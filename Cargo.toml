@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/merge-core", "crates/gitio", "crates/session", "crates/cli", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+yamt-merge-core = { path = "crates/merge-core" }
+yamt-gitio = { path = "crates/gitio" }
+yamt-session = { path = "crates/session" }
+thiserror = "2.0.21"
+serde = { version = "1.0.229", features = ["derive"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "=0.0.12"
+specta-serde = "=0.0.12"
+imara-diff = "0.2.0"
+insta = "1.49.0"
+proptest = "1.11.0"
+tracing = "0.1.44"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+wildcard_enum_match_arm = "deny"
+too_many_lines = "warn"
+# skill://comment-policy forbids `# Errors` / `# Panics` doc sections.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

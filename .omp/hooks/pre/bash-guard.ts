@@ -16,7 +16,7 @@ const DENIED_FOR_EVERYONE: Rule[] = [
 
 const DENIED_FOR_SUBAGENTS: Rule[] = [
   { pattern: /\bgit\s+(?:add|commit|rebase|merge|stash|tag|cherry-pick|am|apply)\b/, reason: "only the orchestrator commits (SP9); git in a scratch repo must use `git -C /tmp/...`" },
-  { pattern: /\bjust\s+(?:golden-update|bindings)\b/, reason: "generated files change only through the orchestrator or the verifier on request (PM4)" },
+  { pattern: /\bjust\s+golden-update(?![\w-])/, reason: "golden snapshots change only through the orchestrator or the verifier on request (PM4); `just bindings` is allowed — it regenerates from source" },
 ];
 
 const SCRATCH_REPO = /\bgit\s+-C\s+(?:\/tmp\/|\$TMPDIR|\$\(mktemp)/;

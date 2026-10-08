@@ -1,0 +1,18 @@
+[package]
+name = "yamt-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "yamt"
+path = "src/main.rs"
+
+[dependencies]
+yamt-session.workspace = true
+specta.workspace = true
+specta-serde.workspace = true
+specta-typescript.workspace = true
+
+[lints]
+workspace = true

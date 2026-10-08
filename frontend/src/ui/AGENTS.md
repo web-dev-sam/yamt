@@ -1,0 +1,1 @@
+Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()`; the single editor seam is `useMergeController`. Section order enforced by `scripts/check-sfc-order.ts`.

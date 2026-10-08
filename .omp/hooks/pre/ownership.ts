@@ -33,7 +33,7 @@ export default function ownership(pi: ExtensionAPI): void {
 
     const scratch = tmpdir();
     const relTargets = targets
-      .filter((t) => !resolve(ctx.cwd, t).startsWith(`${scratch}/`))
+      .filter((t) => !/^[a-z][a-z0-9+.-]*:\/\//.test(t) && !resolve(ctx.cwd, t).startsWith(`${scratch}/`))
       .map((t) => toRepoRelative(t, ctx.cwd));
     if (relTargets.length === 0) return;
 

@@ -1,0 +1,1 @@
+Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`.

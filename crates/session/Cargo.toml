@@ -1,0 +1,12 @@
+[package]
+name = "yamt-session"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+yamt-merge-core.workspace = true
+yamt-gitio.workspace = true
+
+[lints]
+workspace = true

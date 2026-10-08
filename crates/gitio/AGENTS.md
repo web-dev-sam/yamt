@@ -1,0 +1,1 @@
+Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subprocess layer only: explicit argv, bytes in/out, never depends on `yamt-merge-core`. Tests are integration tests against real temp repositories in `tests/`.

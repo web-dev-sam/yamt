@@ -1,0 +1,1 @@
+Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit).

@@ -1,0 +1,158 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "denyWarnings": true
+  },
+  "ignorePatterns": ["dist/**", "src/ipc/bindings.ts"],
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
+    "no-console": "error",
+    "func-style": ["error", "declaration"],
+    "no-magic-numbers": ["error", { "ignore": [0, 1, -1] }],
+    "import/no-cycle": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/strict-boolean-expressions": [
+      "error",
+      { "allowString": false, "allowNumber": false }
+    ],
+    "typescript/no-floating-promises": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "./bindings",
+              "./bindings.ts",
+              "../ipc/bindings",
+              "../ipc/bindings.ts",
+              "**/ipc/bindings",
+              "**/ipc/bindings.ts"
+            ],
+            "message": "bindings.ts is visible only inside src/ipc/ (IPC2); import domain types from ipc/index.ts."
+          },
+          {
+            "group": ["**/internal", "**/internal/*"],
+            "message": "No module imports another module's internal/ (PM5)."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/ipc/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../**/internal", "../**/internal/*"],
+                "message": "No module imports another module's internal/ (PM5)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ipc/fixture.ts"],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
+      }
+    },
+    {
+      "files": ["src/ipc/log.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "no-magic-numbers": "off"
+      }
+    },
+    {
+      "files": ["src/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@codemirror/*"],
+                "message": "ui/ never imports CodeMirror (PM2); go through editor/index.ts."
+              },
+              {
+                "group": ["../editor/internal/*", "**/internal/*"],
+                "message": "No module imports another module's internal/ (PM5)."
+              },
+              {
+                "group": ["../model", "../model/*"],
+                "message": "ui/ never imports model/ (PM2)."
+              },
+              {
+                "group": [
+                  "./bindings",
+                  "./bindings.ts",
+                  "../ipc/bindings",
+                  "../ipc/bindings.ts",
+                  "**/ipc/bindings",
+                  "**/ipc/bindings.ts"
+                ],
+                "message": "bindings.ts is visible only inside src/ipc/ (IPC2); import domain types from ipc/index.ts."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/editor/**", "src/model/**", "src/connectors/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "vue",
+                "message": "editor/, model/, connectors/ are framework-free (PM3)."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@vueuse/*", "@tauri-apps/*"],
+                "message": "editor/, model/, connectors/ are framework-free (PM3)."
+              },
+              {
+                "group": ["../**/internal", "../**/internal/*"],
+                "message": "No module imports another module's internal/ (PM5)."
+              },
+              {
+                "group": [
+                  "./bindings",
+                  "./bindings.ts",
+                  "../ipc/bindings",
+                  "../ipc/bindings.ts",
+                  "**/ipc/bindings",
+                  "**/ipc/bindings.ts"
+                ],
+                "message": "bindings.ts is visible only inside src/ipc/ (IPC2); import domain types from ipc/index.ts."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

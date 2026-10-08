@@ -1,0 +1,1 @@
+Owner skill: `skill://ipc-contract`. Thin Tauri shell: commands ≤ 15 lines delegating to `session`, one `Mutex<MergeSession>`, DMABUF guard in `main.rs`, `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`).
