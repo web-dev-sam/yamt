@@ -1,0 +1,58 @@
+---
+name: vue-conventions
+description: House rules for Vue 3 in yamt's ui/ layer — script-setup section order, template refs, typed macros, vueuse-first, store singleton, Tailwind, the single editor seam — with vuejs-ai vue-best-practices and create-adaptable-composable (MIT) in references/. Autoloaded into web-impl.
+---
+
+# Vue conventions
+
+Base: `references/vue-best-practices.md` (+ `references/vue-best-practices/*.md`, read the
+`reactivity`, `sfc`, `component-data-flow`, `composables` ones before writing a component)
+and `references/create-adaptable-composable.md`. House rules win on conflict.
+
+## Component file shape
+
+- [VU1] `<script setup lang="ts">` → `<template>` → `<style>`. A `<style>` block only for
+  what Tailwind v4 cannot express. Detector: `vue/block-order`.
+- [VU2] Script section order, enforced by `scripts/check-sfc-order.ts` in `just check`:
+  ```
+  imports → types → macros (defineProps, defineEmits<…>(), defineModel) → ref/reactive/shallowRef/useTemplateRef
+  → computed → watch/watchEffect → lifecycle hooks → function declarations
+  ```
+  Imports are sorted by `oxfmt` (`sortImports`); never reorder by hand.
+- [VU3] Top-level functions are `function` declarations (hoisted). Detector: oxlint `func-style`.
+- [VU4] `useTemplateRef<HTMLDivElement>("left")` for DOM hosts; never `ref<HTMLElement | null>(null)`.
+- [VU5] Props and emits are type-based: `defineProps<{ files: FileEntry[] }>()`,
+  `defineEmits<{ select: [path: string] }>()`. Detector: `vue/define-props-declaration`,
+  `vue/define-emits-declaration`, `vue/require-typed-ref`.
+- [VU6] Templates are declarative: no inline arrow handlers with logic, no ternaries beyond
+  one level; derive in `computed`. Detector: `vue/*` recommended + review.
+
+## Data flow
+
+- [VU7] Props down, events up. `v-model` only for a true two-way contract (none expected in v0).
+- [VU8] No `provide`/`inject` anywhere in v0 (there is no layout component). If one ever
+  appears it is only in a layout-only component and uses an `InjectionKey<T>`.
+- [VU9] The store is a module singleton: `createAppStore(source)` once in `main.ts`,
+  `useAppStore()` in components. No Pinia. Actions live in `store.ts`, never in components.
+- [VU10] Vue state never holds an `EditorView`, a document position, or document text
+  (`skill://project-map` state table). The controller instance is a non-reactive `let`
+  inside `useMergeController`, not a `ref`.
+- [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts)` is the
+  **only** place `ui/` imports from `editor/`. It is an adaptable composable: `toRef(data)`
+  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef`.
+
+## Library use
+
+- [VU12] `@vueuse/core` before any hand-rolled listener, observer, debounce, or media query —
+  in `ui/` only (`editor/` is framework-free). Violation: `window.addEventListener("resize", …)` in a component.
+- [VU13] Composables (`use*.ts`) accept `MaybeRefOrGetter` for read inputs, `MaybeRef` for
+  writable ones, never for callbacks; normalise with `toValue`/`toRef` inside effects.
+- [VU14] Tailwind v4 classes in templates, sorted by `oxfmt` (`sortTailwindcss`). CodeMirror
+  decoration classes (`.chunk-local`, …) live once in `editor/theme.css` via `@apply`.
+
+## Splitting
+
+- [VU15] Split by responsibility, not by section count (overrides the vendored "3+ sections
+  ⇒ split" trigger). v0 set: `App`, `Sidebar`, `Toolbar`, `MergeView`, `Banner`. A sixth
+  component needs a one-line reason in `deviations_from_brief`.
+- [VU16] `App.vue` is a composition surface: layout + `useAppStore()` wiring, no feature logic.

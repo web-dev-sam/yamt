@@ -1,0 +1,15 @@
+modelRoles:
+  orchestrator: anthropic/claude-opus-5-5:high
+  implementer: anthropic/claude-opus-5-5:medium
+  reviewer: anthropic/claude-opus-5-5:high
+  verifier: anthropic/claude-opus-5-5:low
+
+task:
+  maxRecursionDepth: 1
+  disabledAgents:
+    - task
+    - sonic
+  isolation:
+    enabled: true
+    merge: patch
+    apply: true

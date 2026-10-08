@@ -1,0 +1,297 @@
+# 3-way merge conflict resolver — plan
+
+Standalone desktop app replacing PhpStorm's merge window for `git mergetool`-style
+conflict resolution. Planning is complete; no code written yet.
+
+**Dev machine:** Arch Linux. **Also runs on:** macOS (arm64). **Windows:** later, not a priority.
+
+---
+
+## 1. Why this exists
+
+PhpStorm's 3-pane merge window is the only tool the author finds usable. Every
+alternative tried (VS Code's merge editor, assorted third-party extensions, TUI
+mergetools) was rejected as unintuitive.
+
+**Root cause of why they're all bad:** they parse `<<<<<<<` conflict markers. Once git
+has collapsed a merge into markers, the base is gone, and with it every piece of
+structure a 3-pane view needs — you can tell *that* two sides differ but not *what each
+side changed*. PhpStorm takes `$LOCAL $REMOTE $BASE $MERGED` and re-diffs them itself.
+
+**This tool never parses a conflict marker.** That single decision is most of the
+differentiation.
+
+---
+
+## 2. Decision record
+
+Decided, with the alternatives that were considered and rejected. Do not re-litigate
+these without new information.
+
+| # | Decision | Rejected alternatives & why |
+|---|---|---|
+| 1 | **Standalone app** | VS Code extension — the built-in merge editor is core and not extensible; custom editors opt out of merge editors by default and opting in needs a *proposed* API (unpublishable to the marketplace). `zawys/vscode-as-git-mergetool` tried the right architecture (orchestrating native diff editors, not a webview) and died on VS Code API limits — upstream issues [#105487](https://github.com/microsoft/vscode/issues/105487) (no initial command via CLI args) and [#105625](https://github.com/microsoft/vscode/issues/105625) (no horizontal scroll API) are still open |
+| 2 | **GUI, not TUI** | TUI (ratatui) starts faster and lives in the terminal, but the target experience is mouse/gutter-driven and wants a modern look |
+| 3 | **Tauri v2** — Rust backend, webview frontend | Native Rust GUI: see §3. Electron: rejected outright |
+| 4 | **CodeMirror 6**, core primitives only | Monaco: heavier, and its 3-way merge lives in VS Code's codebase, not the `monaco-editor` package. **`@codemirror/merge`: explicitly excluded** — it is 2-way only ("no work on a 3-way merge view has been done yet" — Marijn Haverbeke), and its single-strip connector geometry does not generalize to two strips |
+| 5 | **3-way always** | 2-way diff mode / replacing `git difftool` — out of scope. 3-way is the core idea |
+| 6 | **Takes over the whole merge**, file sidebar on the left | One invocation per file via `git mergetool`'s loop — loses cross-file context; real merges here touch ~16 files |
+| 7 | **Reads git index stages 1/2/3 directly** | `git mergetool` temp files — unnecessary once we own the whole merge; the index is the source of truth |
+| 8 | **Shell out to git** | `gix` / `git2` — a C or large-Rust dependency across two platforms, for no gain. Subprocess always matches the user's git and inherits worktree/submodule/sparse-checkout handling for free |
+| 9 | **Result pane seeded from BASE**; every chunk requires an explicit user action | Seeding from git's merge result (so one-sided chunks are pre-applied). **Deliberately rejected:** understanding what happened on *both* sides is a prerequisite for merging correctly — a variable in the conflict is defined somewhere, and code is interconnected. Bulk "apply all non-conflicting from left / from right" buttons make it one click when that review isn't wanted. This matches IntelliJ, which also ships "Apply all non-conflicting changes" buttons precisely because they are *not* pre-applied |
+| 10 | **No auto-resolve in v0** | — "Magic pen" comes later, and means something narrower than it sounds: structural resolution of chunks where *both* sides changed the same region but touched different AST nodes. Applying one-sided changes is not magic, it is just diff3 |
+| 11 | **Curved connectors between panes** (IntelliJ style) | Inserted blank alignment rows (gaps). Connectors keep each pane in its own line coordinates |
+| 12 | **Locked, proportional scrolling** | Independent panes (loses the correspondence connectors exist to show); chunk-anchored hold (what you'll eventually want — a strictly harder version of locked; keep offset derivation in one function so it's a swap, not a rewrite) |
+| 13 | **Per-file staging on completion** (`git add`), IntelliJ semantics | Never staging (leaves `git add -u` as a manual chore); single finish-all action |
+| 14 | **Session state in memory**, app lifetime, IntelliJ semantics | Persisting to `.git/`. Noted as one serde struct if losing a 16-file merge to an accidental quit ever stings |
+| 15 | **Mergiraf stays upstream, not absorbed** | Reimplementing structured merge. [Mergiraf](https://lwn.net/Articles/1042355/) is a Rust/tree-sitter merge *driver* (33 languages) that runs *before* this tool as a git merge driver. Let it auto-resolve what it can; this tool then only sees what genuinely needs a human |
+
+Added 2026-10-08 (architecture session). Each cites a core vision from `docs/architecture.md` §0.
+
+| # | Decision | Rejected alternatives & why | Vision |
+|---|---|---|---|
+| 16 | **Vue 3 for the chrome**, CodeMirror owns every document | Vanilla DOM (strongest fence but the owner is Vue-fluent, agents too); Solid (less agent fluency → more review load) | 1 |
+| 17 | **oxlint + oxfmt; ESLint only `eslint-plugin-vue` on `*.vue`** | typescript-eslint + Prettier + eslint-plugin-boundaries — slower, three configs; oxlint's `no-restricted-imports` overrides give the same fences, `oxfmt` sorts imports and Tailwind classes | 3, 5 |
+| 18 | **Branded line spaces + constructive `LineRange { start, len }`** on both sides of the IPC | `{ start, end }` everywhere (diff libs' native shape, but an inverted range is constructible and base/local/doc confusion compiles) | 4 |
+| 19 | **Tauri IPC payloads trusted, not runtime-parsed**; fixture JSON parsed with valibot | Parsing every payload — duplicates a schema already generated from Rust at the same commit | 2, 5 |
+| 20 | **Structured `log.*` mirrored to console and forwarded to Rust `tracing`** | Bare `console.*` (unstructured, invisible in the packaged app); frontend-only logging (lost once the window closes) | 2 |
+| 21 | **Store is a module singleton via `useAppStore()`; no provide/inject; no Pinia** | Pinia (a dependency for five fields); provide/inject (hidden data flow for a tree two levels deep) | 5 |
+| 22 | **`editor/` is framework-free**; `ui/` is the only Vue layer; vueuse only in `ui/` | vueuse inside the CM6 controller — couples the editor to Vue's effect scope and makes it untestable without a component | 2, 3 |
+| 23 | **All AI tooling in-repo under `.omp/`**, one model tier | User-level reusable skeleton — duplicated conventions drift; decided by owner | — |
+
+### Prior art surveyed — nobody has built this
+
+| project | what it is | state |
+|---|---|---|
+| mergiraf | Rust, tree-sitter structured merge driver | alive, **not interactive** — complements, doesn't compete |
+| dplex | Rust TUI, **marker-parsing** hunk reviewer, 3 source files | 3 stars, wrong model |
+| heckdiff | Rust 3-way merge | dead ~7 years |
+| difftastic | Rust, tree-sitter structural **diff** | alive, diff only, no merge |
+| `@codemirror/merge` | CM6 merge view | alive, **2-way only, 3-way out of scope** |
+
+---
+
+## 3. Why not a native Rust GUI
+
+A full evaluation was done before the web decision. The decisive criterion:
+
+> Can one pane do **custom per-row painting** *and* host a **real editable buffer**?
+
+| framework | verdict |
+|---|---|
+| **egui** | ❌ `TextBuffer::as_str(&self) -> &str` forces one contiguous `String`; a rope can't implement it without materializing per frame. Layouter builds one `Galley` for the whole document every keystroke ([#3086](https://github.com/emilk/egui/issues/3086): >1s/char at scale). Also the weakest text rasterizer — antialiasing [#2639](https://github.com/emilk/egui/issues/2639) open since 2022, no system-font discovery |
+| **iced** | ❌ `Content<R>(RefCell<Internal<R>>)` is sealed against an external rope. **No virtualization at any level** — measured 803ms freeze, +313MiB RSS at 11k lines |
+| **slint** | ❌ Mixed-color text in `TextEdit` is an open feature request ([#3728](https://github.com/slint-ui/slint/issues/3728)); `StyledText` is display-only |
+| **xilem/masonry** | ❌ `TextArea` wraps parley's String-backed `PlainEditor`, laid out whole; `VirtualScroll` can't contain it. Self-declared alpha |
+| **gpui** | ✅ possible — but ships **no text input at all**; Zed's *single-line* input example is 746 lines. crates.io frozen at `0.2.2` since 2025-10-22; `gpui_platform` unpublished → modern gpui means a git pin into Zed's monorepo with no changelog |
+| **floem** | ✅ possible — ships Lapce's rope-backed editor. But crates.io `0.2.0` is from 2024-11-14, <1 commit/month sampled, Lapce itself pins a git rev |
+
+**CodeMirror 6 answers this criterion with documented, maintained APIs**, which is why the
+web route won. It also throws in `ChangeSet` position mapping — chunk ranges survive free
+editing automatically — which is the nastiest piece of a merge tool, free.
+
+### Costs accepted
+
+- **Startup.** Only published figures: Lukas Kalbertodt, [2023-02-03](http://lukaskalbertodt.github.io/2023/02/03/tauri-iced-egui-performance-comparison.html) — Tauri ≈380ms total, window at ≈125ms; iced ≈230ms (window ≈33ms); egui ≈280ms. One machine, one run, Tauri v1, measured by counting OBS frames. Treat as order-of-magnitude only. Against PhpStorm's multi-second JVM boot the comparison isn't close either way. **Measure on real hardware at M3.**
+- **Memory.** WKWebView/WebKitGTK baseline is well above a native toolkit. Irrelevant for a tool open during merges.
+- **Two toolchains**, Rust + a JS bundler.
+
+### Platform reality: three engines
+
+| platform | engine |
+|---|---|
+| macOS | WKWebView (WebKit) |
+| **Linux (dev machine)** | **WebKitGTK** (webkit2gtk-4.1) |
+| Windows (later) | WebView2 (Chromium) |
+
+⚠️ **Arch + NVIDIA will show a blank window.** WebKitGTK's DMABUF renderer fails to
+initialize on NVIDIA proprietary drivers and some Wayland compositors, and then silently
+renders nothing. Rolling distros are specifically affected (bundled WebKit's DMA-BUF
+renderer vs. a newer host Mesa). Documented at
+[v2.tauri.app/develop/debug/linux-graphics](https://v2.tauri.app/develop/debug/linux-graphics/).
+
+```rust
+// in main(), before any webview is created
+if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && nvidia_loaded() {
+    env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+}
+```
+
+Gate on `/sys/module/nvidia`; respect a user-set value. It disables the fast presentation
+path, not accelerated GL.
+
+---
+
+## 4. Architecture
+
+```
+Rust                                    Frontend (CodeMirror 6 × 3)
+────────────────────────────────────    ──────────────────────────────────
+read index stages 1/2/3 (subprocess)    left  : LOCAL  read-only
+diff3 → chunk model                ───► center: BASE → result, editable
+                                        right : REMOTE read-only
+                                        apply chunk = dispatch(transaction)
+write worktree file                ◄─── final doc text on finish
+git add / restore stages
+file list, reset, session
+```
+
+**Keystrokes never cross the IPC boundary.** CodeMirror's `Text` is already a persistent
+rope with transactions and undo; duplicating it in `ropey` and round-tripping edits would
+be the classic mistake. Rust is the git and diff engine; the frontend owns the buffer.
+
+### Git access — subprocess only
+
+```bash
+git ls-files -u -z               # unmerged paths WITH mode, blob SHA, stage
+git cat-file --batch             # one long-lived process, all blob contents
+git update-index --index-info    # restore stages 1/2/3 on reset
+git add -- <path>                # mark resolved
+```
+
+`ls-files -u` already yields the three blob SHAs — exactly what's needed before `git add`
+destroys them. One call, double duty.
+
+### Chunk model (Rust — this is the actual IP)
+
+```
+d1 = diff(base, local)           line-level, `similar` or `imara-diff`
+d2 = diff(base, remote)
+→ project both edit scripts onto base line space
+→ sweep base lines; open a region where either script changes,
+  extend while changes overlap or the gap < N lines     (N = grouping param)
+→ emit { base_range, local_range, remote_range, kind }
+```
+
+```rust
+enum ChunkKind {
+    LocalOnly,   // only d1 touched it      → "apply all non-conflicting from left"
+    RemoteOnly,  // only d2 touched it      → "…from right"
+    BothSame,    // both touched, identical → either
+    Conflict,    // both touched, differ    → human
+}
+```
+
+Pressing both bulk buttons reproduces git's merge exactly — available in two clicks,
+never imposed (decision #9).
+
+Applying a chunk replaces the chunk's **current** range in the center doc — mapped forward
+from its original base range through every prior edit via `ChangeSet` — with local/remote/
+both. Undo is free from `@codemirror/commands`. Positions are never tracked by hand.
+
+### Three panes
+
+| pane | doc | mode | decorations |
+|---|---|---|---|
+| left | LOCAL (stage 2) | `EditorView.editable.of(false)` + `EditorState.readOnly.of(true)` | computed **once** |
+| **center** | **BASE (stage 1) → result** | editable, history enabled | remapped every transaction |
+| right | REMOTE (stage 3) | read-only | computed **once** |
+
+**Key simplification:** left and right documents are immutable for the file's lifetime, so
+their decoration sets are computed once and never remapped, and their connector endpoints
+are fixed in document coordinates (moving only with scroll). Only the center pane needs
+`ChangeSet` mapping. All three are still CodeMirror instances — read-only panes want Lezer
+highlighting, viewport virtualization at 10k lines, line-number gutters, and *identical
+line metrics with the center pane*, which is what makes connector math trivial.
+`editable: false` still permits selection and copy.
+
+### Frontend dependencies
+
+```
+@codemirror/state      EditorState, Text, ChangeSet, transactions
+@codemirror/view       EditorView, Decoration, gutter, lineNumbers
+@codemirror/language   HighlightStyle, syntax infrastructure
+@codemirror/commands   history — center pane only
+@lezer/highlight       tags
+@codemirror/lang-*     javascript (TS), php, vue, css, json
+```
+
+Not the `codemirror` convenience bundle (pulls in autocomplete, search, fold gutter,
+bracket matching — no completion popups in a merge window, and a smaller bundle helps
+startup). **Not `@codemirror/merge`** (decision #4).
+
+| need | API — all from core |
+|---|---|
+| chunk background bands | `Decoration.line({class})` |
+| intra-line word diff | `Decoration.mark({class})` |
+| chunk arrows / X | `gutter({domEventHandlers})` |
+| collapse unchanged regions | `Decoration.replace({block: true})` over a line range |
+| apply a chunk | one `dispatch` on the center pane |
+| undo | `@codemirror/commands` history |
+| chunk ranges survive edits | `ChangeSet` mapping, center pane only |
+| connector endpoints | `EditorView.lineBlockAt` / `coordsAtPos` per pane |
+
+---
+
+## 5. Milestones
+
+| | | platform risk |
+|---|---|---|
+| **M0** | **Rust, headless.** Stage reading, diff3 chunk model, CLI prints classification summary. Golden tests from real conflict triples. **Acceptance: chunk boundaries match what PhpStorm shows on the same conflict.** | none |
+| **M1** | **Frontend in a plain browser, fixture JSON, no Rust, no webview.** Three panes, chunk bands, **two connector strips (build first — the novel part)**, locked scroll, apply + bulk-apply, editable center, undo | none |
+| **M2** | **Tauri shell.** Real IPC, file sidebar, per-file reset, finish + `git add` | first webview contact |
+| **M3** | **Platform hardening.** DMABUF guard, bundled monospace font, macOS build, measure actual startup on both machines | both engines |
+| **M4** | Point the `gmt` shell function at it | — |
+
+M0 before any Tauri scaffolding; M1 before any webview. This reaches a working three-pane
+merge UI without ever touching a webview, the Linux graphics stack, or git integration —
+and if the M0 chunk model is wrong, that surfaces before any of it exists.
+
+### Development practice
+
+- **Build the frontend browser-first.** Put it behind a `ChunkSource` interface with a
+  fixture implementation. Tauri becomes a shell wired up once the UI already works. Also
+  keeps a local-server fallback alive if WebKitGTK ever becomes intolerable.
+- **Test in Epiphany / GNOME Web on Arch** — it is WebKitGTK, *the same engine* the Tauri
+  Linux build uses, in a real browser with real devtools. Developing in Firefox/Chromium
+  and shipping to two WebKit variants is how CSS breakage gets found at integration time.
+  Treat WebKit as the feature baseline: check `scrollend`, `:has()`, container queries,
+  and SVG paint performance before depending on them.
+- **Bundle the monospace font** (JetBrains Mono or similar) so metrics and line heights
+  are identical across platforms.
+
+---
+
+## 6. Carried risks
+
+1. **`git add` destroys the conflict.** Stages 1/2/3 collapse to stage 0, so reset becomes
+   impossible unless the three blob SHAs were captured **at load time**. Restore via
+   `git update-index --index-info`.
+2. **add/add conflicts have no stage 1.** BASE is absent → treat as an empty file, which
+   correctly makes every line a `Conflict`. An unguarded `stages[1]` lookup panics the
+   first time this happens.
+3. **"Locked scrolling" is not shared `scrollTop`.** Panes have different line counts;
+   naive sync drifts visibly within a screen. Interpolate piecewise-linearly through chunk
+   correspondence points — the chunk model already provides the anchors.
+4. **Line endings.** Index blobs are exact bytes. Set `EditorState.lineSeparator` from the
+   file or CRLF files get silently rewritten.
+5. **Binary / non-UTF8 blobs.** Index stages can hold either; guard before anything
+   reaches the webview.
+6. **Chunk grouping distance** (adjacent changes merged within N lines) is a tuning
+   parameter with no correct answer. M0's golden tests are how the right value is found.
+7. **Arch + NVIDIA blank window** until the DMABUF guard exists — will look like total
+   failure the first time M2 runs. See §3.
+8. **Three-pane connector geometry is novel.** No reference implementation exists; the
+   only published CM6 merge connectors are single-strip two-way.
+
+---
+
+## 7. Starting a session
+
+Repository: `~/Projects/yamt`. Start `omp` there; `AGENTS.md` makes the main session the
+orchestrator and points it at `skill://orchestrate`, `docs/slices/SLICES.md` (work board)
+and `.omp/GUARDRAILS.md`. Those files, not transcripts, are the handoff.
+
+§2 is deliberately written as a decision *record* with rejected alternatives so settled
+ground isn't re-explored. Later decisions are appended to it.
+
+Companion documents:
+
+- `docs/architecture.md` — repository layout, crate/module boundaries, IPC
+  contract, state ownership, algorithms, toolchain, `just check` gates, milestone → slice map.
+- `docs/ai-system.md` — how the code gets written: orchestrator (main session) →
+  implementers / reviewers / verifier / curator under `.omp/`, skills instead of a large
+  AGENTS.md, hooks as hard fences, human gates, guardrail evolution.
+
+Decisions taken after this plan: frontend chrome = Vue 3; all AI tooling in-repo under
+`.omp/`; one model tier (Opus) for every role.
