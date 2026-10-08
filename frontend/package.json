@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "VITE_CHUNK_SOURCE=fixture vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc -b && vite build",
     "lint": "oxlint --type-aware && eslint --max-warnings 0 \"src/**/*.vue\"",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc -b",
     "test": "vitest run --project node",
     "test:browser": "vitest run --project browser",
     "sfc-order": "tsx scripts/check-sfc-order.ts"

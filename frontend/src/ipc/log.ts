@@ -1,6 +1,6 @@
-export type LogLevel = "debug" | "info" | "warn" | "error";
+type LogLevel = "debug" | "info" | "warn" | "error";
 
-export type LogFields = Record<string, string | number | boolean>;
+type LogFields = Record<string, string | number | boolean>;
 
 export interface LogEntry {
   level: LogLevel;
@@ -8,9 +8,9 @@ export interface LogEntry {
   fields: LogFields;
 }
 
-export type LogForward = (entry: LogEntry) => void;
+type LogForward = (entry: LogEntry) => Promise<unknown> | void;
 
-export type Log = Record<LogLevel, (event: string, fields?: LogFields) => void>;
+type Log = Record<LogLevel, (event: string, fields?: LogFields) => void>;
 
 function formatFields(fields: LogFields): string {
   const parts = Object.entries(fields).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
@@ -39,6 +39,11 @@ function mirror(entry: LogEntry): void {
   }
 }
 
+function reportForwardFailure(error: unknown): void {
+  const reason = error instanceof Error ? error.message : typeof error;
+  mirror({ level: "error", event: "log.forward_failed", fields: { reason } });
+}
+
 export function createLog(forward?: LogForward): Log {
   function emit(level: LogLevel, event: string, fields: LogFields = {}): void {
     const entry: LogEntry = { level, event, fields };
@@ -47,9 +52,9 @@ export function createLog(forward?: LogForward): Log {
       return;
     }
     try {
-      forward(entry);
+      forward(entry)?.catch(reportForwardFailure);
     } catch (error) {
-      console.error(`[error] log.forward_failed ${formatFields({ reason: String(error) })}`);
+      reportForwardFailure(error);
     }
   }
   return {

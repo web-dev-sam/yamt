@@ -1,4 +1,4 @@
-//! Desktop shell: IPC types exported to the frontend, and later the Tauri commands.
+//! Desktop shell: thin Tauri commands and the IPC types exported to the frontend.
 #![forbid(unsafe_code)]
 
 #[derive(specta::Type)]

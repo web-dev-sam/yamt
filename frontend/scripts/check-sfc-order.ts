@@ -24,17 +24,27 @@ const CALLEE_SECTIONS: Record<string, Section> = {
   ref: "state",
   reactive: "state",
   shallowRef: "state",
-  useTemplateRef: "state",
+  shallowReactive: "state",
   computed: "computed",
   watch: "watch",
   watchEffect: "watch",
-  onMounted: "lifecycle",
+  watchPostEffect: "watch",
+  watchSyncEffect: "watch",
   onBeforeMount: "lifecycle",
-  onUpdated: "lifecycle",
+  onMounted: "lifecycle",
   onBeforeUpdate: "lifecycle",
-  onUnmounted: "lifecycle",
+  onUpdated: "lifecycle",
   onBeforeUnmount: "lifecycle",
+  onUnmounted: "lifecycle",
+  onActivated: "lifecycle",
+  onDeactivated: "lifecycle",
+  onErrorCaptured: "lifecycle",
+  onRenderTracked: "lifecycle",
+  onRenderTriggered: "lifecycle",
+  onServerPrefetch: "lifecycle",
 };
+
+const COMPOSABLE_NAME = /^use[A-Z]/;
 
 function calleeSection(expression: ts.Expression | undefined): Section | undefined {
   if (expression === undefined || !ts.isCallExpression(expression)) {
@@ -44,7 +54,10 @@ function calleeSection(expression: ts.Expression | undefined): Section | undefin
     return undefined;
   }
   const name = expression.expression.text;
-  return Object.hasOwn(CALLEE_SECTIONS, name) ? CALLEE_SECTIONS[name] : undefined;
+  if (Object.hasOwn(CALLEE_SECTIONS, name)) {
+    return CALLEE_SECTIONS[name];
+  }
+  return COMPOSABLE_NAME.test(name) ? "state" : undefined;
 }
 
 function classify(statement: ts.Statement): Section | undefined {
@@ -66,8 +79,8 @@ function classify(statement: ts.Statement): Section | undefined {
   return undefined;
 }
 
-function firstViolation(file: string): string | undefined {
-  const { descriptor } = parse(readFileSync(file, "utf8"), { filename: file });
+export function firstViolation(file: string, text: string): string | undefined {
+  const { descriptor } = parse(text, { filename: file });
   const script = descriptor.scriptSetup;
   if (script === null) {
     return undefined;
@@ -88,10 +101,12 @@ function firstViolation(file: string): string | undefined {
   return undefined;
 }
 
-for (const file of globSync("src/**/*.vue").toSorted()) {
-  const violation = firstViolation(file);
-  if (violation !== undefined) {
-    process.stderr.write(`${violation}\n`);
-    process.exit(1);
+if (import.meta.main) {
+  for (const file of globSync("src/**/*.vue").toSorted()) {
+    const violation = firstViolation(file, readFileSync(file, "utf8"));
+    if (violation !== undefined) {
+      process.stderr.write(`${violation}\n`);
+      process.exit(1);
+    }
   }
 }

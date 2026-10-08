@@ -2,6 +2,7 @@
 all-features = false
 
 [advisories]
+# cargo-deny v2 `unmaintained` sets scope only; `just deny` lowers severity with `--warn unmaintained`.
 unmaintained = "all"
 yanked = "deny"
 ignore = []

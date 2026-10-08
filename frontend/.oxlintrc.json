@@ -94,11 +94,11 @@
                 "message": "ui/ never imports CodeMirror (PM2); go through editor/index.ts."
               },
               {
-                "group": ["../editor/internal/*", "**/internal/*"],
+                "group": ["../editor/internal/*", "**/internal", "**/internal/*"],
                 "message": "No module imports another module's internal/ (PM5)."
               },
               {
-                "group": ["../model", "../model/*"],
+                "group": ["**/model", "**/model/**"],
                 "message": "ui/ never imports model/ (PM2)."
               },
               {
@@ -131,7 +131,7 @@
             ],
             "patterns": [
               {
-                "group": ["@vueuse/*", "@tauri-apps/*"],
+                "group": ["vue/*", "@vue/*", "@vueuse/*", "@tauri-apps/*"],
                 "message": "editor/, model/, connectors/ are framework-free (PM3)."
               },
               {

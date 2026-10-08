@@ -1,6 +1,7 @@
 import tsParser from "@typescript-eslint/parser";
 import pluginVue from "eslint-plugin-vue";
 
+// Layout rules fight oxfmt, which owns .vue formatting; keeping both makes `fmt` and `lint` disagree.
 const layoutRulesOff = Object.fromEntries(
   Object.entries(pluginVue.rules)
     .filter(([, rule]) => rule.meta?.type === "layout")

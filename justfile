@@ -2,7 +2,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order
 
-fmt-check: (frontend "oxfmt" "--check")
+fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
 
 clippy:
@@ -21,16 +21,16 @@ bindings-check:
     cargo run --quiet -p yamt-app --bin export-bindings -- target/bindings-check.ts
     diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts
 
-web-lint: (frontend "oxlint" "--type-aware") (frontend "eslint" "src/**/*.vue")
+web-lint: (frontend "lint")
 
-web-typecheck: (frontend "vue-tsc" "--noEmit")
+web-typecheck: (frontend "typecheck")
 
-web-test: (frontend "vitest" "run")
+web-test: (frontend "test")
 
 arch-check:
     scripts/arch-check.sh
 
-sfc-order: (frontend "tsx" "scripts/check-sfc-order.ts")
+sfc-order: (frontend "sfc-order")
 
 dev-web:
     VITE_CHUNK_SOURCE=fixture {{ just_executable() }} frontend vite
