@@ -1,0 +1,27 @@
+{
+  "_about": "Words the scanner flags in questions to the human. Owned by the human: edit freely. `ai_overused` = filler and hype the AI reaches for; `project_jargon` = vocabulary invented during this project that the human never adopted; `id_patterns` = internal rule/proposal ids. A flagged question is bounced back to the orchestrator for rephrasing.",
+  "ai_overused": [
+    "leverage", "robust", "seamless", "seamlessly", "delve", "comprehensive", "holistic",
+    "streamline", "streamlined", "elegant", "cutting-edge", "state-of-the-art", "crucial",
+    "vital", "pivotal", "utilize", "facilitate", "empower", "unlock", "harness", "foster",
+    "landscape", "paradigm", "synergy", "battle-tested", "production-ready", "best practices",
+    "deep dive", "in a nutshell", "it's worth noting", "keep in mind", "navigate", "tapestry",
+    "testament", "underscore", "game-changer", "journey", "nuanced", "intricate", "meticulous",
+    "aligns with", "at its core", "going forward", "moving forward", "high-level", "non-trivial",
+    "surface", "mechanically", "first-class", "single source of truth", "source of truth",
+    "boil down", "under the hood", "think of it as", "essentially", "simply", "just"
+  ],
+  "project_jargon": [
+    "fence", "fences", "slice", "slices", "wave", "waves", "curator", "verifier", "rework",
+    "brief", "briefs", "retro", "drift", "promote", "promoted", "detector", "ladder",
+    "autoload", "autoloaded", "walking skeleton", "smoke recipe", "scaffold"
+  ],
+  "id_patterns": [
+    "\\bP\\d{1,2}\\b",
+    "\\b(?:OR|RS|TS|VU|CM|PM|RK|SP|RV|VF|GE|CP|DR|IPC)-?\\d{1,2}\\b",
+    "\\bOR-[a-z0-9]+\\b",
+    "\\bL[0-3]\\b",
+    "\\bR-open-\\d+\\b",
+    "\\bM\\dS\\d\\w*\\b"
+  ]
+}
