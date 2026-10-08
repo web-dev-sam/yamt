@@ -1,1 +1,1 @@
-{ "RetroApply00": { "owned": [".omp/**"], "readonly": ["docs/**", "frontend/**", "crates/**", "justfile"] } }
+{}

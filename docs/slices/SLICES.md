@@ -14,7 +14,7 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 | B.3 fence smoke (identity, ownership, generated, bash-guard, main-no-code) | orchestrator | done | four blocks observed; identity confirmed |
 | 0.0 walking skeleton (Rust) | rust-impl | done | verifier: `just check` exit 0; arch-check probes; commit 588abc9 |
 | 0.0' walking skeleton (frontend) | web-impl | done | verifier: `just check` exit 0; 8 node tests; WebKit browser project blocked (libs); commit 588abc9 |
-| B.5 first retro | curator | running | |
+| B.5 first retro | curator | done | 13 proposals, 12 approved (1 changed), 1 rejected; applied; `just check` exit 0 incl. hooks-test |
 
 ## M0 — Rust, headless
 
