@@ -1,1 +1,4 @@
-{}
+{
+  "M0S0RustSkeleton": { "owned": ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "clippy.toml", "justfile", "crates/**", "src-tauri/**", ".cargo/**", "scripts/**", "frontend/src/ipc/bindings.ts"], "readonly": ["docs/**", ".omp/**"] },
+  "M0S0WebSkeleton": { "owned": ["frontend/**"], "readonly": ["docs/**", ".omp/**", "justfile"] }
+}
