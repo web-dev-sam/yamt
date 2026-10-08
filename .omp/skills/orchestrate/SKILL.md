@@ -38,11 +38,9 @@ no skills. Write as if to a product owner joining the conversation now.
 - [OR-h5] Before sending a question, reread it as the human: can it be answered without
   opening a single file? If not, rewrite.
 
-Violation example (rejected 2026-10-08): "Approve P2 hook regression tests in `just check`?
-Both hook bugs (bash-guard vs brief, agent:// blocked) were untested." Correct: "Should the
-safety checks that stop agents from editing the wrong files get their own automated tests?
-Two of those checks had bugs this round that tests would have caught. Cost: a few minutes
-of agent time."
+✗ "Approve P2 hook regression tests in `just check`? Both hook bugs were untested."
+✓ "Should the safety checks that stop agents editing the wrong files get automated tests?
+  Two of them had bugs this round that tests would have caught. Cost: minutes of agent time."
 
 ## 2. Slice map (per wave)
 
