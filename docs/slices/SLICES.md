@@ -12,9 +12,9 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 | B.1 repo + docs + config + AGENTS.md | orchestrator | done | first commit empty; docs in `docs/` |
 | B.2 `.omp/` skills, agents, hooks, GUARDRAILS | orchestrator | done | commit 42fcb3d |
 | B.3 fence smoke (identity, ownership, generated, bash-guard, main-no-code) | orchestrator | done | four blocks observed; identity confirmed |
-| 0.0 walking skeleton (Rust) | rust-impl | running | brief: docs/slices/briefs/0.0-rust-skeleton.md |
-| 0.0' walking skeleton (frontend) | web-impl | running | brief: docs/slices/briefs/0.0-frontend-skeleton.md |
-| B.5 first retro | curator | todo | |
+| 0.0 walking skeleton (Rust) | rust-impl | done | verifier: `just check` exit 0; arch-check probes; commit 588abc9 |
+| 0.0' walking skeleton (frontend) | web-impl | done | verifier: `just check` exit 0; 8 node tests; WebKit browser project blocked (libs); commit 588abc9 |
+| B.5 first retro | curator | running | |
 
 ## M0 — Rust, headless
 

@@ -25,9 +25,11 @@ L3 hook. Procedure: `skill://guardrail-evolution`. Changes land only after Gate 
 | RK14 | chunks sorted and pairwise disjoint | L2 | proptest | architecture §3.1 | 2026-10-08 | active |
 | R-open-1 | comments carry what code cannot; reviewer deletion test | L0 | review (`skill://comment-policy`) | owner, 2026-10-08 | 2026-10-08 | active, open for refinement |
 | OR-q | questions to the human are product questions | L0 | orchestrator self-rule | finding #1 (human) | 2026-10-08 | active |
+| OR-h | every message/question to the human is self-contained plain language: no internal ids, no invented vocabulary, no tool names the human did not introduce; one sentence per option stating what changes for them | L0 | orchestrator self-rule; curator audits human-facing questions each retro | finding #32 (human) | 2026-10-08 | active |
 
 ## Changelog
 
 - 2026-10-08 — bootstrap. Registry seeded from architecture §2/§7 and the owner's conventions
   session. No Gate D yet; first retro after slice 0.0.
 - 2026-10-08 — fence smoke passed: main-session no-code block, subagent ownership block, generated-file block, bash-guard (push, commit) block. Confirmed `ctx.agent.id` == task `name`, `ctx.agent.name` == agent definition name; `slices.json` is keyed by task name.
+- 2026-10-08 — human correction during Gate D of retro 0.0: the approval question used internal ids and jargon and could not be answered. Rule OR-h added to `skill://orchestrate` ("Talking to the human"). Applied outside Gate D as a direct human instruction.

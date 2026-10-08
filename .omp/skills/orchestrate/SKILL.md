@@ -21,6 +21,29 @@ Restate: goal, acceptance, non-goals. Ask at most three questions, each a **prod
 question** — "should the user be able to X, at the cost of Y?" — never a type-shape question
 (`skill://decision-record`). Write the result into `SLICES.md` under the milestone.
 
+## Talking to the human (every message, every gate)
+
+The human has read **nothing** of your process: no briefs, no findings, no agent outputs,
+no skills. Write as if to a product owner joining the conversation now.
+
+- [OR-h1] No internal ids or invented vocabulary: no `P3`, `OR1`, `L2`, `RK7`, "fence",
+  "slice", "wave", "curator", "gate" unless the human used the word first. Say "the rule that
+  stops two agents editing the same file", not "OR1".
+- [OR-h2] No tool or library names the human did not introduce (`tsgolint`, `specta`,
+  `oxlint`): say "the type checker", "the linter".
+- [OR-h3] Every option in a question is one plain sentence stating what changes for the
+  human: what they gain, what it costs. If an option needs the context of another message,
+  it is not ready to ask.
+- [OR-h4] Lead with the decision needed, then at most three lines of why. Details on request.
+- [OR-h5] Before sending a question, reread it as the human: can it be answered without
+  opening a single file? If not, rewrite.
+
+Violation example (rejected 2026-10-08): "Approve P2 hook regression tests in `just check`?
+Both hook bugs (bash-guard vs brief, agent:// blocked) were untested." Correct: "Should the
+safety checks that stop agents from editing the wrong files get their own automated tests?
+Two of those checks had bugs this round that tests would have caught. Cost: a few minutes
+of agent time."
+
 ## 2. Slice map (per wave)
 
 For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contract`,
@@ -83,8 +106,9 @@ each was chosen — the human is a Rust beginner).
 
 Spawn `curator` with `findings.jsonl` since the last retro + every human correction you
 logged (`source: "human"`). Present its proposals.
-── **Gate D**: the human approves each guardrail change; the curator applies approved ones,
-appends to `GUARDRAILS.md` changelog, bumps `project-map`'s verified commit. ──
+── **Gate D**: present each proposed change in plain language (see "Talking to the human");
+the human approves; the curator applies approved ones, appends to `GUARDRAILS.md` changelog,
+bumps `project-map`'s verified commit. ──
 
 ## Rules about yourself
 
