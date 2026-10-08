@@ -5,14 +5,17 @@ L3 hook. Procedure: `skill://guardrail-evolution`. Changes land only after Gate 
 
 | id | rule | level | detector | origin | added | status |
 |---|---|---|---|---|---|---|
-| PM1 | gitio never depends on merge-core; merge-core has no I/O deps | L1 | `just arch-check`, clippy `disallowed_*` | architecture §2 | 2026-10-08 | active |
-| PM2 | ui/ never imports @codemirror, editor/internal, model/ | L1 | oxlint `no-restricted-imports` overrides | architecture §2 | 2026-10-08 | active |
-| PM3 | editor/, model/, connectors/ never import vue, vueuse, tauri | L1 | oxlint overrides | architecture §2 | 2026-10-08 | active |
-| PM4 | generated files are never hand-edited | L3 | hook `generated.ts` + `just bindings-check` | architecture §4 | 2026-10-08 | active |
-| PM5 | no cross-module `internal/` imports; no import cycles | L1 | oxlint overrides, `import/no-cycle` | architecture §2 | 2026-10-08 | active |
-| SP1 | implementers edit only their `Owned` globs | L3 | hook `ownership.ts` | ai-system §7 | 2026-10-08 | active |
-| SP9 | subagents never commit/push; destructive git denied for all | L3 | hook `bash-guard.ts` | ai-system §7 | 2026-10-08 | active |
-| OR-main | orchestrator never edits crates/, frontend/, src-tauri/ | L3 | hook `ownership.ts` | ai-system §3 | 2026-10-08 | active |
+| PM1 | gitio never depends on merge-core; merge-core has no I/O deps | L1 | `just arch-check` (`cargo tree --target all --all-features`; std::fs/process grep), clippy `disallowed_*` | architecture §2 | 2026-10-08 | active |
+| PM2 | ui/ never imports @codemirror, editor/internal, model/ | L1+L2 (test pending next web slice) | oxlint `no-restricted-imports` overrides + `frontend/scripts/fences.test.ts` | architecture §2; #28 | 2026-10-08 | active |
+| PM3 | editor/, model/, connectors/ never import vue, vueuse, tauri | L1+L2 (test pending next web slice) | oxlint overrides + `frontend/scripts/fences.test.ts` | architecture §2; #17 | 2026-10-08 | active |
+| PM4 | generated files are never hand-edited | L3 | hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` | architecture §4 | 2026-10-08 | active |
+| PM5 | no cross-module `internal/` imports; no import cycles | L1+L2 (test pending next web slice) | oxlint overrides + `frontend/scripts/fences.test.ts`, `import/no-cycle` | architecture §2; #18 | 2026-10-08 | active |
+| SP1 | implementers edit only their `Owned` globs | L3 | hook `ownership.ts` + `hooks.test.ts` | ai-system §7 | 2026-10-08 | active |
+| SP9 | subagents never commit/push; destructive git denied for all | L3 | hook `bash-guard.ts` + `hooks.test.ts` | ai-system §7 | 2026-10-08 | active |
+| OR-main | orchestrator never edits `PRODUCT_CODE_ROOTS` except `ORCHESTRATOR_EDITABLE` (`.omp/hooks/lib/policy.ts`) | L3 | hook `ownership.ts` + `hooks.test.ts` | ai-system §3; P3 | 2026-10-08 | active |
+| OR1 | slice `owned` globs pairwise disjoint; `SHARED_PATHS`/`GENERATED_PATHS` never owned; registry written whole | L3 | hook `slice-registry.ts` + `hooks.test.ts` | #4,#9,#15 | 2026-10-08 | active |
+| OR10 | at most `MAX_PARALLEL_AGENTS` agents at once; reviewers run no whole-workspace toolchain | L3 | hooks `task-fanout.ts`, `bash-guard.ts` (`DENIED_FOR_REVIEWERS`) + `hooks.test.ts`; across separate calls L0 | incident (d) | 2026-10-08 | active |
+| IPC8 | log never throws or blocks the caller; debug forwarded only in DEV | L2 | `frontend/src/ipc/log.test.ts` | #25,#27,#30 | 2026-10-08 | active |
 | RS8 | no unwrap/expect/panic outside tests | L1 | clippy deny set | architecture §7 | 2026-10-08 | active |
 | RS9 | domain `match` has no wildcard arm | L1 | clippy `wildcard_enum_match_arm` | architecture §2 | 2026-10-08 | active |
 | TS3 | switch over a union is exhaustive | L1 | tsgolint `switch-exhaustiveness-check` | architecture §2 | 2026-10-08 | active |
@@ -20,12 +23,12 @@ L3 hook. Procedure: `skill://guardrail-evolution`. Changes land only after Gate 
 | TS10/VU3 | top-level functions are declarations | L1 | oxlint `func-style` | owner, 2026-10-08 | 2026-10-08 | active |
 | TS12 | no console.* outside ipc/log.ts | L1 | oxlint `no-console` | owner, 2026-10-08 | 2026-10-08 | active |
 | TS14 | no magic numbers | L1 (TS) / L0 (Rust) | oxlint `no-magic-numbers`; review | owner, 2026-10-08 | 2026-10-08 | active |
-| VU2 | script-setup section order | L1 | `scripts/check-sfc-order.ts` | owner, 2026-10-08 | 2026-10-08 | active |
+| VU2 | script-setup section order | L1 | `scripts/check-sfc-order.ts` + `check-sfc-order.test.ts` | owner, 2026-10-08; #23,#24,#29 | 2026-10-08 | active |
 | RK13 | merge-core agrees with `git merge-file` on conflict-free triples | L2 | `cli/tests` cross-check | plan §5 M0 | 2026-10-08 | active |
 | RK14 | chunks sorted and pairwise disjoint | L2 | proptest | architecture §3.1 | 2026-10-08 | active |
 | R-open-1 | comments carry what code cannot; reviewer deletion test | L0 | review (`skill://comment-policy`) | owner, 2026-10-08 | 2026-10-08 | active, open for refinement |
 | OR-q | questions to the human are product questions | L0 | orchestrator self-rule | finding #1 (human) | 2026-10-08 | active |
-| OR-h | every message/question to the human is self-contained plain language: no internal ids, no invented vocabulary, no tool names the human did not introduce; one sentence per option stating what changes for them | L0 | orchestrator self-rule; curator audits human-facing questions each retro | finding #32 (human) | 2026-10-08 | active |
+| OR-h | every message/question to the human is self-contained plain language: no internal ids, no invented vocabulary, no tool names the human did not introduce; one sentence per option stating what changes for them | L3 (questions) / L0 (other messages) | hook `plain-language.ts` on main's `ask` (word list `.omp/hooks/lib/plain-language.json`, human-owned) + `hooks.test.ts`; orchestrator self-rule elsewhere | finding #32 (human); #1 (human) | 2026-10-08 | active |
 
 ## Changelog
 
@@ -33,3 +36,24 @@ L3 hook. Procedure: `skill://guardrail-evolution`. Changes land only after Gate 
   session. No Gate D yet; first retro after slice 0.0.
 - 2026-10-08 — fence smoke passed: main-session no-code block, subagent ownership block, generated-file block, bash-guard (push, commit) block. Confirmed `ctx.agent.id` == task `name`, `ctx.agent.name` == agent definition name; `slices.json` is keyed by task name.
 - 2026-10-08 — human correction during Gate D of retro 0.0: the approval question used internal ids and jargon and could not be answered. Rule OR-h added to `skill://orchestrate` ("Talking to the human"). Applied outside Gate D as a direct human instruction.
+- 2026-10-08 — retro 0.0, Gate D (human). Outcomes:
+  - P1 approved changed: instead of a type-shape question detector, hook `plain-language.ts`
+    blocks main's `ask` when any question/option text hits the human-owned word list
+    (`lib/plain-language.json`); OR-h L0 → L3 for questions. OR-q stays L0.
+  - P2 approved: `.omp/hooks/test/hooks.test.ts` (node:test, `just hooks-test`); OR5 exception for
+    hooks that block a brief-required action. Ratifies the bash-guard (#2) and ownership (#3)
+    hook fixes made in fb4e13b outside Gate D.
+  - P3 approved: `ORCHESTRATOR_EDITABLE` and `SHARED_PATHS` in `policy.ts`; skills cite them by name.
+  - P4 approved: hook `slice-registry.ts`; OR1 → L3.
+  - P5 approved: `MAX_PARALLEL_AGENTS = 2`, hook `task-fanout.ts`, `DENIED_FOR_REVIEWERS` in
+    `bash-guard.ts`; new OR10; RV6 cites the guard.
+  - P6 approved: SP3 — implementers run their layer's recipes; `just check` only by the verifier.
+  - P7 rejected: `crates/merge-core/clippy.toml` stays; PM1 keeps both detectors.
+  - P8 approved: PM2/PM3/PM5 → L1+L2; `frontend/scripts/fences.test.ts` lands with the next web slice.
+  - P9 approved: VU2 prose shrunk to id + detector; `cm6-rules` no longer autoloaded into
+    web-impl (editor briefs list it under Skills).
+  - P10 approved: IPC8 registered at L2 (`log.test.ts`); skill states the forward type.
+  - P11 approved: VF6 (read-only verifier recipes; failing paths proven by committed tests); SP4 line.
+  - P12 approved: nits ride only on an already-triggered rework; a test that survives deleting
+    the feature is `should`, `block` only when it is the sole evidence for an Acceptance line.
+  - P13 approved: project-map drift corrected, verified against `588abc9`.

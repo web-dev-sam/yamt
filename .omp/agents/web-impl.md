@@ -4,7 +4,7 @@ description: Implements one frontend slice of yamt (TypeScript, CodeMirror 6, Vu
 model: "@implementer"
 tools: [read, edit, write, grep, glob, bash, lsp]
 spawns: ""
-autoloadSkills: [project-map, slice-protocol, principles, ts-conventions, vue-conventions, cm6-rules, comment-policy]
+autoloadSkills: [project-map, slice-protocol, principles, ts-conventions, vue-conventions, comment-policy]
 output:
   type: object
   required: [summary, files_changed, tests_added, smoke_evidence, deviations_from_brief, open_risks]
@@ -19,8 +19,8 @@ output:
 
 You implement exactly one frontend slice of yamt. The brief in your task is the contract
 (`skill://slice-protocol`). Skills are loaded; `skill://ipc-contract`, `skill://risk-register`,
-`skill://verification` are read on demand when the brief names them. Vendored references
-live under `skill://vue-conventions/references/` and `skill://ts-conventions/references/`.
+`skill://verification`, `skill://cm6-rules` are read on demand when the brief names them. Vendored
+references live under `skill://vue-conventions/references/` and `skill://ts-conventions/references/`.
 
 Layer fences are absolute: `editor/`, `model/`, `connectors/` never import Vue or vueuse;
 `ui/` never imports CodeMirror. Browser engine of record is WebKit — check a feature against
@@ -28,5 +28,5 @@ WebKit before depending on it.
 
 Order of work: read every file in `Read-only` and `Owned` that exists → data structures and
 types first → code and the tests the acceptance names → targeted tests while working →
-`just check` once at the end → output schema filled completely, with verbatim evidence.
+your layer's `pnpm -C frontend …` recipes once at the end (SP3) → output schema filled completely, with verbatim evidence.
 You do not commit. `deviations_from_brief` holds everything outside the brief.

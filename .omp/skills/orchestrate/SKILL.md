@@ -5,9 +5,9 @@ description: The yamt orchestrator's playbook — session re-hydration, intent c
 
 # Orchestrate
 
-You are the main session. You plan, brief, spawn, judge, and record. You do not write
-product code (hook-enforced on `crates/**`, `frontend/**`, `src-tauri/**`). You may edit
-`docs/**`, `.omp/**`, `justfile`, workspace `Cargo.toml`, `frontend/package.json`.
+You are the main session. You plan, brief, spawn, judge, and record. You never write
+product code: `PRODUCT_CODE_ROOTS` minus `ORCHESTRATOR_EDITABLE` (`.omp/hooks/lib/policy.ts`)
+is hook-blocked for you; `docs/**`, `.omp/**`, and `SHARED_PATHS` are yours.
 
 ## 0. Re-hydrate (every session, before anything)
 
@@ -25,6 +25,7 @@ question** — "should the user be able to X, at the cost of Y?" — never a typ
 
 The human has read **nothing** of your process: no briefs, no findings, no agent outputs,
 no skills. Write as if to a product owner joining the conversation now.
+Detector: hook `plain-language.ts` (word list: `.omp/hooks/lib/plain-language.json`, human-owned).
 
 - [OR-h1] No internal ids or invented vocabulary: no `P3`, `OR1`, `L2`, `RK7`, "fence",
   "slice", "wave", "curator", "gate" unless the human used the word first. Say "the rule that
@@ -32,11 +33,9 @@ no skills. Write as if to a product owner joining the conversation now.
 - [OR-h2] No tool or library names the human did not introduce (`tsgolint`, `specta`,
   `oxlint`): say "the type checker", "the linter".
 - [OR-h3] Every option in a question is one plain sentence stating what changes for the
-  human: what they gain, what it costs. If an option needs the context of another message,
-  it is not ready to ask.
+  human (what they gain, what it costs), readable without any other message.
 - [OR-h4] Lead with the decision needed, then at most three lines of why. Details on request.
-- [OR-h5] Before sending a question, reread it as the human: can it be answered without
-  opening a single file? If not, rewrite.
+- [OR-h5] Reread each question as the human: not answerable without opening a file → rewrite.
 
 ✗ "Approve P2 hook regression tests in `just check`? Both hook bugs were untested."
 ✓ "Should the safety checks that stop agents editing the wrong files get automated tests?
@@ -45,11 +44,11 @@ no skills. Write as if to a product owner joining the conversation now.
 ## 2. Slice map (per wave)
 
 For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contract`,
-`Acceptance`, smoke recipe. Checks before Gate A:
+`Acceptance`, smoke recipe; editor slices list `skill://cm6-rules` under `## Skills`. Checks:
 
-- [OR1] `Owned` globs are pairwise disjoint across the wave. Shared files (`Cargo.toml`
-  workspace, `justfile`, `package.json`) are never owned by an implementer; implementers
-  report needed edits in `deviations_from_brief` and you apply them between waves.
+- [OR1] `Owned` globs are pairwise disjoint across the wave; `SHARED_PATHS` and
+  `GENERATED_PATHS` are never owned. Implementers report needed shared edits in
+  `deviations_from_brief`; you apply them between waves. Detector: hook `slice-registry.ts`.
 - [OR2] Every `Contract` either exists in the tree or is fully written in the brief.
 - [OR3] Every technical decision the brief makes cites a vision (§0); undecidable → product
   question for the human; irrelevant → boring option, no question.
@@ -58,35 +57,35 @@ For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contra
 
 ## 3. Spawn
 
-Write `.omp/run/slices.json` **before** spawning:
-```json
-{ "<TaskName>": { "owned": ["crates/merge-core/**"], "readonly": ["docs/**"] } }
-```
-One `task` call per wave, `isolated: true`, `name` = slice id in CamelCase
-(`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl`, the brief as `task`, shared
-background as `context`. `solutionSpace` says how open the slice is.
+`write` (never `edit`) `.omp/run/slices.json` **before** spawning:
+`{ "<TaskName>": { "owned": ["crates/merge-core/**"], "readonly": ["docs/**"] } }`.
+One `task` call of at most `MAX_PARALLEL_AGENTS` slices (OR10), `isolated: true`, `name` =
+slice id in CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl`, the brief as
+`task`, shared background as `context`. `solutionSpace` says how open the slice is.
 
 ## 4. Collect
 
-Read each output. Non-empty `deviations_from_brief` → accept (update `SLICES.md`/brief) or
-reject (rework). Needed shared-file edits → you apply them now.
+Read each output. `deviations_from_brief` → accept (update `SLICES.md`/brief) or reject
+(rework). Apply needed shared-file edits now, then `just bindings`; patches never carry generated files.
 
 ## 5. Review
 
-Spawn `boundary-reviewer` and `correctness-reviewer` in parallel per patch with the brief and
-the patch path. Append every finding to `.omp/run/findings.jsonl`:
+One patch at a time (OR10): spawn `boundary-reviewer` and `correctness-reviewer` with the
+brief and the patch path. Append every finding to `.omp/run/findings.jsonl`:
 `{"ts","slice","source":"boundary|correctness|verifier|human","severity","rule_id","file","line","problem","fix"}`.
 
 ## 6. Rework
 
 `block` → revive the same implementer with the findings verbatim; max **two** rounds.
 Third failure → ── **Gate B** (escalate to the human with the findings). ──
-`should` → fixed in the same rework, or logged as a follow-up slice on the board. `nit` → log only.
+`should` → fixed in the same rework, or logged as a follow-up slice on the board.
+`nit` → log; included only in a rework already triggered.
 
 ## 7. Verify
 
-After the wave's patches are applied to the tree: spawn `verifier` once. `gate: fail` →
-rework the owning slice (step 6), never a new slice. Record the evidence line on the board.
+After the wave's patches are applied to the tree: spawn `verifier` once, naming only
+read-only recipes from `skill://verification` (VF6). `gate: fail` → rework the owning slice
+(step 6), never a new slice. Record the evidence line on the board.
 
 ## 8. Commit
 
@@ -95,29 +94,27 @@ commit. Never push without the human asking.
 
 ## 9. Milestone end
 
-Run the milestone's demo recipe from `docs/plan.md` §5 with the human; write
-`docs/walkthroughs/M<n>.md` (what was built; the few non-obvious Rust constructs and why
-each was chosen — the human is a Rust beginner).
+Run the demo recipe (`docs/plan.md` §5) with the human; write `docs/walkthroughs/M<n>.md`:
+what was built, and the few non-obvious Rust constructs with why each (Rust-beginner reader).
 ── **Gate C**: milestone acceptance. ──
 
 ## 10. Retro
 
-Spawn `curator` with `findings.jsonl` since the last retro + every human correction you
-logged (`source: "human"`). Present its proposals.
-── **Gate D**: present each proposed change in plain language (see "Talking to the human");
-the human approves; the curator applies approved ones, appends to `GUARDRAILS.md` changelog,
-bumps `project-map`'s verified commit. ──
+Spawn `curator` with `findings.jsonl` since the last retro + every logged human correction.
+── **Gate D**: each proposed change in plain language (see "Talking to the human"); the human
+approves; the curator applies approved ones, appends the changelog, bumps the verified commit. ──
 
 ## Rules about yourself
 
 - [OR4] Every human correction ("don't do X", "I prefer Y", a rephrased question) is logged
-  to `findings.jsonl` with `source: "human"` the moment it happens. This is the system's
-  main learning input.
-- [OR5] You may recommend a guardrail at any time; you apply none without Gate D. Exception:
-  additions to `.omp/run/*` and `SLICES.md`.
-- [OR6] You never run `just check` as proof; the verifier does. You may run single commands
-  to understand a failure.
+  to `findings.jsonl` with `source: "human"` the moment it happens: the main learning input.
+- [OR5] You may recommend a guardrail at any time; you apply none without Gate D. Exceptions:
+  additions to `.omp/run/*` and `SLICES.md`; a hook that blocks a brief-required action may be
+  fixed immediately, logged as a finding, and ratified at the next Gate D.
+- [OR6] You never run `just check` as proof; the verifier does. Single commands to understand a failure are fine.
 - [OR7] A `scout` is allowed for mapping unknown code; its output is context, not a plan.
 - [OR8] If the board and the tree disagree, the tree wins; fix the board, note it as a finding.
 - [OR9] Session handoff is the board + findings log + GUARDRAILS changelog; never rely on
   chat memory. Update the board before yielding to the human.
+- [OR10] At most `MAX_PARALLEL_AGENTS` agents at once; never reviewers while an implementer
+  or the verifier runs. Detector: hook `task-fanout.ts` (per call; across calls it is yours).

@@ -6,6 +6,7 @@ import {
   type AgentIdentity,
   escapesRepo,
   matchesAny,
+  ORCHESTRATOR_EDITABLE,
   ownershipFor,
   pathsFromToolInput,
   PRODUCT_CODE_ROOTS,
@@ -38,11 +39,11 @@ export default function ownership(pi: ExtensionAPI): void {
     if (relTargets.length === 0) return;
 
     if (agent.kind === "main") {
-      const hit = relTargets.find((p) => matchesAny(p, PRODUCT_CODE_ROOTS));
+      const hit = relTargets.find((p) => matchesAny(p, PRODUCT_CODE_ROOTS) && !matchesAny(p, ORCHESTRATOR_EDITABLE));
       if (hit === undefined) return;
       return {
         block: true,
-        reason: `[ownership/OR-main] The orchestrator does not edit product code (${hit}). Brief a slice and spawn rust-impl or web-impl.`,
+        reason: `[ownership/OR-main] The orchestrator does not edit product code (${hit}); only ORCHESTRATOR_EDITABLE in .omp/hooks/lib/policy.ts. Brief a slice and spawn rust-impl or web-impl.`,
       };
     }
 

@@ -504,27 +504,24 @@ mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no 
 
 ### `justfile` (the gate)
 
+The file itself is the reference; this is its shape (verified at commit `588abc9`+):
+
 ```
-check:        fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order
-fmt-check:    cargo fmt --all --check && pnpm -C frontend oxfmt --check
-clippy:       cargo clippy --workspace --all-targets -- -D warnings
-test:         cargo nextest run --workspace
-deny:         cargo deny check
-bindings:     cargo run -p yamt-app --bin export-bindings
-bindings-check: just bindings && git diff --exit-code frontend/src/ipc/bindings.ts
-web-lint:     pnpm -C frontend oxlint --type-aware && pnpm -C frontend eslint "src/**/*.vue"
-sfc-order:    pnpm -C frontend tsx scripts/check-sfc-order.ts
-web-typecheck: pnpm -C frontend vue-tsc --noEmit
-web-test:     pnpm -C frontend vitest run
-arch-check:   cargo tree -p gitio -e normal | grep -q merge-core && exit 1 || true   # + similar
-dev-web:      VITE_CHUNK_SOURCE=fixture pnpm -C frontend vite      # M1 loop, open in Epiphany
-dev-app:      cargo tauri dev
-smoke-cli:    cargo run -p yamt-cli -- classify tests/golden/basic/{base,local,remote}.txt
-golden-update: cargo run -p yamt-cli -- golden update
+check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order hooks-test
+fmt-check:      pnpm -C frontend fmt:check && cargo fmt --all --check
+clippy:         cargo clippy --workspace --all-targets -- -D warnings
+test:           cargo nextest run --workspace            (--no-tests=warn only until the first Rust test lands)
+deny:           cargo deny check --warn unmaintained
+bindings:       cargo run -p yamt-app --bin export-bindings
+bindings-check: export to target/ and `diff -u` against the committed frontend/src/ipc/bindings.ts
+web-*:          delegate to the package scripts in frontend/package.json (lint, typecheck, test, sfc-order)
+arch-check:     scripts/arch-check.sh — gitio ↛ merge-core; merge-core ↛ serde_json/tokio/tauri; no std::{fs,process} in merge-core
+hooks-test:     node:test over .omp/hooks/test/*.test.ts (the agent safety hooks are code)
+dev-web / dev-app / smoke-cli / golden-update as before
 ```
 
-Agents run `just check` once at the end of a task, never mid-flight (harness rule), and the
-`verifier` agent is the one whose result counts (ai-system doc).
+Implementers run their own layer's commands while working; the integrated `just check` runs
+once per wave, by the verifier, on the merged tree. Nothing in `check` may pass by skipping.
 
 ---
 

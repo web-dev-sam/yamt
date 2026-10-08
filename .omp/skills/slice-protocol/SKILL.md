@@ -25,11 +25,12 @@ missing, say so in `deviations_from_brief` and do what the architecture doc impl
   only if the slice is otherwise blocked. Detector: hook `ownership.ts`.
 - [SP2] `Contract` signatures are fixed. Adding is fine; changing a listed signature is a
   deviation to report, not to do. Detector: review `block`.
-- [SP3] Run `just check` **once, at the end**. Never mid-flight (it is slow and the verifier
-  agent runs it again). Targeted single-crate/single-file test runs are fine while working.
+- [SP3] Run your layer's recipes (`cargo …` for Rust, `pnpm -C frontend …` for web); the
+  integrated `just check` runs once, by the verifier, on the merged tree.
 - [SP4] Done means: every `Acceptance` line observed by you, with the evidence pasted into
   `smoke_evidence` (command + relevant output lines). No stubs, no `TODO`, no "follow-up".
-  If an acceptance line is unreachable, say which and why — do not narrow it silently.
+  If an acceptance line is unreachable, say which and why — do not narrow it silently. A
+  detector you add ships with a committed test of its failing path.
 - [SP5] Tests: write the ones `Acceptance` names, plus any that pin an invariant from
   `skill://risk-register` your code touches. Never tests for wiring, defaults, or "does not throw".
 - [SP6] No new dependency without a `deviations_from_brief` entry naming why the chosen stack

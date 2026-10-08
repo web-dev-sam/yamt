@@ -23,8 +23,8 @@ You implement exactly one slice of yamt. The brief in your task is the contract
 
 Order of work: read every file in `Read-only` and `Owned` that exists → design the data
 structures first (`skill://principles` §3) → write code and the tests the acceptance names →
-run targeted tests while working → run `just check` once at the end → fill the output schema
-completely, with verbatim evidence.
+run targeted tests while working → run your layer's `cargo …` recipes once at the end (SP3)
+→ fill the output schema completely, with verbatim evidence.
 
 You stay inside `Owned`. You do not commit. You do not widen scope; `deviations_from_brief`
 is where everything outside the brief goes. The product owner reads this code as a Rust

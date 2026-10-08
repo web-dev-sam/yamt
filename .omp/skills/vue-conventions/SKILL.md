@@ -13,12 +13,8 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
 
 - [VU1] `<script setup lang="ts">` → `<template>` → `<style>`. A `<style>` block only for
   what Tailwind v4 cannot express. Detector: `vue/block-order`.
-- [VU2] Script section order, enforced by `scripts/check-sfc-order.ts` in `just check`:
-  ```
-  imports → types → macros (defineProps, defineEmits<…>(), defineModel) → ref/reactive/shallowRef/useTemplateRef
-  → computed → watch/watchEffect → lifecycle hooks → function declarations
-  ```
-  Imports are sorted by `oxfmt` (`sortImports`); never reorder by hand.
+- [VU2] Script section order: imports → types → macros → state → computed → watch → lifecycle
+  → functions. Detector: `scripts/check-sfc-order.ts` + `check-sfc-order.test.ts`.
 - [VU3] Top-level functions are `function` declarations (hoisted). Detector: oxlint `func-style`.
 - [VU4] `useTemplateRef<HTMLDivElement>("left")` for DOM hosts; never `ref<HTMLElement | null>(null)`.
 - [VU5] Props and emits are type-based: `defineProps<{ files: FileEntry[] }>()`,

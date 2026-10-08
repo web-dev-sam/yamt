@@ -32,7 +32,8 @@ do the added tests catch a plausible consumer-visible bug, or do they pin wiring
 ## Grading
 
 - `block` — wrong behaviour, violated invariant, violated boundary, changed contract,
-  missing acceptance evidence, test that would pass with the feature deleted.
+  missing acceptance evidence, a test that is the only evidence for an Acceptance line and
+  would pass with the feature deleted (otherwise such a test is `should`).
 - `should` — maintainability: reader load, naming, a comment that explains instead of
   restructuring, a rule-table violation without behavioural impact.
 - `nit` — taste. Never blocks; reported only if ≤ 2 and cheap.
@@ -52,7 +53,8 @@ do the added tests catch a plausible consumer-visible bug, or do they pin wiring
   A review with an empty `checked` list is itself a failure.
 - [RV5] Never restate the diff, never praise, never propose scope the brief excluded —
   a missing feature outside `Change` is not a finding; a missing acceptance item is.
-- [RV6] Do not run `just check`; the verifier does. You may run a single targeted test file
-  if a `block` depends on it, and say so in `checked`.
+- [RV6] Do not run `just check` or any whole-workspace toolchain; the verifier does. You may
+  run a single targeted test file if a `block` depends on it, and say so in `checked`.
+  Detector: hook `bash-guard.ts` (`DENIED_FOR_REVIEWERS`).
 - [RV7] A `should` finding repeated across two slices is reported with
   `rule_id: "promote"` so the curator sees it (`skill://guardrail-evolution`).

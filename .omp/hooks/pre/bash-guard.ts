@@ -19,6 +19,20 @@ const DENIED_FOR_SUBAGENTS: Rule[] = [
   { pattern: /\bjust\s+golden-update(?![\w-])/, reason: "golden snapshots change only through the orchestrator or the verifier on request (PM4); `just bindings` is allowed — it regenerates from source" },
 ];
 
+const REVIEWERS: Record<string, true> = { "boundary-reviewer": true, "correctness-reviewer": true };
+
+const WHOLE_WORKSPACE = "whole-workspace toolchains are the verifier's (RV6, OR10); run one targeted test file instead";
+
+const DENIED_FOR_REVIEWERS: Rule[] = [
+  { pattern: /\bjust\s+(?:check|clippy|test|web-[\w-]+)(?![\w-])/, reason: WHOLE_WORKSPACE },
+  { pattern: /\bpnpm\s+(?:-C\s+\S+\s+)?(?:run\s+)?(?:lint|typecheck)(?![\w:-])/, reason: WHOLE_WORKSPACE },
+  { pattern: /\bpnpm\s+(?:-C\s+\S+\s+)?(?:run\s+)?test(?::browser)?\s*(?:$|[;&|])/, reason: WHOLE_WORKSPACE },
+  { pattern: /\bcargo\s+clippy\b[^;&|]*--workspace/, reason: WHOLE_WORKSPACE },
+  { pattern: /\bcargo\s+nextest\s+run\b[^;&|]*--workspace/, reason: WHOLE_WORKSPACE },
+  { pattern: /\bvue-tsc\b/, reason: WHOLE_WORKSPACE },
+  { pattern: /\boxlint\b[^;&|]*--type-aware/, reason: WHOLE_WORKSPACE },
+];
+
 const SCRATCH_REPO = /\bgit\s+-C\s+(?:\/tmp\/|\$TMPDIR|\$\(mktemp)/;
 
 export default function bashGuard(pi: ExtensionAPI): void {
@@ -30,7 +44,13 @@ export default function bashGuard(pi: ExtensionAPI): void {
     for (const rule of DENIED_FOR_EVERYONE) {
       if (rule.pattern.test(command)) return { block: true, reason: `[bash-guard] ${rule.reason}: ${command}` };
     }
-    if (ctx.agent.kind !== "sub" || SCRATCH_REPO.test(command)) return;
+    if (ctx.agent.kind !== "sub") return;
+    if (REVIEWERS[ctx.agent.name]) {
+      for (const rule of DENIED_FOR_REVIEWERS) {
+        if (rule.pattern.test(command)) return { block: true, reason: `[bash-guard] ${rule.reason}: ${command}` };
+      }
+    }
+    if (SCRATCH_REPO.test(command)) return;
     for (const rule of DENIED_FOR_SUBAGENTS) {
       if (rule.pattern.test(command)) return { block: true, reason: `[bash-guard] ${rule.reason}: ${command}` };
     }

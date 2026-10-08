@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order
+check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order hooks-test
 
 fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
@@ -32,6 +32,9 @@ arch-check:
 
 sfc-order: (frontend "sfc-order")
 
+hooks-test:
+    pnpm -C frontend exec tsx --test ../.omp/hooks/test/hooks.test.ts
+
 dev-web:
     VITE_CHUNK_SOURCE=fixture {{ just_executable() }} frontend vite
 
@@ -47,10 +50,4 @@ golden-update:
 [positional-arguments]
 [private]
 frontend *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -f frontend/package.json ]; then
-        echo "skipped: frontend/package.json not found (pnpm $*)"
-        exit 0
-    fi
     pnpm -C frontend "$@"

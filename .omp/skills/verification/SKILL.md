@@ -6,7 +6,7 @@ description: What counts as proof in yamt — the `just check` gate, per-layer s
 # Verification
 
 Proof is observed output, pasted. "Tests pass" without the command and its last lines is not
-evidence. The verifier runs the gate once per wave; implementers run targeted checks only.
+evidence. The verifier runs the gate once per wave; implementers run their layer's recipes (SP3).
 
 ## The gate
 
@@ -15,7 +15,7 @@ just check
 ```
 
 Runs, in order: `fmt-check` → `clippy` → `test` → `deny` → `bindings-check` → `web-lint` →
-`web-typecheck` → `web-test` → `arch-check` → `sfc-order`. Any non-zero exit is `gate: fail`
+`web-typecheck` → `web-test` → `arch-check` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
 with the failing recipe name and the first 30 relevant lines in `failures[].excerpt`.
 
 - [VF1] The verifier never fixes anything. A failure goes back to the owning slice.
@@ -23,6 +23,8 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
   with `excerpt: "flaky: …"`; flakiness is a correctness finding.
 - [VF3] The gate is run from a clean tree state as merged by the orchestrator, not inside
   an implementer's isolated workspace.
+- [VF6] Verifier recipes are read-only commands; a detector's failing path is proven by a
+  committed test, never by tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no writes).
 
 ## Smoke recipes (pick the one for the layer; paste `observed`)
 
@@ -48,11 +50,11 @@ devtools console shows `[info] file.loaded {…}` from `log.ts`; no errors. Scre
 
 **editor layout tests (WebKit)**
 ```
-pnpm -C frontend vitest run --browser
+pnpm -C frontend test:browser
 ```
-observed: `scrollSync`, `strips` tests green under the `webkit` provider. If Playwright
-WebKit cannot launch on this machine, say so verbatim and run `vitest run` (jsdom) — the
-layout tests are then marked skipped, which is reported, not hidden.
+observed: `scrollSync`, `strips` tests green in the `browser` project (Playwright WebKit). If
+WebKit cannot launch on this machine, say so verbatim: `pnpm test` (the `node` project) excludes
+`src/editor/**`, so the layout tests did not run, which is reported, not hidden.
 
 **tauri shell (M2+)**
 ```

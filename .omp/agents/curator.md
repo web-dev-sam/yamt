@@ -35,6 +35,7 @@ corrections (`source: "human"` weigh most). Follow the retro procedure in
 **Apply**: the task lists approved proposal ids. Apply exactly those to `.omp/skills/**`,
 `.omp/hooks/**`, `.omp/GUARDRAILS.md` (append the changelog entry with the date and the
 Gate D outcome for every proposal, including rejected ones), and bump
-`skill://project-map`'s verified commit. Lint/test detectors that live outside `.omp/`
-(`frontend/.oxlintrc.json`, `Cargo.toml` lints, `scripts/`) are described in
-`diff_summary` for the orchestrator to apply; you cannot edit them.
+`skill://project-map`'s verified commit. Detectors that live outside `.omp/` are described in
+`diff_summary`: the orchestrator applies those in `SHARED_PATHS`, `ORCHESTRATOR_EDITABLE`
+(`.omp/hooks/lib/policy.ts`) or outside `PRODUCT_CODE_ROOTS`, and briefs a slice for the rest.
+You cannot edit them.

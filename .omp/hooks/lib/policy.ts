@@ -3,6 +3,21 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 export const PRODUCT_CODE_ROOTS = ["crates/**", "frontend/**", "src-tauri/**", "tests/golden/**"];
 
+export const ORCHESTRATOR_EDITABLE = [
+  "frontend/package.json",
+  "frontend/.oxlintrc.json",
+  "frontend/.oxfmtrc.json",
+  "frontend/eslint.config.js",
+  "frontend/vite.config.ts",
+  "frontend/tsconfig*.json",
+  "src-tauri/Cargo.toml",
+  "crates/*/Cargo.toml",
+];
+
+export const SHARED_PATHS = ["Cargo.toml", "Cargo.lock", "justfile", "frontend/package.json", "frontend/pnpm-lock.yaml"];
+
+export const MAX_PARALLEL_AGENTS = 2;
+
 export const GENERATED_PATHS = [
   "frontend/src/ipc/bindings.ts",
   "Cargo.lock",

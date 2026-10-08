@@ -1,0 +1,1 @@
+{ "M0S1MergeCore": { "owned": ["crates/merge-core/**"], "readonly": ["docs/**"] } }

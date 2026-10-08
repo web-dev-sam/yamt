@@ -48,7 +48,8 @@ log(entry: LogEntry)              -> ()          fire-and-forget; frontend never
   `fixtures/*.json`, parsed with valibot — the only runtime parse, decision 19).
   `main.ts` picks by `import.meta.env.VITE_CHUNK_SOURCE`.
 - [IPC8] `ipc/log.ts`: `log.{debug,info,warn,error}(event, fields)` → structured console line
-  always; forwarded via `commands.log` when the source is Tauri; `debug` forwarded only in
-  `import.meta.env.DEV`. Must never throw or block the caller.
+  always; `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)` forwards (Tauri
+  source: `commands.log`), `debug` only in `import.meta.env.DEV`. Never throws or blocks the
+  caller, including a rejected forward. Detector: `log.test.ts`.
 - [IPC9] A new command is a decision-record-free change only if it is a pure addition and its
   DTOs are existing types; otherwise report in `deviations_from_brief`.
