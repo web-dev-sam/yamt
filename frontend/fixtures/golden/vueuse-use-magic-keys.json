@@ -149,5 +149,260 @@
         "len": 14
       }
     }
+  ],
+  "word_changes": [
+    {
+      "chunk": 0,
+      "local": [
+        {
+          "line": 2,
+          "start": 14,
+          "len": 16
+        }
+      ],
+      "base": [
+        {
+          "line": 2,
+          "start": 14,
+          "len": 8
+        }
+      ],
+      "remote": []
+    },
+    {
+      "chunk": 1,
+      "local": [
+        {
+          "line": 21,
+          "start": 11,
+          "len": 16
+        }
+      ],
+      "base": [
+        {
+          "line": 21,
+          "start": 11,
+          "len": 8
+        }
+      ],
+      "remote": []
+    },
+    {
+      "chunk": 2,
+      "local": [
+        {
+          "line": 53,
+          "start": 73,
+          "len": 3
+        }
+      ],
+      "base": [
+        {
+          "line": 53,
+          "start": 73,
+          "len": 7
+        }
+      ],
+      "remote": []
+    },
+    {
+      "chunk": 3,
+      "local": [],
+      "base": [],
+      "remote": []
+    },
+    {
+      "chunk": 4,
+      "local": [],
+      "base": [],
+      "remote": []
+    },
+    {
+      "chunk": 5,
+      "local": [
+        {
+          "line": 102,
+          "start": 8,
+          "len": 3
+        },
+        {
+          "line": 104,
+          "start": 20,
+          "len": 3
+        },
+        {
+          "line": 106,
+          "start": 23,
+          "len": 3
+        }
+      ],
+      "base": [
+        {
+          "line": 102,
+          "start": 8,
+          "len": 4
+        },
+        {
+          "line": 104,
+          "start": 20,
+          "len": 6
+        },
+        {
+          "line": 106,
+          "start": 23,
+          "len": 6
+        }
+      ],
+      "remote": []
+    },
+    {
+      "chunk": 6,
+      "local": [],
+      "base": [],
+      "remote": [
+        {
+          "line": 119,
+          "start": 29,
+          "len": 2
+        },
+        {
+          "line": 120,
+          "start": 0,
+          "len": 23
+        },
+        {
+          "line": 122,
+          "start": 0,
+          "len": 5
+        }
+      ]
+    },
+    {
+      "chunk": 7,
+      "local": [
+        {
+          "line": 114,
+          "start": 37,
+          "len": 7
+        }
+      ],
+      "base": [
+        {
+          "line": 114,
+          "start": 37,
+          "len": 6
+        }
+      ],
+      "remote": []
+    },
+    {
+      "chunk": 8,
+      "local": [
+        {
+          "line": 129,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 130,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 131,
+          "start": 0,
+          "len": 2
+        },
+        {
+          "line": 132,
+          "start": 0,
+          "len": 2
+        },
+        {
+          "line": 133,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 134,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 135,
+          "start": 0,
+          "len": 2
+        }
+      ],
+      "base": [
+        {
+          "line": 128,
+          "start": 2,
+          "len": 13
+        },
+        {
+          "line": 129,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 130,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 131,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 132,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 133,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 134,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 135,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 136,
+          "start": 0,
+          "len": 4
+        },
+        {
+          "line": 137,
+          "start": 0,
+          "len": 3
+        }
+      ],
+      "remote": [
+        {
+          "line": 150,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 151,
+          "start": 0,
+          "len": 54
+        },
+        {
+          "line": 152,
+          "start": 0,
+          "len": 55
+        }
+      ]
+    }
   ]
 }

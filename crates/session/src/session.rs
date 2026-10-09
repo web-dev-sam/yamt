@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use specta::Type;
 use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
-use yamt_merge_core::{Chunk, Options, compute_chunks};
+use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
 
 use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
 use crate::{Error, Result};
@@ -33,18 +33,21 @@ pub struct FileMergeData {
     pub remote: String,
     pub eol: Eol,
     pub chunks: Vec<Chunk>,
+    pub word_changes: Vec<WordChanges>,
 }
 
 #[must_use]
 pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMergeData {
     let eol_source = if base.is_empty() { local } else { base };
+    let chunks = compute_chunks(base, local, remote, &Options::default());
     FileMergeData {
         path: path.to_owned(),
         base: base.to_owned(),
         local: local.to_owned(),
         remote: remote.to_owned(),
         eol: detect_eol(eol_source),
-        chunks: compute_chunks(base, local, remote, &Options::default()),
+        word_changes: word_changes(base, local, remote, &chunks),
+        chunks,
     }
 }
 

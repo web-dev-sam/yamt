@@ -261,6 +261,20 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
     assert_eq!(data["eol"], "Lf");
     let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
     assert_eq!(data["chunks"], classified);
+    let word_chunks: Vec<&Value> = data["word_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|words| &words["chunk"])
+        .collect();
+    let chunk_ids: Vec<&Value> = classified
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|chunk| &chunk["id"])
+        .collect();
+    assert_eq!(chunk_ids.len(), 3);
+    assert_eq!(word_chunks, chunk_ids);
 }
 
 #[test]

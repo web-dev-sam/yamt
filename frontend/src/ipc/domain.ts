@@ -5,6 +5,13 @@ type LocalLine = number & { readonly __brand: "LocalLine" };
 type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
 type LineRange<L> = { readonly start: L; readonly len: number };
+type InlineRange<L> = { readonly line: L; readonly start: number; readonly len: number };
+
+type ChunkWords = {
+  readonly local: readonly InlineRange<LocalLine>[];
+  readonly base: readonly InlineRange<BaseLine>[];
+  readonly remote: readonly InlineRange<RemoteLine>[];
+};
 
 export type Chunk = {
   readonly id: ChunkId;
@@ -12,6 +19,7 @@ export type Chunk = {
   readonly base: LineRange<BaseLine>;
   readonly local: LineRange<LocalLine>;
   readonly remote: LineRange<RemoteLine>;
+  readonly words: ChunkWords;
 };
 
 export type FileEntry = Generated.FileEntry;
@@ -49,6 +57,65 @@ function invalid(field: string, value: number): Error {
   return new Error(`${field} must be a non-negative safe integer, got ${value}`);
 }
 
+function toInlineRange<L extends number>({
+  range,
+  isLine,
+  field,
+}: {
+  range: Generated.InlineRange<number>;
+  isLine: (n: number) => n is L;
+  field: string;
+}): InlineRange<L> {
+  const { line, start, len } = range;
+  if (!isLine(line)) {
+    throw invalid(`${field}.line`, line);
+  }
+  if (!isNonNegativeInteger(start)) {
+    throw invalid(`${field}.start`, start);
+  }
+  if (!Number.isSafeInteger(len) || len <= 0) {
+    throw new Error(`${field}.len must be a positive safe integer, got ${len}`);
+  }
+  return { line, start, len };
+}
+
+function toInlineRanges<L extends number>({
+  ranges,
+  isLine,
+  field,
+}: {
+  ranges: readonly Generated.InlineRange<number>[];
+  isLine: (n: number) => n is L;
+  field: string;
+}): InlineRange<L>[] {
+  return ranges.map((range, index) =>
+    toInlineRange({ range, isLine, field: `${field}[${index}]` }),
+  );
+}
+
+function toWords({
+  words,
+  chunkId,
+  field,
+}: {
+  words: Generated.WordChanges;
+  chunkId: ChunkId;
+  field: string;
+}): ChunkWords {
+  if (words.chunk !== chunkId) {
+    throw new Error(`${field}.chunk must be ${chunkId}, got ${words.chunk}`);
+  }
+  return {
+    local: toInlineRanges({ ranges: words.local, isLine: isLocalLine, field: `${field}.local` }),
+    base: toInlineRanges({ ranges: words.base, isLine: isBaseLine, field: `${field}.base` }),
+    remote: toInlineRanges({
+      ranges: words.remote,
+      isLine: isRemoteLine,
+      field: `${field}.remote`,
+    }),
+  };
+}
+
 function toRange<L extends number>({
   range,
   isLine,
@@ -68,18 +135,42 @@ function toRange<L extends number>({
   return { start, len };
 }
 
-function toChunk(dto: Generated.Chunk, field: string): Chunk {
-  const { id } = dto;
+function toChunk({
+  chunk,
+  words,
+  index,
+}: {
+  chunk: Generated.Chunk;
+  words: Generated.WordChanges;
+  index: number;
+}): Chunk {
+  const field = `chunks[${index}]`;
+  const { id } = chunk;
   if (!isChunkId(id)) {
     throw invalid(`${field}.id`, id);
   }
   return {
     id,
-    kind: dto.kind,
-    base: toRange({ range: dto.base, isLine: isBaseLine, field: `${field}.base` }),
-    local: toRange({ range: dto.local, isLine: isLocalLine, field: `${field}.local` }),
-    remote: toRange({ range: dto.remote, isLine: isRemoteLine, field: `${field}.remote` }),
+    kind: chunk.kind,
+    base: toRange({ range: chunk.base, isLine: isBaseLine, field: `${field}.base` }),
+    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.local` }),
+    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.remote` }),
+    words: toWords({ words, chunkId: id, field: `word_changes[${index}]` }),
   };
+}
+
+function toChunks(dto: Generated.FileMergeData): Chunk[] {
+  const misaligned = `word_changes must have one entry per chunk (${dto.chunks.length}), got ${dto.word_changes.length}`;
+  if (dto.word_changes.length > dto.chunks.length) {
+    throw new Error(misaligned);
+  }
+  return dto.chunks.map((chunk, index) => {
+    const words = dto.word_changes[index];
+    if (words === undefined) {
+      throw new Error(misaligned);
+    }
+    return toChunk({ chunk, words, index });
+  });
 }
 
 export function toDomain(dto: Generated.FileMergeData): FileMergeData {
@@ -89,6 +180,6 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
     local: dto.local,
     remote: dto.remote,
     eol: dto.eol,
-    chunks: dto.chunks.map((chunk, index) => toChunk(chunk, `chunks[${index}]`)),
+    chunks: toChunks(dto),
   };
 }

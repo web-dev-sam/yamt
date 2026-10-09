@@ -43,6 +43,19 @@ const CHUNK = v.object({
   remote: LINE_RANGE,
 } satisfies SchemaOf<Generated.Chunk>);
 
+const INLINE_RANGE = v.object({
+  line: v.number(),
+  start: v.number(),
+  len: v.number(),
+} satisfies SchemaOf<Generated.InlineRange<number>>);
+
+const WORD_CHANGES = v.object({
+  chunk: v.number(),
+  local: v.array(INLINE_RANGE),
+  base: v.array(INLINE_RANGE),
+  remote: v.array(INLINE_RANGE),
+} satisfies SchemaOf<Generated.WordChanges>);
+
 const FILE_MERGE_DATA = v.object({
   path: v.string(),
   base: v.string(),
@@ -50,6 +63,7 @@ const FILE_MERGE_DATA = v.object({
   remote: v.string(),
   eol: memberOf(EOLS),
   chunks: v.array(CHUNK),
+  word_changes: v.array(WORD_CHANGES),
 } satisfies SchemaOf<Generated.FileMergeData>);
 
 function parseFixture(file: string, json: unknown): FileMergeData {

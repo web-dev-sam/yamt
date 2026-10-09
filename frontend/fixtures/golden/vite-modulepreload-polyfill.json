@@ -69,5 +69,360 @@
         "len": 13
       }
     }
+  ],
+  "word_changes": [
+    {
+      "chunk": 0,
+      "local": [
+        {
+          "line": 0,
+          "start": 7,
+          "len": 43
+        },
+        {
+          "line": 1,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 1,
+          "start": 9,
+          "len": 95
+        },
+        {
+          "line": 2,
+          "start": 0,
+          "len": 14
+        },
+        {
+          "line": 2,
+          "start": 28,
+          "len": 22
+        }
+      ],
+      "base": [
+        {
+          "line": 0,
+          "start": 7,
+          "len": 4
+        }
+      ],
+      "remote": [
+        {
+          "line": 0,
+          "start": 7,
+          "len": 43
+        },
+        {
+          "line": 1,
+          "start": 0,
+          "len": 7
+        }
+      ]
+    },
+    {
+      "chunk": 1,
+      "local": [],
+      "base": [],
+      "remote": []
+    },
+    {
+      "chunk": 2,
+      "local": [
+        {
+          "line": 29,
+          "start": 6,
+          "len": 7
+        },
+        {
+          "line": 29,
+          "start": 18,
+          "len": 13
+        },
+        {
+          "line": 29,
+          "start": 56,
+          "len": 2
+        },
+        {
+          "line": 30,
+          "start": 0,
+          "len": 19
+        },
+        {
+          "line": 31,
+          "start": 0,
+          "len": 8
+        }
+      ],
+      "base": [
+        {
+          "line": 13,
+          "start": 6,
+          "len": 11
+        },
+        {
+          "line": 14,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 14,
+          "start": 15,
+          "len": 4
+        },
+        {
+          "line": 15,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 16,
+          "start": 0,
+          "len": 9
+        }
+      ],
+      "remote": [
+        {
+          "line": 14,
+          "start": 6,
+          "len": 7
+        },
+        {
+          "line": 14,
+          "start": 18,
+          "len": 13
+        },
+        {
+          "line": 14,
+          "start": 56,
+          "len": 2
+        },
+        {
+          "line": 15,
+          "start": 0,
+          "len": 19
+        },
+        {
+          "line": 16,
+          "start": 0,
+          "len": 8
+        }
+      ]
+    },
+    {
+      "chunk": 3,
+      "local": [
+        {
+          "line": 35,
+          "start": 6,
+          "len": 60
+        },
+        {
+          "line": 36,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 36,
+          "start": 14,
+          "len": 3
+        },
+        {
+          "line": 38,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 39,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 40,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 41,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 42,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 43,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 44,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 45,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 46,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 47,
+          "start": 0,
+          "len": 8
+        }
+      ],
+      "base": [
+        {
+          "line": 20,
+          "start": 14,
+          "len": 2
+        },
+        {
+          "line": 21,
+          "start": 8,
+          "len": 45
+        },
+        {
+          "line": 22,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 23,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 24,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 25,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 26,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 27,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 28,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 29,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 30,
+          "start": 0,
+          "len": 12
+        },
+        {
+          "line": 31,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 32,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 32,
+          "start": 65,
+          "len": 1
+        },
+        {
+          "line": 33,
+          "start": 0,
+          "len": 8
+        }
+      ],
+      "remote": [
+        {
+          "line": 20,
+          "start": 6,
+          "len": 60
+        },
+        {
+          "line": 21,
+          "start": 0,
+          "len": 6
+        },
+        {
+          "line": 21,
+          "start": 14,
+          "len": 3
+        },
+        {
+          "line": 23,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 24,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 25,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 26,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 27,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 28,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 29,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 30,
+          "start": 0,
+          "len": 10
+        },
+        {
+          "line": 31,
+          "start": 0,
+          "len": 8
+        },
+        {
+          "line": 32,
+          "start": 0,
+          "len": 8
+        }
+      ]
+    }
   ]
 }

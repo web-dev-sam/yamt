@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
-use yamt_merge_core::{ChunkKind, Options, compute_chunks};
+use yamt_merge_core::{ChunkKind, Options, compute_chunks, word_changes};
 use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
 
 const MODIFY_TS: &str = "a_modify.ts";
@@ -150,6 +150,13 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
         data.chunks,
         compute_chunks(base, local, remote, &Options::default())
     );
+    assert_eq!(
+        data.word_changes,
+        word_changes(base, local, remote, &data.chunks)
+    );
+    let word_chunks: Vec<_> = data.word_changes.iter().map(|words| words.chunk).collect();
+    let chunk_ids: Vec<_> = data.chunks.iter().map(|chunk| chunk.id).collect();
+    assert_eq!(word_chunks, chunk_ids);
 }
 
 #[test]

@@ -56,6 +56,18 @@ impl LineRange<RemoteLine> {
     }
 }
 
+/// Changed text inside one line of one text: `len` UTF-16 code units from column `start`
+/// (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct InlineRange<L> {
+    /// The line holding the range.
+    pub line: L,
+    /// Column of the first changed code unit.
+    pub start: u32,
+    /// Number of changed code units; never zero.
+    pub len: u32,
+}
+
 pub(crate) fn split_lines(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').collect()
 }

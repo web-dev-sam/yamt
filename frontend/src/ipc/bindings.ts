@@ -45,9 +45,23 @@ export type FileMergeData = {
 	remote: string,
 	eol: Eol,
 	chunks: Chunk[],
+	word_changes: WordChanges[],
 };
 
 export type FileStatus = "Unresolved" | "Resolved";
+
+/**
+ *  Changed text inside one line of one text: `len` UTF-16 code units from column `start`
+ *  (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
+ */
+export type InlineRange<L> = {
+	/**  The line holding the range. */
+	line: L,
+	/**  Column of the first changed code unit. */
+	start: number,
+	/**  Number of changed code units; never zero. */
+	len: number,
+};
 
 /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
 export type LineRange<L> = {
@@ -64,3 +78,18 @@ export type LocalLine = number;
 export type RemoteLine = number;
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
+
+/**
+ *  Where one chunk's sides differ from base, word by word. `base` marks the base text that
+ *  either side changed (the union).
+ */
+export type WordChanges = {
+	/**  The chunk these ranges belong to. */
+	chunk: ChunkId,
+	/**  Changed text in the chunk's local lines. */
+	local: InlineRange<LocalLine>[],
+	/**  Base text changed by local, remote or both. */
+	base: InlineRange<BaseLine>[],
+	/**  Changed text in the chunk's remote lines. */
+	remote: InlineRange<RemoteLine>[],
+};

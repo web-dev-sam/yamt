@@ -21,5 +21,13 @@
         "len": 76
       }
     }
+  ],
+  "word_changes": [
+    {
+      "chunk": 0,
+      "local": [],
+      "base": [],
+      "remote": []
+    }
   ]
 }
