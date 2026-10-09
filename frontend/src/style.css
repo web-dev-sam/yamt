@@ -38,6 +38,8 @@
   --color-chunk-modified: #43698d5c;
   --color-chunk-deleted: #656e765c;
   --color-chunk-conflict: #8f52476b;
+  --color-chunk-modified-word: #43698da6;
+  --color-chunk-conflict-word: #8f5247a6;
 }
 
 @layer base {

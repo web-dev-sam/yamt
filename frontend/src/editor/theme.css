@@ -38,6 +38,14 @@ path.chunk-band {
   fill: var(--chunk-tone);
 }
 
+.cm-editor .chunk-word-modified {
+  background-color: var(--color-chunk-modified-word);
+}
+
+.cm-editor .chunk-word-conflict {
+  background-color: var(--color-chunk-conflict-word);
+}
+
 .cm-editor .cm-line.chunk-point-above {
   box-shadow: inset 0 2px 0 var(--chunk-marker-tone);
 }
