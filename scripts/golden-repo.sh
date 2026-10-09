@@ -32,6 +32,7 @@ if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] &
 fi
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 repo_git() {
     git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
         -c commit.gpgsign=false -c core.autocrlf=false \

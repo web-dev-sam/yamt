@@ -1,0 +1,3 @@
+# cargo-mutants runs `cargo test`; the bindings generator has no tests because `just bindings-check`
+# (in `just check`) diffs its output against the committed file.
+exclude_globs = ["src-tauri/src/bin/export-bindings.rs"]

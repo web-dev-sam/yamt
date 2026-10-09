@@ -1,23 +1,38 @@
 {
-  "M1S0IpcFixturesR1": {
+  "M1S1ChunkColours": {
     "owned": [
-      "frontend/src/main.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
+      "frontend/src/editor/**",
+      "frontend/src/ui/MergeView.vue",
+      "frontend/src/ui/useMergeController.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/domain.ts",
       "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/domain.ts"
+      "frontend/src/style.css"
     ],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "frontend/src/editor/**",
       "frontend/fixtures/**",
-      "frontend/scripts/**"
+      "frontend/scripts/**",
+      "frontend/vite.config.ts"
     ]
   },
-  "M1SPPaletteTestR1": {
-    "owned": ["frontend/scripts/palette.ts", "frontend/scripts/palette.test.ts"],
-    "readonly": ["docs/**", ".omp/**", "frontend/src/**", "frontend/scripts/fences.ts"]
+  "M1SHHermeticTests": {
+    "owned": [
+      "crates/conflict-repo/**",
+      "crates/cli/tests/merge_file.rs",
+      "crates/cli/src/golden.rs",
+      "crates/cli/tests/commands.rs"
+    ],
+    "readonly": [
+      "docs/**",
+      ".omp/**",
+      "crates/gitio/**",
+      "crates/session/**",
+      "crates/merge-core/**",
+      "scripts/**",
+      "Cargo.toml",
+      "justfile"
+    ]
   }
 }
