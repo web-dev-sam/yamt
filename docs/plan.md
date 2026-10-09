@@ -58,6 +58,7 @@ Added 2026-10-08 (architecture session). Each cites a core vision from `docs/arc
 | 21 | **Store is a module singleton via `useAppStore()`; no provide/inject; no Pinia** | Pinia (a dependency for five fields); provide/inject (hidden data flow for a tree two levels deep) | 5 |
 | 22 | **`editor/` is framework-free**; `ui/` is the only Vue layer; vueuse only in `ui/` | vueuse inside the CM6 controller — couples the editor to Vue's effect scope and makes it untestable without a component | 2, 3 |
 | 23 | **All AI tooling in-repo under `.omp/`**, one model tier | User-level reusable skeleton — duplicated conventions drift; decided by owner | — |
+| 24 | **Dark theme, JetBrains look** (New UI dark, from memory, not pixel-exact) for chrome and panes; one palette in `frontend/src/style.css` | Light; follow-system (second palette to tune, incl. change highlights) — decided by owner 2026-10-09 | — |
 
 ### Prior art surveyed — nobody has built this
 

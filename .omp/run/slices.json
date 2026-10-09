@@ -1,1 +1,17 @@
-{}
+{
+  "M1WindowShell": {
+    "owned": [
+      "frontend/src/editor/**",
+      "frontend/src/ui/**",
+      "frontend/src/main.ts",
+      "frontend/src/style.css",
+      "frontend/index.html",
+      "frontend/fixtures/sample/**"
+    ],
+    "readonly": ["docs/**", ".omp/**", "frontend/src/ipc/**", "frontend/scripts/**"]
+  },
+  "M1FencesTest": {
+    "owned": ["frontend/scripts/fences.ts", "frontend/scripts/fences.test.ts"],
+    "readonly": ["docs/**", ".omp/**", "frontend/src/**"]
+  }
+}
