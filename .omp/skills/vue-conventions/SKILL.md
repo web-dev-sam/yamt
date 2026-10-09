@@ -49,6 +49,6 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
 ## Splitting
 
 - [VU15] Split by responsibility, not by section count (overrides the vendored "3+ sections
-  ⇒ split" trigger). v0 set: `App`, `Sidebar`, `Toolbar`, `MergeView`, `Banner`. A sixth
+  ⇒ split" trigger). v0 set: `App`, `FileList`, `MergeToolbar`, `MergeView`, `WarningBanner`. A sixth
   component needs a one-line reason in `deviations_from_brief`.
 - [VU16] `App.vue` is a composition surface: layout + `useAppStore()` wiring, no feature logic.

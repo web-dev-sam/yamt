@@ -1,7 +1,7 @@
 # 3-way merge tool — technical architecture
 
 Companion to `docs/plan.md` (decisions, milestones, risks). That file is the
-*what and why*; this one is the *how*: repository shape, module boundaries, contracts,
+_what and why_; this one is the _how_: repository shape, module boundaries, contracts,
 algorithms, toolchain, gates. Written so that every boundary here can be turned into a
 lint, a test, a hook, or a skill — see `docs/ai-system.md`.
 
@@ -93,19 +93,19 @@ graph LR
 
 Rules (each one is enforced, not advised — §8 says by what):
 
-| rule | enforced by |
-|---|---|
-| `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json` | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate) |
-| `gitio` contains no diff logic (never depends on `merge-core`) | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe) |
-| `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin) | dependency list; reviewer rule |
-| `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` directly | oxlint `no-restricted-imports` in a per-directory `overrides` block |
-| `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally |
-| `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --bin export-bindings` output | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path |
-| No `unwrap`/`expect`/`panic!` outside tests in Rust | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed |
-| No `any`, no non-null assertions, no `as` casts outside `ipc/fixture.ts` | oxlint `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (override for the fixture parser) |
-| Every `switch` over a union is exhaustive; every Rust `match` over a domain enum lists all variants | oxlint type-aware `switch-exhaustiveness-check`; clippy `wildcard_enum_match_arm = deny` |
-| No magic numbers | oxlint `no-magic-numbers` (ignore `0, 1, -1`); Rust: reviewer rule, constants in `merge_core::Options` and module-level `const` |
-| Line numbers of different spaces never mix | Rust newtypes `BaseLine`/`LocalLine`/`RemoteLine`; TS brands applied in `ipc/` (§4) |
+| rule                                                                                                                                                         | enforced by                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
+| `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
+| `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin)                                                                       | dependency list; reviewer rule                                                                                                  |
+| `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` directly                                                                             | oxlint `no-restricted-imports` in a per-directory `overrides` block                                                             |
+| `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
+| `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --bin export-bindings` output                                                    | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
+| No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
+| No `any`, no non-null assertions, no `as` casts outside `ipc/fixture.ts`                                                                                     | oxlint `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (override for the fixture parser)        |
+| Every `switch` over a union is exhaustive; every Rust `match` over a domain enum lists all variants                                                          | oxlint type-aware `switch-exhaustiveness-check`; clippy `wildcard_enum_match_arm = deny`                                        |
+| No magic numbers                                                                                                                                             | oxlint `no-magic-numbers` (ignore `0, 1, -1`); Rust: reviewer rule, constants in `merge_core::Options` and module-level `const` |
+| Line numbers of different spaces never mix                                                                                                                   | Rust newtypes `BaseLine`/`LocalLine`/`RemoteLine`; TS brands applied in `ipc/` (§4)                                             |
 
 ---
 
@@ -230,14 +230,14 @@ impl MergeSession {
 
 Edge cases owned here (plan §6 → code):
 
-| case | handling |
-|---|---|
-| no stage 1 (add/add) | `base = Some("")`; chunk model yields one Conflict |
-| no stage 2 or 3 (delete/modify) | `Content::Unsupported(SideMissing)` in v0; UI offers "keep file" / "delete file" via `git add`/`git rm` — **v0.1, not v0** |
-| binary (NUL in first 8 KiB, git's heuristic) or non-UTF-8 | `Unsupported`; UI shows reason, offers "take local" / "take remote" (`git checkout --ours/--theirs` + add) — **v0.1** |
-| line endings | `Eol` detected on base (or local if base empty): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning |
-| `git add` destroys stages | `stages` captured in `open()`; `reset` replays them |
-| file > 8 MiB | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit |
+| case                                                      | handling                                                                                                                                                                                                                    |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no stage 1 (add/add)                                      | `base = Some("")`; chunk model yields one Conflict                                                                                                                                                                          |
+| no stage 2 or 3 (delete/modify)                           | `Content::Unsupported(SideMissing)` in v0; UI offers "keep file" / "delete file" via `git add`/`git rm` — **v0.1, not v0**                                                                                                  |
+| binary (NUL in first 8 KiB, git's heuristic) or non-UTF-8 | `Unsupported`; UI shows reason, offers "take local" / "take remote" (`git checkout --ours/--theirs` + add) — **v0.1**                                                                                                       |
+| line endings                                              | `Eol` detected on base (or local if base empty): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning |
+| `git add` destroys stages                                 | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                         |
+| file > 8 MiB                                              | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                        |
 
 ### 3.4 `cli`
 
@@ -323,15 +323,15 @@ logs the text. `TauriChunkSource` (M2) wraps `commands`. `main.ts` picks one by
 
 ### 5.1 State ownership — the table that prevents the classic mistake
 
-| state | owner | why |
-|---|---|---|
-| left/right/center document text | CodeMirror `EditorState` | rope, transactions, undo |
-| chunk current positions in center | `editor/chunkField` (`StateField`) | remapped via `tr.changes.mapPos` every transaction |
-| chunk apply status (`Pending/AppliedLocal/AppliedRemote/AppliedBoth/Dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects` | **undo must revert status together with text** |
-| left/right decorations | computed once per file, `EditorState` of that pane | immutable docs |
-| scroll positions | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync` | not state, derived |
-| connector geometry | computed per frame from `lineBlockAt`, never stored | derived |
-| file list, active file, counts, busy flag, warnings | `ui/store.ts` (`reactive()` object, one `createStore()`, no Pinia) | chrome only |
+| state                                                                           | owner                                                                               | why                                                |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
+| left/right/center document text                                                 | CodeMirror `EditorState`                                                            | rope, transactions, undo                           |
+| chunk current positions in center                                               | `editor/chunkField` (`StateField`)                                                  | remapped via `tr.changes.mapPos` every transaction |
+| chunk apply status (`Pending/AppliedLocal/AppliedRemote/AppliedBoth/Dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects` | **undo must revert status together with text**     |
+| left/right decorations                                                          | computed once per file, `EditorState` of that pane                                  | immutable docs                                     |
+| scroll positions                                                                | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                          | not state, derived                                 |
+| connector geometry                                                              | computed per frame from `lineBlockAt`, never stored                                 | derived                                            |
+| file list, active file, counts, busy flag, warnings                             | `ui/store.ts` (`reactive()` object, one `createStore()`, no Pinia)                  | chrome only                                        |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** Counts and
 statuses reach the store through `MergeController` events (`chunkStatusChanged`,
@@ -341,12 +341,21 @@ statuses reach the store through `MergeController` events (`chunkStatusChanged`,
 
 ```ts
 export class MergeController {
-  constructor(data: FileMergeData, host: { left: HTMLElement; center: HTMLElement; right: HTMLElement; strips: [SVGSVGElement, SVGSVGElement] });
+  constructor(
+    data: FileMergeData,
+    host: {
+      left: HTMLElement;
+      center: HTMLElement;
+      right: HTMLElement;
+      strips: [SVGSVGElement, SVGSVGElement];
+    },
+  );
   applyChunk(id: number, side: "local" | "remote" | "both"): void;
   dismissChunk(id: number): void;
   applyAllNonConflicting(side: "local" | "remote"): void;
-  undo(): boolean; redo(): boolean;
-  resultText(): string;            // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
+  undo(): boolean;
+  redo(): boolean;
+  resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
   summary(): { pending: number; conflicts: number; applied: number };
   on(event: "summary", cb: (s: ReturnType<MergeController["summary"]>) => void): () => void;
   destroy(): void;
@@ -373,9 +382,21 @@ Internals (`editor/internal/`, not importable from `ui/`):
 ### 5.3 `connectors/` — pure geometry
 
 ```ts
-export type Band = { id: number; kind: ChunkKind; aTop: number; aBottom: number; bTop: number; bBottom: number };
-export function bandPath(b: Band, width: number): string;   // cubic béziers, filled band
-export function visibleBands(aBlocks: LineBlock[], bBlocks: LineBlock[], chunks: Chunk[], map: (chunk) => [LineRange, LineRange]): Band[];
+export type Band = {
+  id: number;
+  kind: ChunkKind;
+  aTop: number;
+  aBottom: number;
+  bTop: number;
+  bBottom: number;
+};
+export function bandPath(b: Band, width: number): string; // cubic béziers, filled band
+export function visibleBands(
+  aBlocks: LineBlock[],
+  bBlocks: LineBlock[],
+  chunks: Chunk[],
+  map: (chunk) => [LineRange, LineRange],
+): Band[];
 ```
 
 Rendered into the two `<svg>` strips by `editor/internal/strips.ts` on scroll and on center
@@ -384,23 +405,32 @@ drawn. Unit-tested on numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
-Components: `App.vue`, `Sidebar.vue` (file list, status badges), `Toolbar.vue` (bulk apply
+Components: `App.vue`, `FileList.vue` (file list, status badges), `MergeToolbar.vue` (bulk apply
 left/right, undo/redo, finish, reset), `MergeView.vue` (three `<div>` hosts + two `<svg>`,
-mounts a `MergeController` in `onMounted`, destroys on file switch), `Banner.vue` (unsupported
-file / mixed EOL warnings).
+mounts a `MergeController` in `onMounted`, destroys on file switch), `WarningBanner.vue` (unsupported
+file / mixed EOL warnings). Names are multi-word (the Vue linter's `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
 
 ```ts
-export interface AppStore { files: FileEntry[]; active: string | null; summary: Summary | null; busy: boolean; error: IpcError | null }
-export function createAppStore(source: ChunkSource): AppStoreHandle;   // called once in main.ts
-export function useAppStore(): AppStoreHandle;                          // what components call
+export interface AppStore {
+  files: FileEntry[];
+  active: string | null;
+  summary: Summary | null;
+  busy: boolean;
+  error: IpcError | null;
+}
+export function createAppStore(source: ChunkSource): AppStoreHandle; // called once in main.ts
+export function useAppStore(): AppStoreHandle; // what components call
 ```
 
 The Vue↔editor seam is one adaptable composable:
 
 ```ts
-export function useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts: MergeHosts): { summary: Readonly<Ref<Summary | null>>; apply; applyAll; undo; redo; resultText }
+export function useMergeController(
+  data: MaybeRefOrGetter<FileMergeData | null>,
+  hosts: MergeHosts,
+): { summary: Readonly<Ref<Summary | null>>; apply; applyAll; undo; redo; resultText };
 ```
 
 It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data))`, pipes
@@ -429,8 +459,8 @@ imports → types → macros (defineProps / defineEmits<…>() / defineModel) �
 - `@vueuse/core` before any hand-rolled listener/observer/debounce — in `ui/` only.
   `editor/` stays framework-free (plain `addEventListener` + explicit `destroy()`).
 - No provide/inject anywhere in v0 (there is no layout component that needs it).
-- Split components by responsibility, not by section count: `Sidebar`, `Toolbar`, `MergeView`,
-  `Banner`, `App` is the expected set for v0; a sixth needs a one-line justification in the PR.
+- Split components by responsibility, not by section count: `FileList`, `MergeToolbar`, `MergeView`,
+  `WarningBanner`, `App` is the expected set for v0; a sixth needs a one-line justification in the PR.
 - CodeMirror decorations use semantic classes (`.chunk-local`, `.chunk-conflict`, …) defined
   once in `editor/theme.css` with Tailwind `@apply`, so the palette has a single source and
   `sortTailwindcss` keeps templates tidy.
@@ -454,7 +484,7 @@ them. One undo step.
 
 **Scroll anchors**: for pane pair (A, B) the anchor list is
 `[(0,0)] + for each chunk: (A.start, B.start), (A.end, B.end) + (A.lines, B.lines)` in
-*pixel* coordinates via `lineBlockAt(line).top/bottom`; interpolate linearly inside each
+_pixel_ coordinates via `lineBlockAt(line).top/bottom`; interpolate linearly inside each
 segment. Center-pane anchors use the current mapped chunk ranges, so they stay correct after
 edits. Collapsed-regions (`Decoration.replace({block:true})`) are v1; `lineBlockAt` already
 accounts for them when they arrive.
@@ -467,6 +497,7 @@ mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no 
 ## 7. Toolchain
 
 ### Rust
+
 - edition 2024, pinned stable via `rust-toolchain.toml`.
 - Workspace `[lints]`: `clippy::pedantic = warn`, `clippy::unwrap_used/expect_used/panic = deny`,
   `clippy::wildcard_enum_match_arm = deny`, `clippy::disallowed_methods` (per crate in
@@ -484,6 +515,7 @@ mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no 
   handful of non-obvious Rust constructs, with the reason each was chosen.
 
 ### Frontend
+
 - pnpm, Vite, Vue 3.5+, TypeScript strict + `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`, `verbatimModuleSyntax`; `vue-tsc --noEmit` for SFC types.
 - **oxlint** with `oxlint-tsgolint` (`typeAware: true`): `no-restricted-imports` overrides (fences),
@@ -527,15 +559,15 @@ once per wave, by the verifier, on the merged tree. Nothing in `check` may pass 
 
 ## 8. Testing strategy per layer
 
-| layer | kind | oracle |
-|---|---|---|
-| `merge-core` | proptest invariants (§3.1), insta goldens | `git merge-file -p` for conflict-free triples (run from the `cli` test crate so core stays pure); PhpStorm by human, once per golden |
-| `gitio` | integration, real git in tempdir | git's own index after each operation (`ls-files -u`, `cat-file`) |
-| `session` | integration with a scripted conflict repo | reset ⇒ `ls-files -u` identical to before `finish`; finish ⇒ stage 0 only, worktree bytes == result (CRLF preserved) |
-| `model/`, `connectors/` | Vitest unit, numbers only | hand-computed expectations |
-| `editor/` | Vitest browser (WebKit): apply → undo restores text **and** status; mapping survives an edit before the chunk; bulk apply is one undo step; `resultText()` of a CRLF file contains `\r\n` | assertions on `EditorState` |
-| `ui/` | none beyond typecheck in v0 | manual smoke in Epiphany with fixture source |
-| end-to-end | manual: M2 on a 16-file real merge, M3 on macOS | human |
+| layer                   | kind                                                                                                                                                                                      | oracle                                                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `merge-core`            | proptest invariants (§3.1), insta goldens                                                                                                                                                 | `git merge-file -p` for conflict-free triples (run from the `cli` test crate so core stays pure); PhpStorm by human, once per golden |
+| `gitio`                 | integration, real git in tempdir                                                                                                                                                          | git's own index after each operation (`ls-files -u`, `cat-file`)                                                                     |
+| `session`               | integration with a scripted conflict repo                                                                                                                                                 | reset ⇒ `ls-files -u` identical to before `finish`; finish ⇒ stage 0 only, worktree bytes == result (CRLF preserved)                 |
+| `model/`, `connectors/` | Vitest unit, numbers only                                                                                                                                                                 | hand-computed expectations                                                                                                           |
+| `editor/`               | Vitest browser (WebKit): apply → undo restores text **and** status; mapping survives an edit before the chunk; bulk apply is one undo step; `resultText()` of a CRLF file contains `\r\n` | assertions on `EditorState`                                                                                                          |
+| `ui/`                   | none beyond typecheck in v0                                                                                                                                                               | manual smoke in Epiphany with fixture source                                                                                         |
+| end-to-end              | manual: M2 on a 16-file real merge, M3 on macOS                                                                                                                                           | human                                                                                                                                |
 
 Explicitly not tested: wiring, Vue templates, Tauri command plumbing (covered by M2 smoke).
 
@@ -543,30 +575,30 @@ Explicitly not tested: wiring, Vue templates, Tauri command plumbing (covered by
 
 ## 9. Milestones → slices
 
-A *slice* is one agent task: single owner, disjoint files, fixed contract, observable
+A _slice_ is one agent task: single owner, disjoint files, fixed contract, observable
 acceptance. Ordering within a milestone = dependency order; slices on the same row run in
 parallel.
 
 **M0 — Rust, headless**
 
-| # | slice | owner | files | acceptance |
-|---|---|---|---|---|
-| 0.0 | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent | everything (only time one agent owns the whole tree) | `just check` passes on empty crates |
-| 0.1 | `merge-core` types + `compute_chunks` + proptests | rust-impl | `crates/merge-core/**` | invariants §3.1 green; `classify` on 5 synthetic triples matches hand-written `expected.json` |
-| 0.1' | `gitio` | rust-impl | `crates/gitio/**` | integration tests incl. add/add, CRLF |
-| 0.2 | `session` | rust-impl | `crates/session/**` | finish/reset round-trip test |
-| 0.3 | `cli` classify/scan/golden/fixture + `git merge-file` cross-check | rust-impl | `crates/cli/**`, `tests/golden/**` | 10 real goldens committed; human PhpStorm comparison **(human gate)** |
+| #    | slice                                                                                                     | owner     | files                                                | acceptance                                                                                    |
+| ---- | --------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 0.0  | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent   | everything (only time one agent owns the whole tree) | `just check` passes on empty crates                                                           |
+| 0.1  | `merge-core` types + `compute_chunks` + proptests                                                         | rust-impl | `crates/merge-core/**`                               | invariants §3.1 green; `classify` on 5 synthetic triples matches hand-written `expected.json` |
+| 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                    | integration tests incl. add/add, CRLF                                                         |
+| 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                  | finish/reset round-trip test                                                                  |
+| 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check                                         | rust-impl | `crates/cli/**`, `tests/golden/**`                   | 10 real goldens committed; human PhpStorm comparison **(human gate)**                         |
 
 **M1 — frontend in a browser, fixture JSON**
 
-| # | slice | files | acceptance |
-|---|---|---|---|
-| 1.0 | `ipc/` interface + fixture source + generated bindings pipeline (bin + check) | `frontend/src/ipc/**`, `src-tauri/src/bin/export-bindings.rs` | `just bindings-check` green, fixture loads |
-| 1.1 | `editor/internal/pane.ts` + `chunkField.ts` + `apply.ts` + tests | `frontend/src/editor/**` | apply/undo/mapping tests |
-| 1.1' | `connectors/` geometry + tests | `frontend/src/connectors/**` | band paths for a fixture match snapshot |
-| 1.2 | `strips.ts` + `scrollSync.ts` (the novel part) | `frontend/src/editor/internal/{strips,scrollSync}.ts` | visual: Epiphany screenshot of 3 panes + bands; drift ≤ 1 line over a 2k-line fixture |
-| 1.3 | `ui/` Vue chrome + store + `MergeView` mount | `frontend/src/ui/**`, `main.ts` | fixture merge completed end-to-end in Epiphany; `finishFile` logs correct text |
-| 1.4 | gutter actions, bulk apply, dismiss, decorations polish | `editor/internal/{gutter,decorations}.ts` | one-undo-step bulk apply test |
+| #    | slice                                                                         | files                                                         | acceptance                                                                            |
+| ---- | ----------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 1.0  | `ipc/` interface + fixture source + generated bindings pipeline (bin + check) | `frontend/src/ipc/**`, `src-tauri/src/bin/export-bindings.rs` | `just bindings-check` green, fixture loads                                            |
+| 1.1  | `editor/internal/pane.ts` + `chunkField.ts` + `apply.ts` + tests              | `frontend/src/editor/**`                                      | apply/undo/mapping tests                                                              |
+| 1.1' | `connectors/` geometry + tests                                                | `frontend/src/connectors/**`                                  | band paths for a fixture match snapshot                                               |
+| 1.2  | `strips.ts` + `scrollSync.ts` (the novel part)                                | `frontend/src/editor/internal/{strips,scrollSync}.ts`         | visual: Epiphany screenshot of 3 panes + bands; drift ≤ 1 line over a 2k-line fixture |
+| 1.3  | `ui/` Vue chrome + store + `MergeView` mount                                  | `frontend/src/ui/**`, `main.ts`                               | fixture merge completed end-to-end in Epiphany; `finishFile` logs correct text        |
+| 1.4  | gutter actions, bulk apply, dismiss, decorations polish                       | `editor/internal/{gutter,decorations}.ts`                     | one-undo-step bulk apply test                                                         |
 
 **M2 — Tauri shell**: 2.0 commands + state + error enum; 2.1 `TauriChunkSource`; 2.2 sidebar
 reset/finish wired; 2.3 exit code + `--repo`. Acceptance: a real 16-file merge resolved,

@@ -1,0 +1,673 @@
+diff --git i/frontend/index.html w/frontend/index.html
+index 53c34af..845a0d3 100644
+--- i/frontend/index.html
++++ w/frontend/index.html
+@@ -3,6 +3,7 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta name="color-scheme" content="dark" />
+     <title>yamt</title>
+   </head>
+   <body>
+diff --git i/frontend/src/style.css w/frontend/src/style.css
+index f1d8c73..4c63fe9 100644
+--- i/frontend/src/style.css
++++ w/frontend/src/style.css
+@@ -1 +1,48 @@
+ @import "tailwindcss";
++
++@theme static {
++  --font-sans: system-ui, sans-serif;
++  --font-mono: "JetBrains Mono", ui-monospace, monospace;
++
++  --color-window: #2b2d30;
++  --color-editor: #1e1f22;
++  --color-separator: #393b40;
++  --color-control-border: #4e5157;
++  --color-fg: #dfe1e5;
++  --color-fg-muted: #868a91;
++  --color-code: #bcbec4;
++  --color-gutter: #4b5059;
++  --color-gutter-active: #a1a3ab;
++  --color-active-line: #26282e;
++  --color-selection: #214283;
++  --color-caret: #ced0d6;
++  --color-hover: #393b40;
++  --color-row-selected: #2e436e;
++  --color-primary: #3574f0;
++
++  --color-syntax-keyword: #cf8e6d;
++  --color-syntax-string: #6aab73;
++  --color-syntax-number: #2aacb8;
++  --color-syntax-comment: #7a7e85;
++  --color-syntax-function: #56a8f5;
++  --color-syntax-property: #c77dbb;
++  --color-syntax-decorator: #b3ae60;
++}
++
++@layer base {
++  html,
++  body,
++  #app {
++    height: 100%;
++  }
++
++  html {
++    background-color: var(--color-window);
++    color: var(--color-fg);
++  }
++
++  body {
++    overflow: hidden;
++    font-size: 13px;
++  }
++}
+diff --git i/frontend/src/ui/App.vue w/frontend/src/ui/App.vue
+index e775b33..511a191 100644
+--- i/frontend/src/ui/App.vue
++++ w/frontend/src/ui/App.vue
+@@ -1,3 +1,18 @@
++<script setup lang="ts">
++import FileList from "./FileList.vue";
++import MergeToolbar from "./MergeToolbar.vue";
++import MergeView from "./MergeView.vue";
++import { SAMPLE } from "./sample";
++
++const SAMPLE_PATHS: readonly string[] = [SAMPLE.path];
++</script>
++
+ <template>
+-  <main class="p-4">yamt</main>
++  <div class="flex h-full flex-col">
++    <MergeToolbar />
++    <div class="flex min-h-0 flex-1">
++      <FileList :paths="SAMPLE_PATHS" :active="SAMPLE.path" />
++      <MergeView :texts="SAMPLE.texts" />
++    </div>
++  </div>
+ </template>
+diff --git 1/frontend/fixtures/sample/base.ts.txt 2/frontend/fixtures/sample/base.ts.txt
+new file mode 100644
+index 0000000..cf2675d
+--- /dev/null
++++ 2/frontend/fixtures/sample/base.ts.txt
+@@ -0,0 +1,75 @@
++import { formatMoney } from "./money";
++import type { Product } from "./catalog";
++
++export const MAX_QUANTITY = 99;
++const TAX_RATE = 0.2;
++
++export interface CartLine {
++  readonly product: Product;
++  quantity: number;
++}
++
++export interface Cart {
++  readonly id: string;
++  lines: CartLine[];
++  couponCode: string | null;
++}
++
++export function createCart(id: string): Cart {
++  return { id, lines: [], couponCode: null };
++}
++
++export function addItem(cart: Cart, product: Product, quantity = 1): Cart {
++  const existing = cart.lines.find((line) => line.product.id === product.id);
++  if (existing) {
++    existing.quantity = Math.min(existing.quantity + quantity, MAX_QUANTITY);
++    return cart;
++  }
++  cart.lines.push({ product, quantity });
++  return cart;
++}
++
++export function removeItem(cart: Cart, productId: string): Cart {
++  cart.lines = cart.lines.filter((line) => line.product.id !== productId);
++  return cart;
++}
++
++export function setQuantity(cart: Cart, productId: string, quantity: number): Cart {
++  const line = cart.lines.find((candidate) => candidate.product.id === productId);
++  if (line) {
++    line.quantity = Math.max(0, Math.min(quantity, MAX_QUANTITY));
++  }
++  return cart;
++}
++
++export function subtotal(cart: Cart): number {
++  let sum = 0;
++  for (const line of cart.lines) {
++    sum += line.product.price * line.quantity;
++  }
++  return sum;
++}
++
++export function discount(cart: Cart): number {
++  if (cart.couponCode === "WELCOME10") {
++    return subtotal(cart) * 0.1;
++  }
++  return 0;
++}
++
++export function tax(cart: Cart): number {
++  return (subtotal(cart) - discount(cart)) * TAX_RATE;
++}
++
++export function total(cart: Cart): number {
++  return subtotal(cart) - discount(cart) + tax(cart);
++}
++
++export function summary(cart: Cart): string {
++  const count = cart.lines.reduce((n, line) => n + line.quantity, 0);
++  return `${count} items, ${formatMoney(total(cart))}`;
++}
++
++export function isEmpty(cart: Cart): boolean {
++  return cart.lines.length === 0;
++}
+diff --git 1/frontend/fixtures/sample/local.ts.txt 2/frontend/fixtures/sample/local.ts.txt
+new file mode 100644
+index 0000000..3e48c73
+--- /dev/null
++++ 2/frontend/fixtures/sample/local.ts.txt
+@@ -0,0 +1,80 @@
++import { trackEvent } from "./analytics";
++import { formatMoney } from "./money";
++import type { Product } from "./catalog";
++
++export const MAX_QUANTITY = 99;
++const TAX_RATE = 0.2;
++
++export interface CartLine {
++  readonly product: Product;
++  quantity: number;
++}
++
++export interface Cart {
++  readonly id: string;
++  lines: CartLine[];
++  couponCode: string | null;
++}
++
++export function createCart(id: string): Cart {
++  return { id, lines: [], couponCode: null };
++}
++
++export function addItem(cart: Cart, product: Product, quantity = 1): Cart {
++  const existing = cart.lines.find((line) => line.product.id === product.id);
++  if (existing) {
++    existing.quantity = Math.min(existing.quantity + quantity, MAX_QUANTITY);
++    return cart;
++  }
++  cart.lines.push({ product, quantity });
++  return cart;
++}
++
++export function removeItem(cart: Cart, productId: string): Cart {
++  const before = cart.lines.length;
++  cart.lines = cart.lines.filter((line) => line.product.id !== productId);
++  if (cart.lines.length < before) {
++    trackEvent("cart.remove", { cartId: cart.id, productId });
++  }
++  return cart;
++}
++
++export function setQuantity(cart: Cart, productId: string, quantity: number): Cart {
++  const line = cart.lines.find((candidate) => candidate.product.id === productId);
++  if (line) {
++    line.quantity = Math.max(0, Math.min(quantity, MAX_QUANTITY));
++  }
++  return cart;
++}
++
++export function subtotal(cart: Cart): number {
++  let sum = 0;
++  for (const line of cart.lines) {
++    sum += line.product.price * line.quantity;
++  }
++  return sum;
++}
++
++export function discount(cart: Cart): number {
++  if (cart.couponCode === "WELCOME10") {
++    return Math.min(subtotal(cart) * 0.1, 50);
++  }
++  return 0;
++}
++
++export function tax(cart: Cart): number {
++  return (subtotal(cart) - discount(cart)) * TAX_RATE;
++}
++
++export function total(cart: Cart): number {
++  return subtotal(cart) - discount(cart) + tax(cart);
++}
++
++export function summary(cart: Cart): string {
++  const count = cart.lines.reduce((n, line) => n + line.quantity, 0);
++  return `${count} items, ${formatMoney(total(cart))}`;
++}
++
++export function isEmpty(cart: Cart): boolean {
++  return cart.lines.every((line) => line.quantity === 0);
++}
+diff --git 1/frontend/fixtures/sample/remote.ts.txt 2/frontend/fixtures/sample/remote.ts.txt
+new file mode 100644
+index 0000000..d425128
+--- /dev/null
++++ 2/frontend/fixtures/sample/remote.ts.txt
+@@ -0,0 +1,75 @@
++import { formatMoney } from "./money";
++import type { Product } from "./catalog";
++
++export const MAX_QUANTITY = 99;
++const VAT_RATE = 0.2;
++
++export interface CartLine {
++  readonly product: Product;
++  quantity: number;
++}
++
++export interface Cart {
++  readonly id: string;
++  lines: CartLine[];
++  couponCode: string | null;
++}
++
++export function createCart(id: string): Cart {
++  return { id, lines: [], couponCode: null };
++}
++
++export function addItem(cart: Cart, product: Product, quantity = 1): Cart {
++  const existing = cart.lines.find((line) => line.product.id === product.id);
++  if (existing) {
++    existing.quantity = Math.min(existing.quantity + quantity, MAX_QUANTITY);
++    return cart;
++  }
++  cart.lines.push({ product, quantity });
++  return cart;
++}
++
++export function removeItem(cart: Cart, productId: string): Cart {
++  cart.lines = cart.lines.filter((line) => line.product.id !== productId);
++  return cart;
++}
++
++export function setQuantity(cart: Cart, productId: string, quantity: number): Cart {
++  const line = cart.lines.find((candidate) => candidate.product.id === productId);
++  if (line) {
++    line.quantity = Math.max(0, Math.min(quantity, MAX_QUANTITY));
++  }
++  return cart;
++}
++
++export function subtotal(cart: Cart): number {
++  return cart.lines.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
++}
++
++export function discount(cart: Cart): number {
++  switch (cart.couponCode) {
++    case "WELCOME10":
++      return subtotal(cart) * 0.1;
++    case "FREESHIP":
++      return 5;
++    default:
++      return 0;
++  }
++}
++
++export function tax(cart: Cart): number {
++  return (subtotal(cart) - discount(cart)) * VAT_RATE;
++}
++
++export function total(cart: Cart): number {
++  return subtotal(cart) - discount(cart) + tax(cart);
++}
++
++export function summary(cart: Cart): string {
++  const count = cart.lines.reduce((n, line) => n + line.quantity, 0);
++  return `${count} items, ${formatMoney(total(cart))}`;
++}
++
++export function isEmpty(cart: Cart): boolean {
++  return cart.lines.every((line) => line.quantity === 0);
++}
+diff --git 1/frontend/src/editor/index.ts 2/frontend/src/editor/index.ts
+new file mode 100644
+index 0000000..d8d0993
+--- /dev/null
++++ 2/frontend/src/editor/index.ts
+@@ -0,0 +1,35 @@
++import type { EditorView } from "@codemirror/view";
++
++import { createPane } from "./internal/pane";
++
++export type MergeTexts = {
++  readonly local: string;
++  readonly base: string;
++  readonly remote: string;
++  readonly language: string | null;
++};
++
++export type MergeHosts = {
++  readonly left: HTMLElement;
++  readonly center: HTMLElement;
++  readonly right: HTMLElement;
++};
++
++export class MergeController {
++  readonly #views: readonly EditorView[];
++
++  constructor(texts: MergeTexts, hosts: MergeHosts) {
++    const { language } = texts;
++    this.#views = [
++      createPane({ kind: "side", doc: texts.local, language, parent: hosts.left }),
++      createPane({ kind: "center", doc: texts.base, language, parent: hosts.center }),
++      createPane({ kind: "side", doc: texts.remote, language, parent: hosts.right }),
++    ];
++  }
++
++  destroy(): void {
++    for (const view of this.#views) {
++      view.destroy();
++    }
++  }
++}
+diff --git 1/frontend/src/editor/internal/pane.ts 2/frontend/src/editor/internal/pane.ts
+new file mode 100644
+index 0000000..5bad586
+--- /dev/null
++++ 2/frontend/src/editor/internal/pane.ts
+@@ -0,0 +1,112 @@
++import "@fontsource/jetbrains-mono/400.css";
++import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
++import { javascript } from "@codemirror/lang-javascript";
++import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
++import { EditorState, type Extension } from "@codemirror/state";
++import {
++  drawSelection,
++  EditorView,
++  highlightActiveLine,
++  highlightActiveLineGutter,
++  keymap,
++  lineNumbers,
++} from "@codemirror/view";
++import { tags } from "@lezer/highlight";
++
++export type PaneKind = "side" | "center";
++
++const LANGUAGES: Readonly<Record<string, () => Extension>> = {
++  typescript: () => javascript({ typescript: true }),
++};
++
++const darkTheme = EditorView.theme(
++  {
++    "&": {
++      height: "100%",
++      backgroundColor: "var(--color-editor)",
++      color: "var(--color-code)",
++      fontSize: "13px",
++    },
++    ".cm-scroller": {
++      fontFamily: "var(--font-mono)",
++      fontVariantLigatures: "none",
++      lineHeight: "1.4",
++    },
++    ".cm-content": { caretColor: "var(--color-caret)" },
++    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
++    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
++      { backgroundColor: "var(--color-selection)" },
++    ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
++    ".cm-gutters": {
++      backgroundColor: "var(--color-editor)",
++      color: "var(--color-gutter)",
++      border: "none",
++    },
++    ".cm-activeLineGutter": {
++      backgroundColor: "var(--color-active-line)",
++      color: "var(--color-gutter-active)",
++    },
++  },
++  { dark: true },
++);
++
++const paletteHighlight = HighlightStyle.define([
++  {
++    tag: [tags.keyword, tags.bool, tags.null, tags.self, tags.atom],
++    color: "var(--color-syntax-keyword)",
++  },
++  { tag: [tags.string, tags.special(tags.string)], color: "var(--color-syntax-string)" },
++  { tag: tags.number, color: "var(--color-syntax-number)" },
++  { tag: tags.comment, color: "var(--color-syntax-comment)" },
++  {
++    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
++    color: "var(--color-syntax-function)",
++  },
++  {
++    tag: [tags.propertyName, tags.constant(tags.variableName)],
++    color: "var(--color-syntax-property)",
++  },
++  { tag: tags.meta, color: "var(--color-syntax-decorator)" },
++]);
++
++function kindExtensions(kind: PaneKind): Extension {
++  switch (kind) {
++    case "side":
++      return [EditorState.readOnly.of(true), EditorView.editable.of(false)];
++    case "center":
++      return [
++        history(),
++        keymap.of([...defaultKeymap, ...historyKeymap]),
++        highlightActiveLine(),
++        highlightActiveLineGutter(),
++      ];
++    default: {
++      const _exhaustive: never = kind;
++      return _exhaustive;
++    }
++  }
++}
++
++export function createPane(pane: {
++  kind: PaneKind;
++  doc: string;
++  language: string | null;
++  parent: HTMLElement;
++}): EditorView {
++  const language =
++    pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
++      ? LANGUAGES[pane.language]
++      : undefined;
++  const state = EditorState.create({
++    doc: pane.doc,
++    extensions: [
++      lineNumbers(),
++      drawSelection(),
++      darkTheme,
++      syntaxHighlighting(paletteHighlight),
++      language?.() ?? [],
++      kindExtensions(pane.kind),
++    ],
++  });
++  return new EditorView({ state, parent: pane.parent });
++}
+diff --git 1/frontend/src/ui/FileList.vue 2/frontend/src/ui/FileList.vue
+new file mode 100644
+index 0000000..c0ce2dd
+--- /dev/null
++++ 2/frontend/src/ui/FileList.vue
+@@ -0,0 +1,28 @@
++<script setup lang="ts">
++defineProps<{ paths: readonly string[]; active: string | null }>();
++
++function extension(path: string): string {
++  const dot = path.lastIndexOf(".");
++  return dot === -1 ? "" : path.slice(dot + 1).toUpperCase();
++}
++</script>
++
++<template>
++  <aside class="flex w-60 shrink-0 flex-col border-r border-separator bg-window">
++    <h2 class="px-3 py-2 font-semibold">Files</h2>
++    <ul role="listbox" aria-label="Conflicted files" class="flex-1 overflow-y-auto">
++      <li
++        v-for="path in paths"
++        :key="path"
++        role="option"
++        :aria-selected="path === active"
++        class="mx-1 flex cursor-default items-center gap-2 rounded px-2 py-1 hover:bg-hover aria-selected:bg-row-selected"
++      >
++        <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-white">
++          {{ extension(path) }}
++        </span>
++        <span class="truncate">{{ path }}</span>
++      </li>
++    </ul>
++  </aside>
++</template>
+diff --git 1/frontend/src/ui/MergeToolbar.vue 2/frontend/src/ui/MergeToolbar.vue
+new file mode 100644
+index 0000000..8879820
+--- /dev/null
++++ 2/frontend/src/ui/MergeToolbar.vue
+@@ -0,0 +1,45 @@
++<script setup lang="ts">
++type IconButton = { readonly label: string; readonly path: string };
++
++const ICON_BUTTONS: readonly IconButton[] = [
++  { label: "Apply non-conflicting changes from the left", path: "M3 4l4 4-4 4M9 4l4 4-4 4" },
++  { label: "Apply non-conflicting changes from the right", path: "M13 4l-4 4 4 4M7 4L3 8l4 4" },
++  { label: "Undo", path: "M6 4L3 7l3 3M3 7h6.5a3.5 3.5 0 0 1 0 7H7" },
++  { label: "Redo", path: "M10 4l3 3-3 3M13 7H6.5a3.5 3.5 0 0 0 0 7H9" },
++];
++</script>
++
++<template>
++  <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
++    <button
++      v-for="button in ICON_BUTTONS"
++      :key="button.label"
++      type="button"
++      :title="button.label"
++      :aria-label="button.label"
++      class="rounded p-1.5 hover:bg-hover"
++    >
++      <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
++        <path
++          :d="button.path"
++          fill="none"
++          stroke="currentColor"
++          stroke-width="1.4"
++          stroke-linecap="round"
++          stroke-linejoin="round"
++        />
++      </svg>
++    </button>
++    <div class="ml-auto flex gap-2">
++      <button type="button" class="rounded border border-control-border px-3.5 py-1 hover:bg-hover">
++        Reset file
++      </button>
++      <button
++        type="button"
++        class="rounded border border-primary bg-primary px-3.5 py-1 text-white hover:brightness-110"
++      >
++        Mark resolved
++      </button>
++    </div>
++  </header>
++</template>
+diff --git 1/frontend/src/ui/MergeView.vue 2/frontend/src/ui/MergeView.vue
+new file mode 100644
+index 0000000..d7a5e50
+--- /dev/null
++++ 2/frontend/src/ui/MergeView.vue
+@@ -0,0 +1,30 @@
++<script setup lang="ts">
++import { useTemplateRef } from "vue";
++
++import { useMergeController, type MergeTexts } from "./useMergeController";
++
++const props = defineProps<{ texts: MergeTexts }>();
++
++const left = useTemplateRef<HTMLDivElement>("left");
++const center = useTemplateRef<HTMLDivElement>("center");
++const right = useTemplateRef<HTMLDivElement>("right");
++useMergeController(() => props.texts, { left, center, right });
++</script>
++
++<template>
++  <section
++    class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
++  >
++    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Local (yours)</h2>
++    <div class="border-b border-separator bg-window" />
++    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Result</h2>
++    <div class="border-b border-separator bg-window" />
++    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
++
++    <div ref="left" class="min-h-0 min-w-0" />
++    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
++    <div ref="center" class="min-h-0 min-w-0" />
++    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
++    <div ref="right" class="min-h-0 min-w-0" />
++  </section>
++</template>
+diff --git 1/frontend/src/ui/sample.ts 2/frontend/src/ui/sample.ts
+new file mode 100644
+index 0000000..3f46ca1
+--- /dev/null
++++ 2/frontend/src/ui/sample.ts
+@@ -0,0 +1,9 @@
++import base from "../../fixtures/sample/base.ts.txt?raw";
++import local from "../../fixtures/sample/local.ts.txt?raw";
++import remote from "../../fixtures/sample/remote.ts.txt?raw";
++import type { MergeTexts } from "./useMergeController";
++
++export const SAMPLE = {
++  path: "src/cart.ts",
++  texts: { local, base, remote, language: "typescript" },
++} satisfies { path: string; texts: MergeTexts };
+diff --git 1/frontend/src/ui/useMergeController.ts 2/frontend/src/ui/useMergeController.ts
+new file mode 100644
+index 0000000..b47b0b1
+--- /dev/null
++++ 2/frontend/src/ui/useMergeController.ts
+@@ -0,0 +1,35 @@
++import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } from "vue";
++
++import { MergeController, type MergeTexts } from "../editor";
++
++export type { MergeTexts } from "../editor";
++
++export function useMergeController(
++  texts: MaybeRefOrGetter<MergeTexts | null>,
++  hosts: {
++    left: Readonly<ShallowRef<HTMLDivElement | null>>;
++    center: Readonly<ShallowRef<HTMLDivElement | null>>;
++    right: Readonly<ShallowRef<HTMLDivElement | null>>;
++  },
++): void {
++  let controller: MergeController | null = null;
++
++  function destroyController(): void {
++    controller?.destroy();
++    controller = null;
++  }
++
++  watch(
++    [toRef(texts), hosts.left, hosts.center, hosts.right],
++    ([current, left, center, right]) => {
++      destroyController();
++      if (current === null || left === null || center === null || right === null) {
++        return;
++      }
++      controller = new MergeController(current, { left, center, right });
++    },
++    { immediate: true, flush: "post" },
++  );
++
++  onScopeDispose(destroyController);
++}

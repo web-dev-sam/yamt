@@ -33,7 +33,7 @@ frontend/src/ipc    public surface ipc/index.ts (planned); bindings.ts (GENERATE
 frontend/src/model  pure TS shared by editor/ and connectors/; exists only while both consume it (planned)
 frontend/src/editor CodeMirror 6 integration; public surface = MergeController (index.ts); framework-free (planned; engine.test.ts WebKit probe)
 frontend/src/connectors  pure band geometry → SVG path strings; no DOM (planned)
-frontend/src/ui     Vue 3 chrome: App.vue; planned: Sidebar, Toolbar, MergeView, Banner, store.ts singleton
+frontend/src/ui     Vue 3 chrome: App.vue; planned: FileList, MergeToolbar, MergeView, WarningBanner, store.ts singleton
 frontend/src/main.ts     picks ChunkSource, creates store, mounts App (today: mounts App)
 frontend/scripts    check-sfc-order.ts + .test.ts (VU2); fences.test.ts (PM2/PM3/PM5, planned)
 frontend/fixtures   fixture JSON for FixtureChunkSource (empty)
@@ -63,30 +63,30 @@ ipc ◄── model ◄── editor ◄── ui ◄── main.ts
 
 ## State ownership (vision 2)
 
-| state | owner |
-|---|---|
-| document text (all three panes) | CodeMirror `EditorState` |
-| chunk current positions (center) | `editor/chunkField` StateField, remapped via `tr.changes.mapPos` |
-| chunk apply status | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
-| left/right decorations | computed once per file; docs are immutable |
-| scroll positions | DOM, driven by `editor/scrollSync` |
-| connector geometry | derived per frame, never stored |
-| file list, active file, summary counts, busy, error | `ui/store.ts` singleton via `useAppStore()` |
-| captured index stages (for reset) | `session::FileState.stages`, captured at `open()` |
+| state                                               | owner                                                                                                 |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| document text (all three panes)                     | CodeMirror `EditorState`                                                                              |
+| chunk current positions (center)                    | `editor/chunkField` StateField, remapped via `tr.changes.mapPos`                                      |
+| chunk apply status                                  | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
+| left/right decorations                              | computed once per file; docs are immutable                                                            |
+| scroll positions                                    | DOM, driven by `editor/scrollSync`                                                                    |
+| connector geometry                                  | derived per frame, never stored                                                                       |
+| file list, active file, summary counts, busy, error | `ui/store.ts` singleton via `useAppStore()`                                                           |
+| captured index stages (for reset)                   | `session::FileState.stages`, captured at `open()`                                                     |
 
 Vue state never holds an `EditorView`, a position, or document text.
 
 ## Where does X go?
 
-| X | place |
-|---|---|
-| a new git operation | `gitio::Repo` method; bytes in/out; integration test with a real tempdir repo |
-| a new chunk property | `merge_core::Chunk` → regenerate bindings → `ipc/domain.ts` |
-| a new IPC command | `src-tauri/src/commands.rs` (≤ 15 lines, delegates to `session`) → `just bindings` |
-| an editor behaviour (apply, undo, decorations, gutter) | `editor/internal/*`, exposed only through `MergeController` |
-| a new chrome widget | `ui/<Name>.vue`, state in `store.ts`, actions in `store.ts` |
-| a tunable number | one `const` next to its only user, or `merge_core::DEFAULT_GAP` |
-| a cross-cutting decision | `docs/plan.md` §2 row citing a vision |
+| X                                                      | place                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| a new git operation                                    | `gitio::Repo` method; bytes in/out; integration test with a real tempdir repo      |
+| a new chunk property                                   | `merge_core::Chunk` → regenerate bindings → `ipc/domain.ts`                        |
+| a new IPC command                                      | `src-tauri/src/commands.rs` (≤ 15 lines, delegates to `session`) → `just bindings` |
+| an editor behaviour (apply, undo, decorations, gutter) | `editor/internal/*`, exposed only through `MergeController`                        |
+| a new chrome widget                                    | `ui/<Name>.vue`, state in `store.ts`, actions in `store.ts`                        |
+| a tunable number                                       | one `const` next to its only user, or `merge_core::DEFAULT_GAP`                    |
+| a cross-cutting decision                               | `docs/plan.md` §2 row citing a vision                                              |
 
 ## Line spaces (vision 4)
 
