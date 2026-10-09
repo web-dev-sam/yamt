@@ -86,8 +86,10 @@ function actionButton(
   glyph.setAttribute("y", String(button.lineHeight * GLYPH_CENTER));
   glyph.textContent = button.glyph;
   group.append(title, hit, glyph);
-  group.addEventListener("click", () => {
-    onAction(action);
+  group.addEventListener("pointerdown", (event) => {
+    if (event.button === 0) {
+      onAction(action);
+    }
   });
   return group;
 }
@@ -124,41 +126,35 @@ function arrowGroups(
     });
 }
 
+function paintGap(
+  strip: SVGSVGElement,
+  panes: { readonly left: EditorView; readonly right: EditorView },
+  { side, rows }: { readonly side: Side; readonly rows: readonly ChunkRow[] },
+  onAction: OnAction,
+): void {
+  const stripTop = strip.getBoundingClientRect().top;
+  const view = side === "local" ? panes.left : panes.right;
+  strip.replaceChildren(
+    ...bandPaths(strip, stripTop, panes, gapBands(rows, side)),
+    ...arrowGroups(strip, stripTop, { view, side, arrows: gapArrows(rows, side) }, onAction),
+  );
+}
+
 export function paintStrips(
   views: PaneViews,
   strips: readonly [SVGSVGElement, SVGSVGElement],
   rows: readonly ChunkRow[],
   onAction: OnAction,
 ): void {
-  const [leftStrip, rightStrip] = strips;
-  const leftTop = leftStrip.getBoundingClientRect().top;
-  const rightTop = rightStrip.getBoundingClientRect().top;
-  leftStrip.replaceChildren(
-    ...bandPaths(
-      leftStrip,
-      leftTop,
-      { left: views.left, right: views.center },
-      gapBands(rows, "local"),
-    ),
-    ...arrowGroups(
-      leftStrip,
-      leftTop,
-      { view: views.left, side: "local", arrows: gapArrows(rows, "local") },
-      onAction,
-    ),
+  paintGap(strips[0], { left: views.left, right: views.center }, { side: "local", rows }, onAction);
+  paintGap(
+    strips[1],
+    { left: views.center, right: views.right },
+    { side: "remote", rows },
+    onAction,
   );
-  rightStrip.replaceChildren(
-    ...bandPaths(
-      rightStrip,
-      rightTop,
-      { left: views.center, right: views.right },
-      gapBands(rows, "remote"),
-    ),
-    ...arrowGroups(
-      rightStrip,
-      rightTop,
-      { view: views.right, side: "remote", arrows: gapArrows(rows, "remote") },
-      onAction,
-    ),
-  );
+}
+
+export function keepEditorFocus(event: MouseEvent): void {
+  event.preventDefault();
 }

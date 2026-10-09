@@ -47,13 +47,19 @@ function mapSpans(
   doc: Text | null,
   applied: StatusChanges,
 ): readonly ChunkSpan[] {
-  const mapped = spans.map((span) => ({
-    ...span,
-    from: toDocPos(changes.mapPos(span.from, -1)),
-    to: toDocPos(
-      changes.mapPos(span.to, applied.has(span.chunk.id) || endsMidLine(span, doc) ? 1 : -1),
-    ),
-  }));
+  let floor = 0;
+  const mapped = spans.map((span) => {
+    const isApplied = applied.has(span.chunk.id);
+    const from = Math.max(changes.mapPos(span.from, -1), floor);
+    const to = Math.max(
+      changes.mapPos(span.to, isApplied || endsMidLine(span, doc) ? 1 : -1),
+      from,
+    );
+    if (isApplied) {
+      floor = to;
+    }
+    return { ...span, from: toDocPos(from), to: toDocPos(to) };
+  });
   return mapped.map((span, index) => {
     const next = mapped[index + 1];
     return next === undefined || span.to <= next.from ? span : { ...span, to: next.from };

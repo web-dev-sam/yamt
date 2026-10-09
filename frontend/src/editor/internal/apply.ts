@@ -44,7 +44,7 @@ function spanOf(target: ApplyTarget, chunk: Chunk): ChunkSpan | undefined {
   return target.state.field(target.field).find((span) => span.chunk.id === chunk.id);
 }
 
-export function applyChunk(target: ApplyTarget, chunk: Chunk, side: Side): TransactionSpec | null {
+export function applySpec(target: ApplyTarget, chunk: Chunk, side: Side): TransactionSpec | null {
   const span = spanOf(target, chunk);
   if (span === undefined || !canApply(span.chunk, span.status, side)) {
     return null;
@@ -56,7 +56,7 @@ export function applyChunk(target: ApplyTarget, chunk: Chunk, side: Side): Trans
   };
 }
 
-export function applyAllNonConflicting(target: ApplyTarget, side: Side): TransactionSpec | null {
+export function bulkApplySpec(target: ApplyTarget, side: Side): TransactionSpec | null {
   const spans = target.state
     .field(target.field)
     .filter(
@@ -77,7 +77,7 @@ export function applyAllNonConflicting(target: ApplyTarget, side: Side): Transac
   };
 }
 
-export function dismissChunk(target: ApplyTarget, chunk: Chunk): TransactionSpec | null {
+export function dismissSpec(target: ApplyTarget, chunk: Chunk): TransactionSpec | null {
   const span = spanOf(target, chunk);
   if (span === undefined || isResolved(span.chunk, span.status)) {
     return null;

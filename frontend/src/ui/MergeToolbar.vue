@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { summaryLabel } from "./summaryLabel";
 import type { MergeSummary } from "./useMergeController";
 
 type IconButton = { readonly label: string; readonly path: string; readonly run: () => void };
@@ -46,23 +47,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
   },
 ];
 
-const remaining = computed(() => {
-  const summary = props.summary;
-  if (summary === null) {
-    return "";
-  }
-  const parts = [counted(summary.changes, "change"), counted(summary.conflicts, "conflict")].filter(
-    (part) => part !== null,
-  );
-  return parts.length === 0 ? "All changes processed" : parts.join(" · ");
-});
-
-function counted(count: number, noun: string): string | null {
-  if (count === 0) {
-    return null;
-  }
-  return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
-}
+const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 </script>
 
 <template>

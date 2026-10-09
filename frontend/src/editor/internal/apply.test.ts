@@ -1,14 +1,14 @@
-import { history, redo, undo } from "@codemirror/commands";
-import { EditorState, type StateCommand, type TransactionSpec } from "@codemirror/state";
+import { redo, undo } from "@codemirror/commands";
+import type { EditorState, StateCommand, TransactionSpec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
-import { applyAllNonConflicting, applyChunk, dismissChunk, type ApplyTarget } from "./apply";
+import { applySpec, bulkApplySpec, dismissSpec, type ApplyTarget } from "./apply";
 import { chunkField } from "./chunkField";
 import { centerDecorations } from "./decorations";
 import { lineSpan } from "./lineSpan";
-import { eolSeparator } from "./pane";
+import { paneState, paneText } from "./pane";
 import type { Side } from "./side";
 import { summarize, type ChunkStatus } from "./status";
 import { gapArrows } from "./strips";
@@ -17,37 +17,37 @@ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 
 async function synthetic(
   texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
-  chunk: { kind: Chunk["kind"]; base: [number, number]; side: [number, number] },
+  chunks: readonly { kind: Chunk["kind"]; base: [number, number]; side: [number, number] }[],
 ): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
     ...texts,
     language: null,
-    chunks: [
-      {
-        id: 0,
-        kind: chunk.kind,
-        base: { start: chunk.base[0], len: chunk.base[1] },
-        local: { start: chunk.side[0], len: chunk.side[1] },
-        remote: { start: chunk.side[0], len: chunk.side[1] },
-      },
-    ],
+    chunks: chunks.map((chunk, id) => ({
+      id,
+      kind: chunk.kind,
+      base: { start: chunk.base[0], len: chunk.base[1] },
+      local: { start: chunk.side[0], len: chunk.side[1] },
+      remote: { start: chunk.side[0], len: chunk.side[1] },
+    })),
   };
   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
 }
 
 function open(data: FileMergeData): ApplyTarget {
   const field = chunkField(data.chunks);
-  const separator = eolSeparator(data.eol);
+  const pane = { eol: data.eol, language: data.language };
   return {
-    state: EditorState.create({
+    state: paneState({
+      ...pane,
+      kind: "center",
       doc: data.base,
-      extensions: [separator, history(), field, centerDecorations(field)],
+      extensions: [field, centerDecorations(field)],
     }),
     field,
     sides: {
-      local: EditorState.create({ doc: data.local, extensions: separator }).doc,
-      remote: EditorState.create({ doc: data.remote, extensions: separator }).doc,
+      local: paneState({ ...pane, kind: "side", doc: data.local, extensions: [] }).doc,
+      remote: paneState({ ...pane, kind: "side", doc: data.remote, extensions: [] }).doc,
     },
   };
 }
@@ -122,7 +122,7 @@ function arrowLines(merge: ApplyTarget, side: Side): number[] {
 test("apply local: the change gets the left text, resolves, and loses colour and arrow", async () => {
   const start = await magicKeys();
 
-  const applied = run(start, applyChunk(start, chunkAt(start, 0), "local"));
+  const applied = run(start, applySpec(start, chunkAt(start, 0), "local"));
 
   expect(centerText(applied, 0)).toBe(sideText(applied, 0, "local"));
   expect(centerText(applied, 0)).not.toBe(centerText(start, 0));
@@ -133,14 +133,14 @@ test("apply local: the change gets the left text, resolves, and loses colour and
   expect(arrowLines(applied, "local")).not.toContain(3);
   expect(summarize(start.state.field(start.field))).toEqual({ changes: 8, conflicts: 1 });
   expect(summarize(applied.state.field(applied.field))).toEqual({ changes: 7, conflicts: 1 });
-  expect(applyChunk(applied, chunkAt(applied, 0), "local")).toBeNull();
-  expect(applyChunk(start, chunkAt(start, 0), "remote")).toBeNull();
+  expect(applySpec(applied, chunkAt(applied, 0), "local")).toBeNull();
+  expect(applySpec(start, chunkAt(start, 0), "remote")).toBeNull();
 });
 
 test("apply remote inserts the right lines at an empty base range", async () => {
   const start = await magicKeys();
 
-  const applied = run(start, applyChunk(start, chunkAt(start, 3), "remote"));
+  const applied = run(start, applySpec(start, chunkAt(start, 3), "remote"));
 
   expect(centerText(applied, 3)).toBe(sideText(applied, 3, "remote"));
   expect(applied.state.doc.lines).toBe(start.state.doc.lines + 1);
@@ -152,8 +152,8 @@ test("a conflict applied from both sides holds local then remote text", async ()
   const start = await magicKeys();
   const conflict = chunkAt(start, 8);
 
-  const local = run(start, applyChunk(start, conflict, "local"));
-  const both = run(local, applyChunk(local, conflict, "remote"));
+  const local = run(start, applySpec(start, conflict, "local"));
+  const both = run(local, applySpec(local, conflict, "remote"));
 
   expect(statuses(local)[8]).toBe("applied-local");
   expect(summarize(local.state.field(local.field))).toEqual({ changes: 8, conflicts: 1 });
@@ -170,9 +170,9 @@ test("a conflict applied from both sides holds local then remote text", async ()
 test("ignore keeps the text and resolves a change or a half-applied conflict", async () => {
   const start = await magicKeys();
 
-  const ignored = run(start, dismissChunk(start, chunkAt(start, 1)));
-  const half = run(ignored, applyChunk(ignored, chunkAt(ignored, 8), "remote"));
-  const settled = run(half, dismissChunk(half, chunkAt(half, 8)));
+  const ignored = run(start, dismissSpec(start, chunkAt(start, 1)));
+  const half = run(ignored, applySpec(ignored, chunkAt(ignored, 8), "remote"));
+  const settled = run(half, dismissSpec(half, chunkAt(half, 8)));
 
   expect(ignored.state.doc.toString()).toBe(start.state.doc.toString());
   expect(statuses(ignored)[1]).toBe("dismissed");
@@ -181,7 +181,7 @@ test("ignore keeps the text and resolves a change or a half-applied conflict", a
   expect(centerText(settled, 8)).toBe(sideText(settled, 8, "remote"));
   expect(statuses(settled)[8]).toBe("dismissed");
   expect(summarize(settled.state.field(settled.field))).toEqual({ changes: 7, conflicts: 0 });
-  expect(dismissChunk(settled, chunkAt(settled, 8))).toBeNull();
+  expect(dismissSpec(settled, chunkAt(settled, 8))).toBeNull();
 });
 
 test("applying after an edit inside the change replaces the current range", async () => {
@@ -192,7 +192,7 @@ test("applying after an edit inside the change replaces the current range", asyn
     state: start.state.update({ changes: { from: line.to, insert: "\n// mine" } }).state,
   };
 
-  const applied = run(typed, applyChunk(typed, chunkAt(typed, 0), "local"));
+  const applied = run(typed, applySpec(typed, chunkAt(typed, 0), "local"));
 
   expect(centerText(typed, 0)).toContain("// mine");
   expect(centerText(applied, 0)).toBe(sideText(applied, 0, "local"));
@@ -201,7 +201,7 @@ test("applying after an edit inside the change replaces the current range", asyn
 
 test("undo after apply restores text and status; redo re-applies", async () => {
   const start = await magicKeys();
-  const applied = run(start, applyChunk(start, chunkAt(start, 0), "local"));
+  const applied = run(start, applySpec(start, chunkAt(start, 0), "local"));
 
   const undone = command(applied, undo);
   const redone = command(undone, redo);
@@ -215,7 +215,7 @@ test("undo after apply restores text and status; redo re-applies", async () => {
 
 test("undo after ignore brings the change back; redo ignores it again", async () => {
   const start = await magicKeys();
-  const ignored = run(start, dismissChunk(start, chunkAt(start, 1)));
+  const ignored = run(start, dismissSpec(start, chunkAt(start, 1)));
 
   const undone = command(ignored, undo);
   const redone = command(undone, redo);
@@ -227,7 +227,7 @@ test("undo after ignore brings the change back; redo ignores it again", async ()
 test("bulk apply from the left resolves every LocalOnly change; one undo restores all", async () => {
   const start = await magicKeys();
 
-  const bulk = run(start, applyAllNonConflicting(start, "local"));
+  const bulk = run(start, bulkApplySpec(start, "local"));
   const undone = command(bulk, undo);
 
   expect(statuses(bulk)).toEqual([
@@ -245,23 +245,22 @@ test("bulk apply from the left resolves every LocalOnly change; one undo restore
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "local"));
   }
   expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 3, conflicts: 1 });
-  expect(applyAllNonConflicting(bulk, "local")).toBeNull();
+  expect(bulkApplySpec(bulk, "local")).toBeNull();
   expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
   expect(statuses(undone)).toEqual(statuses(start));
 });
 
 test("a BothSame change resolves from either arrow and from either bulk apply", async () => {
   const merge = open(
-    await synthetic(
-      { base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" },
+    await synthetic({ base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" }, [
       { kind: "BothSame", base: [1, 1], side: [1, 1] },
-    ),
+    ]),
   );
   const same = chunkAt(merge, 0);
 
-  const fromRight = run(merge, applyChunk(merge, same, "remote"));
-  const bulkLeft = run(merge, applyAllNonConflicting(merge, "local"));
-  const bulkRight = run(merge, applyAllNonConflicting(merge, "remote"));
+  const fromRight = run(merge, applySpec(merge, same, "remote"));
+  const bulkLeft = run(merge, bulkApplySpec(merge, "local"));
+  const bulkRight = run(merge, bulkApplySpec(merge, "remote"));
 
   expect(arrowLines(merge, "local")).toEqual([2]);
   expect(arrowLines(merge, "remote")).toEqual([2]);
@@ -276,7 +275,7 @@ test("a BothSame change resolves from either arrow and from either bulk apply", 
 test("bulk apply from the right inserts every RemoteOnly change in place", async () => {
   const start = await magicKeys();
 
-  const bulk = run(start, applyAllNonConflicting(start, "remote"));
+  const bulk = run(start, bulkApplySpec(start, "remote"));
 
   for (const id of [3, 4, 6]) {
     expect(statuses(bulk)[id]).toBe("applied-remote");
@@ -303,13 +302,39 @@ test("resultText of a CRLF file keeps CRLF after an apply", async () => {
   const merge = open(
     await synthetic(
       { base: "a\r\nb\r\nc\r\n", local: "a\r\nB\r\nc\r\n", remote: "a\r\nb\r\nc\r\n", eol: "CrLf" },
-      { kind: "LocalOnly", base: [1, 1], side: [1, 1] },
+      [{ kind: "LocalOnly", base: [1, 1], side: [1, 1] }],
     ),
   );
 
-  const applied = run(merge, applyChunk(merge, chunkAt(merge, 0), "local"));
+  const applied = run(merge, applySpec(merge, chunkAt(merge, 0), "local"));
 
-  expect(applied.state.sliceDoc()).toBe("a\r\nB\r\nc\r\n");
+  expect(paneText(applied.state)).toBe("a\r\nB\r\nc\r\n");
+});
+
+test("a conflict applied from both sides after its separator line is deleted pushes the next change", async () => {
+  const merge = open(
+    await synthetic(
+      { base: "a\nc\nx\nd\nz\n", local: "a\nL\nx\nD\nz\n", remote: "a\nR\nx\nd\nz\n", eol: "Lf" },
+      [
+        { kind: "Conflict", base: [1, 1], side: [1, 1] },
+        { kind: "LocalOnly", base: [3, 1], side: [3, 1] },
+      ],
+    ),
+  );
+  const separator = merge.state.doc.line(3);
+  const joined = {
+    ...merge,
+    state: merge.state.update({ changes: { from: separator.from, to: separator.to + 1 } }).state,
+  };
+
+  const local = run(joined, applySpec(joined, chunkAt(joined, 0), "local"));
+  const both = run(local, applySpec(local, chunkAt(local, 0), "remote"));
+  const next = run(both, applySpec(both, chunkAt(both, 1), "local"));
+
+  expect(centerText(both, 0)).toBe("L\nR\n");
+  expect(centerText(both, 1)).toBe("d\n");
+  expect(statuses(both)).toEqual(["applied-both", "pending"]);
+  expect(paneText(next.state)).toBe("a\nL\nR\nD\nz\n");
 });
 
 test("a change on an unterminated last line keeps the file without a final line break", async () => {
@@ -326,9 +351,9 @@ test("a change on an unterminated last line keeps the file without a final line 
 
   for (const { base, local, chunk, result } of cases) {
     const merge = open(
-      await synthetic({ base, local, remote: base, eol: "Lf" }, { kind: "LocalOnly", ...chunk }),
+      await synthetic({ base, local, remote: base, eol: "Lf" }, [{ kind: "LocalOnly", ...chunk }]),
     );
-    const applied = run(merge, applyChunk(merge, chunkAt(merge, 0), "local"));
+    const applied = run(merge, applySpec(merge, chunkAt(merge, 0), "local"));
     expect(applied.state.sliceDoc()).toBe(result);
   }
 });

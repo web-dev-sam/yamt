@@ -240,6 +240,22 @@ test("a rejected reset keeps the current file and logs store.reset_failed", asyn
   expect(lines.error).toEqual(['[error] store.reset_failed {path: "a.ts", reason: "stages gone"}']);
 });
 
+test("a reset whose list refresh rejects shows the original and logs store.list_failed", async () => {
+  const lines = spyConsole();
+  const original = await dataFor("a.ts");
+  const { store } = await openedStore({
+    resetFile: () => Promise.resolve(original),
+    listFiles: () => Promise.reject(new Error("repo gone")),
+  });
+  const before = store.files.value;
+
+  await store.reset();
+
+  expect(store.data.value).toEqual(original);
+  expect(store.files.value).toBe(before);
+  expect(lines.error).toEqual(['[error] store.list_failed {reason: "repo gone"}']);
+});
+
 test("a later open wins over a reset that resolves last", async () => {
   const resets: ((data: FileMergeData) => void)[] = [];
   const { store, pending } = await openedStore({

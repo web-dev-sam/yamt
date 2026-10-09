@@ -10,7 +10,7 @@ import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
 
 function sideBands(chunks: readonly Chunk[], side: Side): Extension {
-  const statuses = sideStatusField(chunks);
+  const statuses = sideStatusField(chunks.map((chunk) => ({ chunk, status: "pending" })));
   return [statuses, sideDecorations(statuses, side)];
 }
 
@@ -100,7 +100,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
 
 test("a side pane drops a resolved change's band and keeps a half-applied conflict", async () => {
   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
-  const statuses = sideStatusField(data.chunks);
+  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
   const state = EditorState.create({
     doc: data.local,
     extensions: [statuses, sideDecorations(statuses, "local")],

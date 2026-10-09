@@ -51,6 +51,10 @@ hooks-test:
 dev-web:
     {{ just_executable() }} frontend vite
 
+# WebKit WebDriver on a private virtual display: browser windows never appear on the owner's screens.
+webdriver port="4445":
+    xvfb-run -a -s "-screen 0 1700x1000x24" env -u WAYLAND_DISPLAY GDK_BACKEND=x11 WebKitWebDriver --port={{ port }}
+
 dev-app:
     cargo tauri dev
 

@@ -4,22 +4,23 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import type { FileMergeData } from "../ipc";
 import {
-  applyAllNonConflicting,
-  applyChunk,
-  dismissChunk,
+  applySpec,
+  bulkApplySpec,
+  dismissSpec,
   type ApplyTarget,
   type SideDocs,
 } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { chunkRows, type PaneViews } from "./internal/geometry";
-import { createPane } from "./internal/pane";
+import { createPane, paneText } from "./internal/pane";
 import { ScrollSync } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type MergeSummary } from "./internal/status";
-import { paintStrips, type ChunkAction } from "./internal/strips";
+import { keepEditorFocus, paintStrips, type ChunkAction } from "./internal/strips";
 
+export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 
 export type MergeHosts = {
@@ -43,6 +44,9 @@ export class MergeController {
     this.#views = this.#createViews(data, hosts);
     this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
     this.#strips = hosts.strips;
+    for (const strip of this.#strips) {
+      strip.addEventListener("mousedown", keepEditorFocus);
+    }
     this.#scroll = new ScrollSync(this.#views, () => {
       this.#requestFrame();
     });
@@ -52,7 +56,6 @@ export class MergeController {
   #createViews(data: FileMergeData, hosts: MergeHosts): PaneViews {
     const { language, eol } = data;
     const field = this.#field;
-    const statuses = sideStatusField(data.chunks);
     const repaint = EditorView.updateListener.of((update) => {
       if (update.docChanged || update.geometryChanged) {
         this.#requestFrame();
@@ -62,6 +65,16 @@ export class MergeController {
       this.#statusesChanged(update);
     });
     const shared = { eol, language };
+    const center = createPane({
+      ...shared,
+      kind: "center",
+      doc: data.base,
+      parent: hosts.center,
+      extensions: [field, centerDecorations(field), repaint, statusSync],
+    });
+    const statuses = sideStatusField(
+      center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
+    );
     return {
       left: createPane({
         ...shared,
@@ -70,13 +83,7 @@ export class MergeController {
         parent: hosts.left,
         extensions: [statuses, sideDecorations(statuses, "local"), repaint],
       }),
-      center: createPane({
-        ...shared,
-        kind: "center",
-        doc: data.base,
-        parent: hosts.center,
-        extensions: [field, centerDecorations(field), repaint, statusSync],
-      }),
+      center,
       right: createPane({
         ...shared,
         kind: "side",
@@ -98,11 +105,18 @@ export class MergeController {
   }
 
   #act(action: ChunkAction): void {
-    this.#dispatch(
-      action.kind === "apply"
-        ? applyChunk(this.#target(), action.chunk, action.side)
-        : dismissChunk(this.#target(), action.chunk),
-    );
+    switch (action.kind) {
+      case "apply":
+        this.#dispatch(applySpec(this.#target(), action.chunk, action.side));
+        return;
+      case "dismiss":
+        this.#dispatch(dismissSpec(this.#target(), action.chunk));
+        return;
+      default: {
+        const _exhaustive: never = action;
+        return _exhaustive;
+      }
+    }
   }
 
   #statusesChanged(update: ViewUpdate): void {
@@ -131,7 +145,7 @@ export class MergeController {
   }
 
   applyAllNonConflicting(side: Side): void {
-    this.#dispatch(applyAllNonConflicting(this.#target(), side));
+    this.#dispatch(bulkApplySpec(this.#target(), side));
   }
 
   undo(): boolean {
@@ -143,7 +157,7 @@ export class MergeController {
   }
 
   resultText(): string {
-    return this.#views.center.state.sliceDoc();
+    return paneText(this.#views.center.state);
   }
 
   summary(): MergeSummary {
@@ -164,6 +178,7 @@ export class MergeController {
       view.destroy();
     }
     for (const strip of this.#strips) {
+      strip.removeEventListener("mousedown", keepEditorFocus);
       strip.replaceChildren();
     }
   }

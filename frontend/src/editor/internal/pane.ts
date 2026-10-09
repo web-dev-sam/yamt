@@ -89,27 +89,22 @@ function kindExtensions(kind: PaneKind): Extension {
   }
 }
 
-export function eolSeparator(eol: FileMergeData["eol"]): Extension {
-  return eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [];
-}
-
-export function createPane(pane: {
+export function paneState(pane: {
   kind: PaneKind;
   doc: string;
   eol: FileMergeData["eol"];
   language: string | null;
-  parent: HTMLElement;
   extensions: Extension;
-}): EditorView {
+}): EditorState {
   const languageExtension =
     pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
       ? LANGUAGES[pane.language]
       : undefined;
-  const state = EditorState.create({
+  return EditorState.create({
     doc: pane.doc,
     extensions: [
       lineNumbers(),
-      eolSeparator(pane.eol),
+      pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
       drawSelection(),
       darkTheme,
       syntaxHighlighting(paletteHighlight),
@@ -118,5 +113,14 @@ export function createPane(pane: {
       pane.extensions,
     ],
   });
-  return new EditorView({ state, parent: pane.parent });
+}
+
+export function createPane(
+  pane: Parameters<typeof paneState>[0] & { parent: HTMLElement },
+): EditorView {
+  return new EditorView({ state: paneState(pane), parent: pane.parent });
+}
+
+export function paneText(state: EditorState): string {
+  return state.sliceDoc();
 }

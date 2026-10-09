@@ -351,61 +351,55 @@ source in M1 there is no switch (vision 5).
 
 ### 5.1 State ownership — the table that prevents the classic mistake
 
-| state                                                                           | owner                                                                               | why                                                                                                                                 |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| left/right/center document text                                                 | CodeMirror `EditorState`                                                            | rope, transactions, undo                                                                                                            |
-| chunk current positions in center                                               | `editor/chunkField` (`StateField`)                                                  | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
-| chunk apply status (`Pending/AppliedLocal/AppliedRemote/AppliedBoth/Dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects` | **undo must revert status together with text**                                                                                      |
-| left/right decorations                                                          | computed once per file, `EditorState` of that pane                                  | immutable docs                                                                                                                      |
-| scroll positions                                                                | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                          | not state, derived                                                                                                                  |
-| connector geometry                                                              | computed per frame from `lineBlockAt`, never stored                                 | derived                                                                                                                             |
-| file list, active file, counts, busy flag, warnings                             | `ui/store.ts` (`reactive()` object, one `createStore()`, no Pinia)                  | chrome only                                                                                                                         |
+| state                                                                                      | owner                                                                                                                                                                       | why                                                                                                                                 |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| left/right/center document text                                                            | CodeMirror `EditorState`                                                                                                                                                    | rope, transactions, undo                                                                                                            |
+| chunk current positions in center                                                          | `editor/chunkField` (`StateField`)                                                                                                                                          | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
+| chunk apply status (`pending`/`applied-local`/`applied-remote`/`applied-both`/`dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects`; side panes hold a read-only mirror the controller pushes after each center transaction | **undo must revert status together with text**                                                                                      |
+| left/right decorations                                                                     | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
+| scroll positions                                                                           | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
+| connector geometry                                                                         | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
+| file list, active file, loaded file data                                                   | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia)                                                                                                              | chrome only                                                                                                                         |
+| summary counts of the open file                                                            | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                              | per controller                                                                                                                      |
 
-Rule: **Vue state never holds an `EditorView`, a position, or document text.** Counts and
-statuses reach the store through `MergeController` events (`chunkStatusChanged`,
-`resolvedCount`).
+Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
+text passes through once, from `resultText()` to `store.finish`.
 
 ### 5.2 `editor/` — public surface is one class
 
 ```ts
 export class MergeController {
-  constructor(
-    data: FileMergeData,
-    host: {
-      left: HTMLElement;
-      center: HTMLElement;
-      right: HTMLElement;
-      strips: [SVGSVGElement, SVGSVGElement];
-    },
-  );
-  applyChunk(id: number, side: "local" | "remote" | "both"): void;
-  dismissChunk(id: number): void;
-  applyAllNonConflicting(side: "local" | "remote"): void;
+  constructor(data: FileMergeData, hosts: MergeHosts); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]
+  applyAllNonConflicting(side: Side): void; // one undo step
   undo(): boolean;
   redo(): boolean;
   resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
-  summary(): { pending: number; conflicts: number; applied: number };
-  on(event: "summary", cb: (s: ReturnType<MergeController["summary"]>) => void): () => void;
+  summary(): MergeSummary; // { changes, conflicts } still to decide
+  onSummaryChange(listener: (s: MergeSummary) => void): void;
   destroy(): void;
 }
 ```
 
+Per-change apply/ignore is internal: the arrows in the strips are its only caller.
+
 Internals (`editor/internal/`, not importable from `ui/`):
 
-- `pane.ts` — `createPane(kind, doc, eol, language)`: shared extensions (bundled font theme,
-  line numbers, Lezer highlight, `EditorState.lineSeparator`), `readOnly` + `editable(false)`
-  for sides, `history()` for center only.
-- `chunkField.ts` — the `StateField` + effects described above; exposes `chunkAt(pos)`.
-- `decorations.ts` — line bands per kind/status; later word-diff marks.
-- `gutter.ts` — arrows / X per chunk via `gutter({ domEventHandlers })`; dispatches effects
-  through the controller, never touches DOM outside CM.
-- `scrollSync.ts` — one function `targets(source, scrollTop) → {left, center, right}` using
-  piecewise-linear interpolation between chunk anchor pixel positions (`lineBlockAt`). Swapping
-  to chunk-anchored hold later = replacing this one function (plan decision #12). Re-entrancy:
-  a `syncing` flag + `requestAnimationFrame`, ignore scroll events we caused.
-- `apply.ts` — build the `TransactionSpec` for an apply: current mapped range from
-  `chunkField`, replacement text from `data.local/remote` sliced by the chunk's fixed side
-  range, plus the status effect. Pure given `(state, chunk, side, data)`.
+- `pane.ts` — shared extensions (bundled font theme, line numbers, Lezer highlight,
+  `EditorState.lineSeparator` for CRLF), `readOnly` + `editable(false)` for sides, `history()`
+  for center only.
+- `chunkField.ts` — the center `StateField` + effects described above (CM1, CM2, CM8).
+- `status.ts`, `apply.ts` — status rules and the `TransactionSpec` builders for apply, ignore and
+  bulk apply: current mapped range from `chunkField`, replacement text from `data.local/remote`
+  sliced by the chunk's fixed side range, plus the status effect.
+- `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status.
+- `geometry.ts`, `strips.ts` — bands and the apply/ignore arrows in the two `<svg>` strips
+  (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
+  WebKit).
+- `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
+  interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
+  of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan
+  decision #12). Re-entrancy: the follower panes written by a sync ignore their echo for one
+  frame; a source whose `scrollTop` did not change does not re-sync.
 
 ### 5.3 `connectors/` — pure geometry
 
@@ -422,24 +416,18 @@ drawn. `connectors/` is unit-tested on numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
-Components: `App.vue`, `FileList.vue` (file list, status badges), `MergeToolbar.vue` (bulk apply
-left/right, undo/redo, finish, reset), `MergeView.vue` (three `<div>` hosts + two `<svg>`,
-creates its `MergeController` through `useMergeController`, which recreates it when the file or a host changes and destroys it with the component), `WarningBanner.vue` (unsupported
-file / mixed EOL warnings). Names are multi-word (the Vue linter's `multi-word-component-names`; `App` exempt).
+Components: `App.vue`, `FileList.vue` (file list, resolved mark), `MergeView.vue` (toolbar + three
+`<div>` hosts + two `<svg>`; creates its `MergeController` through `useMergeController`, which
+recreates it when the file or a host changes and destroys it with the component),
+`MergeToolbar.vue` (bulk apply left/right, undo/redo, counts, finish, reset — rendered by
+`MergeView` so it acts on that view's controller; finish/reset are emitted up to `App`, which
+calls the store), `WarningBanner.vue` (planned: unsupported file / mixed EOL warnings). Names are
+multi-word (the Vue linter's `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
-
-```ts
-export interface AppStore {
-  files: FileEntry[];
-  active: string | null;
-  summary: Summary | null;
-  busy: boolean;
-  error: IpcError | null;
-}
-export function createAppStore(source: ChunkSource): AppStoreHandle; // called once in main.ts
-export function useAppStore(): AppStoreHandle; // what components call
-```
+`createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file
+list, the active path (derived from the loaded data) and the loaded `FileMergeData` in a
+`shallowRef`; actions: load the list, open (a later open wins), finish, reset.
 
 The Vue↔editor seam is one adaptable composable:
 
@@ -447,11 +435,17 @@ The Vue↔editor seam is one adaptable composable:
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: MergeHosts,
-): { summary: Readonly<Ref<Summary | null>>; apply; applyAll; undo; redo; resultText };
+): {
+  summary: Readonly<ShallowRef<MergeSummary | null>>;
+  applyAllNonConflicting;
+  undo;
+  redo;
+  resultText;
+};
 ```
 
 It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data))`, pipes
-`summary` events into a `shallowRef`, and is the only place `editor/` is imported from `ui/`.
+`onSummaryChange` into a `shallowRef`, and is the only place `editor/` is imported from `ui/`.
 
 ### 5.5 Frontend file and component conventions (house rules)
 

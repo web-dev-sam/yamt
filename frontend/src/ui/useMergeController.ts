@@ -7,7 +7,7 @@ import {
   type ShallowRef,
 } from "vue";
 
-import { MergeController, type MergeSummary } from "../editor";
+import { MergeController, type MergeSummary, type Side } from "../editor";
 import type { FileMergeData } from "../ipc";
 
 export type { MergeSummary } from "../editor";
@@ -24,7 +24,7 @@ export function useMergeController(
   },
 ): {
   summary: Readonly<ShallowRef<MergeSummary | null>>;
-  applyAllNonConflicting(side: "local" | "remote"): void;
+  applyAllNonConflicting(side: Side): void;
   undo(): void;
   redo(): void;
   resultText(): string | null;

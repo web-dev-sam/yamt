@@ -18,20 +18,30 @@ export function createAppStore(source: ChunkSource): AppStore {
   const files = shallowRef<readonly FileEntry[]>([]);
   const data = shallowRef<FileMergeData | null>(null);
   const active = computed(() => data.value?.path ?? null);
-  let latestOpen = 0;
+  let latestLoad = 0;
 
   async function open(path: string): Promise<void> {
-    latestOpen += 1;
-    const ticket = latestOpen;
+    latestLoad += 1;
+    const ticket = latestLoad;
     try {
       const loaded = await source.loadFile(path);
-      if (ticket !== latestOpen) {
+      if (ticket !== latestLoad) {
         return;
       }
       data.value = loaded;
       log.info("file.loaded", { path, chunks: loaded.chunks.length });
     } catch (error) {
       log.error("store.load_failed", { path, reason: reasonOf(error) });
+    }
+  }
+
+  async function refreshFiles(): Promise<boolean> {
+    try {
+      files.value = await source.listFiles();
+      return true;
+    } catch (error) {
+      log.error("store.list_failed", { reason: reasonOf(error) });
+      return false;
     }
   }
 
@@ -52,26 +62,24 @@ export function createAppStore(source: ChunkSource): AppStore {
     if (path === null) {
       return;
     }
-    latestOpen += 1;
-    const ticket = latestOpen;
+    latestLoad += 1;
+    const ticket = latestLoad;
     try {
       const original = await source.resetFile(path);
-      if (ticket !== latestOpen) {
+      if (ticket !== latestLoad) {
         return;
       }
       // A new object, so the editor is rebuilt even when the source returns the record it cached.
       data.value = { ...original };
-      files.value = await source.listFiles();
     } catch (error) {
       log.error("store.reset_failed", { path, reason: reasonOf(error) });
+      return;
     }
+    await refreshFiles();
   }
 
   async function loadFiles(): Promise<void> {
-    try {
-      files.value = await source.listFiles();
-    } catch (error) {
-      log.error("store.list_failed", { reason: reasonOf(error) });
+    if (!(await refreshFiles())) {
       return;
     }
     const first = files.value[0];

@@ -51,12 +51,19 @@ observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the o
 **frontend, fixture mode**
 
 ```
-pnpm -C frontend dev        # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until M2
-epiphany http://localhost:5173    # or WebKitWebDriver --port=4445 + MiniBrowser --automation
+pnpm -C frontend dev --port <own port>   # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until M2
+just webdriver <own port>                # WebKitWebDriver on a private virtual display (Xvfb)
+# session capabilities: browserName "MiniBrowser",
+#   webkitgtk:browserOptions { binary: "/usr/lib/webkitgtk-6.0/MiniBrowser", args: ["--automation"] }
 ```
 
-observed: three panes, bands between them, apply a chunk via gutter, undo, bulk apply;
-devtools console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path.
+- [VF8] Agents never open a browser window on the owner's screens (owner, 2026-10-09: windows
+  appeared under their mouse). Drive WebKit only through `just webdriver`; never start
+  `WebKitWebDriver`, `MiniBrowser` or `epiphany` directly. Set the window size with WebDriver
+  `setWindowRect`. Stop the driver and the dev server when done.
+
+observed: three panes, bands between them, apply a change via its arrow, undo, bulk apply;
+console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path.
 
 **editor layout tests (WebKit)**
 

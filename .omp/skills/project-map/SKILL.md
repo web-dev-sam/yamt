@@ -64,16 +64,17 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 ## State ownership (vision 2)
 
-| state                                               | owner                                                                                                                                        |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)                     | CodeMirror `EditorState`                                                                                                                     |
-| chunk current positions (center)                    | `editor/chunkField` StateField, mapped per CM1 (`-1`; `to` `+1` only when it ends mid-line); restored on undo by an `invertedEffects` effect |
-| chunk apply status                                  | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)                                        |
-| left/right decorations                              | computed once per file; docs are immutable                                                                                                   |
-| scroll positions                                    | DOM, driven by `editor/scrollSync`                                                                                                           |
-| connector geometry                                  | derived per frame, never stored                                                                                                              |
-| file list, active file, summary counts, busy, error | `ui/store.ts` singleton via `useAppStore()`                                                                                                  |
-| captured index stages (for reset)                   | `session::FileState.stages`, captured at `open()`                                                                                            |
+| state                                    | owner                                                                                                                                        |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)          | CodeMirror `EditorState`                                                                                                                     |
+| chunk current positions (center)         | `editor/chunkField` StateField, mapped per CM1 (`-1`; `to` `+1` only when it ends mid-line); restored on undo by an `invertedEffects` effect |
+| chunk apply status                       | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)                                        |
+| left/right decorations                   | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                          |
+| scroll positions                         | DOM, driven by `editor/scrollSync`                                                                                                           |
+| connector geometry                       | derived per frame, never stored                                                                                                              |
+| file list, active file, loaded file data | `ui/store.ts` singleton via `useAppStore()`                                                                                                  |
+| summary counts of the open file          | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                               |
+| captured index stages (for reset)        | `session::FileState.stages`, captured at `open()`                                                                                            |
 
 Vue state never holds an `EditorView`, a position, or document text.
 

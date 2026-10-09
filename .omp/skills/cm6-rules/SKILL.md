@@ -20,8 +20,9 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   registered with `invertedEffects` from `@codemirror/commands` so **undo restores status
   together with text**. Test: apply → undo ⇒ status back to `pending`.
 - [CM3] Left and right panes: `EditorState.readOnly.of(true)` + `EditorView.editable.of(false)`;
-  no `history()`. Their decorations are built once per file from the fixed `local`/`remote`
-  ranges and never remapped. `editable: false` still allows selection and copy — keep it.
+  no `history()`. Their decorations come from the fixed `local`/`remote` ranges (never remapped)
+  plus a read-only status mirror the controller pushes after each center transaction (1.4).
+  `editable: false` still allows selection and copy — keep it.
 - [CM4] Every pane carries the same base extensions (bundled JetBrains Mono theme, line
   numbers, highlighting, `EditorState.lineSeparator` when `eol === "CrLf"`) so line metrics
   are identical — that identity is what makes connector and scroll math trivial.
@@ -37,21 +38,22 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
 - [CM7] Bulk apply builds all changes in **original** coordinates and passes them together as
   `state.changes([...])` — CM composes them — so the whole bulk is one undo step.
 - [CM8] A chunk whose current range collapsed to empty because the user deleted it becomes
-  `dismissed` in the same update cycle; the gutter marker disappears.
+  `dismissed` in the same update cycle; its arrows disappear.
 - [CM9] Never store a `number` position outside the StateField; derive from
   `state.field(chunkField)` at use time. Positions are `DocPos`-branded.
 
 ## Rendering
 
 - [CM10] Decorations: `Decoration.line({ class })` for bands, `Decoration.mark` for
-  intra-line diffs (later), `gutter({ domEventHandlers })` for apply/dismiss markers. Compute
+  intra-line diffs (later). Apply/ignore arrows are SVG groups in the gap strips, acting on
+  `pointerdown` (a CM gutter on the inner edge missed clicks in WebKit; 1.4). Compute
   with `RangeSetBuilder` over `view.visibleRanges` only when the set depends on the viewport.
 - [CM11] Connector endpoints come from `view.lineBlockAt(pos)` / `view.coordsAtPos`; subtract
   `scrollDOM.scrollTop`; draw only chunks intersecting either pane's `viewport`.
 - [CM12] Scroll sync: one function `targets(source, scrollTop) → { left, center, right }`
-  (piecewise-linear through chunk anchors in pixel space). Re-entrancy guard: a `syncing`
-  flag set before writing `scrollTop`s, cleared in the next `requestAnimationFrame`;
-  scroll events while `syncing` are ignored. Decision 12: this one function is the swap point.
+  (piecewise-linear through chunk anchors in pixel space). Re-entrancy guard: the follower panes
+  a sync wrote ignore their echo until the next `requestAnimationFrame`, and a source whose
+  `scrollTop` did not change does not re-sync (1.2). Decision 12: this one function is the swap point.
 - [CM13] Repaint of strips and sync is coalesced to one `requestAnimationFrame` per frame;
   no synchronous layout reads in scroll handlers.
 - [CM14] `destroy()` destroys all three views, removes listeners, and leaves the host elements
