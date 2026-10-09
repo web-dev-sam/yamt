@@ -1,7 +1,7 @@
 import type { StateField } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import type { Chunk, FileMergeData } from "../ipc";
+import type { FileMergeData } from "../ipc";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { chunkRows, type PaneViews } from "./internal/geometry";
@@ -17,7 +17,6 @@ export type MergeHosts = {
 };
 
 export class MergeController {
-  readonly #chunks: readonly Chunk[];
   readonly #field: StateField<readonly ChunkSpan[]>;
   readonly #views: PaneViews;
   readonly #strips: MergeHosts["strips"];
@@ -32,7 +31,6 @@ export class MergeController {
         this.#requestFrame();
       }
     });
-    this.#chunks = chunks;
     this.#field = field;
     this.#views = {
       left: createPane({
@@ -68,7 +66,7 @@ export class MergeController {
     this.#frameId ??= requestAnimationFrame(() => {
       this.#frameId = null;
       const views = this.#views;
-      const rows = chunkRows(views, this.#chunks, views.center.state.field(this.#field));
+      const rows = chunkRows(views, views.center.state.field(this.#field));
       this.#scroll.sync(rows);
       paintStrips(views, this.#strips, rows);
     });

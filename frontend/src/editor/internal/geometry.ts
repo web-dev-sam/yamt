@@ -31,21 +31,11 @@ function viewSpan(view: EditorView, range: { readonly from: number; readonly to:
   return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
 }
 
-export function chunkRows(
-  views: PaneViews,
-  chunks: readonly Chunk[],
-  centerSpans: readonly ChunkSpan[],
-): ChunkRow[] {
-  return chunks.map((chunk, index) => {
-    const center = centerSpans[index];
-    if (center === undefined) {
-      throw new Error(`chunk ${chunk.id} has no center range`);
-    }
-    return {
-      chunk,
-      left: viewSpan(views.left, lineSpan(views.left.state.doc, chunk.local)),
-      center: viewSpan(views.center, center),
-      right: viewSpan(views.right, lineSpan(views.right.state.doc, chunk.remote)),
-    };
-  });
+export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): ChunkRow[] {
+  return centerSpans.map((center) => ({
+    chunk: center.chunk,
+    left: viewSpan(views.left, lineSpan(views.left.state.doc, center.chunk.local)),
+    center: viewSpan(views.center, center),
+    right: viewSpan(views.right, lineSpan(views.right.state.doc, center.chunk.remote)),
+  }));
 }

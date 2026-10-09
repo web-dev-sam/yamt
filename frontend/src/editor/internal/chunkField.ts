@@ -8,8 +8,7 @@ import { chunkTone, type Tone } from "./tone";
 type DocPos = number & { readonly __brand: "DocPos" };
 
 export type ChunkSpan = {
-  readonly id: Chunk["id"];
-  readonly kind: Chunk["kind"];
+  readonly chunk: Chunk;
   readonly tone: Tone;
   readonly from: DocPos;
   readonly to: DocPos;
@@ -56,8 +55,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
       chunks.map((chunk) => {
         const { from, to } = lineSpan(state.doc, chunk.base);
         return {
-          id: chunk.id,
-          kind: chunk.kind,
+          chunk,
           tone: chunkTone(chunk, "center"),
           from: toDocPos(from),
           to: toDocPos(to),

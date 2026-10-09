@@ -67,6 +67,20 @@ test("positions beyond the last anchor and before the first keep the last offset
   expect(targets(anchors, "right", -30)).toEqual({ left: -30, center: -30, right: -30 });
 });
 
+test("the content ends anchor the tails when they differ from the last chunk's offset", () => {
+  const anchors = anchorsOf(
+    [row({ start: 5, len: 5 }, { start: 5, len: 12 }, { start: 5, len: 12 })],
+    ends(20, 27, 30),
+  );
+
+  expect(targets(anchors, "center", 27 * LINE_PX).right).toBe(30 * LINE_PX);
+  expect(targets(anchors, "center", 22 * LINE_PX)).toEqual({
+    left: 15 * LINE_PX,
+    center: 22 * LINE_PX,
+    right: 23.5 * LINE_PX,
+  });
+});
+
 test("a 2,000-line file with 40 mixed chunks maps every chunk top exactly and never goes back", () => {
   const rows = [];
   const next = { left: 0, center: 0, right: 0 };

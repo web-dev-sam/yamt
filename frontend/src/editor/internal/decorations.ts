@@ -5,7 +5,8 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import type { Chunk } from "../../ipc";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
-import { chunkTone, sideChanged, type Side, type Tone } from "./tone";
+import { sideChanged, type Side } from "./side";
+import { chunkTone, type Tone } from "./tone";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 

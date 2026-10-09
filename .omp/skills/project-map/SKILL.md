@@ -30,8 +30,8 @@ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed 
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts;
                     fixture.ts (the M1 source: valibot over fixtures/golden/*.json); bindings.ts (GENERATED); log.ts; TauriChunkSource is M2
-frontend/src/model  pure TS shared by editor/ and connectors/; exists only while both consume it (planned)
-frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s) + destroy(); internal/: pane, chunkField, decorations, tone, lineSpan, geometry, strips, scrollSync; theme.css; framework-free (engine.browser.test.ts WebKit probe; other tests in `node`)
+frontend/src/model  empty and unused (AGENTS.md only); reserved for pure TS shared by more than one module
+frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s) + destroy(); internal/: pane, chunkField, decorations, side, tone, lineSpan, geometry, strips, scrollSync; theme.css; framework-free (engine.browser.test.ts WebKit probe; other tests in `node`)
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select), MergeToolbar (inert), MergeView, useMergeController (only ../editor importer), store.ts singleton; planned: WarningBanner
 frontend/src/main.ts     creates the fixture source and the store, loads the file list, mounts App; `VITE_CHUNK_SOURCE` picks a source from M2

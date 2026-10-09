@@ -72,10 +72,13 @@ test("a real fixture's chunks start at line starts; an empty base range is a poi
 
   const [first, insertion, , last] = state.field(field);
 
-  expect(first).toMatchObject({ id: 0, kind: "Conflict", from: 0, to: doc.line(2).from });
+  expect(first).toMatchObject({
+    chunk: { id: 0, kind: "Conflict" },
+    from: 0,
+    to: doc.line(2).from,
+  });
   expect(insertion).toMatchObject({
-    id: 1,
-    kind: "LocalOnly",
+    chunk: { id: 1, kind: "LocalOnly" },
     tone: "inserted",
     from: doc.line(9).from,
     to: doc.line(9).from,

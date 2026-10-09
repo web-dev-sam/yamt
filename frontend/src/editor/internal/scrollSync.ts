@@ -63,8 +63,9 @@ export class ScrollSync {
   readonly #views: PaneViews;
   readonly #listeners = new AbortController();
   #source: Pane | null = null;
-  #syncing: readonly Pane[] = [];
-  #release: number | null = null;
+  #echoes: readonly Pane[] = [];
+  #clearEchoes: number | null = null;
+  #syncedTops: Readonly<Record<Pane, number>> | null = null;
 
   constructor(views: PaneViews, requestFrame: () => void) {
     this.#views = views;
@@ -72,7 +73,7 @@ export class ScrollSync {
       views[pane].scrollDOM.addEventListener(
         "scroll",
         () => {
-          if (!this.#syncing.includes(pane)) {
+          if (!this.#echoes.includes(pane)) {
             this.#source = pane;
           }
           requestFrame();
@@ -84,31 +85,36 @@ export class ScrollSync {
 
   sync(rows: readonly Readonly<Record<Pane, Span>>[]): void {
     const source = this.#source;
-    if (source === null) {
-      return;
-    }
     this.#source = null;
     const views = this.#views;
+    if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.[source]) {
+      return;
+    }
     const at = targets(anchorsOf(rows, ends(views)), source, middle(views[source]));
     const followers = PANES.filter((pane) => pane !== source);
     for (const pane of followers) {
       const { scrollDOM, documentPadding } = views[pane];
       scrollDOM.scrollTop = at[pane] + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
     }
-    this.#syncing = followers;
-    if (this.#release !== null) {
-      cancelAnimationFrame(this.#release);
+    this.#syncedTops = {
+      left: views.left.scrollDOM.scrollTop,
+      center: views.center.scrollDOM.scrollTop,
+      right: views.right.scrollDOM.scrollTop,
+    };
+    this.#echoes = followers;
+    if (this.#clearEchoes !== null) {
+      cancelAnimationFrame(this.#clearEchoes);
     }
-    this.#release = requestAnimationFrame(() => {
-      this.#release = null;
-      this.#syncing = [];
+    this.#clearEchoes = requestAnimationFrame(() => {
+      this.#clearEchoes = null;
+      this.#echoes = [];
     });
   }
 
   destroy(): void {
     this.#listeners.abort();
-    if (this.#release !== null) {
-      cancelAnimationFrame(this.#release);
+    if (this.#clearEchoes !== null) {
+      cancelAnimationFrame(this.#clearEchoes);
     }
   }
 }

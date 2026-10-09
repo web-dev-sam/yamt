@@ -3,7 +3,8 @@ import type { EditorView } from "@codemirror/view";
 
 import { bandPath, type Band } from "../../connectors";
 import type { ChunkRow, PaneViews } from "./geometry";
-import { chunkTone, sideChanged, type Side, type Tone } from "./tone";
+import { sideChanged, type Side } from "./side";
+import { chunkTone, type Tone } from "./tone";
 
 type ToneBand = Band & { readonly tone: Tone };
 
