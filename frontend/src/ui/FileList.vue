@@ -18,7 +18,7 @@ function extension(path: string): string {
         :aria-selected="path === active"
         class="mx-1 flex cursor-default items-center gap-2 rounded px-2 py-1 hover:bg-hover aria-selected:bg-row-selected"
       >
-        <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-white">
+        <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-on-primary">
           {{ extension(path) }}
         </span>
         <span class="truncate">{{ path }}</span>

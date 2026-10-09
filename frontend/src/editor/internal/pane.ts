@@ -13,7 +13,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
-export type PaneKind = "side" | "center";
+type PaneKind = "side" | "center";
 
 const LANGUAGES: Readonly<Record<string, () => Extension>> = {
   typescript: () => javascript({ typescript: true }),
@@ -93,7 +93,7 @@ export function createPane(pane: {
   language: string | null;
   parent: HTMLElement;
 }): EditorView {
-  const language =
+  const languageExtension =
     pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
       ? LANGUAGES[pane.language]
       : undefined;
@@ -104,7 +104,7 @@ export function createPane(pane: {
       drawSelection(),
       darkTheme,
       syntaxHighlighting(paletteHighlight),
-      language?.() ?? [],
+      languageExtension?.() ?? [],
       kindExtensions(pane.kind),
     ],
   });

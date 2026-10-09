@@ -1,9 +1,6 @@
 import { formatMoney } from "./money";
 import type { Product } from "./catalog";
 
-export const MAX_QUANTITY = 99;
-const TAX_RATE = 0.2;
-
 export interface CartLine {
   readonly product: Product;
   quantity: number;
@@ -14,6 +11,9 @@ export interface Cart {
   lines: CartLine[];
   couponCode: string | null;
 }
+
+export const MAX_QUANTITY = 99;
+const TAX_RATE = 0.2;
 
 export function createCart(id: string): Cart {
   return { id, lines: [], couponCode: null };
@@ -50,6 +50,10 @@ export function subtotal(cart: Cart): number {
   return sum;
 }
 
+export function itemCount(cart: Cart): number {
+  return cart.lines.reduce((count, line) => count + line.quantity, 0);
+}
+
 export function discount(cart: Cart): number {
   if (cart.couponCode === "WELCOME10") {
     return subtotal(cart) * 0.1;
@@ -57,17 +61,16 @@ export function discount(cart: Cart): number {
   return 0;
 }
 
-export function tax(cart: Cart): number {
-  return (subtotal(cart) - discount(cart)) * TAX_RATE;
-}
-
 export function total(cart: Cart): number {
   return subtotal(cart) - discount(cart) + tax(cart);
 }
 
+export function tax(cart: Cart): number {
+  return (subtotal(cart) - discount(cart)) * TAX_RATE;
+}
+
 export function summary(cart: Cart): string {
-  const count = cart.lines.reduce((n, line) => n + line.quantity, 0);
-  return `${count} items, ${formatMoney(total(cart))}`;
+  return `${itemCount(cart)} items, ${formatMoney(total(cart))}`;
 }
 
 export function isEmpty(cart: Cart): boolean {

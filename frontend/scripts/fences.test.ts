@@ -126,6 +126,27 @@ test("a two-file cycle violates PM5 once", () => {
   expect(violationsOf(files)).toEqual([{ rule: "PM5", file: "src/model/a.ts", specifier: "./b" }]);
 });
 
+test("an extensionless two-file cycle violates PM5 once", () => {
+  const files = [
+    { path: "src/model/a.ts", text: `import "./b";` },
+    { path: "src/model/b.ts", text: `import "./a";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([{ rule: "PM5", file: "src/model/a.ts", specifier: "./b" }]);
+});
+
+test("a cycle through a .vue file violates PM5 once", () => {
+  const files = [
+    {
+      path: "src/ui/A.vue",
+      text: `<script setup lang="ts">\nimport { b } from "./b";\n</script>\n<template><p>{{ b }}</p></template>\n`,
+    },
+    { path: "src/ui/b.ts", text: `import "./A";\nexport const b = 1;` },
+  ];
+
+  expect(violationsOf(files)).toEqual([{ rule: "PM5", file: "src/ui/A.vue", specifier: "./b" }]);
+});
+
 test("a type-only import into model violates PM2", () => {
   const files = [{ path: "src/ui/store.ts", text: `import type { Chunk } from "../model/chunk";` }];
 
@@ -141,6 +162,20 @@ test("a ?raw import of an allowed file violates nothing", () => {
       text: `import theme from "./theme.css?raw";\nexport { theme };`,
     },
   ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("a ?raw import of model from ui violates PM2", () => {
+  const files = [{ path: "src/ui/s.ts", text: `import "../model?raw";` }];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM2", file: "src/ui/s.ts", specifier: "../model?raw" },
+  ]);
+});
+
+test("ui importing an internal/ directory outside src/ is allowed", () => {
+  const files = [{ path: "src/ui/s.ts", text: `import "../../fixtures/internal/x.txt?raw";` }];
 
   expect(violationsOf(files)).toEqual([]);
 });

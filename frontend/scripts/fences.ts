@@ -71,7 +71,12 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   if (module === "ui" && isInside(target, "src/model")) {
     return { rule: "PM2", reason: "ui/ never imports model/" };
   }
-  if (target.split("/").includes("internal") && MODULE_OF.exec(target)?.[1] !== module) {
+  const targetModule = MODULE_OF.exec(target)?.[1];
+  if (
+    targetModule !== undefined &&
+    targetModule !== module &&
+    target.split("/").includes("internal")
+  ) {
     return { rule: "PM5", reason: "no module imports another module's internal/" };
   }
   return undefined;
@@ -113,15 +118,26 @@ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[
   return components;
 }
 
+function isCycle(
+  component: readonly string[],
+  graph: ReadonlyMap<string, readonly Edge[]>,
+): boolean {
+  return (
+    component.length > 1 ||
+    component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
+  );
+}
+
 function cycleViolations(graph: ReadonlyMap<string, readonly Edge[]>): FenceViolation[] {
-  return stronglyConnected(graph).flatMap((component) => {
+  const cycles = stronglyConnected(graph).filter((component) => isCycle(component, graph));
+  return cycles.flatMap((component) => {
     const members = component.toSorted();
     const [file] = members;
-    if (file === undefined) {
-      return [];
-    }
-    const edge = graph.get(file)?.find((candidate) => members.includes(candidate.file));
-    if (edge === undefined) {
+    const edge =
+      file === undefined
+        ? undefined
+        : graph.get(file)?.find((candidate) => members.includes(candidate.file));
+    if (file === undefined || edge === undefined) {
       return [];
     }
     return [

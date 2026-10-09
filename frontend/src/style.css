@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 @theme static {
+  --color-*: initial;
+
   --font-sans: system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
@@ -19,6 +21,7 @@
   --color-hover: #393b40;
   --color-row-selected: #2e436e;
   --color-primary: #3574f0;
+  --color-on-primary: #ffffff;
 
   --color-syntax-keyword: #cf8e6d;
   --color-syntax-string: #6aab73;

@@ -31,12 +31,12 @@ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed 
 frontend/src/ipc    public surface ipc/index.ts (planned); bindings.ts (GENERATED); log.ts (+ log.test.ts);
                     planned: ChunkSource, domain.ts (brands, toDomain), fixture.ts (valibot)
 frontend/src/model  pure TS shared by editor/ and connectors/; exists only while both consume it (planned)
-frontend/src/editor CodeMirror 6 integration; public surface = MergeController (index.ts); framework-free (planned; engine.test.ts WebKit probe)
+frontend/src/editor CodeMirror 6 integration; public surface = MergeController (index.ts: MergeTexts stand-in, destroy()); internal/pane.ts createPane; framework-free (engine.test.ts WebKit probe)
 frontend/src/connectors  pure band geometry → SVG path strings; no DOM (planned)
-frontend/src/ui     Vue 3 chrome: App.vue; planned: FileList, MergeToolbar, MergeView, WarningBanner, store.ts singleton
+frontend/src/ui     Vue 3 chrome: App, FileList, MergeToolbar (inert), MergeView, useMergeController (only ../editor importer), sample.ts; planned: WarningBanner, store.ts singleton
 frontend/src/main.ts     picks ChunkSource, creates store, mounts App (today: mounts App)
-frontend/scripts    check-sfc-order.ts + .test.ts (VU2); fences.test.ts (PM2/PM3/PM5, planned)
-frontend/fixtures   fixture JSON for FixtureChunkSource (empty)
+frontend/scripts    check-sfc-order.ts + .test.ts (VU2); fences.ts + fences.test.ts (PM2/PM3/PM5, reads src/ itself)
+frontend/fixtures   sample/{base,local,remote}.ts.txt (window sample, `src/cart.ts`); fixture JSON for FixtureChunkSource (planned)
 frontend/tsconfig   tsconfig.app.json: src/**, types [vite/client] — no Node globals in webview code;
                     tsconfig.node.json: scripts/**, vite.config.ts, types [node]. typecheck = `vue-tsc -b`
 frontend/vite.config.ts  Vitest projects: `node` (model, connectors, ipc, scripts) = `pnpm test`;

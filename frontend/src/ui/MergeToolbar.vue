@@ -36,7 +36,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
       </button>
       <button
         type="button"
-        class="rounded border border-primary bg-primary px-3.5 py-1 text-white hover:brightness-110"
+        class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110"
       >
         Mark resolved
       </button>
