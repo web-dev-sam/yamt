@@ -1,15 +1,29 @@
 {
-  "M0S2SessionR2": {
-    "owned": ["crates/session/**", "crates/conflict-repo/**"],
+  "M0S3Cli": {
+    "owned": ["crates/cli/**", "crates/session/src/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
       "crates/merge-core/**",
       "crates/gitio/**",
+      "crates/conflict-repo/**",
+      "crates/session/tests/**",
+      "tests/golden/**",
+      "frontend/fixtures/sample/**",
       "Cargo.toml",
       "Cargo.lock",
-      "clippy.toml",
-      "deny.toml"
+      "justfile"
     ]
+  },
+  "M0S3Goldens": {
+    "owned": [
+      "tests/golden/README.md",
+      "tests/golden/*/README.md",
+      "tests/golden/*/base.*",
+      "tests/golden/*/local.*",
+      "tests/golden/*/remote.*",
+      "scripts/golden-repo.sh"
+    ],
+    "readonly": ["docs/**", ".omp/**", "crates/**"]
   }
 }

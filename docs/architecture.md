@@ -59,8 +59,8 @@ yamt/
 │  │  ├─ connectors/          pure geometry → SVG path strings
 │  │  ├─ ui/                  Vue components + one store. Never imports @codemirror/*
 │  │  └─ main.ts              wiring: pick ChunkSource, mount App
-│  └─ fixtures/               JSON produced by `cli classify --json` from golden triples
-└─ tests/golden/<case>/       base.txt local.txt remote.txt expected.json  (+ README per case)
+│  └─ fixtures/               JSON produced by `cli fixture` from golden triples
+└─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
 ```
 
 Two toolchains, one entry point: `just check` runs every gate below (§8).
@@ -77,6 +77,7 @@ graph LR
     session[session] --> core
     session --> gitio
     cli[cli] --> session
+    cli --> core
     tauri[src-tauri] --> session
   end
   tauri -. generates .-> bindings[ipc/bindings.ts]
@@ -253,14 +254,22 @@ Edge cases owned here (plan §6 → code):
 ### 3.4 `cli`
 
 ```
-yamt-cli classify <base> <local> <remote> [--gap N] [--json]   # chunk table or FileMergeData JSON
-yamt-cli scan [<repo>]                                         # unmerged files + per-file summary
-yamt-cli golden run|update                                     # insta snapshots over tests/golden
-yamt-cli fixture <case> > frontend/fixtures/<case>.json        # M1 input, same DTO as IPC
+yamt-cli classify <base> <local> <remote> [--gap N] [--json]   # chunk table, or the chunks as JSON (§4 `Chunk[]`)
+yamt-cli scan [<repo>]                                         # unmerged files + per-file chunk counts or unsupported reason
+yamt-cli golden run|update [<dir>]                            # compare / rewrite every case's expected.json (default tests/golden)
+yamt-cli fixture <case-dir>                                    # FileMergeData JSON for M1 (`session::merge_data`), same DTO as IPC
 ```
 
-M0 acceptance lives here: `golden run` passes, `classify --json` on each golden matches
-`expected.json`, and the human compares ~10 real-world goldens against PhpStorm once.
+`cli` uses `merge-core` directly only for pure file classification (`classify`, `golden`);
+everything that touches a repository goes through `session`. A case is
+`tests/golden/<case>/{base,local,remote}.<ext>` with the original file extension (so PhpStorm
+and the window highlight it), a generated `expected.json` (the chunks; written only by
+`just golden-update`), and a `README.md` (source project, license, commits, original path,
+how to open it in PhpStorm). `scripts/golden-repo.sh <case> <dir>` builds a git repo holding
+that conflict for PhpStorm's own merge window.
+
+M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-file` cross-check
+(RK13) passes, and the human compares the 10 goldens against PhpStorm once.
 
 ### 3.5 `src-tauri`
 
@@ -594,13 +603,14 @@ parallel.
 
 **M0 — Rust, headless**
 
-| #    | slice                                                                                                     | owner     | files                                                | acceptance                                                                                                                                             |
-| ---- | --------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0.0  | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent   | everything (only time one agent owns the whole tree) | `just check` passes on empty crates                                                                                                                    |
-| 0.1  | `merge-core` types + `compute_chunks` + proptests                                                         | rust-impl | `crates/merge-core/**`                               | invariants §3.1 green; 5 synthetic triples match hand-written expected chunks (Rust literals; the `expected.json` form arrives with `classify` in 0.3) |
-| 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                    | integration tests incl. add/add, CRLF                                                                                                                  |
-| 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                  | finish/reset round-trip test                                                                                                                           |
-| 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check                                         | rust-impl | `crates/cli/**`, `tests/golden/**`                   | 10 real goldens committed; human PhpStorm comparison **(human gate)**                                                                                  |
+| #    | slice                                                                                                     | owner     | files                                                             | acceptance                                                                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0.0  | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent   | everything (only time one agent owns the whole tree)              | `just check` passes on empty crates                                                                                                                    |
+| 0.1  | `merge-core` types + `compute_chunks` + proptests                                                         | rust-impl | `crates/merge-core/**`                                            | invariants §3.1 green; 5 synthetic triples match hand-written expected chunks (Rust literals; the `expected.json` form arrives with `classify` in 0.3) |
+| 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                                 | integration tests incl. add/add, CRLF                                                                                                                  |
+| 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                               | finish/reset round-trip test                                                                                                                           |
+| 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check; `session::merge_data`                  | rust-impl | `crates/cli/**`, `crates/session/src/**`                          | golden tooling tested on synthetic cases; RK13 cross-check proptest green                                                                              |
+| 0.3' | 10 real goldens from public TS/TSX/Vue projects + `scripts/golden-repo.sh`                                | task      | `tests/golden/**` (not `expected.json`), `scripts/golden-repo.sh` | cases committed with attribution; `just golden` green; human PhpStorm comparison **(human gate)**                                                      |
 
 **M1 — frontend in a browser, fixture JSON**
 
