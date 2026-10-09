@@ -74,10 +74,10 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<Output> {
 }
 
 pub fn git_ok(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    succeeded(args, git(dir, args)?)
+    stdout_or_failure(args, git(dir, args)?)
 }
 
-fn succeeded(args: &[&str], output: Output) -> Result<Vec<u8>> {
+fn stdout_or_failure(args: &[&str], output: Output) -> Result<Vec<u8>> {
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -98,7 +98,7 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
     let mut stdin = child.stdin.take().ok_or(Error::NoStdin)?;
     stdin.write_all(content)?;
     drop(stdin);
-    let stdout = succeeded(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
+    let stdout = stdout_or_failure(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
     Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
 }
 

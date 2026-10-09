@@ -142,8 +142,7 @@ impl MergeSession {
         let file = find_file(&mut self.files, path)?;
         self.repo.restore_stages(&file.stages.entries())?;
         file.status = FileStatus::Unresolved;
-        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
-        if file.stages.has_both_sides() {
+        if file.stages.can_rebuild_markers() {
             self.repo.checkout_merge(&file.path)?;
         }
         Ok(())
@@ -192,8 +191,11 @@ impl CapturedStages {
         }
     }
 
-    fn has_both_sides(&self) -> bool {
-        self.local.is_some() && self.remote.is_some()
+    fn can_rebuild_markers(&self) -> bool {
+        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
+        let has_both_sides = self.local.is_some() && self.remote.is_some();
+        // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
+        has_both_sides && !self.has_mode(SUBMODULE_MODE)
     }
 
     fn has_mode(&self, mode: u32) -> bool {

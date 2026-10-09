@@ -280,3 +280,17 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
     }
     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
 }
+
+#[test]
+fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
+    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
+
+    session.reset(SUBMODULE).unwrap();
+
+    assert_eq!(git_ok(dir.path(), &["ls-files", "-u"]).unwrap(), before);
+    let files = session.files();
+    let submodule = files.iter().find(|file| file.path == SUBMODULE).unwrap();
+    assert_eq!(submodule.status, FileStatus::Unresolved);
+}

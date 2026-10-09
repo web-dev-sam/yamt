@@ -1,0 +1,76 @@
+diff --git i/crates/conflict-repo/src/lib.rs w/crates/conflict-repo/src/lib.rs
+index 65804e8..2f23bd7 100644
+--- i/crates/conflict-repo/src/lib.rs
++++ w/crates/conflict-repo/src/lib.rs
+@@ -74,10 +74,10 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<Output> {
+ }
+ 
+ pub fn git_ok(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
+-    succeeded(args, git(dir, args)?)
++    stdout_or_failure(args, git(dir, args)?)
+ }
+ 
+-fn succeeded(args: &[&str], output: Output) -> Result<Vec<u8>> {
++fn stdout_or_failure(args: &[&str], output: Output) -> Result<Vec<u8>> {
+     if output.status.success() {
+         Ok(output.stdout)
+     } else {
+@@ -98,7 +98,7 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
+     let mut stdin = child.stdin.take().ok_or(Error::NoStdin)?;
+     stdin.write_all(content)?;
+     drop(stdin);
+-    let stdout = succeeded(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
++    let stdout = stdout_or_failure(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
+     Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
+ }
+ 
+diff --git i/crates/session/src/session.rs w/crates/session/src/session.rs
+index 27e9ab1..0a5f5f2 100644
+--- i/crates/session/src/session.rs
++++ w/crates/session/src/session.rs
+@@ -142,8 +142,7 @@ impl MergeSession {
+         let file = find_file(&mut self.files, path)?;
+         self.repo.restore_stages(&file.stages.entries())?;
+         file.status = FileStatus::Unresolved;
+-        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
+-        if file.stages.has_both_sides() {
++        if file.stages.can_rebuild_markers() {
+             self.repo.checkout_merge(&file.path)?;
+         }
+         Ok(())
+@@ -192,8 +191,11 @@ impl CapturedStages {
+         }
+     }
+ 
+-    fn has_both_sides(&self) -> bool {
+-        self.local.is_some() && self.remote.is_some()
++    fn can_rebuild_markers(&self) -> bool {
++        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
++        let has_both_sides = self.local.is_some() && self.remote.is_some();
++        // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
++        has_both_sides && !self.has_mode(SUBMODULE_MODE)
+     }
+ 
+     fn has_mode(&self, mode: u32) -> bool {
+diff --git i/crates/session/tests/open_and_load.rs w/crates/session/tests/open_and_load.rs
+index 5b6dd18..fc2b8b4 100644
+--- i/crates/session/tests/open_and_load.rs
++++ w/crates/session/tests/open_and_load.rs
+@@ -280,3 +280,17 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
+     }
+     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
+ }
++
++#[test]
++fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
++    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
++
++    session.reset(SUBMODULE).unwrap();
++
++    assert_eq!(git_ok(dir.path(), &["ls-files", "-u"]).unwrap(), before);
++    let files = session.files();
++    let submodule = files.iter().find(|file| file.path == SUBMODULE).unwrap();
++    assert_eq!(submodule.status, FileStatus::Unresolved);
++}
