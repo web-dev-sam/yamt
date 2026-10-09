@@ -49,7 +49,7 @@ hooks-test:
     pnpm -C frontend exec tsx --test ../.omp/hooks/test/hooks.test.ts
 
 dev-web:
-    VITE_CHUNK_SOURCE=fixture {{ just_executable() }} frontend vite
+    {{ just_executable() }} frontend vite
 
 dev-app:
     cargo tauri dev
@@ -68,6 +68,26 @@ golden-show case:
 
 golden-repo case dir:
     scripts/golden-repo.sh {{ case }} {{ dir }}
+
+# Mutation testing of the lines changed since <base> (not in `check`; the verifier runs it per wave).
+mutants base:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p target/mutants
+    git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
+    if [ -s target/mutants/rust.diff ]; then
+        status=0
+        cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
+        if [ "$status" -ne 0 ] && [ "$status" -ne 2 ] && [ "$status" -ne 3 ]; then exit "$status"; fi
+    else
+        echo "mutants: no Rust changes since {{ base }}"
+    fi
+    web_files=$(git diff --name-only --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    if [ -n "$web_files" ]; then
+        pnpm -C frontend exec stryker run --plugins @stryker-mutator/vitest-runner --testRunner vitest --mutate "$web_files" --reporters clear-text --tempDirName ../target/stryker-tmp
+    else
+        echo "mutants: no TypeScript changes since {{ base }}"
+    fi
 
 [positional-arguments]
 [private]

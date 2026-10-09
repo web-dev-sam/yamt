@@ -14,8 +14,8 @@ evidence. The verifier runs the gate once per wave; implementers run their layer
 just check
 ```
 
-Runs, in order: `fmt-check` → `clippy` → `test` → `deny` → `bindings-check` → `web-lint` →
-`web-typecheck` → `web-test` → `web-unused` → `arch-check` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
+Runs, in order: `fmt-check` → `clippy` → `test` → `deny` → `bindings-check` → `fixtures-check` →
+`web-lint` → `web-typecheck` → `web-test` → `web-unused` → `arch-check` → `golden` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
 with the failing recipe name and the first 30 relevant lines in `failures[].excerpt`.
 
 - [VF1] The verifier never fixes anything. A failure goes back to the owning slice.
@@ -25,13 +25,17 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
   an implementer's isolated workspace.
 - [VF6] Verifier recipes are read-only commands; a detector's failing path is proven by a
   committed test, never by tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no writes).
+- [VF7] After `just check`, once per wave: `just mutants <base>` (`<base>` = the commit before the
+  wave's patches; not in `check`). It mutates the wave's changed Rust lines (cargo-mutants) and
+  changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS); reports in
+  `target/`. Each surviving mutant goes into `smoke[]` as `file:line mutation`; `editor/` is not mutated.
 
 ## Smoke recipes (pick the one for the layer; paste `observed`)
 
 **merge-core / cli**
 
 ```
-cargo run -p yamt-cli -- classify tests/golden/<case>/{base,local,remote}.txt
+just golden-show <case>    # classify tests/golden/<case>/{base,local,remote}.<ext>; `just smoke-cli` for the sample
 ```
 
 observed: chunk table with kinds and ranges; compare against `expected.json` by eye for one case.
@@ -47,8 +51,8 @@ observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the o
 **frontend, fixture mode**
 
 ```
-just dev-web            # VITE_CHUNK_SOURCE=fixture
-epiphany http://localhost:5173
+pnpm -C frontend dev        # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until M2
+epiphany http://localhost:5173    # or WebKitWebDriver --port=4445 + MiniBrowser --automation
 ```
 
 observed: three panes, bands between them, apply a chunk via gutter, undo, bulk apply;
@@ -67,7 +71,7 @@ WebKit cannot launch on this machine, say so verbatim: `pnpm test` (the `node` p
 **tauri shell (M2+)**
 
 ```
-scripts/conflict-repo.sh /tmp/yamt-smoke     # creates a repo with 3 conflicted files incl. add/add and CRLF
+scripts/conflict-repo.sh /tmp/yamt-smoke     # (planned, M2) a repo with 3 conflicted files incl. add/add and CRLF
 cargo tauri dev -- --repo /tmp/yamt-smoke
 ```
 

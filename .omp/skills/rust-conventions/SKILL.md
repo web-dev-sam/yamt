@@ -22,6 +22,8 @@ The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic
   No `async`, no `tokio`: git subprocesses and diffs are synchronous and fast.
 - [RS6] Functions ≤ 40 lines, files ≤ 400 lines; split by responsibility, not by count.
   Detector: clippy `too_many_lines` (threshold 40).
+- [RS16] A name says what it returns: `is_/has_/can_` return `bool`; a fn returning data is named for the
+  data (`computed_json`, `stdout_or_failure`, not `expected_json`, `succeeded`); a call kept only as a guard is `require_*`; no one-letter helpers (`g`).
 
 ## Errors
 
@@ -40,8 +42,8 @@ The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic
   `pub(crate)`. One module per file; `mod.rs` only for a directory module. Binaries in
   `src/main.rs` ≤ 30 lines delegating to the lib.
 - [RS11] Unit tests in `#[cfg(test)] mod tests { use super::*; }` at the bottom of the file
-  they test. Integration tests (real git, real files) in `crates/<x>/tests/`. Golden snapshots
-  via `insta`, invariants via `proptest`. Test names say the behaviour:
+  they test. Integration tests (real git, real files) in `crates/<x>/tests/`. Goldens are
+  `tests/golden/<case>/expected.json` (`just golden-update`; byte-compared by `just golden`), invariants via `proptest`. Test names say the behaviour:
   `add_add_conflict_yields_single_conflict_chunk`.
 - [RS12] No `mod util`, `mod helpers`, `mod common`. Name the module after what it owns.
 

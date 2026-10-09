@@ -64,24 +64,29 @@ comparison waits for the window. The window shows the 10 real conflicts as the e
 them — colours, connectors, locked scroll — so the owner can compare against WebStorm by eye;
 then applying changes. Acceptance (plan §5 M1, architecture §9): three panes, chunk bands, two
 connector strips, locked scroll, apply + bulk apply, editable center, undo, on the 10 golden
-fixtures, in WebKit. Non-goals: Tauri and a live git merge (M2), `.vue`/`.tsx` highlighting,
-word-level diff.
+fixtures, in WebKit. The chunk algorithm is judged by what the window shows (plan §2 #28).
+Non-goals: Tauri and a live git merge (M2), `.vue`/`.tsx` highlighting, word-level diff.
 Orchestrator setup: `just fixtures` / `just fixtures-check` (in `check`) write the engine's
 output for every golden to `frontend/fixtures/golden/<case>.json`; oxfmt ignores them; the
-`node` test project includes `src/ui/**/*.test.ts`.
+`node` test project includes `src/ui/**/*.test.ts`; `just mutants <base>` (plan §2 #27).
 Re-cut of architecture §9: the store and file list (from 1.3) join 1.0 so real files appear
-first; the rest of 1.3 (toolbar, counts, finish) joins 1.4. Brands use `__brand` (ts-conventions
-pattern), not §4's `__space`.
+first; the rest of 1.3 (toolbar, counts, finish) joins 1.4. Brands use `__brand` (architecture §4).
+Ride-alongs for the next slice owning each file (logged nits, not slices of their own): gitio
+#65 `closed_pipe` twice, #66 receiver type spelled 3×; merge-core #67 duplicate BothSame
+assertion, #68 committed `invariants.proptest-regressions`, `AGENTS.md` "goldens via insta";
+cli #104 test name, #111 `golden.rs:82` NotFound guard survives mutation.
 
-| wave | slice                                                                                                    | owner    | status  | evidence |
-| ---- | -------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1    | 1.0 generated types, fixture source, store, file list of the 10 conflicts (`briefs/1.0-ipc-fixtures.md`) | web-impl | planned |          |
-| 1    | 1.P palette test, VU17 (`briefs/1.P-palette-test.md`)                                                    | web-impl | planned |          |
-| 2    | 1.1 editor: chunk state, apply, chunk colours; `MergeTexts` → `FileMergeData`                            | web-impl | todo    |          |
-| 2    | 1.1' connector geometry                                                                                  | web-impl | todo    |          |
-| 3    | 1.2 strips + locked scroll                                                                               | web-impl | todo    |          |
-| 3    | owner compares the 10 conflicts against WebStorm in the window (M0 Gate C; settles `DEFAULT_GAP`)        | human    | todo    |          |
-| 4    | 1.4 gutter arrows, bulk apply, toolbar wiring, summary counts, finish                                    | web-impl | todo    |          |
+| wave | slice                                                                                                    | owner     | status  | evidence                                                                                                                                                                                                                                                                                                                                          |
+| ---- | -------------------------------------------------------------------------------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | retro after M0 (findings #51–#110)                                                                       | curator   | done    | Gate D 2026-10-09: approved by owner — mutation testing engine + window, hermetic engine tests (risk row; code fix below), standing orchestrator rules, comment rule, naming rule; delegated to orchestrator — risk-register update, IPC rule text, insta removal; rejected — uniform-error check, fixture lock; applied; `just hooks-test` 10/10 |
+| 1    | 1.0 generated types, fixture source, store, file list of the 10 conflicts (`briefs/1.0-ipc-fixtures.md`) | web-impl  | planned |                                                                                                                                                                                                                                                                                                                                                   |
+| 1    | 1.P palette test, VU17 (`briefs/1.P-palette-test.md`)                                                    | web-impl  | planned |                                                                                                                                                                                                                                                                                                                                                   |
+| 2    | 1.1 editor: chunk state, apply, chunk colours; `MergeTexts` → `FileMergeData`                            | web-impl  | todo    |                                                                                                                                                                                                                                                                                                                                                   |
+| 2    | 1.1' connector geometry                                                                                  | web-impl  | todo    |                                                                                                                                                                                                                                                                                                                                                   |
+| 3    | 1.2 strips + locked scroll                                                                               | web-impl  | todo    |                                                                                                                                                                                                                                                                                                                                                   |
+| 3    | engine tests ignore the runner's personal git settings (RK19: `crates/conflict-repo` `isolated_git`)     | rust-impl | todo    |                                                                                                                                                                                                                                                                                                                                                   |
+| 3    | owner compares the 10 conflicts against WebStorm in the window (M0 Gate C; settles `DEFAULT_GAP`)        | human     | todo    |                                                                                                                                                                                                                                                                                                                                                   |
+| 4    | 1.4 gutter arrows, bulk apply, toolbar wiring, summary counts, finish                                    | web-impl  | todo    |                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Open product questions
 

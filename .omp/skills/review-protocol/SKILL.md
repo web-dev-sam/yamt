@@ -27,7 +27,8 @@ VU2–VU16), decision-record contradictions. Test strength is the correctness re
 **correctness-reviewer**: invariants (`skill://risk-register`, architecture §3.1 list),
 edge cases named in the brief and in the risk register, off-by-one in line spaces, undo and
 mapping semantics (CM1–CM9), error paths (what happens when git fails mid-call), tests —
-do the added tests catch a plausible consumer-visible bug, or do they pin wiring/defaults?
+do the added tests catch a plausible consumer-visible bug, or do they pin wiring/defaults? Judge
+by reading; never edit source to mutate it — survivors come from the verifier's `just mutants` (VF7).
 
 ## Grading
 

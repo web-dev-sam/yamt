@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "VITE_CHUNK_SOURCE=fixture vite",
+    "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "lint": "oxlint --type-aware && eslint --max-warnings 0 \"src/**/*.vue\"",
     "fmt": "oxfmt",
@@ -28,6 +28,8 @@
     "vue": "3.5.43"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "26.6.4",
     "@typescript-eslint/parser": "8.71.1",

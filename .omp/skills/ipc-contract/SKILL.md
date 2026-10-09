@@ -21,7 +21,7 @@ from them and committed.
 - [IPC2] Nothing outside `ipc/` imports `bindings.ts` or sees a DTO; consumers get domain
   types from `ipc/index.ts`. Detector: oxlint `no-restricted-imports`.
 - [IPC3] Rust newtypes (`BaseLine`, `LocalLine`, `RemoteLine`, `ChunkId`) arrive as `number`;
-  `ipc/domain.ts` is the only place that applies the TS brands.
+  `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is BaseLine`), never `as` (TS4).
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
   (`GitFailed { args, stderr }`, `Unsupported { path, reason }`, …); never a string. The
   frontend `switch`es on `kind` exhaustively.
@@ -43,10 +43,10 @@ log(entry: LogEntry)              -> ()          fire-and-forget; frontend never
 
 ## Frontend side
 
-- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`) is the interface the app talks to; two
-  implementations: `TauriChunkSource` (wraps `commands`) and `FixtureChunkSource` (reads
-  `fixtures/*.json`, parsed with valibot — the only runtime parse, decision 19).
-  `main.ts` picks by `import.meta.env.VITE_CHUNK_SOURCE`.
+- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`) is the interface the app talks to. M1: one
+  implementation, the fixture source in `ipc/fixture.ts` (reads `fixtures/golden/*.json`, valibot —
+  the only runtime parse, decision 19); `main.ts` creates it directly. M2 adds `TauriChunkSource`
+  (wraps `commands`), and `main.ts` then picks by `import.meta.env.VITE_CHUNK_SOURCE` (architecture §4).
 - [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
   the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
   call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,

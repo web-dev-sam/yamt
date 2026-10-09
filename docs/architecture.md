@@ -58,8 +58,8 @@ yamt/
 │  │  ├─ editor/              CodeMirror integration; exports ONLY MergeController
 │  │  ├─ connectors/          pure geometry → SVG path strings
 │  │  ├─ ui/                  Vue components + one store. Never imports @codemirror/*
-│  │  └─ main.ts              wiring: pick ChunkSource, mount App
-│  └─ fixtures/               JSON produced by `cli fixture` from golden triples
+│  │  └─ main.ts              wiring: create the source and the store, mount App (one source in M1)
+│  └─ fixtures/               golden/<case>.json: the engine's output per golden (`just fixtures`); sample/ for `just smoke-cli`
 └─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
 ```
 
@@ -597,10 +597,15 @@ once per wave, by the verifier, on the merged tree. Nothing in `check` may pass 
 | `session`               | integration with a scripted conflict repo                                                                                                                                                 | reset ⇒ `ls-files -u` identical to before `finish`; finish ⇒ stage 0 only, worktree bytes == result (CRLF preserved)                 |
 | `model/`, `connectors/` | Vitest unit, numbers only                                                                                                                                                                 | hand-computed expectations                                                                                                           |
 | `editor/`               | Vitest browser (WebKit): apply → undo restores text **and** status; mapping survives an edit before the chunk; bulk apply is one undo step; `resultText()` of a CRLF file contains `\r\n` | assertions on `EditorState`                                                                                                          |
-| `ui/`                   | none beyond typecheck in v0                                                                                                                                                               | manual smoke in Epiphany with fixture source                                                                                         |
+| `ui/`                   | Vitest `node`: store actions against a fake `ChunkSource` (later open wins, failed load keeps the file)                                                                                   | hand-written expectations; manual smoke in Epiphany with the fixture source                                                          |
 | end-to-end              | manual: M2 on a 16-file real merge, M3 on macOS                                                                                                                                           | human                                                                                                                                |
 
 Explicitly not tested: wiring, Vue templates, Tauri command plumbing (covered by M2 smoke).
+
+Test strength: `just mutants <base>` mutates the lines changed since `<base>` (cargo-mutants for
+Rust, StrykerJS for the `node` Vitest project) and lists surviving mutants; the verifier runs it
+once per wave, outside `check`. `editor/` (WebKit project) is not mutated and keeps hand
+failing-path proofs.
 
 ---
 
@@ -619,18 +624,19 @@ parallel.
 | 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                                 | integration tests incl. add/add, CRLF                                                                                                                  |
 | 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                               | finish/reset round-trip test                                                                                                                           |
 | 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check; `session::merge_data`                  | rust-impl | `crates/cli/**`, `crates/session/src/**`                          | golden tooling tested on synthetic cases; RK13 cross-check proptest green                                                                              |
-| 0.3' | 10 real goldens from public TS/TSX/Vue projects + `scripts/golden-repo.sh`                                | rust-impl | `tests/golden/**` (not `expected.json`), `scripts/golden-repo.sh` | cases committed with attribution; `just golden` green; human PhpStorm comparison **(human gate)**                                                      |
+| 0.3' | 10 real goldens from public TS/TSX/Vue projects + `scripts/golden-repo.sh`                                | rust-impl | `tests/golden/**` (not `expected.json`), `scripts/golden-repo.sh` | cases committed with attribution; `just golden` green; owner's PhpStorm comparison deferred to the window (M1, after strips)                           |
 
 **M1 — frontend in a browser, fixture JSON**
 
-| #    | slice                                                                         | files                                                         | acceptance                                                                            |
-| ---- | ----------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 1.0  | `ipc/` interface + fixture source + generated bindings pipeline (bin + check) | `frontend/src/ipc/**`, `src-tauri/src/bin/export-bindings.rs` | `just bindings-check` green, fixture loads                                            |
-| 1.1  | `editor/internal/pane.ts` + `chunkField.ts` + `apply.ts` + tests              | `frontend/src/editor/**`                                      | apply/undo/mapping tests                                                              |
-| 1.1' | `connectors/` geometry + tests                                                | `frontend/src/connectors/**`                                  | band paths for a fixture match snapshot                                               |
-| 1.2  | `strips.ts` + `scrollSync.ts` (the novel part)                                | `frontend/src/editor/internal/{strips,scrollSync}.ts`         | visual: Epiphany screenshot of 3 panes + bands; drift ≤ 1 line over a 2k-line fixture |
-| 1.3  | `ui/` Vue chrome + store + `MergeView` mount                                  | `frontend/src/ui/**`, `main.ts`                               | fixture merge completed end-to-end in Epiphany; `finishFile` logs correct text        |
-| 1.4  | gutter actions, bulk apply, dismiss, decorations polish                       | `editor/internal/{gutter,decorations}.ts`                     | one-undo-step bulk apply test                                                         |
+| #    | slice                                                                              | files                                                                      | acceptance                                                                                     |
+| ---- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1.0  | `ipc/` interface + fixture source + bindings pipeline; store + file list           | `frontend/src/ipc/**`, `src-tauri/src/**`, `frontend/src/ui/**`, `main.ts` | `just bindings-check` + `fixtures-check` green; the 10 fixtures listed and opened in WebKit    |
+| 1.1  | `editor/internal/chunkField.ts` + `apply.ts` + chunk colours; `FileMergeData` seam | `frontend/src/editor/**`, `ui/MergeView.vue`, `ui/useMergeController.ts`   | apply/undo/mapping tests; chunk colours visible in all three panes                             |
+| 1.1' | `connectors/` geometry + tests                                                     | `frontend/src/connectors/**`                                               | band paths for a fixture match snapshot                                                        |
+| 1.2  | `strips.ts` + `scrollSync.ts` (the novel part)                                     | `frontend/src/editor/internal/{strips,scrollSync}.ts`                      | visual: Epiphany screenshot of 3 panes + bands; drift ≤ 1 line over a 2k-line fixture          |
+| 1.4  | gutter actions, bulk apply, dismiss; toolbar wiring, summary counts, finish        | `editor/internal/{gutter,decorations}.ts`, `frontend/src/ui/**`            | one-undo-step bulk apply test; fixture merge completed in Epiphany; `finishFile` logs the text |
+
+(1.3 was split: store and file list moved into 1.0, toolbar, counts and finish into 1.4.)
 
 **M2 — Tauri shell**: 2.0 commands + state + error enum; 2.1 `TauriChunkSource`; 2.2 sidebar
 reset/finish wired; 2.3 exit code + `--repo`. Acceptance: a real 16-file merge resolved,

@@ -26,7 +26,6 @@ specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "=0.0.12"
 specta-serde = "=0.0.12"
 imara-diff = "0.2.0"
-insta = "1.49.0"
 proptest = "1.11.0"
 tracing = "0.1.44"
 tempfile = "3.27.0"

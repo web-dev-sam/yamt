@@ -43,8 +43,9 @@ Two of them had bugs this round that tests would have caught. Cost: minutes of a
 
 ## 2. Slice map (per wave)
 
-For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contract`,
-`Acceptance`, smoke recipe; editor slices list `skill://cm6-rules` under `## Skills`. Checks:
+For each slice: id, owner agent, `Owned`/`Read-only` globs, fixed `Contract`, `Acceptance`, smoke
+recipe; editor slices list `skill://cm6-rules` under `## Skills`. Hand failing-path steps only for
+`editor/` (not mutated) and type-level proofs; elsewhere `just mutants` (VF7) does it. Checks:
 
 - [OR1] `Owned` globs are pairwise disjoint across the wave; `SHARED_PATHS` and
   `GENERATED_PATHS` are never owned. Implementers report needed shared edits in
@@ -59,9 +60,9 @@ For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contra
 
 `write` `.omp/run/slices.json` with only the live task names and **commit** it before spawning;
 isolated agents see HEAD. Detector: hooks `slice-registry.ts`, `task-fanout.ts`.
-One `task` call of at most `MAX_PARALLEL_AGENTS` slices (OR10), `isolated: true`, `name` =
-slice id in CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl`, the brief as
-`task`, shared background as `context`. `solutionSpace` says how open the slice is.
+One `task` call of at most `MAX_PARALLEL_AGENTS` slices (OR10), `isolated: true`, `name` = slice id in
+CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl` (language-neutral work: `rust-impl`; the
+default `task` agent is disabled), brief as `task`, background as `context`, `solutionSpace` = openness.
 
 ## 4. Collect
 
@@ -78,31 +79,30 @@ brief and the patch path. Append every finding to `.omp/run/findings.jsonl`:
 
 `block` → respawn under a fresh name (`<Name>R<n>`) with the findings verbatim; max **two** rounds.
 Third failure → ── **Gate B** (escalate to the human with the findings). ──
-`should` → fixed in the same rework, or logged as a follow-up slice on the board.
-`nit` → log; included only in a rework already triggered.
+`should` → fixed in the same rework or a board follow-up; `nit` → log, only in a rework already triggered.
 
 ## 7. Verify
 
-After the wave's patches are applied to the tree: spawn `verifier` once, naming only
-read-only recipes from `skill://verification` (VF6). `gate: fail` → rework the owning slice
-(step 6), never a new slice. Record the evidence line on the board.
+After the wave's patches are applied: spawn `verifier` once with read-only recipes (VF6) and
+`just mutants <base>` (VF7). `gate: fail` → rework the owning slice (step 6), never a new slice;
+each surviving mutant → an SP5 finding for its slice (drop equivalents with a reason). Evidence → board.
 
 ## 8. Commit
 
-One commit per wave, caveman-commit style (`feat(merge-core): diff3 chunk sweep`). Only you
-commit. Never push without the human asking.
+One commit per wave, caveman-commit style; only you commit; never push unless the human asks.
 
 ## 9. Milestone end
 
 Run the demo recipe (`docs/plan.md` §5) with the human; write `docs/walkthroughs/M<n>.md`:
 what was built, and the few non-obvious Rust constructs with why each (Rust-beginner reader).
-── **Gate C**: milestone acceptance. ──
+── **Gate C**: milestone acceptance by the owner. A check the product will show later waits for it: a board
+row in that milestone naming the question it settles; no side tooling (#106–#107). ──
 
 ## 10. Retro
 
-Spawn `curator` with `findings.jsonl` since the last retro + every logged human correction.
-── **Gate D**: each proposed change in plain language (see "Talking to the human"); the human
-approves; the curator applies approved ones, appends the changelog, bumps the verified commit. ──
+At every milestone end, before the next milestone's first spawn (owner, #108), spawn `curator` with
+`findings.jsonl` since the last retro + human corrections. ── **Gate D**: each change in plain language;
+the human approves; the curator applies, appends the changelog, bumps the verified commit. ──
 
 ## Rules about yourself
 

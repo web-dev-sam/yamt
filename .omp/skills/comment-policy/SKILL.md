@@ -15,8 +15,8 @@ default and measured each milestone (`skill://guardrail-evolution` step 4).
   (`git checkout -m` regenerates markers only while the index is unmerged — git-checkout(1)),
   a WebKit quirk (link to the Tauri/WebKit issue), a CodeMirror API subtlety (`mapPos` side
   semantics, link to the docs). One or two lines, placed at the statement that depends on it.
-- [CP2] A `///` one-liner on a **public item of `merge-core`** stating what it is, not how.
-  Rustdoc is API documentation the Rust-beginner owner reads with `cargo doc`.
+- [CP2] A `///` one-liner on a public item, stating what it is: required on `merge-core` (`missing_docs`; a
+  field or variant whose name says it all may restate it); elsewhere only if the reviewer test fails.
 - [CP3] A `//!` crate-level line in `lib.rs` naming the crate's single responsibility.
 
 ## Never
