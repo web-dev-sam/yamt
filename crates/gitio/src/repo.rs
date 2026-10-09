@@ -1,0 +1,86 @@
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::blob::BlobReader;
+use crate::entry::{index_info, parse_unmerged};
+use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+use crate::{Error, Result, StageEntry};
+
+const ANY_EXECUTE_BIT: u32 = 0o111;
+
+/// A git work tree, addressed by its top-level directory, plus the `git` binary to run.
+pub struct Repo {
+    root: PathBuf,
+    git: PathBuf,
+}
+
+impl Repo {
+    pub fn discover(cwd: &Path) -> Result<Repo> {
+        let git = find_git_on_path()?;
+        let command = git_command(&git, cwd, Access::Read, &["rev-parse", "--show-toplevel"]);
+        let mut output = run(command, None, GIT_TIMEOUT)?;
+        if output.pop() != Some(b'\n') {
+            return Err(Error::UnexpectedOutput {
+                command: "rev-parse",
+                output: String::from_utf8_lossy(&output).into_owned(),
+            });
+        }
+        let root = PathBuf::from(OsStr::from_bytes(&output));
+        Ok(Repo { root, git })
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn unmerged(&self) -> Result<Vec<StageEntry>> {
+        let command = self.command(Access::Read, &["ls-files", "-u", "-z"]);
+        parse_unmerged(&run(command, None, GIT_TIMEOUT)?)
+    }
+
+    pub fn blob_reader(&self) -> Result<BlobReader> {
+        BlobReader::spawn(self.command(Access::Read, &["cat-file", "--batch"]))
+    }
+
+    pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()> {
+        let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
+        run(command, Some(index_info(entries)), GIT_TIMEOUT)?;
+        Ok(())
+    }
+
+    pub fn checkout_merge(&self, path: &Path) -> Result<()> {
+        let mut command = self.command(Access::Write, &["checkout", "-m", "--"]);
+        command.arg(path);
+        run(command, None, GIT_TIMEOUT)?;
+        Ok(())
+    }
+
+    pub fn add(&self, path: &Path) -> Result<()> {
+        let mut command = self.command(Access::Write, &["add", "--"]);
+        command.arg(path);
+        run(command, None, GIT_TIMEOUT)?;
+        Ok(())
+    }
+
+    fn command(&self, access: Access, args: &[&str]) -> Command {
+        git_command(&self.git, &self.root, access, args)
+    }
+}
+
+fn find_git_on_path() -> Result<PathBuf> {
+    let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+    for dir in std::env::split_paths(&search_path) {
+        let candidate = dir.join("git");
+        let is_executable = candidate.metadata().is_ok_and(|metadata| {
+            metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
+        });
+        if is_executable {
+            return Ok(candidate);
+        }
+    }
+    Err(Error::GitNotFound)
+}

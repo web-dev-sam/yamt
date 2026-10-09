@@ -48,13 +48,13 @@ Wave 1 = 0.1 + 0.1' in parallel (`briefs/0.1-merge-core.md`, `briefs/0.1'-gitio.
 pre-added by orchestrator: merge-core `imara-diff`, `serde`, `specta`, dev `proptest`; gitio
 `thiserror`, `tracing`, dev `tempfile` (workspace).
 
-| slice                                      | owner     | status  | evidence |
-| ------------------------------------------ | --------- | ------- | -------- |
-| 0.1 merge-core                             | rust-impl | planned |          |
-| 0.1' gitio                                 | rust-impl | planned |          |
-| 0.2 session                                | rust-impl | todo    |          |
-| 0.3 cli + goldens + merge-file cross-check | rust-impl | todo    |          |
-| Gate C: PhpStorm comparison on 10 goldens  | human     | todo    |          |
+| slice                                      | owner     | status | evidence                                                                                                                                                                                                                                                      |
+| ------------------------------------------ | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.1 merge-core                             | rust-impl | review | implementer: 13 tests (7 proptests × 512 cases, 6 hand-computed triples), clippy/fmt/arch-check exit 0; two failing-path proofs (sweep `<=`→`<`: 6 fail; end mapping `<=`→`<`: reconstruction fails); sample smoke: 7 chunks, kinds match the sample's design |
+| 0.1' gitio                                 | rust-impl | review | implementer: 17 tests, clippy/fmt/arch-check exit 0; failing-path proofs for removal record, `-z`, reaping; smoke `unmerged()` == `git ls-files -u` on `f ü.txt`                                                                                              |
+| 0.2 session                                | rust-impl | todo   |                                                                                                                                                                                                                                                               |
+| 0.3 cli + goldens + merge-file cross-check | rust-impl | todo   |                                                                                                                                                                                                                                                               |
+| Gate C: PhpStorm comparison on 10 goldens  | human     | todo   |                                                                                                                                                                                                                                                               |
 
 ## Open product questions
 

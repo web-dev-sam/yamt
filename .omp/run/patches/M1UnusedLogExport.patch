@@ -1,0 +1,10 @@
+diff --git i/frontend/src/ipc/log.ts w/frontend/src/ipc/log.ts
+index 86fed07..dde3880 100644
+--- i/frontend/src/ipc/log.ts
++++ w/frontend/src/ipc/log.ts
+@@ -64,5 +64,3 @@ export function createLog(forward?: LogForward): Log {
+     error: (event, fields) => emit("error", event, fields),
+   };
+ }
+-
+-export const log: Log = createLog();

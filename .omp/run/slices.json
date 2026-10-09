@@ -1,5 +1,5 @@
 {
-  "M0S1MergeCore": {
+  "M0S1MergeCoreR1": {
     "owned": ["crates/merge-core/**"],
     "readonly": [
       "docs/**",
@@ -11,7 +11,7 @@
       "deny.toml"
     ]
   },
-  "M0S1GitIo": {
+  "M0S1GitIoR1": {
     "owned": ["crates/gitio/**"],
     "readonly": ["docs/**", ".omp/**", "Cargo.toml", "Cargo.lock", "clippy.toml", "deny.toml"]
   }
