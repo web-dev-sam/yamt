@@ -1,1 +1,26 @@
-{}
+{
+  "M1LSyntaxColours": {
+    "owned": [
+      "frontend/src/editor/**",
+      "frontend/src/style.css",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "crates/session/src/decode.rs",
+      "crates/session/src/session.rs",
+      "crates/session/tests/open_and_load.rs",
+      "crates/cli/tests/commands.rs"
+    ],
+    "readonly": [
+      "docs/**",
+      ".omp/**",
+      "frontend/src/ui/**",
+      "frontend/src/connectors/**",
+      "frontend/src/main.ts",
+      "frontend/package.json",
+      "frontend/scripts/**",
+      "frontend/fixtures/**",
+      "frontend/src/ipc/bindings.ts"
+    ]
+  }
+}

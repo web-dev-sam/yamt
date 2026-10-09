@@ -232,7 +232,7 @@ pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDele
 // DTOs (serde::Serialize + specta::Type), see §4
 pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
 pub struct FileMergeData { pub path: String, pub base: String /* "" for add/add */, pub local: String,
-                           pub remote: String, pub eol: Eol, pub language: Option<String>, pub chunks: Vec<Chunk> }
+                           pub remote: String, pub eol: Eol, pub chunks: Vec<Chunk> }
 
 impl MergeSession {
     pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages and decodes its blobs now
@@ -299,7 +299,7 @@ export type Chunk = { id: ChunkId; kind: ChunkKind; base: LineRange<BaseLine>; l
 export type Eol = "Lf" | "CrLf" | "Mixed";
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
-export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; language: string | null; chunks: Chunk[] };
+export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; chunks: Chunk[] };
 export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: string): Promise<FileMergeData>; … };
 ```
 
@@ -500,8 +500,10 @@ segment. Center-pane anchors use the current mapped chunk ranges, so they stay c
 edits. Collapsed-regions (`Decoration.replace({block:true})`) are v1; `lineBlockAt` already
 accounts for them when they arrive.
 
-**Language detection**: by extension in Rust (`language: "typescript" | "php" | "vue" | …`),
-mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no highlighting.
+**Language detection** (plan §2 #29): in `editor/`, from the file name of `FileMergeData.path`
+(basename) through `@codemirror/language-data`'s own table; the grammar loads on demand the first time
+a file of that language opens, and the three panes are recoloured when it arrives. No language in the
+IPC; Rust does not know languages. Unknown → no highlighting.
 
 ---
 

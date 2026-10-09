@@ -62,5 +62,7 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
 ## Dependencies (closed list, decision 4)
 
 `@codemirror/state`, `@codemirror/view`, `@codemirror/language`, `@codemirror/commands`
-(center only), `@lezer/highlight`, `@codemirror/lang-{javascript,php,vue,css,json}`.
+(center only), `@lezer/highlight`, `@codemirror/language-data` (every official grammar, each loaded
+on demand; owner request 2026-10-09, plan §2 #29 — ratify at the M1 retro). Grammars are reached
+only through `language-data`, never imported one by one.
 Not the `codemirror` bundle, not `@codemirror/merge`, not `@codemirror/search`/`autocomplete`.
