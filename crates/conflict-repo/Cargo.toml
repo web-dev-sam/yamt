@@ -1,0 +1,12 @@
+[package]
+name = "yamt-conflict-repo"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+tempfile.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

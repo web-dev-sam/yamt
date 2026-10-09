@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/merge-core", "crates/gitio", "crates/session", "crates/cli", "src-tauri"]
+members = [
+  "crates/merge-core",
+  "crates/gitio",
+  "crates/session",
+  "crates/cli",
+  "crates/conflict-repo",
+  "src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +18,7 @@ publish = false
 yamt-merge-core = { path = "crates/merge-core" }
 yamt-gitio = { path = "crates/gitio" }
 yamt-session = { path = "crates/session" }
+yamt-conflict-repo = { path = "crates/conflict-repo" }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }

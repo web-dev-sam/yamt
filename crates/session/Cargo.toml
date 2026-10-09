@@ -7,6 +7,12 @@ publish.workspace = true
 [dependencies]
 yamt-merge-core.workspace = true
 yamt-gitio.workspace = true
+serde.workspace = true
+specta.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+yamt-conflict-repo.workspace = true
 
 [lints]
 workspace = true

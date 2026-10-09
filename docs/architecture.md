@@ -46,7 +46,8 @@ yamt/
 │  ├─ merge-core/             pure diff3 chunk model. NO I/O, NO git, NO tauri
 │  ├─ gitio/                  git subprocess layer. NO merge logic
 │  ├─ session/                MergeSession state machine; depends on merge-core + gitio
-│  └─ cli/                    headless binary (M0): classify / scan / golden tooling
+│  ├─ cli/                    headless binary (M0): classify / scan / golden tooling
+│  └─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
 ├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session only
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
@@ -210,45 +211,44 @@ impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 - Every git call: explicit argv, `-c core.quotepath=false`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0`
   for reads, cwd = repo root, timeouts, stderr captured into the error.
 - Bytes in, bytes out. No UTF-8 assumptions here; `session` decides.
-- Integration tests build real repos in `tempdir` with a scripted conflict (helper
-  `fixtures::conflict_repo(base, local, remote)`), including add/add, delete/modify, and a
-  CRLF file. These tests are the only place `git` runs during `just check`.
+- Integration tests build real repos in `tempdir` with a scripted conflict (crate
+  `yamt-conflict-repo`, `conflict_repo(files)`, shared with `session`'s tests), including
+  add/add, delete/modify, and a CRLF file. These tests are the only place `git` runs during `just check`.
 
 ### 3.3 `session` — the state machine
 
 ```rust
-pub struct MergeSession { repo: Repo, files: Vec<FileState>, blobs: BlobReader }
+pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private */, blobs: BlobReader }
 
+pub enum Eol { Lf, CrLf, Mixed }
 pub enum FileStatus { Unresolved, Resolved }
-pub enum Content { Text { base: Option<String>, local: String, remote: String, eol: Eol },
-                   Unsupported(UnsupportedReason) }  // Binary | NonUtf8 | TooLarge | SideMissing(..)
+pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDeleted }
 
-pub struct FileState {
-    pub path: PathBuf,
-    pub stages: [Option<StageEntry>; 3],   // captured at open — needed to reset after `git add`
-    pub status: FileStatus,
-}
+// DTOs (serde::Serialize + specta::Type), see §4
+pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
+pub struct FileMergeData { pub path: String, pub base: String /* "" for add/add */, pub local: String,
+                           pub remote: String, pub eol: Eol, pub language: Option<String>, pub chunks: Vec<Chunk> }
 
 impl MergeSession {
-    pub fn open(cwd: &Path) -> Result<Self>;
-    pub fn files(&self) -> &[FileState];
-    pub fn load(&mut self, path: &Path) -> Result<FileMerge>;         // blobs + decode + compute_chunks
-    pub fn finish(&mut self, path: &Path, result: &str) -> Result<()>; // write worktree (eol restored), git add, Resolved
-    pub fn reset(&mut self, path: &Path) -> Result<()>;               // restore_stages + checkout -m, Unresolved
+    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages now
+    pub fn files(&self) -> Vec<FileEntry>;
+    pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // blobs + decode + compute_chunks
+    pub fn finish(&mut self, path: &str, result: &str) -> Result<()>; // write worktree bytes as given, git add, Resolved
+    pub fn reset(&mut self, path: &str) -> Result<()>;               // restore_stages + checkout -m, Unresolved
     pub fn remaining(&self) -> usize;
 }
 ```
 
 Edge cases owned here (plan §6 → code):
 
-| case                                                      | handling                                                                                                                                                                                                                    |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| no stage 1 (add/add)                                      | `base = Some("")`; chunk model yields one Conflict                                                                                                                                                                          |
-| no stage 2 or 3 (delete/modify)                           | `Content::Unsupported(SideMissing)` in v0; UI offers "keep file" / "delete file" via `git add`/`git rm` — **v0.1, not v0**                                                                                                  |
-| binary (NUL in first 8 KiB, git's heuristic) or non-UTF-8 | `Unsupported`; UI shows reason, offers "take local" / "take remote" (`git checkout --ours/--theirs` + add) — **v0.1**                                                                                                       |
-| line endings                                              | `Eol` detected on base (or local if base empty): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning |
-| `git add` destroys stages                                 | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                         |
-| file > 8 MiB                                              | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                        |
+| case                                                           | handling                                                                                                                                                                                                                    |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                |
+| no stage 2 or 3 (delete/modify)                                | `unsupported: LocalDeleted / RemoteDeleted` in v0; UI offers "keep file" / "delete file" via `git add`/`git rm` — **v0.1, not v0**                                                                                          |
+| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; UI shows reason, offers "take local" / "take remote" (`git checkout --ours/--theirs` + add) — **v0.1**                                                                                     |
+| line endings                                                   | `Eol` detected on base (or local if base empty): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning |
+| `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                         |
+| file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                        |
 
 ### 3.4 `cli`
 
@@ -284,7 +284,8 @@ export type LineRange<L> = { start: L; len: number };     // L is a branded numb
 export type ChunkKind = "LocalOnly" | "RemoteOnly" | "BothSame" | "Conflict";
 export type Chunk = { id: ChunkId; kind: ChunkKind; base: LineRange<BaseLine>; local: LineRange<LocalLine>; remote: LineRange<RemoteLine> };
 export type Eol = "Lf" | "CrLf" | "Mixed";
-export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; supported: boolean; reason?: string };
+export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted";
+export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
 export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; language: string | null; chunks: Chunk[] };
 export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: string): Promise<FileMergeData>; … };
 ```

@@ -1,18 +1,15 @@
 {
-  "M0S1MergeCoreR1": {
-    "owned": ["crates/merge-core/**"],
+  "M0S2Session": {
+    "owned": ["crates/session/**", "crates/conflict-repo/**", "crates/gitio/tests/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "frontend/fixtures/sample/**",
+      "crates/merge-core/**",
+      "crates/gitio/src/**",
       "Cargo.toml",
       "Cargo.lock",
       "clippy.toml",
       "deny.toml"
     ]
-  },
-  "M0S1GitIoR1": {
-    "owned": ["crates/gitio/**"],
-    "readonly": ["docs/**", ".omp/**", "Cargo.toml", "Cargo.lock", "clippy.toml", "deny.toml"]
   }
 }
