@@ -148,12 +148,17 @@ pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) -> 
 pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> String;
 ```
 
+The chunk types (`BaseLine`, `LocalLine`, `RemoteLine`, `LineRange`, `ChunkKind`, `ChunkId`,
+`Chunk`) derive `serde::Serialize` + `specta::Type` and cross the IPC as they are; `session` and
+`src-tauri` reuse them instead of mirroring them (plan §2 #25). `apply_non_conflicting` keeps a
+`Conflict` chunk's base lines (the result starts from base, plan §2 #9).
+
 Algorithm (plan §4), made precise:
 
-1. `d1 = diff(base, local)`, `d2 = diff(base, remote)` via `imara-diff` (histogram; interned
-   lines with terminators so a missing trailing newline is a real difference). Lines are split
-   on `\n` only; `\r` stays in the line content, so CRLF↔LF shows up as a change, exactly as
-   git sees it.
+1. `d1 = diff(base, local)`, `d2 = diff(base, remote)` via `imara-diff` (histogram, then its
+   `postprocess_lines` hunk placement; interned lines with terminators so a missing trailing
+   newline is a real difference). Lines are split on `\n` only; `\r` stays in the line content,
+   so CRLF↔LF shows up as a change, exactly as git sees it.
 2. Each hunk → `{ base: LineRange, side: LineRange }`. Both lists are sorted by `base.start`.
 3. Sweep: merge all hunks (both sides) in base order into regions. Open a region at the first
    hunk; absorb the next hunk if `next.base.start <= region.base.end + gap`. Two zero-length
@@ -173,7 +178,10 @@ Invariants (property-tested with `proptest`):
 - for any triple, every non-Conflict chunk's text on the "other" side equals the base text
   of that region (otherwise it is by definition a conflict).
 - `local == base` ⇒ every chunk is `RemoteOnly`; `local == remote` ⇒ no `Conflict`.
-- `base == ""` (add/add) ⇒ exactly one chunk, `Conflict` unless `local == remote`.
+- `base == ""` (add/add) with `local` and `remote` both non-empty ⇒ exactly one chunk, base range
+  empty at line 0, `Conflict` unless `local == remote` (then `BothSame`).
+- reconstruction: base with each chunk's base range replaced by its local lines `==` local,
+  byte for byte; same for remote (proves the side-range mapping of step 4).
 
 Not in `merge-core` v0: intra-line word diff. Add later as `pub fn word_diff(a:&str, b:&str)`
 returning token ranges; it stays pure.
@@ -183,17 +191,20 @@ returning token ranges; it stays pure.
 ```rust
 pub struct Repo { root: PathBuf, git: PathBuf /* resolved `git` */ }
 
-pub struct StageEntry { pub mode: u32, pub oid: Oid, pub stage: u8, pub path: PathBuf }
+pub struct Oid(String);                    // 40 or 64 hex chars; Oid::parse, as_str
+pub enum Stage { Base, Local, Remote }     // index stages 1, 2, 3 — no stage 0 or 4 can be built
+pub struct StageEntry { pub mode: u32, pub oid: Oid, pub stage: Stage, pub path: PathBuf }
 
 impl Repo {
     pub fn discover(cwd: &Path) -> Result<Repo>;                 // rev-parse --show-toplevel
+    pub fn root(&self) -> &Path;
     pub fn unmerged(&self) -> Result<Vec<StageEntry>>;            // ls-files -u -z
     pub fn blob_reader(&self) -> Result<BlobReader>;              // cat-file --batch, long-lived
-    pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()>; // update-index --index-info
+    pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()>; // update-index -z --index-info
     pub fn checkout_merge(&self, path: &Path) -> Result<()>;      // checkout -m -- <path>
     pub fn add(&self, path: &Path) -> Result<()>;                 // add -- <path>
 }
-impl BlobReader { pub fn read(&mut self, oid: Oid) -> Result<Vec<u8>>; }
+impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
 
 - Every git call: explicit argv, `-c core.quotepath=false`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0`
@@ -407,7 +418,7 @@ drawn. Unit-tested on numbers, no DOM.
 
 Components: `App.vue`, `FileList.vue` (file list, status badges), `MergeToolbar.vue` (bulk apply
 left/right, undo/redo, finish, reset), `MergeView.vue` (three `<div>` hosts + two `<svg>`,
-mounts a `MergeController` in `onMounted`, destroys on file switch), `WarningBanner.vue` (unsupported
+creates its `MergeController` through `useMergeController`, which recreates it when the file or a host changes and destroys it with the component), `WarningBanner.vue` (unsupported
 file / mixed EOL warnings). Names are multi-word (the Vue linter's `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
@@ -461,9 +472,9 @@ imports → types → macros (defineProps / defineEmits<…>() / defineModel) �
 - No provide/inject anywhere in v0 (there is no layout component that needs it).
 - Split components by responsibility, not by section count: `FileList`, `MergeToolbar`, `MergeView`,
   `WarningBanner`, `App` is the expected set for v0; a sixth needs a one-line justification in the PR.
-- CodeMirror decorations use semantic classes (`.chunk-local`, `.chunk-conflict`, …) defined
-  once in `editor/theme.css` with Tailwind `@apply`, so the palette has a single source and
-  `sortTailwindcss` keeps templates tidy.
+- CodeMirror decorations use semantic classes (`.chunk-local`, `.chunk-conflict`, …) whose
+  colours are `var(--color-…)` from the one palette, the `@theme` block in `frontend/src/style.css`
+  (plan §2 #24); the editor theme in `editor/internal/pane.ts` reads the same variables.
 
 ---
 
@@ -539,14 +550,14 @@ mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no 
 The file itself is the reference; this is its shape (verified at commit `588abc9`+):
 
 ```
-check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test arch-check sfc-order hooks-test
+check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check sfc-order hooks-test
 fmt-check:      pnpm -C frontend fmt:check && cargo fmt --all --check
 clippy:         cargo clippy --workspace --all-targets -- -D warnings
 test:           cargo nextest run --workspace            (--no-tests=warn only until the first Rust test lands)
 deny:           cargo deny check --warn unmaintained
 bindings:       cargo run -p yamt-app --bin export-bindings
 bindings-check: export to target/ and `diff -u` against the committed frontend/src/ipc/bindings.ts
-web-*:          delegate to the package scripts in frontend/package.json (lint, typecheck, test, sfc-order)
+web-*:          delegate to the package scripts in frontend/package.json (lint, typecheck, test, unused, sfc-order); `unused` = exports nobody imports
 arch-check:     scripts/arch-check.sh — gitio ↛ merge-core; merge-core ↛ serde_json/tokio/tauri; no std::{fs,process} in merge-core
 hooks-test:     node:test over .omp/hooks/test/*.test.ts (the agent safety hooks are code)
 dev-web / dev-app / smoke-cli / golden-update as before
@@ -581,13 +592,13 @@ parallel.
 
 **M0 — Rust, headless**
 
-| #    | slice                                                                                                     | owner     | files                                                | acceptance                                                                                    |
-| ---- | --------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 0.0  | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent   | everything (only time one agent owns the whole tree) | `just check` passes on empty crates                                                           |
-| 0.1  | `merge-core` types + `compute_chunks` + proptests                                                         | rust-impl | `crates/merge-core/**`                               | invariants §3.1 green; `classify` on 5 synthetic triples matches hand-written `expected.json` |
-| 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                    | integration tests incl. add/add, CRLF                                                         |
-| 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                  | finish/reset round-trip test                                                                  |
-| 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check                                         | rust-impl | `crates/cli/**`, `tests/golden/**`                   | 10 real goldens committed; human PhpStorm comparison **(human gate)**                         |
+| #    | slice                                                                                                     | owner     | files                                                | acceptance                                                                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0.0  | walking skeleton: workspace, crates (empty), justfile, lints, deny, CI, pnpm scaffold, `just check` green | 1 agent   | everything (only time one agent owns the whole tree) | `just check` passes on empty crates                                                                                                                    |
+| 0.1  | `merge-core` types + `compute_chunks` + proptests                                                         | rust-impl | `crates/merge-core/**`                               | invariants §3.1 green; 5 synthetic triples match hand-written expected chunks (Rust literals; the `expected.json` form arrives with `classify` in 0.3) |
+| 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                    | integration tests incl. add/add, CRLF                                                                                                                  |
+| 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                  | finish/reset round-trip test                                                                                                                           |
+| 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check                                         | rust-impl | `crates/cli/**`, `tests/golden/**`                   | 10 real goldens committed; human PhpStorm comparison **(human gate)**                                                                                  |
 
 **M1 — frontend in a browser, fixture JSON**
 

@@ -29,25 +29,32 @@ Non-goals: chunks, bands, connectors, scroll sync, gutter arrows, store/ChunkSou
 Dependencies added by orchestrator: `@codemirror/{state,view,commands,language,lang-javascript}`,
 `@lezer/highlight`, `@fontsource/jetbrains-mono` (all listed in architecture §7 / cm6-rules).
 
-| slice                                                                                   | owner    | status | evidence                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------- | -------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.W window: three panes + JetBrains-dark chrome, inert buttons (`briefs/1.W-window.md`) | web-impl | done   | verifier: `just check` exit 0, build exit 0; WebKit smoke (rework 1): editable `[false,true,false]`, each pane scrolls alone (own scrollTop 644/553/444, others 0), keyword `#CF8E6D`, only yamt colours (`--color-red-500` empty), undo restores BASE, six buttons inert; sample changes ≥ 7 lines apart; screenshot `/tmp/yamt-1W-window.png` |
-| 1.F import-rule test, owed since retro 0.0 (`briefs/1.F-fences-test.md`)                | web-impl | done   | verifier: `just check` exit 0; 17 import-rule tests pass on the real tree incl. window files; rework 1: four failing-path proofs (query stripping, `.ts`/`.vue` resolution, PM5 only inside `src/`)                                                                                                                                             |
-| Gate C (early): owner looks at the window in WebKit                                     | human    | todo   | `pnpm -C frontend dev`, open http://localhost:5173 in Epiphany                                                                                                                                                                                                                                                                                  |
-
-Next: owner looks at the window; then either M1 chunk work on the frontend (fixture-fed) or M0
-(Rust merge engine) — owner's call. Retro due at the end of this early-M1 part (findings since
-retro 0.0: naming vs lint rule, rework spawn naming, registry must be committed before isolated spawns).
+| slice                                                                                                      | owner    | status  | evidence                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.W window: three panes + JetBrains-dark chrome, inert buttons (`briefs/1.W-window.md`)                    | web-impl | done    | verifier: `just check` exit 0, build exit 0; WebKit smoke (rework 1): editable `[false,true,false]`, each pane scrolls alone (own scrollTop 644/553/444, others 0), keyword `#CF8E6D`, only yamt colours (`--color-red-500` empty), undo restores BASE, six buttons inert; sample changes ≥ 7 lines apart; screenshot `/tmp/yamt-1W-window.png` |
+| 1.F import-rule test, owed since retro 0.0 (`briefs/1.F-fences-test.md`)                                   | web-impl | done    | verifier: `just check` exit 0; 17 import-rule tests pass on the real tree incl. window files; rework 1: four failing-path proofs (query stripping, `.ts`/`.vue` resolution, PM5 only inside `src/`)                                                                                                                                             |
+| Gate C (early): owner looks at the window in WebKit                                                        | human    | done    | owner 2026-10-09: "the look is accepted"                                                                                                                                                                                                                                                                                                        |
+| retro after early M1 (findings #33–#50)                                                                    | curator  | running | Gate D 2026-10-09: 9 proposals — 7 approved, 1 approved changed (component names: written rule, no check on plans), 1 deferred (self-breaking test check: decide when window work resumes)                                                                                                                                                      |
+| 1.U remove unused `log` export so the new unused-export check passes (`briefs/1.U-unused-log-export.md`)   | web-impl | running |                                                                                                                                                                                                                                                                                                                                                 |
+| palette test: colours only from `style.css` `@theme` (approved at retro, owner: with the next window work) | web-impl | todo    |                                                                                                                                                                                                                                                                                                                                                 |
 
 ## M0 — Rust, headless
 
-| slice                                      | owner     | status | evidence |
-| ------------------------------------------ | --------- | ------ | -------- |
-| 0.1 merge-core                             | rust-impl | todo   |          |
-| 0.1' gitio                                 | rust-impl | todo   |          |
-| 0.2 session                                | rust-impl | todo   |          |
-| 0.3 cli + goldens + merge-file cross-check | rust-impl | todo   |          |
-| Gate C: PhpStorm comparison on 10 goldens  | human     | todo   |          |
+Intent (owner go-ahead 2026-10-09): the engine before more window work — highlighting, bands
+and apply arrows need the chunk data, which comes from Rust types via generated bindings
+(vision 2). Acceptance (plan §5): chunk boundaries match what PhpStorm shows on the same
+conflict, judged by the owner on 10 real conflicts. Non-goals: any window change, Tauri, IPC.
+Wave 1 = 0.1 + 0.1' in parallel (`briefs/0.1-merge-core.md`, `briefs/0.1'-gitio.md`); deps
+pre-added by orchestrator: merge-core `imara-diff`, `serde`, `specta`, dev `proptest`; gitio
+`thiserror`, `tracing`, dev `tempfile` (workspace).
+
+| slice                                      | owner     | status  | evidence |
+| ------------------------------------------ | --------- | ------- | -------- |
+| 0.1 merge-core                             | rust-impl | planned |          |
+| 0.1' gitio                                 | rust-impl | planned |          |
+| 0.2 session                                | rust-impl | todo    |          |
+| 0.3 cli + goldens + merge-file cross-check | rust-impl | todo    |          |
+| Gate C: PhpStorm comparison on 10 goldens  | human     | todo    |          |
 
 ## Open product questions
 

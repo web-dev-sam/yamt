@@ -20,6 +20,7 @@ imara-diff = "0.2.0"
 insta = "1.49.0"
 proptest = "1.11.0"
 tracing = "0.1.44"
+tempfile = "3.27.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

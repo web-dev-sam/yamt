@@ -1,17 +1,10 @@
 {
-  "M1WindowShellR1": {
-    "owned": [
-      "frontend/src/editor/**",
-      "frontend/src/ui/**",
-      "frontend/src/main.ts",
-      "frontend/src/style.css",
-      "frontend/index.html",
-      "frontend/fixtures/sample/**"
-    ],
-    "readonly": ["docs/**", ".omp/**", "frontend/src/ipc/**", "frontend/scripts/**"]
+  "RetroM1Early": {
+    "owned": [".omp/skills/**", ".omp/hooks/**", ".omp/GUARDRAILS.md", ".omp/RULES.md"],
+    "readonly": ["docs/**", "frontend/**", "crates/**", "justfile", ".omp/run/**"]
   },
-  "M1FencesTestR1": {
-    "owned": ["frontend/scripts/fences.ts", "frontend/scripts/fences.test.ts"],
-    "readonly": ["docs/**", ".omp/**", "frontend/src/**"]
+  "M1UnusedLogExport": {
+    "owned": ["frontend/src/ipc/log.ts"],
+    "readonly": ["docs/**", ".omp/**", "frontend/**"]
   }
 }
