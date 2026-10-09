@@ -44,7 +44,6 @@ export type FileMergeData = {
 	local: string,
 	remote: string,
 	eol: Eol,
-	language: string | null,
 	chunks: Chunk[],
 };
 

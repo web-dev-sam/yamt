@@ -13,7 +13,6 @@ async function chunkWith(
     local: "",
     remote: "",
     eol: "Lf",
-    language: null,
     chunks: [
       {
         id: 0,

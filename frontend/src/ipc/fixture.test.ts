@@ -27,7 +27,6 @@ function record(path: string, chunk: Record<string, unknown> = {}): Record<strin
     local: "l\n",
     remote: "r\n",
     eol: "Lf",
-    language: "typescript",
     chunks: [
       {
         id: 0,
@@ -99,21 +98,17 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact", async () => {
     "  useEventListener(target, 'keydown', (e: KeyboardEvent) => {",
   );
   expect(data.remote.split("\n")[140]).toBe("  if (target) {");
-  expect(data).toMatchObject({
-    path: "vueuse-use-magic-keys.ts",
-    eol: "Lf",
-    language: "typescript",
-  });
+  expect(data).toMatchObject({ path: "vueuse-use-magic-keys.ts", eol: "Lf" });
 });
 
 test("in-memory records are listed sorted by path and keep every field", async () => {
   const source = createFixtureSource(quietLog().log, {
     "z.json": record("z.ts"),
-    "a.json": { ...record("a.ts"), language: null },
+    "a.json": { ...record("a.ts"), eol: "CrLf" },
   });
 
   expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
-  expect(await source.loadFile("a.ts")).toEqual({ ...record("a.ts"), language: null });
+  expect(await source.loadFile("a.ts")).toEqual({ ...record("a.ts"), eol: "CrLf" });
 });
 
 test.each([

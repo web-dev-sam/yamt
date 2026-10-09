@@ -22,7 +22,6 @@ async function synthetic(
   const record = {
     path: "synthetic.ts",
     ...texts,
-    language: null,
     chunks: chunks.map((chunk, id) => ({
       id,
       kind: chunk.kind,
@@ -36,7 +35,7 @@ async function synthetic(
 
 function open(data: FileMergeData): ApplyTarget {
   const field = chunkField(data.chunks);
-  const pane = { eol: data.eol, language: data.language };
+  const pane = { eol: data.eol, language: null };
   return {
     state: paneState({
       ...pane,

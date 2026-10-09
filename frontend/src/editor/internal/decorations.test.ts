@@ -55,7 +55,6 @@ async function synthetic(
     path: "synthetic.ts",
     ...texts,
     eol: "Lf",
-    language: null,
     chunks: chunks.map(({ kind, base, local, remote }, id) => ({
       id,
       kind,

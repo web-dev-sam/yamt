@@ -1,8 +1,7 @@
 import "@fontsource/jetbrains-mono/400.css";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { javascript } from "@codemirror/lang-javascript";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorState, type Extension } from "@codemirror/state";
+import { HighlightStyle, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -17,9 +16,7 @@ import type { FileMergeData } from "../../ipc";
 
 type PaneKind = "side" | "center";
 
-const LANGUAGES: Readonly<Record<string, () => Extension>> = {
-  typescript: () => javascript({ typescript: true }),
-};
+export const languageCompartment = new Compartment();
 
 const darkTheme = EditorView.theme(
   {
@@ -52,7 +49,7 @@ const darkTheme = EditorView.theme(
   { dark: true },
 );
 
-const paletteHighlight = HighlightStyle.define([
+export const paletteHighlight = HighlightStyle.define([
   {
     tag: [tags.keyword, tags.bool, tags.null, tags.self, tags.atom],
     color: "var(--color-syntax-keyword)",
@@ -69,6 +66,14 @@ const paletteHighlight = HighlightStyle.define([
     color: "var(--color-syntax-property)",
   },
   { tag: tags.meta, color: "var(--color-syntax-decorator)" },
+  { tag: [tags.tagName, tags.angleBracket], color: "var(--color-syntax-tag)" },
+  { tag: tags.attributeValue, color: "var(--color-syntax-string)" },
+  { tag: tags.escape, color: "var(--color-syntax-keyword)" },
+  { tag: tags.regexp, color: "var(--color-syntax-regexp)" },
+  { tag: [tags.link, tags.url, tags.character], color: "var(--color-syntax-link)" },
+  { tag: [tags.heading, tags.strong], fontWeight: "bold" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
 
 function kindExtensions(kind: PaneKind): Extension {
@@ -93,13 +98,9 @@ export function paneState(pane: {
   kind: PaneKind;
   doc: string;
   eol: FileMergeData["eol"];
-  language: string | null;
+  language: LanguageSupport | null;
   extensions: Extension;
 }): EditorState {
-  const languageExtension =
-    pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
-      ? LANGUAGES[pane.language]
-      : undefined;
   return EditorState.create({
     doc: pane.doc,
     extensions: [
@@ -108,7 +109,7 @@ export function paneState(pane: {
       drawSelection(),
       darkTheme,
       syntaxHighlighting(paletteHighlight),
-      languageExtension?.() ?? [],
+      languageCompartment.of(pane.language ?? []),
       kindExtensions(pane.kind),
       pane.extensions,
     ],

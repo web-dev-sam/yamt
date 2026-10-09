@@ -259,7 +259,6 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
     assert_eq!(data["local"], LOCAL);
     assert_eq!(data["remote"], REMOTE);
     assert_eq!(data["eol"], "Lf");
-    assert_eq!(data["language"], "typescript");
     let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
     assert_eq!(data["chunks"], classified);
 }

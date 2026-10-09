@@ -30,6 +30,9 @@
   --color-syntax-function: #56a8f5;
   --color-syntax-property: #c77dbb;
   --color-syntax-decorator: #b3ae60;
+  --color-syntax-tag: #d5b778;
+  --color-syntax-regexp: #42c3d4;
+  --color-syntax-link: #56a8f5;
 
   --color-chunk-inserted: #4471525c;
   --color-chunk-modified: #43698d5c;

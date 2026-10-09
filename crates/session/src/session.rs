@@ -6,7 +6,7 @@ use specta::Type;
 use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
 use yamt_merge_core::{Chunk, Options, compute_chunks};
 
-use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol, language_of};
+use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
 use crate::{Error, Result};
 
 const SYMLINK_MODE: u32 = 0o120_000;
@@ -32,7 +32,6 @@ pub struct FileMergeData {
     pub local: String,
     pub remote: String,
     pub eol: Eol,
-    pub language: Option<String>,
     pub chunks: Vec<Chunk>,
 }
 
@@ -45,7 +44,6 @@ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMerg
         local: local.to_owned(),
         remote: remote.to_owned(),
         eol: detect_eol(eol_source),
-        language: language_of(Path::new(path)),
         chunks: compute_chunks(base, local, remote, &Options::default()),
     }
 }

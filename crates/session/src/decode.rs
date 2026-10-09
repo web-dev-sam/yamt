@@ -1,12 +1,9 @@
-use std::path::Path;
-
 use serde::Serialize;
 use specta::Type;
 
 // git's binary heuristic: a NUL within the first 8000 bytes (xdiff-interface.c FIRST_FEW_BYTES).
 const BINARY_PROBE_LEN: usize = 8000;
 const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
-const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "mts", "cts"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum Eol {
@@ -55,15 +52,6 @@ pub(crate) fn detect_eol(text: &str) -> Eol {
         Eol::CrLf
     } else {
         Eol::Mixed
-    }
-}
-
-pub(crate) fn language_of(path: &Path) -> Option<String> {
-    let extension = path.extension()?.to_str()?;
-    if TYPESCRIPT_EXTENSIONS.contains(&extension) {
-        Some("typescript".to_owned())
-    } else {
-        None
     }
 }
 

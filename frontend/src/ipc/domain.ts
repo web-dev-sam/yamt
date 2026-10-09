@@ -22,7 +22,6 @@ export type FileMergeData = {
   readonly local: string;
   readonly remote: string;
   readonly eol: Generated.Eol;
-  readonly language: string | null;
   readonly chunks: readonly Chunk[];
 };
 
@@ -90,7 +89,6 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
     local: dto.local,
     remote: dto.remote,
     eol: dto.eol,
-    language: dto.language,
     chunks: dto.chunks.map((chunk, index) => toChunk(chunk, `chunks[${index}]`)),
   };
 }

@@ -19,7 +19,6 @@ async function synthetic(
     local: "",
     remote: "",
     eol: "Lf",
-    language: null,
     chunks: ranges.map((base, id) => ({
       id,
       kind: "Conflict",

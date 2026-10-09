@@ -49,7 +49,6 @@ const FILE_MERGE_DATA = v.object({
   local: v.string(),
   remote: v.string(),
   eol: memberOf(EOLS),
-  language: v.nullable(v.string()),
   chunks: v.array(CHUNK),
 } satisfies SchemaOf<Generated.FileMergeData>);
 

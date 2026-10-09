@@ -145,7 +145,6 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
         [&data.base, &data.local, &data.remote],
         [base, local, remote]
     );
-    assert_eq!(data.language.as_deref(), Some("typescript"));
     assert_eq!(data.eol, Eol::Lf);
     assert_eq!(
         data.chunks,
@@ -161,7 +160,6 @@ fn load_add_add_has_empty_base_and_one_conflict_chunk() {
     let data = session.load(ADD_ADD).unwrap();
 
     assert_eq!(data.base, "");
-    assert_eq!(data.language, None);
     let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
     assert_eq!(kinds, [ChunkKind::Conflict]);
 }
