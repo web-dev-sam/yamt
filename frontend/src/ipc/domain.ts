@@ -50,17 +50,21 @@ function invalid(field: string, value: number): Error {
   return new Error(`${field} must be a non-negative safe integer, got ${value}`);
 }
 
-function toRange<L extends number>(dto: {
+function toRange<L extends number>({
+  range,
+  isLine,
+  field,
+}: {
   range: Generated.LineRange<number>;
   isLine: (n: number) => n is L;
   field: string;
 }): LineRange<L> {
-  const { start, len } = dto.range;
-  if (!dto.isLine(start)) {
-    throw invalid(`${dto.field}.start`, start);
+  const { start, len } = range;
+  if (!isLine(start)) {
+    throw invalid(`${field}.start`, start);
   }
   if (!isNonNegativeInteger(len)) {
-    throw invalid(`${dto.field}.len`, len);
+    throw invalid(`${field}.len`, len);
   }
   return { start, len };
 }

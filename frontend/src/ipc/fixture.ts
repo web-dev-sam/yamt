@@ -65,24 +65,28 @@ function parseFixture(file: string, json: unknown): FileMergeData {
   }
 }
 
+function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, FileMergeData> {
+  const parsed = Object.entries(files).map(([file, json]) => parseFixture(file, json));
+  parsed.sort((a, b) => a.path.localeCompare(b.path));
+  return new Map(parsed.map((data) => [data.path, data]));
+}
+
+function lookup(fixtures: ReadonlyMap<string, FileMergeData>, path: string): FileMergeData {
+  const data = fixtures.get(path);
+  if (data === undefined) {
+    throw new Error(`no fixture for ${path}`);
+  }
+  return data;
+}
+
 export function createFixtureSource(
   log: Log,
   files: Readonly<Record<string, unknown>> = GOLDEN_FILES,
 ): ChunkSource {
-  const parsed = Object.entries(files).map(([file, json]) => parseFixture(file, json));
-  parsed.sort((a, b) => a.path.localeCompare(b.path));
-  const fixtures = new Map(parsed.map((data) => [data.path, data]));
+  const fixtures = parseFixtures(files);
   const finished = new Map<string, string>();
 
-  function fixture(path: string): FileMergeData {
-    const data = fixtures.get(path);
-    if (data === undefined) {
-      throw new Error(`no fixture for ${path}`);
-    }
-    return data;
-  }
-
-  function listFiles(): FileEntry[] {
+  function entries(): FileEntry[] {
     return [...fixtures.keys()].map((path): FileEntry => ({
       path,
       status: finished.has(path) ? "Resolved" : "Unresolved",
@@ -92,19 +96,19 @@ export function createFixtureSource(
 
   return {
     async listFiles() {
-      return listFiles();
+      return entries();
     },
     async loadFile(path) {
-      return fixture(path);
+      return lookup(fixtures, path);
     },
     async finishFile(path, text) {
-      fixture(path);
+      lookup(fixtures, path);
       finished.set(path, text);
       log.info("fixture.finish", { path, text });
-      return listFiles();
+      return entries();
     },
     async resetFile(path) {
-      const data = fixture(path);
+      const data = lookup(fixtures, path);
       finished.delete(path);
       return data;
     },

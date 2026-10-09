@@ -1,7 +1,7 @@
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { SourceFile } from "./fences";
+import { readSourceTree, type SourceFile } from "./fences";
 
 export type PaletteViolation = {
   readonly rule: "literal" | "unknown-token";
@@ -12,10 +12,7 @@ export type PaletteViolation = {
 
 type Span = { readonly start: number; readonly end: number };
 
-type Found = PaletteViolation & { readonly offset: number };
-
 const PALETTE_FILE = "src/style.css";
-const SKIPPED_FILE = "src/ipc/bindings.ts";
 const THEME_OPENER = /@theme(?:\s+(?:static|inline))?\s*\{/g;
 const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
 const TOKEN_USE = /--color-([\w-]+)/g;
@@ -58,7 +55,7 @@ function lineAt(text: string, offset: number): number {
   return text.slice(0, offset).split("\n").length;
 }
 
-function literalFindings(file: SourceFile, theme: readonly Span[]): Found[] {
+function literalFindings(file: SourceFile, theme: readonly Span[]): PaletteViolation[] {
   const matches = [...file.text.matchAll(HEX_COLOUR), ...file.text.matchAll(FUNCTIONAL_COLOUR)];
   return matches
     .filter((match) => !theme.some(({ start, end }) => match.index >= start && match.index < end))
@@ -67,11 +64,14 @@ function literalFindings(file: SourceFile, theme: readonly Span[]): Found[] {
       file: file.path,
       line: lineAt(file.text, match.index),
       match: match[0],
-      offset: match.index,
     }));
 }
 
-function tokenFindings(file: SourceFile, theme: readonly Span[], defined: Set<string>): Found[] {
+function tokenFindings(
+  file: SourceFile,
+  theme: readonly Span[],
+  defined: Set<string>,
+): PaletteViolation[] {
   return [...file.text.matchAll(TOKEN_USE)]
     .filter((use) => !defined.has(use[1] ?? ""))
     .filter(
@@ -84,7 +84,6 @@ function tokenFindings(file: SourceFile, theme: readonly Span[], defined: Set<st
       file: file.path,
       line: lineAt(file.text, use.index),
       match: use[0],
-      offset: use.index,
     }));
 }
 
@@ -92,15 +91,15 @@ export function findPaletteViolations(files: readonly SourceFile[]): PaletteViol
   const defined = definedTokens(files);
   return files.flatMap((file) => {
     const theme = themeSpans(file);
-    return [...literalFindings(file, theme), ...tokenFindings(file, theme, defined)]
-      .toSorted((left, right) => left.offset - right.offset)
-      .map(({ rule, file: path, line, match }) => ({ rule, file: path, line, match }));
+    return [...literalFindings(file, theme), ...tokenFindings(file, theme, defined)].toSorted(
+      (left, right) => left.line - right.line,
+    );
   });
 }
 
 export function readPaletteSources(frontendRoot: string): SourceFile[] {
-  return globSync(["src/**/*.ts", "src/**/*.vue", "src/**/*.css"], { cwd: frontendRoot })
-    .filter((path) => path !== SKIPPED_FILE)
+  const styles = globSync("src/**/*.css", { cwd: frontendRoot })
     .toSorted()
     .map((path) => ({ path, text: readFileSync(join(frontendRoot, path), "utf8") }));
+  return [...readSourceTree(frontendRoot), ...styles];
 }

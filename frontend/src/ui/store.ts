@@ -35,7 +35,13 @@ export function createAppStore(source: ChunkSource): AppStore {
   }
 
   async function loadFiles(): Promise<void> {
-    files.value = await source.listFiles();
+    try {
+      files.value = await source.listFiles();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.error("store.list_failed", { reason });
+      return;
+    }
     const first = files.value[0];
     if (first !== undefined) {
       await open(first.path);

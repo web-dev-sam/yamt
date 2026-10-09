@@ -1,12 +1,15 @@
+import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { createFixtureSource } from "./fixture";
 import { createLog, type Log, type LogEntry } from "./log";
 
-const COMMITTED: Readonly<Record<string, { path: string; chunks: unknown[] }>> = import.meta.glob(
+const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
   "../../fixtures/golden/*.json",
   { eager: true, import: "default" },
 );
+
+const PATH_AND_CHUNKS = v.object({ path: v.string(), chunks: v.array(v.unknown()) });
 
 function quietLog(): { log: Log; entries: LogEntry[] } {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -74,8 +77,9 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
   expect(committed).toHaveLength(10);
 
   for (const json of committed) {
-    const data = await source.loadFile(json.path);
-    expect(data.chunks).toHaveLength(json.chunks.length);
+    const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
+    const data = await source.loadFile(path);
+    expect(data.chunks).toHaveLength(chunks.length);
   }
 });
 

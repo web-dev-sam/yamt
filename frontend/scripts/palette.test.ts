@@ -18,13 +18,14 @@ test("the real source tree has no palette violations", () => {
   expect(findPaletteViolations(readPaletteSources(FRONTEND_ROOT))).toEqual([]);
 });
 
-test("readPaletteSources reports literals on disk outside @theme and skips src/ipc/bindings.ts", () => {
+test("readPaletteSources reports ts, vue and css literals on disk and skips src/ipc/bindings.ts", () => {
   const root = mkdtempSync(join(tmpdir(), "yamt-palette-"));
   try {
     const probes: Record<string, string> = {
       "src/style.css": `@theme static {\n  --color-editor: #1e1f22;\n}\n\n@layer base {\n  body {\n    color: #ffffff;\n  }\n}\n`,
       "src/ui/Probe.vue": `<template>\n  <div class="bg-[#123456]"></div>\n</template>\n`,
       "src/ipc/bindings.ts": `export const shade = "#abcdef";\n`,
+      "src/editor/theme.ts": `export const ink = "rgb(0 0 0)";\n`,
     };
     for (const [path, text] of Object.entries(probes)) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -32,8 +33,9 @@ test("readPaletteSources reports literals on disk outside @theme and skips src/i
     }
 
     expect(findPaletteViolations(readPaletteSources(root))).toEqual([
-      { rule: "literal", file: "src/style.css", line: 7, match: "#ffffff" },
+      { rule: "literal", file: "src/editor/theme.ts", line: 1, match: "rgb(" },
       { rule: "literal", file: "src/ui/Probe.vue", line: 2, match: "#123456" },
+      { rule: "literal", file: "src/style.css", line: 7, match: "#ffffff" },
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -70,6 +72,14 @@ test("an 8-digit hex colour is a literal", () => {
   ]);
 });
 
+test("an upper-case hex colour is a literal", () => {
+  const file = { path: "src/ui/extra.css", text: `p {\n  color: #ABCDEF;\n}\n` };
+
+  expect(findPaletteViolations([PALETTE, file])).toEqual([
+    { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#ABCDEF" },
+  ]);
+});
+
 test("var(--color-nope) in a ts file is an unknown token", () => {
   const file = { path: "src/editor/pane.ts", text: `\nconst caret = "var(--color-nope)";\n` };
 
@@ -100,14 +110,26 @@ test("var(--color-nope) inside @theme is an unknown token", () => {
   ]);
 });
 
-test("a hex colour after the @theme block closes is a literal", () => {
+test("a nested block inside @theme does not close it early", () => {
   const palette = {
     path: "src/style.css",
-    text: `@theme inline {\n  --color-editor: #1e1f22;\n  @keyframes x { to { opacity: 0; } }\n}\nhtml { color: #fff; }\n`,
+    text: `@theme inline {\n  --color-editor: #1e1f22;\n  @keyframes x { to { opacity: 0; } }\n  --color-late: #abcabc;\n}\nhtml { color: #fff; background: var(--color-late); }\n`,
   };
 
   expect(findPaletteViolations([palette])).toEqual([
-    { rule: "literal", file: "src/style.css", line: 5, match: "#fff" },
+    { rule: "literal", file: "src/style.css", line: 6, match: "#fff" },
+  ]);
+});
+
+test("a bare --color- mention is exempt inside @theme and unknown outside it", () => {
+  const palette = {
+    path: "src/style.css",
+    text: `@theme static {\n  /* was --color-old */\n  --color-editor: #1e1f22;\n}\n`,
+  };
+  const file = { path: "src/ui/extra.css", text: `p {\n  /* was --color-old */\n}\n` };
+
+  expect(findPaletteViolations([palette, file])).toEqual([
+    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-old" },
   ]);
 });
 
@@ -118,15 +140,15 @@ test("an @theme block outside src/style.css does not exempt literals or define t
   };
 
   expect(findPaletteViolations([PALETTE, file])).toEqual([
-    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-extra" },
     { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#abcd" },
+    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-extra" },
   ]);
 });
 
 test("hex digits of other lengths or followed by a word character are not colours", () => {
   const file = {
     path: "src/ui/ids.ts",
-    text: `export const ids = ["#12", "#12345", "#1234567", "#abc-x", "#fffg"];\n`,
+    text: `export const ids = ["#12", "#12345", "#1234567", "#abc-x", "#fffg", "1#abc"];\n`,
   };
 
   expect(findPaletteViolations([PALETTE, file])).toEqual([]);
@@ -142,6 +164,7 @@ test("palette-conforming sources violate nothing", () => {
       text: `<style>\np { color: color-mix(in srgb, var(--color-editor) 30%, transparent); }\n</style>\n`,
     },
     { path: "src/ui/notes.ts", text: `export const ref = "issue#123";\n` },
+    { path: "src/ui/convert.ts", text: `export const x = parseRgb(toHsl(v));\n` },
   ];
 
   expect(findPaletteViolations(files)).toEqual([]);

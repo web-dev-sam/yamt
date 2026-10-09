@@ -83,7 +83,7 @@ test("loading the list opens the first file and logs file.loaded", async () => {
   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
   expect(store.active.value).toBe("a.ts");
   expect(store.data.value).toBe(a);
-  expect(lines.info).toEqual(['[info] file.loaded {path: "a.ts", chunks: 9}']);
+  expect(lines.info).toEqual([`[info] file.loaded {path: "a.ts", chunks: ${a.chunks.length}}`]);
 });
 
 test("an empty list opens nothing", async () => {
@@ -95,6 +95,23 @@ test("an empty list opens nothing", async () => {
   expect(pending).toEqual([]);
   expect(store.active.value).toBeNull();
   expect(store.data.value).toBeNull();
+});
+
+test("a rejected list opens nothing, resolves, and logs store.list_failed once", async () => {
+  const lines = spyConsole();
+  const { source, pending } = handSource([]);
+  const store = createAppStore({
+    ...source,
+    listFiles: () => Promise.reject(new Error("repo gone")),
+  });
+
+  await expect(store.loadFiles()).resolves.toBeUndefined();
+
+  expect(pending).toEqual([]);
+  expect(store.files.value).toEqual([]);
+  expect(store.data.value).toBeNull();
+  expect(lines.info).toEqual([]);
+  expect(lines.error).toEqual(['[error] store.list_failed {reason: "repo gone"}']);
 });
 
 test("a later open wins when the earlier load resolves last", async () => {
@@ -113,7 +130,7 @@ test("a later open wins when the earlier load resolves last", async () => {
 
   expect(store.active.value).toBe("b.ts");
   expect(store.data.value).toBe(b);
-  expect(lines.info).toEqual(['[info] file.loaded {path: "b.ts", chunks: 9}']);
+  expect(lines.info).toEqual([`[info] file.loaded {path: "b.ts", chunks: ${b.chunks.length}}`]);
 });
 
 test("a rejected load keeps the previous file and logs store.load_failed", async () => {
