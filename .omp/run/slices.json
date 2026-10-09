@@ -1,15 +1,1 @@
-{
-  "M1S4ApplyR1": {
-    "owned": ["frontend/src/editor/**", "frontend/src/ui/**"],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "frontend/src/ipc/**",
-      "frontend/src/connectors/**",
-      "frontend/src/style.css",
-      "frontend/src/main.ts",
-      "frontend/fixtures/**",
-      "frontend/scripts/**"
-    ]
-  }
-}
+{}
