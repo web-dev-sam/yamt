@@ -5,6 +5,14 @@ import { expect, test } from "vitest";
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
+import type { Side } from "./side";
+import { showStatuses, sideStatusField } from "./sideStatus";
+import type { ChunkState } from "./status";
+
+function sideBands(chunks: readonly Chunk[], side: Side): Extension {
+  const statuses = sideStatusField(chunks);
+  return [statuses, sideDecorations(statuses, side)];
+}
 
 function decoratedRuns(doc: string, extension: Extension): string[] {
   return runsOf(EditorState.create({ doc, extensions: extension }));
@@ -63,7 +71,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
 
-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
+  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
     "3 chunk-modified chunk-band",
     "22 chunk-modified chunk-band",
     "54 chunk-modified chunk-band",
@@ -71,7 +79,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
     "115 chunk-modified chunk-band",
     "129-136 chunk-conflict chunk-band",
   ]);
-  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
+  expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
     "87 chunk-inserted chunk-band",
     "98-106 chunk-inserted chunk-band",
     "120-123 chunk-modified chunk-band",
@@ -87,6 +95,29 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
     "110-111 chunk-modified chunk-band",
     "115 chunk-modified chunk-band",
     "129-138 chunk-conflict chunk-band",
+  ]);
+});
+
+test("a side pane drops a resolved change's band and keeps a half-applied conflict", async () => {
+  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const statuses = sideStatusField(data.chunks);
+  const state = EditorState.create({
+    doc: data.local,
+    extensions: [statuses, sideDecorations(statuses, "local")],
+  });
+  const reported = data.chunks.map((chunk) => ({
+    chunk,
+    status: chunk.id === 0 || chunk.kind === "Conflict" ? "applied-local" : "pending",
+  })) satisfies ChunkState[];
+
+  const updated = state.update({ effects: showStatuses.of(reported) }).state;
+
+  expect(runsOf(updated)).toEqual([
+    "22 chunk-modified chunk-band",
+    "54 chunk-modified chunk-band",
+    "103-107 chunk-modified chunk-band",
+    "115 chunk-modified chunk-band",
+    "129-136 chunk-conflict chunk-band",
   ]);
 });
 
@@ -115,7 +146,7 @@ test("an empty range at the end of an unterminated last line is drawn below that
   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
     "2 chunk-marker-inserted chunk-point-below",
   ]);
-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
+  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
     "3 chunk-inserted chunk-band",
   ]);
 });
@@ -202,8 +233,8 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
     "1-2 chunk-deleted chunk-band",
   ]);
-  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
+  expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
     "1 chunk-marker-deleted chunk-point-above",
   ]);
-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([]);
+  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([]);
 });

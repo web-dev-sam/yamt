@@ -25,7 +25,12 @@ function extension(path: string): string {
         <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-on-primary">
           {{ extension(file.path) }}
         </span>
-        <span class="truncate">{{ file.path }}</span>
+        <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
+          {{ file.path }}
+        </span>
+        <span v-if="file.status === 'Resolved'" class="ml-auto shrink-0 text-fg-muted">
+          ✓ resolved
+        </span>
       </li>
     </ul>
   </aside>

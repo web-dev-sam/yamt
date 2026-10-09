@@ -1,0 +1,1747 @@
+diff --git c/frontend/src/editor/index.ts i/frontend/src/editor/index.ts
+index d646377..79d078b 100644
+--- c/frontend/src/editor/index.ts
++++ i/frontend/src/editor/index.ts
+@@ -1,13 +1,26 @@
+-import type { StateField } from "@codemirror/state";
+-import { EditorView } from "@codemirror/view";
++import { redo, undo } from "@codemirror/commands";
++import type { StateField, TransactionSpec } from "@codemirror/state";
++import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+ import type { FileMergeData } from "../ipc";
++import {
++  applyAllNonConflicting,
++  applyChunk,
++  dismissChunk,
++  type ApplyTarget,
++  type SideDocs,
++} from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+ import { centerDecorations, sideDecorations } from "./internal/decorations";
+ import { chunkRows, type PaneViews } from "./internal/geometry";
+ import { createPane } from "./internal/pane";
+ import { ScrollSync } from "./internal/scrollSync";
+-import { paintStrips } from "./internal/strips";
++import type { Side } from "./internal/side";
++import { showStatuses, sideStatusField } from "./internal/sideStatus";
++import { summarize, type MergeSummary } from "./internal/status";
++import { paintStrips, type ChunkAction } from "./internal/strips";
++
++export type { MergeSummary } from "./internal/status";
+ 
+ export type MergeHosts = {
+   readonly left: HTMLElement;
+@@ -19,42 +32,16 @@ export type MergeHosts = {
+ export class MergeController {
+   readonly #field: StateField<readonly ChunkSpan[]>;
+   readonly #views: PaneViews;
++  readonly #sides: SideDocs;
+   readonly #strips: MergeHosts["strips"];
+   readonly #scroll: ScrollSync;
+   #frameId: number | null = null;
++  #summaryListener: ((summary: MergeSummary) => void) | null = null;
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts) {
+-    const { language, chunks } = data;
+-    const field = chunkField(chunks);
+-    const repaint = EditorView.updateListener.of((update) => {
+-      if (update.docChanged || update.geometryChanged) {
+-        this.#requestFrame();
+-      }
+-    });
+-    this.#field = field;
+-    this.#views = {
+-      left: createPane({
+-        kind: "side",
+-        doc: data.local,
+-        language,
+-        parent: hosts.left,
+-        extensions: [sideDecorations(chunks, "local"), repaint],
+-      }),
+-      center: createPane({
+-        kind: "center",
+-        doc: data.base,
+-        language,
+-        parent: hosts.center,
+-        extensions: [field, centerDecorations(field), repaint],
+-      }),
+-      right: createPane({
+-        kind: "side",
+-        doc: data.remote,
+-        language,
+-        parent: hosts.right,
+-        extensions: [sideDecorations(chunks, "remote"), repaint],
+-      }),
+-    };
++    this.#field = chunkField(data.chunks);
++    this.#views = this.#createViews(data, hosts);
++    this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
+     this.#strips = hosts.strips;
+     this.#scroll = new ScrollSync(this.#views, () => {
+       this.#requestFrame();
+@@ -62,17 +49,113 @@ export class MergeController {
+     this.#requestFrame();
+   }
+ 
++  #createViews(data: FileMergeData, hosts: MergeHosts): PaneViews {
++    const { language, eol } = data;
++    const field = this.#field;
++    const statuses = sideStatusField(data.chunks);
++    const repaint = EditorView.updateListener.of((update) => {
++      if (update.docChanged || update.geometryChanged) {
++        this.#requestFrame();
++      }
++    });
++    const statusSync = EditorView.updateListener.of((update) => {
++      this.#statusesChanged(update);
++    });
++    const shared = { eol, language };
++    return {
++      left: createPane({
++        ...shared,
++        kind: "side",
++        doc: data.local,
++        parent: hosts.left,
++        extensions: [statuses, sideDecorations(statuses, "local"), repaint],
++      }),
++      center: createPane({
++        ...shared,
++        kind: "center",
++        doc: data.base,
++        parent: hosts.center,
++        extensions: [field, centerDecorations(field), repaint, statusSync],
++      }),
++      right: createPane({
++        ...shared,
++        kind: "side",
++        doc: data.remote,
++        parent: hosts.right,
++        extensions: [statuses, sideDecorations(statuses, "remote"), repaint],
++      }),
++    };
++  }
++
++  #target(): ApplyTarget {
++    return { state: this.#views.center.state, field: this.#field, sides: this.#sides };
++  }
++
++  #dispatch(spec: TransactionSpec | null): void {
++    if (spec !== null) {
++      this.#views.center.dispatch(spec);
++    }
++  }
++
++  #act(action: ChunkAction): void {
++    this.#dispatch(
++      action.kind === "apply"
++        ? applyChunk(this.#target(), action.chunk, action.side)
++        : dismissChunk(this.#target(), action.chunk),
++    );
++  }
++
++  #statusesChanged(update: ViewUpdate): void {
++    const before = update.startState.field(this.#field);
++    const after = update.state.field(this.#field);
++    if (after.every((span, index) => span.status === before[index]?.status)) {
++      return;
++    }
++    const states = after.map(({ chunk, status }) => ({ chunk, status }));
++    this.#views.left.dispatch({ effects: showStatuses.of(states) });
++    this.#views.right.dispatch({ effects: showStatuses.of(states) });
++    this.#requestFrame();
++    this.#summaryListener?.(summarize(after));
++  }
++
+   #requestFrame(): void {
+     this.#frameId ??= requestAnimationFrame(() => {
+       this.#frameId = null;
+       const views = this.#views;
+       const rows = chunkRows(views, views.center.state.field(this.#field));
+       this.#scroll.sync(rows);
+-      paintStrips(views, this.#strips, rows);
++      paintStrips(views, this.#strips, rows, (action) => {
++        this.#act(action);
++      });
+     });
+   }
+ 
++  applyAllNonConflicting(side: Side): void {
++    this.#dispatch(applyAllNonConflicting(this.#target(), side));
++  }
++
++  undo(): boolean {
++    return undo(this.#views.center);
++  }
++
++  redo(): boolean {
++    return redo(this.#views.center);
++  }
++
++  resultText(): string {
++    return this.#views.center.state.sliceDoc();
++  }
++
++  summary(): MergeSummary {
++    return summarize(this.#views.center.state.field(this.#field));
++  }
++
++  onSummaryChange(listener: (summary: MergeSummary) => void): void {
++    this.#summaryListener = listener;
++  }
++
+   destroy(): void {
++    this.#summaryListener = null;
+     if (this.#frameId !== null) {
+       cancelAnimationFrame(this.#frameId);
+     }
+diff --git c/frontend/src/editor/internal/apply.test.ts i/frontend/src/editor/internal/apply.test.ts
+new file mode 100644
+index 0000000..927c1a6
+--- /dev/null
++++ i/frontend/src/editor/internal/apply.test.ts
+@@ -0,0 +1,334 @@
++import { history, redo, undo } from "@codemirror/commands";
++import { EditorState, type StateCommand, type TransactionSpec } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++import { expect, test } from "vitest";
++
++import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { applyAllNonConflicting, applyChunk, dismissChunk, type ApplyTarget } from "./apply";
++import { chunkField } from "./chunkField";
++import { centerDecorations } from "./decorations";
++import { lineSpan } from "./lineSpan";
++import { eolSeparator } from "./pane";
++import type { Side } from "./side";
++import { summarize, type ChunkStatus } from "./status";
++import { gapArrows } from "./strips";
++
++const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
++
++async function synthetic(
++  texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
++  chunk: { kind: Chunk["kind"]; base: [number, number]; side: [number, number] },
++): Promise<FileMergeData> {
++  const record = {
++    path: "synthetic.ts",
++    ...texts,
++    language: null,
++    chunks: [
++      {
++        id: 0,
++        kind: chunk.kind,
++        base: { start: chunk.base[0], len: chunk.base[1] },
++        local: { start: chunk.side[0], len: chunk.side[1] },
++        remote: { start: chunk.side[0], len: chunk.side[1] },
++      },
++    ],
++  };
++  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++}
++
++function open(data: FileMergeData): ApplyTarget {
++  const field = chunkField(data.chunks);
++  const separator = eolSeparator(data.eol);
++  return {
++    state: EditorState.create({
++      doc: data.base,
++      extensions: [separator, history(), field, centerDecorations(field)],
++    }),
++    field,
++    sides: {
++      local: EditorState.create({ doc: data.local, extensions: separator }).doc,
++      remote: EditorState.create({ doc: data.remote, extensions: separator }).doc,
++    },
++  };
++}
++
++async function magicKeys(): Promise<ApplyTarget> {
++  return open(await createFixtureSource(log).loadFile(MAGIC_KEYS));
++}
++
++function chunkAt(merge: ApplyTarget, id: number): Chunk {
++  const span = merge.state.field(merge.field)[id];
++  if (span === undefined) {
++    throw new Error(`no chunk ${id}`);
++  }
++  return span.chunk;
++}
++
++function run(merge: ApplyTarget, spec: TransactionSpec | null): ApplyTarget {
++  if (spec === null) {
++    throw new Error("expected a transaction");
++  }
++  return { ...merge, state: merge.state.update(spec).state };
++}
++
++function command(merge: ApplyTarget, cmd: StateCommand): ApplyTarget {
++  let next = merge;
++  cmd({
++    state: merge.state,
++    dispatch: (tr) => {
++      next = { ...merge, state: tr.state };
++    },
++  });
++  return next;
++}
++
++function statuses(merge: ApplyTarget): ChunkStatus[] {
++  return merge.state.field(merge.field).map((span) => span.status);
++}
++
++function centerText(merge: ApplyTarget, id: number): string {
++  const span = merge.state.field(merge.field)[id];
++  return span === undefined ? "" : merge.state.sliceDoc(span.from, span.to);
++}
++
++function sideText(merge: ApplyTarget, id: number, side: Side): string {
++  const doc = merge.sides[side];
++  const { from, to } = lineSpan(doc, chunkAt(merge, id)[side]);
++  return doc.sliceString(from, to);
++}
++
++function decoratedLines(state: EditorState): number[] {
++  const lines = new Set<number>();
++  for (const source of state.facet(EditorView.decorations)) {
++    if (typeof source !== "function") {
++      source.between(0, state.doc.length, (from) => {
++        lines.add(state.doc.lineAt(from).number);
++      });
++    }
++  }
++  return [...lines];
++}
++
++function arrowLines(merge: ApplyTarget, side: Side): number[] {
++  const rows = merge.state.field(merge.field).map((span) => ({
++    ...span,
++    left: { top: span.chunk.local.start + 1, bottom: 0 },
++    center: { top: 0, bottom: 0 },
++    right: { top: span.chunk.remote.start + 1, bottom: 0 },
++  }));
++  return gapArrows(rows, side).map((arrow) => arrow.top);
++}
++
++test("apply local: the change gets the left text, resolves, and loses colour and arrow", async () => {
++  const start = await magicKeys();
++
++  const applied = run(start, applyChunk(start, chunkAt(start, 0), "local"));
++
++  expect(centerText(applied, 0)).toBe(sideText(applied, 0, "local"));
++  expect(centerText(applied, 0)).not.toBe(centerText(start, 0));
++  expect(statuses(applied)[0]).toBe("applied-local");
++  expect(decoratedLines(start.state)).toContain(3);
++  expect(decoratedLines(applied.state)).not.toContain(3);
++  expect(arrowLines(start, "local")).toContain(3);
++  expect(arrowLines(applied, "local")).not.toContain(3);
++  expect(summarize(start.state.field(start.field))).toEqual({ changes: 8, conflicts: 1 });
++  expect(summarize(applied.state.field(applied.field))).toEqual({ changes: 7, conflicts: 1 });
++  expect(applyChunk(applied, chunkAt(applied, 0), "local")).toBeNull();
++  expect(applyChunk(start, chunkAt(start, 0), "remote")).toBeNull();
++});
++
++test("apply remote inserts the right lines at an empty base range", async () => {
++  const start = await magicKeys();
++
++  const applied = run(start, applyChunk(start, chunkAt(start, 3), "remote"));
++
++  expect(centerText(applied, 3)).toBe(sideText(applied, 3, "remote"));
++  expect(applied.state.doc.lines).toBe(start.state.doc.lines + 1);
++  expect(statuses(applied)[3]).toBe("applied-remote");
++  expect(arrowLines(applied, "remote")).not.toContain(arrowLines(start, "remote")[0]);
++});
++
++test("a conflict applied from both sides holds local then remote text", async () => {
++  const start = await magicKeys();
++  const conflict = chunkAt(start, 8);
++
++  const local = run(start, applyChunk(start, conflict, "local"));
++  const both = run(local, applyChunk(local, conflict, "remote"));
++
++  expect(statuses(local)[8]).toBe("applied-local");
++  expect(summarize(local.state.field(local.field))).toEqual({ changes: 8, conflicts: 1 });
++  expect(arrowLines(local, "local")).not.toContain(129);
++  expect(arrowLines(local, "remote")).toContain(141);
++  expect(decoratedLines(local.state)).toContain(129);
++  expect(centerText(both, 8)).toBe(sideText(both, 8, "local") + sideText(both, 8, "remote"));
++  expect(statuses(both)[8]).toBe("applied-both");
++  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
++  expect(arrowLines(both, "remote")).not.toContain(141);
++  expect(decoratedLines(both.state)).not.toContain(129);
++});
++
++test("ignore keeps the text and resolves a change or a half-applied conflict", async () => {
++  const start = await magicKeys();
++
++  const ignored = run(start, dismissChunk(start, chunkAt(start, 1)));
++  const half = run(ignored, applyChunk(ignored, chunkAt(ignored, 8), "remote"));
++  const settled = run(half, dismissChunk(half, chunkAt(half, 8)));
++
++  expect(ignored.state.doc.toString()).toBe(start.state.doc.toString());
++  expect(statuses(ignored)[1]).toBe("dismissed");
++  expect(decoratedLines(ignored.state)).not.toContain(22);
++  expect(arrowLines(ignored, "local")).not.toContain(22);
++  expect(centerText(settled, 8)).toBe(sideText(settled, 8, "remote"));
++  expect(statuses(settled)[8]).toBe("dismissed");
++  expect(summarize(settled.state.field(settled.field))).toEqual({ changes: 7, conflicts: 0 });
++  expect(dismissChunk(settled, chunkAt(settled, 8))).toBeNull();
++});
++
++test("applying after an edit inside the change replaces the current range", async () => {
++  const start = await magicKeys();
++  const line = start.state.doc.line(3);
++  const typed = {
++    ...start,
++    state: start.state.update({ changes: { from: line.to, insert: "\n// mine" } }).state,
++  };
++
++  const applied = run(typed, applyChunk(typed, chunkAt(typed, 0), "local"));
++
++  expect(centerText(typed, 0)).toContain("// mine");
++  expect(centerText(applied, 0)).toBe(sideText(applied, 0, "local"));
++  expect(applied.state.doc.lines).toBe(start.state.doc.lines);
++});
++
++test("undo after apply restores text and status; redo re-applies", async () => {
++  const start = await magicKeys();
++  const applied = run(start, applyChunk(start, chunkAt(start, 0), "local"));
++
++  const undone = command(applied, undo);
++  const redone = command(undone, redo);
++
++  expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
++  expect(statuses(undone)[0]).toBe("pending");
++  expect(decoratedLines(undone.state)).toContain(3);
++  expect(redone.state.doc.toString()).toBe(applied.state.doc.toString());
++  expect(statuses(redone)[0]).toBe("applied-local");
++});
++
++test("undo after ignore brings the change back; redo ignores it again", async () => {
++  const start = await magicKeys();
++  const ignored = run(start, dismissChunk(start, chunkAt(start, 1)));
++
++  const undone = command(ignored, undo);
++  const redone = command(undone, redo);
++
++  expect(statuses(undone)[1]).toBe("pending");
++  expect(statuses(redone)[1]).toBe("dismissed");
++});
++
++test("bulk apply from the left resolves every LocalOnly change; one undo restores all", async () => {
++  const start = await magicKeys();
++
++  const bulk = run(start, applyAllNonConflicting(start, "local"));
++  const undone = command(bulk, undo);
++
++  expect(statuses(bulk)).toEqual([
++    "applied-local",
++    "applied-local",
++    "applied-local",
++    "pending",
++    "pending",
++    "applied-local",
++    "pending",
++    "applied-local",
++    "pending",
++  ]);
++  for (const id of [0, 1, 2, 5, 7]) {
++    expect(centerText(bulk, id)).toBe(sideText(bulk, id, "local"));
++  }
++  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 3, conflicts: 1 });
++  expect(applyAllNonConflicting(bulk, "local")).toBeNull();
++  expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
++  expect(statuses(undone)).toEqual(statuses(start));
++});
++
++test("a BothSame change resolves from either arrow and from either bulk apply", async () => {
++  const merge = open(
++    await synthetic(
++      { base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" },
++      { kind: "BothSame", base: [1, 1], side: [1, 1] },
++    ),
++  );
++  const same = chunkAt(merge, 0);
++
++  const fromRight = run(merge, applyChunk(merge, same, "remote"));
++  const bulkLeft = run(merge, applyAllNonConflicting(merge, "local"));
++  const bulkRight = run(merge, applyAllNonConflicting(merge, "remote"));
++
++  expect(arrowLines(merge, "local")).toEqual([2]);
++  expect(arrowLines(merge, "remote")).toEqual([2]);
++  expect(fromRight.state.sliceDoc()).toBe("a\nB\nc\n");
++  expect(arrowLines(fromRight, "local")).toEqual([]);
++  expect(summarize(fromRight.state.field(fromRight.field))).toEqual({ changes: 0, conflicts: 0 });
++  expect(statuses(bulkLeft)).toEqual(["applied-local"]);
++  expect(statuses(bulkRight)).toEqual(["applied-remote"]);
++  expect(bulkRight.state.sliceDoc()).toBe("a\nB\nc\n");
++});
++
++test("bulk apply from the right inserts every RemoteOnly change in place", async () => {
++  const start = await magicKeys();
++
++  const bulk = run(start, applyAllNonConflicting(start, "remote"));
++
++  for (const id of [3, 4, 6]) {
++    expect(statuses(bulk)[id]).toBe("applied-remote");
++    expect(centerText(bulk, id)).toBe(sideText(bulk, id, "remote"));
++  }
++  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
++});
++
++test("deleting all of a change's lines in the middle pane ignores it", async () => {
++  const start = await magicKeys();
++  const line = start.state.doc.line(3);
++
++  const deleted = {
++    ...start,
++    state: start.state.update({ changes: { from: line.from, to: line.to + 1 } }).state,
++  };
++
++  expect(statuses(deleted)[0]).toBe("dismissed");
++  expect(summarize(deleted.state.field(deleted.field))).toEqual({ changes: 7, conflicts: 1 });
++  expect(statuses(command(deleted, undo))[0]).toBe("pending");
++});
++
++test("resultText of a CRLF file keeps CRLF after an apply", async () => {
++  const merge = open(
++    await synthetic(
++      { base: "a\r\nb\r\nc\r\n", local: "a\r\nB\r\nc\r\n", remote: "a\r\nb\r\nc\r\n", eol: "CrLf" },
++      { kind: "LocalOnly", base: [1, 1], side: [1, 1] },
++    ),
++  );
++
++  const applied = run(merge, applyChunk(merge, chunkAt(merge, 0), "local"));
++
++  expect(applied.state.sliceDoc()).toBe("a\r\nB\r\nc\r\n");
++});
++
++test("a change on an unterminated last line keeps the file without a final line break", async () => {
++  const cases = [
++    { base: "a\nb", local: "a\nB", chunk: { base: [1, 1], side: [1, 1] }, result: "a\nB" },
++    { base: "a\nb", local: "a", chunk: { base: [1, 1], side: [1, 0] }, result: "a" },
++    { base: "a", local: "a\nb", chunk: { base: [1, 0], side: [1, 1] }, result: "a\nb" },
++  ] satisfies {
++    base: string;
++    local: string;
++    chunk: { base: [number, number]; side: [number, number] };
++    result: string;
++  }[];
++
++  for (const { base, local, chunk, result } of cases) {
++    const merge = open(
++      await synthetic({ base, local, remote: base, eol: "Lf" }, { kind: "LocalOnly", ...chunk }),
++    );
++    const applied = run(merge, applyChunk(merge, chunkAt(merge, 0), "local"));
++    expect(applied.state.sliceDoc()).toBe(result);
++  }
++});
+diff --git c/frontend/src/editor/internal/apply.ts i/frontend/src/editor/internal/apply.ts
+new file mode 100644
+index 0000000..dc4eeef
+--- /dev/null
++++ i/frontend/src/editor/internal/apply.ts
+@@ -0,0 +1,89 @@
++import {
++  Text,
++  type ChangeSpec,
++  type EditorState,
++  type StateField,
++  type TransactionSpec,
++} from "@codemirror/state";
++
++import type { Chunk } from "../../ipc";
++import { setStatus, type ChunkSpan } from "./chunkField";
++import { sideChanged, type Side } from "./side";
++import { canApply, isResolved, statusAfterApply } from "./status";
++
++export type SideDocs = Readonly<Record<Side, Text>>;
++
++export type ApplyTarget = {
++  readonly state: EditorState;
++  readonly field: StateField<readonly ChunkSpan[]>;
++  readonly sides: SideDocs;
++};
++
++function sideLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): string[] {
++  return Array.from({ length: range.len }, (_, index) => doc.line(range.start + 1 + index).text);
++}
++
++function wholeLines(doc: Text, range: { from: number; to: number }, lines: string[]): ChangeSpec {
++  const { from, to } = range;
++  if (doc.lineAt(to).from === to) {
++    return { from, to, insert: Text.of([...lines, ""]) };
++  }
++  if (lines.length === 0) {
++    return { from: from === to ? from : Math.max(0, from - 1), to };
++  }
++  return { from, to, insert: Text.of(from === to ? ["", ...lines] : lines) };
++}
++
++function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSpec {
++  const lines = sideLines(target.sides[side], span.chunk[side]);
++  const from = span.status === "pending" ? span.from : span.to;
++  return wholeLines(target.state.doc, { from, to: span.to }, lines);
++}
++
++function spanOf(target: ApplyTarget, chunk: Chunk): ChunkSpan | undefined {
++  return target.state.field(target.field).find((span) => span.chunk.id === chunk.id);
++}
++
++export function applyChunk(target: ApplyTarget, chunk: Chunk, side: Side): TransactionSpec | null {
++  const span = spanOf(target, chunk);
++  if (span === undefined || !canApply(span.chunk, span.status, side)) {
++    return null;
++  }
++  return {
++    changes: applyChange(target, span, side),
++    effects: setStatus.of({ id: chunk.id, status: statusAfterApply(span.status, side) }),
++    userEvent: "yamt.apply",
++  };
++}
++
++export function applyAllNonConflicting(target: ApplyTarget, side: Side): TransactionSpec | null {
++  const spans = target.state
++    .field(target.field)
++    .filter(
++      (span) =>
++        span.status === "pending" &&
++        span.chunk.kind !== "Conflict" &&
++        sideChanged(span.chunk, side),
++    );
++  if (spans.length === 0) {
++    return null;
++  }
++  return {
++    changes: target.state.changes(spans.map((span) => applyChange(target, span, side))),
++    effects: spans.map((span) =>
++      setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.status, side) }),
++    ),
++    userEvent: "yamt.apply",
++  };
++}
++
++export function dismissChunk(target: ApplyTarget, chunk: Chunk): TransactionSpec | null {
++  const span = spanOf(target, chunk);
++  if (span === undefined || isResolved(span.chunk, span.status)) {
++    return null;
++  }
++  return {
++    effects: setStatus.of({ id: chunk.id, status: "dismissed" }),
++    userEvent: "yamt.dismiss",
++  };
++}
+diff --git c/frontend/src/editor/internal/chunkField.ts i/frontend/src/editor/internal/chunkField.ts
+index 4ce3ad3..3185538 100644
+--- c/frontend/src/editor/internal/chunkField.ts
++++ i/frontend/src/editor/internal/chunkField.ts
+@@ -1,19 +1,31 @@
+ import { invertedEffects } from "@codemirror/commands";
+-import { StateEffect, StateField, type ChangeDesc, type Text } from "@codemirror/state";
++import {
++  StateEffect,
++  StateField,
++  type ChangeDesc,
++  type Text,
++  type Transaction,
++} from "@codemirror/state";
+ 
+ import type { Chunk } from "../../ipc";
+ import { lineSpan } from "./lineSpan";
++import { isResolved, type ChunkState, type ChunkStatus } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+ type DocPos = number & { readonly __brand: "DocPos" };
++type StatusChanges = ReadonlyMap<Chunk["id"], ChunkStatus>;
+ 
+-export type ChunkSpan = {
+-  readonly chunk: Chunk;
++export type ChunkSpan = ChunkState & {
+   readonly tone: Tone;
+   readonly from: DocPos;
+   readonly to: DocPos;
+ };
+ 
++export const setStatus = StateEffect.define<{
++  readonly id: Chunk["id"];
++  readonly status: ChunkStatus;
++}>();
++
+ function isDocPos(n: number): n is DocPos {
+   return Number.isSafeInteger(n) && n >= 0;
+ }
+@@ -33,11 +45,14 @@ function mapSpans(
+   spans: readonly ChunkSpan[],
+   changes: ChangeDesc,
+   doc: Text | null,
++  applied: StatusChanges,
+ ): readonly ChunkSpan[] {
+   const mapped = spans.map((span) => ({
+     ...span,
+     from: toDocPos(changes.mapPos(span.from, -1)),
+-    to: toDocPos(changes.mapPos(span.to, endsMidLine(span, doc) ? 1 : -1)),
++    to: toDocPos(
++      changes.mapPos(span.to, applied.has(span.chunk.id) || endsMidLine(span, doc) ? 1 : -1),
++    ),
+   }));
+   return mapped.map((span, index) => {
+     const next = mapped[index + 1];
+@@ -45,8 +60,36 @@ function mapSpans(
+   });
+ }
+ 
++function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boolean {
++  return (
++    before !== undefined &&
++    before.from < before.to &&
++    after.from === after.to &&
++    !isResolved(before.chunk, before.status)
++  );
++}
++
++function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
++  const changed = new Map<Chunk["id"], ChunkStatus>();
++  for (const effect of tr.effects) {
++    if (effect.is(setStatus)) {
++      changed.set(effect.value.id, effect.value.status);
++    }
++  }
++  if (!tr.docChanged && changed.size === 0) {
++    return spans;
++  }
++  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
++  return mapped.map((span, index) => {
++    const status =
++      changed.get(span.chunk.id) ??
++      (collapsedByUser(spans[index], span) ? "dismissed" : span.status);
++    return status === span.status ? span : { ...span, status };
++  });
++}
++
+ const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
+-  map: (spans, changes) => mapSpans(spans, changes, null),
++  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
+ });
+ 
+ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
+@@ -57,6 +100,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+         return {
+           chunk,
+           tone: chunkTone(chunk, "center"),
++          status: "pending",
+           from: toDocPos(from),
+           to: toDocPos(to),
+         };
+@@ -65,14 +109,14 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+       // History appends a merged event's older inverted effects after the newer ones
+       // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
+       const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
+-      if (restore !== undefined) {
+-        return restore.value;
+-      }
+-      return tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc) : spans;
++      return restore === undefined ? updateSpans(spans, tr) : restore.value;
+     },
+     provide: (field) =>
+       invertedEffects.of((tr) =>
+-        tr.docChanged ? [restoreSpans.of(tr.startState.field(field))] : [],
++        tr.docChanged ||
++        tr.effects.some((effect) => effect.is(setStatus) || effect.is(restoreSpans))
++          ? [restoreSpans.of(tr.startState.field(field))]
++          : [],
+       ),
+   });
+ }
+diff --git c/frontend/src/editor/internal/decorations.test.ts i/frontend/src/editor/internal/decorations.test.ts
+index 1de8954..8398050 100644
+--- c/frontend/src/editor/internal/decorations.test.ts
++++ i/frontend/src/editor/internal/decorations.test.ts
+@@ -5,6 +5,14 @@ import { expect, test } from "vitest";
+ import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
++import type { Side } from "./side";
++import { showStatuses, sideStatusField } from "./sideStatus";
++import type { ChunkState } from "./status";
++
++function sideBands(chunks: readonly Chunk[], side: Side): Extension {
++  const statuses = sideStatusField(chunks);
++  return [statuses, sideDecorations(statuses, side)];
++}
+ 
+ function decoratedRuns(doc: string, extension: Extension): string[] {
+   return runsOf(EditorState.create({ doc, extensions: extension }));
+@@ -63,7 +71,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+ 
+-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
++  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
+     "3 chunk-modified chunk-band",
+     "22 chunk-modified chunk-band",
+     "54 chunk-modified chunk-band",
+@@ -71,7 +79,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+     "115 chunk-modified chunk-band",
+     "129-136 chunk-conflict chunk-band",
+   ]);
+-  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
++  expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
+     "87 chunk-inserted chunk-band",
+     "98-106 chunk-inserted chunk-band",
+     "120-123 chunk-modified chunk-band",
+@@ -90,6 +98,29 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+   ]);
+ });
+ 
++test("a side pane drops a resolved change's band and keeps a half-applied conflict", async () => {
++  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
++  const statuses = sideStatusField(data.chunks);
++  const state = EditorState.create({
++    doc: data.local,
++    extensions: [statuses, sideDecorations(statuses, "local")],
++  });
++  const reported = data.chunks.map((chunk) => ({
++    chunk,
++    status: chunk.id === 0 || chunk.kind === "Conflict" ? "applied-local" : "pending",
++  })) satisfies ChunkState[];
++
++  const updated = state.update({ effects: showStatuses.of(reported) }).state;
++
++  expect(runsOf(updated)).toEqual([
++    "22 chunk-modified chunk-band",
++    "54 chunk-modified chunk-band",
++    "103-107 chunk-modified chunk-band",
++    "115 chunk-modified chunk-band",
++    "129-136 chunk-conflict chunk-band",
++  ]);
++});
++
+ test("center colours follow their text when a line is typed above them", async () => {
+   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+@@ -115,7 +146,7 @@ test("an empty range at the end of an unterminated last line is drawn below that
+   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+     "2 chunk-marker-inserted chunk-point-below",
+   ]);
+-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
++  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
+     "3 chunk-inserted chunk-band",
+   ]);
+ });
+@@ -202,8 +233,8 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
+   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+     "1-2 chunk-deleted chunk-band",
+   ]);
+-  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
++  expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
+     "1 chunk-marker-deleted chunk-point-above",
+   ]);
+-  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([]);
++  expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([]);
+ });
+diff --git c/frontend/src/editor/internal/decorations.ts i/frontend/src/editor/internal/decorations.ts
+index 92853e1..df79e7c 100644
+--- c/frontend/src/editor/internal/decorations.ts
++++ i/frontend/src/editor/internal/decorations.ts
+@@ -2,10 +2,10 @@ import "../theme.css";
+ import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
+ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+ 
+-import type { Chunk } from "../../ipc";
+ import type { ChunkSpan } from "./chunkField";
+ import { lineSpan } from "./lineSpan";
+ import { sideChanged, type Side } from "./side";
++import { isResolved, type ChunkState } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+ type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+@@ -29,19 +29,29 @@ function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
+   return builder.finish();
+ }
+ 
+-export function sideDecorations(chunks: readonly Chunk[], side: Side): Extension {
+-  return EditorView.decorations.compute([], (state) =>
++export function sideDecorations(
++  statuses: StateField<readonly ChunkState[]>,
++  side: Side,
++): Extension {
++  return EditorView.decorations.compute([statuses], (state) =>
+     bandDecorations(
+       state.doc,
+-      chunks
+-        .filter((chunk) => sideChanged(chunk, side))
+-        .map((chunk) => ({ ...lineSpan(state.doc, chunk[side]), tone: chunkTone(chunk, side) })),
++      state
++        .field(statuses)
++        .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
++        .map(({ chunk }) => ({
++          ...lineSpan(state.doc, chunk[side]),
++          tone: chunkTone(chunk, side),
++        })),
+     ),
+   );
+ }
+ 
+ export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
+   return EditorView.decorations.compute([field], (state) =>
+-    bandDecorations(state.doc, state.field(field)),
++    bandDecorations(
++      state.doc,
++      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
++    ),
+   );
+ }
+diff --git c/frontend/src/editor/internal/geometry.ts i/frontend/src/editor/internal/geometry.ts
+index 8677e83..818e12a 100644
+--- c/frontend/src/editor/internal/geometry.ts
++++ i/frontend/src/editor/internal/geometry.ts
+@@ -2,13 +2,13 @@ import type { Text } from "@codemirror/state";
+ import type { EditorView } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+-import type { Chunk } from "../../ipc";
+ import type { ChunkSpan } from "./chunkField";
+ import { lineSpan } from "./lineSpan";
++import type { ChunkState } from "./status";
+ 
+ export type Pane = "left" | "center" | "right";
+ export type PaneViews = Readonly<Record<Pane, EditorView>>;
+-export type ChunkRow = Readonly<Record<Pane, Span>> & { readonly chunk: Chunk };
++export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+ 
+ export function rangeSpan(
+   doc: Text,
+@@ -34,6 +34,7 @@ function viewSpan(view: EditorView, range: { readonly from: number; readonly to:
+ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): ChunkRow[] {
+   return centerSpans.map((center) => ({
+     chunk: center.chunk,
++    status: center.status,
+     left: viewSpan(views.left, lineSpan(views.left.state.doc, center.chunk.local)),
+     center: viewSpan(views.center, center),
+     right: viewSpan(views.right, lineSpan(views.right.state.doc, center.chunk.remote)),
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index 77446a7..a7e0809 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -13,6 +13,8 @@ import {
+ } from "@codemirror/view";
+ import { tags } from "@lezer/highlight";
+ 
++import type { FileMergeData } from "../../ipc";
++
+ type PaneKind = "side" | "center";
+ 
+ const LANGUAGES: Readonly<Record<string, () => Extension>> = {
+@@ -87,9 +89,14 @@ function kindExtensions(kind: PaneKind): Extension {
+   }
+ }
+ 
++export function eolSeparator(eol: FileMergeData["eol"]): Extension {
++  return eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [];
++}
++
+ export function createPane(pane: {
+   kind: PaneKind;
+   doc: string;
++  eol: FileMergeData["eol"];
+   language: string | null;
+   parent: HTMLElement;
+   extensions: Extension;
+@@ -102,6 +109,7 @@ export function createPane(pane: {
+     doc: pane.doc,
+     extensions: [
+       lineNumbers(),
++      eolSeparator(pane.eol),
+       drawSelection(),
+       darkTheme,
+       syntaxHighlighting(paletteHighlight),
+diff --git c/frontend/src/editor/internal/sideStatus.ts i/frontend/src/editor/internal/sideStatus.ts
+new file mode 100644
+index 0000000..e402211
+--- /dev/null
++++ i/frontend/src/editor/internal/sideStatus.ts
+@@ -0,0 +1,14 @@
++import { StateEffect, StateField } from "@codemirror/state";
++
++import type { Chunk } from "../../ipc";
++import type { ChunkState } from "./status";
++
++export const showStatuses = StateEffect.define<readonly ChunkState[]>();
++
++export function sideStatusField(chunks: readonly Chunk[]): StateField<readonly ChunkState[]> {
++  return StateField.define<readonly ChunkState[]>({
++    create: () => chunks.map((chunk) => ({ chunk, status: "pending" })),
++    update: (states, tr) =>
++      tr.effects.findLast((effect) => effect.is(showStatuses))?.value ?? states,
++  });
++}
+diff --git c/frontend/src/editor/internal/status.ts i/frontend/src/editor/internal/status.ts
+new file mode 100644
+index 0000000..05ad90c
+--- /dev/null
++++ i/frontend/src/editor/internal/status.ts
+@@ -0,0 +1,44 @@
++import type { Chunk } from "../../ipc";
++import { sideChanged, type Side } from "./side";
++
++export type ChunkStatus =
++  | "pending"
++  | "applied-local"
++  | "applied-remote"
++  | "applied-both"
++  | "dismissed";
++
++export type ChunkState = { readonly chunk: Chunk; readonly status: ChunkStatus };
++
++export type MergeSummary = { readonly changes: number; readonly conflicts: number };
++
++export function isResolved(chunk: Chunk, status: ChunkStatus): boolean {
++  switch (status) {
++    case "pending":
++      return false;
++    case "applied-local":
++    case "applied-remote":
++      return chunk.kind !== "Conflict";
++    case "applied-both":
++    case "dismissed":
++      return true;
++    default: {
++      const _exhaustive: never = status;
++      return _exhaustive;
++    }
++  }
++}
++
++export function canApply(chunk: Chunk, status: ChunkStatus, side: Side): boolean {
++  return sideChanged(chunk, side) && !isResolved(chunk, status) && status !== `applied-${side}`;
++}
++
++export function statusAfterApply(status: ChunkStatus, side: Side): ChunkStatus {
++  return status === "pending" ? `applied-${side}` : "applied-both";
++}
++
++export function summarize(states: readonly ChunkState[]): MergeSummary {
++  const open = states.filter(({ chunk, status }) => !isResolved(chunk, status));
++  const conflicts = open.filter(({ chunk }) => chunk.kind === "Conflict").length;
++  return { changes: open.length - conflicts, conflicts };
++}
+diff --git c/frontend/src/editor/internal/strips.ts i/frontend/src/editor/internal/strips.ts
+index 9a6b415..1dcb76e 100644
+--- c/frontend/src/editor/internal/strips.ts
++++ i/frontend/src/editor/internal/strips.ts
+@@ -2,17 +2,33 @@ import "../theme.css";
+ import type { EditorView } from "@codemirror/view";
+ 
+ import { bandPath, type Band } from "../../connectors";
++import type { Chunk } from "../../ipc";
+ import type { ChunkRow, PaneViews } from "./geometry";
+ import { sideChanged, type Side } from "./side";
++import { canApply, isResolved } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
++export type ChunkAction =
++  | { readonly kind: "apply"; readonly chunk: Chunk; readonly side: Side }
++  | { readonly kind: "dismiss"; readonly chunk: Chunk };
++
++type OnAction = (action: ChunkAction) => void;
+ type ToneBand = Band & { readonly tone: Tone };
++type Arrow = { readonly top: number; readonly chunk: Chunk };
++type ArrowPane = {
++  readonly view: EditorView;
++  readonly side: Side;
++  readonly arrows: readonly Arrow[];
++};
+ 
+ const SVG_NS = "http://www.w3.org/2000/svg";
++const ACTION_WIDTH_PX = 16;
++const GLYPH_CENTER = 0.5;
++const APPLY_GLYPH: Readonly<Record<Side, string>> = { local: "»", remote: "«" };
+ 
+ function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
+   return rows
+-    .filter((row) => sideChanged(row.chunk, side))
++    .filter((row) => sideChanged(row.chunk, side) && !isResolved(row.chunk, row.status))
+     .map((row) => ({
+       left: side === "local" ? row.left : row.center,
+       right: side === "local" ? row.center : row.right,
+@@ -20,17 +36,21 @@ function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
+     }));
+ }
+ 
+-function paintGap(
++export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
++  return rows
++    .filter((row) => canApply(row.chunk, row.status, side))
++    .map((row) => ({ top: (side === "local" ? row.left : row.right).top, chunk: row.chunk }));
++}
++
++function bandPaths(
+   strip: SVGSVGElement,
+-  left: EditorView,
+-  right: EditorView,
++  stripTop: number,
++  panes: { readonly left: EditorView; readonly right: EditorView },
+   bands: readonly ToneBand[],
+-): void {
+-  const stripTop = strip.getBoundingClientRect().top;
+-  const leftShift = left.documentTop - stripTop;
+-  const rightShift = right.documentTop - stripTop;
++): SVGPathElement[] {
++  const leftShift = panes.left.documentTop - stripTop;
++  const rightShift = panes.right.documentTop - stripTop;
+   const height = strip.clientHeight;
+-  const width = strip.clientWidth;
+   const paths = [];
+   for (const band of bands) {
+     const onLeft = { top: band.left.top + leftShift, bottom: band.left.bottom + leftShift };
+@@ -41,18 +61,104 @@ function paintGap(
+     ) {
+       const path = document.createElementNS(SVG_NS, "path");
+       path.setAttribute("class", `chunk-${band.tone} chunk-band`);
+-      path.setAttribute("d", bandPath({ left: onLeft, right: onRight }, width));
++      path.setAttribute("d", bandPath({ left: onLeft, right: onRight }, strip.clientWidth));
+       paths.push(path);
+     }
+   }
+-  strip.replaceChildren(...paths);
++  return paths;
++}
++
++function actionButton(
++  button: { x: number; lineHeight: number; glyph: string; title: string },
++  action: ChunkAction,
++  onAction: OnAction,
++): SVGGElement {
++  const group = document.createElementNS(SVG_NS, "g");
++  group.setAttribute("class", `chunk-action chunk-action-${action.kind}`);
++  group.setAttribute("transform", `translate(${button.x} 0)`);
++  const title = document.createElementNS(SVG_NS, "title");
++  title.textContent = button.title;
++  const hit = document.createElementNS(SVG_NS, "rect");
++  hit.setAttribute("width", String(ACTION_WIDTH_PX));
++  hit.setAttribute("height", String(button.lineHeight));
++  const glyph = document.createElementNS(SVG_NS, "text");
++  glyph.setAttribute("x", String(ACTION_WIDTH_PX * GLYPH_CENTER));
++  glyph.setAttribute("y", String(button.lineHeight * GLYPH_CENTER));
++  glyph.textContent = button.glyph;
++  group.append(title, hit, glyph);
++  group.addEventListener("click", () => {
++    onAction(action);
++  });
++  return group;
++}
++
++function arrowGroups(
++  strip: SVGSVGElement,
++  stripTop: number,
++  { view, side, arrows }: ArrowPane,
++  onAction: OnAction,
++): SVGGElement[] {
++  const shift = view.documentTop - stripTop;
++  const lineHeight = view.defaultLineHeight;
++  const height = strip.clientHeight;
++  const applyX = side === "local" ? 0 : strip.clientWidth - ACTION_WIDTH_PX;
++  const dismissX = side === "local" ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
++  return arrows
++    .filter(({ top }) => top + shift + lineHeight >= 0 && top + shift <= height)
++    .map(({ top, chunk }) => {
++      const row = document.createElementNS(SVG_NS, "g");
++      row.setAttribute("transform", `translate(0 ${top + shift})`);
++      row.append(
++        actionButton(
++          { x: applyX, lineHeight, glyph: APPLY_GLYPH[side], title: "Apply" },
++          { kind: "apply", chunk, side },
++          onAction,
++        ),
++        actionButton(
++          { x: dismissX, lineHeight, glyph: "×", title: "Ignore" },
++          { kind: "dismiss", chunk },
++          onAction,
++        ),
++      );
++      return row;
++    });
+ }
+ 
+ export function paintStrips(
+   views: PaneViews,
+   strips: readonly [SVGSVGElement, SVGSVGElement],
+   rows: readonly ChunkRow[],
++  onAction: OnAction,
+ ): void {
+-  paintGap(strips[0], views.left, views.center, gapBands(rows, "local"));
+-  paintGap(strips[1], views.center, views.right, gapBands(rows, "remote"));
++  const [leftStrip, rightStrip] = strips;
++  const leftTop = leftStrip.getBoundingClientRect().top;
++  const rightTop = rightStrip.getBoundingClientRect().top;
++  leftStrip.replaceChildren(
++    ...bandPaths(
++      leftStrip,
++      leftTop,
++      { left: views.left, right: views.center },
++      gapBands(rows, "local"),
++    ),
++    ...arrowGroups(
++      leftStrip,
++      leftTop,
++      { view: views.left, side: "local", arrows: gapArrows(rows, "local") },
++      onAction,
++    ),
++  );
++  rightStrip.replaceChildren(
++    ...bandPaths(
++      rightStrip,
++      rightTop,
++      { left: views.center, right: views.right },
++      gapBands(rows, "remote"),
++    ),
++    ...arrowGroups(
++      rightStrip,
++      rightTop,
++      { view: views.right, side: "remote", arrows: gapArrows(rows, "remote") },
++      onAction,
++    ),
++  );
+ }
+diff --git c/frontend/src/editor/theme.css i/frontend/src/editor/theme.css
+index b89b92e..00828a1 100644
+--- c/frontend/src/editor/theme.css
++++ i/frontend/src/editor/theme.css
+@@ -51,3 +51,24 @@ path.chunk-band {
+     inset 0 2px 0 var(--chunk-marker-tone),
+     inset 0 -2px 0 var(--chunk-marker-tone);
+ }
++
++.chunk-action {
++  cursor: pointer;
++  -webkit-user-select: none;
++  user-select: none;
++}
++
++.chunk-action rect {
++  fill: transparent;
++}
++
++.chunk-action text {
++  fill: var(--color-fg-muted);
++  font-family: var(--font-mono);
++  text-anchor: middle;
++  dominant-baseline: central;
++}
++
++.chunk-action:hover text {
++  fill: var(--color-fg);
++}
+diff --git c/frontend/src/ui/App.vue i/frontend/src/ui/App.vue
+index 3f444d2..18cd907 100644
+--- c/frontend/src/ui/App.vue
++++ i/frontend/src/ui/App.vue
+@@ -1,18 +1,14 @@
+ <script setup lang="ts">
+ import FileList from "./FileList.vue";
+-import MergeToolbar from "./MergeToolbar.vue";
+ import MergeView from "./MergeView.vue";
+ import { useAppStore } from "./store";
+ 
+-const { files, active, data, open } = useAppStore();
++const { files, active, data, open, finish, reset } = useAppStore();
+ </script>
+ 
+ <template>
+-  <div class="flex h-full flex-col">
+-    <MergeToolbar />
+-    <div class="flex min-h-0 flex-1">
+-      <FileList :files="files" :active="active" @select="open" />
+-      <MergeView :data="data" />
+-    </div>
++  <div class="flex h-full">
++    <FileList :files="files" :active="active" @select="open" />
++    <MergeView :data="data" @finish="finish" @reset="reset" />
+   </div>
+ </template>
+diff --git c/frontend/src/ui/FileList.vue i/frontend/src/ui/FileList.vue
+index ea5039f..d47aa02 100644
+--- c/frontend/src/ui/FileList.vue
++++ i/frontend/src/ui/FileList.vue
+@@ -25,7 +25,12 @@ function extension(path: string): string {
+         <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-on-primary">
+           {{ extension(file.path) }}
+         </span>
+-        <span class="truncate">{{ file.path }}</span>
++        <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
++          {{ file.path }}
++        </span>
++        <span v-if="file.status === 'Resolved'" class="ml-auto shrink-0 text-fg-muted">
++          ✓ resolved
++        </span>
+       </li>
+     </ul>
+   </aside>
+diff --git c/frontend/src/ui/MergeToolbar.vue i/frontend/src/ui/MergeToolbar.vue
+index 1c7227c..e3c5bf7 100644
+--- c/frontend/src/ui/MergeToolbar.vue
++++ i/frontend/src/ui/MergeToolbar.vue
+@@ -1,12 +1,68 @@
+ <script setup lang="ts">
+-type IconButton = { readonly label: string; readonly path: string };
++import { computed } from "vue";
++
++import type { MergeSummary } from "./useMergeController";
++
++type IconButton = { readonly label: string; readonly path: string; readonly run: () => void };
++
++const props = defineProps<{ summary: MergeSummary | null }>();
++const emit = defineEmits<{
++  applyLeft: [];
++  applyRight: [];
++  undo: [];
++  redo: [];
++  reset: [];
++  finish: [];
++}>();
+ 
+ const ICON_BUTTONS: readonly IconButton[] = [
+-  { label: "Apply non-conflicting changes from the left", path: "M3 4l4 4-4 4M9 4l4 4-4 4" },
+-  { label: "Apply non-conflicting changes from the right", path: "M13 4l-4 4 4 4M7 4L3 8l4 4" },
+-  { label: "Undo", path: "M6 4L3 7l3 3M3 7h6.5a3.5 3.5 0 0 1 0 7H7" },
+-  { label: "Redo", path: "M10 4l3 3-3 3M13 7H6.5a3.5 3.5 0 0 0 0 7H9" },
++  {
++    label: "Apply non-conflicting changes from the left",
++    path: "M3 4l4 4-4 4M9 4l4 4-4 4",
++    run: () => {
++      emit("applyLeft");
++    },
++  },
++  {
++    label: "Apply non-conflicting changes from the right",
++    path: "M13 4l-4 4 4 4M7 4L3 8l4 4",
++    run: () => {
++      emit("applyRight");
++    },
++  },
++  {
++    label: "Undo",
++    path: "M6 4L3 7l3 3M3 7h6.5a3.5 3.5 0 0 1 0 7H7",
++    run: () => {
++      emit("undo");
++    },
++  },
++  {
++    label: "Redo",
++    path: "M10 4l3 3-3 3M13 7H6.5a3.5 3.5 0 0 0 0 7H9",
++    run: () => {
++      emit("redo");
++    },
++  },
+ ];
++
++const remaining = computed(() => {
++  const summary = props.summary;
++  if (summary === null) {
++    return "";
++  }
++  const parts = [counted(summary.changes, "change"), counted(summary.conflicts, "conflict")].filter(
++    (part) => part !== null,
++  );
++  return parts.length === 0 ? "All changes processed" : parts.join(" · ");
++});
++
++function counted(count: number, noun: string): string | null {
++  if (count === 0) {
++    return null;
++  }
++  return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
++}
+ </script>
+ 
+ <template>
+@@ -17,7 +73,9 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       type="button"
+       :title="button.label"
+       :aria-label="button.label"
+-      class="rounded p-1.5 hover:bg-hover"
++      :disabled="summary === null"
++      class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++      @click="button.run"
+     >
+       <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+         <path
+@@ -30,13 +88,21 @@ const ICON_BUTTONS: readonly IconButton[] = [
+         />
+       </svg>
+     </button>
++    <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
+     <div class="ml-auto flex gap-2">
+-      <button type="button" class="rounded border border-control-border px-3.5 py-1 hover:bg-hover">
++      <button
++        type="button"
++        :disabled="summary === null"
++        class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="emit('reset')"
++      >
+         Reset file
+       </button>
+       <button
+         type="button"
++        :disabled="summary === null"
+         class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110"
++        @click="emit('finish')"
+       >
+         Mark resolved
+       </button>
+diff --git c/frontend/src/ui/MergeView.vue i/frontend/src/ui/MergeView.vue
+index 289b544..0012d96 100644
+--- c/frontend/src/ui/MergeView.vue
++++ i/frontend/src/ui/MergeView.vue
+@@ -2,32 +2,55 @@
+ import { useTemplateRef } from "vue";
+ 
+ import type { FileMergeData } from "../ipc";
++import MergeToolbar from "./MergeToolbar.vue";
+ import { useMergeController } from "./useMergeController";
+ 
+ const props = defineProps<{ data: FileMergeData | null }>();
++const emit = defineEmits<{ finish: [text: string]; reset: [] }>();
+ 
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
++const { summary, applyAllNonConflicting, undo, redo, resultText } = useMergeController(
++  () => props.data,
++  { left, center, right, strips: [leftStrip, rightStrip] },
++);
++
++function finish(): void {
++  const text = resultText();
++  if (text !== null) {
++    emit("finish", text);
++  }
++}
+ </script>
+ 
+ <template>
+-  <section
+-    class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
+-  >
+-    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Local (yours)</h2>
+-    <div class="border-b border-separator bg-window" />
+-    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Result</h2>
+-    <div class="border-b border-separator bg-window" />
+-    <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
++  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
++    <MergeToolbar
++      :summary="summary"
++      @apply-left="applyAllNonConflicting('local')"
++      @apply-right="applyAllNonConflicting('remote')"
++      @undo="undo"
++      @redo="redo"
++      @reset="emit('reset')"
++      @finish="finish"
++    />
++    <section
++      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
++    >
++      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Local (yours)</h2>
++      <div class="border-b border-separator bg-window" />
++      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Result</h2>
++      <div class="border-b border-separator bg-window" />
++      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
+ 
+-    <div ref="left" class="min-h-0 min-w-0" />
+-    <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+-    <div ref="center" class="min-h-0 min-w-0" />
+-    <svg ref="rightStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+-    <div ref="right" class="min-h-0 min-w-0" />
+-  </section>
++      <div ref="left" class="min-h-0 min-w-0" />
++      <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
++      <div ref="center" class="min-h-0 min-w-0" />
++      <svg ref="rightStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
++      <div ref="right" class="min-h-0 min-w-0" />
++    </section>
++  </div>
+ </template>
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index 1556afa..36d7b5b 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -7,7 +7,7 @@ import {
+   type FileEntry,
+   type FileMergeData,
+ } from "../ipc";
+-import { createAppStore, useAppStore } from "./store";
++import { createAppStore, useAppStore, type AppStore } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -150,3 +150,112 @@ test("a rejected load keeps the previous file and logs store.load_failed", async
+   expect(store.data.value).toBe(a);
+   expect(lines.error).toEqual(['[error] store.load_failed {path: "b.ts", reason: "disk gone"}']);
+ });
++
++async function openedStore(
++  overrides: Partial<ChunkSource>,
++): Promise<{ store: AppStore; pending: PendingLoad[]; a: FileMergeData }> {
++  const { source, pending } = handSource([]);
++  const store = createAppStore({ ...source, ...overrides });
++  const a = await dataFor("a.ts");
++  const opening = store.open("a.ts");
++  pending[0]?.resolve(a);
++  await opening;
++  return { store, pending, a };
++}
++
++test("finish sends the open file's text and shows the list finishFile returns", async () => {
++  const sent: [string, string][] = [];
++  const resolved: FileEntry = { ...entry("a.ts"), status: "Resolved" };
++  const { store, a } = await openedStore({
++    finishFile: (path, text) => {
++      sent.push([path, text]);
++      return Promise.resolve([resolved, entry("b.ts")]);
++    },
++  });
++
++  await store.finish("merged\r\n");
++
++  expect(sent).toEqual([["a.ts", "merged\r\n"]]);
++  expect(store.files.value).toEqual([resolved, entry("b.ts")]);
++  expect(store.data.value).toBe(a);
++});
++
++test("finish and reset without an open file call nothing", async () => {
++  const lines = spyConsole();
++  const { source } = handSource([]);
++  const store = createAppStore(source);
++
++  await store.finish("text");
++  await store.reset();
++
++  expect(store.data.value).toBeNull();
++  expect(lines.error).toEqual([]);
++});
++
++test("a rejected finish keeps the list and the file and logs store.finish_failed", async () => {
++  const lines = spyConsole();
++  const { store, a } = await openedStore({
++    finishFile: () => Promise.reject(new Error("index locked")),
++  });
++  const before = store.files.value;
++
++  await store.finish("text");
++
++  expect(store.files.value).toBe(before);
++  expect(store.data.value).toBe(a);
++  expect(lines.error).toEqual([
++    '[error] store.finish_failed {path: "a.ts", reason: "index locked"}',
++  ]);
++});
++
++test("reset reopens the original data as a new object and refreshes the list", async () => {
++  const original = await dataFor("a.ts");
++  const reset: string[] = [];
++  const { store, a } = await openedStore({
++    resetFile: (path) => {
++      reset.push(path);
++      return Promise.resolve(original);
++    },
++    listFiles: () => Promise.resolve([entry("a.ts")]),
++  });
++
++  await store.reset();
++
++  expect(reset).toEqual(["a.ts"]);
++  expect(store.data.value).toEqual(original);
++  expect(store.data.value).not.toBe(original);
++  expect(store.data.value).not.toBe(a);
++  expect(store.files.value).toEqual([entry("a.ts")]);
++});
++
++test("a rejected reset keeps the current file and logs store.reset_failed", async () => {
++  const lines = spyConsole();
++  const { store, a } = await openedStore({
++    resetFile: () => Promise.reject(new Error("stages gone")),
++  });
++
++  await store.reset();
++
++  expect(store.data.value).toBe(a);
++  expect(lines.error).toEqual(['[error] store.reset_failed {path: "a.ts", reason: "stages gone"}']);
++});
++
++test("a later open wins over a reset that resolves last", async () => {
++  const resets: ((data: FileMergeData) => void)[] = [];
++  const { store, pending } = await openedStore({
++    resetFile: () =>
++      new Promise((resolve) => {
++        resets.push(resolve);
++      }),
++  });
++  const b = await dataFor("b.ts");
++
++  const resetting = store.reset();
++  const openB = store.open("b.ts");
++  pending[1]?.resolve(b);
++  await openB;
++  resets[0]?.(await dataFor("a.ts"));
++  await resetting;
++
++  expect(store.data.value).toBe(b);
++});
+diff --git c/frontend/src/ui/store.ts i/frontend/src/ui/store.ts
+index b46df15..f30d35d 100644
+--- c/frontend/src/ui/store.ts
++++ i/frontend/src/ui/store.ts
+@@ -2,12 +2,14 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import { log, type ChunkSource, type FileEntry, type FileMergeData } from "../ipc";
+ 
+-type AppStore = {
++export type AppStore = {
+   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+   readonly active: ComputedRef<string | null>;
+   readonly data: Readonly<ShallowRef<FileMergeData | null>>;
+   loadFiles(): Promise<void>;
+   open(path: string): Promise<void>;
++  finish(text: string): Promise<void>;
++  reset(): Promise<void>;
+ };
+ 
+ let store: AppStore | null = null;
+@@ -29,8 +31,39 @@ export function createAppStore(source: ChunkSource): AppStore {
+       data.value = loaded;
+       log.info("file.loaded", { path, chunks: loaded.chunks.length });
+     } catch (error) {
+-      const reason = error instanceof Error ? error.message : String(error);
+-      log.error("store.load_failed", { path, reason });
++      log.error("store.load_failed", { path, reason: reasonOf(error) });
++    }
++  }
++
++  async function finish(text: string): Promise<void> {
++    const path = active.value;
++    if (path === null) {
++      return;
++    }
++    try {
++      files.value = await source.finishFile(path, text);
++    } catch (error) {
++      log.error("store.finish_failed", { path, reason: reasonOf(error) });
++    }
++  }
++
++  async function reset(): Promise<void> {
++    const path = active.value;
++    if (path === null) {
++      return;
++    }
++    latestOpen += 1;
++    const ticket = latestOpen;
++    try {
++      const original = await source.resetFile(path);
++      if (ticket !== latestOpen) {
++        return;
++      }
++      // A new object, so the editor is rebuilt even when the source returns the record it cached.
++      data.value = { ...original };
++      files.value = await source.listFiles();
++    } catch (error) {
++      log.error("store.reset_failed", { path, reason: reasonOf(error) });
+     }
+   }
+ 
+@@ -38,8 +71,7 @@ export function createAppStore(source: ChunkSource): AppStore {
+     try {
+       files.value = await source.listFiles();
+     } catch (error) {
+-      const reason = error instanceof Error ? error.message : String(error);
+-      log.error("store.list_failed", { reason });
++      log.error("store.list_failed", { reason: reasonOf(error) });
+       return;
+     }
+     const first = files.value[0];
+@@ -48,10 +80,14 @@ export function createAppStore(source: ChunkSource): AppStore {
+     }
+   }
+ 
+-  store = { files, active, data, loadFiles, open };
++  store = { files, active, data, loadFiles, open, finish, reset };
+   return store;
+ }
+ 
++function reasonOf(error: unknown): string {
++  return error instanceof Error ? error.message : String(error);
++}
++
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
+diff --git c/frontend/src/ui/useMergeController.ts i/frontend/src/ui/useMergeController.ts
+index 489453f..e09aa8c 100644
+--- c/frontend/src/ui/useMergeController.ts
++++ i/frontend/src/ui/useMergeController.ts
+@@ -1,8 +1,17 @@
+-import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } from "vue";
++import {
++  onScopeDispose,
++  shallowRef,
++  toRef,
++  watch,
++  type MaybeRefOrGetter,
++  type ShallowRef,
++} from "vue";
+ 
+-import { MergeController } from "../editor";
++import { MergeController, type MergeSummary } from "../editor";
+ import type { FileMergeData } from "../ipc";
+ 
++export type { MergeSummary } from "../editor";
++
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+ export function useMergeController(
+@@ -13,12 +22,20 @@ export function useMergeController(
+     right: Host<HTMLDivElement>;
+     strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
+   },
+-): void {
++): {
++  summary: Readonly<ShallowRef<MergeSummary | null>>;
++  applyAllNonConflicting(side: "local" | "remote"): void;
++  undo(): void;
++  redo(): void;
++  resultText(): string | null;
++} {
++  const summary = shallowRef<MergeSummary | null>(null);
+   let controller: MergeController | null = null;
+ 
+   function destroyController(): void {
+     controller?.destroy();
+     controller = null;
++    summary.value = null;
+   }
+ 
+   watch(
+@@ -41,9 +58,21 @@ export function useMergeController(
+         right,
+         strips: [leftStrip, rightStrip],
+       });
++      controller.onSummaryChange((next) => {
++        summary.value = next;
++      });
++      summary.value = controller.summary();
+     },
+     { immediate: true, flush: "post" },
+   );
+ 
+   onScopeDispose(destroyController);
++
++  return {
++    summary,
++    applyAllNonConflicting: (side) => controller?.applyAllNonConflicting(side),
++    undo: () => controller?.undo(),
++    redo: () => controller?.redo(),
++    resultText: () => controller?.resultText() ?? null,
++  };
+ }

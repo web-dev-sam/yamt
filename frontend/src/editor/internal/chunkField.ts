@@ -1,18 +1,30 @@
 import { invertedEffects } from "@codemirror/commands";
-import { StateEffect, StateField, type ChangeDesc, type Text } from "@codemirror/state";
+import {
+  StateEffect,
+  StateField,
+  type ChangeDesc,
+  type Text,
+  type Transaction,
+} from "@codemirror/state";
 
 import type { Chunk } from "../../ipc";
 import { lineSpan } from "./lineSpan";
+import { isResolved, type ChunkState, type ChunkStatus } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
 type DocPos = number & { readonly __brand: "DocPos" };
+type StatusChanges = ReadonlyMap<Chunk["id"], ChunkStatus>;
 
-export type ChunkSpan = {
-  readonly chunk: Chunk;
+export type ChunkSpan = ChunkState & {
   readonly tone: Tone;
   readonly from: DocPos;
   readonly to: DocPos;
 };
+
+export const setStatus = StateEffect.define<{
+  readonly id: Chunk["id"];
+  readonly status: ChunkStatus;
+}>();
 
 function isDocPos(n: number): n is DocPos {
   return Number.isSafeInteger(n) && n >= 0;
@@ -33,11 +45,14 @@ function mapSpans(
   spans: readonly ChunkSpan[],
   changes: ChangeDesc,
   doc: Text | null,
+  applied: StatusChanges,
 ): readonly ChunkSpan[] {
   const mapped = spans.map((span) => ({
     ...span,
     from: toDocPos(changes.mapPos(span.from, -1)),
-    to: toDocPos(changes.mapPos(span.to, endsMidLine(span, doc) ? 1 : -1)),
+    to: toDocPos(
+      changes.mapPos(span.to, applied.has(span.chunk.id) || endsMidLine(span, doc) ? 1 : -1),
+    ),
   }));
   return mapped.map((span, index) => {
     const next = mapped[index + 1];
@@ -45,8 +60,36 @@ function mapSpans(
   });
 }
 
+function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boolean {
+  return (
+    before !== undefined &&
+    before.from < before.to &&
+    after.from === after.to &&
+    !isResolved(before.chunk, before.status)
+  );
+}
+
+function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
+  const changed = new Map<Chunk["id"], ChunkStatus>();
+  for (const effect of tr.effects) {
+    if (effect.is(setStatus)) {
+      changed.set(effect.value.id, effect.value.status);
+    }
+  }
+  if (!tr.docChanged && changed.size === 0) {
+    return spans;
+  }
+  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
+  return mapped.map((span, index) => {
+    const status =
+      changed.get(span.chunk.id) ??
+      (collapsedByUser(spans[index], span) ? "dismissed" : span.status);
+    return status === span.status ? span : { ...span, status };
+  });
+}
+
 const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
-  map: (spans, changes) => mapSpans(spans, changes, null),
+  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
 });
 
 export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
@@ -57,6 +100,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
         return {
           chunk,
           tone: chunkTone(chunk, "center"),
+          status: "pending",
           from: toDocPos(from),
           to: toDocPos(to),
         };
@@ -65,14 +109,14 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
       // History appends a merged event's older inverted effects after the newer ones
       // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
       const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
-      if (restore !== undefined) {
-        return restore.value;
-      }
-      return tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc) : spans;
+      return restore === undefined ? updateSpans(spans, tr) : restore.value;
     },
     provide: (field) =>
       invertedEffects.of((tr) =>
-        tr.docChanged ? [restoreSpans.of(tr.startState.field(field))] : [],
+        tr.docChanged ||
+        tr.effects.some((effect) => effect.is(setStatus) || effect.is(restoreSpans))
+          ? [restoreSpans.of(tr.startState.field(field))]
+          : [],
       ),
   });
 }

@@ -2,13 +2,13 @@ import type { Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
-import type { Chunk } from "../../ipc";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
+import type { ChunkState } from "./status";
 
 export type Pane = "left" | "center" | "right";
 export type PaneViews = Readonly<Record<Pane, EditorView>>;
-export type ChunkRow = Readonly<Record<Pane, Span>> & { readonly chunk: Chunk };
+export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
 
 export function rangeSpan(
   doc: Text,
@@ -34,6 +34,7 @@ function viewSpan(view: EditorView, range: { readonly from: number; readonly to:
 export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): ChunkRow[] {
   return centerSpans.map((center) => ({
     chunk: center.chunk,
+    status: center.status,
     left: viewSpan(views.left, lineSpan(views.left.state.doc, center.chunk.local)),
     center: viewSpan(views.center, center),
     right: viewSpan(views.right, lineSpan(views.right.state.doc, center.chunk.remote)),

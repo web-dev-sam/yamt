@@ -7,7 +7,7 @@ import {
   type FileEntry,
   type FileMergeData,
 } from "../ipc";
-import { createAppStore, useAppStore } from "./store";
+import { createAppStore, useAppStore, type AppStore } from "./store";
 
 type PendingLoad = {
   readonly path: string;
@@ -149,4 +149,113 @@ test("a rejected load keeps the previous file and logs store.load_failed", async
   expect(store.active.value).toBe("a.ts");
   expect(store.data.value).toBe(a);
   expect(lines.error).toEqual(['[error] store.load_failed {path: "b.ts", reason: "disk gone"}']);
+});
+
+async function openedStore(
+  overrides: Partial<ChunkSource>,
+): Promise<{ store: AppStore; pending: PendingLoad[]; a: FileMergeData }> {
+  const { source, pending } = handSource([]);
+  const store = createAppStore({ ...source, ...overrides });
+  const a = await dataFor("a.ts");
+  const opening = store.open("a.ts");
+  pending[0]?.resolve(a);
+  await opening;
+  return { store, pending, a };
+}
+
+test("finish sends the open file's text and shows the list finishFile returns", async () => {
+  const sent: [string, string][] = [];
+  const resolved: FileEntry = { ...entry("a.ts"), status: "Resolved" };
+  const { store, a } = await openedStore({
+    finishFile: (path, text) => {
+      sent.push([path, text]);
+      return Promise.resolve([resolved, entry("b.ts")]);
+    },
+  });
+
+  await store.finish("merged\r\n");
+
+  expect(sent).toEqual([["a.ts", "merged\r\n"]]);
+  expect(store.files.value).toEqual([resolved, entry("b.ts")]);
+  expect(store.data.value).toBe(a);
+});
+
+test("finish and reset without an open file call nothing", async () => {
+  const lines = spyConsole();
+  const { source } = handSource([]);
+  const store = createAppStore(source);
+
+  await store.finish("text");
+  await store.reset();
+
+  expect(store.data.value).toBeNull();
+  expect(lines.error).toEqual([]);
+});
+
+test("a rejected finish keeps the list and the file and logs store.finish_failed", async () => {
+  const lines = spyConsole();
+  const { store, a } = await openedStore({
+    finishFile: () => Promise.reject(new Error("index locked")),
+  });
+  const before = store.files.value;
+
+  await store.finish("text");
+
+  expect(store.files.value).toBe(before);
+  expect(store.data.value).toBe(a);
+  expect(lines.error).toEqual([
+    '[error] store.finish_failed {path: "a.ts", reason: "index locked"}',
+  ]);
+});
+
+test("reset reopens the original data as a new object and refreshes the list", async () => {
+  const original = await dataFor("a.ts");
+  const reset: string[] = [];
+  const { store, a } = await openedStore({
+    resetFile: (path) => {
+      reset.push(path);
+      return Promise.resolve(original);
+    },
+    listFiles: () => Promise.resolve([entry("a.ts")]),
+  });
+
+  await store.reset();
+
+  expect(reset).toEqual(["a.ts"]);
+  expect(store.data.value).toEqual(original);
+  expect(store.data.value).not.toBe(original);
+  expect(store.data.value).not.toBe(a);
+  expect(store.files.value).toEqual([entry("a.ts")]);
+});
+
+test("a rejected reset keeps the current file and logs store.reset_failed", async () => {
+  const lines = spyConsole();
+  const { store, a } = await openedStore({
+    resetFile: () => Promise.reject(new Error("stages gone")),
+  });
+
+  await store.reset();
+
+  expect(store.data.value).toBe(a);
+  expect(lines.error).toEqual(['[error] store.reset_failed {path: "a.ts", reason: "stages gone"}']);
+});
+
+test("a later open wins over a reset that resolves last", async () => {
+  const resets: ((data: FileMergeData) => void)[] = [];
+  const { store, pending } = await openedStore({
+    resetFile: () =>
+      new Promise((resolve) => {
+        resets.push(resolve);
+      }),
+  });
+  const b = await dataFor("b.ts");
+
+  const resetting = store.reset();
+  const openB = store.open("b.ts");
+  pending[1]?.resolve(b);
+  await openB;
+  resets[0]?.(await dataFor("a.ts"));
+  await resetting;
+
+  expect(store.data.value).toBe(b);
 });

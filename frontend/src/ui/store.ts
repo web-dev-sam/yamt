@@ -2,12 +2,14 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import { log, type ChunkSource, type FileEntry, type FileMergeData } from "../ipc";
 
-type AppStore = {
+export type AppStore = {
   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
   readonly active: ComputedRef<string | null>;
   readonly data: Readonly<ShallowRef<FileMergeData | null>>;
   loadFiles(): Promise<void>;
   open(path: string): Promise<void>;
+  finish(text: string): Promise<void>;
+  reset(): Promise<void>;
 };
 
 let store: AppStore | null = null;
@@ -29,8 +31,39 @@ export function createAppStore(source: ChunkSource): AppStore {
       data.value = loaded;
       log.info("file.loaded", { path, chunks: loaded.chunks.length });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      log.error("store.load_failed", { path, reason });
+      log.error("store.load_failed", { path, reason: reasonOf(error) });
+    }
+  }
+
+  async function finish(text: string): Promise<void> {
+    const path = active.value;
+    if (path === null) {
+      return;
+    }
+    try {
+      files.value = await source.finishFile(path, text);
+    } catch (error) {
+      log.error("store.finish_failed", { path, reason: reasonOf(error) });
+    }
+  }
+
+  async function reset(): Promise<void> {
+    const path = active.value;
+    if (path === null) {
+      return;
+    }
+    latestOpen += 1;
+    const ticket = latestOpen;
+    try {
+      const original = await source.resetFile(path);
+      if (ticket !== latestOpen) {
+        return;
+      }
+      // A new object, so the editor is rebuilt even when the source returns the record it cached.
+      data.value = { ...original };
+      files.value = await source.listFiles();
+    } catch (error) {
+      log.error("store.reset_failed", { path, reason: reasonOf(error) });
     }
   }
 
@@ -38,8 +71,7 @@ export function createAppStore(source: ChunkSource): AppStore {
     try {
       files.value = await source.listFiles();
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      log.error("store.list_failed", { reason });
+      log.error("store.list_failed", { reason: reasonOf(error) });
       return;
     }
     const first = files.value[0];
@@ -48,8 +80,12 @@ export function createAppStore(source: ChunkSource): AppStore {
     }
   }
 
-  store = { files, active, data, loadFiles, open };
+  store = { files, active, data, loadFiles, open, finish, reset };
   return store;
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function useAppStore(): AppStore {

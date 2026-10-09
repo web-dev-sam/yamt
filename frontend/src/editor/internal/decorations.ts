@@ -2,10 +2,10 @@ import "../theme.css";
 import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
-import type { Chunk } from "../../ipc";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
 import { sideChanged, type Side } from "./side";
+import { isResolved, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
@@ -29,19 +29,29 @@ function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
   return builder.finish();
 }
 
-export function sideDecorations(chunks: readonly Chunk[], side: Side): Extension {
-  return EditorView.decorations.compute([], (state) =>
+export function sideDecorations(
+  statuses: StateField<readonly ChunkState[]>,
+  side: Side,
+): Extension {
+  return EditorView.decorations.compute([statuses], (state) =>
     bandDecorations(
       state.doc,
-      chunks
-        .filter((chunk) => sideChanged(chunk, side))
-        .map((chunk) => ({ ...lineSpan(state.doc, chunk[side]), tone: chunkTone(chunk, side) })),
+      state
+        .field(statuses)
+        .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
+        .map(({ chunk }) => ({
+          ...lineSpan(state.doc, chunk[side]),
+          tone: chunkTone(chunk, side),
+        })),
     ),
   );
 }
 
 export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
   return EditorView.decorations.compute([field], (state) =>
-    bandDecorations(state.doc, state.field(field)),
+    bandDecorations(
+      state.doc,
+      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
+    ),
   );
 }

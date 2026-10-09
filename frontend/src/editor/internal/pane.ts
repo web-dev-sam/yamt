@@ -13,6 +13,8 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
+import type { FileMergeData } from "../../ipc";
+
 type PaneKind = "side" | "center";
 
 const LANGUAGES: Readonly<Record<string, () => Extension>> = {
@@ -87,9 +89,14 @@ function kindExtensions(kind: PaneKind): Extension {
   }
 }
 
+export function eolSeparator(eol: FileMergeData["eol"]): Extension {
+  return eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [];
+}
+
 export function createPane(pane: {
   kind: PaneKind;
   doc: string;
+  eol: FileMergeData["eol"];
   language: string | null;
   parent: HTMLElement;
   extensions: Extension;
@@ -102,6 +109,7 @@ export function createPane(pane: {
     doc: pane.doc,
     extensions: [
       lineNumbers(),
+      eolSeparator(pane.eol),
       drawSelection(),
       darkTheme,
       syntaxHighlighting(paletteHighlight),

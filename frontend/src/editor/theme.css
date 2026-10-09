@@ -51,3 +51,24 @@ path.chunk-band {
     inset 0 2px 0 var(--chunk-marker-tone),
     inset 0 -2px 0 var(--chunk-marker-tone);
 }
+
+.chunk-action {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chunk-action rect {
+  fill: transparent;
+}
+
+.chunk-action text {
+  fill: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.chunk-action:hover text {
+  fill: var(--color-fg);
+}

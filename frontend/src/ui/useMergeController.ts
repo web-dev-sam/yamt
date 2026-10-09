@@ -1,7 +1,16 @@
-import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } from "vue";
+import {
+  onScopeDispose,
+  shallowRef,
+  toRef,
+  watch,
+  type MaybeRefOrGetter,
+  type ShallowRef,
+} from "vue";
 
-import { MergeController } from "../editor";
+import { MergeController, type MergeSummary } from "../editor";
 import type { FileMergeData } from "../ipc";
+
+export type { MergeSummary } from "../editor";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -13,12 +22,20 @@ export function useMergeController(
     right: Host<HTMLDivElement>;
     strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
   },
-): void {
+): {
+  summary: Readonly<ShallowRef<MergeSummary | null>>;
+  applyAllNonConflicting(side: "local" | "remote"): void;
+  undo(): void;
+  redo(): void;
+  resultText(): string | null;
+} {
+  const summary = shallowRef<MergeSummary | null>(null);
   let controller: MergeController | null = null;
 
   function destroyController(): void {
     controller?.destroy();
     controller = null;
+    summary.value = null;
   }
 
   watch(
@@ -41,9 +58,21 @@ export function useMergeController(
         right,
         strips: [leftStrip, rightStrip],
       });
+      controller.onSummaryChange((next) => {
+        summary.value = next;
+      });
+      summary.value = controller.summary();
     },
     { immediate: true, flush: "post" },
   );
 
   onScopeDispose(destroyController);
+
+  return {
+    summary,
+    applyAllNonConflicting: (side) => controller?.applyAllNonConflicting(side),
+    undo: () => controller?.undo(),
+    redo: () => controller?.redo(),
+    resultText: () => controller?.resultText() ?? null,
+  };
 }
