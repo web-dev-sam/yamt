@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "frontend: dev server",
+      "type": "shell",
+      "command": "pnpm -C frontend dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^(?!x)x$" },
+        "background": {
+          "activeBegins": true,
+          "beginsPattern": "VITE v\\d",
+          "endsPattern": "Local:\\s+http"
+        }
+      },
+      "presentation": { "panel": "dedicated", "reveal": "always" }
+    }
+  ]
+}
