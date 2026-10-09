@@ -5,7 +5,7 @@ mod decode;
 mod session;
 
 pub use decode::{Eol, UnsupportedReason};
-pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession};
+pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession, merge_data};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

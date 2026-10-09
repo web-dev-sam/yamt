@@ -175,8 +175,13 @@ Algorithm (plan §4), made precise:
 Invariants (property-tested with `proptest`):
 
 - chunks sorted by `base.start`, pairwise disjoint in base space, same for local and remote.
-- `apply_non_conflicting` on a triple with zero `Conflict` chunks `==` `git merge-file -p`
-  output (the CLI test harness shells out to git; `merge-core` itself never does).
+- when yamt finds no `Conflict` chunk **and** `git merge-file -p --diff-algorithm=histogram`
+  exits 0, `apply_non_conflicting` `==` git's output (the CLI test harness shells out to git;
+  `merge-core` itself never does). Equality on every triple yamt calls conflict-free is not
+  achievable: imara-diff and git's xdiff place ambiguous runs of repeated lines differently, so
+  the two can disagree on _whether_ a region conflicts. yamt applies nothing on its own
+  (plan §2 #9), so such a region is still reviewed by the user; the test prints how often each
+  side disagrees.
 - for any triple, every non-Conflict chunk's text on the "other" side equals the base text
   of that region (otherwise it is by definition a conflict).
 - `local == base` ⇒ every chunk is `RemoteOnly`; `local == remote` ⇒ no `Conflict`.
@@ -561,17 +566,19 @@ mapped to `@codemirror/lang-*` in `pane.ts` with a static table. Unknown → no 
 The file itself is the reference; this is its shape (verified at commit `588abc9`+):
 
 ```
-check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check sfc-order hooks-test
+check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
 fmt-check:      pnpm -C frontend fmt:check && cargo fmt --all --check
 clippy:         cargo clippy --workspace --all-targets -- -D warnings
-test:           cargo nextest run --workspace            (--no-tests=warn only until the first Rust test lands)
+test:           cargo nextest run --workspace
 deny:           cargo deny check --warn unmaintained
 bindings:       cargo run -p yamt-app --bin export-bindings
 bindings-check: export to target/ and `diff -u` against the committed frontend/src/ipc/bindings.ts
 web-*:          delegate to the package scripts in frontend/package.json (lint, typecheck, test, unused, sfc-order); `unused` = exports nobody imports
 arch-check:     scripts/arch-check.sh — gitio ↛ merge-core; merge-core ↛ serde_json/tokio/tauri; no std::{fs,process} in merge-core
+golden:         yamt-cli golden run — every tests/golden case still produces its committed expected.json
 hooks-test:     node:test over .omp/hooks/test/*.test.ts (the agent safety hooks are code)
-dev-web / dev-app / smoke-cli / golden-update as before
+golden-update:  rewrites expected.json (orchestrator only, PM4); golden-show <case>, golden-repo <case> <dir> for the PhpStorm comparison
+dev-web / dev-app / smoke-cli (classify on the window's sample) as before
 ```
 
 Implementers run their own layer's commands while working; the integrated `just check` runs
@@ -610,7 +617,7 @@ parallel.
 | 0.1' | `gitio`                                                                                                   | rust-impl | `crates/gitio/**`                                                 | integration tests incl. add/add, CRLF                                                                                                                  |
 | 0.2  | `session`                                                                                                 | rust-impl | `crates/session/**`                                               | finish/reset round-trip test                                                                                                                           |
 | 0.3  | `cli` classify/scan/golden/fixture + `git merge-file` cross-check; `session::merge_data`                  | rust-impl | `crates/cli/**`, `crates/session/src/**`                          | golden tooling tested on synthetic cases; RK13 cross-check proptest green                                                                              |
-| 0.3' | 10 real goldens from public TS/TSX/Vue projects + `scripts/golden-repo.sh`                                | task      | `tests/golden/**` (not `expected.json`), `scripts/golden-repo.sh` | cases committed with attribution; `just golden` green; human PhpStorm comparison **(human gate)**                                                      |
+| 0.3' | 10 real goldens from public TS/TSX/Vue projects + `scripts/golden-repo.sh`                                | rust-impl | `tests/golden/**` (not `expected.json`), `scripts/golden-repo.sh` | cases committed with attribution; `just golden` green; human PhpStorm comparison **(human gate)**                                                      |
 
 **M1 — frontend in a browser, fixture JSON**
 

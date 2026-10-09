@@ -542,6 +542,7 @@ dependencies = [
  "proptest",
  "serde_json",
  "tempfile",
+ "thiserror",
  "yamt-conflict-repo",
  "yamt-merge-core",
  "yamt-session",

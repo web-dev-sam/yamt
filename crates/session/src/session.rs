@@ -36,6 +36,20 @@ pub struct FileMergeData {
     pub chunks: Vec<Chunk>,
 }
 
+#[must_use]
+pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMergeData {
+    let eol_source = if base.is_empty() { local } else { base };
+    FileMergeData {
+        path: path.to_owned(),
+        base: base.to_owned(),
+        local: local.to_owned(),
+        remote: remote.to_owned(),
+        eol: detect_eol(eol_source),
+        language: language_of(Path::new(path)),
+        chunks: compute_chunks(base, local, remote, &Options::default()),
+    }
+}
+
 pub struct MergeSession {
     repo: Repo,
     files: Vec<FileState>,
@@ -103,26 +117,12 @@ impl MergeSession {
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
         let file = find_file(&mut self.files, path)?;
         let texts = file.require_text()?;
-        let eol_source = if texts.base.is_empty() {
-            &texts.local
-        } else {
-            &texts.base
-        };
-        let chunks = compute_chunks(
+        Ok(merge_data(
+            &file.display_path(),
             &texts.base,
             &texts.local,
             &texts.remote,
-            &Options::default(),
-        );
-        Ok(FileMergeData {
-            path: file.display_path(),
-            base: texts.base.clone(),
-            local: texts.local.clone(),
-            remote: texts.remote.clone(),
-            eol: detect_eol(eol_source),
-            language: language_of(&file.path),
-            chunks,
-        })
+        ))
     }
 
     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {

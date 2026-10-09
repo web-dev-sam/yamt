@@ -42,7 +42,7 @@ frontend/tsconfig   tsconfig.app.json: src/**, types [vite/client] — no Node g
                     tsconfig.node.json: scripts/**, vite.config.ts, types [node]. typecheck = `vue-tsc -b`
 frontend/vite.config.ts  Vitest projects: `node` (model, connectors, ipc, scripts) = `pnpm test`;
                     `browser` (editor, Playwright WebKit) = `pnpm test:browser`, not in `just check`
-tests/golden/<case>      base.txt local.txt remote.txt expected.json (planned)
+tests/golden/<case>      base.<ext> local.<ext> remote.<ext> README.md, expected.json (generated, `just golden-update`); scripts/golden-repo.sh rebuilds a case as a repo
 docs/                    plan.md (decisions §2), architecture.md, ai-system.md, slices/SLICES.md, slices/briefs/, walkthroughs/
 AGENTS.md                root, plus one per module: crates/*, src-tauri, frontend/src/*
 ```

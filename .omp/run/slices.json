@@ -1,5 +1,5 @@
 {
-  "M0S3Cli": {
+  "M0S3CliR1": {
     "owned": ["crates/cli/**", "crates/session/src/**"],
     "readonly": [
       "docs/**",
@@ -15,15 +15,8 @@
       "justfile"
     ]
   },
-  "M0S3Goldens": {
-    "owned": [
-      "tests/golden/README.md",
-      "tests/golden/*/README.md",
-      "tests/golden/*/base.*",
-      "tests/golden/*/local.*",
-      "tests/golden/*/remote.*",
-      "scripts/golden-repo.sh"
-    ],
-    "readonly": ["docs/**", ".omp/**", "crates/**"]
+  "M0S3GoldensR1": {
+    "owned": ["tests/golden/README.md", "tests/golden/*/README.md", "scripts/golden-repo.sh"],
+    "readonly": ["docs/**", ".omp/**", "crates/**", "tests/golden/**"]
   }
 }

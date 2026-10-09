@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check sfc-order hooks-test
+check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
 
 fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
@@ -9,7 +9,7 @@ clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
 test:
-    cargo nextest run --workspace --no-tests=warn
+    cargo nextest run --workspace
 
 deny:
     cargo deny check --warn unmaintained
@@ -44,10 +44,19 @@ dev-app:
     cargo tauri dev
 
 smoke-cli:
-    cargo run -p yamt-cli -- classify tests/golden/basic/{base,local,remote}.txt
+    cargo run --quiet -p yamt-cli -- classify frontend/fixtures/sample/{base,local,remote}.ts.txt
+
+golden:
+    cargo run --quiet -p yamt-cli -- golden run
 
 golden-update:
-    cargo run -p yamt-cli -- golden update
+    cargo run --quiet -p yamt-cli -- golden update
+
+golden-show case:
+    cargo run --quiet -p yamt-cli -- classify tests/golden/{{ case }}/base.* tests/golden/{{ case }}/local.* tests/golden/{{ case }}/remote.*
+
+golden-repo case dir:
+    scripts/golden-repo.sh {{ case }} {{ dir }}
 
 [positional-arguments]
 [private]

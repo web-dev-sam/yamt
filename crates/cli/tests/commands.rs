@@ -1,0 +1,234 @@
+#![cfg(test)]
+
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use yamt_conflict_repo::{ConflictFile, FileKind, conflict_repo};
+
+const BASE: &str = "a\nb\nc\nd\ne\nf\ng\nh\ni\n";
+const LOCAL: &str = "a\nB\nc\nd\ne\nf\ng\nL\ni\n";
+const REMOTE: &str = "a\nb\nc\nd\nE\nf\ng\nR\ni\n";
+
+struct Output {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+fn yamt_cli(args: &[&str]) -> Output {
+    let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
+        .args(args)
+        .output()
+        .unwrap();
+    Output {
+        code: output.status.code().unwrap(),
+        stdout: String::from_utf8(output.stdout).unwrap(),
+        stderr: String::from_utf8(output.stderr).unwrap(),
+    }
+}
+
+fn path(path: &Path) -> &str {
+    path.to_str().unwrap()
+}
+
+fn write_case(root: &Path, name: &str, extension: &str) -> std::path::PathBuf {
+    let dir = root.join(name);
+    fs::create_dir(&dir).unwrap();
+    for (side, text) in [("base", BASE), ("local", LOCAL), ("remote", REMOTE)] {
+        fs::write(dir.join(format!("{side}.{extension}")), text).unwrap();
+    }
+    dir
+}
+
+fn classify(extra: &[&str]) -> Output {
+    let dir = TempDir::new().unwrap();
+    let case = write_case(dir.path(), "triple", "txt");
+    let sides = ["base", "local", "remote"].map(|side| case.join(format!("{side}.txt")));
+    let mut args = vec![
+        "classify",
+        path(&sides[0]),
+        path(&sides[1]),
+        path(&sides[2]),
+    ];
+    args.extend_from_slice(extra);
+    yamt_cli(&args)
+}
+
+#[test]
+fn classify_prints_one_row_per_chunk_and_a_summary_per_kind() {
+    let output = classify(&[]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout,
+        "0 LocalOnly base[1+1] local[1+1] remote[1+1]\n\
+         1 RemoteOnly base[4+1] local[4+1] remote[4+1]\n\
+         2 Conflict base[7+1] local[7+1] remote[7+1]\n\
+         total 3: LocalOnly 1, RemoteOnly 1, BothSame 0, Conflict 1\n"
+    );
+}
+
+#[test]
+fn classify_gap_joins_changes_separated_by_up_to_gap_lines() {
+    let output = classify(&["--gap", "2"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout,
+        "0 Conflict base[1+7] local[1+7] remote[1+7]\n\
+         total 1: LocalOnly 0, RemoteOnly 0, BothSame 0, Conflict 1\n"
+    );
+}
+
+#[test]
+fn classify_json_round_trips_into_the_chunk_array_shape() {
+    let output = classify(&["--json"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(output.stdout.ends_with("]\n"));
+    let chunks: Value = serde_json::from_str(&output.stdout).unwrap();
+    let range = |start: u32| json!({ "start": start, "len": 1 });
+    let chunk = |id: u32, kind: &str, start: u32| json!({ "id": id, "kind": kind, "base": range(start), "local": range(start), "remote": range(start) });
+    assert_eq!(
+        chunks,
+        json!([
+            chunk(0, "LocalOnly", 1),
+            chunk(1, "RemoteOnly", 4),
+            chunk(2, "Conflict", 7)
+        ])
+    );
+}
+
+#[test]
+fn unknown_command_is_a_usage_error_with_exit_code_two() {
+    let output = yamt_cli(&["frobnicate"]);
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .starts_with("yamt-cli: unknown command `frobnicate`\nusage:")
+    );
+}
+
+#[test]
+fn golden_update_then_run_passes_and_an_edited_expected_json_is_a_diff() {
+    let root = TempDir::new().unwrap();
+    write_case(root.path(), "first", "ts");
+    let second = write_case(root.path(), "second", "rs");
+    fs::write(root.path().join("README.md"), "not a case").unwrap();
+
+    let update = yamt_cli(&["golden", "update", path(root.path())]);
+    assert_eq!(update.code, 0, "{}", update.stderr);
+    assert_eq!(update.stdout, "wrote first\nwrote second\n");
+    let classified = classify(&["--json"]).stdout;
+    assert_eq!(
+        fs::read_to_string(second.join("expected.json")).unwrap(),
+        classified
+    );
+
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(run.stdout, "ok first\nok second\n");
+
+    let edited = classified.replace("\"Conflict\"", "\"BothSame\"");
+    fs::write(second.join("expected.json"), edited).unwrap();
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        run.stdout,
+        "ok first\nDIFF second: line 36: expected `\"kind\": \"BothSame\",`, got `\"kind\": \"Conflict\",`\n"
+    );
+    assert_eq!(run.stderr, "yamt-cli: 1 of 2 golden cases failed\n");
+}
+
+#[test]
+fn golden_run_fails_on_a_missing_expected_json() {
+    let root = TempDir::new().unwrap();
+    write_case(root.path(), "fresh", "txt");
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(run.stdout, "DIFF fresh: expected.json is missing\n");
+}
+
+#[test]
+fn golden_run_fails_on_a_case_without_remote() {
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "broken", "txt");
+    fs::remove_file(case.join("remote.txt")).unwrap();
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        run.stderr,
+        "yamt-cli: broken is not a golden case: missing remote.*\n"
+    );
+}
+
+#[test]
+fn golden_run_fails_on_sides_with_different_extensions() {
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "mixed", "txt");
+    fs::rename(case.join("local.txt"), case.join("local.ts")).unwrap();
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        run.stderr,
+        "yamt-cli: mixed is not a golden case: base.txt, local.ts and remote.txt differ in extension\n"
+    );
+}
+
+#[test]
+fn golden_run_fails_without_cases() {
+    let root = TempDir::new().unwrap();
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        run.stderr,
+        format!("yamt-cli: no golden cases in {}\n", path(root.path()))
+    );
+}
+
+#[test]
+fn fixture_prints_file_merge_data_named_after_the_case() {
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "cart", "ts");
+    let output = yamt_cli(&["fixture", path(&case)]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let data: Value = serde_json::from_str(&output.stdout).unwrap();
+    assert_eq!(data["path"], "cart.ts");
+    assert_eq!(data["base"], BASE);
+    assert_eq!(data["local"], LOCAL);
+    assert_eq!(data["remote"], REMOTE);
+    assert_eq!(data["eol"], "Lf");
+    assert_eq!(data["language"], "typescript");
+    let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
+    assert_eq!(data["chunks"], classified);
+}
+
+#[test]
+fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
+    let repo = conflict_repo(&[
+        ConflictFile {
+            path: "notes.txt",
+            kind: FileKind::Regular,
+            base: Some(BASE.as_bytes()),
+            local: Some(LOCAL.as_bytes()),
+            remote: Some(REMOTE.as_bytes()),
+        },
+        ConflictFile {
+            path: "image.bin",
+            kind: FileKind::Regular,
+            base: Some(b"\0base"),
+            local: Some(b"\0local"),
+            remote: Some(b"\0remote"),
+        },
+    ])
+    .unwrap();
+    let output = yamt_cli(&["scan", path(repo.path())]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout,
+        "image.bin Unresolved unsupported Binary\n\
+         notes.txt Unresolved total 3: LocalOnly 1, RemoteOnly 1, BothSame 0, Conflict 1\n\
+         remaining: 2\n"
+    );
+}
