@@ -47,7 +47,7 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
 - [VU14] Tailwind v4 classes in templates, sorted by `oxfmt` (`sortTailwindcss`). The palette is
   the `@theme` block in `src/style.css` (stock colours reset, plan §2 row 24). The CodeMirror theme
   reads its `--color-*` variables; decoration classes (`.chunk-local`, …) live once in
-  `editor/theme.css` via `@apply` of those tokens.
+  `editor/theme.css` via `@apply` of those tokens. Detector: `scripts/palette.test.ts` (VU17).
 
 ## Splitting
 

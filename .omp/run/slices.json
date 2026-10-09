@@ -1,34 +1,22 @@
 {
-  "M1S0IpcFixtures": {
+  "M1S0IpcFixturesR1": {
     "owned": [
-      "src-tauri/src/**",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/log.ts",
-      "frontend/src/ipc/*.test.ts",
-      "frontend/src/ui/**",
       "frontend/src/main.ts",
-      "frontend/fixtures/.gitkeep"
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/domain.ts"
     ],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "crates/**",
-      "tests/golden/**",
       "frontend/src/editor/**",
-      "frontend/src/style.css",
-      "frontend/fixtures/golden/**",
-      "frontend/fixtures/sample/**",
-      "frontend/scripts/**",
-      "Cargo.toml",
-      "Cargo.lock",
-      "justfile",
-      "frontend/package.json"
+      "frontend/fixtures/**",
+      "frontend/scripts/**"
     ]
   },
-  "M1SPPaletteTest": {
+  "M1SPPaletteTestR1": {
     "owned": ["frontend/scripts/palette.ts", "frontend/scripts/palette.test.ts"],
     "readonly": ["docs/**", ".omp/**", "frontend/src/**", "frontend/scripts/fences.ts"]
   }
