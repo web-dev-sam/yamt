@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-check: fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
+check: fmt-check clippy test deny bindings-check fixtures-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
 
 fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
@@ -20,6 +20,17 @@ bindings:
 bindings-check:
     cargo run --quiet -p yamt-app --bin export-bindings -- target/bindings-check.ts
     diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts
+
+fixtures: (fixtures-into "frontend/fixtures/golden")
+
+fixtures-check: (fixtures-into "target/fixtures-check")
+    diff -ru frontend/fixtures/golden target/fixtures-check
+
+[private]
+fixtures-into dir:
+    rm -rf {{ dir }} && mkdir -p {{ dir }}
+    cargo build --quiet -p yamt-cli
+    for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/$(basename "$case").json"; done
 
 web-lint: (frontend "lint")
 

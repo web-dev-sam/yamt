@@ -16,6 +16,7 @@ export default defineConfig({
             "src/model/**/*.test.ts",
             "src/connectors/**/*.test.ts",
             "src/ipc/**/*.test.ts",
+            "src/ui/**/*.test.ts",
             "scripts/**/*.test.ts",
           ],
         },

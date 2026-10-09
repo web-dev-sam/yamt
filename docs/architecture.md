@@ -305,8 +305,8 @@ export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: strin
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
-unbranded. `ipc/domain.ts` owns the domain types (`BaseLine = number & { readonly __space:
-"base" }`, `LocalLine`, `RemoteLine`, `ChunkId`, and `Chunk`/`FileMergeData` built on them)
+unbranded. `ipc/domain.ts` owns the domain types (`BaseLine = number & { readonly __brand:
+"BaseLine" }`, `LocalLine`, `RemoteLine`, `ChunkId`, and `Chunk`/`FileMergeData` built on them)
 and one `toDomain(dto: Generated.FileMergeData): FileMergeData` mapping. Both `ChunkSource`
 implementations return domain types; nothing outside `ipc/` sees a generated DTO. `DocPos`
 (a CodeMirror offset) is a fourth brand created only inside `editor/`. Mixing any two is a
@@ -340,9 +340,11 @@ export interface ChunkSource {
 }
 ```
 
-`FixtureChunkSource` (M1) reads `fixtures/*.json`; `finishFile` stores results in memory and
-logs the text. `TauriChunkSource` (M2) wraps `commands`. `main.ts` picks one by
-`import.meta.env.VITE_CHUNK_SOURCE`.
+`FixtureChunkSource` (M1) reads `frontend/fixtures/golden/*.json` — the engine's output for each
+golden case, written by `just fixtures` and kept current by `just fixtures-check` in `check`;
+`finishFile` stores results in memory and logs the text. `TauriChunkSource` (M2) wraps
+`commands`. From M2, `main.ts` picks one by `import.meta.env.VITE_CHUNK_SOURCE`; with one
+source in M1 there is no switch (vision 5).
 
 ---
 

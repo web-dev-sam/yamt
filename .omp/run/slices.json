@@ -1,22 +1,35 @@
 {
-  "M0S3CliR1": {
-    "owned": ["crates/cli/**", "crates/session/src/**"],
+  "M1S0IpcFixtures": {
+    "owned": [
+      "src-tauri/src/**",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/log.ts",
+      "frontend/src/ipc/*.test.ts",
+      "frontend/src/ui/**",
+      "frontend/src/main.ts",
+      "frontend/fixtures/.gitkeep"
+    ],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "crates/merge-core/**",
-      "crates/gitio/**",
-      "crates/conflict-repo/**",
-      "crates/session/tests/**",
+      "crates/**",
       "tests/golden/**",
+      "frontend/src/editor/**",
+      "frontend/src/style.css",
+      "frontend/fixtures/golden/**",
       "frontend/fixtures/sample/**",
+      "frontend/scripts/**",
       "Cargo.toml",
       "Cargo.lock",
-      "justfile"
+      "justfile",
+      "frontend/package.json"
     ]
   },
-  "M0S3GoldensR1": {
-    "owned": ["tests/golden/README.md", "tests/golden/*/README.md", "scripts/golden-repo.sh"],
-    "readonly": ["docs/**", ".omp/**", "crates/**", "tests/golden/**"]
+  "M1SPPaletteTest": {
+    "owned": ["frontend/scripts/palette.ts", "frontend/scripts/palette.test.ts"],
+    "readonly": ["docs/**", ".omp/**", "frontend/src/**", "frontend/scripts/fences.ts"]
   }
 }
