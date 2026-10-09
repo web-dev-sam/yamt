@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{Error, Result};
+use crate::{Error, Result, read_error, read_text};
 
-const EXPECTED_FILE: &str = "expected.json";
+pub(crate) const EXPECTED_FILE: &str = "expected.json";
 
 pub(crate) struct Case {
     pub(crate) name: String,
@@ -77,17 +77,6 @@ fn side_extension(dir: &Path, case: &str) -> Result<String> {
         return Err(malformed(case, &problem));
     }
     Ok(base)
-}
-
-pub(crate) fn read_text(path: &Path) -> Result<String> {
-    fs::read_to_string(path).map_err(|source| read_error(path, source))
-}
-
-pub(crate) fn read_error(path: &Path, source: std::io::Error) -> Error {
-    Error::Read {
-        path: path.display().to_string(),
-        source,
-    }
 }
 
 fn malformed(case: &str, problem: &str) -> Error {

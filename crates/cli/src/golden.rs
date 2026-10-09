@@ -4,9 +4,9 @@ use std::path::Path;
 
 use yamt_merge_core::{Options, compute_chunks};
 
-use crate::case::{Case, read_error};
+use crate::case::{Case, EXPECTED_FILE};
 use crate::classify::chunks_json;
-use crate::{Error, Result, print_lines};
+use crate::{Error, Result, print_lines, read_error};
 
 pub(crate) fn run(dir: &Path) -> Result<()> {
     let cases = load_cases(dir)?;
@@ -37,7 +37,7 @@ pub(crate) fn update(dir: &Path) -> Result<()> {
     let mut report = Vec::with_capacity(cases.len());
     for case in &cases {
         let path = case.expected_path();
-        fs::write(&path, expected_json(case)?).map_err(|source| Error::Write {
+        fs::write(&path, computed_json(case)?).map_err(|source| Error::Write {
             path: path.display().to_string(),
             source,
         })?;
@@ -69,18 +69,18 @@ fn load_cases(dir: &Path) -> Result<Vec<Case>> {
         .collect()
 }
 
-fn expected_json(case: &Case) -> Result<String> {
+fn computed_json(case: &Case) -> Result<String> {
     let chunks = compute_chunks(&case.base, &case.local, &case.remote, &Options::default());
     chunks_json(&chunks)
 }
 
 fn mismatch(case: &Case) -> Result<Option<String>> {
-    let actual = expected_json(case)?;
+    let actual = computed_json(case)?;
     let path = case.expected_path();
     let expected = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
-            return Ok(Some("expected.json is missing".to_owned()));
+            return Ok(Some(format!("{EXPECTED_FILE} is missing")));
         }
         Err(source) => return Err(read_error(&path, source)),
     };
@@ -93,6 +93,9 @@ fn mismatch(case: &Case) -> Result<Option<String>> {
 }
 
 fn first_difference(expected: &str, actual: &str) -> String {
+    if expected.ends_with('\n') != actual.ends_with('\n') {
+        return "trailing newline differs".to_owned();
+    }
     for (number, (expected_line, actual_line)) in (1..).zip(expected.lines().zip(actual.lines())) {
         if expected_line != actual_line {
             return format!(

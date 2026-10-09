@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -18,7 +19,7 @@ struct Output {
     stderr: String,
 }
 
-fn yamt_cli(args: &[&str]) -> Output {
+fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
     let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
         .args(args)
         .output()
@@ -110,6 +111,21 @@ fn unknown_command_is_a_usage_error_with_exit_code_two() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn non_utf8_argument_is_a_usage_error_with_exit_code_two() {
+    use std::os::unix::ffi::OsStrExt;
+    let output = yamt_cli(&[OsStr::new("classify"), OsStr::from_bytes(b"\xff")]);
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .starts_with("yamt-cli: argument `\u{fffd}` is not UTF-8\nusage:"),
+        "{}",
+        output.stderr
+    );
+}
+
 #[test]
 fn golden_update_then_run_passes_and_an_edited_expected_json_is_a_diff() {
     let root = TempDir::new().unwrap();
@@ -148,6 +164,34 @@ fn golden_run_fails_on_a_missing_expected_json() {
     let run = yamt_cli(&["golden", "run", path(root.path())]);
     assert_eq!(run.code, 1);
     assert_eq!(run.stdout, "DIFF fresh: expected.json is missing\n");
+}
+
+fn golden_run_with_expected(edit: impl Fn(&str) -> String) -> Output {
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "edited", "txt");
+    let update = yamt_cli(&["golden", "update", path(root.path())]);
+    assert_eq!(update.code, 0, "{}", update.stderr);
+    let expected = case.join("expected.json");
+    let written = fs::read_to_string(&expected).unwrap();
+    fs::write(&expected, edit(&written)).unwrap();
+    yamt_cli(&["golden", "run", path(root.path())])
+}
+
+#[test]
+fn golden_run_fails_on_an_expected_json_with_crlf_line_endings() {
+    let run = golden_run_with_expected(|json| json.replace('\n', "\r\n"));
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        run.stdout,
+        "DIFF edited: same lines, different line endings\n"
+    );
+}
+
+#[test]
+fn golden_run_fails_on_an_expected_json_without_a_final_newline() {
+    let run = golden_run_with_expected(|json| json.trim_end_matches('\n').to_owned());
+    assert_eq!(run.code, 1);
+    assert_eq!(run.stdout, "DIFF edited: trailing newline differs\n");
 }
 
 #[test]

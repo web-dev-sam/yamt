@@ -3,7 +3,7 @@
 - Project: nuxt/nuxt (MIT, https://github.com/nuxt/nuxt/blob/68a4d3b4ce27ecbba04dc1c91c1803bb38acfbce/LICENSE)
 - Merge commit: 68a4d3b4ce27ecbba04dc1c91c1803bb38acfbce (https://github.com/nuxt/nuxt/commit/68a4d3b4ce27ecbba04dc1c91c1803bb38acfbce) — parents: ours acc23a0b72bce7a56af44e66e4453321c16ca3db, theirs 4fbbc10f62aae02beb0c59e946c5fd18cd0d63f3; merge base bb533f8d253fcfb67937ee811bc8a49cd81239e8
 - File: test/nuxt/nuxt-island.test.ts
-- Lines (base/local/remote): 68/214/241
+- Lines (base/local/remote): 68/214/241 (remote has no final newline; wc -l prints 240)
 - Why this case: The remote side has no final newline; both sides insert at the same places (imports, mocks, end of file), giving three conflicts, one of them 140 lines long.
 
 ## Compare in PhpStorm

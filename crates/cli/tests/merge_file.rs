@@ -18,6 +18,7 @@ const MAX_LINES: usize = 10;
 const MAX_EDITS: usize = 3;
 const CASES: u32 = 512;
 const MIN_BOTH_CLEAN_PERCENT: u32 = 25;
+const MAX_ONLY_GIT_CONFLICT_PERCENT: u32 = 1;
 const PERCENT: u32 = 100;
 // Exit status is the conflict count capped at 127; errors are negative, i.e. 255 (git-merge-file(1)).
 const MAX_GIT_CONFLICT_EXIT: i32 = 127;
@@ -223,5 +224,9 @@ fn enough_generated_triples_are_clean_for_both_to_exercise_the_cross_check() {
     assert!(
         both_clean * PERCENT >= CASES * MIN_BOTH_CLEAN_PERCENT,
         "only {both_clean} of {CASES} triples were clean for both yamt and git"
+    );
+    assert!(
+        only_git_conflicts * PERCENT <= CASES * MAX_ONLY_GIT_CONFLICT_PERCENT,
+        "{only_git_conflicts} of {CASES} triples were clean for yamt but conflicted in git"
     );
 }

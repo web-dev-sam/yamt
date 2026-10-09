@@ -1,0 +1,114 @@
+[
+  {
+    "id": 0,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 2,
+      "len": 1
+    },
+    "local": {
+      "start": 2,
+      "len": 7
+    },
+    "remote": {
+      "start": 2,
+      "len": 1
+    }
+  },
+  {
+    "id": 1,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 16,
+      "len": 0
+    },
+    "local": {
+      "start": 22,
+      "len": 0
+    },
+    "remote": {
+      "start": 16,
+      "len": 2
+    }
+  },
+  {
+    "id": 2,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 22,
+      "len": 7
+    },
+    "local": {
+      "start": 28,
+      "len": 11
+    },
+    "remote": {
+      "start": 24,
+      "len": 7
+    }
+  },
+  {
+    "id": 3,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 48,
+      "len": 0
+    },
+    "local": {
+      "start": 58,
+      "len": 2
+    },
+    "remote": {
+      "start": 50,
+      "len": 0
+    }
+  },
+  {
+    "id": 4,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 54,
+      "len": 0
+    },
+    "local": {
+      "start": 66,
+      "len": 1
+    },
+    "remote": {
+      "start": 56,
+      "len": 0
+    }
+  },
+  {
+    "id": 5,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 59,
+      "len": 0
+    },
+    "local": {
+      "start": 72,
+      "len": 1
+    },
+    "remote": {
+      "start": 61,
+      "len": 0
+    }
+  },
+  {
+    "id": 6,
+    "kind": "Conflict",
+    "base": {
+      "start": 69,
+      "len": 2
+    },
+    "local": {
+      "start": 83,
+      "len": 3
+    },
+    "remote": {
+      "start": 71,
+      "len": 3
+    }
+  }
+]

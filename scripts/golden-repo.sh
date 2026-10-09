@@ -25,15 +25,22 @@ for side in base local remote; do
     [ -f "$case_dir/$side.$ext" ] || die "missing $case_dir/$side.$ext"
 done
 
+git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+read -r git_major git_minor <<<"$git_version"
+if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
+    die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
+fi
+
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-g() {
+repo_git() {
     git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
-        -c commit.gpgsign=false -c core.autocrlf=false "$@"
+        -c commit.gpgsign=false -c core.autocrlf=false \
+        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
 }
 put() {
     mkdir -p "$(dirname "$dir/$path")"
     cp "$case_dir/$1.$ext" "$dir/$path"
-    g add -- "$path"
+    repo_git add -- "$path"
 }
 
 mkdir -p "$dir"
@@ -42,18 +49,19 @@ git -c init.defaultBranch=main init -q "$dir"
 if [ -s "$case_dir/base.$ext" ]; then
     put base
 fi
-g commit -q --allow-empty -m base
+repo_git commit -q --allow-empty -m base
 
-g checkout -q -b local
+repo_git checkout -q -b local
 put local
-g commit -q -m local
+repo_git commit -q -m local
 
-g checkout -q -b remote main
+repo_git checkout -q -b remote main
 put remote
-g commit -q -m remote
+repo_git commit -q -m remote
 
-g checkout -q local
-if g merge -q --no-edit remote; then
+repo_git checkout -q local
+if repo_git merge -q --no-edit remote; then
     die "merging remote into local was clean; expected a conflict"
 fi
+[ -n "$(repo_git ls-files -u)" ] || die "merge failed without leaving a conflict"
 echo "golden-repo: $dir is mid-merge; conflicted file: $path"

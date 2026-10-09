@@ -1,0 +1,18 @@
+[
+  {
+    "id": 0,
+    "kind": "Conflict",
+    "base": {
+      "start": 0,
+      "len": 0
+    },
+    "local": {
+      "start": 0,
+      "len": 74
+    },
+    "remote": {
+      "start": 0,
+      "len": 76
+    }
+  }
+]

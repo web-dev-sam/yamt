@@ -1,0 +1,82 @@
+[
+  {
+    "id": 0,
+    "kind": "Conflict",
+    "base": {
+      "start": 0,
+      "len": 3
+    },
+    "local": {
+      "start": 0,
+      "len": 4
+    },
+    "remote": {
+      "start": 0,
+      "len": 4
+    }
+  },
+  {
+    "id": 1,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 6,
+      "len": 0
+    },
+    "local": {
+      "start": 7,
+      "len": 1
+    },
+    "remote": {
+      "start": 7,
+      "len": 0
+    }
+  },
+  {
+    "id": 2,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 11,
+      "len": 1
+    },
+    "local": {
+      "start": 13,
+      "len": 1
+    },
+    "remote": {
+      "start": 12,
+      "len": 2
+    }
+  },
+  {
+    "id": 3,
+    "kind": "Conflict",
+    "base": {
+      "start": 23,
+      "len": 0
+    },
+    "local": {
+      "start": 25,
+      "len": 4
+    },
+    "remote": {
+      "start": 25,
+      "len": 13
+    }
+  },
+  {
+    "id": 4,
+    "kind": "Conflict",
+    "base": {
+      "start": 67,
+      "len": 1
+    },
+    "local": {
+      "start": 73,
+      "len": 141
+    },
+    "remote": {
+      "start": 82,
+      "len": 159
+    }
+  }
+]

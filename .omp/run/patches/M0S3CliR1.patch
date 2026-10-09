@@ -1,0 +1,373 @@
+diff --git i/crates/cli/src/args.rs w/crates/cli/src/args.rs
+index d812a78..549eece 100644
+--- i/crates/cli/src/args.rs
++++ w/crates/cli/src/args.rs
+@@ -1,3 +1,4 @@
++use std::ffi::OsString;
+ use std::path::PathBuf;
+ 
+ use yamt_merge_core::Options;
+@@ -27,7 +28,8 @@ pub(crate) enum Command {
+     },
+ }
+ 
+-pub(crate) fn parse(args: &[String]) -> Result<Command> {
++pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
++    let args = utf8_args(args)?;
+     let (command, rest) = args
+         .split_first()
+         .ok_or_else(|| usage("missing command".to_owned()))?;
+@@ -44,6 +46,17 @@ pub(crate) fn parse(args: &[String]) -> Result<Command> {
+     }
+ }
+ 
++fn utf8_args(args: &[OsString]) -> Result<Vec<String>> {
++    let mut utf8 = Vec::with_capacity(args.len());
++    for arg in args {
++        let arg = arg
++            .to_str()
++            .ok_or_else(|| usage(format!("argument `{}` is not UTF-8", arg.to_string_lossy())))?;
++        utf8.push(arg.to_owned());
++    }
++    Ok(utf8)
++}
++
+ fn parse_classify(args: &[String]) -> Result<Command> {
+     let mut paths = Vec::new();
+     let mut options = Options::default();
+diff --git i/crates/cli/src/case.rs w/crates/cli/src/case.rs
+index 30b2b71..2e80e83 100644
+--- i/crates/cli/src/case.rs
++++ w/crates/cli/src/case.rs
+@@ -1,9 +1,9 @@
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+-use crate::{Error, Result};
++use crate::{Error, Result, read_error, read_text};
+ 
+-const EXPECTED_FILE: &str = "expected.json";
++pub(crate) const EXPECTED_FILE: &str = "expected.json";
+ 
+ pub(crate) struct Case {
+     pub(crate) name: String,
+@@ -79,17 +79,6 @@ fn side_extension(dir: &Path, case: &str) -> Result<String> {
+     Ok(base)
+ }
+ 
+-pub(crate) fn read_text(path: &Path) -> Result<String> {
+-    fs::read_to_string(path).map_err(|source| read_error(path, source))
+-}
+-
+-pub(crate) fn read_error(path: &Path, source: std::io::Error) -> Error {
+-    Error::Read {
+-        path: path.display().to_string(),
+-        source,
+-    }
+-}
+-
+ fn malformed(case: &str, problem: &str) -> Error {
+     Error::MalformedCase {
+         case: case.to_owned(),
+diff --git i/crates/cli/src/classify.rs w/crates/cli/src/classify.rs
+index 6243eaa..b951f65 100644
+--- i/crates/cli/src/classify.rs
++++ w/crates/cli/src/classify.rs
+@@ -2,8 +2,7 @@ use std::path::PathBuf;
+ 
+ use yamt_merge_core::{Chunk, ChunkKind, Options, compute_chunks};
+ 
+-use crate::case::read_text;
+-use crate::{Result, print, print_lines};
++use crate::{Result, print, print_lines, read_text};
+ 
+ pub(crate) fn classify(sides: &[PathBuf; 3], options: Options, json: bool) -> Result<()> {
+     let [base, local, remote] = sides;
+diff --git i/crates/cli/src/golden.rs w/crates/cli/src/golden.rs
+index 46a50fd..6a3190f 100644
+--- i/crates/cli/src/golden.rs
++++ w/crates/cli/src/golden.rs
+@@ -4,9 +4,9 @@ use std::path::Path;
+ 
+ use yamt_merge_core::{Options, compute_chunks};
+ 
+-use crate::case::{Case, read_error};
++use crate::case::{Case, EXPECTED_FILE};
+ use crate::classify::chunks_json;
+-use crate::{Error, Result, print_lines};
++use crate::{Error, Result, print_lines, read_error};
+ 
+ pub(crate) fn run(dir: &Path) -> Result<()> {
+     let cases = load_cases(dir)?;
+@@ -37,7 +37,7 @@ pub(crate) fn update(dir: &Path) -> Result<()> {
+     let mut report = Vec::with_capacity(cases.len());
+     for case in &cases {
+         let path = case.expected_path();
+-        fs::write(&path, expected_json(case)?).map_err(|source| Error::Write {
++        fs::write(&path, computed_json(case)?).map_err(|source| Error::Write {
+             path: path.display().to_string(),
+             source,
+         })?;
+@@ -69,18 +69,18 @@ fn load_cases(dir: &Path) -> Result<Vec<Case>> {
+         .collect()
+ }
+ 
+-fn expected_json(case: &Case) -> Result<String> {
++fn computed_json(case: &Case) -> Result<String> {
+     let chunks = compute_chunks(&case.base, &case.local, &case.remote, &Options::default());
+     chunks_json(&chunks)
+ }
+ 
+ fn mismatch(case: &Case) -> Result<Option<String>> {
+-    let actual = expected_json(case)?;
++    let actual = computed_json(case)?;
+     let path = case.expected_path();
+     let expected = match fs::read(&path) {
+         Ok(bytes) => bytes,
+         Err(source) if source.kind() == io::ErrorKind::NotFound => {
+-            return Ok(Some("expected.json is missing".to_owned()));
++            return Ok(Some(format!("{EXPECTED_FILE} is missing")));
+         }
+         Err(source) => return Err(read_error(&path, source)),
+     };
+@@ -93,6 +93,9 @@ fn mismatch(case: &Case) -> Result<Option<String>> {
+ }
+ 
+ fn first_difference(expected: &str, actual: &str) -> String {
++    if expected.ends_with('\n') != actual.ends_with('\n') {
++        return "trailing newline differs".to_owned();
++    }
+     for (number, (expected_line, actual_line)) in (1..).zip(expected.lines().zip(actual.lines())) {
+         if expected_line != actual_line {
+             return format!(
+diff --git i/crates/cli/src/lib.rs w/crates/cli/src/lib.rs
+index ab3e222..894c201 100644
+--- i/crates/cli/src/lib.rs
++++ w/crates/cli/src/lib.rs
+@@ -8,8 +8,10 @@ mod fixture;
+ mod golden;
+ mod scan;
+ 
+-use std::fmt;
++use std::ffi::OsString;
++use std::fs;
+ use std::io::{self, Write};
++use std::path::Path;
+ use std::process::ExitCode;
+ 
+ use args::Command;
+@@ -21,55 +23,38 @@ const USAGE: &str = "usage:
+   yamt-cli fixture <case-dir>";
+ const USAGE_EXIT_CODE: u8 = 2;
+ 
+-#[derive(Debug)]
++#[derive(Debug, thiserror::Error)]
+ pub enum Error {
++    #[error("{problem}\n{}", USAGE)]
+     Usage { problem: String },
+-    Read { path: String, source: io::Error },
+-    Write { path: String, source: io::Error },
++    #[error("cannot read {path}: {source}")]
++    Read {
++        path: String,
++        #[source]
++        source: io::Error,
++    },
++    #[error("cannot write {path}: {source}")]
++    Write {
++        path: String,
++        #[source]
++        source: io::Error,
++    },
++    #[error("{case} is not a golden case: {problem}")]
+     MalformedCase { case: String, problem: String },
++    #[error("no golden cases in {dir}")]
+     NoCases { dir: String },
++    #[error("{failed} of {total} golden cases failed")]
+     GoldenFailed { failed: usize, total: usize },
+-    Session(yamt_session::Error),
+-    Json(serde_json::Error),
+-    Stdout(io::Error),
++    #[error(transparent)]
++    Session(#[from] yamt_session::Error),
++    #[error("cannot serialise json: {0}")]
++    Json(#[from] serde_json::Error),
++    #[error("cannot write to stdout: {0}")]
++    Stdout(#[source] io::Error),
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+ 
+-impl fmt::Display for Error {
+-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+-        match self {
+-            Error::Usage { problem } => write!(f, "{problem}\n{USAGE}"),
+-            Error::Read { path, source } => write!(f, "cannot read {path}: {source}"),
+-            Error::Write { path, source } => write!(f, "cannot write {path}: {source}"),
+-            Error::MalformedCase { case, problem } => {
+-                write!(f, "{case} is not a golden case: {problem}")
+-            }
+-            Error::NoCases { dir } => write!(f, "no golden cases in {dir}"),
+-            Error::GoldenFailed { failed, total } => {
+-                write!(f, "{failed} of {total} golden cases failed")
+-            }
+-            Error::Session(source) => write!(f, "{source}"),
+-            Error::Json(source) => write!(f, "cannot serialise json: {source}"),
+-            Error::Stdout(source) => write!(f, "cannot write to stdout: {source}"),
+-        }
+-    }
+-}
+-
+-impl std::error::Error for Error {}
+-
+-impl From<yamt_session::Error> for Error {
+-    fn from(source: yamt_session::Error) -> Self {
+-        Error::Session(source)
+-    }
+-}
+-
+-impl From<serde_json::Error> for Error {
+-    fn from(source: serde_json::Error) -> Self {
+-        Error::Json(source)
+-    }
+-}
+-
+ impl Error {
+     #[must_use]
+     pub fn exit_code(&self) -> ExitCode {
+@@ -87,7 +72,7 @@ impl Error {
+     }
+ }
+ 
+-pub fn run(args: &[String]) -> Result<()> {
++pub fn run(args: &[OsString]) -> Result<()> {
+     match args::parse(args)? {
+         Command::Classify {
+             sides,
+@@ -111,3 +96,14 @@ fn print(text: &str) -> Result<()> {
+ fn print_lines(lines: &[String]) -> Result<()> {
+     print(&(lines.join("\n") + "\n"))
+ }
++
++fn read_text(path: &Path) -> Result<String> {
++    fs::read_to_string(path).map_err(|source| read_error(path, source))
++}
++
++fn read_error(path: &Path, source: io::Error) -> Error {
++    Error::Read {
++        path: path.display().to_string(),
++        source,
++    }
++}
+diff --git i/crates/cli/src/main.rs w/crates/cli/src/main.rs
+index d9508f1..f92f345 100644
+--- i/crates/cli/src/main.rs
++++ w/crates/cli/src/main.rs
+@@ -1,7 +1,8 @@
++use std::ffi::OsString;
+ use std::process::ExitCode;
+ 
+ fn main() -> ExitCode {
+-    let args: Vec<String> = std::env::args().skip(1).collect();
++    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+     match yamt_cli::run(&args) {
+         Ok(()) => ExitCode::SUCCESS,
+         Err(error) => {
+diff --git i/crates/cli/tests/commands.rs w/crates/cli/tests/commands.rs
+index 051c620..f7667d3 100644
+--- i/crates/cli/tests/commands.rs
++++ w/crates/cli/tests/commands.rs
+@@ -1,5 +1,6 @@
+ #![cfg(test)]
+ 
++use std::ffi::OsStr;
+ use std::fs;
+ use std::path::Path;
+ use std::process::Command;
+@@ -18,7 +19,7 @@ struct Output {
+     stderr: String,
+ }
+ 
+-fn yamt_cli(args: &[&str]) -> Output {
++fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
+     let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
+         .args(args)
+         .output()
+@@ -110,6 +111,21 @@ fn unknown_command_is_a_usage_error_with_exit_code_two() {
+     );
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn non_utf8_argument_is_a_usage_error_with_exit_code_two() {
++    use std::os::unix::ffi::OsStrExt;
++    let output = yamt_cli(&[OsStr::new("classify"), OsStr::from_bytes(b"\xff")]);
++    assert_eq!(output.code, 2);
++    assert!(
++        output
++            .stderr
++            .starts_with("yamt-cli: argument `\u{fffd}` is not UTF-8\nusage:"),
++        "{}",
++        output.stderr
++    );
++}
++
+ #[test]
+ fn golden_update_then_run_passes_and_an_edited_expected_json_is_a_diff() {
+     let root = TempDir::new().unwrap();
+@@ -150,6 +166,34 @@ fn golden_run_fails_on_a_missing_expected_json() {
+     assert_eq!(run.stdout, "DIFF fresh: expected.json is missing\n");
+ }
+ 
++fn golden_run_with_expected(edit: impl Fn(&str) -> String) -> Output {
++    let root = TempDir::new().unwrap();
++    let case = write_case(root.path(), "edited", "txt");
++    let update = yamt_cli(&["golden", "update", path(root.path())]);
++    assert_eq!(update.code, 0, "{}", update.stderr);
++    let expected = case.join("expected.json");
++    let written = fs::read_to_string(&expected).unwrap();
++    fs::write(&expected, edit(&written)).unwrap();
++    yamt_cli(&["golden", "run", path(root.path())])
++}
++
++#[test]
++fn golden_run_fails_on_an_expected_json_with_crlf_line_endings() {
++    let run = golden_run_with_expected(|json| json.replace('\n', "\r\n"));
++    assert_eq!(run.code, 1);
++    assert_eq!(
++        run.stdout,
++        "DIFF edited: same lines, different line endings\n"
++    );
++}
++
++#[test]
++fn golden_run_fails_on_an_expected_json_without_a_final_newline() {
++    let run = golden_run_with_expected(|json| json.trim_end_matches('\n').to_owned());
++    assert_eq!(run.code, 1);
++    assert_eq!(run.stdout, "DIFF edited: trailing newline differs\n");
++}
++
+ #[test]
+ fn golden_run_fails_on_a_case_without_remote() {
+     let root = TempDir::new().unwrap();
+diff --git i/crates/cli/tests/merge_file.rs w/crates/cli/tests/merge_file.rs
+index e54c3d1..4abe38f 100644
+--- i/crates/cli/tests/merge_file.rs
++++ w/crates/cli/tests/merge_file.rs
+@@ -18,6 +18,7 @@ const MAX_LINES: usize = 10;
+ const MAX_EDITS: usize = 3;
+ const CASES: u32 = 512;
+ const MIN_BOTH_CLEAN_PERCENT: u32 = 25;
++const MAX_ONLY_GIT_CONFLICT_PERCENT: u32 = 1;
+ const PERCENT: u32 = 100;
+ // Exit status is the conflict count capped at 127; errors are negative, i.e. 255 (git-merge-file(1)).
+ const MAX_GIT_CONFLICT_EXIT: i32 = 127;
+@@ -224,4 +225,8 @@ fn enough_generated_triples_are_clean_for_both_to_exercise_the_cross_check() {
+         both_clean * PERCENT >= CASES * MIN_BOTH_CLEAN_PERCENT,
+         "only {both_clean} of {CASES} triples were clean for both yamt and git"
+     );
++    assert!(
++        only_git_conflicts * PERCENT <= CASES * MAX_ONLY_GIT_CONFLICT_PERCENT,
++        "{only_git_conflicts} of {CASES} triples were clean for yamt but conflicted in git"
++    );
+ }

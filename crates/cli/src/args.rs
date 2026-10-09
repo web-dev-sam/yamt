@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use yamt_merge_core::Options;
@@ -27,7 +28,8 @@ pub(crate) enum Command {
     },
 }
 
-pub(crate) fn parse(args: &[String]) -> Result<Command> {
+pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
+    let args = utf8_args(args)?;
     let (command, rest) = args
         .split_first()
         .ok_or_else(|| usage("missing command".to_owned()))?;
@@ -42,6 +44,17 @@ pub(crate) fn parse(args: &[String]) -> Result<Command> {
         }),
         other => Err(usage(format!("unknown command `{other}`"))),
     }
+}
+
+fn utf8_args(args: &[OsString]) -> Result<Vec<String>> {
+    let mut utf8 = Vec::with_capacity(args.len());
+    for arg in args {
+        let arg = arg
+            .to_str()
+            .ok_or_else(|| usage(format!("argument `{}` is not UTF-8", arg.to_string_lossy())))?;
+        utf8.push(arg.to_owned());
+    }
+    Ok(utf8)
 }
 
 fn parse_classify(args: &[String]) -> Result<Command> {

@@ -1,0 +1,50 @@
+[
+  {
+    "id": 0,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 15,
+      "len": 1
+    },
+    "local": {
+      "start": 15,
+      "len": 1
+    },
+    "remote": {
+      "start": 15,
+      "len": 1
+    }
+  },
+  {
+    "id": 1,
+    "kind": "Conflict",
+    "base": {
+      "start": 18,
+      "len": 3
+    },
+    "local": {
+      "start": 18,
+      "len": 3
+    },
+    "remote": {
+      "start": 18,
+      "len": 0
+    }
+  },
+  {
+    "id": 2,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 86,
+      "len": 2
+    },
+    "local": {
+      "start": 86,
+      "len": 2
+    },
+    "remote": {
+      "start": 83,
+      "len": 2
+    }
+  }
+]

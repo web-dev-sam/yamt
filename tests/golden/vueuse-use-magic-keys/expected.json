@@ -1,0 +1,146 @@
+[
+  {
+    "id": 0,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 2,
+      "len": 1
+    },
+    "local": {
+      "start": 2,
+      "len": 1
+    },
+    "remote": {
+      "start": 2,
+      "len": 1
+    }
+  },
+  {
+    "id": 1,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 21,
+      "len": 1
+    },
+    "local": {
+      "start": 21,
+      "len": 1
+    },
+    "remote": {
+      "start": 21,
+      "len": 1
+    }
+  },
+  {
+    "id": 2,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 53,
+      "len": 1
+    },
+    "local": {
+      "start": 53,
+      "len": 1
+    },
+    "remote": {
+      "start": 53,
+      "len": 1
+    }
+  },
+  {
+    "id": 3,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 86,
+      "len": 0
+    },
+    "local": {
+      "start": 86,
+      "len": 0
+    },
+    "remote": {
+      "start": 86,
+      "len": 1
+    }
+  },
+  {
+    "id": 4,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 96,
+      "len": 0
+    },
+    "local": {
+      "start": 96,
+      "len": 0
+    },
+    "remote": {
+      "start": 97,
+      "len": 9
+    }
+  },
+  {
+    "id": 5,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 102,
+      "len": 5
+    },
+    "local": {
+      "start": 102,
+      "len": 5
+    },
+    "remote": {
+      "start": 112,
+      "len": 5
+    }
+  },
+  {
+    "id": 6,
+    "kind": "RemoteOnly",
+    "base": {
+      "start": 109,
+      "len": 2
+    },
+    "local": {
+      "start": 109,
+      "len": 2
+    },
+    "remote": {
+      "start": 119,
+      "len": 4
+    }
+  },
+  {
+    "id": 7,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 114,
+      "len": 1
+    },
+    "local": {
+      "start": 114,
+      "len": 1
+    },
+    "remote": {
+      "start": 126,
+      "len": 1
+    }
+  },
+  {
+    "id": 8,
+    "kind": "Conflict",
+    "base": {
+      "start": 128,
+      "len": 10
+    },
+    "local": {
+      "start": 128,
+      "len": 8
+    },
+    "remote": {
+      "start": 140,
+      "len": 14
+    }
+  }
+]

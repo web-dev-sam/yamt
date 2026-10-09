@@ -1,0 +1,66 @@
+[
+  {
+    "id": 0,
+    "kind": "Conflict",
+    "base": {
+      "start": 0,
+      "len": 1
+    },
+    "local": {
+      "start": 0,
+      "len": 3
+    },
+    "remote": {
+      "start": 0,
+      "len": 2
+    }
+  },
+  {
+    "id": 1,
+    "kind": "LocalOnly",
+    "base": {
+      "start": 8,
+      "len": 0
+    },
+    "local": {
+      "start": 10,
+      "len": 14
+    },
+    "remote": {
+      "start": 9,
+      "len": 0
+    }
+  },
+  {
+    "id": 2,
+    "kind": "BothSame",
+    "base": {
+      "start": 13,
+      "len": 4
+    },
+    "local": {
+      "start": 29,
+      "len": 3
+    },
+    "remote": {
+      "start": 14,
+      "len": 3
+    }
+  },
+  {
+    "id": 3,
+    "kind": "BothSame",
+    "base": {
+      "start": 20,
+      "len": 14
+    },
+    "local": {
+      "start": 35,
+      "len": 13
+    },
+    "remote": {
+      "start": 20,
+      "len": 13
+    }
+  }
+]

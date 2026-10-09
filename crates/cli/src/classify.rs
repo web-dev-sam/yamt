@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use yamt_merge_core::{Chunk, ChunkKind, Options, compute_chunks};
 
-use crate::case::read_text;
-use crate::{Result, print, print_lines};
+use crate::{Result, print, print_lines, read_text};
 
 pub(crate) fn classify(sides: &[PathBuf; 3], options: Options, json: bool) -> Result<()> {
     let [base, local, remote] = sides;

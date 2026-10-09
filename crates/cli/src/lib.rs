@@ -8,8 +8,10 @@ mod fixture;
 mod golden;
 mod scan;
 
-use std::fmt;
+use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use args::Command;
@@ -21,54 +23,37 @@ const USAGE: &str = "usage:
   yamt-cli fixture <case-dir>";
 const USAGE_EXIT_CODE: u8 = 2;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{problem}\n{}", USAGE)]
     Usage { problem: String },
-    Read { path: String, source: io::Error },
-    Write { path: String, source: io::Error },
+    #[error("cannot read {path}: {source}")]
+    Read {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("cannot write {path}: {source}")]
+    Write {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("{case} is not a golden case: {problem}")]
     MalformedCase { case: String, problem: String },
+    #[error("no golden cases in {dir}")]
     NoCases { dir: String },
+    #[error("{failed} of {total} golden cases failed")]
     GoldenFailed { failed: usize, total: usize },
-    Session(yamt_session::Error),
-    Json(serde_json::Error),
-    Stdout(io::Error),
+    #[error(transparent)]
+    Session(#[from] yamt_session::Error),
+    #[error("cannot serialise json: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("cannot write to stdout: {0}")]
+    Stdout(#[source] io::Error),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Usage { problem } => write!(f, "{problem}\n{USAGE}"),
-            Error::Read { path, source } => write!(f, "cannot read {path}: {source}"),
-            Error::Write { path, source } => write!(f, "cannot write {path}: {source}"),
-            Error::MalformedCase { case, problem } => {
-                write!(f, "{case} is not a golden case: {problem}")
-            }
-            Error::NoCases { dir } => write!(f, "no golden cases in {dir}"),
-            Error::GoldenFailed { failed, total } => {
-                write!(f, "{failed} of {total} golden cases failed")
-            }
-            Error::Session(source) => write!(f, "{source}"),
-            Error::Json(source) => write!(f, "cannot serialise json: {source}"),
-            Error::Stdout(source) => write!(f, "cannot write to stdout: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<yamt_session::Error> for Error {
-    fn from(source: yamt_session::Error) -> Self {
-        Error::Session(source)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(source: serde_json::Error) -> Self {
-        Error::Json(source)
-    }
-}
 
 impl Error {
     #[must_use]
@@ -87,7 +72,7 @@ impl Error {
     }
 }
 
-pub fn run(args: &[String]) -> Result<()> {
+pub fn run(args: &[OsString]) -> Result<()> {
     match args::parse(args)? {
         Command::Classify {
             sides,
@@ -110,4 +95,15 @@ fn print(text: &str) -> Result<()> {
 
 fn print_lines(lines: &[String]) -> Result<()> {
     print(&(lines.join("\n") + "\n"))
+}
+
+fn read_text(path: &Path) -> Result<String> {
+    fs::read_to_string(path).map_err(|source| read_error(path, source))
+}
+
+fn read_error(path: &Path, source: io::Error) -> Error {
+    Error::Read {
+        path: path.display().to_string(),
+        source,
+    }
 }
