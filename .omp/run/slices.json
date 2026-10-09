@@ -1,15 +1,12 @@
 {
-  "M1S2BandsScroll": {
-    "owned": [
-      "frontend/src/connectors/**",
-      "frontend/src/editor/**",
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/useMergeController.ts"
-    ],
+  "M1S2BandsScrollR1": {
+    "owned": ["frontend/src/editor/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
+      "frontend/src/connectors/**",
       "frontend/src/ipc/**",
+      "frontend/src/ui/**",
       "frontend/src/style.css",
       "frontend/fixtures/**",
       "frontend/scripts/**"

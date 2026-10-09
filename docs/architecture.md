@@ -69,7 +69,7 @@ Two toolchains, one entry point: `just check` runs every gate below (§8).
 
 ## 2. Dependency direction
 
-```mermaid
+````mermaid
 graph LR
   subgraph Rust
     core[merge-core]
@@ -83,13 +83,12 @@ graph LR
   tauri -. generates .-> bindings[ipc/bindings.ts]
   subgraph Frontend
     bindings --> ipc[ipc/]
-    model[model/] --> bindings
-    editor[editor/] --> model
-    connectors[connectors/] --> model
+    editor[editor/] --> ipc
+    editor --> connectors[connectors/]
     ui[ui/] --> editor
-    ui --> connectors
     ui --> ipc
     main[main.ts] --> ui
+    main --> ipc
   end
 ```
 
@@ -148,7 +147,7 @@ pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) -> 
 /// Expected merge text when every non-Conflict chunk is applied — used by tests and
 /// by `cli classify` to cross-check against `git merge-file`.
 pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> String;
-```
+````
 
 The chunk types (`BaseLine`, `LocalLine`, `RemoteLine`, `LineRange`, `ChunkKind`, `ChunkId`,
 `Chunk`) derive `serde::Serialize` + `specta::Type` and cross the IPC as they are; `session` and
@@ -411,26 +410,15 @@ Internals (`editor/internal/`, not importable from `ui/`):
 ### 5.3 `connectors/` — pure geometry
 
 ```ts
-export type Band = {
-  id: number;
-  kind: ChunkKind;
-  aTop: number;
-  aBottom: number;
-  bTop: number;
-  bBottom: number;
-};
-export function bandPath(b: Band, width: number): string; // cubic béziers, filled band
-export function visibleBands(
-  aBlocks: LineBlock[],
-  bBlocks: LineBlock[],
-  chunks: Chunk[],
-  map: (chunk) => [LineRange, LineRange],
-): Band[];
+export type Span = { readonly top: number; readonly bottom: number }; // px from the strip's top; top === bottom is an insertion point
+export type Band = { readonly left: Span; readonly right: Span };
+export function bandPath(band: Band, width: number): string; // closed path, cubic top/bottom edges, control points at width / 2
 ```
 
-Rendered into the two `<svg>` strips by `editor/internal/strips.ts` on scroll and on center
-transactions (coalesced per frame). Only chunks intersecting either pane's `viewport` are
-drawn. Unit-tested on numbers, no DOM.
+`editor/internal/strips.ts` turns chunk ranges into `Span`s (`editor/internal/geometry.ts`, via
+`lineBlockAt`) and draws the bands into the two `<svg>` strips once per animation frame, after
+any pane scroll, center edit or geometry change. Only bands whose box intersects the strip are
+drawn. `connectors/` is unit-tested on numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
