@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
 
-use crate::chunk::{Chunk, ChunkId, ChunkKind, Options};
+use crate::chunk::{Chunk, ChunkId, ChunkKind};
 use crate::line::{BaseLine, LineRange, LocalLine, RemoteLine, lines_in, split_lines};
 
 #[derive(Clone, Copy)]
@@ -58,14 +58,15 @@ impl<'a> SideDiff<'a> {
         }
     }
 
-    fn map(&self, base: &Range<u32>) -> Range<u32> {
-        let starting_before = self
+    fn map_base_to_side(&self, base: &Range<u32>) -> Range<u32> {
+        let starting_before_start = self
             .hunks
             .partition_point(|hunk| hunk.before.start < base.start);
-        let starting_within = self
+        let starting_at_or_before_end = self
             .hunks
             .partition_point(|hunk| hunk.before.start <= base.end);
-        self.side_line(starting_before, base.start)..self.side_line(starting_within, base.end)
+        self.side_line(starting_before_start, base.start)
+            ..self.side_line(starting_at_or_before_end, base.end)
     }
 
     fn side_line(&self, preceding_hunks: usize, base_line: u32) -> u32 {
@@ -83,6 +84,22 @@ impl<'a> SideDiff<'a> {
     }
 }
 
+/// Default for `Options::gap`.
+pub const DEFAULT_GAP: u32 = 1;
+
+/// Tuning for `compute_chunks`.
+#[derive(Clone, Copy, Debug)]
+pub struct Options {
+    /// Changes separated by at most this many unchanged base lines form one chunk.
+    pub gap: u32,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { gap: DEFAULT_GAP }
+    }
+}
+
 /// Splits three texts into the chunks where local or remote differs from base, in base order.
 #[must_use]
 pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) -> Vec<Chunk> {
@@ -91,8 +108,8 @@ pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) -> 
     let regions = sweep(&local.hunks, &remote.hunks, opts.gap);
     let mut chunks = Vec::with_capacity(regions.len());
     for (id, region) in (0..).zip(regions) {
-        let local_range = local.map(&region.base);
-        let remote_range = remote.map(&region.base);
+        let local_range = local.map_base_to_side(&region.base);
+        let remote_range = remote.map_base_to_side(&region.base);
         let kind = classify(
             region.touched,
             local.text(&local_range),

@@ -96,12 +96,32 @@ fn triple() -> impl Strategy<Value = Triple> {
                 base: base.text(),
             },
         );
+    let shared = (doc(), edits(), option::of(last_line()), edits(), edits()).prop_map(
+        |(base, shared_edits, shared_last, local_edits, remote_edits)| {
+            let common = base.edited(&shared_edits, shared_last);
+            Triple {
+                local: common.edited(&local_edits, None).text(),
+                remote: common.edited(&remote_edits, None).text(),
+                base: base.text(),
+            }
+        },
+    );
     let independent = (doc(), doc(), doc()).prop_map(|(base, local, remote)| Triple {
         base: base.text(),
         local: local.text(),
         remote: remote.text(),
     });
-    prop_oneof![4 => derived, 1 => independent]
+    prop_oneof![3 => derived, 3 => shared, 1 => independent]
+}
+
+impl Triple {
+    fn with_local_as_remote(&self) -> Triple {
+        Triple {
+            base: self.base.clone(),
+            local: self.local.clone(),
+            remote: self.local.clone(),
+        }
+    }
 }
 
 struct Lines<'a> {
@@ -200,13 +220,17 @@ proptest! {
 
     #[test]
     fn non_conflict_chunks_leave_the_other_side_equal(triple in triple(), gap in 0..MAX_GAP) {
-        let lines = Lines::of(&triple);
-        for chunk in chunks_of(&triple, gap) {
-            match chunk.kind {
-                ChunkKind::LocalOnly => prop_assert_eq!(lines.remote(&chunk), lines.base(&chunk)),
-                ChunkKind::RemoteOnly => prop_assert_eq!(lines.local(&chunk), lines.base(&chunk)),
-                ChunkKind::BothSame => prop_assert_eq!(lines.local(&chunk), lines.remote(&chunk)),
-                ChunkKind::Conflict => {}
+        let shared = triple.with_local_as_remote();
+        prop_assert!(chunks_of(&shared, gap).iter().all(|chunk| chunk.kind == ChunkKind::BothSame));
+        for triple in [triple, shared] {
+            let lines = Lines::of(&triple);
+            for chunk in chunks_of(&triple, gap) {
+                match chunk.kind {
+                    ChunkKind::LocalOnly => prop_assert_eq!(lines.remote(&chunk), lines.base(&chunk)),
+                    ChunkKind::RemoteOnly => prop_assert_eq!(lines.local(&chunk), lines.base(&chunk)),
+                    ChunkKind::BothSame => prop_assert_eq!(lines.local(&chunk), lines.remote(&chunk)),
+                    ChunkKind::Conflict => {}
+                }
             }
         }
     }
@@ -214,9 +238,15 @@ proptest! {
     #[test]
     fn an_unchanged_side_yields_only_the_other_sides_kind(triple in triple()) {
         let Triple { base, local, remote } = &triple;
-        prop_assert!(kinds(base, base, remote).iter().all(|kind| *kind == ChunkKind::RemoteOnly));
-        prop_assert!(kinds(base, local, base).iter().all(|kind| *kind == ChunkKind::LocalOnly));
-        prop_assert!(!kinds(base, local, local).contains(&ChunkKind::Conflict));
+        let remote_changed = kinds(base, base, remote);
+        prop_assert_eq!(remote_changed.is_empty(), remote == base);
+        prop_assert!(remote_changed.iter().all(|kind| *kind == ChunkKind::RemoteOnly));
+        let local_changed = kinds(base, local, base);
+        prop_assert_eq!(local_changed.is_empty(), local == base);
+        prop_assert!(local_changed.iter().all(|kind| *kind == ChunkKind::LocalOnly));
+        let both_changed = kinds(base, local, local);
+        prop_assert_eq!(both_changed.is_empty(), local == base);
+        prop_assert!(!both_changed.contains(&ChunkKind::Conflict));
     }
 
     #[test]
@@ -246,12 +276,16 @@ proptest! {
 
     #[test]
     fn every_chunk_is_a_real_change(triple in triple(), gap in 0..MAX_GAP) {
-        let lines = Lines::of(&triple);
-        for chunk in chunks_of(&triple, gap) {
-            match chunk.kind {
-                ChunkKind::LocalOnly | ChunkKind::BothSame => prop_assert_ne!(lines.local(&chunk), lines.base(&chunk)),
-                ChunkKind::RemoteOnly => prop_assert_ne!(lines.remote(&chunk), lines.base(&chunk)),
-                ChunkKind::Conflict => prop_assert_ne!(lines.local(&chunk), lines.remote(&chunk)),
+        let shared = triple.with_local_as_remote();
+        prop_assert!(chunks_of(&shared, gap).iter().all(|chunk| chunk.kind == ChunkKind::BothSame));
+        for triple in [triple, shared] {
+            let lines = Lines::of(&triple);
+            for chunk in chunks_of(&triple, gap) {
+                match chunk.kind {
+                    ChunkKind::LocalOnly | ChunkKind::BothSame => prop_assert_ne!(lines.local(&chunk), lines.base(&chunk)),
+                    ChunkKind::RemoteOnly => prop_assert_ne!(lines.remote(&chunk), lines.base(&chunk)),
+                    ChunkKind::Conflict => prop_assert_ne!(lines.local(&chunk), lines.remote(&chunk)),
+                }
             }
         }
     }

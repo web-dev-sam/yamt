@@ -1,0 +1,452 @@
+diff --git i/crates/gitio/src/blob.rs w/crates/gitio/src/blob.rs
+index a2eab02..4a42ca7 100644
+--- i/crates/gitio/src/blob.rs
++++ w/crates/gitio/src/blob.rs
+@@ -4,9 +4,8 @@ use std::process::{Child, ChildStdout, Command, Stdio};
+ use crate::run::argv;
+ use crate::{Error, Oid, Result};
+ 
+-const CAT_FILE: &str = "cat-file";
++pub(crate) const CAT_FILE: &str = "cat-file";
+ 
+-/// One long-lived `git cat-file --batch` process that reads blobs by oid.
+ pub struct BlobReader {
+     child: Child,
+     stdout: BufReader<ChildStdout>,
+diff --git i/crates/gitio/src/entry.rs w/crates/gitio/src/entry.rs
+index d13a1c4..09bb33a 100644
+--- i/crates/gitio/src/entry.rs
++++ w/crates/gitio/src/entry.rs
+@@ -7,7 +7,6 @@ use crate::{Error, Result};
+ const SHA1_HEX_LEN: usize = 40;
+ const SHA256_HEX_LEN: usize = 64;
+ 
+-/// A git object id: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct Oid(String);
+ 
+@@ -33,7 +32,6 @@ impl Oid {
+     }
+ }
+ 
+-/// A conflict stage of the index: 1 = merge base, 2 = ours, 3 = theirs.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum Stage {
+     Base,
+@@ -60,7 +58,6 @@ impl Stage {
+     }
+ }
+ 
+-/// One line of `git ls-files -u`: a path at one conflict stage.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct StageEntry {
+     pub mode: u32,
+@@ -69,10 +66,10 @@ pub struct StageEntry {
+     pub path: PathBuf,
+ }
+ 
+-const LS_FILES: &str = "ls-files";
++pub(crate) const LS_FILES: &str = "ls-files";
+ const OCTAL: u32 = 8;
+ 
+-/// Parses `ls-files -u -z` output: records `<mode> SP <oid> SP <stage> TAB <path> NUL`.
++// git-ls-files(1) `-z`: records `<mode> SP <oid> SP <stage> TAB <path> NUL`, path unquoted.
+ pub(crate) fn parse_unmerged(output: &[u8]) -> Result<Vec<StageEntry>> {
+     let mut entries = Vec::new();
+     for record in output.split(|&byte| byte == b'\0') {
+@@ -107,22 +104,20 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
+     })
+ }
+ 
+-/// Builds `update-index -z --index-info` input that replaces each path's index entries
+-/// with exactly the given stages.
+ pub(crate) fn index_info(entries: &[StageEntry]) -> Vec<u8> {
+-    let mut paths: Vec<&Path> = Vec::new();
++    let mut first_entry_of_each_path: Vec<&StageEntry> = Vec::new();
+     for entry in entries {
+-        if !paths.contains(&entry.path.as_path()) {
+-            paths.push(&entry.path);
++        if !first_entry_of_each_path
++            .iter()
++            .any(|first| first.path == entry.path)
++        {
++            first_entry_of_each_path.push(entry);
+         }
+     }
+     let mut input = Vec::new();
+-    for path in paths {
+-        let path_entries = entries.iter().filter(|entry| entry.path == path);
+-        for (index, entry) in path_entries.enumerate() {
+-            if index == 0 {
+-                push_removal_record(&mut input, entry);
+-            }
++    for first in first_entry_of_each_path {
++        push_removal_record(&mut input, first);
++        for entry in entries.iter().filter(|entry| entry.path == first.path) {
+             push_stage_record(&mut input, entry);
+         }
+     }
+diff --git i/crates/gitio/src/lib.rs w/crates/gitio/src/lib.rs
+index 58e513e..f3af205 100644
+--- i/crates/gitio/src/lib.rs
++++ w/crates/gitio/src/lib.rs
+@@ -14,7 +14,7 @@ pub use repo::Repo;
+ pub enum Error {
+     #[error("git executable not found on PATH")]
+     GitNotFound,
+-    #[error("`{}` failed with exit status {status:?}: {stderr}", args.join(" "))]
++    #[error("`{}` failed with {}: {stderr}", args.join(" "), exit_description(*status))]
+     GitFailed {
+         args: Vec<String>,
+         status: Option<i32>,
+@@ -37,3 +37,10 @@ pub enum Error {
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
++
++fn exit_description(status: Option<i32>) -> String {
++    match status {
++        Some(code) => format!("exit status {code}"),
++        None => "killed by signal".to_owned(),
++    }
++}
+diff --git i/crates/gitio/src/repo.rs w/crates/gitio/src/repo.rs
+index 25d4a20..826b356 100644
+--- i/crates/gitio/src/repo.rs
++++ w/crates/gitio/src/repo.rs
+@@ -4,14 +4,14 @@ use std::os::unix::fs::PermissionsExt;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ 
+-use crate::blob::BlobReader;
+-use crate::entry::{index_info, parse_unmerged};
++use crate::blob::{BlobReader, CAT_FILE};
++use crate::entry::{LS_FILES, index_info, parse_unmerged};
+ use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+ use crate::{Error, Result, StageEntry};
+ 
+ const ANY_EXECUTE_BIT: u32 = 0o111;
++const REV_PARSE: &str = "rev-parse";
+ 
+-/// A git work tree, addressed by its top-level directory, plus the `git` binary to run.
+ pub struct Repo {
+     root: PathBuf,
+     git: PathBuf,
+@@ -20,11 +20,11 @@ pub struct Repo {
+ impl Repo {
+     pub fn discover(cwd: &Path) -> Result<Repo> {
+         let git = find_git_on_path()?;
+-        let command = git_command(&git, cwd, Access::Read, &["rev-parse", "--show-toplevel"]);
++        let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+         let mut output = run(command, None, GIT_TIMEOUT)?;
+         if output.pop() != Some(b'\n') {
+             return Err(Error::UnexpectedOutput {
+-                command: "rev-parse",
++                command: REV_PARSE,
+                 output: String::from_utf8_lossy(&output).into_owned(),
+             });
+         }
+@@ -38,12 +38,12 @@ impl Repo {
+     }
+ 
+     pub fn unmerged(&self) -> Result<Vec<StageEntry>> {
+-        let command = self.command(Access::Read, &["ls-files", "-u", "-z"]);
++        let command = self.command(Access::Read, &[LS_FILES, "-u", "-z"]);
+         parse_unmerged(&run(command, None, GIT_TIMEOUT)?)
+     }
+ 
+     pub fn blob_reader(&self) -> Result<BlobReader> {
+-        BlobReader::spawn(self.command(Access::Read, &["cat-file", "--batch"]))
++        BlobReader::spawn(self.command(Access::Read, &[CAT_FILE, "--batch"]))
+     }
+ 
+     pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()> {
+@@ -74,6 +74,9 @@ impl Repo {
+ fn find_git_on_path() -> Result<PathBuf> {
+     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+     for dir in std::env::split_paths(&search_path) {
++        if !dir.is_absolute() {
++            continue;
++        }
+         let candidate = dir.join("git");
+         let is_executable = candidate.metadata().is_ok_and(|metadata| {
+             metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
+diff --git i/crates/gitio/src/run.rs w/crates/gitio/src/run.rs
+index 7bdc023..47bb1f0 100644
+--- i/crates/gitio/src/run.rs
++++ w/crates/gitio/src/run.rs
+@@ -1,7 +1,8 @@
+ use std::io::{self, Read, Write};
+ use std::path::Path;
+ use std::process::{Child, Command, ExitStatus, Stdio};
+-use std::thread::{self, JoinHandle};
++use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
++use std::thread;
+ use std::time::{Duration, Instant};
+ 
+ use crate::{Error, Result};
+@@ -9,13 +10,21 @@ use crate::{Error, Result};
+ pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+ const POLL_INTERVAL: Duration = Duration::from_millis(5);
+ 
+-/// Whether a git call may write to the repository; read-only calls skip optional locks.
+ #[derive(Clone, Copy)]
+ pub(crate) enum Access {
+     Read,
+     Write,
+ }
+ 
++enum Waited {
++    Exited {
++        status: ExitStatus,
++        stdout: Vec<u8>,
++        stderr: Vec<u8>,
++    },
++    TimedOut,
++}
++
+ pub(crate) fn git_command(git: &Path, cwd: &Path, access: Access, args: &[&str]) -> Command {
+     let mut command = Command::new(git);
+     command
+@@ -40,31 +49,34 @@ pub(crate) fn argv(command: &Command) -> Vec<String> {
+     std::iter::once(program).chain(args).collect()
+ }
+ 
+-/// Runs a one-shot git call to completion and returns its stdout.
+ pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Vec<u8>> {
+     let args = argv(&command);
+     tracing::debug!(?args, "running git");
++    let deadline = Instant::now() + timeout;
+     let mut child = spawn_piped(command, stdin.is_some())?;
+-    let writer = child
+-        .stdin
+-        .take()
+-        .zip(stdin)
+-        .map(|(mut pipe, bytes)| thread::spawn(move || pipe.write_all(&bytes)));
+-    let stdout = child.stdout.take().map(read_on_thread);
+-    let stderr = child.stderr.take().map(read_on_thread);
+-    let Some(status) = wait_or_kill(&mut child, timeout)? else {
+-        return Err(Error::Timeout {
+-            args,
+-            after: timeout,
+-        });
++    let writer = if let (Some(mut pipe), Some(bytes)) = (child.stdin.take(), stdin) {
++        Some(thread::spawn(move || pipe.write_all(&bytes)))
++    } else {
++        None
++    };
++    let (status, stdout, stderr) = match wait_with_deadline(&mut child, deadline)? {
++        Waited::Exited {
++            status,
++            stdout,
++            stderr,
++        } => (status, stdout, stderr),
++        Waited::TimedOut => {
++            return Err(Error::Timeout {
++                args,
++                after: timeout,
++            });
++        }
+     };
+-    let stdout = join_reader(stdout)?;
+-    let stderr = join_reader(stderr)?;
+     if !status.success() {
+         return Err(Error::GitFailed {
+             args,
+             status: status.code(),
+-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
++            stderr: String::from_utf8_lossy(&stderr).trim_end().to_owned(),
+         });
+     }
+     if let Some(writer) = writer {
+@@ -87,40 +99,65 @@ fn spawn_piped(mut command: Command, with_stdin: bool) -> io::Result<Child> {
+         .spawn()
+ }
+ 
+-fn read_on_thread(mut pipe: impl Read + Send + 'static) -> JoinHandle<io::Result<Vec<u8>>> {
+-    thread::spawn(move || {
+-        let mut bytes = Vec::new();
+-        pipe.read_to_end(&mut bytes).map(|_| bytes)
+-    })
+-}
+-
+-fn join_reader(reader: Option<JoinHandle<io::Result<Vec<u8>>>>) -> io::Result<Vec<u8>> {
+-    match reader {
+-        Some(handle) => handle.join().map_err(|_| thread_panicked())?,
+-        None => Ok(Vec::new()),
+-    }
+-}
+-
+-fn thread_panicked() -> io::Error {
+-    io::Error::other("git pipe thread panicked")
+-}
+-
+-/// Returns `None` when the deadline passed; the child is then killed and reaped.
+-fn wait_or_kill(child: &mut Child, timeout: Duration) -> io::Result<Option<ExitStatus>> {
+-    let deadline = Instant::now() + timeout;
++fn wait_with_deadline(child: &mut Child, deadline: Instant) -> io::Result<Waited> {
++    let stdout = read_on_thread(child.stdout.take().ok_or_else(closed_pipe)?);
++    let stderr = read_on_thread(child.stderr.take().ok_or_else(closed_pipe)?);
+     loop {
+         if let Some(status) = child.try_wait()? {
+-            return Ok(Some(status));
++            return receive_output(status, &stdout, &stderr, deadline);
+         }
+         if Instant::now() >= deadline {
+             child.kill()?;
+             child.wait()?;
+-            return Ok(None);
++            return Ok(Waited::TimedOut);
+         }
+         thread::sleep(POLL_INTERVAL);
+     }
+ }
+ 
++fn read_on_thread(mut pipe: impl Read + Send + 'static) -> Receiver<io::Result<Vec<u8>>> {
++    let (sender, receiver) = mpsc::channel();
++    thread::spawn(move || {
++        let mut bytes = Vec::new();
++        let read = pipe.read_to_end(&mut bytes).map(|_| bytes);
++        if sender.send(read).is_err() {
++            tracing::debug!("git output arrived after the deadline");
++        }
++    });
++    receiver
++}
++
++fn receive_output(
++    status: ExitStatus,
++    stdout: &Receiver<io::Result<Vec<u8>>>,
++    stderr: &Receiver<io::Result<Vec<u8>>>,
++    deadline: Instant,
++) -> io::Result<Waited> {
++    let stdout = match stdout.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
++        Ok(read) => read?,
++        Err(RecvTimeoutError::Timeout) => return Ok(Waited::TimedOut),
++        Err(RecvTimeoutError::Disconnected) => return Err(thread_panicked()),
++    };
++    let stderr = match stderr.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
++        Ok(read) => read?,
++        Err(RecvTimeoutError::Timeout) => return Ok(Waited::TimedOut),
++        Err(RecvTimeoutError::Disconnected) => return Err(thread_panicked()),
++    };
++    Ok(Waited::Exited {
++        status,
++        stdout,
++        stderr,
++    })
++}
++
++fn closed_pipe() -> io::Error {
++    io::Error::from(io::ErrorKind::BrokenPipe)
++}
++
++fn thread_panicked() -> io::Error {
++    io::Error::other("git pipe thread panicked")
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -128,6 +165,7 @@ mod tests {
+     const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+     const SLEEP_SECONDS: u64 = 5;
+ 
++    #[cfg(target_os = "linux")]
+     fn child_pids_of_this_process() -> String {
+         let mut pids = String::new();
+         for task in std::fs::read_dir("/proc/self/task").unwrap() {
+@@ -137,21 +175,43 @@ mod tests {
+         pids
+     }
+ 
+-    #[test]
+-    fn hanging_git_call_times_out_and_child_is_reaped() {
+-        let git = Path::new("git");
+-        let alias = format!("alias.hang=!sleep {SLEEP_SECONDS}");
+-        let command = git_command(git, Path::new("/"), Access::Read, &["-c", &alias, "hang"]);
++    fn run_alias_with_short_timeout(alias_body: &str) -> (Error, Duration) {
++        let alias = format!("alias.hang=!{alias_body}");
++        let command = git_command(
++            Path::new("git"),
++            Path::new("/"),
++            Access::Read,
++            &["-c", &alias, "hang"],
++        );
+         let started = Instant::now();
+-
+         let error = run(command, None, SHORT_TIMEOUT).unwrap_err();
++        (error, started.elapsed())
++    }
+ 
+-        assert!(started.elapsed() < Duration::from_secs(SLEEP_SECONDS));
++    fn assert_is_short_timeout(error: Error, elapsed: Duration) {
++        assert!(elapsed < Duration::from_secs(SLEEP_SECONDS), "{elapsed:?}");
+         let Error::Timeout { args, after } = error else {
+             panic!("expected Timeout, got {error:?}");
+         };
+         assert_eq!(after, SHORT_TIMEOUT);
+         assert!(args.contains(&"hang".to_owned()));
++    }
++
++    #[test]
++    fn hanging_git_call_times_out_and_child_is_reaped() {
++        let (error, elapsed) = run_alias_with_short_timeout(&format!("sleep {SLEEP_SECONDS}"));
++
++        assert_is_short_timeout(error, elapsed);
++        #[cfg(target_os = "linux")]
+         assert_eq!(child_pids_of_this_process().trim(), "");
+     }
++
++    #[test]
++    fn background_process_holding_stderr_open_times_out() {
++        let alias_body = format!("sleep {SLEEP_SECONDS} >/dev/null &");
++
++        let (error, elapsed) = run_alias_with_short_timeout(&alias_body);
++
++        assert_is_short_timeout(error, elapsed);
++    }
+ }
+diff --git i/crates/gitio/tests/repo.rs w/crates/gitio/tests/repo.rs
+index a349620..b43376b 100644
+--- i/crates/gitio/tests/repo.rs
++++ w/crates/gitio/tests/repo.rs
+@@ -5,7 +5,7 @@ mod fixtures;
+ use std::fs;
+ use std::path::Path;
+ 
+-use fixtures::{conflict_repo, hash_object};
++use fixtures::{conflict_repo, git_ok, hash_object};
+ use yamt_gitio::{Error, Oid, Repo, Stage, StageEntry};
+ 
+ const FILE: &str = "cart.ts";
+@@ -67,7 +67,7 @@ fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
+ }
+ 
+ #[test]
+-fn one_reader_serves_many_reads_and_survives_a_missing_oid() {
++fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
+     const ROUNDS: usize = 3;
+     let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+@@ -83,6 +83,20 @@ fn one_reader_serves_many_reads_and_survives_a_missing_oid() {
+     let error = reader.read(&missing).unwrap_err();
+     assert!(matches!(error, Error::BlobMissing { oid } if oid == missing));
+     assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
++    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"])).unwrap();
++    let commit = Oid::parse(head.trim_end()).unwrap();
++    let error = reader.read(&commit).unwrap_err();
++    assert!(
++        matches!(
++            error,
++            Error::UnexpectedOutput {
++                command: "cat-file",
++                ..
++            }
++        ),
++        "{error:?}"
++    );
++    assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
+ }
+ 
+ fn assert_add_then_restore_round_trips(base: Option<&[u8]>, path: &str) {

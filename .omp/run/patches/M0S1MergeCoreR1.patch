@@ -1,0 +1,246 @@
+diff --git 1/crates/merge-core/tests/invariants.proptest-regressions 2/crates/merge-core/tests/invariants.proptest-regressions
+new file mode 100644
+index 0000000..319846c
+--- /dev/null
++++ 2/crates/merge-core/tests/invariants.proptest-regressions
+@@ -0,0 +1,7 @@
++# Seeds for failure cases proptest has generated in the past. It is
++# automatically read and these particular cases re-run before any
++# novel cases are generated.
++#
++# It is recommended to check this file in to source control so that
++# everyone who runs the test benefits from these saved cases.
++cc 9716f6e892c1a97ed4583e6362f9fc475f958e968046e0dcea0602a3311ca5be # shrinks to triple = Triple { base: "", local: "x", remote: "" }
+diff --git i/crates/merge-core/src/apply.rs w/crates/merge-core/src/apply.rs
+index d824adf..97265e6 100644
+--- i/crates/merge-core/src/apply.rs
++++ w/crates/merge-core/src/apply.rs
+@@ -7,6 +7,7 @@ pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Ch
+     let base_lines = split_lines(base);
+     let local_lines = split_lines(local);
+     let remote_lines = split_lines(remote);
++    let base_end = u32::try_from(base_lines.len()).unwrap_or(u32::MAX);
+     let mut merged = String::with_capacity(base.len());
+     let mut next_base_line = 0;
+     for chunk in chunks {
+@@ -24,9 +25,7 @@ pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Ch
+         merged.extend(taken.iter().copied());
+         next_base_line = chunk.base.end().0;
+     }
+-    let rest = base_lines
+-        .get(next_base_line as usize..)
+-        .unwrap_or_default();
+-    merged.extend(rest.iter().copied());
++    let rest = next_base_line..base_end;
++    merged.extend(lines_in(&base_lines, &rest).iter().copied());
+     merged
+ }
+diff --git i/crates/merge-core/src/chunk.rs w/crates/merge-core/src/chunk.rs
+index d596ac9..35a5199 100644
+--- i/crates/merge-core/src/chunk.rs
++++ w/crates/merge-core/src/chunk.rs
+@@ -34,19 +34,3 @@ pub struct Chunk {
+     /// The region in remote.
+     pub remote: LineRange<RemoteLine>,
+ }
+-
+-/// Default for `Options::gap`.
+-pub const DEFAULT_GAP: u32 = 1;
+-
+-/// Tuning for `compute_chunks`.
+-#[derive(Clone, Copy, Debug)]
+-pub struct Options {
+-    /// Changes separated by at most this many unchanged base lines form one chunk.
+-    pub gap: u32,
+-}
+-
+-impl Default for Options {
+-    fn default() -> Self {
+-        Options { gap: DEFAULT_GAP }
+-    }
+-}
+diff --git i/crates/merge-core/src/compute.rs w/crates/merge-core/src/compute.rs
+index 3d0b70c..e984160 100644
+--- i/crates/merge-core/src/compute.rs
++++ w/crates/merge-core/src/compute.rs
+@@ -2,7 +2,7 @@ use std::ops::Range;
+ 
+ use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
+ 
+-use crate::chunk::{Chunk, ChunkId, ChunkKind, Options};
++use crate::chunk::{Chunk, ChunkId, ChunkKind};
+ use crate::line::{BaseLine, LineRange, LocalLine, RemoteLine, lines_in, split_lines};
+ 
+ #[derive(Clone, Copy)]
+@@ -58,14 +58,15 @@ impl<'a> SideDiff<'a> {
+         }
+     }
+ 
+-    fn map(&self, base: &Range<u32>) -> Range<u32> {
+-        let starting_before = self
++    fn map_base_to_side(&self, base: &Range<u32>) -> Range<u32> {
++        let starting_before_start = self
+             .hunks
+             .partition_point(|hunk| hunk.before.start < base.start);
+-        let starting_within = self
++        let starting_at_or_before_end = self
+             .hunks
+             .partition_point(|hunk| hunk.before.start <= base.end);
+-        self.side_line(starting_before, base.start)..self.side_line(starting_within, base.end)
++        self.side_line(starting_before_start, base.start)
++            ..self.side_line(starting_at_or_before_end, base.end)
+     }
+ 
+     fn side_line(&self, preceding_hunks: usize, base_line: u32) -> u32 {
+@@ -83,6 +84,22 @@ impl<'a> SideDiff<'a> {
+     }
+ }
+ 
++/// Default for `Options::gap`.
++pub const DEFAULT_GAP: u32 = 1;
++
++/// Tuning for `compute_chunks`.
++#[derive(Clone, Copy, Debug)]
++pub struct Options {
++    /// Changes separated by at most this many unchanged base lines form one chunk.
++    pub gap: u32,
++}
++
++impl Default for Options {
++    fn default() -> Self {
++        Options { gap: DEFAULT_GAP }
++    }
++}
++
+ /// Splits three texts into the chunks where local or remote differs from base, in base order.
+ #[must_use]
+ pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) -> Vec<Chunk> {
+@@ -91,8 +108,8 @@ pub fn compute_chunks(base: &str, local: &str, remote: &str, opts: &Options) ->
+     let regions = sweep(&local.hunks, &remote.hunks, opts.gap);
+     let mut chunks = Vec::with_capacity(regions.len());
+     for (id, region) in (0..).zip(regions) {
+-        let local_range = local.map(&region.base);
+-        let remote_range = remote.map(&region.base);
++        let local_range = local.map_base_to_side(&region.base);
++        let remote_range = remote.map_base_to_side(&region.base);
+         let kind = classify(
+             region.touched,
+             local.text(&local_range),
+diff --git i/crates/merge-core/src/lib.rs w/crates/merge-core/src/lib.rs
+index fada870..cba039f 100644
+--- i/crates/merge-core/src/lib.rs
++++ w/crates/merge-core/src/lib.rs
+@@ -8,6 +8,6 @@ mod compute;
+ mod line;
+ 
+ pub use apply::apply_non_conflicting;
+-pub use chunk::{Chunk, ChunkId, ChunkKind, DEFAULT_GAP, Options};
+-pub use compute::compute_chunks;
++pub use chunk::{Chunk, ChunkId, ChunkKind};
++pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+ pub use line::{BaseLine, LineRange, LocalLine, RemoteLine};
+diff --git i/crates/merge-core/tests/invariants.rs w/crates/merge-core/tests/invariants.rs
+index c97becd..c244190 100644
+--- i/crates/merge-core/tests/invariants.rs
++++ w/crates/merge-core/tests/invariants.rs
+@@ -96,12 +96,32 @@ fn triple() -> impl Strategy<Value = Triple> {
+                 base: base.text(),
+             },
+         );
++    let shared = (doc(), edits(), option::of(last_line()), edits(), edits()).prop_map(
++        |(base, shared_edits, shared_last, local_edits, remote_edits)| {
++            let common = base.edited(&shared_edits, shared_last);
++            Triple {
++                local: common.edited(&local_edits, None).text(),
++                remote: common.edited(&remote_edits, None).text(),
++                base: base.text(),
++            }
++        },
++    );
+     let independent = (doc(), doc(), doc()).prop_map(|(base, local, remote)| Triple {
+         base: base.text(),
+         local: local.text(),
+         remote: remote.text(),
+     });
+-    prop_oneof![4 => derived, 1 => independent]
++    prop_oneof![3 => derived, 3 => shared, 1 => independent]
++}
++
++impl Triple {
++    fn with_local_as_remote(&self) -> Triple {
++        Triple {
++            base: self.base.clone(),
++            local: self.local.clone(),
++            remote: self.local.clone(),
++        }
++    }
+ }
+ 
+ struct Lines<'a> {
+@@ -200,13 +220,17 @@ proptest! {
+ 
+     #[test]
+     fn non_conflict_chunks_leave_the_other_side_equal(triple in triple(), gap in 0..MAX_GAP) {
+-        let lines = Lines::of(&triple);
+-        for chunk in chunks_of(&triple, gap) {
+-            match chunk.kind {
+-                ChunkKind::LocalOnly => prop_assert_eq!(lines.remote(&chunk), lines.base(&chunk)),
+-                ChunkKind::RemoteOnly => prop_assert_eq!(lines.local(&chunk), lines.base(&chunk)),
+-                ChunkKind::BothSame => prop_assert_eq!(lines.local(&chunk), lines.remote(&chunk)),
+-                ChunkKind::Conflict => {}
++        let shared = triple.with_local_as_remote();
++        prop_assert!(chunks_of(&shared, gap).iter().all(|chunk| chunk.kind == ChunkKind::BothSame));
++        for triple in [triple, shared] {
++            let lines = Lines::of(&triple);
++            for chunk in chunks_of(&triple, gap) {
++                match chunk.kind {
++                    ChunkKind::LocalOnly => prop_assert_eq!(lines.remote(&chunk), lines.base(&chunk)),
++                    ChunkKind::RemoteOnly => prop_assert_eq!(lines.local(&chunk), lines.base(&chunk)),
++                    ChunkKind::BothSame => prop_assert_eq!(lines.local(&chunk), lines.remote(&chunk)),
++                    ChunkKind::Conflict => {}
++                }
+             }
+         }
+     }
+@@ -214,9 +238,15 @@ proptest! {
+     #[test]
+     fn an_unchanged_side_yields_only_the_other_sides_kind(triple in triple()) {
+         let Triple { base, local, remote } = &triple;
+-        prop_assert!(kinds(base, base, remote).iter().all(|kind| *kind == ChunkKind::RemoteOnly));
+-        prop_assert!(kinds(base, local, base).iter().all(|kind| *kind == ChunkKind::LocalOnly));
+-        prop_assert!(!kinds(base, local, local).contains(&ChunkKind::Conflict));
++        let remote_changed = kinds(base, base, remote);
++        prop_assert_eq!(remote_changed.is_empty(), remote == base);
++        prop_assert!(remote_changed.iter().all(|kind| *kind == ChunkKind::RemoteOnly));
++        let local_changed = kinds(base, local, base);
++        prop_assert_eq!(local_changed.is_empty(), local == base);
++        prop_assert!(local_changed.iter().all(|kind| *kind == ChunkKind::LocalOnly));
++        let both_changed = kinds(base, local, local);
++        prop_assert_eq!(both_changed.is_empty(), local == base);
++        prop_assert!(!both_changed.contains(&ChunkKind::Conflict));
+     }
+ 
+     #[test]
+@@ -246,12 +276,16 @@ proptest! {
+ 
+     #[test]
+     fn every_chunk_is_a_real_change(triple in triple(), gap in 0..MAX_GAP) {
+-        let lines = Lines::of(&triple);
+-        for chunk in chunks_of(&triple, gap) {
+-            match chunk.kind {
+-                ChunkKind::LocalOnly | ChunkKind::BothSame => prop_assert_ne!(lines.local(&chunk), lines.base(&chunk)),
+-                ChunkKind::RemoteOnly => prop_assert_ne!(lines.remote(&chunk), lines.base(&chunk)),
+-                ChunkKind::Conflict => prop_assert_ne!(lines.local(&chunk), lines.remote(&chunk)),
++        let shared = triple.with_local_as_remote();
++        prop_assert!(chunks_of(&shared, gap).iter().all(|chunk| chunk.kind == ChunkKind::BothSame));
++        for triple in [triple, shared] {
++            let lines = Lines::of(&triple);
++            for chunk in chunks_of(&triple, gap) {
++                match chunk.kind {
++                    ChunkKind::LocalOnly | ChunkKind::BothSame => prop_assert_ne!(lines.local(&chunk), lines.base(&chunk)),
++                    ChunkKind::RemoteOnly => prop_assert_ne!(lines.remote(&chunk), lines.base(&chunk)),
++                    ChunkKind::Conflict => prop_assert_ne!(lines.local(&chunk), lines.remote(&chunk)),
++                }
+             }
+         }
+     }

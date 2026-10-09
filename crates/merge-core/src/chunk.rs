@@ -34,19 +34,3 @@ pub struct Chunk {
     /// The region in remote.
     pub remote: LineRange<RemoteLine>,
 }
-
-/// Default for `Options::gap`.
-pub const DEFAULT_GAP: u32 = 1;
-
-/// Tuning for `compute_chunks`.
-#[derive(Clone, Copy, Debug)]
-pub struct Options {
-    /// Changes separated by at most this many unchanged base lines form one chunk.
-    pub gap: u32,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Options { gap: DEFAULT_GAP }
-    }
-}

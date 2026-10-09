@@ -4,9 +4,8 @@ use std::process::{Child, ChildStdout, Command, Stdio};
 use crate::run::argv;
 use crate::{Error, Oid, Result};
 
-const CAT_FILE: &str = "cat-file";
+pub(crate) const CAT_FILE: &str = "cat-file";
 
-/// One long-lived `git cat-file --batch` process that reads blobs by oid.
 pub struct BlobReader {
     child: Child,
     stdout: BufReader<ChildStdout>,

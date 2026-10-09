@@ -5,7 +5,7 @@ mod fixtures;
 use std::fs;
 use std::path::Path;
 
-use fixtures::{conflict_repo, hash_object};
+use fixtures::{conflict_repo, git_ok, hash_object};
 use yamt_gitio::{Error, Oid, Repo, Stage, StageEntry};
 
 const FILE: &str = "cart.ts";
@@ -67,7 +67,7 @@ fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
 }
 
 #[test]
-fn one_reader_serves_many_reads_and_survives_a_missing_oid() {
+fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
     const ROUNDS: usize = 3;
     let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
@@ -82,6 +82,20 @@ fn one_reader_serves_many_reads_and_survives_a_missing_oid() {
     let missing = Oid::parse(&"ab".repeat(20)).unwrap();
     let error = reader.read(&missing).unwrap_err();
     assert!(matches!(error, Error::BlobMissing { oid } if oid == missing));
+    assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
+    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"])).unwrap();
+    let commit = Oid::parse(head.trim_end()).unwrap();
+    let error = reader.read(&commit).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::UnexpectedOutput {
+                command: "cat-file",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
     assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
 }
 

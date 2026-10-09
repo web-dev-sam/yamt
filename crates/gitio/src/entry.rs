@@ -7,7 +7,6 @@ use crate::{Error, Result};
 const SHA1_HEX_LEN: usize = 40;
 const SHA256_HEX_LEN: usize = 64;
 
-/// A git object id: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Oid(String);
 
@@ -33,7 +32,6 @@ impl Oid {
     }
 }
 
-/// A conflict stage of the index: 1 = merge base, 2 = ours, 3 = theirs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Base,
@@ -60,7 +58,6 @@ impl Stage {
     }
 }
 
-/// One line of `git ls-files -u`: a path at one conflict stage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StageEntry {
     pub mode: u32,
@@ -69,10 +66,10 @@ pub struct StageEntry {
     pub path: PathBuf,
 }
 
-const LS_FILES: &str = "ls-files";
+pub(crate) const LS_FILES: &str = "ls-files";
 const OCTAL: u32 = 8;
 
-/// Parses `ls-files -u -z` output: records `<mode> SP <oid> SP <stage> TAB <path> NUL`.
+// git-ls-files(1) `-z`: records `<mode> SP <oid> SP <stage> TAB <path> NUL`, path unquoted.
 pub(crate) fn parse_unmerged(output: &[u8]) -> Result<Vec<StageEntry>> {
     let mut entries = Vec::new();
     for record in output.split(|&byte| byte == b'\0') {
@@ -107,22 +104,20 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
     })
 }
 
-/// Builds `update-index -z --index-info` input that replaces each path's index entries
-/// with exactly the given stages.
 pub(crate) fn index_info(entries: &[StageEntry]) -> Vec<u8> {
-    let mut paths: Vec<&Path> = Vec::new();
+    let mut first_entry_of_each_path: Vec<&StageEntry> = Vec::new();
     for entry in entries {
-        if !paths.contains(&entry.path.as_path()) {
-            paths.push(&entry.path);
+        if !first_entry_of_each_path
+            .iter()
+            .any(|first| first.path == entry.path)
+        {
+            first_entry_of_each_path.push(entry);
         }
     }
     let mut input = Vec::new();
-    for path in paths {
-        let path_entries = entries.iter().filter(|entry| entry.path == path);
-        for (index, entry) in path_entries.enumerate() {
-            if index == 0 {
-                push_removal_record(&mut input, entry);
-            }
+    for first in first_entry_of_each_path {
+        push_removal_record(&mut input, first);
+        for entry in entries.iter().filter(|entry| entry.path == first.path) {
             push_stage_record(&mut input, entry);
         }
     }

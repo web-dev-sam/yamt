@@ -64,5 +64,3 @@ export function createLog(forward?: LogForward): Log {
     error: (event, fields) => emit("error", event, fields),
   };
 }
-
-export const log: Log = createLog();

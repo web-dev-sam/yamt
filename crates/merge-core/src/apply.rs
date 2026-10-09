@@ -7,6 +7,7 @@ pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Ch
     let base_lines = split_lines(base);
     let local_lines = split_lines(local);
     let remote_lines = split_lines(remote);
+    let base_end = u32::try_from(base_lines.len()).unwrap_or(u32::MAX);
     let mut merged = String::with_capacity(base.len());
     let mut next_base_line = 0;
     for chunk in chunks {
@@ -24,9 +25,7 @@ pub fn apply_non_conflicting(base: &str, local: &str, remote: &str, chunks: &[Ch
         merged.extend(taken.iter().copied());
         next_base_line = chunk.base.end().0;
     }
-    let rest = base_lines
-        .get(next_base_line as usize..)
-        .unwrap_or_default();
-    merged.extend(rest.iter().copied());
+    let rest = next_base_line..base_end;
+    merged.extend(lines_in(&base_lines, &rest).iter().copied());
     merged
 }

@@ -14,7 +14,7 @@ pub use repo::Repo;
 pub enum Error {
     #[error("git executable not found on PATH")]
     GitNotFound,
-    #[error("`{}` failed with exit status {status:?}: {stderr}", args.join(" "))]
+    #[error("`{}` failed with {}: {stderr}", args.join(" "), exit_description(*status))]
     GitFailed {
         args: Vec<String>,
         status: Option<i32>,
@@ -37,3 +37,10 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+fn exit_description(status: Option<i32>) -> String {
+    match status {
+        Some(code) => format!("exit status {code}"),
+        None => "killed by signal".to_owned(),
+    }
+}
