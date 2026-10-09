@@ -2,14 +2,16 @@ import type { Chunk } from "../../ipc";
 
 export type Tone = "inserted" | "modified" | "deleted" | "conflict";
 
-function sideOf(chunk: Chunk, pane: "local" | "center" | "remote"): "local" | "remote" {
+type Pane = "local" | "center" | "remote";
+
+function sideOf(chunk: Chunk, pane: Pane): Exclude<Pane, "center"> {
   if (pane !== "center") {
     return pane;
   }
   return chunk.kind === "RemoteOnly" ? "remote" : "local";
 }
 
-export function chunkTone(chunk: Chunk, pane: "local" | "center" | "remote"): Tone {
+export function chunkTone(chunk: Chunk, pane: Pane): Tone {
   if (chunk.kind === "Conflict") {
     return "conflict";
   }

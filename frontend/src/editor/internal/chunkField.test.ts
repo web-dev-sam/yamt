@@ -1,5 +1,5 @@
 import { history, redo, undo } from "@codemirror/commands";
-import { EditorState, type StateCommand, type StateField } from "@codemirror/state";
+import { EditorState, Transaction, type StateCommand, type StateField } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type FileMergeData } from "../../ipc";
@@ -105,6 +105,12 @@ test("typing at the end of an unterminated last line stays inside its chunk", as
   expect(ranges(typed)).toEqual([[2, 5]]);
 });
 
+test("typing at an empty chunk's point in the middle of a line lands after it", async () => {
+  const typed = edit(center(await synthetic("a\nb", [{ start: 2, len: 0 }])), 3, 3, "c");
+
+  expect(ranges(typed)).toEqual([[3, 3]]);
+});
+
 test("an edit before a chunk shifts it", async () => {
   const shifted = edit(await mappedCenter(), 0, 0, "new\n");
 
@@ -152,8 +158,16 @@ test("deleting all of a chunk's lines collapses it; undo restores the range", as
 });
 
 test("one undo restores a merged history event; redo re-applies it", async () => {
-  const deleted = edit(await mappedCenter(), 5, 13, "");
-  const typed = edit(deleted, 5, 5, "x");
+  const start = await mappedCenter();
+  const sameTime = Transaction.time.of(0);
+  const deleted = {
+    ...start,
+    state: start.state.update({ changes: { from: 5, to: 13 }, annotations: sameTime }).state,
+  };
+  const typed = {
+    ...deleted,
+    state: deleted.state.update({ changes: { from: 5, insert: "x" }, annotations: sameTime }).state,
+  };
 
   const undone = run(undo, typed);
   const redone = run(redo, undone);

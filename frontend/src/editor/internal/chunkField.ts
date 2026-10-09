@@ -35,11 +35,15 @@ function mapSpans(
   changes: ChangeDesc,
   doc: Text | null,
 ): readonly ChunkSpan[] {
-  return spans.map((span) => ({
+  const mapped = spans.map((span) => ({
     ...span,
     from: toDocPos(changes.mapPos(span.from, -1)),
     to: toDocPos(changes.mapPos(span.to, endsMidLine(span, doc) ? 1 : -1)),
   }));
+  return mapped.map((span, index) => {
+    const next = mapped[index + 1];
+    return next === undefined || span.to <= next.from ? span : { ...span, to: next.from };
+  });
 }
 
 const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({

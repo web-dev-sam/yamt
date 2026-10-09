@@ -139,6 +139,60 @@ test("a marker on another chunk's band line keeps its own tone class", async () 
   ]);
 });
 
+test("a line break pasted at the end of a band line stops at the marker that follows it", async () => {
+  const data = await synthetic({ base: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
+    { kind: "Conflict", base: [0, 1], local: [0, 1], remote: [0, 1] },
+    { kind: "LocalOnly", base: [1, 0], local: [1, 1], remote: [1, 0] },
+  ]);
+  const field = chunkField(data.chunks);
+  const joined = EditorState.create({
+    doc: data.base,
+    extensions: [field, centerDecorations(field)],
+  }).update({ changes: { from: 1, to: 2 } }).state;
+
+  const pasted = joined.update({ changes: { from: 1, insert: "\n  x" } }).state;
+
+  expect(pasted.field(field).map((span) => [span.from, span.to])).toEqual([
+    [0, 1],
+    [1, 1],
+  ]);
+  expect(runsOf(pasted)).toEqual([
+    "1 chunk-conflict chunk-band",
+    "1 chunk-marker-inserted chunk-point-below",
+  ]);
+});
+
+test("random edits keep center ranges sorted, disjoint, inside the document, and drawable", async () => {
+  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const field = chunkField(data.chunks);
+  let state = EditorState.create({ doc: data.base, extensions: [field, centerDecorations(field)] });
+  let seed = 7;
+  function random(below: number): number {
+    seed = (seed * 48_271) % 2_147_483_647;
+    return seed % below;
+  }
+
+  for (let step = 0; step < 200; step += 1) {
+    const spans = state.field(field);
+    const anchor = spans[random(spans.length)];
+    const near = anchor === undefined ? 0 : ([anchor.from, anchor.to][random(2)] ?? 0);
+    const from = Math.max(0, Math.min(state.doc.length, near + random(9) - 4));
+    const to = random(2) === 0 ? from : Math.min(state.doc.length, from + random(40));
+    const insert = Array.from({ length: random(6) }, () => "ab\n"[random(3)]).join("");
+    state = state.update({ changes: { from, to, insert } }).state;
+
+    const after = state.field(field);
+    const broken = after.filter(
+      (span, index) =>
+        span.from > span.to ||
+        span.to > state.doc.length ||
+        span.to > (after[index + 1]?.from ?? state.doc.length),
+    );
+    expect({ step, broken }).toEqual({ step, broken: [] });
+    expect(() => runsOf(state)).not.toThrow();
+  }
+});
+
 test("a RemoteOnly deletion: center band and right marker are deleted, left is bare", async () => {
   const data = await synthetic({ base: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
     { kind: "RemoteOnly", base: [0, 2], local: [0, 2], remote: [0, 0] },
