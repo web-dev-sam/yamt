@@ -53,6 +53,8 @@ fn isolated_git(dir: &Path) -> Command {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("LC_ALL", "C")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_COUNT")
         .args([
             "-c",
             "user.name=yamt test",
@@ -65,7 +67,13 @@ fn isolated_git(dir: &Path) -> Command {
             "-c",
             "commit.gpgsign=false",
         ])
-        .args(["-c", "core.autocrlf=false"]);
+        .args(["-c", "core.autocrlf=false"])
+        .args([
+            "-c",
+            "core.attributesFile=/dev/null",
+            "-c",
+            "core.excludesFile=/dev/null",
+        ]);
     command
 }
 
@@ -167,4 +175,54 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IN_HOSTILE_ENVIRONMENT: &str = "tests::ordinary_conflict_in_the_inherited_environment";
+
+    #[test]
+    #[ignore = "run by hostile_user_git_environment_does_not_reach_the_conflict_repo"]
+    fn ordinary_conflict_in_the_inherited_environment() {
+        let repo = conflict_repo(&[ConflictFile {
+            path: "notes.txt",
+            kind: FileKind::Regular,
+            base: Some(b"base\n"),
+            local: Some(b"local\n"),
+            remote: Some(b"remote\n"),
+        }])
+        .unwrap();
+        let merged = fs::read_to_string(repo.path().join("notes.txt")).unwrap();
+        for marker in ["<<<<<<< ", "=======\n", ">>>>>>> "] {
+            assert!(merged.contains(marker), "no `{marker}` in:\n{merged}");
+        }
+        assert!(!merged.contains("|||||||"), "base section in:\n{merged}");
+        let stages = git_ok(repo.path(), &["ls-files", "-u", "--format=%(stage)"]).unwrap();
+        assert_eq!(String::from_utf8_lossy(&stages), "1\n2\n3\n");
+    }
+
+    #[test]
+    fn hostile_user_git_environment_does_not_reach_the_conflict_repo() {
+        let xdg_config_home = tempfile::tempdir().unwrap();
+        let git_dir = xdg_config_home.path().join("git");
+        fs::create_dir(&git_dir).unwrap();
+        fs::write(git_dir.join("attributes"), "* -merge\n").unwrap();
+        fs::write(git_dir.join("ignore"), "*\n").unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", IN_HOSTILE_ENVIRONMENT, "--ignored"])
+            .env("XDG_CONFIG_HOME", xdg_config_home.path())
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
+            .env("GIT_CONFIG_VALUE_0", "zdiff3")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&child.stdout);
+        assert!(
+            child.status.success() && stdout.contains("test result: ok. 1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+    }
 }

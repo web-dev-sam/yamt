@@ -92,6 +92,7 @@ export function createPane(pane: {
   doc: string;
   language: string | null;
   parent: HTMLElement;
+  chunks: Extension;
 }): EditorView {
   const languageExtension =
     pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
@@ -106,6 +107,7 @@ export function createPane(pane: {
       syntaxHighlighting(paletteHighlight),
       languageExtension?.() ?? [],
       kindExtensions(pane.kind),
+      pane.chunks,
     ],
   });
   return new EditorView({ state, parent: pane.parent });

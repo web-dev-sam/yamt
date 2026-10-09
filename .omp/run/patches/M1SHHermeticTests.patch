@@ -1,0 +1,140 @@
+diff --git c/crates/cli/tests/commands.rs i/crates/cli/tests/commands.rs
+index f7667d3..120f610 100644
+--- c/crates/cli/tests/commands.rs
++++ i/crates/cli/tests/commands.rs
+@@ -166,6 +166,24 @@ fn golden_run_fails_on_a_missing_expected_json() {
+     assert_eq!(run.stdout, "DIFF fresh: expected.json is missing\n");
+ }
+ 
++#[test]
++fn golden_run_reports_an_unreadable_expected_json_as_a_read_error_not_as_missing() {
++    let root = TempDir::new().unwrap();
++    let case = write_case(root.path(), "unreadable", "txt");
++    let expected = case.join("expected.json");
++    fs::create_dir(&expected).unwrap();
++    let run = yamt_cli(&["golden", "run", path(root.path())]);
++    assert_eq!(run.code, 1);
++    assert_eq!(run.stdout, "");
++    assert_eq!(
++        run.stderr,
++        format!(
++            "yamt-cli: cannot read {}: Is a directory (os error 21)\n",
++            path(&expected)
++        )
++    );
++}
++
+ fn golden_run_with_expected(edit: impl Fn(&str) -> String) -> Output {
+     let root = TempDir::new().unwrap();
+     let case = write_case(root.path(), "edited", "txt");
+diff --git c/crates/cli/tests/merge_file.rs i/crates/cli/tests/merge_file.rs
+index 4abe38f..9a6da6d 100644
+--- c/crates/cli/tests/merge_file.rs
++++ i/crates/cli/tests/merge_file.rs
+@@ -140,6 +140,8 @@ fn git_merge_file(triple: &Triple) -> GitMerge {
+         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+         .env("GIT_CONFIG_NOSYSTEM", "1")
+         .env("LC_ALL", "C")
++        .env_remove("GIT_CONFIG_PARAMETERS")
++        .env_remove("GIT_CONFIG_COUNT")
+         .args([
+             "merge-file",
+             "-p",
+@@ -201,7 +203,7 @@ proptest! {
+ }
+ 
+ #[test]
+-fn enough_generated_triples_are_clean_for_both_to_exercise_the_cross_check() {
++fn sample_is_often_clean_for_both_and_rarely_clean_only_for_yamt() {
+     let mut runner = TestRunner::deterministic();
+     let strategy = triple();
+     let mut both_clean = 0;
+diff --git c/crates/conflict-repo/AGENTS.md i/crates/conflict-repo/AGENTS.md
+index 5b906ae..f90b694 100644
+--- c/crates/conflict-repo/AGENTS.md
++++ i/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user git config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`). The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`). The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git c/crates/conflict-repo/src/lib.rs i/crates/conflict-repo/src/lib.rs
+index 2f23bd7..59cd893 100644
+--- c/crates/conflict-repo/src/lib.rs
++++ i/crates/conflict-repo/src/lib.rs
+@@ -53,6 +53,8 @@ fn isolated_git(dir: &Path) -> Command {
+         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+         .env("GIT_CONFIG_NOSYSTEM", "1")
+         .env("LC_ALL", "C")
++        .env_remove("GIT_CONFIG_PARAMETERS")
++        .env_remove("GIT_CONFIG_COUNT")
+         .args([
+             "-c",
+             "user.name=yamt test",
+@@ -65,7 +67,13 @@ fn isolated_git(dir: &Path) -> Command {
+             "-c",
+             "commit.gpgsign=false",
+         ])
+-        .args(["-c", "core.autocrlf=false"]);
++        .args(["-c", "core.autocrlf=false"])
++        .args([
++            "-c",
++            "core.attributesFile=/dev/null",
++            "-c",
++            "core.excludesFile=/dev/null",
++        ]);
+     command
+ }
+ 
+@@ -168,3 +176,53 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+     }
+     Ok(())
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const IN_HOSTILE_ENVIRONMENT: &str = "tests::ordinary_conflict_in_the_inherited_environment";
++
++    #[test]
++    #[ignore = "run by hostile_user_git_environment_does_not_reach_the_conflict_repo"]
++    fn ordinary_conflict_in_the_inherited_environment() {
++        let repo = conflict_repo(&[ConflictFile {
++            path: "notes.txt",
++            kind: FileKind::Regular,
++            base: Some(b"base\n"),
++            local: Some(b"local\n"),
++            remote: Some(b"remote\n"),
++        }])
++        .unwrap();
++        let merged = fs::read_to_string(repo.path().join("notes.txt")).unwrap();
++        for marker in ["<<<<<<< ", "=======\n", ">>>>>>> "] {
++            assert!(merged.contains(marker), "no `{marker}` in:\n{merged}");
++        }
++        assert!(!merged.contains("|||||||"), "base section in:\n{merged}");
++        let stages = git_ok(repo.path(), &["ls-files", "-u", "--format=%(stage)"]).unwrap();
++        assert_eq!(String::from_utf8_lossy(&stages), "1\n2\n3\n");
++    }
++
++    #[test]
++    fn hostile_user_git_environment_does_not_reach_the_conflict_repo() {
++        let xdg_config_home = tempfile::tempdir().unwrap();
++        let git_dir = xdg_config_home.path().join("git");
++        fs::create_dir(&git_dir).unwrap();
++        fs::write(git_dir.join("attributes"), "* -merge\n").unwrap();
++        fs::write(git_dir.join("ignore"), "*\n").unwrap();
++        let child = Command::new(std::env::current_exe().unwrap())
++            .args(["--exact", IN_HOSTILE_ENVIRONMENT, "--ignored"])
++            .env("XDG_CONFIG_HOME", xdg_config_home.path())
++            .env("GIT_CONFIG_COUNT", "1")
++            .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
++            .env("GIT_CONFIG_VALUE_0", "zdiff3")
++            .output()
++            .unwrap();
++        let stdout = String::from_utf8_lossy(&child.stdout);
++        assert!(
++            child.status.success() && stdout.contains("test result: ok. 1 passed"),
++            "{stdout}{}",
++            String::from_utf8_lossy(&child.stderr)
++        );
++    }
++}

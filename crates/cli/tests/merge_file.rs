@@ -140,6 +140,8 @@ fn git_merge_file(triple: &Triple) -> GitMerge {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("LC_ALL", "C")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_COUNT")
         .args([
             "merge-file",
             "-p",
@@ -201,7 +203,7 @@ proptest! {
 }
 
 #[test]
-fn enough_generated_triples_are_clean_for_both_to_exercise_the_cross_check() {
+fn sample_is_often_clean_for_both_and_rarely_clean_only_for_yamt() {
     let mut runner = TestRunner::deterministic();
     let strategy = triple();
     let mut both_clean = 0;

@@ -1,7 +1,7 @@
 import { createLog } from "./log";
 
 export type { ChunkSource } from "./ChunkSource";
-export type { FileEntry, FileMergeData } from "./domain";
+export type { Chunk, FileEntry, FileMergeData } from "./domain";
 export { createFixtureSource } from "./fixture";
 
 export const log = createLog();

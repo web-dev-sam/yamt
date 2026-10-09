@@ -1,13 +1,9 @@
 import type { EditorView } from "@codemirror/view";
 
+import type { FileMergeData } from "../ipc";
+import { chunkField } from "./internal/chunkField";
+import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { createPane } from "./internal/pane";
-
-export type MergeTexts = {
-  readonly local: string;
-  readonly base: string;
-  readonly remote: string;
-  readonly language: string | null;
-};
 
 export type MergeHosts = {
   readonly left: HTMLElement;
@@ -18,12 +14,31 @@ export type MergeHosts = {
 export class MergeController {
   readonly #views: readonly EditorView[];
 
-  constructor(texts: MergeTexts, hosts: MergeHosts) {
-    const { language } = texts;
+  constructor(data: FileMergeData, hosts: MergeHosts) {
+    const { language, chunks } = data;
+    const spans = chunkField(chunks);
     this.#views = [
-      createPane({ kind: "side", doc: texts.local, language, parent: hosts.left }),
-      createPane({ kind: "center", doc: texts.base, language, parent: hosts.center }),
-      createPane({ kind: "side", doc: texts.remote, language, parent: hosts.right }),
+      createPane({
+        kind: "side",
+        doc: data.local,
+        language,
+        parent: hosts.left,
+        chunks: sideDecorations(chunks, "local"),
+      }),
+      createPane({
+        kind: "center",
+        doc: data.base,
+        language,
+        parent: hosts.center,
+        chunks: [spans, centerDecorations(spans)],
+      }),
+      createPane({
+        kind: "side",
+        doc: data.remote,
+        language,
+        parent: hosts.right,
+        chunks: sideDecorations(chunks, "remote"),
+      }),
     ];
   }
 

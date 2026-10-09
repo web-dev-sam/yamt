@@ -6,7 +6,7 @@ type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
 type LineRange<L> = { readonly start: L; readonly len: number };
 
-type Chunk = {
+export type Chunk = {
   readonly id: ChunkId;
   readonly kind: Generated.ChunkKind;
   readonly base: LineRange<BaseLine>;

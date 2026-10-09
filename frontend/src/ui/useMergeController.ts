@@ -1,9 +1,10 @@
 import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } from "vue";
 
-import { MergeController, type MergeTexts } from "../editor";
+import { MergeController } from "../editor";
+import type { FileMergeData } from "../ipc";
 
 export function useMergeController(
-  texts: MaybeRefOrGetter<MergeTexts | null>,
+  data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: {
     left: Readonly<ShallowRef<HTMLDivElement | null>>;
     center: Readonly<ShallowRef<HTMLDivElement | null>>;
@@ -18,7 +19,7 @@ export function useMergeController(
   }
 
   watch(
-    [toRef(texts), hosts.left, hosts.center, hosts.right],
+    [toRef(data), hosts.left, hosts.center, hosts.right],
     ([current, left, center, right]) => {
       destroyController();
       if (current === null || left === null || center === null || right === null) {

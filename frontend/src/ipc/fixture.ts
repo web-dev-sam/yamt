@@ -7,10 +7,12 @@ import type { Log } from "./log";
 
 type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
 
+// Stryker disable all: Vite needs import.meta.glob arguments as literals
 const GOLDEN_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
   "../../fixtures/golden/*.json",
   { eager: true, import: "default" },
 );
+// Stryker restore all
 
 const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {
   LocalOnly: true,

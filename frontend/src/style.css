@@ -30,6 +30,11 @@
   --color-syntax-function: #56a8f5;
   --color-syntax-property: #c77dbb;
   --color-syntax-decorator: #b3ae60;
+
+  --color-chunk-inserted: #4471525c;
+  --color-chunk-modified: #43698d5c;
+  --color-chunk-deleted: #656e765c;
+  --color-chunk-conflict: #8f52476b;
 }
 
 @layer base {

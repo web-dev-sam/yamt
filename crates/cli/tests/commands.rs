@@ -166,6 +166,24 @@ fn golden_run_fails_on_a_missing_expected_json() {
     assert_eq!(run.stdout, "DIFF fresh: expected.json is missing\n");
 }
 
+#[test]
+fn golden_run_reports_an_unreadable_expected_json_as_a_read_error_not_as_missing() {
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "unreadable", "txt");
+    let expected = case.join("expected.json");
+    fs::create_dir(&expected).unwrap();
+    let run = yamt_cli(&["golden", "run", path(root.path())]);
+    assert_eq!(run.code, 1);
+    assert_eq!(run.stdout, "");
+    assert_eq!(
+        run.stderr,
+        format!(
+            "yamt-cli: cannot read {}: Is a directory (os error 21)\n",
+            path(&expected)
+        )
+    );
+}
+
 fn golden_run_with_expected(edit: impl Fn(&str) -> String) -> Output {
     let root = TempDir::new().unwrap();
     let case = write_case(root.path(), "edited", "txt");

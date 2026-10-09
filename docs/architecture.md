@@ -628,15 +628,16 @@ parallel.
 
 **M1 — frontend in a browser, fixture JSON**
 
-| #    | slice                                                                              | files                                                                      | acceptance                                                                                     |
-| ---- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 1.0  | `ipc/` interface + fixture source + bindings pipeline; store + file list           | `frontend/src/ipc/**`, `src-tauri/src/**`, `frontend/src/ui/**`, `main.ts` | `just bindings-check` + `fixtures-check` green; the 10 fixtures listed and opened in WebKit    |
-| 1.1  | `editor/internal/chunkField.ts` + `apply.ts` + chunk colours; `FileMergeData` seam | `frontend/src/editor/**`, `ui/MergeView.vue`, `ui/useMergeController.ts`   | apply/undo/mapping tests; chunk colours visible in all three panes                             |
-| 1.1' | `connectors/` geometry + tests                                                     | `frontend/src/connectors/**`                                               | band paths for a fixture match snapshot                                                        |
-| 1.2  | `strips.ts` + `scrollSync.ts` (the novel part)                                     | `frontend/src/editor/internal/{strips,scrollSync}.ts`                      | visual: Epiphany screenshot of 3 panes + bands; drift ≤ 1 line over a 2k-line fixture          |
-| 1.4  | gutter actions, bulk apply, dismiss; toolbar wiring, summary counts, finish        | `editor/internal/{gutter,decorations}.ts`, `frontend/src/ui/**`            | one-undo-step bulk apply test; fixture merge completed in Epiphany; `finishFile` logs the text |
+| #   | slice                                                                            | files                                                                      | acceptance                                                                                                   |
+| --- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1.0 | `ipc/` interface + fixture source + bindings pipeline; store + file list         | `frontend/src/ipc/**`, `src-tauri/src/**`, `frontend/src/ui/**`, `main.ts` | `just bindings-check` + `fixtures-check` green; the 10 fixtures listed and opened in WebKit                  |
+| 1.1 | `editor/internal/chunkField.ts` + chunk colours; `FileMergeData` seam            | `frontend/src/editor/**`, `ui/MergeView.vue`, `ui/useMergeController.ts`   | mapping tests; chunk colours visible in all three panes                                                      |
+| 1.2 | `connectors/` geometry + `strips.ts` + `scrollSync.ts` (the novel part)          | `frontend/src/connectors/**`, `frontend/src/editor/**`, `ui/MergeView.vue` | band paths tested on numbers; Epiphany screenshot of 3 panes + bands; drift ≤ 1 line                         |
+| 1.4 | apply: gutter, chunk status + undo, bulk apply, dismiss; toolbar, counts, finish | `frontend/src/editor/**`, `frontend/src/ui/**`                             | apply/undo + one-undo-step bulk apply tests; fixture merge completed in Epiphany; `finishFile` logs the text |
 
-(1.3 was split: store and file list moved into 1.0, toolbar, counts and finish into 1.4.)
+(Re-cut during M1: store and file list moved into 1.0; `apply.ts` moved from 1.1 to 1.4, the
+first slice with a caller; 1.1' connectors folded into 1.2, their only user; toolbar, counts and
+finish from 1.3 into 1.4.)
 
 **M2 — Tauri shell**: 2.0 commands + state + error enum; 2.1 `TauriChunkSource`; 2.2 sidebar
 reset/finish wired; 2.3 exit code + `--repo`. Acceptance: a real 16-file merge resolved,
