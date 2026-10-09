@@ -1,16 +1,16 @@
-.cm-editor .cm-line.chunk-inserted {
+.chunk-inserted {
   --chunk-tone: var(--color-chunk-inserted);
 }
 
-.cm-editor .cm-line.chunk-modified {
+.chunk-modified {
   --chunk-tone: var(--color-chunk-modified);
 }
 
-.cm-editor .cm-line.chunk-deleted {
+.chunk-deleted {
   --chunk-tone: var(--color-chunk-deleted);
 }
 
-.cm-editor .cm-line.chunk-conflict {
+.chunk-conflict {
   --chunk-tone: var(--color-chunk-conflict);
 }
 
@@ -32,6 +32,10 @@
 
 .cm-editor .cm-line.chunk-band {
   background-color: var(--chunk-tone);
+}
+
+path.chunk-band {
+  fill: var(--chunk-tone);
 }
 
 .cm-editor .cm-line.chunk-point-above {

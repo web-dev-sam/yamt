@@ -9,7 +9,9 @@ const props = defineProps<{ data: FileMergeData | null }>();
 const left = useTemplateRef<HTMLDivElement>("left");
 const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
-useMergeController(() => props.data, { left, center, right });
+const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
 </script>
 
 <template>
@@ -23,9 +25,9 @@ useMergeController(() => props.data, { left, center, right });
     <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
 
     <div ref="left" class="min-h-0 min-w-0" />
-    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
+    <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
     <div ref="center" class="min-h-0 min-w-0" />
-    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
+    <svg ref="rightStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
     <div ref="right" class="min-h-0 min-w-0" />
   </section>
 </template>

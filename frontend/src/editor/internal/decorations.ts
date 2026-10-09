@@ -5,16 +5,7 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import type { Chunk } from "../../ipc";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
-import { chunkTone, type Tone } from "./tone";
-
-type Side = "local" | "remote";
-
-const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
-  LocalOnly: ["local"],
-  RemoteOnly: ["remote"],
-  BothSame: ["local", "remote"],
-  Conflict: ["local", "remote"],
-};
+import { chunkTone, sideChanged, type Side, type Tone } from "./tone";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
@@ -42,7 +33,7 @@ export function sideDecorations(chunks: readonly Chunk[], side: Side): Extension
     bandDecorations(
       state.doc,
       chunks
-        .filter((chunk) => CHANGED_SIDES[chunk.kind].includes(side))
+        .filter((chunk) => sideChanged(chunk, side))
         .map((chunk) => ({ ...lineSpan(state.doc, chunk[side]), tone: chunkTone(chunk, side) })),
     ),
   );

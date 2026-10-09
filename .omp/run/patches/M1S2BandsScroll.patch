@@ -1,0 +1,777 @@
+diff --git c/frontend/src/connectors/.gitkeep i/frontend/src/connectors/.gitkeep
+deleted file mode 100644
+index e69de29..0000000
+diff --git c/frontend/src/connectors/index.test.ts i/frontend/src/connectors/index.test.ts
+new file mode 100644
+index 0000000..7fe40f4
+--- /dev/null
++++ i/frontend/src/connectors/index.test.ts
+@@ -0,0 +1,33 @@
++import { expect, test } from "vitest";
++
++import { bandPath } from ".";
++
++test("an aligned band is a rectangle drawn with flat curves", () => {
++  const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
++
++  expect(bandPath(band, 40)).toBe("M0 0 C20 0 20 0 40 0 L40 20 C20 20 20 20 0 20 Z");
++});
++
++test("a band whose right side is lower curves down with control points at half the width", () => {
++  const band = { left: { top: 10, bottom: 30 }, right: { top: 50, bottom: 90 } };
++
++  expect(bandPath(band, 40)).toBe("M0 10 C20 10 20 50 40 50 L40 90 C20 90 20 30 0 30 Z");
++});
++
++test("an insertion on the left tapers the band to a point on the left edge", () => {
++  const band = { left: { top: 40, bottom: 40 }, right: { top: 40, bottom: 100 } };
++
++  expect(bandPath(band, 40)).toBe("M0 40 C20 40 20 40 40 40 L40 100 C20 100 20 40 0 40 Z");
++});
++
++test("an insertion on the right tapers to the right edge, at fractional line heights", () => {
++  const lineHeight = 18.2;
++  const band = {
++    left: { top: lineHeight, bottom: lineHeight * 3 },
++    right: { top: lineHeight * 2, bottom: lineHeight * 2 },
++  };
++
++  expect(bandPath(band, 39)).toBe(
++    "M0 18.2 C19.5 18.2 19.5 36.4 39 36.4 L39 36.4 C19.5 36.4 19.5 54.6 0 54.6 Z",
++  );
++});
+diff --git c/frontend/src/connectors/index.ts i/frontend/src/connectors/index.ts
+new file mode 100644
+index 0000000..0c66037
+--- /dev/null
++++ i/frontend/src/connectors/index.ts
+@@ -0,0 +1,22 @@
++export type Span = { readonly top: number; readonly bottom: number };
++export type Band = { readonly left: Span; readonly right: Span };
++
++const CONTROL_X = 0.5;
++const DECIMALS = 2;
++
++function px(n: number): string {
++  return String(Number(n.toFixed(DECIMALS)));
++}
++
++export function bandPath(band: Band, width: number): string {
++  const { left, right } = band;
++  const w = px(width);
++  const mid = px(width * CONTROL_X);
++  return [
++    `M0 ${px(left.top)}`,
++    `C${mid} ${px(left.top)} ${mid} ${px(right.top)} ${w} ${px(right.top)}`,
++    `L${w} ${px(right.bottom)}`,
++    `C${mid} ${px(right.bottom)} ${mid} ${px(left.bottom)} 0 ${px(left.bottom)}`,
++    "Z",
++  ].join(" ");
++}
+diff --git c/frontend/src/editor/index.ts i/frontend/src/editor/index.ts
+index f4e3d53..8fddd44 100644
+--- c/frontend/src/editor/index.ts
++++ i/frontend/src/editor/index.ts
+@@ -1,50 +1,89 @@
+-import type { EditorView } from "@codemirror/view";
++import type { StateField } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
+ 
+-import type { FileMergeData } from "../ipc";
+-import { chunkField } from "./internal/chunkField";
++import type { Chunk, FileMergeData } from "../ipc";
++import { chunkField, type ChunkSpan } from "./internal/chunkField";
+ import { centerDecorations, sideDecorations } from "./internal/decorations";
++import { chunkRows, type PaneViews } from "./internal/geometry";
+ import { createPane } from "./internal/pane";
++import { ScrollSync } from "./internal/scrollSync";
++import { paintStrips } from "./internal/strips";
+ 
+ export type MergeHosts = {
+   readonly left: HTMLElement;
+   readonly center: HTMLElement;
+   readonly right: HTMLElement;
++  readonly strips: readonly [SVGSVGElement, SVGSVGElement];
+ };
+ 
+ export class MergeController {
+-  readonly #views: readonly EditorView[];
++  readonly #chunks: readonly Chunk[];
++  readonly #field: StateField<readonly ChunkSpan[]>;
++  readonly #views: PaneViews;
++  readonly #strips: MergeHosts["strips"];
++  readonly #scroll: ScrollSync;
++  #frameId: number | null = null;
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts) {
+     const { language, chunks } = data;
+     const field = chunkField(chunks);
+-    this.#views = [
+-      createPane({
++    const repaint = EditorView.updateListener.of((update) => {
++      if (update.docChanged || update.geometryChanged) {
++        this.#requestFrame();
++      }
++    });
++    this.#chunks = chunks;
++    this.#field = field;
++    this.#views = {
++      left: createPane({
+         kind: "side",
+         doc: data.local,
+         language,
+         parent: hosts.left,
+-        decorations: sideDecorations(chunks, "local"),
++        extensions: [sideDecorations(chunks, "local"), repaint],
+       }),
+-      createPane({
++      center: createPane({
+         kind: "center",
+         doc: data.base,
+         language,
+         parent: hosts.center,
+-        decorations: [field, centerDecorations(field)],
++        extensions: [field, centerDecorations(field), repaint],
+       }),
+-      createPane({
++      right: createPane({
+         kind: "side",
+         doc: data.remote,
+         language,
+         parent: hosts.right,
+-        decorations: sideDecorations(chunks, "remote"),
++        extensions: [sideDecorations(chunks, "remote"), repaint],
+       }),
+-    ];
++    };
++    this.#strips = hosts.strips;
++    this.#scroll = new ScrollSync(this.#views, () => {
++      this.#requestFrame();
++    });
++    this.#requestFrame();
++  }
++
++  #requestFrame(): void {
++    this.#frameId ??= requestAnimationFrame(() => {
++      this.#frameId = null;
++      const views = this.#views;
++      const rows = chunkRows(views, this.#chunks, views.center.state.field(this.#field));
++      this.#scroll.sync(rows);
++      paintStrips(views, this.#strips, rows);
++    });
+   }
+ 
+   destroy(): void {
+-    for (const view of this.#views) {
++    if (this.#frameId !== null) {
++      cancelAnimationFrame(this.#frameId);
++    }
++    this.#scroll.destroy();
++    for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
+       view.destroy();
+     }
++    for (const strip of this.#strips) {
++      strip.replaceChildren();
++    }
+   }
+ }
+diff --git c/frontend/src/editor/internal/decorations.ts i/frontend/src/editor/internal/decorations.ts
+index 0e8f9d1..96a65fd 100644
+--- c/frontend/src/editor/internal/decorations.ts
++++ i/frontend/src/editor/internal/decorations.ts
+@@ -5,16 +5,7 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+ import type { Chunk } from "../../ipc";
+ import type { ChunkSpan } from "./chunkField";
+ import { lineSpan } from "./lineSpan";
+-import { chunkTone, type Tone } from "./tone";
+-
+-type Side = "local" | "remote";
+-
+-const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
+-  LocalOnly: ["local"],
+-  RemoteOnly: ["remote"],
+-  BothSame: ["local", "remote"],
+-  Conflict: ["local", "remote"],
+-};
++import { chunkTone, sideChanged, type Side, type Tone } from "./tone";
+ 
+ type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+ 
+@@ -42,7 +33,7 @@ export function sideDecorations(chunks: readonly Chunk[], side: Side): Extension
+     bandDecorations(
+       state.doc,
+       chunks
+-        .filter((chunk) => CHANGED_SIDES[chunk.kind].includes(side))
++        .filter((chunk) => sideChanged(chunk, side))
+         .map((chunk) => ({ ...lineSpan(state.doc, chunk[side]), tone: chunkTone(chunk, side) })),
+     ),
+   );
+diff --git c/frontend/src/editor/internal/geometry.test.ts i/frontend/src/editor/internal/geometry.test.ts
+new file mode 100644
+index 0000000..0465002
+--- /dev/null
++++ i/frontend/src/editor/internal/geometry.test.ts
+@@ -0,0 +1,44 @@
++import { Text } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { rangeSpan } from "./geometry";
++
++const LINE_PX = 20;
++
++function spanOf(
++  lines: readonly string[],
++  from: number,
++  to: number,
++): { top: number; bottom: number } {
++  const doc = Text.of(lines);
++  return rangeSpan(doc, { from, to }, (pos) => {
++    const top = (doc.lineAt(pos).number - 1) * LINE_PX;
++    return { top, bottom: top + LINE_PX };
++  });
++}
++
++test("lines in the middle span from the first line's top to the next line's top", () => {
++  expect(spanOf(["a", "b", "c"], 2, 4)).toEqual({ top: 20, bottom: 40 });
++});
++
++test("an empty range at a line start is a point at that line's top", () => {
++  expect(spanOf(["a", "b", "c"], 0, 0)).toEqual({ top: 0, bottom: 0 });
++  expect(spanOf(["a", "b", "c"], 2, 2)).toEqual({ top: 20, bottom: 20 });
++});
++
++test("a range to the end of an unterminated last line ends at that line's bottom", () => {
++  expect(spanOf(["a", "b", "c"], 2, 5)).toEqual({ top: 20, bottom: 60 });
++});
++
++test("an empty range at the end of an unterminated last line is a point at its bottom", () => {
++  expect(spanOf(["a", "b", "c"], 5, 5)).toEqual({ top: 60, bottom: 60 });
++});
++
++test("a range to the end of a newline-terminated document ends at the empty last line's top", () => {
++  expect(spanOf(["a", "b", ""], 2, 4)).toEqual({ top: 20, bottom: 40 });
++  expect(spanOf(["a", "b", ""], 4, 4)).toEqual({ top: 40, bottom: 40 });
++});
++
++test("an empty document has one point at the top", () => {
++  expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
++});
+diff --git c/frontend/src/editor/internal/geometry.ts i/frontend/src/editor/internal/geometry.ts
+new file mode 100644
+index 0000000..f85549c
+--- /dev/null
++++ i/frontend/src/editor/internal/geometry.ts
+@@ -0,0 +1,51 @@
++import type { Text } from "@codemirror/state";
++import type { EditorView } from "@codemirror/view";
++
++import type { Span } from "../../connectors";
++import type { Chunk } from "../../ipc";
++import type { ChunkSpan } from "./chunkField";
++import { lineSpan } from "./lineSpan";
++
++export type Pane = "left" | "center" | "right";
++export type PaneViews = Readonly<Record<Pane, EditorView>>;
++export type ChunkRow = Readonly<Record<Pane, Span>> & { readonly chunk: Chunk };
++
++export function rangeSpan(
++  doc: Text,
++  range: { readonly from: number; readonly to: number },
++  blockAt: (pos: number) => Span,
++): Span {
++  const first = blockAt(range.from);
++  if (range.from === range.to) {
++    const y = doc.lineAt(range.from).from === range.from ? first.top : first.bottom;
++    return { top: y, bottom: y };
++  }
++  const last = blockAt(range.to);
++  return {
++    top: first.top,
++    bottom: doc.lineAt(range.to).from === range.to ? last.top : last.bottom,
++  };
++}
++
++function viewSpan(view: EditorView, range: { readonly from: number; readonly to: number }): Span {
++  return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
++}
++
++export function chunkRows(
++  views: PaneViews,
++  chunks: readonly Chunk[],
++  centerSpans: readonly ChunkSpan[],
++): ChunkRow[] {
++  return chunks.map((chunk, index) => {
++    const center = centerSpans[index];
++    if (center === undefined) {
++      throw new Error(`chunk ${chunk.id} has no center range`);
++    }
++    return {
++      chunk,
++      left: viewSpan(views.left, lineSpan(views.left.state.doc, chunk.local)),
++      center: viewSpan(views.center, center),
++      right: viewSpan(views.right, lineSpan(views.right.state.doc, chunk.remote)),
++    };
++  });
++}
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index 530dd91..77446a7 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -92,7 +92,7 @@ export function createPane(pane: {
+   doc: string;
+   language: string | null;
+   parent: HTMLElement;
+-  decorations: Extension;
++  extensions: Extension;
+ }): EditorView {
+   const languageExtension =
+     pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
+@@ -107,7 +107,7 @@ export function createPane(pane: {
+       syntaxHighlighting(paletteHighlight),
+       languageExtension?.() ?? [],
+       kindExtensions(pane.kind),
+-      pane.decorations,
++      pane.extensions,
+     ],
+   });
+   return new EditorView({ state, parent: pane.parent });
+diff --git c/frontend/src/editor/internal/scrollSync.test.ts i/frontend/src/editor/internal/scrollSync.test.ts
+new file mode 100644
+index 0000000..3920285
+--- /dev/null
++++ i/frontend/src/editor/internal/scrollSync.test.ts
+@@ -0,0 +1,109 @@
++import { expect, test } from "vitest";
++
++import type { Span } from "../../connectors";
++import type { Pane } from "./geometry";
++import { anchorsOf, targets, type Anchor } from "./scrollSync";
++
++const LINE_PX = 20;
++
++type Lines = { readonly start: number; readonly len: number };
++
++function span({ start, len }: Lines): Span {
++  return { top: start * LINE_PX, bottom: (start + len) * LINE_PX };
++}
++
++function row(left: Lines, center: Lines, right: Lines): Record<Pane, Span> {
++  return { left: span(left), center: span(center), right: span(right) };
++}
++
++function ends(left: number, center: number, right: number): Anchor {
++  return { left: left * LINE_PX, center: center * LINE_PX, right: right * LINE_PX };
++}
++
++test("without chunks every pane follows line for line", () => {
++  const anchors = anchorsOf([], ends(100, 100, 100));
++
++  expect(targets(anchors, "center", 730)).toEqual({ left: 730, center: 730, right: 730 });
++  expect(targets(anchors, "left", 0)).toEqual({ left: 0, center: 0, right: 0 });
++  expect(targets([], "right", 55)).toEqual({ left: 55, center: 55, right: 55 });
++});
++
++test("a 5-line chunk against 12 lines maps its edges exactly and its interior proportionally", () => {
++  const anchors = anchorsOf(
++    [row({ start: 5, len: 5 }, { start: 5, len: 12 }, { start: 5, len: 12 })],
++    ends(20, 27, 27),
++  );
++
++  expect(targets(anchors, "left", 100).center).toBe(100);
++  expect(targets(anchors, "left", 200).center).toBe(340);
++  expect(targets(anchors, "left", 150).center).toBe(220);
++  expect(targets(anchors, "center", 220).left).toBe(150);
++  expect(targets(anchors, "left", 300).center).toBe(440);
++});
++
++test("an insertion on the scrolled side holds the follower at the insertion point", () => {
++  const anchors = anchorsOf(
++    [row({ start: 5, len: 4 }, { start: 5, len: 0 }, { start: 5, len: 0 })],
++    ends(30, 26, 26),
++  );
++
++  for (const y of [100, 120, 150, 180]) {
++    expect(targets(anchors, "left", y)).toEqual({ left: y, center: 100, right: 100 });
++  }
++  expect(targets(anchors, "left", 200).center).toBeCloseTo(120);
++});
++
++test("positions beyond the last anchor and before the first keep the last offset", () => {
++  const anchors = anchorsOf(
++    [row({ start: 2, len: 3 }, { start: 2, len: 1 }, { start: 2, len: 6 })],
++    ends(40, 38, 43),
++  );
++
++  expect(targets(anchors, "center", 38 * LINE_PX + 90)).toEqual({
++    left: 40 * LINE_PX + 90,
++    center: 38 * LINE_PX + 90,
++    right: 43 * LINE_PX + 90,
++  });
++  expect(targets(anchors, "right", -30)).toEqual({ left: -30, center: -30, right: -30 });
++});
++
++test("a 2,000-line file with 40 mixed chunks maps every chunk top exactly and never goes back", () => {
++  const rows = [];
++  const next = { left: 0, center: 0, right: 0 };
++  for (let index = 0; index < 40; index += 1) {
++    const gap = 30 + (index % 7);
++    const lens = { left: (index * 5) % 11, center: (index * 7) % 13, right: (index * 3) % 9 };
++    const at = { left: next.left + gap, center: next.center + gap, right: next.right + gap };
++    rows.push(
++      row(
++        { start: at.left, len: lens.left },
++        { start: at.center, len: lens.center },
++        { start: at.right, len: lens.right },
++      ),
++    );
++    next.left = at.left + lens.left;
++    next.center = at.center + lens.center;
++    next.right = at.right + lens.right;
++  }
++  const tail = 2000 - next.center;
++  expect(tail).toBeGreaterThan(0);
++  const anchors = anchorsOf(rows, ends(next.left + tail, 2000, next.right + tail));
++  const panes = ["left", "center", "right"] as const;
++
++  for (const chunk of rows) {
++    const top = { left: chunk.left.top, center: chunk.center.top, right: chunk.right.top };
++    for (const source of panes) {
++      expect(targets(anchors, source, top[source])).toEqual(top);
++    }
++  }
++  for (const source of panes) {
++    let previous = targets(anchors, source, -LINE_PX);
++    for (let y = 0; y <= 2100 * LINE_PX; y += 7) {
++      const current = targets(anchors, source, y);
++      for (const pane of panes) {
++        expect(current[pane]).toBeGreaterThanOrEqual(previous[pane]);
++      }
++      previous = current;
++    }
++  }
++});
+diff --git c/frontend/src/editor/internal/scrollSync.ts i/frontend/src/editor/internal/scrollSync.ts
+new file mode 100644
+index 0000000..1e7eeba
+--- /dev/null
++++ i/frontend/src/editor/internal/scrollSync.ts
+@@ -0,0 +1,114 @@
++import type { EditorView } from "@codemirror/view";
++
++import type { Span } from "../../connectors";
++import type { Pane, PaneViews } from "./geometry";
++
++export type Anchor = Readonly<Record<Pane, number>>;
++
++const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
++const ANCHOR_AT = 0.5;
++
++function shifted(anchor: Anchor, by: number): Anchor {
++  return { left: anchor.left + by, center: anchor.center + by, right: anchor.right + by };
++}
++
++function edge(row: Readonly<Record<Pane, Span>>, side: keyof Span): Anchor {
++  return { left: row.left[side], center: row.center[side], right: row.right[side] };
++}
++
++export function anchorsOf(rows: readonly Readonly<Record<Pane, Span>>[], ends: Anchor): Anchor[] {
++  const start = { left: 0, center: 0, right: 0 };
++  return [start, ...rows.flatMap((row) => [edge(row, "top"), edge(row, "bottom")]), ends];
++}
++
++export function targets(anchors: readonly Anchor[], source: Pane, y: number): Anchor {
++  let before: Anchor | undefined;
++  for (const after of anchors) {
++    if (after[source] >= y) {
++      if (before === undefined || after[source] === y) {
++        return shifted(after, y - after[source]);
++      }
++      const t = (y - before[source]) / (after[source] - before[source]);
++      return {
++        left: before.left + (after.left - before.left) * t,
++        center: before.center + (after.center - before.center) * t,
++        right: before.right + (after.right - before.right) * t,
++      };
++    }
++    before = after;
++  }
++  return before === undefined
++    ? { left: y, center: y, right: y }
++    : shifted(before, y - before[source]);
++}
++
++function contentEnd(view: EditorView): number {
++  return view.lineBlockAt(view.state.doc.length).bottom;
++}
++
++function ends(views: PaneViews): Anchor {
++  return {
++    left: contentEnd(views.left),
++    center: contentEnd(views.center),
++    right: contentEnd(views.right),
++  };
++}
++
++function middle(view: EditorView): number {
++  const { scrollTop, clientHeight } = view.scrollDOM;
++  return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
++}
++
++export class ScrollSync {
++  readonly #views: PaneViews;
++  readonly #listeners = new AbortController();
++  #source: Pane | null = null;
++  #syncing: readonly Pane[] = [];
++  #release: number | null = null;
++
++  constructor(views: PaneViews, requestFrame: () => void) {
++    this.#views = views;
++    for (const pane of PANES) {
++      views[pane].scrollDOM.addEventListener(
++        "scroll",
++        () => {
++          if (!this.#syncing.includes(pane)) {
++            this.#source = pane;
++          }
++          requestFrame();
++        },
++        { passive: true, signal: this.#listeners.signal },
++      );
++    }
++  }
++
++  sync(rows: readonly Readonly<Record<Pane, Span>>[]): void {
++    const source = this.#source;
++    if (source === null) {
++      return;
++    }
++    this.#source = null;
++    const views = this.#views;
++    const at = targets(anchorsOf(rows, ends(views)), source, middle(views[source]));
++    const followers = PANES.filter((pane) => pane !== source);
++    for (const pane of followers) {
++      const { scrollDOM, documentPadding } = views[pane];
++      scrollDOM.scrollTop = at[pane] + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
++    }
++    this.#syncing = followers;
++    if (this.#release !== null) {
++      cancelAnimationFrame(this.#release);
++    }
++    this.#release = requestAnimationFrame(() => {
++      this.#release = null;
++      this.#syncing = [];
++    });
++  }
++
++  destroy(): void {
++    this.#listeners.abort();
++    if (this.#release !== null) {
++      cancelAnimationFrame(this.#release);
++    }
++  }
++}
+diff --git c/frontend/src/editor/internal/strips.ts i/frontend/src/editor/internal/strips.ts
+new file mode 100644
+index 0000000..e8d99ae
+--- /dev/null
++++ i/frontend/src/editor/internal/strips.ts
+@@ -0,0 +1,57 @@
++import "../theme.css";
++import type { EditorView } from "@codemirror/view";
++
++import { bandPath, type Band } from "../../connectors";
++import type { ChunkRow, PaneViews } from "./geometry";
++import { chunkTone, sideChanged, type Side, type Tone } from "./tone";
++
++type ToneBand = Band & { readonly tone: Tone };
++
++const SVG_NS = "http://www.w3.org/2000/svg";
++
++function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
++  return rows
++    .filter((row) => sideChanged(row.chunk, side))
++    .map((row) => ({
++      left: side === "local" ? row.left : row.center,
++      right: side === "local" ? row.center : row.right,
++      tone: chunkTone(row.chunk, side),
++    }));
++}
++
++function paintGap(
++  strip: SVGSVGElement,
++  left: EditorView,
++  right: EditorView,
++  bands: readonly ToneBand[],
++): void {
++  const stripTop = strip.getBoundingClientRect().top;
++  const leftShift = left.documentTop - stripTop;
++  const rightShift = right.documentTop - stripTop;
++  const height = strip.clientHeight;
++  const width = strip.clientWidth;
++  const paths = [];
++  for (const band of bands) {
++    const onLeft = { top: band.left.top + leftShift, bottom: band.left.bottom + leftShift };
++    const onRight = { top: band.right.top + rightShift, bottom: band.right.bottom + rightShift };
++    if (
++      Math.min(onLeft.top, onRight.top) <= height &&
++      Math.max(onLeft.bottom, onRight.bottom) >= 0
++    ) {
++      const path = document.createElementNS(SVG_NS, "path");
++      path.setAttribute("class", `chunk-${band.tone} chunk-band`);
++      path.setAttribute("d", bandPath({ left: onLeft, right: onRight }, width));
++      paths.push(path);
++    }
++  }
++  strip.replaceChildren(...paths);
++}
++
++export function paintStrips(
++  views: PaneViews,
++  strips: readonly [SVGSVGElement, SVGSVGElement],
++  rows: readonly ChunkRow[],
++): void {
++  paintGap(strips[0], views.left, views.center, gapBands(rows, "local"));
++  paintGap(strips[1], views.center, views.right, gapBands(rows, "remote"));
++}
+diff --git c/frontend/src/editor/internal/tone.ts i/frontend/src/editor/internal/tone.ts
+index 95ac616..9a55e79 100644
+--- c/frontend/src/editor/internal/tone.ts
++++ i/frontend/src/editor/internal/tone.ts
+@@ -4,7 +4,20 @@ export type Tone = "inserted" | "modified" | "deleted" | "conflict";
+ 
+ type Pane = "local" | "center" | "remote";
+ 
+-function sideOf(chunk: Chunk, pane: Pane): Exclude<Pane, "center"> {
++export type Side = Exclude<Pane, "center">;
++
++const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
++  LocalOnly: ["local"],
++  RemoteOnly: ["remote"],
++  BothSame: ["local", "remote"],
++  Conflict: ["local", "remote"],
++};
++
++export function sideChanged(chunk: Chunk, side: Side): boolean {
++  return CHANGED_SIDES[chunk.kind].includes(side);
++}
++
++function sideOf(chunk: Chunk, pane: Pane): Side {
+   if (pane !== "center") {
+     return pane;
+   }
+diff --git c/frontend/src/editor/theme.css i/frontend/src/editor/theme.css
+index 8dbece0..b89b92e 100644
+--- c/frontend/src/editor/theme.css
++++ i/frontend/src/editor/theme.css
+@@ -1,16 +1,16 @@
+-.cm-editor .cm-line.chunk-inserted {
++.chunk-inserted {
+   --chunk-tone: var(--color-chunk-inserted);
+ }
+ 
+-.cm-editor .cm-line.chunk-modified {
++.chunk-modified {
+   --chunk-tone: var(--color-chunk-modified);
+ }
+ 
+-.cm-editor .cm-line.chunk-deleted {
++.chunk-deleted {
+   --chunk-tone: var(--color-chunk-deleted);
+ }
+ 
+-.cm-editor .cm-line.chunk-conflict {
++.chunk-conflict {
+   --chunk-tone: var(--color-chunk-conflict);
+ }
+ 
+@@ -34,6 +34,10 @@
+   background-color: var(--chunk-tone);
+ }
+ 
++path.chunk-band {
++  fill: var(--chunk-tone);
++}
++
+ .cm-editor .cm-line.chunk-point-above {
+   box-shadow: inset 0 2px 0 var(--chunk-marker-tone);
+ }
+diff --git c/frontend/src/ui/MergeView.vue i/frontend/src/ui/MergeView.vue
+index 064ba8e..289b544 100644
+--- c/frontend/src/ui/MergeView.vue
++++ i/frontend/src/ui/MergeView.vue
+@@ -9,7 +9,9 @@ const props = defineProps<{ data: FileMergeData | null }>();
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+-useMergeController(() => props.data, { left, center, right });
++const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
++const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
++useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
+ </script>
+ 
+ <template>
+@@ -23,9 +25,9 @@ useMergeController(() => props.data, { left, center, right });
+     <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
+ 
+     <div ref="left" class="min-h-0 min-w-0" />
+-    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
++    <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+     <div ref="center" class="min-h-0 min-w-0" />
+-    <svg aria-hidden="true" class="h-full w-full border-x border-separator" />
++    <svg ref="rightStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+     <div ref="right" class="min-h-0 min-w-0" />
+   </section>
+ </template>
+diff --git c/frontend/src/ui/useMergeController.ts i/frontend/src/ui/useMergeController.ts
+index ebd0606..489453f 100644
+--- c/frontend/src/ui/useMergeController.ts
++++ i/frontend/src/ui/useMergeController.ts
+@@ -3,12 +3,15 @@ import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef }
+ import { MergeController } from "../editor";
+ import type { FileMergeData } from "../ipc";
+ 
++type Host<T> = Readonly<ShallowRef<T | null>>;
++
+ export function useMergeController(
+   data: MaybeRefOrGetter<FileMergeData | null>,
+   hosts: {
+-    left: Readonly<ShallowRef<HTMLDivElement | null>>;
+-    center: Readonly<ShallowRef<HTMLDivElement | null>>;
+-    right: Readonly<ShallowRef<HTMLDivElement | null>>;
++    left: Host<HTMLDivElement>;
++    center: Host<HTMLDivElement>;
++    right: Host<HTMLDivElement>;
++    strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
+   },
+ ): void {
+   let controller: MergeController | null = null;
+@@ -19,13 +22,25 @@ export function useMergeController(
+   }
+ 
+   watch(
+-    [toRef(data), hosts.left, hosts.center, hosts.right],
+-    ([current, left, center, right]) => {
++    [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
++    ([current, left, center, right, leftStrip, rightStrip]) => {
+       destroyController();
+-      if (current === null || left === null || center === null || right === null) {
++      if (
++        current === null ||
++        left === null ||
++        center === null ||
++        right === null ||
++        leftStrip === null ||
++        rightStrip === null
++      ) {
+         return;
+       }
+-      controller = new MergeController(current, { left, center, right });
++      controller = new MergeController(current, {
++        left,
++        center,
++        right,
++        strips: [leftStrip, rightStrip],
++      });
+     },
+     { immediate: true, flush: "post" },
+   );

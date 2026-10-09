@@ -3,12 +3,15 @@ import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } 
 import { MergeController } from "../editor";
 import type { FileMergeData } from "../ipc";
 
+type Host<T> = Readonly<ShallowRef<T | null>>;
+
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: {
-    left: Readonly<ShallowRef<HTMLDivElement | null>>;
-    center: Readonly<ShallowRef<HTMLDivElement | null>>;
-    right: Readonly<ShallowRef<HTMLDivElement | null>>;
+    left: Host<HTMLDivElement>;
+    center: Host<HTMLDivElement>;
+    right: Host<HTMLDivElement>;
+    strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
   },
 ): void {
   let controller: MergeController | null = null;
@@ -19,13 +22,25 @@ export function useMergeController(
   }
 
   watch(
-    [toRef(data), hosts.left, hosts.center, hosts.right],
-    ([current, left, center, right]) => {
+    [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+    ([current, left, center, right, leftStrip, rightStrip]) => {
       destroyController();
-      if (current === null || left === null || center === null || right === null) {
+      if (
+        current === null ||
+        left === null ||
+        center === null ||
+        right === null ||
+        leftStrip === null ||
+        rightStrip === null
+      ) {
         return;
       }
-      controller = new MergeController(current, { left, center, right });
+      controller = new MergeController(current, {
+        left,
+        center,
+        right,
+        strips: [leftStrip, rightStrip],
+      });
     },
     { immediate: true, flush: "post" },
   );

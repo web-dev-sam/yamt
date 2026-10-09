@@ -4,7 +4,20 @@ export type Tone = "inserted" | "modified" | "deleted" | "conflict";
 
 type Pane = "local" | "center" | "remote";
 
-function sideOf(chunk: Chunk, pane: Pane): Exclude<Pane, "center"> {
+export type Side = Exclude<Pane, "center">;
+
+const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
+  LocalOnly: ["local"],
+  RemoteOnly: ["remote"],
+  BothSame: ["local", "remote"],
+  Conflict: ["local", "remote"],
+};
+
+export function sideChanged(chunk: Chunk, side: Side): boolean {
+  return CHANGED_SIDES[chunk.kind].includes(side);
+}
+
+function sideOf(chunk: Chunk, pane: Pane): Side {
   if (pane !== "center") {
     return pane;
   }
