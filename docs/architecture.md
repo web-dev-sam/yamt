@@ -190,8 +190,10 @@ Invariants (property-tested with `proptest`):
   byte for byte; same for remote (proves the side-range mapping of step 4).
 
 **Word changes** (plan §2 #30): `pub fn word_changes(base, local, remote, chunks: &[Chunk]) -> Vec<WordChanges>`,
-one per chunk in order. Each side's chunk text is diffed against the chunk's base text over tokens
-(word runs, whitespace runs, line breaks, single other characters; imara-diff histogram); the
+one per chunk in order. Line-anchored, as IntelliJ: each side's chunk lines are diffed against the
+chunk's base lines first; lines equal to their matched base line get nothing; inside each changed
+line hunk the text is diffed over tokens (word runs, whitespace runs, line breaks, single other
+characters; imara-diff histogram); the
 changed tokens become `InlineRange<L> { line: L, start: u32, len: u32 }` — one line each, line break
 never inside, columns in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions).
 `WordChanges { chunk, local, base, remote }`; `base` is the union of base text changed by either

@@ -1,29 +1,16 @@
 {
-  "M1DWordEngine": {
-    "owned": [
-      "crates/merge-core/**",
-      "crates/session/src/session.rs",
-      "crates/session/tests/**",
-      "crates/cli/tests/**",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/editor/internal/apply.test.ts",
-      "frontend/src/editor/internal/chunkField.test.ts",
-      "frontend/src/editor/internal/decorations.test.ts",
-      "frontend/src/editor/internal/tone.test.ts"
-    ],
+  "M1DWordEngineR1": {
+    "owned": ["crates/merge-core/**", "frontend/src/ipc/fixture.test.ts"],
     "readonly": [
       "docs/**",
       ".omp/**",
       "tests/golden/**",
-      "crates/gitio/**",
-      "src-tauri/**",
-      "frontend/src/ui/**",
+      "crates/session/**",
+      "crates/cli/**",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/editor/**",
       "frontend/fixtures/**",
-      "frontend/src/ipc/bindings.ts",
-      "frontend/package.json"
+      "frontend/src/ipc/bindings.ts"
     ]
   }
 }

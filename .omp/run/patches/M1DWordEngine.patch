@@ -1,0 +1,4824 @@
+diff --git a/crates/cli/tests/commands.rs b/crates/cli/tests/commands.rs
+index dfc005f..5482191 100644
+--- a/crates/cli/tests/commands.rs
++++ b/crates/cli/tests/commands.rs
+@@ -261,6 +261,20 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
+     assert_eq!(data["eol"], "Lf");
+     let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
+     assert_eq!(data["chunks"], classified);
++    let word_chunks: Vec<&Value> = data["word_changes"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .map(|words| &words["chunk"])
++        .collect();
++    let chunk_ids: Vec<&Value> = classified
++        .as_array()
++        .unwrap()
++        .iter()
++        .map(|chunk| &chunk["id"])
++        .collect();
++    assert_eq!(chunk_ids.len(), 3);
++    assert_eq!(word_chunks, chunk_ids);
+ }
+ 
+ #[test]
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index cba039f..8800034 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -6,8 +6,10 @@ mod apply;
+ mod chunk;
+ mod compute;
+ mod line;
++mod word;
+ 
+ pub use apply::apply_non_conflicting;
+ pub use chunk::{Chunk, ChunkId, ChunkKind};
+ pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+-pub use line::{BaseLine, LineRange, LocalLine, RemoteLine};
++pub use line::{BaseLine, InlineRange, LineRange, LocalLine, RemoteLine};
++pub use word::{WordChanges, word_changes};
+diff --git a/crates/merge-core/src/line.rs b/crates/merge-core/src/line.rs
+index 69c5695..d5fc422 100644
+--- a/crates/merge-core/src/line.rs
++++ b/crates/merge-core/src/line.rs
+@@ -56,6 +56,18 @@ impl LineRange<RemoteLine> {
+     }
+ }
+ 
++/// Changed text inside one line of one text: `len` UTF-16 code units from column `start`
++/// (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct InlineRange<L> {
++    /// The line holding the range.
++    pub line: L,
++    /// Column of the first changed code unit.
++    pub start: u32,
++    /// Number of changed code units; never zero.
++    pub len: u32,
++}
++
+ pub(crate) fn split_lines(text: &str) -> Vec<&str> {
+     text.split_inclusive('\n').collect()
+ }
+diff --git a/crates/merge-core/src/word.rs b/crates/merge-core/src/word.rs
+new file mode 100644
+index 0000000..c6b2184
+--- /dev/null
++++ b/crates/merge-core/src/word.rs
+@@ -0,0 +1,192 @@
++use std::ops::Range;
++
++use imara_diff::{Algorithm, Diff, InternedInput};
++use serde::Serialize;
++use specta::Type;
++
++use crate::chunk::{Chunk, ChunkId};
++use crate::line::{BaseLine, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
++
++/// Where one chunk's sides differ from base, word by word. `base` marks the base text that
++/// either side changed (the union).
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct WordChanges {
++    /// The chunk these ranges belong to.
++    pub chunk: ChunkId,
++    /// Changed text in the chunk's local lines.
++    pub local: Vec<InlineRange<LocalLine>>,
++    /// Base text changed by local, remote or both.
++    pub base: Vec<InlineRange<BaseLine>>,
++    /// Changed text in the chunk's remote lines.
++    pub remote: Vec<InlineRange<RemoteLine>>,
++}
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum TokenKind {
++    Word,
++    Space,
++    Symbol,
++    LineBreak,
++}
++
++struct Token<'a> {
++    text: &'a str,
++    kind: TokenKind,
++    line: u32,
++    column: u32,
++    width: u32,
++}
++
++/// One entry per chunk, in the order of `chunks`.
++#[must_use]
++pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> Vec<WordChanges> {
++    let base_lines = split_lines(base);
++    let local_lines = split_lines(local);
++    let remote_lines = split_lines(remote);
++    let mut changes = Vec::with_capacity(chunks.len());
++    for chunk in chunks {
++        let base = tokens(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
++        let local = tokens(&local_lines, &(chunk.local.start.0..chunk.local.end().0));
++        let remote = tokens(&remote_lines, &(chunk.remote.start.0..chunk.remote.end().0));
++        let (base_by_local, local_changed) = changed_tokens(&base, &local);
++        let (base_by_remote, remote_changed) = changed_tokens(&base, &remote);
++        let base_changed: Vec<bool> = base_by_local
++            .iter()
++            .zip(&base_by_remote)
++            .map(|(by_local, by_remote)| *by_local || *by_remote)
++            .collect();
++        changes.push(WordChanges {
++            chunk: chunk.id,
++            local: ranges(&local, &local_changed, LocalLine),
++            base: ranges(&base, &base_changed, BaseLine),
++            remote: ranges(&remote, &remote_changed, RemoteLine),
++        });
++    }
++    changes
++}
++
++fn tokens<'a>(lines: &'a [&'a str], range: &Range<u32>) -> Vec<Token<'a>> {
++    let mut tokens = Vec::new();
++    for (line, text) in (range.start..).zip(lines_in(lines, range)) {
++        let (content, line_break) = split_line_break(text);
++        let mut column = 0;
++        let mut rest = content;
++        while let Some(first) = rest.chars().next() {
++            let kind = kind_of(first);
++            let byte_len = match kind {
++                TokenKind::Word | TokenKind::Space => rest
++                    .find(|next| kind_of(next) != kind)
++                    .unwrap_or(rest.len()),
++                TokenKind::Symbol | TokenKind::LineBreak => first.len_utf8(),
++            };
++            let (text, after) = rest.split_at(byte_len);
++            let width = utf16_len(text);
++            tokens.push(Token {
++                text,
++                kind,
++                line,
++                column,
++                width,
++            });
++            column += width;
++            rest = after;
++        }
++        if !line_break.is_empty() {
++            tokens.push(Token {
++                text: line_break,
++                kind: TokenKind::LineBreak,
++                line,
++                column,
++                width: utf16_len(line_break),
++            });
++        }
++    }
++    tokens
++}
++
++fn split_line_break(line: &str) -> (&str, &'static str) {
++    if let Some(content) = line.strip_suffix("\r\n") {
++        (content, "\r\n")
++    } else if let Some(content) = line.strip_suffix('\n') {
++        (content, "\n")
++    } else {
++        (line, "")
++    }
++}
++
++fn kind_of(character: char) -> TokenKind {
++    if character.is_alphanumeric() || character == '_' {
++        TokenKind::Word
++    } else if character.is_whitespace() {
++        TokenKind::Space
++    } else {
++        TokenKind::Symbol
++    }
++}
++
++fn utf16_len(text: &str) -> u32 {
++    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
++}
++
++fn changed_tokens(base: &[Token], side: &[Token]) -> (Vec<bool>, Vec<bool>) {
++    if base.is_empty() || side.is_empty() {
++        return (vec![false; base.len()], vec![false; side.len()]);
++    }
++    let mut input = InternedInput::default();
++    input.update_before(base.iter().map(|token| token.text));
++    input.update_after(side.iter().map(|token| token.text));
++    let diff = Diff::compute(Algorithm::Histogram, &input);
++    let base_changed = (0..).zip(base).map(|(index, _)| diff.is_removed(index));
++    let side_changed = (0..).zip(side).map(|(index, _)| diff.is_added(index));
++    (base_changed.collect(), side_changed.collect())
++}
++
++fn ranges<L: Copy + PartialEq>(
++    tokens: &[Token],
++    changed: &[bool],
++    line_of: fn(u32) -> L,
++) -> Vec<InlineRange<L>> {
++    let mut ranges: Vec<InlineRange<L>> = Vec::new();
++    for (index, token) in tokens.iter().enumerate() {
++        if !is_highlighted(tokens, changed, index) {
++            continue;
++        }
++        let line = line_of(token.line);
++        match ranges.last_mut() {
++            Some(last) if last.line == line && last.start + last.len == token.column => {
++                last.len += token.width;
++            }
++            Some(_) | None => ranges.push(InlineRange {
++                line,
++                start: token.column,
++                len: token.width,
++            }),
++        }
++    }
++    ranges
++}
++
++fn is_highlighted(tokens: &[Token], changed: &[bool], index: usize) -> bool {
++    let Some(token) = tokens.get(index) else {
++        return false;
++    };
++    match token.kind {
++        TokenKind::LineBreak => false,
++        TokenKind::Word | TokenKind::Symbol => is_changed_text(tokens, changed, Some(index)),
++        TokenKind::Space => {
++            is_changed_text(tokens, changed, Some(index))
++                || (is_changed_text(tokens, changed, index.checked_sub(1))
++                    && is_changed_text(tokens, changed, index.checked_add(1)))
++        }
++    }
++}
++
++fn is_changed_text(tokens: &[Token], changed: &[bool], index: Option<usize>) -> bool {
++    let Some(index) = index else {
++        return false;
++    };
++    let is_text = tokens
++        .get(index)
++        .is_some_and(|token| token.kind != TokenKind::LineBreak);
++    is_text && changed.get(index).copied().unwrap_or(false)
++}
+diff --git a/crates/merge-core/tests/word_changes.rs b/crates/merge-core/tests/word_changes.rs
+new file mode 100644
+index 0000000..1250617
+--- /dev/null
++++ b/crates/merge-core/tests/word_changes.rs
+@@ -0,0 +1,145 @@
++use yamt_merge_core::{
++    BaseLine, ChunkId, ChunkKind, InlineRange, LocalLine, Options, RemoteLine, WordChanges,
++    compute_chunks, word_changes,
++};
++
++type Ranges<'a> = &'a [(u32, u32, u32)];
++
++fn ranges<L>(line_of: fn(u32) -> L, expected: Ranges) -> Vec<InlineRange<L>> {
++    expected
++        .iter()
++        .map(|&(line, start, len)| InlineRange {
++            line: line_of(line),
++            start,
++            len,
++        })
++        .collect()
++}
++
++fn expected(local: Ranges, base: Ranges, remote: Ranges) -> WordChanges {
++    WordChanges {
++        chunk: ChunkId(0),
++        local: ranges(LocalLine, local),
++        base: ranges(BaseLine, base),
++        remote: ranges(RemoteLine, remote),
++    }
++}
++
++fn only_chunk_words(base: &str, local: &str, remote: &str) -> (ChunkKind, WordChanges) {
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    let mut changes = word_changes(base, local, remote, &chunks);
++    assert_eq!(chunks.len(), 1, "{chunks:?}");
++    assert_eq!(changes.len(), 1);
++    (chunks[0].kind, changes.remove(0))
++}
++
++#[test]
++fn one_changed_word_is_one_range_on_the_changed_side_and_base() {
++    let base = "foo(a, b)\n";
++    let (kind, words) = only_chunk_words(base, "foo(a, c)\n", base);
++    assert_eq!(kind, ChunkKind::LocalOnly);
++    assert_eq!(words, expected(&[(0, 7, 1)], &[(0, 7, 1)], &[]));
++}
++
++#[test]
++fn two_changed_words_separated_by_a_space_become_one_range() {
++    let base = "a old words z\n";
++    let (kind, words) = only_chunk_words(base, base, "a new terms z\n");
++    assert_eq!(kind, ChunkKind::RemoteOnly);
++    assert_eq!(words, expected(&[], &[(0, 2, 9)], &[(0, 2, 9)]));
++}
++
++#[test]
++fn changed_words_on_later_lines_of_a_chunk_carry_their_own_line() {
++    let base = "head\nalpha\nbeta gamma\ntail\n";
++    let (_, words) = only_chunk_words(base, "head\nALPHA\nbeta delta\ntail\n", base);
++    assert_eq!(
++        words,
++        expected(&[(1, 0, 5), (2, 5, 5)], &[(1, 0, 5), (2, 5, 5)], &[])
++    );
++}
++
++#[test]
++fn a_line_added_inside_a_modified_chunk_is_a_full_line_range_without_its_break() {
++    let base = "a\nb\n";
++    let (_, words) = only_chunk_words(base, "a!\nnew line\nb\n", base);
++    assert_eq!(words, expected(&[(0, 1, 1), (1, 0, 8)], &[], &[]));
++}
++
++#[test]
++fn columns_count_utf16_code_units_of_a_non_ascii_prefix() {
++    let base = "é😀 x\n";
++    let (_, words) = only_chunk_words(base, "é😀 yy\n", base);
++    assert_eq!(words, expected(&[(0, 4, 2)], &[(0, 4, 1)], &[]));
++}
++
++#[test]
++fn crlf_line_breaks_stay_outside_every_range() {
++    let base = "keep\r\nold value\r\n";
++    let (_, words) = only_chunk_words(base, "keep\r\nnew value\r\nadded\r\n", base);
++    assert_eq!(words, expected(&[(1, 0, 3), (2, 0, 5)], &[(1, 0, 3)], &[]));
++}
++
++#[test]
++fn a_changed_line_break_alone_yields_no_range() {
++    let base = "a\r\nb\n";
++    let (_, words) = only_chunk_words(base, "a\nb\n", base);
++    assert_eq!(words, expected(&[], &[], &[]));
++}
++
++#[test]
++fn a_conflict_on_different_words_marks_each_side_and_their_union_in_base() {
++    let (kind, words) = only_chunk_words("let a = 1;\n", "let b = 1;\n", "let a = 2;\n");
++    assert_eq!(kind, ChunkKind::Conflict);
++    assert_eq!(
++        words,
++        expected(&[(0, 4, 1)], &[(0, 4, 1), (0, 8, 1)], &[(0, 8, 1)])
++    );
++}
++
++#[test]
++fn overlapping_base_ranges_of_both_sides_merge_into_one() {
++    let (_, words) = only_chunk_words("x a+b y\n", "x c+b y\n", "x d-b y\n");
++    assert_eq!(words, expected(&[(0, 2, 1)], &[(0, 2, 2)], &[(0, 2, 2)]));
++}
++
++#[test]
++fn an_underscore_belongs_to_its_word() {
++    let base = "snake_case\n";
++    let (_, words) = only_chunk_words(base, "snake_name\n", base);
++    assert_eq!(words, expected(&[(0, 0, 10)], &[(0, 0, 10)], &[]));
++}
++
++#[test]
++fn both_same_gives_both_sides_the_same_ranges() {
++    let (kind, words) = only_chunk_words("fn a()\n", "fn b()\n", "fn b()\n");
++    assert_eq!(kind, ChunkKind::BothSame);
++    assert_eq!(words, expected(&[(0, 3, 1)], &[(0, 3, 1)], &[(0, 3, 1)]));
++}
++
++#[test]
++fn add_add_has_no_ranges() {
++    let (kind, words) = only_chunk_words("", "local\n", "remote\n");
++    assert_eq!(kind, ChunkKind::Conflict);
++    assert_eq!(words, expected(&[], &[], &[]));
++}
++
++#[test]
++fn lines_differing_only_in_whitespace_mark_the_whitespace_run() {
++    let base = "a  b\n";
++    let (_, words) = only_chunk_words(base, "a b\n", base);
++    assert_eq!(words, expected(&[(0, 1, 1)], &[(0, 1, 2)], &[]));
++}
++
++#[test]
++fn each_chunk_gets_its_own_entry_in_chunk_order() {
++    let base = "a 1\nb\nc\nd\ne 2\n";
++    let local = "a 9\nb\nc\nd\ne 2\n";
++    let remote = "a 1\nb\nc\nd\ne 8\n";
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    let words = word_changes(base, local, remote, &chunks);
++    let ids: Vec<ChunkId> = words.iter().map(|change| change.chunk).collect();
++    assert_eq!(ids, [ChunkId(0), ChunkId(1)]);
++    assert_eq!(words[1].remote, ranges(RemoteLine, &[(4, 2, 1)]));
++    assert_eq!(words[1].base, ranges(BaseLine, &[(4, 2, 1)]));
++}
+diff --git a/crates/merge-core/tests/word_invariants.rs b/crates/merge-core/tests/word_invariants.rs
+new file mode 100644
+index 0000000..8814659
+--- /dev/null
++++ b/crates/merge-core/tests/word_invariants.rs
+@@ -0,0 +1,217 @@
++use proptest::collection::vec;
++use proptest::option;
++use proptest::prelude::*;
++use proptest::sample::Index;
++use yamt_merge_core::{
++    BaseLine, Chunk, ChunkId, ChunkKind, InlineRange, LineRange, LocalLine, Options, RemoteLine,
++    compute_chunks, word_changes,
++};
++
++const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
++const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
++const MAX_LINES: usize = 8;
++const MAX_EDITS: usize = 4;
++const CASES: u32 = 512;
++
++#[derive(Clone, Debug)]
++enum Edit {
++    Insert(String),
++    Delete,
++    Replace(String),
++}
++
++#[derive(Clone, Debug)]
++struct Doc {
++    lines: Vec<String>,
++    last: String,
++}
++
++impl Doc {
++    fn text(&self) -> String {
++        self.lines.concat() + &self.last
++    }
++
++    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
++        let mut lines = self.lines.clone();
++        for (at, edit) in edits {
++            match edit {
++                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
++                Edit::Delete if !lines.is_empty() => {
++                    lines.remove(at.index(lines.len()));
++                }
++                Edit::Replace(line) if !lines.is_empty() => {
++                    let replaced = at.index(lines.len());
++                    lines[replaced].clone_from(line);
++                }
++                Edit::Delete | Edit::Replace(_) => {}
++            }
++        }
++        Doc {
++            lines,
++            last: last.unwrap_or_else(|| self.last.clone()),
++        }
++    }
++}
++
++#[derive(Clone, Debug)]
++struct Triple {
++    base: String,
++    local: String,
++    remote: String,
++}
++
++fn doc() -> impl Strategy<Value = Doc> {
++    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
++}
++
++fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
++    let edit = prop_oneof![
++        LINE.prop_map(Edit::Insert),
++        Just(Edit::Delete),
++        LINE.prop_map(Edit::Replace),
++    ];
++    vec((any::<Index>(), edit), 0..MAX_EDITS)
++}
++
++fn triple() -> impl Strategy<Value = Triple> {
++    (
++        doc(),
++        edits(),
++        option::of(LAST_LINE),
++        edits(),
++        option::of(LAST_LINE),
++    )
++        .prop_map(
++            |(base, local_edits, local_last, remote_edits, remote_last)| Triple {
++                local: base.edited(&local_edits, local_last).text(),
++                remote: base.edited(&remote_edits, remote_last).text(),
++                base: base.text(),
++            },
++        )
++}
++
++fn content(line: &str) -> &str {
++    line.strip_suffix("\r\n")
++        .or_else(|| line.strip_suffix('\n'))
++        .unwrap_or(line)
++}
++
++fn plain<L: Copy>(ranges: &[InlineRange<L>], index: fn(L) -> u32) -> Vec<(u32, u32, u32)> {
++    ranges
++        .iter()
++        .map(|range| (index(range.line), range.start, range.len))
++        .collect()
++}
++
++fn check_side(
++    ranges: &[(u32, u32, u32)],
++    text: &str,
++    chunk_lines: (u32, u32),
++) -> Result<(), TestCaseError> {
++    let lines: Vec<&str> = text.split_inclusive('\n').collect();
++    let (first, len) = chunk_lines;
++    for &(line, start, range_len) in ranges {
++        prop_assert!(
++            line >= first && line < first + len,
++            "{ranges:?} {chunk_lines:?}"
++        );
++        let width = content(lines[line as usize]).encode_utf16().count();
++        prop_assert!((start + range_len) as usize <= width, "{ranges:?} {text:?}");
++        prop_assert!(range_len > 0, "{ranges:?}");
++    }
++    for pair in ranges.windows(2) {
++        let ((line, start, len), (next_line, next_start, _)) = (pair[0], pair[1]);
++        prop_assert!(line < next_line || start + len < next_start, "{ranges:?}");
++    }
++    Ok(())
++}
++
++fn without_ranges(text: &str, first: u32, len: u32, ranges: &[(u32, u32, u32)]) -> Option<String> {
++    let mut kept = String::new();
++    for (line, line_text) in (0..).zip(text.split_inclusive('\n')) {
++        if line < first || line >= first + len {
++            continue;
++        }
++        let mut units: Vec<Option<u16>> = line_text.encode_utf16().map(Some).collect();
++        for &(_, start, range_len) in ranges.iter().filter(|range| range.0 == line) {
++            units[start as usize..(start + range_len) as usize].fill(None);
++        }
++        let rest: Vec<u16> = units.into_iter().flatten().collect();
++        kept += &String::from_utf16(&rest).ok()?;
++    }
++    Some(kept.chars().filter(|c| !c.is_whitespace()).collect())
++}
++
++fn whole_text_chunk(text: &str) -> Chunk {
++    let len: u32 = text.split_inclusive('\n').map(|_| 1).sum();
++    Chunk {
++        id: ChunkId(0),
++        kind: ChunkKind::Conflict,
++        base: LineRange {
++            start: BaseLine(0),
++            len,
++        },
++        local: LineRange {
++            start: LocalLine(0),
++            len,
++        },
++        remote: LineRange {
++            start: RemoteLine(0),
++            len,
++        },
++    }
++}
++
++proptest! {
++    #![proptest_config(ProptestConfig::with_cases(CASES))]
++
++    #[test]
++    fn every_range_lies_sorted_and_disjoint_on_a_line_of_its_chunk(triple in triple()) {
++        let Triple { base, local, remote } = &triple;
++        let chunks = compute_chunks(base, local, remote, &Options::default());
++        let words = word_changes(base, local, remote, &chunks);
++        prop_assert_eq!(words.len(), chunks.len());
++        for (chunk, change) in chunks.iter().zip(&words) {
++            prop_assert_eq!(change.chunk, chunk.id);
++            check_side(&plain(&change.local, |line| line.0), local, (chunk.local.start.0, chunk.local.len))?;
++            check_side(&plain(&change.base, |line| line.0), base, (chunk.base.start.0, chunk.base.len))?;
++            check_side(&plain(&change.remote, |line| line.0), remote, (chunk.remote.start.0, chunk.remote.len))?;
++        }
++    }
++
++    #[test]
++    fn removing_ranges_then_whitespace_leaves_both_texts_equal(triple in triple()) {
++        let Triple { base, local, .. } = &triple;
++        let chunks = compute_chunks(base, local, base, &Options::default());
++        for (chunk, change) in chunks.iter().zip(word_changes(base, local, base, &chunks)) {
++            prop_assert!(change.remote.is_empty());
++            if chunk.base.is_empty() || chunk.local.is_empty() {
++                prop_assert!(change.local.is_empty() && change.base.is_empty());
++                continue;
++            }
++            let local_rest = without_ranges(local, chunk.local.start.0, chunk.local.len, &plain(&change.local, |line| line.0));
++            let base_rest = without_ranges(base, chunk.base.start.0, chunk.base.len, &plain(&change.base, |line| line.0));
++            prop_assert!(local_rest.is_some() && base_rest.is_some(), "a range splits a character");
++            prop_assert_eq!(local_rest, base_rest);
++        }
++    }
++
++    #[test]
++    fn both_same_chunks_give_both_sides_equal_ranges(triple in triple()) {
++        let Triple { base, local, .. } = &triple;
++        let chunks = compute_chunks(base, local, local, &Options::default());
++        for change in word_changes(base, local, local, &chunks) {
++            prop_assert_eq!(plain(&change.local, |line| line.0), plain(&change.remote, |line| line.0));
++        }
++    }
++
++    #[test]
++    fn identical_texts_give_no_ranges(text in doc()) {
++        let text = text.text();
++        prop_assert!(word_changes(&text, &text, &text, &compute_chunks(&text, &text, &text, &Options::default())).is_empty());
++        let whole = whole_text_chunk(&text);
++        for change in word_changes(&text, &text, &text, &[whole]) {
++            prop_assert!(change.local.is_empty() && change.base.is_empty() && change.remote.is_empty());
++        }
++    }
++}
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 4517c5f..d3bb941 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
+ use serde::Serialize;
+ use specta::Type;
+ use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
+-use yamt_merge_core::{Chunk, Options, compute_chunks};
++use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
+ 
+ use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
+ use crate::{Error, Result};
+@@ -33,18 +33,21 @@ pub struct FileMergeData {
+     pub remote: String,
+     pub eol: Eol,
+     pub chunks: Vec<Chunk>,
++    pub word_changes: Vec<WordChanges>,
+ }
+ 
+ #[must_use]
+ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMergeData {
+     let eol_source = if base.is_empty() { local } else { base };
++    let chunks = compute_chunks(base, local, remote, &Options::default());
+     FileMergeData {
+         path: path.to_owned(),
+         base: base.to_owned(),
+         local: local.to_owned(),
+         remote: remote.to_owned(),
+         eol: detect_eol(eol_source),
+-        chunks: compute_chunks(base, local, remote, &Options::default()),
++        word_changes: word_changes(base, local, remote, &chunks),
++        chunks,
+     }
+ }
+ 
+diff --git a/crates/session/tests/open_and_load.rs b/crates/session/tests/open_and_load.rs
+index 7c72f0e..53ac606 100644
+--- a/crates/session/tests/open_and_load.rs
++++ b/crates/session/tests/open_and_load.rs
+@@ -1,7 +1,7 @@
+ #![cfg(test)]
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+-use yamt_merge_core::{ChunkKind, Options, compute_chunks};
++use yamt_merge_core::{ChunkKind, Options, compute_chunks, word_changes};
+ use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
+ 
+ const MODIFY_TS: &str = "a_modify.ts";
+@@ -150,6 +150,13 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
+         data.chunks,
+         compute_chunks(base, local, remote, &Options::default())
+     );
++    assert_eq!(
++        data.word_changes,
++        word_changes(base, local, remote, &data.chunks)
++    );
++    let word_chunks: Vec<_> = data.word_changes.iter().map(|words| words.chunk).collect();
++    let chunk_ids: Vec<_> = data.chunks.iter().map(|chunk| chunk.id).collect();
++    assert_eq!(word_chunks, chunk_ids);
+ }
+ 
+ #[test]
+diff --git a/frontend/fixtures/golden/language-tools-script-setup.json b/frontend/fixtures/golden/language-tools-script-setup.json
+index 8779d33..ea71a94 100644
+--- a/frontend/fixtures/golden/language-tools-script-setup.json
++++ b/frontend/fixtures/golden/language-tools-script-setup.json
+@@ -69,5 +69,427 @@
+         "len": 34
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [
++        {
++          "line": 86,
++          "start": 40,
++          "len": 2
++        },
++        {
++          "line": 87,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 87,
++          "start": 62,
++          "len": 22
++        },
++        {
++          "line": 88,
++          "start": 0,
++          "len": 4
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [
++        {
++          "line": 108,
++          "start": 4,
++          "len": 30
++        },
++        {
++          "line": 109,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 111,
++          "start": 65,
++          "len": 1
++        },
++        {
++          "line": 112,
++          "start": 0,
++          "len": 39
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [],
++      "base": [
++        {
++          "line": 116,
++          "start": 7,
++          "len": 76
++        },
++        {
++          "line": 116,
++          "start": 92,
++          "len": 2
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 3,
++      "local": [
++        {
++          "line": 363,
++          "start": 0,
++          "len": 1
++        },
++        {
++          "line": 364,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 365,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 366,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 367,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 368,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 369,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 371,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 372,
++          "start": 0,
++          "len": 1
++        },
++        {
++          "line": 373,
++          "start": 0,
++          "len": 2
++        }
++      ],
++      "base": [
++        {
++          "line": 366,
++          "start": 1,
++          "len": 47
++        },
++        {
++          "line": 367,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 367,
++          "start": 16,
++          "len": 5
++        },
++        {
++          "line": 368,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 368,
++          "start": 13,
++          "len": 21
++        },
++        {
++          "line": 368,
++          "start": 42,
++          "len": 25
++        },
++        {
++          "line": 369,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 369,
++          "start": 34,
++          "len": 5
++        },
++        {
++          "line": 369,
++          "start": 41,
++          "len": 2
++        },
++        {
++          "line": 370,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 370,
++          "start": 8,
++          "len": 8
++        },
++        {
++          "line": 371,
++          "start": 0,
++          "len": 5
++        },
++        {
++          "line": 371,
++          "start": 12,
++          "len": 23
++        },
++        {
++          "line": 372,
++          "start": 0,
++          "len": 20
++        },
++        {
++          "line": 373,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 374,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 374,
++          "start": 13,
++          "len": 5
++        },
++        {
++          "line": 375,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 376,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 377,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 378,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 379,
++          "start": 0,
++          "len": 3
++        }
++      ],
++      "remote": [
++        {
++          "line": 367,
++          "start": 2,
++          "len": 17
++        },
++        {
++          "line": 367,
++          "start": 22,
++          "len": 19
++        },
++        {
++          "line": 368,
++          "start": 8,
++          "len": 19
++        },
++        {
++          "line": 368,
++          "start": 36,
++          "len": 18
++        },
++        {
++          "line": 369,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 369,
++          "start": 41,
++          "len": 2
++        },
++        {
++          "line": 370,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 371,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 373,
++          "start": 0,
++          "len": 64
++        },
++        {
++          "line": 374,
++          "start": 0,
++          "len": 60
++        },
++        {
++          "line": 374,
++          "start": 61,
++          "len": 3
++        },
++        {
++          "line": 375,
++          "start": 7,
++          "len": 6
++        },
++        {
++          "line": 376,
++          "start": 0,
++          "len": 74
++        },
++        {
++          "line": 377,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 378,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 379,
++          "start": 0,
++          "len": 57
++        },
++        {
++          "line": 380,
++          "start": 0,
++          "len": 57
++        },
++        {
++          "line": 381,
++          "start": 0,
++          "len": 57
++        },
++        {
++          "line": 382,
++          "start": 0,
++          "len": 59
++        },
++        {
++          "line": 383,
++          "start": 0,
++          "len": 59
++        },
++        {
++          "line": 384,
++          "start": 0,
++          "len": 45
++        },
++        {
++          "line": 385,
++          "start": 0,
++          "len": 71
++        },
++        {
++          "line": 386,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 387,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 388,
++          "start": 0,
++          "len": 75
++        },
++        {
++          "line": 389,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 391,
++          "start": 0,
++          "len": 52
++        },
++        {
++          "line": 391,
++          "start": 79,
++          "len": 5
++        },
++        {
++          "line": 391,
++          "start": 86,
++          "len": 1
++        },
++        {
++          "line": 393,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 393,
++          "start": 6,
++          "len": 15
++        },
++        {
++          "line": 394,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 395,
++          "start": 0,
++          "len": 33
++        },
++        {
++          "line": 395,
++          "start": 34,
++          "len": 15
++        },
++        {
++          "line": 396,
++          "start": 10,
++          "len": 22
++        },
++        {
++          "line": 396,
++          "start": 35,
++          "len": 40
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/nuxt-island-test.json b/frontend/fixtures/golden/nuxt-island-test.json
+index eacc44c..ea07b36 100644
+--- a/frontend/fixtures/golden/nuxt-island-test.json
++++ b/frontend/fixtures/golden/nuxt-island-test.json
+@@ -85,5 +85,1423 @@
+         "len": 159
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [
++        {
++          "line": 0,
++          "start": 9,
++          "len": 23
++        },
++        {
++          "line": 2,
++          "start": 44,
++          "len": 6
++        },
++        {
++          "line": 3,
++          "start": 0,
++          "len": 41
++        }
++      ],
++      "base": [
++        {
++          "line": 2,
++          "start": 36,
++          "len": 7
++        }
++      ],
++      "remote": [
++        {
++          "line": 0,
++          "start": 9,
++          "len": 29
++        },
++        {
++          "line": 1,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 2,
++          "start": 10,
++          "len": 10
++        },
++        {
++          "line": 3,
++          "start": 32,
++          "len": 1
++        },
++        {
++          "line": 3,
++          "start": 38,
++          "len": 5
++        },
++        {
++          "line": 3,
++          "start": 48,
++          "len": 8
++        }
++      ]
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [],
++      "base": [],
++      "remote": [
++        {
++          "line": 12,
++          "start": 32,
++          "len": 1
++        },
++        {
++          "line": 13,
++          "start": 0,
++          "len": 25
++        }
++      ]
++    },
++    {
++      "chunk": 3,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 4,
++      "local": [
++        {
++          "line": 75,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 76,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 77,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 78,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 79,
++          "start": 0,
++          "len": 70
++        },
++        {
++          "line": 80,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 82,
++          "start": 0,
++          "len": 74
++        },
++        {
++          "line": 83,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 84,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 85,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 86,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 87,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 88,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 89,
++          "start": 0,
++          "len": 23
++        },
++        {
++          "line": 90,
++          "start": 0,
++          "len": 23
++        },
++        {
++          "line": 91,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 92,
++          "start": 0,
++          "len": 20
++        },
++        {
++          "line": 93,
++          "start": 0,
++          "len": 25
++        },
++        {
++          "line": 94,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 95,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 96,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 97,
++          "start": 0,
++          "len": 31
++        },
++        {
++          "line": 98,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 99,
++          "start": 0,
++          "len": 39
++        },
++        {
++          "line": 101,
++          "start": 0,
++          "len": 36
++        },
++        {
++          "line": 102,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 104,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 105,
++          "start": 0,
++          "len": 36
++        },
++        {
++          "line": 106,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 108,
++          "start": 0,
++          "len": 56
++        },
++        {
++          "line": 109,
++          "start": 0,
++          "len": 43
++        },
++        {
++          "line": 110,
++          "start": 0,
++          "len": 45
++        },
++        {
++          "line": 111,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 112,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 113,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 114,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 115,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 116,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 117,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 119,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 120,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 121,
++          "start": 0,
++          "len": 30
++        },
++        {
++          "line": 122,
++          "start": 0,
++          "len": 24
++        },
++        {
++          "line": 123,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 124,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 125,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 126,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 128,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 129,
++          "start": 0,
++          "len": 44
++        },
++        {
++          "line": 130,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 131,
++          "start": 0,
++          "len": 30
++        },
++        {
++          "line": 132,
++          "start": 0,
++          "len": 24
++        },
++        {
++          "line": 133,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 134,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 135,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 136,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 137,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 138,
++          "start": 0,
++          "len": 69
++        },
++        {
++          "line": 139,
++          "start": 0,
++          "len": 44
++        },
++        {
++          "line": 140,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 141,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 143,
++          "start": 0,
++          "len": 52
++        },
++        {
++          "line": 144,
++          "start": 0,
++          "len": 43
++        },
++        {
++          "line": 145,
++          "start": 0,
++          "len": 45
++        },
++        {
++          "line": 146,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 147,
++          "start": 0,
++          "len": 25
++        },
++        {
++          "line": 148,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 149,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 150,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 151,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 152,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 154,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 155,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 156,
++          "start": 0,
++          "len": 30
++        },
++        {
++          "line": 157,
++          "start": 0,
++          "len": 23
++        },
++        {
++          "line": 158,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 159,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 160,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 161,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 163,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 164,
++          "start": 0,
++          "len": 44
++        },
++        {
++          "line": 165,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 166,
++          "start": 0,
++          "len": 30
++        },
++        {
++          "line": 167,
++          "start": 0,
++          "len": 23
++        },
++        {
++          "line": 168,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 169,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 170,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 171,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 172,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 173,
++          "start": 0,
++          "len": 66
++        },
++        {
++          "line": 174,
++          "start": 0,
++          "len": 44
++        },
++        {
++          "line": 175,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 176,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 178,
++          "start": 0,
++          "len": 84
++        },
++        {
++          "line": 179,
++          "start": 0,
++          "len": 43
++        },
++        {
++          "line": 180,
++          "start": 0,
++          "len": 45
++        },
++        {
++          "line": 181,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 182,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 183,
++          "start": 0,
++          "len": 25
++        },
++        {
++          "line": 184,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 185,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 186,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 187,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 188,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 190,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 191,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 192,
++          "start": 0,
++          "len": 1
++        },
++        {
++          "line": 193,
++          "start": 0,
++          "len": 67
++        },
++        {
++          "line": 194,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 196,
++          "start": 0,
++          "len": 88
++        },
++        {
++          "line": 197,
++          "start": 0,
++          "len": 43
++        },
++        {
++          "line": 198,
++          "start": 0,
++          "len": 45
++        },
++        {
++          "line": 199,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 200,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 201,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 202,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 203,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 204,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 205,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 206,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 208,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 209,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 210,
++          "start": 0,
++          "len": 68
++        },
++        {
++          "line": 211,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 212,
++          "start": 0,
++          "len": 4
++        }
++      ],
++      "base": [],
++      "remote": [
++        {
++          "line": 83,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 84,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 85,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 86,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 87,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 88,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 89,
++          "start": 0,
++          "len": 36
++        },
++        {
++          "line": 90,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 91,
++          "start": 0,
++          "len": 15
++        },
++        {
++          "line": 92,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 93,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 94,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 95,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 96,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 97,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 98,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 99,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 100,
++          "start": 0,
++          "len": 37
++        },
++        {
++          "line": 102,
++          "start": 0,
++          "len": 78
++        },
++        {
++          "line": 103,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 105,
++          "start": 0,
++          "len": 49
++        },
++        {
++          "line": 107,
++          "start": 0,
++          "len": 43
++        },
++        {
++          "line": 108,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 109,
++          "start": 0,
++          "len": 20
++        },
++        {
++          "line": 110,
++          "start": 0,
++          "len": 49
++        },
++        {
++          "line": 111,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 112,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 113,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 116,
++          "start": 0,
++          "len": 37
++        },
++        {
++          "line": 118,
++          "start": 0,
++          "len": 82
++        },
++        {
++          "line": 119,
++          "start": 0,
++          "len": 38
++        },
++        {
++          "line": 120,
++          "start": 0,
++          "len": 38
++        },
++        {
++          "line": 122,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 123,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 124,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 125,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 126,
++          "start": 0,
++          "len": 51
++        },
++        {
++          "line": 127,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 128,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 129,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 131,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 132,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 133,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 134,
++          "start": 0,
++          "len": 115
++        },
++        {
++          "line": 135,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 136,
++          "start": 0,
++          "len": 15
++        },
++        {
++          "line": 137,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 138,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 139,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 140,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 141,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 142,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 143,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 144,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 145,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 146,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 147,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 148,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 149,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 150,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 151,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 153,
++          "start": 0,
++          "len": 37
++        },
++        {
++          "line": 155,
++          "start": 0,
++          "len": 54
++        },
++        {
++          "line": 156,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 157,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 158,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 159,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 160,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 161,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 162,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 163,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 165,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 167,
++          "start": 0,
++          "len": 50
++        },
++        {
++          "line": 168,
++          "start": 0,
++          "len": 99
++        },
++        {
++          "line": 169,
++          "start": 0,
++          "len": 37
++        },
++        {
++          "line": 170,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 171,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 172,
++          "start": 0,
++          "len": 27
++        },
++        {
++          "line": 173,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 174,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 176,
++          "start": 0,
++          "len": 28
++        },
++        {
++          "line": 177,
++          "start": 0,
++          "len": 48
++        },
++        {
++          "line": 178,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 179,
++          "start": 0,
++          "len": 77
++        },
++        {
++          "line": 180,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 181,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 182,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 183,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 184,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 185,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 186,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 187,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 188,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 189,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 191,
++          "start": 0,
++          "len": 41
++        },
++        {
++          "line": 192,
++          "start": 0,
++          "len": 20
++        },
++        {
++          "line": 193,
++          "start": 0,
++          "len": 51
++        },
++        {
++          "line": 194,
++          "start": 0,
++          "len": 42
++        },
++        {
++          "line": 195,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 196,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 197,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 198,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 200,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 201,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 202,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 204,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 205,
++          "start": 0,
++          "len": 81
++        },
++        {
++          "line": 206,
++          "start": 0,
++          "len": 38
++        },
++        {
++          "line": 207,
++          "start": 0,
++          "len": 1
++        },
++        {
++          "line": 208,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 209,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 210,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 211,
++          "start": 0,
++          "len": 136
++        },
++        {
++          "line": 212,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 213,
++          "start": 0,
++          "len": 15
++        },
++        {
++          "line": 214,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 215,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 216,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 217,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 218,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 219,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 220,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 221,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 223,
++          "start": 0,
++          "len": 37
++        },
++        {
++          "line": 225,
++          "start": 0,
++          "len": 54
++        },
++        {
++          "line": 226,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 227,
++          "start": 0,
++          "len": 33
++        },
++        {
++          "line": 228,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 229,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 230,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 231,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 232,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 233,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 235,
++          "start": 0,
++          "len": 40
++        },
++        {
++          "line": 236,
++          "start": 0,
++          "len": 76
++        },
++        {
++          "line": 237,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 238,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 239,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 240,
++          "start": 0,
++          "len": 2
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/tanstack-query-persist-provider.json b/frontend/fixtures/golden/tanstack-query-persist-provider.json
+index 43f4773..0d966cc 100644
+--- a/frontend/fixtures/golden/tanstack-query-persist-provider.json
++++ b/frontend/fixtures/golden/tanstack-query-persist-provider.json
+@@ -69,5 +69,198 @@
+         "len": 10
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [
++        {
++          "line": 3,
++          "start": 8,
++          "len": 20
++        }
++      ],
++      "remote": [
++        {
++          "line": 4,
++          "start": 0,
++          "len": 28
++        },
++        {
++          "line": 5,
++          "start": 0,
++          "len": 30
++        }
++      ]
++    },
++    {
++      "chunk": 1,
++      "local": [
++        {
++          "line": 10,
++          "start": 20,
++          "len": 26
++        }
++      ],
++      "base": [
++        {
++          "line": 10,
++          "start": 20,
++          "len": 4
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 3,
++      "local": [
++        {
++          "line": 37,
++          "start": 19,
++          "len": 6
++        },
++        {
++          "line": 38,
++          "start": 8,
++          "len": 5
++        },
++        {
++          "line": 39,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 40,
++          "start": 8,
++          "len": 11
++        },
++        {
++          "line": 41,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 42,
++          "start": 0,
++          "len": 9
++        }
++      ],
++      "base": [
++        {
++          "line": 32,
++          "start": 6,
++          "len": 49
++        },
++        {
++          "line": 32,
++          "start": 56,
++          "len": 1
++        },
++        {
++          "line": 33,
++          "start": 0,
++          "len": 39
++        },
++        {
++          "line": 34,
++          "start": 0,
++          "len": 28
++        },
++        {
++          "line": 35,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 37,
++          "start": 0,
++          "len": 13
++        },
++        {
++          "line": 40,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 42,
++          "start": 0,
++          "len": 20
++        },
++        {
++          "line": 43,
++          "start": 8,
++          "len": 13
++        }
++      ],
++      "remote": [
++        {
++          "line": 39,
++          "start": 6,
++          "len": 25
++        },
++        {
++          "line": 39,
++          "start": 32,
++          "len": 7
++        },
++        {
++          "line": 39,
++          "start": 46,
++          "len": 6
++        },
++        {
++          "line": 40,
++          "start": 8,
++          "len": 5
++        },
++        {
++          "line": 41,
++          "start": 0,
++          "len": 16
++        },
++        {
++          "line": 42,
++          "start": 8,
++          "len": 11
++        },
++        {
++          "line": 43,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 44,
++          "start": 8,
++          "len": 1
++        },
++        {
++          "line": 45,
++          "start": 7,
++          "len": 1
++        },
++        {
++          "line": 47,
++          "start": 10,
++          "len": 14
++        },
++        {
++          "line": 47,
++          "start": 34,
++          "len": 39
++        },
++        {
++          "line": 48,
++          "start": 12,
++          "len": 13
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/tanstack-query-svelte-base-query.json b/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
+index 04f2d51..714eb34 100644
+--- a/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
++++ b/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
+@@ -21,5 +21,13 @@
+         "len": 76
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [],
++      "remote": []
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vite-modulepreload-polyfill.json b/frontend/fixtures/golden/vite-modulepreload-polyfill.json
+index 0a0fca5..9113e85 100644
+--- a/frontend/fixtures/golden/vite-modulepreload-polyfill.json
++++ b/frontend/fixtures/golden/vite-modulepreload-polyfill.json
+@@ -69,5 +69,360 @@
+         "len": 13
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [
++        {
++          "line": 0,
++          "start": 7,
++          "len": 43
++        },
++        {
++          "line": 1,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 1,
++          "start": 9,
++          "len": 95
++        },
++        {
++          "line": 2,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 2,
++          "start": 28,
++          "len": 22
++        }
++      ],
++      "base": [
++        {
++          "line": 0,
++          "start": 7,
++          "len": 4
++        }
++      ],
++      "remote": [
++        {
++          "line": 0,
++          "start": 7,
++          "len": 43
++        },
++        {
++          "line": 1,
++          "start": 0,
++          "len": 7
++        }
++      ]
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [
++        {
++          "line": 29,
++          "start": 6,
++          "len": 7
++        },
++        {
++          "line": 29,
++          "start": 18,
++          "len": 13
++        },
++        {
++          "line": 29,
++          "start": 56,
++          "len": 2
++        },
++        {
++          "line": 30,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 31,
++          "start": 0,
++          "len": 8
++        }
++      ],
++      "base": [
++        {
++          "line": 13,
++          "start": 6,
++          "len": 11
++        },
++        {
++          "line": 14,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 14,
++          "start": 15,
++          "len": 4
++        },
++        {
++          "line": 15,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 16,
++          "start": 0,
++          "len": 9
++        }
++      ],
++      "remote": [
++        {
++          "line": 14,
++          "start": 6,
++          "len": 7
++        },
++        {
++          "line": 14,
++          "start": 18,
++          "len": 13
++        },
++        {
++          "line": 14,
++          "start": 56,
++          "len": 2
++        },
++        {
++          "line": 15,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 16,
++          "start": 0,
++          "len": 8
++        }
++      ]
++    },
++    {
++      "chunk": 3,
++      "local": [
++        {
++          "line": 35,
++          "start": 6,
++          "len": 60
++        },
++        {
++          "line": 36,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 36,
++          "start": 14,
++          "len": 3
++        },
++        {
++          "line": 38,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 39,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 40,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 41,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 42,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 43,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 44,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 45,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 46,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 47,
++          "start": 0,
++          "len": 8
++        }
++      ],
++      "base": [
++        {
++          "line": 20,
++          "start": 14,
++          "len": 2
++        },
++        {
++          "line": 21,
++          "start": 8,
++          "len": 45
++        },
++        {
++          "line": 22,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 23,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 24,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 25,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 26,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 27,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 28,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 29,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 30,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 31,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 32,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 32,
++          "start": 65,
++          "len": 1
++        },
++        {
++          "line": 33,
++          "start": 0,
++          "len": 8
++        }
++      ],
++      "remote": [
++        {
++          "line": 20,
++          "start": 6,
++          "len": 60
++        },
++        {
++          "line": 21,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 21,
++          "start": 14,
++          "len": 3
++        },
++        {
++          "line": 23,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 24,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 25,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 26,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 27,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 28,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 29,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 30,
++          "start": 0,
++          "len": 10
++        },
++        {
++          "line": 31,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 32,
++          "start": 0,
++          "len": 8
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vue-core-compiler-von.json b/frontend/fixtures/golden/vue-core-compiler-von.json
+index 9f9b72e..d0ef9cb 100644
+--- a/frontend/fixtures/golden/vue-core-compiler-von.json
++++ b/frontend/fixtures/golden/vue-core-compiler-von.json
+@@ -53,5 +53,69 @@
+         "len": 2
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [],
++      "remote": [
++        {
++          "line": 15,
++          "start": 22,
++          "len": 16
++        }
++      ]
++    },
++    {
++      "chunk": 1,
++      "local": [
++        {
++          "line": 18,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 18,
++          "start": 20,
++          "len": 8
++        }
++      ],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [],
++      "base": [
++        {
++          "line": 86,
++          "start": 46,
++          "len": 8
++        },
++        {
++          "line": 87,
++          "start": 47,
++          "len": 12
++        },
++        {
++          "line": 87,
++          "start": 63,
++          "len": 8
++        }
++      ],
++      "remote": [
++        {
++          "line": 84,
++          "start": 47,
++          "len": 14
++        },
++        {
++          "line": 84,
++          "start": 65,
++          "len": 9
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vue-core-playground-app.json b/frontend/fixtures/golden/vue-core-playground-app.json
+index 7a24736..efc85a3 100644
+--- a/frontend/fixtures/golden/vue-core-playground-app.json
++++ b/frontend/fixtures/golden/vue-core-playground-app.json
+@@ -117,5 +117,231 @@
+         "len": 3
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [
++        {
++          "line": 3,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 4,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 5,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 6,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 6,
++          "start": 17,
++          "len": 1
++        },
++        {
++          "line": 7,
++          "start": 0,
++          "len": 13
++        }
++      ],
++      "base": [
++        {
++          "line": 2,
++          "start": 8,
++          "len": 1
++        },
++        {
++          "line": 2,
++          "start": 14,
++          "len": 10
++        },
++        {
++          "line": 2,
++          "start": 36,
++          "len": 1
++        },
++        {
++          "line": 2,
++          "start": 52,
++          "len": 1
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [
++        {
++          "line": 28,
++          "start": 8,
++          "len": 10
++        },
++        {
++          "line": 28,
++          "start": 20,
++          "len": 14
++        },
++        {
++          "line": 29,
++          "start": 14,
++          "len": 7
++        },
++        {
++          "line": 30,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 31,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 31,
++          "start": 39,
++          "len": 11
++        },
++        {
++          "line": 32,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 33,
++          "start": 0,
++          "len": 3
++        },
++        {
++          "line": 34,
++          "start": 15,
++          "len": 7
++        },
++        {
++          "line": 35,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 36,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 36,
++          "start": 39,
++          "len": 11
++        },
++        {
++          "line": 37,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 38,
++          "start": 0,
++          "len": 3
++        }
++      ],
++      "base": [
++        {
++          "line": 22,
++          "start": 8,
++          "len": 14
++        },
++        {
++          "line": 22,
++          "start": 24,
++          "len": 10
++        },
++        {
++          "line": 24,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 25,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 27,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 28,
++          "start": 0,
++          "len": 4
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 3,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 4,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 5,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 6,
++      "local": [
++        {
++          "line": 83,
++          "start": 4,
++          "len": 5
++        },
++        {
++          "line": 84,
++          "start": 14,
++          "len": 1
++        },
++        {
++          "line": 85,
++          "start": 0,
++          "len": 31
++        }
++      ],
++      "base": [
++        {
++          "line": 69,
++          "start": 4,
++          "len": 27
++        }
++      ],
++      "remote": [
++        {
++          "line": 73,
++          "start": 0,
++          "len": 55
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vue-core-script-context.json b/frontend/fixtures/golden/vue-core-script-context.json
+index e7fe86e..68eaf55 100644
+--- a/frontend/fixtures/golden/vue-core-script-context.json
++++ b/frontend/fixtures/golden/vue-core-script-context.json
+@@ -69,5 +69,221 @@
+         "len": 1
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [
++        {
++          "line": 20,
++          "start": 16,
++          "len": 25
++        },
++        {
++          "line": 21,
++          "start": 18,
++          "len": 27
++        },
++        {
++          "line": 22,
++          "start": 16,
++          "len": 31
++        },
++        {
++          "line": 23,
++          "start": 33,
++          "len": 2
++        },
++        {
++          "line": 24,
++          "start": 0,
++          "len": 49
++        },
++        {
++          "line": 25,
++          "start": 31,
++          "len": 46
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [
++        {
++          "line": 89,
++          "start": 9,
++          "len": 26
++        },
++        {
++          "line": 90,
++          "start": 0,
++          "len": 39
++        },
++        {
++          "line": 91,
++          "start": 0,
++          "len": 47
++        },
++        {
++          "line": 92,
++          "start": 0,
++          "len": 63
++        },
++        {
++          "line": 93,
++          "start": 0,
++          "len": 59
++        },
++        {
++          "line": 95,
++          "start": 0,
++          "len": 9
++        },
++        {
++          "line": 95,
++          "start": 15,
++          "len": 6
++        },
++        {
++          "line": 95,
++          "start": 31,
++          "len": 1
++        },
++        {
++          "line": 95,
++          "start": 48,
++          "len": 1
++        },
++        {
++          "line": 96,
++          "start": 15,
++          "len": 6
++        },
++        {
++          "line": 96,
++          "start": 31,
++          "len": 1
++        },
++        {
++          "line": 96,
++          "start": 48,
++          "len": 1
++        }
++      ],
++      "base": [
++        {
++          "line": 90,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 90,
++          "start": 17,
++          "len": 11
++        },
++        {
++          "line": 91,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 92,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 92,
++          "start": 21,
++          "len": 12
++        },
++        {
++          "line": 93,
++          "start": 0,
++          "len": 31
++        },
++        {
++          "line": 95,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 95,
++          "start": 17,
++          "len": 11
++        },
++        {
++          "line": 96,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 97,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 97,
++          "start": 21,
++          "len": 12
++        },
++        {
++          "line": 98,
++          "start": 0,
++          "len": 31
++        }
++      ],
++      "remote": [
++        {
++          "line": 90,
++          "start": 15,
++          "len": 6
++        },
++        {
++          "line": 90,
++          "start": 31,
++          "len": 1
++        },
++        {
++          "line": 90,
++          "start": 48,
++          "len": 1
++        },
++        {
++          "line": 91,
++          "start": 15,
++          "len": 6
++        },
++        {
++          "line": 91,
++          "start": 31,
++          "len": 1
++        },
++        {
++          "line": 91,
++          "start": 48,
++          "len": 1
++        }
++      ]
++    },
++    {
++      "chunk": 3,
++      "local": [],
++      "base": [
++        {
++          "line": 101,
++          "start": 21,
++          "len": 5
++        }
++      ],
++      "remote": []
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vue-router-playground-app.json b/frontend/fixtures/golden/vue-router-playground-app.json
+index 24a95e6..19222e8 100644
+--- a/frontend/fixtures/golden/vue-router-playground-app.json
++++ b/frontend/fixtures/golden/vue-router-playground-app.json
+@@ -85,5 +85,386 @@
+         "len": 35
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 1,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 3,
++      "local": [
++        {
++          "line": 202,
++          "start": 5,
++          "len": 29
++        },
++        {
++          "line": 202,
++          "start": 35,
++          "len": 10
++        }
++      ],
++      "base": [
++        {
++          "line": 162,
++          "start": 0,
++          "len": 63
++        },
++        {
++          "line": 163,
++          "start": 0,
++          "len": 17
++        },
++        {
++          "line": 164,
++          "start": 0,
++          "len": 47
++        },
++        {
++          "line": 165,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 166,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 167,
++          "start": 0,
++          "len": 35
++        },
++        {
++          "line": 168,
++          "start": 0,
++          "len": 7
++        },
++        {
++          "line": 169,
++          "start": 0,
++          "len": 28
++        },
++        {
++          "line": 170,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 171,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 172,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 173,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 174,
++          "start": 0,
++          "len": 74
++        },
++        {
++          "line": 175,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 176,
++          "start": 0,
++          "len": 21
++        },
++        {
++          "line": 177,
++          "start": 0,
++          "len": 53
++        },
++        {
++          "line": 178,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 179,
++          "start": 0,
++          "len": 29
++        },
++        {
++          "line": 180,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 181,
++          "start": 6,
++          "len": 10
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 4,
++      "local": [],
++      "base": [
++        {
++          "line": 186,
++          "start": 8,
++          "len": 17
++        },
++        {
++          "line": 191,
++          "start": 0,
++          "len": 32
++        },
++        {
++          "line": 192,
++          "start": 0,
++          "len": 14
++        },
++        {
++          "line": 193,
++          "start": 0,
++          "len": 26
++        },
++        {
++          "line": 194,
++          "start": 0,
++          "len": 11
++        },
++        {
++          "line": 195,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 196,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 197,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 199,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 200,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 201,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 203,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 204,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 205,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 206,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 208,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 209,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 210,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 211,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 212,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 213,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 215,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 216,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 217,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 219,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 220,
++          "start": 0,
++          "len": 22
++        },
++        {
++          "line": 221,
++          "start": 0,
++          "len": 19
++        },
++        {
++          "line": 222,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 223,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 224,
++          "start": 0,
++          "len": 18
++        },
++        {
++          "line": 225,
++          "start": 0,
++          "len": 15
++        },
++        {
++          "line": 226,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 227,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 228,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 228,
++          "start": 7,
++          "len": 1
++        },
++        {
++          "line": 229,
++          "start": 0,
++          "len": 5
++        },
++        {
++          "line": 230,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 231,
++          "start": 0,
++          "len": 2
++        }
++      ],
++      "remote": [
++        {
++          "line": 185,
++          "start": 17,
++          "len": 6
++        },
++        {
++          "line": 188,
++          "start": 26,
++          "len": 12
++        },
++        {
++          "line": 200,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 201,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 205,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 208,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 212,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 215,
++          "start": 0,
++          "len": 8
++        },
++        {
++          "line": 216,
++          "start": 0,
++          "len": 2
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/fixtures/golden/vueuse-use-magic-keys.json b/frontend/fixtures/golden/vueuse-use-magic-keys.json
+index e7ab386..5bb2ce5 100644
+--- a/frontend/fixtures/golden/vueuse-use-magic-keys.json
++++ b/frontend/fixtures/golden/vueuse-use-magic-keys.json
+@@ -149,5 +149,260 @@
+         "len": 14
+       }
+     }
++  ],
++  "word_changes": [
++    {
++      "chunk": 0,
++      "local": [
++        {
++          "line": 2,
++          "start": 14,
++          "len": 16
++        }
++      ],
++      "base": [
++        {
++          "line": 2,
++          "start": 14,
++          "len": 8
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 1,
++      "local": [
++        {
++          "line": 21,
++          "start": 11,
++          "len": 16
++        }
++      ],
++      "base": [
++        {
++          "line": 21,
++          "start": 11,
++          "len": 8
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 2,
++      "local": [
++        {
++          "line": 53,
++          "start": 73,
++          "len": 3
++        }
++      ],
++      "base": [
++        {
++          "line": 53,
++          "start": 73,
++          "len": 7
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 3,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 4,
++      "local": [],
++      "base": [],
++      "remote": []
++    },
++    {
++      "chunk": 5,
++      "local": [
++        {
++          "line": 102,
++          "start": 8,
++          "len": 3
++        },
++        {
++          "line": 104,
++          "start": 20,
++          "len": 3
++        },
++        {
++          "line": 106,
++          "start": 23,
++          "len": 3
++        }
++      ],
++      "base": [
++        {
++          "line": 102,
++          "start": 8,
++          "len": 4
++        },
++        {
++          "line": 104,
++          "start": 20,
++          "len": 6
++        },
++        {
++          "line": 106,
++          "start": 23,
++          "len": 6
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 6,
++      "local": [],
++      "base": [],
++      "remote": [
++        {
++          "line": 119,
++          "start": 29,
++          "len": 2
++        },
++        {
++          "line": 120,
++          "start": 0,
++          "len": 23
++        },
++        {
++          "line": 122,
++          "start": 0,
++          "len": 5
++        }
++      ]
++    },
++    {
++      "chunk": 7,
++      "local": [
++        {
++          "line": 114,
++          "start": 37,
++          "len": 7
++        }
++      ],
++      "base": [
++        {
++          "line": 114,
++          "start": 37,
++          "len": 6
++        }
++      ],
++      "remote": []
++    },
++    {
++      "chunk": 8,
++      "local": [
++        {
++          "line": 129,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 130,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 131,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 132,
++          "start": 0,
++          "len": 2
++        },
++        {
++          "line": 133,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 134,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 135,
++          "start": 0,
++          "len": 2
++        }
++      ],
++      "base": [
++        {
++          "line": 128,
++          "start": 2,
++          "len": 13
++        },
++        {
++          "line": 129,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 130,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 131,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 132,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 133,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 134,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 135,
++          "start": 0,
++          "len": 6
++        },
++        {
++          "line": 136,
++          "start": 0,
++          "len": 4
++        },
++        {
++          "line": 137,
++          "start": 0,
++          "len": 3
++        }
++      ],
++      "remote": [
++        {
++          "line": 150,
++          "start": 0,
++          "len": 12
++        },
++        {
++          "line": 151,
++          "start": 0,
++          "len": 54
++        },
++        {
++          "line": 152,
++          "start": 0,
++          "len": 55
++        }
++      ]
++    }
+   ]
+ }
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 9baa487..508d265 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -29,6 +29,7 @@ async function synthetic(
+       local: { start: chunk.side[0], len: chunk.side[1] },
+       remote: { start: chunk.side[0], len: chunk.side[1] },
+     })),
++    word_changes: chunks.map((_chunk, id) => ({ chunk: id, local: [], base: [], remote: [] })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index 9aa2e5f..7864252 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -26,6 +26,7 @@ async function synthetic(
+       local: { start: 0, len: 1 },
+       remote: { start: 0, len: 1 },
+     })),
++    word_changes: ranges.map((_range, id) => ({ chunk: id, local: [], base: [], remote: [] })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index 9105543..b530ab5 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -62,6 +62,7 @@ async function synthetic(
+       local: { start: local[0], len: local[1] },
+       remote: { start: remote[0], len: remote[1] },
+     })),
++    word_changes: chunks.map((_chunk, id) => ({ chunk: id, local: [], base: [], remote: [] })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index 178d507..4f9e6e8 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -22,6 +22,7 @@ async function chunkWith(
+         remote: { start: 0, len: lens.remote },
+       },
+     ],
++    word_changes: [{ chunk: 0, local: [], base: [], remote: [] }],
+   };
+   const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
+     "synthetic.ts",
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 750d9e1..31e9546 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -45,10 +45,24 @@ export type FileMergeData = {
+ 	remote: string,
+ 	eol: Eol,
+ 	chunks: Chunk[],
++	word_changes: WordChanges[],
+ };
+ 
+ export type FileStatus = "Unresolved" | "Resolved";
+ 
++/**
++ *  Changed text inside one line of one text: `len` UTF-16 code units from column `start`
++ *  (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
++ */
++export type InlineRange<L> = {
++	/**  The line holding the range. */
++	line: L,
++	/**  Column of the first changed code unit. */
++	start: number,
++	/**  Number of changed code units; never zero. */
++	len: number,
++};
++
+ /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
+ export type LineRange<L> = {
+ 	/**  First line of the range, or the insertion point when the range is empty. */
+@@ -64,3 +78,18 @@ export type LocalLine = number;
+ export type RemoteLine = number;
+ 
+ export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
++
++/**
++ *  Where one chunk's sides differ from base, word by word. `base` marks the base text that
++ *  either side changed (the union).
++ */
++export type WordChanges = {
++	/**  The chunk these ranges belong to. */
++	chunk: ChunkId,
++	/**  Changed text in the chunk's local lines. */
++	local: InlineRange<LocalLine>[],
++	/**  Base text changed by local, remote or both. */
++	base: InlineRange<BaseLine>[],
++	/**  Changed text in the chunk's remote lines. */
++	remote: InlineRange<RemoteLine>[],
++};
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 93a94cc..3c96141 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -5,6 +5,13 @@ type LocalLine = number & { readonly __brand: "LocalLine" };
+ type RemoteLine = number & { readonly __brand: "RemoteLine" };
+ type ChunkId = number & { readonly __brand: "ChunkId" };
+ type LineRange<L> = { readonly start: L; readonly len: number };
++type InlineRange<L> = { readonly line: L; readonly start: number; readonly len: number };
++
++type ChunkWords = {
++  readonly local: readonly InlineRange<LocalLine>[];
++  readonly base: readonly InlineRange<BaseLine>[];
++  readonly remote: readonly InlineRange<RemoteLine>[];
++};
+ 
+ export type Chunk = {
+   readonly id: ChunkId;
+@@ -12,6 +19,7 @@ export type Chunk = {
+   readonly base: LineRange<BaseLine>;
+   readonly local: LineRange<LocalLine>;
+   readonly remote: LineRange<RemoteLine>;
++  readonly words: ChunkWords;
+ };
+ 
+ export type FileEntry = Generated.FileEntry;
+@@ -49,6 +57,65 @@ function invalid(field: string, value: number): Error {
+   return new Error(`${field} must be a non-negative safe integer, got ${value}`);
+ }
+ 
++function toInlineRange<L extends number>({
++  range,
++  isLine,
++  field,
++}: {
++  range: Generated.InlineRange<number>;
++  isLine: (n: number) => n is L;
++  field: string;
++}): InlineRange<L> {
++  const { line, start, len } = range;
++  if (!isLine(line)) {
++    throw invalid(`${field}.line`, line);
++  }
++  if (!isNonNegativeInteger(start)) {
++    throw invalid(`${field}.start`, start);
++  }
++  if (!Number.isSafeInteger(len) || len <= 0) {
++    throw new Error(`${field}.len must be a positive safe integer, got ${len}`);
++  }
++  return { line, start, len };
++}
++
++function toInlineRanges<L extends number>({
++  ranges,
++  isLine,
++  field,
++}: {
++  ranges: readonly Generated.InlineRange<number>[];
++  isLine: (n: number) => n is L;
++  field: string;
++}): InlineRange<L>[] {
++  return ranges.map((range, index) =>
++    toInlineRange({ range, isLine, field: `${field}[${index}]` }),
++  );
++}
++
++function toWords({
++  words,
++  chunkId,
++  field,
++}: {
++  words: Generated.WordChanges;
++  chunkId: ChunkId;
++  field: string;
++}): ChunkWords {
++  if (words.chunk !== chunkId) {
++    throw new Error(`${field}.chunk must be ${chunkId}, got ${words.chunk}`);
++  }
++  return {
++    local: toInlineRanges({ ranges: words.local, isLine: isLocalLine, field: `${field}.local` }),
++    base: toInlineRanges({ ranges: words.base, isLine: isBaseLine, field: `${field}.base` }),
++    remote: toInlineRanges({
++      ranges: words.remote,
++      isLine: isRemoteLine,
++      field: `${field}.remote`,
++    }),
++  };
++}
++
+ function toRange<L extends number>({
+   range,
+   isLine,
+@@ -68,20 +135,44 @@ function toRange<L extends number>({
+   return { start, len };
+ }
+ 
+-function toChunk(dto: Generated.Chunk, field: string): Chunk {
+-  const { id } = dto;
++function toChunk({
++  chunk,
++  words,
++  index,
++}: {
++  chunk: Generated.Chunk;
++  words: Generated.WordChanges;
++  index: number;
++}): Chunk {
++  const field = `chunks[${index}]`;
++  const { id } = chunk;
+   if (!isChunkId(id)) {
+     throw invalid(`${field}.id`, id);
+   }
+   return {
+     id,
+-    kind: dto.kind,
+-    base: toRange({ range: dto.base, isLine: isBaseLine, field: `${field}.base` }),
+-    local: toRange({ range: dto.local, isLine: isLocalLine, field: `${field}.local` }),
+-    remote: toRange({ range: dto.remote, isLine: isRemoteLine, field: `${field}.remote` }),
++    kind: chunk.kind,
++    base: toRange({ range: chunk.base, isLine: isBaseLine, field: `${field}.base` }),
++    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.local` }),
++    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.remote` }),
++    words: toWords({ words, chunkId: id, field: `word_changes[${index}]` }),
+   };
+ }
+ 
++function toChunks(dto: Generated.FileMergeData): Chunk[] {
++  const misaligned = `word_changes must have one entry per chunk (${dto.chunks.length}), got ${dto.word_changes.length}`;
++  if (dto.word_changes.length > dto.chunks.length) {
++    throw new Error(misaligned);
++  }
++  return dto.chunks.map((chunk, index) => {
++    const words = dto.word_changes[index];
++    if (words === undefined) {
++      throw new Error(misaligned);
++    }
++    return toChunk({ chunk, words, index });
++  });
++}
++
+ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+   return {
+     path: dto.path,
+@@ -89,6 +180,6 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+     local: dto.local,
+     remote: dto.remote,
+     eol: dto.eol,
+-    chunks: dto.chunks.map((chunk, index) => toChunk(chunk, `chunks[${index}]`)),
++    chunks: toChunks(dto),
+   };
+ }
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index e8df541..c8ac5e7 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -20,28 +20,49 @@ function quietLog(): { log: Log; entries: LogEntry[] } {
+   return { log, entries };
+ }
+ 
+-function record(path: string, chunk: Record<string, unknown> = {}): Record<string, unknown> {
++const CHUNK = {
++  id: 0,
++  kind: "Conflict",
++  base: { start: 0, len: 0 },
++  local: { start: 0, len: 1 },
++  remote: { start: 0, len: 1 },
++};
++
++const WORDS = {
++  local: [{ line: 0, start: 0, len: 1 }],
++  base: [],
++  remote: [{ line: 0, start: 1, len: 1 }],
++};
++
++function record(
++  path: string,
++  chunk: Record<string, unknown> = {},
++  words: Record<string, unknown> = {},
++): Record<string, unknown> {
+   return {
+     path,
+     base: "b\n",
+     local: "l\n",
+     remote: "r\n",
+     eol: "Lf",
+-    chunks: [
+-      {
+-        id: 0,
+-        kind: "Conflict",
+-        base: { start: 0, len: 0 },
+-        local: { start: 0, len: 1 },
+-        remote: { start: 0, len: 1 },
+-        ...chunk,
+-      },
+-    ],
++    chunks: [{ ...CHUNK, ...chunk }],
++    word_changes: [{ chunk: 0, ...WORDS, ...words }],
+   };
+ }
+ 
+-function withoutChunks(json: Record<string, unknown>): Record<string, unknown> {
+-  return Object.fromEntries(Object.entries(json).filter(([key]) => key !== "chunks"));
++function loaded(path: string): Record<string, unknown> {
++  return {
++    path,
++    base: "b\n",
++    local: "l\n",
++    remote: "r\n",
++    eol: "Lf",
++    chunks: [{ ...CHUNK, words: WORDS }],
++  };
++}
++
++function without(json: Record<string, unknown>, field: string): Record<string, unknown> {
++  return Object.fromEntries(Object.entries(json).filter(([key]) => key !== field));
+ }
+ 
+ afterEach(() => {
+@@ -82,12 +103,12 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
+   }
+ });
+ 
+-test("a conflict of vueuse-use-magic-keys.ts arrives intact", async () => {
++test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
+   const source = createFixtureSource(quietLog().log);
+ 
+   const data = await source.loadFile("vueuse-use-magic-keys.ts");
+ 
+-  expect(data.chunks[8]).toEqual({
++  expect(data.chunks[8]).toMatchObject({
+     id: 8,
+     kind: "Conflict",
+     base: { start: 128, len: 10 },
+@@ -99,6 +120,19 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact", async () => {
+   );
+   expect(data.remote.split("\n")[140]).toBe("  if (target) {");
+   expect(data).toMatchObject({ path: "vueuse-use-magic-keys.ts", eol: "Lf" });
++
++  const words = data.chunks[8]?.words;
++  expect(words?.local).toHaveLength(7);
++  expect(words?.base[0]).toEqual({ line: 128, start: 2, len: 13 });
++  expect(data.base.split("\n")[128]?.slice(2, 15)).toBe("if (target) {");
++  expect(words?.remote).toEqual([
++    { line: 150, start: 0, len: 12 },
++    { line: 151, start: 0, len: 54 },
++    { line: 152, start: 0, len: 55 },
++  ]);
++  expect(data.remote.split("\n")[151]).toBe(
++    "    useEventListener('blur', reset, { passive: true })",
++  );
+ });
+ 
+ test("in-memory records are listed sorted by path and keep every field", async () => {
+@@ -108,7 +142,7 @@ test("in-memory records are listed sorted by path and keep every field", async (
+   });
+ 
+   expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+-  expect(await source.loadFile("a.ts")).toEqual({ ...record("a.ts"), eol: "CrLf" });
++  expect(await source.loadFile("a.ts")).toEqual({ ...loaded("a.ts"), eol: "CrLf" });
+ });
+ 
+ test.each([
+@@ -118,7 +152,17 @@ test.each([
+     "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
+   ],
+   ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
+-  ["missing chunks", withoutChunks(record("x.ts")), 'Invalid key: Expected "chunks"'],
++  ["missing chunks", without(record("x.ts"), "chunks"), 'Invalid key: Expected "chunks"'],
++  [
++    "missing word_changes",
++    without(record("x.ts"), "word_changes"),
++    'Invalid key: Expected "word_changes"',
++  ],
++  [
++    "a string word column",
++    record("x.ts", {}, { base: [{ line: 0, start: "1", len: 1 }] }),
++    "word_changes.0.base.0.start",
++  ],
+   ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
+ ])("a record with %s is rejected naming the file", (_case, json, detail) => {
+   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+@@ -148,6 +192,68 @@ test.each([
+   );
+ });
+ 
++test.each([
++  [
++    "fewer word_changes than chunks",
++    { ...record("x.ts"), word_changes: [] },
++    "word_changes must have one entry per chunk (1), got 0",
++  ],
++  [
++    "more word_changes than chunks",
++    {
++      ...record("x.ts"),
++      word_changes: [
++        { chunk: 0, ...WORDS },
++        { chunk: 1, ...WORDS },
++      ],
++    },
++    "word_changes must have one entry per chunk (1), got 2",
++  ],
++  [
++    "word_changes of another chunk",
++    record("x.ts", {}, { chunk: 1 }),
++    "word_changes[0].chunk must be 0, got 1",
++  ],
++  [
++    "a negative word line",
++    record("x.ts", {}, { local: [{ line: -1, start: 0, len: 1 }] }),
++    "word_changes[0].local[0].line must be a non-negative safe integer, got -1",
++  ],
++  [
++    "a non-integer base word line",
++    record("x.ts", {}, { base: [{ line: 0.5, start: 0, len: 1 }] }),
++    "word_changes[0].base[0].line must be a non-negative safe integer, got 0.5",
++  ],
++  [
++    "a negative word column",
++    record(
++      "x.ts",
++      {},
++      {
++        remote: [
++          { line: 0, start: 1, len: 1 },
++          { line: 0, start: -1, len: 1 },
++        ],
++      },
++    ),
++    "word_changes[0].remote[1].start must be a non-negative safe integer, got -1",
++  ],
++  [
++    "an empty word range",
++    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0 }] }),
++    "word_changes[0].local[0].len must be a positive safe integer, got 0",
++  ],
++  [
++    "a fractional word length",
++    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0.5 }] }),
++    "word_changes[0].local[0].len must be a positive safe integer, got 0.5",
++  ],
++])("a record with %s is rejected naming its word_changes entry", (_case, json, message) => {
++  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
++    `fixture bad.json: ${message}`,
++  );
++});
++
+ test("an unknown path is rejected naming it", async () => {
+   const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts") });
+ 
+@@ -170,7 +276,7 @@ test("finish marks the file resolved and logs its text once; reset undoes it", a
+     { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
+   ]);
+ 
+-  expect(await source.resetFile("a.ts")).toEqual(record("a.ts"));
++  expect(await source.resetFile("a.ts")).toEqual(loaded("a.ts"));
+   expect((await source.listFiles())[0]).toEqual({
+     path: "a.ts",
+     status: "Unresolved",
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 0112c47..026b7ac 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -43,6 +43,19 @@ const CHUNK = v.object({
+   remote: LINE_RANGE,
+ } satisfies SchemaOf<Generated.Chunk>);
+ 
++const INLINE_RANGE = v.object({
++  line: v.number(),
++  start: v.number(),
++  len: v.number(),
++} satisfies SchemaOf<Generated.InlineRange<number>>);
++
++const WORD_CHANGES = v.object({
++  chunk: v.number(),
++  local: v.array(INLINE_RANGE),
++  base: v.array(INLINE_RANGE),
++  remote: v.array(INLINE_RANGE),
++} satisfies SchemaOf<Generated.WordChanges>);
++
+ const FILE_MERGE_DATA = v.object({
+   path: v.string(),
+   base: v.string(),
+@@ -50,6 +63,7 @@ const FILE_MERGE_DATA = v.object({
+   remote: v.string(),
+   eol: memberOf(EOLS),
+   chunks: v.array(CHUNK),
++  word_changes: v.array(WORD_CHANGES),
+ } satisfies SchemaOf<Generated.FileMergeData>);
+ 
+ function parseFixture(file: string, json: unknown): FileMergeData {
