@@ -1,0 +1,282 @@
+diff --git a/crates/merge-core/src/word.rs b/crates/merge-core/src/word.rs
+index c6b2184..7bddfcb 100644
+--- a/crates/merge-core/src/word.rs
++++ b/crates/merge-core/src/word.rs
+@@ -22,10 +22,15 @@ pub struct WordChanges {
+ }
+ 
+ #[derive(Clone, Copy, PartialEq, Eq)]
+-enum TokenKind {
++enum CharKind {
+     Word,
+     Space,
+     Symbol,
++}
++
++#[derive(Clone, Copy)]
++enum TokenKind {
++    Text(CharKind),
+     LineBreak,
+ }
+ 
+@@ -37,6 +42,30 @@ struct Token<'a> {
+     width: u32,
+ }
+ 
++struct ChunkText<'a> {
++    lines: &'a [&'a str],
++    first_line: u32,
++    tokens: Vec<Token<'a>>,
++}
++
++impl<'a> ChunkText<'a> {
++    fn new(all_lines: &'a [&'a str], range: &Range<u32>) -> ChunkText<'a> {
++        let lines = lines_in(all_lines, range);
++        ChunkText {
++            lines,
++            first_line: range.start,
++            tokens: tokens(lines, range.start),
++        }
++    }
++
++    fn token_span(&self, lines: &Range<u32>) -> Range<usize> {
++        let start = self.first_line + lines.start;
++        let end = self.first_line + lines.end;
++        self.tokens.partition_point(|token| token.line < start)
++            ..self.tokens.partition_point(|token| token.line < end)
++    }
++}
++
+ /// One entry per chunk, in the order of `chunks`.
+ #[must_use]
+ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> Vec<WordChanges> {
+@@ -45,9 +74,9 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) ->
+     let remote_lines = split_lines(remote);
+     let mut changes = Vec::with_capacity(chunks.len());
+     for chunk in chunks {
+-        let base = tokens(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
+-        let local = tokens(&local_lines, &(chunk.local.start.0..chunk.local.end().0));
+-        let remote = tokens(&remote_lines, &(chunk.remote.start.0..chunk.remote.end().0));
++        let base = ChunkText::new(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
++        let local = ChunkText::new(&local_lines, &(chunk.local.start.0..chunk.local.end().0));
++        let remote = ChunkText::new(&remote_lines, &(chunk.remote.start.0..chunk.remote.end().0));
+         let (base_by_local, local_changed) = changed_tokens(&base, &local);
+         let (base_by_remote, remote_changed) = changed_tokens(&base, &remote);
+         let base_changed: Vec<bool> = base_by_local
+@@ -57,33 +86,33 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) ->
+             .collect();
+         changes.push(WordChanges {
+             chunk: chunk.id,
+-            local: ranges(&local, &local_changed, LocalLine),
+-            base: ranges(&base, &base_changed, BaseLine),
+-            remote: ranges(&remote, &remote_changed, RemoteLine),
++            local: ranges(&local.tokens, &local_changed, LocalLine),
++            base: ranges(&base.tokens, &base_changed, BaseLine),
++            remote: ranges(&remote.tokens, &remote_changed, RemoteLine),
+         });
+     }
+     changes
+ }
+ 
+-fn tokens<'a>(lines: &'a [&'a str], range: &Range<u32>) -> Vec<Token<'a>> {
++fn tokens<'a>(lines: &'a [&'a str], first_line: u32) -> Vec<Token<'a>> {
+     let mut tokens = Vec::new();
+-    for (line, text) in (range.start..).zip(lines_in(lines, range)) {
++    for (line, text) in (first_line..).zip(lines) {
+         let (content, line_break) = split_line_break(text);
+         let mut column = 0;
+         let mut rest = content;
+         while let Some(first) = rest.chars().next() {
+             let kind = kind_of(first);
+             let byte_len = match kind {
+-                TokenKind::Word | TokenKind::Space => rest
++                CharKind::Word | CharKind::Space => rest
+                     .find(|next| kind_of(next) != kind)
+                     .unwrap_or(rest.len()),
+-                TokenKind::Symbol | TokenKind::LineBreak => first.len_utf8(),
++                CharKind::Symbol => first.len_utf8(),
+             };
+             let (text, after) = rest.split_at(byte_len);
+             let width = utf16_len(text);
+             tokens.push(Token {
+                 text,
+-                kind,
++                kind: TokenKind::Text(kind),
+                 line,
+                 column,
+                 width,
+@@ -114,13 +143,13 @@ fn split_line_break(line: &str) -> (&str, &'static str) {
+     }
+ }
+ 
+-fn kind_of(character: char) -> TokenKind {
++fn kind_of(character: char) -> CharKind {
+     if character.is_alphanumeric() || character == '_' {
+-        TokenKind::Word
++        CharKind::Word
+     } else if character.is_whitespace() {
+-        TokenKind::Space
++        CharKind::Space
+     } else {
+-        TokenKind::Symbol
++        CharKind::Symbol
+     }
+ }
+ 
+@@ -128,17 +157,51 @@ fn utf16_len(text: &str) -> u32 {
+     u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
+ }
+ 
+-fn changed_tokens(base: &[Token], side: &[Token]) -> (Vec<bool>, Vec<bool>) {
++fn changed_tokens(base: &ChunkText, side: &ChunkText) -> (Vec<bool>, Vec<bool>) {
++    let mut base_changed = vec![false; base.tokens.len()];
++    let mut side_changed = vec![false; side.tokens.len()];
++    if base.lines.is_empty() || side.lines.is_empty() {
++        return (base_changed, side_changed);
++    }
++    let mut input = InternedInput::default();
++    input.update_before(base.lines.iter().copied());
++    input.update_after(side.lines.iter().copied());
++    let mut diff = Diff::compute(Algorithm::Histogram, &input);
++    diff.postprocess_lines(&input);
++    for hunk in diff.hunks() {
++        let base_span = base.token_span(&hunk.before);
++        let side_span = side.token_span(&hunk.after);
++        mark_changed_tokens(
++            base.tokens.get(base_span.clone()).unwrap_or_default(),
++            side.tokens.get(side_span.clone()).unwrap_or_default(),
++            base_changed.get_mut(base_span).unwrap_or_default(),
++            side_changed.get_mut(side_span).unwrap_or_default(),
++        );
++    }
++    (base_changed, side_changed)
++}
++
++fn mark_changed_tokens(
++    base: &[Token],
++    side: &[Token],
++    base_changed: &mut [bool],
++    side_changed: &mut [bool],
++) {
+     if base.is_empty() || side.is_empty() {
+-        return (vec![false; base.len()], vec![false; side.len()]);
++        base_changed.fill(true);
++        side_changed.fill(true);
++        return;
+     }
+     let mut input = InternedInput::default();
+     input.update_before(base.iter().map(|token| token.text));
+     input.update_after(side.iter().map(|token| token.text));
+     let diff = Diff::compute(Algorithm::Histogram, &input);
+-    let base_changed = (0..).zip(base).map(|(index, _)| diff.is_removed(index));
+-    let side_changed = (0..).zip(side).map(|(index, _)| diff.is_added(index));
+-    (base_changed.collect(), side_changed.collect())
++    for (index, changed) in (0..).zip(base_changed) {
++        *changed = diff.is_removed(index);
++    }
++    for (index, changed) in (0..).zip(side_changed) {
++        *changed = diff.is_added(index);
++    }
+ }
+ 
+ fn ranges<L: Copy + PartialEq>(
+@@ -146,9 +209,23 @@ fn ranges<L: Copy + PartialEq>(
+     changed: &[bool],
+     line_of: fn(u32) -> L,
+ ) -> Vec<InlineRange<L>> {
++    let text_changed: Vec<bool> = tokens
++        .iter()
++        .zip(changed)
++        .map(|(token, changed)| *changed && !matches!(token.kind, TokenKind::LineBreak))
++        .collect();
+     let mut ranges: Vec<InlineRange<L>> = Vec::new();
+-    for (index, token) in tokens.iter().enumerate() {
+-        if !is_highlighted(tokens, changed, index) {
++    for (index, (token, is_changed)) in tokens.iter().zip(&text_changed).enumerate() {
++        let before = index
++            .checked_sub(1)
++            .and_then(|before| text_changed.get(before));
++        let after = text_changed.get(index + 1);
++        if !is_highlighted(
++            token.kind,
++            *is_changed,
++            before == Some(&true),
++            after == Some(&true),
++        ) {
+             continue;
+         }
+         let line = line_of(token.line);
+@@ -166,27 +243,10 @@ fn ranges<L: Copy + PartialEq>(
+     ranges
+ }
+ 
+-fn is_highlighted(tokens: &[Token], changed: &[bool], index: usize) -> bool {
+-    let Some(token) = tokens.get(index) else {
+-        return false;
+-    };
+-    match token.kind {
++fn is_highlighted(kind: TokenKind, is_changed: bool, before: bool, after: bool) -> bool {
++    match kind {
+         TokenKind::LineBreak => false,
+-        TokenKind::Word | TokenKind::Symbol => is_changed_text(tokens, changed, Some(index)),
+-        TokenKind::Space => {
+-            is_changed_text(tokens, changed, Some(index))
+-                || (is_changed_text(tokens, changed, index.checked_sub(1))
+-                    && is_changed_text(tokens, changed, index.checked_add(1)))
+-        }
++        TokenKind::Text(CharKind::Word | CharKind::Symbol) => is_changed,
++        TokenKind::Text(CharKind::Space) => is_changed || (before && after),
+     }
+ }
+-
+-fn is_changed_text(tokens: &[Token], changed: &[bool], index: Option<usize>) -> bool {
+-    let Some(index) = index else {
+-        return false;
+-    };
+-    let is_text = tokens
+-        .get(index)
+-        .is_some_and(|token| token.kind != TokenKind::LineBreak);
+-    is_text && changed.get(index).copied().unwrap_or(false)
+-}
+diff --git a/crates/merge-core/tests/word_changes.rs b/crates/merge-core/tests/word_changes.rs
+index 1250617..d5c5e70 100644
+--- a/crates/merge-core/tests/word_changes.rs
++++ b/crates/merge-core/tests/word_changes.rs
+@@ -87,6 +87,21 @@ fn a_changed_line_break_alone_yields_no_range() {
+     assert_eq!(words, expected(&[], &[], &[]));
+ }
+ 
++#[test]
++fn a_space_between_a_changed_word_and_a_changed_line_break_stays_unmarked() {
++    let (_, words) = only_chunk_words("x old \n", "x new \r\n", "x old \n");
++    assert_eq!(words, expected(&[(0, 2, 3)], &[(0, 2, 3)], &[]));
++}
++
++#[test]
++fn words_are_diffed_only_inside_changed_lines_so_an_equal_line_stays_unmarked() {
++    let base = "import { it } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\n";
++    let local = "import { it, vi } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\nimport { flush } from '@vue/test-utils'\n";
++    let (kind, words) = only_chunk_words(base, local, base);
++    assert_eq!(kind, ChunkKind::LocalOnly);
++    assert_eq!(words, expected(&[(0, 11, 4), (2, 0, 39)], &[], &[]));
++}
++
+ #[test]
+ fn a_conflict_on_different_words_marks_each_side_and_their_union_in_base() {
+     let (kind, words) = only_chunk_words("let a = 1;\n", "let b = 1;\n", "let a = 2;\n");
+diff --git a/crates/merge-core/tests/word_invariants.rs b/crates/merge-core/tests/word_invariants.rs
+index 8814659..2776d4a 100644
+--- a/crates/merge-core/tests/word_invariants.rs
++++ b/crates/merge-core/tests/word_invariants.rs
+@@ -121,7 +121,10 @@ fn check_side(
+     }
+     for pair in ranges.windows(2) {
+         let ((line, start, len), (next_line, next_start, _)) = (pair[0], pair[1]);
+-        prop_assert!(line < next_line || start + len < next_start, "{ranges:?}");
++        prop_assert!(
++            line < next_line || (line == next_line && start + len < next_start),
++            "{ranges:?}"
++        );
+     }
+     Ok(())
+ }

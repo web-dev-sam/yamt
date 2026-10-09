@@ -1,16 +1,17 @@
 {
-  "M1DWordEngineR1": {
-    "owned": ["crates/merge-core/**", "frontend/src/ipc/fixture.test.ts"],
+  "M1EWordHighlights": {
+    "owned": ["frontend/src/editor/**", "frontend/src/style.css"],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "tests/golden/**",
-      "crates/session/**",
-      "crates/cli/**",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/editor/**",
-      "frontend/fixtures/**",
-      "frontend/src/ipc/bindings.ts"
+      "crates/**",
+      "frontend/src/ipc/**",
+      "frontend/src/ui/**",
+      "frontend/src/connectors/**",
+      "frontend/src/main.ts",
+      "frontend/package.json",
+      "frontend/scripts/**",
+      "frontend/fixtures/**"
     ]
   }
 }
