@@ -1,5 +1,5 @@
 {
-  "M1S4Apply": {
+  "M1S4ApplyR1": {
     "owned": ["frontend/src/editor/**", "frontend/src/ui/**"],
     "readonly": [
       "docs/**",
