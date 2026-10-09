@@ -1,11 +1,9 @@
 #![cfg(test)]
 
-mod fixtures;
-
 use std::fs;
 use std::path::Path;
 
-use fixtures::{conflict_repo, git_ok, hash_object};
+use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok, hash_object};
 use yamt_gitio::{Error, Oid, Repo, Stage, StageEntry};
 
 const FILE: &str = "cart.ts";
@@ -18,9 +16,24 @@ fn stages_of(entries: &[StageEntry]) -> Vec<Stage> {
     entries.iter().map(|entry| entry.stage).collect()
 }
 
+fn one_file_repo(
+    path: &str,
+    base: Option<&[u8]>,
+    local: Option<&[u8]>,
+    remote: Option<&[u8]>,
+) -> TempDir {
+    let file = ConflictFile {
+        path,
+        base,
+        local,
+        remote,
+    };
+    conflict_repo(&[file]).unwrap()
+}
+
 #[test]
 fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
 
     let entries = repo.unmerged().unwrap();
@@ -30,13 +43,13 @@ fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
     for (entry, text) in entries.iter().zip([BASE, LOCAL, REMOTE]) {
         assert_eq!(entry.path, Path::new(FILE));
         assert_eq!(entry.mode, REGULAR_FILE_MODE);
-        assert_eq!(entry.oid.as_str(), hash_object(dir.path(), text));
+        assert_eq!(entry.oid.as_str(), hash_object(dir.path(), text).unwrap());
     }
 }
 
 #[test]
 fn add_add_conflict_has_only_local_and_remote_stages() {
-    let dir = conflict_repo(FILE, None, Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, None, Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
 
     let entries = repo.unmerged().unwrap();
@@ -46,7 +59,7 @@ fn add_add_conflict_has_only_local_and_remote_stages() {
 
 #[test]
 fn delete_modify_conflict_has_base_and_the_modifying_side() {
-    let dir = conflict_repo(FILE, Some(BASE), None, Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), None, Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
 
     let entries = repo.unmerged().unwrap();
@@ -57,7 +70,7 @@ fn delete_modify_conflict_has_base_and_the_modifying_side() {
 #[test]
 fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
     let sides: [&[u8]; 3] = [b"a\r\nb\r\nc", b"a\r\nlocal\r\nc", b"a\r\nremote\r\nc"];
-    let dir = conflict_repo(FILE, Some(sides[0]), Some(sides[1]), Some(sides[2]));
+    let dir = one_file_repo(FILE, Some(sides[0]), Some(sides[1]), Some(sides[2]));
     let repo = Repo::discover(dir.path()).unwrap();
     let mut reader = repo.blob_reader().unwrap();
 
@@ -69,7 +82,7 @@ fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
 #[test]
 fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
     const ROUNDS: usize = 3;
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let entries = repo.unmerged().unwrap();
     let mut reader = repo.blob_reader().unwrap();
@@ -83,7 +96,7 @@ fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
     let error = reader.read(&missing).unwrap_err();
     assert!(matches!(error, Error::BlobMissing { oid } if oid == missing));
     assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
-    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"])).unwrap();
+    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"]).unwrap()).unwrap();
     let commit = Oid::parse(head.trim_end()).unwrap();
     let error = reader.read(&commit).unwrap_err();
     assert!(
@@ -100,7 +113,7 @@ fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
 }
 
 fn assert_add_then_restore_round_trips(base: Option<&[u8]>, path: &str) {
-    let dir = conflict_repo(path, base, Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(path, base, Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let captured = repo.unmerged().unwrap();
     assert!(captured.iter().all(|entry| entry.path == Path::new(path)));
@@ -129,7 +142,7 @@ fn path_with_space_and_non_ascii_round_trips_through_restore() {
 
 #[test]
 fn restore_stages_replaces_every_existing_stage_of_the_path() {
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let without_base: Vec<StageEntry> = repo.unmerged().unwrap().into_iter().skip(1).collect();
 
@@ -140,7 +153,7 @@ fn restore_stages_replaces_every_existing_stage_of_the_path() {
 
 #[test]
 fn checkout_merge_after_restore_rewrites_conflict_markers() {
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let captured = repo.unmerged().unwrap();
     repo.add(Path::new(FILE)).unwrap();
@@ -156,7 +169,7 @@ fn checkout_merge_after_restore_rewrites_conflict_markers() {
 #[test]
 fn failing_git_call_reports_argv_status_and_stderr() {
     const NO_SUCH_FILE: &str = "no-such-file.txt";
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
 
     let error = repo.checkout_merge(Path::new(NO_SUCH_FILE)).unwrap_err();
@@ -177,7 +190,7 @@ fn failing_git_call_reports_argv_status_and_stderr() {
 
 #[test]
 fn discover_from_a_subdirectory_returns_the_top_level() {
-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let nested = dir.path().join("nested/deeper");
     fs::create_dir_all(&nested).unwrap();
 

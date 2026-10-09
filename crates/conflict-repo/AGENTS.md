@@ -1,0 +1,1 @@
+Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user git config isolated) whose `git merge` stops with the scripted conflicts. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.

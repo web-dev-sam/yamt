@@ -1,0 +1,1195 @@
+diff --git 1/crates/conflict-repo/AGENTS.md 2/crates/conflict-repo/AGENTS.md
+new file mode 100644
+index 0000000..e14c6b0
+--- /dev/null
++++ 2/crates/conflict-repo/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user git config isolated) whose `git merge` stops with the scripted conflicts. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git 1/crates/conflict-repo/src/lib.rs 2/crates/conflict-repo/src/lib.rs
+new file mode 100644
+index 0000000..dd91ab6
+--- /dev/null
++++ 2/crates/conflict-repo/src/lib.rs
+@@ -0,0 +1,130 @@
++//! Test fixture: real git repositories whose merge stops with scripted conflicts.
++#![forbid(unsafe_code)]
++
++use std::fs;
++use std::io::Write;
++use std::path::Path;
++use std::process::{Command, Output, Stdio};
++
++pub use tempfile::TempDir;
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error("i/o error while running git: {0}")]
++    Io(#[from] std::io::Error),
++    #[error("`git {}` failed: {stderr}", args.join(" "))]
++    GitFailed { args: Vec<String>, stderr: String },
++    #[error("merging `remote` into `local` did not conflict")]
++    MergeDidNotConflict,
++}
++
++pub type Result<T, E = Error> = std::result::Result<T, E>;
++
++/// One path in the scripted merge; `None` means the file does not exist on that side.
++#[derive(Clone, Copy, Debug)]
++pub struct ConflictFile<'a> {
++    pub path: &'a str,
++    pub base: Option<&'a [u8]>,
++    pub local: Option<&'a [u8]>,
++    pub remote: Option<&'a [u8]>,
++}
++
++fn isolated_git(dir: &Path) -> Command {
++    let mut command = Command::new("git");
++    command
++        .current_dir(dir)
++        .env("GIT_CONFIG_GLOBAL", "/dev/null")
++        .env("GIT_CONFIG_NOSYSTEM", "1")
++        .env("LC_ALL", "C")
++        .args([
++            "-c",
++            "user.name=yamt test",
++            "-c",
++            "user.email=test@yamt.invalid",
++        ])
++        .args([
++            "-c",
++            "init.defaultBranch=main",
++            "-c",
++            "commit.gpgsign=false",
++        ])
++        .args(["-c", "core.autocrlf=false"]);
++    command
++}
++
++pub fn git(dir: &Path, args: &[&str]) -> Result<Output> {
++    Ok(isolated_git(dir).args(args).output()?)
++}
++
++pub fn git_ok(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
++    let output = git(dir, args)?;
++    if output.status.success() {
++        Ok(output.stdout)
++    } else {
++        Err(Error::GitFailed {
++            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
++            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
++        })
++    }
++}
++
++pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
++    let mut child = isolated_git(dir)
++        .args(["hash-object", "--stdin"])
++        .stdin(Stdio::piped())
++        .stdout(Stdio::piped())
++        .spawn()?;
++    if let Some(mut stdin) = child.stdin.take() {
++        stdin.write_all(content)?;
++    }
++    let output = child.wait_with_output()?;
++    Ok(String::from_utf8_lossy(&output.stdout)
++        .trim_end()
++        .to_owned())
++}
++
++/// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
++pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
++    let dir = tempfile::tempdir()?;
++    let root = dir.path();
++    git_ok(root, &["init", "--quiet"])?;
++    git_ok(root, &["config", "core.autocrlf", "false"])?;
++    commit_side(root, files, |file| file.base, "base")?;
++    git_ok(root, &["checkout", "--quiet", "-b", "local"])?;
++    commit_side(root, files, |file| file.local, "local")?;
++    git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"])?;
++    commit_side(root, files, |file| file.remote, "remote")?;
++    git_ok(root, &["checkout", "--quiet", "local"])?;
++    let merge = git(root, &["merge", "--quiet", "remote"])?;
++    if merge.status.success() {
++        return Err(Error::MergeDidNotConflict);
++    }
++    Ok(dir)
++}
++
++fn commit_side<'a>(
++    root: &Path,
++    files: &[ConflictFile<'a>],
++    side: fn(&ConflictFile<'a>) -> Option<&'a [u8]>,
++    message: &str,
++) -> Result<()> {
++    for file in files {
++        let worktree_file = root.join(file.path);
++        match side(file) {
++            Some(bytes) => {
++                if let Some(parent) = worktree_file.parent() {
++                    fs::create_dir_all(parent)?;
++                }
++                fs::write(&worktree_file, bytes)?;
++                git_ok(root, &["add", "--", file.path])?;
++            }
++            None => {
++                if worktree_file.exists() {
++                    git_ok(root, &["rm", "--quiet", "--", file.path])?;
++                }
++            }
++        }
++    }
++    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message])?;
++    Ok(())
++}
+diff --git 1/crates/session/src/decode.rs 2/crates/session/src/decode.rs
+new file mode 100644
+index 0000000..36c3ba3
+--- /dev/null
++++ 2/crates/session/src/decode.rs
+@@ -0,0 +1,81 @@
++use std::path::Path;
++
++use serde::Serialize;
++use specta::Type;
++
++// git's binary heuristic: a NUL within the first 8000 bytes (xdiff-interface.c FIRST_FEW_BYTES).
++const BINARY_PROBE_LEN: usize = 8000;
++const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
++const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "mts", "cts"];
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub enum Eol {
++    Lf,
++    CrLf,
++    Mixed,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub enum UnsupportedReason {
++    Binary,
++    NonUtf8,
++    TooLarge,
++    LocalDeleted,
++    RemoteDeleted,
++}
++
++pub(crate) fn decode_side(bytes: Vec<u8>) -> Result<String, UnsupportedReason> {
++    let probe = bytes.get(..BINARY_PROBE_LEN).unwrap_or(&bytes);
++    if probe.contains(&b'\0') {
++        return Err(UnsupportedReason::Binary);
++    }
++    if bytes.len() > MAX_TEXT_BYTES {
++        return Err(UnsupportedReason::TooLarge);
++    }
++    String::from_utf8(bytes).map_err(|_| UnsupportedReason::NonUtf8)
++}
++
++pub(crate) fn detect_eol(text: &str) -> Eol {
++    let line_breaks = text.matches('\n').count();
++    let crlf_breaks = text.matches("\r\n").count();
++    if crlf_breaks == 0 {
++        Eol::Lf
++    } else if crlf_breaks == line_breaks {
++        Eol::CrLf
++    } else {
++        Eol::Mixed
++    }
++}
++
++pub(crate) fn language_of(path: &Path) -> Option<String> {
++    let extension = path.extension()?.to_str()?;
++    if TYPESCRIPT_EXTENSIONS.contains(&extension) {
++        Some("typescript".to_owned())
++    } else {
++        None
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn eol_is_crlf_only_when_every_line_break_is_crlf() {
++        assert_eq!(detect_eol(""), Eol::Lf);
++        assert_eq!(detect_eol("a\nb"), Eol::Lf);
++        assert_eq!(detect_eol("a\r\nb\r\n"), Eol::CrLf);
++        assert_eq!(detect_eol("a\r\nb\n"), Eol::Mixed);
++        assert_eq!(detect_eol("a\rb\n"), Eol::Lf);
++    }
++
++    #[test]
++    fn nul_after_the_probe_window_is_still_text() {
++        let mut bytes = vec![b'a'; BINARY_PROBE_LEN];
++        bytes.push(b'\0');
++        assert!(decode_side(bytes).is_ok());
++        let mut bytes = vec![b'a'; BINARY_PROBE_LEN - 1];
++        bytes.push(b'\0');
++        assert_eq!(decode_side(bytes), Err(UnsupportedReason::Binary));
++    }
++}
+diff --git 1/crates/session/src/session.rs 2/crates/session/src/session.rs
+new file mode 100644
+index 0000000..e35db6a
+--- /dev/null
++++ 2/crates/session/src/session.rs
+@@ -0,0 +1,261 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use serde::Serialize;
++use specta::Type;
++use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
++use yamt_merge_core::{Chunk, Options, compute_chunks};
++
++use crate::decode::{Eol, UnsupportedReason, decode_side, detect_eol, language_of};
++use crate::{Error, Result};
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub enum FileStatus {
++    Unresolved,
++    Resolved,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct FileEntry {
++    pub path: String,
++    pub status: FileStatus,
++    pub unsupported: Option<UnsupportedReason>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct FileMergeData {
++    pub path: String,
++    pub base: String,
++    pub local: String,
++    pub remote: String,
++    pub eol: Eol,
++    pub language: Option<String>,
++    pub chunks: Vec<Chunk>,
++}
++
++pub struct MergeSession {
++    repo: Repo,
++    files: Vec<FileState>,
++}
++
++struct FileState {
++    path: PathBuf,
++    stages: CapturedStages,
++    status: FileStatus,
++    content: Content,
++}
++
++#[derive(Default)]
++struct CapturedStages {
++    base: Option<StageEntry>,
++    local: Option<StageEntry>,
++    remote: Option<StageEntry>,
++}
++
++enum Content {
++    Text(Texts),
++    Unsupported(UnsupportedReason),
++}
++
++struct Texts {
++    base: String,
++    local: String,
++    remote: String,
++}
++
++impl MergeSession {
++    pub fn open(cwd: &Path) -> Result<MergeSession> {
++        let repo = Repo::discover(cwd)?;
++        let mut blobs = repo.blob_reader()?;
++        let mut files = Vec::new();
++        for (path, stages) in group_by_path(repo.unmerged()?) {
++            let content = read_content(&mut blobs, &path, &stages)?;
++            files.push(FileState {
++                path,
++                stages,
++                status: FileStatus::Unresolved,
++                content,
++            });
++        }
++        Ok(MergeSession { repo, files })
++    }
++
++    #[must_use]
++    pub fn files(&self) -> Vec<FileEntry> {
++        let mut entries = Vec::with_capacity(self.files.len());
++        for file in &self.files {
++            let unsupported = match &file.content {
++                Content::Text(_) => None,
++                Content::Unsupported(reason) => Some(*reason),
++            };
++            entries.push(FileEntry {
++                path: file.display_path(),
++                status: file.status,
++                unsupported,
++            });
++        }
++        entries
++    }
++
++    pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
++        let file = self.file(path)?;
++        let texts = file.texts()?;
++        let eol_source = if texts.base.is_empty() {
++            &texts.local
++        } else {
++            &texts.base
++        };
++        let chunks = compute_chunks(
++            &texts.base,
++            &texts.local,
++            &texts.remote,
++            &Options::default(),
++        );
++        Ok(FileMergeData {
++            path: file.display_path(),
++            base: texts.base.clone(),
++            local: texts.local.clone(),
++            remote: texts.remote.clone(),
++            eol: detect_eol(eol_source),
++            language: language_of(&file.path),
++            chunks,
++        })
++    }
++
++    pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
++        let file = self.file(path)?;
++        file.texts()?;
++        let worktree_file = self.repo.root().join(&file.path);
++        fs::write(&worktree_file, result).map_err(|source| Error::WriteFailed {
++            path: path.to_owned(),
++            source,
++        })?;
++        self.repo.add(&file.path)?;
++        self.file_mut(path)?.status = FileStatus::Resolved;
++        Ok(())
++    }
++
++    pub fn reset(&mut self, path: &str) -> Result<()> {
++        let file = self.file(path)?;
++        self.repo.restore_stages(&file.stages.entries())?;
++        // `checkout -m` refuses a path without both sides: "does not have all necessary versions".
++        if file.stages.has_both_sides() {
++            self.repo.checkout_merge(&file.path)?;
++        }
++        self.file_mut(path)?.status = FileStatus::Unresolved;
++        Ok(())
++    }
++
++    #[must_use]
++    pub fn remaining(&self) -> usize {
++        self.files
++            .iter()
++            .filter(|file| file.status == FileStatus::Unresolved)
++            .count()
++    }
++
++    fn file(&self, path: &str) -> Result<&FileState> {
++        self.files
++            .iter()
++            .find(|file| file.display_path() == path)
++            .ok_or_else(|| Error::UnknownPath {
++                path: path.to_owned(),
++            })
++    }
++
++    fn file_mut(&mut self, path: &str) -> Result<&mut FileState> {
++        self.files
++            .iter_mut()
++            .find(|file| file.display_path() == path)
++            .ok_or_else(|| Error::UnknownPath {
++                path: path.to_owned(),
++            })
++    }
++}
++
++impl FileState {
++    fn display_path(&self) -> String {
++        self.path.to_string_lossy().into_owned()
++    }
++
++    fn texts(&self) -> Result<&Texts> {
++        match &self.content {
++            Content::Text(texts) => Ok(texts),
++            Content::Unsupported(reason) => Err(Error::Unsupported {
++                path: self.display_path(),
++                reason: *reason,
++            }),
++        }
++    }
++}
++
++impl CapturedStages {
++    fn insert(&mut self, entry: StageEntry) {
++        match entry.stage {
++            Stage::Base => self.base = Some(entry),
++            Stage::Local => self.local = Some(entry),
++            Stage::Remote => self.remote = Some(entry),
++        }
++    }
++
++    fn has_both_sides(&self) -> bool {
++        self.local.is_some() && self.remote.is_some()
++    }
++
++    fn entries(&self) -> Vec<StageEntry> {
++        [&self.base, &self.local, &self.remote]
++            .into_iter()
++            .flatten()
++            .cloned()
++            .collect()
++    }
++}
++
++fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
++    let mut groups: Vec<(PathBuf, CapturedStages)> = Vec::new();
++    for entry in entries {
++        match groups.last_mut() {
++            Some((path, stages)) if *path == entry.path => stages.insert(entry),
++            Some(_) | None => {
++                let mut stages = CapturedStages::default();
++                let path = entry.path.clone();
++                stages.insert(entry);
++                groups.push((path, stages));
++            }
++        }
++    }
++    groups
++}
++
++fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) -> Result<Content> {
++    if path.to_str().is_none() {
++        return Ok(Content::Unsupported(UnsupportedReason::NonUtf8));
++    }
++    let Some(local) = &stages.local else {
++        return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted));
++    };
++    let Some(remote) = &stages.remote else {
++        return Ok(Content::Unsupported(UnsupportedReason::RemoteDeleted));
++    };
++    let base = match &stages.base {
++        Some(entry) => blobs.read(&entry.oid)?,
++        None => Vec::new(),
++    };
++    let decoded = decode_texts(base, blobs.read(&local.oid)?, blobs.read(&remote.oid)?);
++    match decoded {
++        Ok(texts) => Ok(Content::Text(texts)),
++        Err(reason) => Ok(Content::Unsupported(reason)),
++    }
++}
++
++fn decode_texts(
++    base: Vec<u8>,
++    local: Vec<u8>,
++    remote: Vec<u8>,
++) -> Result<Texts, UnsupportedReason> {
++    Ok(Texts {
++        base: decode_side(base)?,
++        local: decode_side(local)?,
++        remote: decode_side(remote)?,
++    })
++}
+diff --git 1/crates/session/tests/finish_and_reset.rs 2/crates/session/tests/finish_and_reset.rs
+new file mode 100644
+index 0000000..682a372
+--- /dev/null
++++ 2/crates/session/tests/finish_and_reset.rs
+@@ -0,0 +1,176 @@
++#![cfg(test)]
++
++use std::fs;
++
++use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok};
++use yamt_session::{Eol, Error, FileStatus, MergeSession, UnsupportedReason};
++
++const FILE: &str = "src/cart.ts";
++const OTHER: &str = "src/other.ts";
++
++fn two_file_conflict() -> TempDir {
++    conflict_repo(&[
++        ConflictFile {
++            path: FILE,
++            base: Some(b"one\ntwo\nthree\n"),
++            local: Some(b"one\nlocal\nthree\n"),
++            remote: Some(b"one\nremote\nthree\n"),
++        },
++        ConflictFile {
++            path: OTHER,
++            base: Some(b"four\nfive\n"),
++            local: Some(b"four\nlocal five\n"),
++            remote: Some(b"four\nremote five\n"),
++        },
++    ])
++    .unwrap()
++}
++
++fn single_conflict(path: &str, sides: [&[u8]; 3]) -> TempDir {
++    let [base, local, remote] = sides;
++    conflict_repo(&[ConflictFile {
++        path,
++        base: Some(base),
++        local: Some(local),
++        remote: Some(remote),
++    }])
++    .unwrap()
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
++}
++
++fn status_of(session: &MergeSession, path: &str) -> FileStatus {
++    let files = session.files();
++    files.iter().find(|file| file.path == path).unwrap().status
++}
++
++fn assert_finish_with_local_round_trips_bytes(sides: [&[u8]; 3], expected_eol: Eol) {
++    const PATH: &str = "eol.txt";
++    let dir = single_conflict(PATH, sides);
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let data = session.load(PATH).unwrap();
++    assert_eq!(data.eol, expected_eol);
++
++    session.finish(PATH, &data.local).unwrap();
++
++    let worktree = fs::read(dir.path().join(PATH)).unwrap();
++    assert_eq!(worktree, sides[1]);
++}
++
++#[test]
++fn crlf_file_is_detected_and_finish_writes_its_crlf_bytes_unchanged() {
++    let sides: [&[u8]; 3] = [b"a\r\nb\r\nc", b"a\r\nlocal\r\nc", b"a\r\nremote\r\nc"];
++    assert_finish_with_local_round_trips_bytes(sides, Eol::CrLf);
++}
++
++#[test]
++fn mixed_eol_file_is_detected_and_finish_writes_its_bytes_unchanged() {
++    let sides: [&[u8]; 3] = [
++        b"a\r\nb\nc\r\n",
++        b"a\r\nlocal\nc\r\n",
++        b"a\r\nremote\nc\r\n",
++    ];
++    assert_finish_with_local_round_trips_bytes(sides, Eol::Mixed);
++}
++
++#[test]
++fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
++    const RESULT: &str = "one\nmerged\nthree\n";
++    let dir = two_file_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    assert_eq!(session.remaining(), 2);
++
++    session.finish(FILE, RESULT).unwrap();
++
++    assert!(!unmerged(&dir).contains(FILE));
++    assert!(unmerged(&dir).contains(OTHER));
++    assert_eq!(fs::read_to_string(dir.path().join(FILE)).unwrap(), RESULT);
++    assert_eq!(status_of(&session, FILE), FileStatus::Resolved);
++    assert_eq!(session.remaining(), 1);
++}
++
++#[test]
++fn reset_after_finish_restores_git_stages_and_conflict_markers() {
++    let dir = two_file_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let before_finish = unmerged(&dir);
++    session.finish(FILE, "resolved\n").unwrap();
++    // `git add` leaves a resolve-undo record that `checkout -m` alone would use to bring the
++    // conflict back (git-ls-files(1) --resolve-undo); without it only the captured stages can.
++    git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
++
++    session.reset(FILE).unwrap();
++
++    assert_eq!(unmerged(&dir), before_finish);
++    let worktree = fs::read_to_string(dir.path().join(FILE)).unwrap();
++    assert!(worktree.contains("<<<<<<<"), "no markers in {worktree:?}");
++    assert_eq!(status_of(&session, FILE), FileStatus::Unresolved);
++    assert_eq!(session.remaining(), 2);
++}
++
++#[test]
++fn unknown_path_is_rejected_by_load_finish_and_reset() {
++    const UNKNOWN: &str = "not-conflicted.ts";
++    let dir = two_file_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let errors = [
++        session.load(UNKNOWN).unwrap_err(),
++        session.finish(UNKNOWN, "text\n").unwrap_err(),
++        session.reset(UNKNOWN).unwrap_err(),
++    ];
++
++    for error in errors {
++        assert!(
++            matches!(&error, Error::UnknownPath { path } if path == UNKNOWN),
++            "{error:?}"
++        );
++    }
++    assert!(!dir.path().join(UNKNOWN).exists());
++}
++
++#[test]
++fn finish_refuses_an_unsupported_file_and_leaves_the_worktree_alone() {
++    const PATH: &str = "image.bin";
++    let dir = single_conflict(PATH, [b"\0base", b"\0local", b"\0remote"]);
++    let worktree_before = fs::read(dir.path().join(PATH)).unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let error = session.finish(PATH, "text\n").unwrap_err();
++
++    assert!(
++        matches!(
++            &error,
++            Error::Unsupported {
++                reason: UnsupportedReason::Binary,
++                ..
++            }
++        ),
++        "{error:?}"
++    );
++    assert_eq!(fs::read(dir.path().join(PATH)).unwrap(), worktree_before);
++    assert!(unmerged(&dir).contains(PATH));
++}
++
++#[test]
++fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
++    const PATH: &str = "gone.txt";
++    let dir = conflict_repo(&[ConflictFile {
++        path: PATH,
++        base: Some(b"kept\nbase\n"),
++        local: None,
++        remote: Some(b"kept\nremote\n"),
++    }])
++    .unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let before = unmerged(&dir);
++    git_ok(dir.path(), &["add", "--", PATH]).unwrap();
++    git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
++
++    session.reset(PATH).unwrap();
++
++    assert_eq!(unmerged(&dir), before);
++    assert_eq!(status_of(&session, PATH), FileStatus::Unresolved);
++}
+diff --git 1/crates/session/tests/open_and_load.rs 2/crates/session/tests/open_and_load.rs
+new file mode 100644
+index 0000000..55a985c
+--- /dev/null
++++ 2/crates/session/tests/open_and_load.rs
+@@ -0,0 +1,198 @@
++#![cfg(test)]
++
++use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok};
++use yamt_merge_core::{ChunkKind, Options, compute_chunks};
++use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
++
++const MODIFY_TS: &str = "a_modify.ts";
++const ADD_ADD: &str = "b_added.txt";
++const LOCAL_DELETED: &str = "c_local_deleted.txt";
++const REMOTE_DELETED: &str = "d_remote_deleted.txt";
++const BINARY: &str = "e_binary.bin";
++const LATIN1: &str = "f_latin1.txt";
++const CRLF: &str = "g_crlf.txt";
++
++const MODIFY_SIDES: [&str; 3] = [
++    "one\ntwo\nthree\n",
++    "one\nlocal\nthree\n",
++    "one\nremote\nthree\n",
++];
++
++const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = [
++    ConflictFile {
++        path: MODIFY_TS,
++        base: Some(MODIFY_SIDES[0].as_bytes()),
++        local: Some(MODIFY_SIDES[1].as_bytes()),
++        remote: Some(MODIFY_SIDES[2].as_bytes()),
++    },
++    ConflictFile {
++        path: ADD_ADD,
++        base: None,
++        local: Some(b"alpha added by local\n"),
++        remote: Some(b"bravo added by remote\n"),
++    },
++    ConflictFile {
++        path: LOCAL_DELETED,
++        base: Some(b"charlie\ndelta\n"),
++        local: None,
++        remote: Some(b"charlie\nchanged by remote\n"),
++    },
++    ConflictFile {
++        path: REMOTE_DELETED,
++        base: Some(b"echo\nfoxtrot\n"),
++        local: Some(b"echo\nchanged by local\n"),
++        remote: None,
++    },
++    ConflictFile {
++        path: BINARY,
++        base: Some(b"\0binary base"),
++        local: Some(b"\0binary local"),
++        remote: Some(b"\0binary remote"),
++    },
++    ConflictFile {
++        path: LATIN1,
++        base: Some(b"caf\xe9 base\n"),
++        local: Some(b"caf\xe9 local\n"),
++        remote: Some(b"caf\xe9 remote\n"),
++    },
++    ConflictFile {
++        path: CRLF,
++        base: Some(b"golf\r\nhotel\r\n"),
++        local: Some(b"golf\r\nlocal\r\n"),
++        remote: Some(b"golf\r\nremote\r\n"),
++    },
++];
++
++fn every_kind_of_conflict() -> TempDir {
++    conflict_repo(&EVERY_KIND_OF_CONFLICT).unwrap()
++}
++
++fn unmerged_paths_in_git_order(dir: &TempDir) -> Vec<String> {
++    let output = git_ok(dir.path(), &["ls-files", "-u", "-z"]).unwrap();
++    let mut paths: Vec<String> = Vec::new();
++    for record in output
++        .split(|&byte| byte == b'\0')
++        .filter(|r| !r.is_empty())
++    {
++        let tab = record.iter().position(|&byte| byte == b'\t').unwrap();
++        let path = String::from_utf8(record[tab + 1..].to_vec()).unwrap();
++        if paths.last() != Some(&path) {
++            paths.push(path);
++        }
++    }
++    paths
++}
++
++fn unsupported_error(session: &mut MergeSession, path: &str) -> UnsupportedReason {
++    let error = session.load(path).unwrap_err();
++    let Error::Unsupported {
++        path: error_path,
++        reason,
++    } = error
++    else {
++        panic!("expected Unsupported for {path}, got {error:?}");
++    };
++    assert_eq!(error_path, path);
++    reason
++}
++
++#[test]
++fn open_lists_each_conflicted_file_once_in_git_order_with_its_unsupported_reason() {
++    let dir = every_kind_of_conflict();
++
++    let session = MergeSession::open(dir.path()).unwrap();
++
++    let expected = [
++        (MODIFY_TS, None),
++        (ADD_ADD, None),
++        (LOCAL_DELETED, Some(UnsupportedReason::LocalDeleted)),
++        (REMOTE_DELETED, Some(UnsupportedReason::RemoteDeleted)),
++        (BINARY, Some(UnsupportedReason::Binary)),
++        (LATIN1, Some(UnsupportedReason::NonUtf8)),
++        (CRLF, None),
++    ]
++    .map(|(path, unsupported)| FileEntry {
++        path: path.to_owned(),
++        status: FileStatus::Unresolved,
++        unsupported,
++    });
++    let files = session.files();
++    assert_eq!(files, expected);
++    let listed: Vec<String> = files.into_iter().map(|file| file.path).collect();
++    assert_eq!(listed, unmerged_paths_in_git_order(&dir));
++    assert_eq!(session.remaining(), expected.len());
++}
++
++#[test]
++fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let data = session.load(MODIFY_TS).unwrap();
++
++    let [base, local, remote] = MODIFY_SIDES;
++    assert_eq!(data.path, MODIFY_TS);
++    assert_eq!(
++        [&data.base, &data.local, &data.remote],
++        [base, local, remote]
++    );
++    assert_eq!(data.language.as_deref(), Some("typescript"));
++    assert_eq!(data.eol, Eol::Lf);
++    assert_eq!(
++        data.chunks,
++        compute_chunks(base, local, remote, &Options::default())
++    );
++}
++
++#[test]
++fn load_add_add_has_empty_base_and_one_conflict_chunk() {
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let data = session.load(ADD_ADD).unwrap();
++
++    assert_eq!(data.base, "");
++    assert_eq!(data.language, None);
++    let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
++    assert_eq!(kinds, [ChunkKind::Conflict]);
++}
++
++#[test]
++fn load_refuses_deleted_binary_and_non_utf8_files_with_their_reason() {
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let cases = [
++        (LOCAL_DELETED, UnsupportedReason::LocalDeleted),
++        (REMOTE_DELETED, UnsupportedReason::RemoteDeleted),
++        (BINARY, UnsupportedReason::Binary),
++        (LATIN1, UnsupportedReason::NonUtf8),
++    ];
++    for (path, reason) in cases {
++        assert_eq!(unsupported_error(&mut session, path), reason);
++    }
++}
++
++#[test]
++fn load_refuses_a_side_over_eight_mib_as_too_large() {
++    const PATH: &str = "huge.txt";
++    const EIGHT_MIB: usize = 8 * 1024 * 1024;
++    let huge_local = "x".repeat(EIGHT_MIB) + "\n";
++    let dir = conflict_repo(&[ConflictFile {
++        path: PATH,
++        base: Some(b"base\n"),
++        local: Some(huge_local.as_bytes()),
++        remote: Some(b"remote\n"),
++    }])
++    .unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    assert_eq!(
++        session.files()[0].unsupported,
++        Some(UnsupportedReason::TooLarge)
++    );
++    assert_eq!(
++        unsupported_error(&mut session, PATH),
++        UnsupportedReason::TooLarge
++    );
++}
+diff --git i/Cargo.lock w/Cargo.lock
+index c2f3586..338ef75 100644
+--- i/Cargo.lock
++++ w/Cargo.lock
+@@ -523,6 +523,14 @@ dependencies = [
+  "yamt-session",
+ ]
+ 
++[[package]]
++name = "yamt-conflict-repo"
++version = "0.1.0"
++dependencies = [
++ "tempfile",
++ "thiserror",
++]
++
+ [[package]]
+ name = "yamt-gitio"
+ version = "0.1.0"
+@@ -530,6 +538,7 @@ dependencies = [
+  "tempfile",
+  "thiserror",
+  "tracing",
++ "yamt-conflict-repo",
+ ]
+ 
+ [[package]]
+@@ -546,6 +555,10 @@ dependencies = [
+ name = "yamt-session"
+ version = "0.1.0"
+ dependencies = [
++ "serde",
++ "specta",
++ "thiserror",
++ "yamt-conflict-repo",
+  "yamt-gitio",
+  "yamt-merge-core",
+ ]
+diff --git i/crates/gitio/tests/fixtures/mod.rs w/crates/gitio/tests/fixtures/mod.rs
+deleted file mode 100644
+index c1e957d..0000000
+--- i/crates/gitio/tests/fixtures/mod.rs
++++ /dev/null
+@@ -1,95 +0,0 @@
+-use std::fs;
+-use std::io::Write;
+-use std::path::Path;
+-use std::process::{Command, Output, Stdio};
+-
+-use tempfile::TempDir;
+-
+-fn isolated_git(dir: &Path) -> Command {
+-    let mut command = Command::new("git");
+-    command
+-        .current_dir(dir)
+-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+-        .env("GIT_CONFIG_NOSYSTEM", "1")
+-        .env("LC_ALL", "C")
+-        .args([
+-            "-c",
+-            "user.name=yamt test",
+-            "-c",
+-            "user.email=test@yamt.invalid",
+-        ])
+-        .args([
+-            "-c",
+-            "init.defaultBranch=main",
+-            "-c",
+-            "commit.gpgsign=false",
+-        ])
+-        .args(["-c", "core.autocrlf=false"]);
+-    command
+-}
+-
+-pub fn git(dir: &Path, args: &[&str]) -> Output {
+-    isolated_git(dir).args(args).output().unwrap()
+-}
+-
+-pub fn git_ok(dir: &Path, args: &[&str]) -> Vec<u8> {
+-    let output = git(dir, args);
+-    let stderr = String::from_utf8_lossy(&output.stderr);
+-    assert!(output.status.success(), "git {args:?} failed: {stderr}");
+-    output.stdout
+-}
+-
+-pub fn hash_object(dir: &Path, content: &[u8]) -> String {
+-    let mut child = isolated_git(dir)
+-        .args(["hash-object", "--stdin"])
+-        .stdin(Stdio::piped())
+-        .stdout(Stdio::piped())
+-        .spawn()
+-        .unwrap();
+-    child.stdin.take().unwrap().write_all(content).unwrap();
+-    let output = child.wait_with_output().unwrap();
+-    String::from_utf8(output.stdout)
+-        .unwrap()
+-        .trim_end()
+-        .to_owned()
+-}
+-
+-/// A repo whose `git merge` of branch `remote` into `local` conflicts on `path`.
+-/// `None` means the file does not exist on that side.
+-pub fn conflict_repo(
+-    path: &str,
+-    base: Option<&[u8]>,
+-    local: Option<&[u8]>,
+-    remote: Option<&[u8]>,
+-) -> TempDir {
+-    let dir = tempfile::tempdir().unwrap();
+-    let root = dir.path();
+-    git_ok(root, &["init", "--quiet"]);
+-    git_ok(root, &["config", "core.autocrlf", "false"]);
+-    commit_side(root, path, base, "base");
+-    git_ok(root, &["checkout", "--quiet", "-b", "local"]);
+-    commit_side(root, path, local, "local");
+-    git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"]);
+-    commit_side(root, path, remote, "remote");
+-    git_ok(root, &["checkout", "--quiet", "local"]);
+-    let merge = git(root, &["merge", "--quiet", "remote"]);
+-    assert!(!merge.status.success(), "merge was expected to conflict");
+-    dir
+-}
+-
+-fn commit_side(root: &Path, path: &str, content: Option<&[u8]>, message: &str) {
+-    let file = root.join(path);
+-    match content {
+-        Some(bytes) => {
+-            fs::create_dir_all(file.parent().unwrap()).unwrap();
+-            fs::write(&file, bytes).unwrap();
+-            git_ok(root, &["add", "--", path]);
+-        }
+-        None => {
+-            if file.exists() {
+-                git_ok(root, &["rm", "--quiet", "--", path]);
+-            }
+-        }
+-    }
+-    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message]);
+-}
+diff --git i/crates/gitio/tests/repo.rs w/crates/gitio/tests/repo.rs
+index b43376b..a3a7923 100644
+--- i/crates/gitio/tests/repo.rs
++++ w/crates/gitio/tests/repo.rs
+@@ -1,11 +1,9 @@
+ #![cfg(test)]
+ 
+-mod fixtures;
+-
+ use std::fs;
+ use std::path::Path;
+ 
+-use fixtures::{conflict_repo, git_ok, hash_object};
++use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok, hash_object};
+ use yamt_gitio::{Error, Oid, Repo, Stage, StageEntry};
+ 
+ const FILE: &str = "cart.ts";
+@@ -18,9 +16,24 @@ fn stages_of(entries: &[StageEntry]) -> Vec<Stage> {
+     entries.iter().map(|entry| entry.stage).collect()
+ }
+ 
++fn one_file_repo(
++    path: &str,
++    base: Option<&[u8]>,
++    local: Option<&[u8]>,
++    remote: Option<&[u8]>,
++) -> TempDir {
++    let file = ConflictFile {
++        path,
++        base,
++        local,
++        remote,
++    };
++    conflict_repo(&[file]).unwrap()
++}
++
+ #[test]
+ fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+ 
+     let entries = repo.unmerged().unwrap();
+@@ -30,13 +43,13 @@ fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
+     for (entry, text) in entries.iter().zip([BASE, LOCAL, REMOTE]) {
+         assert_eq!(entry.path, Path::new(FILE));
+         assert_eq!(entry.mode, REGULAR_FILE_MODE);
+-        assert_eq!(entry.oid.as_str(), hash_object(dir.path(), text));
++        assert_eq!(entry.oid.as_str(), hash_object(dir.path(), text).unwrap());
+     }
+ }
+ 
+ #[test]
+ fn add_add_conflict_has_only_local_and_remote_stages() {
+-    let dir = conflict_repo(FILE, None, Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, None, Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+ 
+     let entries = repo.unmerged().unwrap();
+@@ -46,7 +59,7 @@ fn add_add_conflict_has_only_local_and_remote_stages() {
+ 
+ #[test]
+ fn delete_modify_conflict_has_base_and_the_modifying_side() {
+-    let dir = conflict_repo(FILE, Some(BASE), None, Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), None, Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+ 
+     let entries = repo.unmerged().unwrap();
+@@ -57,7 +70,7 @@ fn delete_modify_conflict_has_base_and_the_modifying_side() {
+ #[test]
+ fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
+     let sides: [&[u8]; 3] = [b"a\r\nb\r\nc", b"a\r\nlocal\r\nc", b"a\r\nremote\r\nc"];
+-    let dir = conflict_repo(FILE, Some(sides[0]), Some(sides[1]), Some(sides[2]));
++    let dir = one_file_repo(FILE, Some(sides[0]), Some(sides[1]), Some(sides[2]));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let mut reader = repo.blob_reader().unwrap();
+ 
+@@ -69,7 +82,7 @@ fn crlf_blobs_without_final_newline_read_back_byte_for_byte() {
+ #[test]
+ fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
+     const ROUNDS: usize = 3;
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let entries = repo.unmerged().unwrap();
+     let mut reader = repo.blob_reader().unwrap();
+@@ -83,7 +96,7 @@ fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
+     let error = reader.read(&missing).unwrap_err();
+     assert!(matches!(error, Error::BlobMissing { oid } if oid == missing));
+     assert_eq!(reader.read(&entries[0].oid).unwrap(), BASE);
+-    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"])).unwrap();
++    let head = String::from_utf8(git_ok(dir.path(), &["rev-parse", "HEAD"]).unwrap()).unwrap();
+     let commit = Oid::parse(head.trim_end()).unwrap();
+     let error = reader.read(&commit).unwrap_err();
+     assert!(
+@@ -100,7 +113,7 @@ fn one_reader_serves_many_reads_and_survives_missing_and_non_blob_oids() {
+ }
+ 
+ fn assert_add_then_restore_round_trips(base: Option<&[u8]>, path: &str) {
+-    let dir = conflict_repo(path, base, Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(path, base, Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let captured = repo.unmerged().unwrap();
+     assert!(captured.iter().all(|entry| entry.path == Path::new(path)));
+@@ -129,7 +142,7 @@ fn path_with_space_and_non_ascii_round_trips_through_restore() {
+ 
+ #[test]
+ fn restore_stages_replaces_every_existing_stage_of_the_path() {
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let without_base: Vec<StageEntry> = repo.unmerged().unwrap().into_iter().skip(1).collect();
+ 
+@@ -140,7 +153,7 @@ fn restore_stages_replaces_every_existing_stage_of_the_path() {
+ 
+ #[test]
+ fn checkout_merge_after_restore_rewrites_conflict_markers() {
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let captured = repo.unmerged().unwrap();
+     repo.add(Path::new(FILE)).unwrap();
+@@ -156,7 +169,7 @@ fn checkout_merge_after_restore_rewrites_conflict_markers() {
+ #[test]
+ fn failing_git_call_reports_argv_status_and_stderr() {
+     const NO_SUCH_FILE: &str = "no-such-file.txt";
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+ 
+     let error = repo.checkout_merge(Path::new(NO_SUCH_FILE)).unwrap_err();
+@@ -177,7 +190,7 @@ fn failing_git_call_reports_argv_status_and_stderr() {
+ 
+ #[test]
+ fn discover_from_a_subdirectory_returns_the_top_level() {
+-    let dir = conflict_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let nested = dir.path().join("nested/deeper");
+     fs::create_dir_all(&nested).unwrap();
+ 
+diff --git i/crates/session/src/lib.rs w/crates/session/src/lib.rs
+index 7ab60d3..14c72f0 100644
+--- i/crates/session/src/lib.rs
++++ w/crates/session/src/lib.rs
+@@ -1,2 +1,28 @@
+ //! Merge session state machine: the only crate that combines git I/O with the chunk model.
+ #![forbid(unsafe_code)]
++
++mod decode;
++mod session;
++
++pub use decode::{Eol, UnsupportedReason};
++pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession};
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error(transparent)]
++    Git(#[from] yamt_gitio::Error),
++    #[error("{path} is not a conflicted file of this merge")]
++    UnknownPath { path: String },
++    #[error("{path} cannot be merged as text: {reason:?}")]
++    Unsupported {
++        path: String,
++        reason: UnsupportedReason,
++    },
++    #[error("cannot write {path}: {source}")]
++    WriteFailed {
++        path: String,
++        source: std::io::Error,
++    },
++}
++
++pub type Result<T, E = Error> = std::result::Result<T, E>;

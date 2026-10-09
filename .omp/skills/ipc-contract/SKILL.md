@@ -28,7 +28,7 @@ from them and committed.
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
   method, map the error. No logic in `src-tauri`.
 - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
-  reaches the webview (`FileEntry.supported = false` with a reason instead).
+  reaches the webview (`FileEntry.unsupported` carries the reason instead).
 
 ## Commands (v0)
 

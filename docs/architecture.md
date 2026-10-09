@@ -218,11 +218,11 @@ impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ### 3.3 `session` — the state machine
 
 ```rust
-pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private */, blobs: BlobReader }
+pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages + decoded content */ }
 
 pub enum Eol { Lf, CrLf, Mixed }
 pub enum FileStatus { Unresolved, Resolved }
-pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDeleted }
+pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDeleted, Symlink, Submodule }
 
 // DTOs (serde::Serialize + specta::Type), see §4
 pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
@@ -230,11 +230,11 @@ pub struct FileMergeData { pub path: String, pub base: String /* "" for add/add 
                            pub remote: String, pub eol: Eol, pub language: Option<String>, pub chunks: Vec<Chunk> }
 
 impl MergeSession {
-    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages now
+    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages and decodes its blobs now
     pub fn files(&self) -> Vec<FileEntry>;
-    pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // blobs + decode + compute_chunks
+    pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // decoded texts + compute_chunks
     pub fn finish(&mut self, path: &str, result: &str) -> Result<()>; // write worktree bytes as given, git add, Resolved
-    pub fn reset(&mut self, path: &str) -> Result<()>;               // restore_stages + checkout -m, Unresolved
+    pub fn reset(&mut self, path: &str) -> Result<()>;               // restore_stages (+ checkout -m when both sides exist), Unresolved
     pub fn remaining(&self) -> usize;
 }
 ```
@@ -284,7 +284,7 @@ export type LineRange<L> = { start: L; len: number };     // L is a branded numb
 export type ChunkKind = "LocalOnly" | "RemoteOnly" | "BothSame" | "Conflict";
 export type Chunk = { id: ChunkId; kind: ChunkKind; base: LineRange<BaseLine>; local: LineRange<LocalLine>; remote: LineRange<RemoteLine> };
 export type Eol = "Lf" | "CrLf" | "Mixed";
-export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted";
+export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
 export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; language: string | null; chunks: Chunk[] };
 export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: string): Promise<FileMergeData>; … };

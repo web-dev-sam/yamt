@@ -524,12 +524,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yamt-conflict-repo"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "yamt-gitio"
 version = "0.1.0"
 dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "yamt-conflict-repo",
 ]
 
 [[package]]
@@ -546,6 +555,10 @@ dependencies = [
 name = "yamt-session"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "specta",
+ "thiserror",
+ "yamt-conflict-repo",
  "yamt-gitio",
  "yamt-merge-core",
 ]

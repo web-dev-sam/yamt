@@ -1,5 +1,5 @@
 {
-  "M0S2Session": {
+  "M0S2SessionR1": {
     "owned": ["crates/session/**", "crates/conflict-repo/**", "crates/gitio/tests/**"],
     "readonly": [
       "docs/**",
