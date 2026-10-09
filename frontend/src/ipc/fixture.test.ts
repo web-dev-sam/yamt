@@ -1,0 +1,181 @@
+import { afterEach, expect, test, vi } from "vitest";
+
+import { createFixtureSource } from "./fixture";
+import { createLog, type Log, type LogEntry } from "./log";
+
+const COMMITTED: Readonly<Record<string, { path: string; chunks: unknown[] }>> = import.meta.glob(
+  "../../fixtures/golden/*.json",
+  { eager: true, import: "default" },
+);
+
+function quietLog(): { log: Log; entries: LogEntry[] } {
+  vi.spyOn(console, "info").mockImplementation(() => undefined);
+  const entries: LogEntry[] = [];
+  const log = createLog((entry) => {
+    entries.push(entry);
+  });
+  return { log, entries };
+}
+
+function record(path: string, chunk: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    path,
+    base: "b\n",
+    local: "l\n",
+    remote: "r\n",
+    eol: "Lf",
+    language: "typescript",
+    chunks: [
+      {
+        id: 0,
+        kind: "Conflict",
+        base: { start: 0, len: 0 },
+        local: { start: 0, len: 1 },
+        remote: { start: 0, len: 1 },
+        ...chunk,
+      },
+    ],
+  };
+}
+
+function withoutChunks(json: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(json).filter(([key]) => key !== "chunks"));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+test("the committed fixtures list 10 files, sorted by path, all unresolved", async () => {
+  const source = createFixtureSource(quietLog().log);
+
+  const files = await source.listFiles();
+
+  expect(files.map((file) => file.path)).toEqual([
+    "language-tools-script-setup.ts",
+    "nuxt-island-test.ts",
+    "tanstack-query-persist-provider.tsx",
+    "tanstack-query-svelte-base-query.ts",
+    "vite-modulepreload-polyfill.ts",
+    "vue-core-compiler-von.ts",
+    "vue-core-playground-app.vue",
+    "vue-core-script-context.ts",
+    "vue-router-playground-app.vue",
+    "vueuse-use-magic-keys.ts",
+  ]);
+  for (const file of files) {
+    expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
+  }
+});
+
+test("each committed fixture loads with its JSON's chunk count", async () => {
+  const source = createFixtureSource(quietLog().log);
+  const committed = Object.values(COMMITTED);
+  expect(committed).toHaveLength(10);
+
+  for (const json of committed) {
+    const data = await source.loadFile(json.path);
+    expect(data.chunks).toHaveLength(json.chunks.length);
+  }
+});
+
+test("a conflict of vueuse-use-magic-keys.ts arrives intact", async () => {
+  const source = createFixtureSource(quietLog().log);
+
+  const data = await source.loadFile("vueuse-use-magic-keys.ts");
+
+  expect(data.chunks[8]).toEqual({
+    id: 8,
+    kind: "Conflict",
+    base: { start: 128, len: 10 },
+    local: { start: 128, len: 8 },
+    remote: { start: 140, len: 14 },
+  });
+  expect(data.local.split("\n")[128]).toBe(
+    "  useEventListener(target, 'keydown', (e: KeyboardEvent) => {",
+  );
+  expect(data.remote.split("\n")[140]).toBe("  if (target) {");
+  expect(data).toMatchObject({
+    path: "vueuse-use-magic-keys.ts",
+    eol: "Lf",
+    language: "typescript",
+  });
+});
+
+test("in-memory records are listed sorted by path and keep every field", async () => {
+  const source = createFixtureSource(quietLog().log, {
+    "z.json": record("z.ts"),
+    "a.json": { ...record("a.ts"), language: null },
+  });
+
+  expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+  expect(await source.loadFile("a.ts")).toEqual({ ...record("a.ts"), language: null });
+});
+
+test.each([
+  [
+    "an unknown chunk kind",
+    record("x.ts", { kind: "Mystery" }),
+    "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
+  ],
+  ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
+  ["missing chunks", withoutChunks(record("x.ts")), 'Invalid key: Expected "chunks"'],
+  ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
+])("a record with %s is rejected naming the file", (_case, json, detail) => {
+  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+    /^fixture bad\.json: /,
+  );
+  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(detail);
+});
+
+test.each([
+  ["a negative base line", { base: { start: -1, len: 0 } }, "chunks[0].base.start", -1],
+  ["a negative local line", { local: { start: -1, len: 1 } }, "chunks[0].local.start", -1],
+  ["a negative remote line", { remote: { start: -2, len: 1 } }, "chunks[0].remote.start", -2],
+  ["a non-integer local line", { local: { start: 0.5, len: 1 } }, "chunks[0].local.start", 0.5],
+  [
+    "an unsafe remote line",
+    { remote: { start: 2 ** 53, len: 1 } },
+    "chunks[0].remote.start",
+    2 ** 53,
+  ],
+  ["a non-integer len", { base: { start: 0, len: 1.5 } }, "chunks[0].base.len", 1.5],
+  ["a negative len", { remote: { start: 0, len: -1 } }, "chunks[0].remote.len", -1],
+  ["a negative chunk id", { id: -1 }, "chunks[0].id", -1],
+  ["a non-integer chunk id", { id: 0.25 }, "chunks[0].id", 0.25],
+])("a record with %s is rejected naming the file and field", (_case, chunk, field, value) => {
+  expect(() => createFixtureSource(quietLog().log, { "bad.json": record("x.ts", chunk) })).toThrow(
+    `fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`,
+  );
+});
+
+test("an unknown path is rejected naming it", async () => {
+  const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts") });
+
+  await expect(source.loadFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
+  await expect(source.finishFile("nope.ts", "x")).rejects.toThrow("no fixture for nope.ts");
+  await expect(source.resetFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
+});
+
+test("finish marks the file resolved and logs its text once; reset undoes it", async () => {
+  const { log, entries } = quietLog();
+  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
+
+  const finished = await source.finishFile("a.ts", "merged\n");
+
+  expect(finished).toEqual([
+    { path: "a.ts", status: "Resolved", unsupported: null },
+    { path: "b.ts", status: "Unresolved", unsupported: null },
+  ]);
+  expect(entries).toEqual([
+    { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
+  ]);
+
+  expect(await source.resetFile("a.ts")).toEqual(record("a.ts"));
+  expect((await source.listFiles())[0]).toEqual({
+    path: "a.ts",
+    status: "Unresolved",
+    unsupported: null,
+  });
+  expect(entries).toHaveLength(1);
+});

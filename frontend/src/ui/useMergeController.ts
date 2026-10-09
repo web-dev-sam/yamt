@@ -2,8 +2,6 @@ import { onScopeDispose, toRef, watch, type MaybeRefOrGetter, type ShallowRef } 
 
 import { MergeController, type MergeTexts } from "../editor";
 
-export type { MergeTexts } from "../editor";
-
 export function useMergeController(
   texts: MaybeRefOrGetter<MergeTexts | null>,
   hosts: {

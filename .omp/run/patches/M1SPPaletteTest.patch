@@ -1,0 +1,266 @@
+diff --git c/frontend/scripts/palette.test.ts i/frontend/scripts/palette.test.ts
+new file mode 100644
+index 0000000..bdb2e3d
+--- /dev/null
++++ i/frontend/scripts/palette.test.ts
+@@ -0,0 +1,148 @@
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { dirname, join } from "node:path";
++import { fileURLToPath } from "node:url";
++
++import { expect, test } from "vitest";
++
++import { findPaletteViolations, readPaletteSources } from "./palette";
++
++const FRONTEND_ROOT = fileURLToPath(new URL("..", import.meta.url));
++
++const PALETTE = {
++  path: "src/style.css",
++  text: `@theme static {\n  --color-*: initial;\n  --color-editor: #1e1f22;\n}\n`,
++};
++
++test("the real source tree has no palette violations", () => {
++  expect(findPaletteViolations(readPaletteSources(FRONTEND_ROOT))).toEqual([]);
++});
++
++test("readPaletteSources reports literals on disk outside @theme and skips src/ipc/bindings.ts", () => {
++  const root = mkdtempSync(join(tmpdir(), "yamt-palette-"));
++  try {
++    const probes: Record<string, string> = {
++      "src/style.css": `@theme static {\n  --color-editor: #1e1f22;\n}\n\n@layer base {\n  body {\n    color: #ffffff;\n  }\n}\n`,
++      "src/ui/Probe.vue": `<template>\n  <div class="bg-[#123456]"></div>\n</template>\n`,
++      "src/ipc/bindings.ts": `export const shade = "#abcdef";\n`,
++    };
++    for (const [path, text] of Object.entries(probes)) {
++      mkdirSync(dirname(join(root, path)), { recursive: true });
++      writeFileSync(join(root, path), text);
++    }
++
++    expect(findPaletteViolations(readPaletteSources(root))).toEqual([
++      { rule: "literal", file: "src/style.css", line: 7, match: "#ffffff" },
++      { rule: "literal", file: "src/ui/Probe.vue", line: 2, match: "#123456" },
++    ]);
++  } finally {
++    rmSync(root, { recursive: true, force: true });
++  }
++});
++
++test("rgb() in a ts theme object is a literal", () => {
++  const file = {
++    path: "src/editor/theme.ts",
++    text: `export const theme = {\n  color: "rgb(0 0 0)",\n};\n`,
++  };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "literal", file: "src/editor/theme.ts", line: 2, match: "rgb(" },
++  ]);
++});
++
++test("an upper-case OKLCH( is a literal", () => {
++  const file = { path: "src/ui/tint.ts", text: `export const tint = "OKLCH(0.5 0.1 200)";\n` };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "literal", file: "src/ui/tint.ts", line: 1, match: "OKLCH(" },
++  ]);
++});
++
++test("an 8-digit hex colour is a literal", () => {
++  const file = {
++    path: "src/ui/App.vue",
++    text: `<template>\n</template>\n<style>\np { color: #1e1f22cc; }\n</style>\n`,
++  };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "literal", file: "src/ui/App.vue", line: 4, match: "#1e1f22cc" },
++  ]);
++});
++
++test("var(--color-nope) in a ts file is an unknown token", () => {
++  const file = { path: "src/editor/pane.ts", text: `\nconst caret = "var(--color-nope)";\n` };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "unknown-token", file: "src/editor/pane.ts", line: 2, match: "--color-nope" },
++  ]);
++});
++
++test("--color-nope in a vue style block is an unknown token", () => {
++  const file = {
++    path: "src/ui/FileList.vue",
++    text: `<template>\n  <ul></ul>\n</template>\n<style>\nul {\n  --color-nope: var(--color-editor);\n}\n</style>\n`,
++  };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "unknown-token", file: "src/ui/FileList.vue", line: 6, match: "--color-nope" },
++  ]);
++});
++
++test("var(--color-nope) inside @theme is an unknown token", () => {
++  const palette = {
++    path: "src/style.css",
++    text: `@theme {\n  --color-editor: #1e1f22;\n  --color-fg: var(--color-nope);\n}\n`,
++  };
++
++  expect(findPaletteViolations([palette])).toEqual([
++    { rule: "unknown-token", file: "src/style.css", line: 3, match: "--color-nope" },
++  ]);
++});
++
++test("a hex colour after the @theme block closes is a literal", () => {
++  const palette = {
++    path: "src/style.css",
++    text: `@theme inline {\n  --color-editor: #1e1f22;\n  @keyframes x { to { opacity: 0; } }\n}\nhtml { color: #fff; }\n`,
++  };
++
++  expect(findPaletteViolations([palette])).toEqual([
++    { rule: "literal", file: "src/style.css", line: 5, match: "#fff" },
++  ]);
++});
++
++test("an @theme block outside src/style.css does not exempt literals or define tokens", () => {
++  const file = {
++    path: "src/ui/extra.css",
++    text: `@theme {\n  --color-extra: #abcd;\n}\n`,
++  };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([
++    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-extra" },
++    { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#abcd" },
++  ]);
++});
++
++test("hex digits of other lengths or followed by a word character are not colours", () => {
++  const file = {
++    path: "src/ui/ids.ts",
++    text: `export const ids = ["#12", "#12345", "#1234567", "#abc-x", "#fffg"];\n`,
++  };
++
++  expect(findPaletteViolations([PALETTE, file])).toEqual([]);
++});
++
++test("palette-conforming sources violate nothing", () => {
++  const files = [
++    PALETTE,
++    { path: "src/main.ts", text: `document.querySelector("#app");\n` },
++    { path: "src/editor/pane.ts", text: `const bg = "var(--color-editor)";\n` },
++    {
++      path: "src/ui/App.vue",
++      text: `<style>\np { color: color-mix(in srgb, var(--color-editor) 30%, transparent); }\n</style>\n`,
++    },
++    { path: "src/ui/notes.ts", text: `export const ref = "issue#123";\n` },
++  ];
++
++  expect(findPaletteViolations(files)).toEqual([]);
++});
+diff --git c/frontend/scripts/palette.ts i/frontend/scripts/palette.ts
+new file mode 100644
+index 0000000..8a8bf92
+--- /dev/null
++++ i/frontend/scripts/palette.ts
+@@ -0,0 +1,106 @@
++import { globSync, readFileSync } from "node:fs";
++import { join } from "node:path";
++
++import type { SourceFile } from "./fences";
++
++export type PaletteViolation = {
++  readonly rule: "literal" | "unknown-token";
++  readonly file: string;
++  readonly line: number;
++  readonly match: string;
++};
++
++type Span = { readonly start: number; readonly end: number };
++
++type Found = PaletteViolation & { readonly offset: number };
++
++const PALETTE_FILE = "src/style.css";
++const SKIPPED_FILE = "src/ipc/bindings.ts";
++const THEME_OPENER = /@theme(?:\s+(?:static|inline))?\s*\{/g;
++const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
++const TOKEN_USE = /--color-([\w-]+)/g;
++const VAR_OPENER = /var\(\s*$/;
++const HEX_COLOUR =
++  /(?<![A-Za-z0-9])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![A-Za-z0-9-])/g;
++const FUNCTIONAL_COLOUR = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/gi;
++
++function blockEnd(text: string, afterOpener: number): number {
++  let depth = 1;
++  for (let index = afterOpener; index < text.length; index += 1) {
++    if (text[index] === "{") depth += 1;
++    if (text[index] === "}") depth -= 1;
++    if (depth === 0) return index + 1;
++  }
++  return text.length;
++}
++
++function themeSpans(file: SourceFile): Span[] {
++  if (file.path !== PALETTE_FILE) return [];
++  return [...file.text.matchAll(THEME_OPENER)].map((opener) => {
++    const afterOpener = opener.index + opener[0].length;
++    return { start: opener.index, end: blockEnd(file.text, afterOpener) };
++  });
++}
++
++function definedTokens(files: readonly SourceFile[]): Set<string> {
++  const names = new Set<string>();
++  for (const file of files) {
++    for (const span of themeSpans(file)) {
++      for (const definition of file.text.slice(span.start, span.end).matchAll(TOKEN_DEFINITION)) {
++        names.add(definition[1] ?? "");
++      }
++    }
++  }
++  return names;
++}
++
++function lineAt(text: string, offset: number): number {
++  return text.slice(0, offset).split("\n").length;
++}
++
++function literalFindings(file: SourceFile, theme: readonly Span[]): Found[] {
++  const matches = [...file.text.matchAll(HEX_COLOUR), ...file.text.matchAll(FUNCTIONAL_COLOUR)];
++  return matches
++    .filter((match) => !theme.some(({ start, end }) => match.index >= start && match.index < end))
++    .map((match) => ({
++      rule: "literal",
++      file: file.path,
++      line: lineAt(file.text, match.index),
++      match: match[0],
++      offset: match.index,
++    }));
++}
++
++function tokenFindings(file: SourceFile, theme: readonly Span[], defined: Set<string>): Found[] {
++  return [...file.text.matchAll(TOKEN_USE)]
++    .filter((use) => !defined.has(use[1] ?? ""))
++    .filter(
++      (use) =>
++        !theme.some(({ start, end }) => use.index >= start && use.index < end) ||
++        VAR_OPENER.test(file.text.slice(0, use.index)),
++    )
++    .map((use) => ({
++      rule: "unknown-token",
++      file: file.path,
++      line: lineAt(file.text, use.index),
++      match: use[0],
++      offset: use.index,
++    }));
++}
++
++export function findPaletteViolations(files: readonly SourceFile[]): PaletteViolation[] {
++  const defined = definedTokens(files);
++  return files.flatMap((file) => {
++    const theme = themeSpans(file);
++    return [...literalFindings(file, theme), ...tokenFindings(file, theme, defined)]
++      .toSorted((left, right) => left.offset - right.offset)
++      .map(({ rule, file: path, line, match }) => ({ rule, file: path, line, match }));
++  });
++}
++
++export function readPaletteSources(frontendRoot: string): SourceFile[] {
++  return globSync(["src/**/*.ts", "src/**/*.vue", "src/**/*.css"], { cwd: frontendRoot })
++    .filter((path) => path !== SKIPPED_FILE)
++    .toSorted()
++    .map((path) => ({ path, text: readFileSync(join(frontendRoot, path), "utf8") }));
++}

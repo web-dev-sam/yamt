@@ -10,7 +10,7 @@ export interface LogEntry {
 
 type LogForward = (entry: LogEntry) => Promise<unknown> | void;
 
-type Log = Record<LogLevel, (event: string, fields?: LogFields) => void>;
+export type Log = Record<LogLevel, (event: string, fields?: LogFields) => void>;
 
 function formatFields(fields: LogFields): string {
   const parts = Object.entries(fields).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);

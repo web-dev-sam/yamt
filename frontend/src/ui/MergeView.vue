@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { useTemplateRef } from "vue";
 
-import { useMergeController, type MergeTexts } from "./useMergeController";
+import type { FileMergeData } from "../ipc";
+import { useMergeController } from "./useMergeController";
 
-const props = defineProps<{ texts: MergeTexts }>();
+const props = defineProps<{ data: FileMergeData | null }>();
 
 const left = useTemplateRef<HTMLDivElement>("left");
 const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
-useMergeController(() => props.texts, { left, center, right });
+useMergeController(() => props.data, { left, center, right });
 </script>
 
 <template>
