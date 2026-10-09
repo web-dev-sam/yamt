@@ -1,4 +1,16 @@
 {
+  "RetroM0Engine": {
+    "owned": [".omp/skills/**", ".omp/hooks/**", ".omp/GUARDRAILS.md"],
+    "readonly": [
+      "docs/**",
+      ".omp/run/**",
+      "crates/**",
+      "frontend/**",
+      "scripts/**",
+      "justfile",
+      "Cargo.toml"
+    ]
+  },
   "M1S0IpcFixtures": {
     "owned": [
       "src-tauri/src/**",
