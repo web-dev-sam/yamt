@@ -11,8 +11,9 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
 ## State
 
 - [CM1] Chunk positions and apply status live in **one** `StateField<ChunkSet>` on the center
-  pane. `update(value, tr)` maps `from` with `tr.changes.mapPos(from, -1)` and `to` with
-  `mapPos(to, 1)` so a chunk neither swallows adjacent insertions nor loses its own edge.
+  pane. A range is `from` = start of its first line, `to` = start of the line after (an insertion
+  point is `from === to`); both map with `tr.changes.mapPos(pos, -1)`, so typing on the chunk's
+  lines stays inside and typing on the next line stays outside (corrected in 1.1; ratify at Gate D).
 - [CM2] Status changes only through a `StateEffect<{ id: ChunkId; status }>`; the effect is
   registered with `invertedEffects` from `@codemirror/commands` so **undo restores status
   together with text**. Test: apply → undo ⇒ status back to `pending`.

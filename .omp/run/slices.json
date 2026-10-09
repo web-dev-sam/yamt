@@ -1,38 +1,25 @@
 {
-  "M1S1ChunkColours": {
-    "owned": [
-      "frontend/src/editor/**",
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/style.css"
-    ],
+  "M1S1ChunkColoursR1": {
+    "owned": ["frontend/src/editor/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
+      "frontend/src/ipc/**",
+      "frontend/src/ui/**",
+      "frontend/src/style.css",
       "frontend/fixtures/**",
-      "frontend/scripts/**",
-      "frontend/vite.config.ts"
+      "frontend/scripts/**"
     ]
   },
-  "M1SHHermeticTests": {
-    "owned": [
-      "crates/conflict-repo/**",
-      "crates/cli/tests/merge_file.rs",
-      "crates/cli/src/golden.rs",
-      "crates/cli/tests/commands.rs"
-    ],
+  "M1SHHermeticTestsR1": {
+    "owned": ["crates/conflict-repo/src/lib.rs", "crates/cli/tests/commands.rs"],
     "readonly": [
       "docs/**",
       ".omp/**",
+      "crates/cli/src/**",
       "crates/gitio/**",
       "crates/session/**",
-      "crates/merge-core/**",
-      "scripts/**",
-      "Cargo.toml",
-      "justfile"
+      "crates/merge-core/**"
     ]
   }
 }

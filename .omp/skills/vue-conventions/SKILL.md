@@ -35,8 +35,8 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   inside `useMergeController`, not a `ref`.
 - [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts)` is the
   **only** place `ui/` imports from `editor/`. It is an adaptable composable: `toRef(data)`
-  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef`. Today:
-  `MergeTexts` stand-in, no `summary` (`FileMergeData` lands with `ipc/domain.ts`).
+  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef` (with the
+  apply slice; today no `summary`).
 
 ## Library use
 
@@ -46,8 +46,8 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   writable ones, never for callbacks; normalise with `toValue`/`toRef` inside effects.
 - [VU14] Tailwind v4 classes in templates, sorted by `oxfmt` (`sortTailwindcss`). The palette is
   the `@theme` block in `src/style.css` (stock colours reset, plan §2 row 24). The CodeMirror theme
-  reads its `--color-*` variables; decoration classes (`.chunk-local`, …) live once in
-  `editor/theme.css` via `@apply` of those tokens. Detector: `scripts/palette.test.ts` (VU17).
+  reads its `--color-*` variables; decoration classes (`.chunk-inserted`, …) live once in
+  `editor/theme.css` as plain `var(--color-chunk-*)`. Detector: `scripts/palette.test.ts` (VU17).
 
 ## Splitting
 

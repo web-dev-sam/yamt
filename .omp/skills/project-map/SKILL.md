@@ -31,7 +31,7 @@ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed 
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts;
                     fixture.ts (the M1 source: valibot over fixtures/golden/*.json); bindings.ts (GENERATED); log.ts; TauriChunkSource is M2
 frontend/src/model  pure TS shared by editor/ and connectors/; exists only while both consume it (planned)
-frontend/src/editor CodeMirror 6 integration; public surface = MergeController (index.ts: MergeTexts stand-in, destroy()); internal/pane.ts createPane; framework-free (engine.test.ts WebKit probe)
+frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts) + destroy(); internal/: pane, chunkField, decorations, tone, lineStart; theme.css; framework-free (engine.browser.test.ts WebKit probe; other tests in `node`)
 frontend/src/connectors  pure band geometry → SVG path strings; no DOM (planned)
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select), MergeToolbar (inert), MergeView, useMergeController (only ../editor importer), store.ts singleton; planned: WarningBanner
 frontend/src/main.ts     creates the fixture source and the store, loads the file list, mounts App; `VITE_CHUNK_SOURCE` picks a source from M2
@@ -64,16 +64,16 @@ ipc ◄── model ◄── editor ◄── ui ◄── main.ts
 
 ## State ownership (vision 2)
 
-| state                                               | owner                                                                                                 |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| document text (all three panes)                     | CodeMirror `EditorState`                                                                              |
-| chunk current positions (center)                    | `editor/chunkField` StateField, remapped via `tr.changes.mapPos`                                      |
-| chunk apply status                                  | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
-| left/right decorations                              | computed once per file; docs are immutable                                                            |
-| scroll positions                                    | DOM, driven by `editor/scrollSync`                                                                    |
-| connector geometry                                  | derived per frame, never stored                                                                       |
-| file list, active file, summary counts, busy, error | `ui/store.ts` singleton via `useAppStore()`                                                           |
-| captured index stages (for reset)                   | `session::FileState.stages`, captured at `open()`                                                     |
+| state                                               | owner                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| document text (all three panes)                     | CodeMirror `EditorState`                                                                                     |
+| chunk current positions (center)                    | `editor/chunkField` StateField, `mapPos(pos, -1)` both ends; restored on undo by an `invertedEffects` effect |
+| chunk apply status                                  | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)        |
+| left/right decorations                              | computed once per file; docs are immutable                                                                   |
+| scroll positions                                    | DOM, driven by `editor/scrollSync`                                                                           |
+| connector geometry                                  | derived per frame, never stored                                                                              |
+| file list, active file, summary counts, busy, error | `ui/store.ts` singleton via `useAppStore()`                                                                  |
+| captured index stages (for reset)                   | `session::FileState.stages`, captured at `open()`                                                            |
 
 Vue state never holds an `EditorView`, a position, or document text.
 
