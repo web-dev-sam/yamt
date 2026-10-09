@@ -16,6 +16,32 @@
         }
       },
       "presentation": { "panel": "dedicated", "reveal": "always" }
+    },
+    {
+      "label": "golden: build conflict repo",
+      "type": "shell",
+      "command": "just golden-repo ${input:goldenCase} /tmp/yamt-${input:goldenCase}",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "always" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "goldenCase",
+      "type": "pickString",
+      "description": "Real conflict to rebuild in /tmp for PhpStorm",
+      "options": [
+        "language-tools-script-setup",
+        "nuxt-island-test",
+        "tanstack-query-persist-provider",
+        "tanstack-query-svelte-base-query",
+        "vite-modulepreload-polyfill",
+        "vue-core-compiler-von",
+        "vue-core-playground-app",
+        "vue-core-script-context",
+        "vue-router-playground-app",
+        "vueuse-use-magic-keys"
+      ]
     }
   ]
 }
