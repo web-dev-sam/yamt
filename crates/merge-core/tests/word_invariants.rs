@@ -121,7 +121,10 @@ fn check_side(
     }
     for pair in ranges.windows(2) {
         let ((line, start, len), (next_line, next_start, _)) = (pair[0], pair[1]);
-        prop_assert!(line < next_line || start + len < next_start, "{ranges:?}");
+        prop_assert!(
+            line < next_line || (line == next_line && start + len < next_start),
+            "{ranges:?}"
+        );
     }
     Ok(())
 }

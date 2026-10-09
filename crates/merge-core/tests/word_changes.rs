@@ -88,6 +88,21 @@ fn a_changed_line_break_alone_yields_no_range() {
 }
 
 #[test]
+fn a_space_between_a_changed_word_and_a_changed_line_break_stays_unmarked() {
+    let (_, words) = only_chunk_words("x old \n", "x new \r\n", "x old \n");
+    assert_eq!(words, expected(&[(0, 2, 3)], &[(0, 2, 3)], &[]));
+}
+
+#[test]
+fn words_are_diffed_only_inside_changed_lines_so_an_equal_line_stays_unmarked() {
+    let base = "import { it } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\n";
+    let local = "import { it, vi } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\nimport { flush } from '@vue/test-utils'\n";
+    let (kind, words) = only_chunk_words(base, local, base);
+    assert_eq!(kind, ChunkKind::LocalOnly);
+    assert_eq!(words, expected(&[(0, 11, 4), (2, 0, 39)], &[], &[]));
+}
+
+#[test]
 fn a_conflict_on_different_words_marks_each_side_and_their_union_in_base() {
     let (kind, words) = only_chunk_words("let a = 1;\n", "let b = 1;\n", "let a = 2;\n");
     assert_eq!(kind, ChunkKind::Conflict);

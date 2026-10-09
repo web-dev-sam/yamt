@@ -96,14 +96,9 @@
           "len": 23
         },
         {
-          "line": 2,
-          "start": 44,
-          "len": 6
-        },
-        {
           "line": 3,
           "start": 0,
-          "len": 41
+          "len": 47
         }
       ],
       "base": [
@@ -116,13 +111,8 @@
       "remote": [
         {
           "line": 0,
-          "start": 9,
-          "len": 29
-        },
-        {
-          "line": 1,
           "start": 0,
-          "len": 9
+          "len": 38
         },
         {
           "line": 2,
@@ -889,7 +879,7 @@
         {
           "line": 99,
           "start": 0,
-          "len": 4
+          "len": 6
         },
         {
           "line": 100,
@@ -940,11 +930,6 @@
           "line": 112,
           "start": 0,
           "len": 4
-        },
-        {
-          "line": 113,
-          "start": 0,
-          "len": 2
         },
         {
           "line": 116,
