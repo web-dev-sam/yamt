@@ -189,8 +189,13 @@ Invariants (property-tested with `proptest`):
 - reconstruction: base with each chunk's base range replaced by its local lines `==` local,
   byte for byte; same for remote (proves the side-range mapping of step 4).
 
-Not in `merge-core` v0: intra-line word diff. Add later as `pub fn word_diff(a:&str, b:&str)`
-returning token ranges; it stays pure.
+**Word changes** (plan §2 #30): `pub fn word_changes(base, local, remote, chunks: &[Chunk]) -> Vec<WordChanges>`,
+one per chunk in order. Each side's chunk text is diffed against the chunk's base text over tokens
+(word runs, whitespace runs, line breaks, single other characters; imara-diff histogram); the
+changed tokens become `InlineRange<L> { line: L, start: u32, len: u32 }` — one line each, line break
+never inside, columns in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions).
+`WordChanges { chunk, local, base, remote }`; `base` is the union of base text changed by either
+side; a side whose chunk text or base text is empty gets none (the block tint says it all). Pure.
 
 ### 3.2 `gitio` — subprocess only
 
@@ -232,7 +237,8 @@ pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDele
 // DTOs (serde::Serialize + specta::Type), see §4
 pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
 pub struct FileMergeData { pub path: String, pub base: String /* "" for add/add */, pub local: String,
-                           pub remote: String, pub eol: Eol, pub chunks: Vec<Chunk> }
+                           pub remote: String, pub eol: Eol, pub chunks: Vec<Chunk>,
+                           pub word_changes: Vec<WordChanges> /* one per chunk, same order */ }
 
 impl MergeSession {
     pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages and decodes its blobs now
@@ -299,7 +305,9 @@ export type Chunk = { id: ChunkId; kind: ChunkKind; base: LineRange<BaseLine>; l
 export type Eol = "Lf" | "CrLf" | "Mixed";
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
-export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; chunks: Chunk[] };
+export type InlineRange<L> = { line: L; start: number; len: number };   // UTF-16 columns, one line
+export type WordChanges = { chunk: ChunkId; local: InlineRange<LocalLine>[]; base: InlineRange<BaseLine>[]; remote: InlineRange<RemoteLine>[] };
+export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; chunks: Chunk[]; word_changes: WordChanges[] };
 export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: string): Promise<FileMergeData>; … };
 ```
 
