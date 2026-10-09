@@ -1,5 +1,5 @@
-import { history, undo } from "@codemirror/commands";
-import { EditorState, type StateField } from "@codemirror/state";
+import { history, redo, undo } from "@codemirror/commands";
+import { EditorState, type StateCommand, type StateField } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type FileMergeData } from "../../ipc";
@@ -54,6 +54,17 @@ function edit(current: Center, from: number, to: number, insert: string): Center
   return { ...current, state: current.state.update({ changes: { from, to, insert } }).state };
 }
 
+function run(command: StateCommand, current: Center): Center {
+  let next = current;
+  command({
+    state: current.state,
+    dispatch: (tr) => {
+      next = { ...current, state: tr.state };
+    },
+  });
+  return next;
+}
+
 test("a real fixture's chunks start at line starts; an empty base range is a point", async () => {
   const data = await createFixtureSource(log).loadFile("vite-modulepreload-polyfill.ts");
   const { state, field } = center(data);
@@ -86,6 +97,12 @@ test("a chunk ending on the last line ends at the document end", async () => {
     [2, 3],
     [3, 3],
   ]);
+});
+
+test("typing at the end of an unterminated last line stays inside its chunk", async () => {
+  const typed = edit(center(await synthetic("a\nb", [{ start: 1, len: 1 }])), 3, 3, "\nc");
+
+  expect(ranges(typed)).toEqual([[2, 5]]);
 });
 
 test("an edit before a chunk shifts it", async () => {
@@ -121,13 +138,7 @@ test("text typed at an empty chunk's point lands after it", async () => {
 
 test("deleting all of a chunk's lines collapses it; undo restores the range", async () => {
   const deleted = edit(await mappedCenter(), 5, 13, "");
-  let restored = deleted;
-  undo({
-    state: deleted.state,
-    dispatch: (tr) => {
-      restored = { ...deleted, state: tr.state };
-    },
-  });
+  const restored = run(undo, deleted);
 
   expect(ranges(deleted)).toEqual([
     [5, 5],
@@ -137,5 +148,24 @@ test("deleting all of a chunk's lines collapses it; undo restores the range", as
   expect(ranges(restored)).toEqual([
     [5, 13],
     [19, 19],
+  ]);
+});
+
+test("one undo restores a merged history event; redo re-applies it", async () => {
+  const deleted = edit(await mappedCenter(), 5, 13, "");
+  const typed = edit(deleted, 5, 5, "x");
+
+  const undone = run(undo, typed);
+  const redone = run(redo, undone);
+
+  expect(undone.state.doc.toString()).toBe(MAPPED_BASE);
+  expect(ranges(undone)).toEqual([
+    [5, 13],
+    [19, 19],
+  ]);
+  expect(redone.state.doc.toString()).toBe("zero\nxthree\nfour\n");
+  expect(ranges(redone)).toEqual([
+    [5, 5],
+    [12, 12],
   ]);
 });

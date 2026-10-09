@@ -181,7 +181,7 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
-    const IN_HOSTILE_ENVIRONMENT: &str = "tests::ordinary_conflict_in_the_inherited_environment";
+    const CHILD_TEST: &str = "tests::ordinary_conflict_in_the_inherited_environment";
 
     #[test]
     #[ignore = "run by hostile_user_git_environment_does_not_reach_the_conflict_repo"]
@@ -211,8 +211,9 @@ mod tests {
         fs::write(git_dir.join("attributes"), "* -merge\n").unwrap();
         fs::write(git_dir.join("ignore"), "*\n").unwrap();
         let child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", IN_HOSTILE_ENVIRONMENT, "--ignored"])
+            .args(["--exact", CHILD_TEST, "--ignored"])
             .env("XDG_CONFIG_HOME", xdg_config_home.path())
+            .env("GIT_CONFIG_PARAMETERS", "'merge.conflictstyle'='diff3'")
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
             .env("GIT_CONFIG_VALUE_0", "zdiff3")

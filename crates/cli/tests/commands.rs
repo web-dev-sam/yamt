@@ -175,12 +175,10 @@ fn golden_run_reports_an_unreadable_expected_json_as_a_read_error_not_as_missing
     let run = yamt_cli(&["golden", "run", path(root.path())]);
     assert_eq!(run.code, 1);
     assert_eq!(run.stdout, "");
+    let os_error = fs::read(&expected).unwrap_err();
     assert_eq!(
         run.stderr,
-        format!(
-            "yamt-cli: cannot read {}: Is a directory (os error 21)\n",
-            path(&expected)
-        )
+        format!("yamt-cli: cannot read {}: {os_error}\n", path(&expected))
     );
 }
 

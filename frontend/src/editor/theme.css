@@ -14,14 +14,36 @@
   --chunk-tone: var(--color-chunk-conflict);
 }
 
+.cm-editor .cm-line.chunk-marker-inserted {
+  --chunk-marker-tone: var(--color-chunk-inserted);
+}
+
+.cm-editor .cm-line.chunk-marker-modified {
+  --chunk-marker-tone: var(--color-chunk-modified);
+}
+
+.cm-editor .cm-line.chunk-marker-deleted {
+  --chunk-marker-tone: var(--color-chunk-deleted);
+}
+
+.cm-editor .cm-line.chunk-marker-conflict {
+  --chunk-marker-tone: var(--color-chunk-conflict);
+}
+
 .cm-editor .cm-line.chunk-band {
   background-color: var(--chunk-tone);
 }
 
-.cm-editor .cm-line.chunk-gap-above {
-  box-shadow: inset 0 2px 0 var(--chunk-tone);
+.cm-editor .cm-line.chunk-point-above {
+  box-shadow: inset 0 2px 0 var(--chunk-marker-tone);
 }
 
-.cm-editor .cm-line.chunk-gap-below {
-  box-shadow: inset 0 -2px 0 var(--chunk-tone);
+.cm-editor .cm-line.chunk-point-below {
+  box-shadow: inset 0 -2px 0 var(--chunk-marker-tone);
+}
+
+.cm-editor .cm-line.chunk-point-above.chunk-point-below {
+  box-shadow:
+    inset 0 2px 0 var(--chunk-marker-tone),
+    inset 0 -2px 0 var(--chunk-marker-tone);
 }

@@ -2,7 +2,7 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log } from "../../ipc";
+import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 
@@ -34,6 +34,31 @@ function runsOf(state: EditorState): string[] {
   );
 }
 
+async function synthetic(
+  texts: { base: string; local: string; remote: string },
+  chunks: readonly {
+    kind: Chunk["kind"];
+    base: [start: number, len: number];
+    local: [start: number, len: number];
+    remote: [start: number, len: number];
+  }[],
+): Promise<FileMergeData> {
+  const record = {
+    path: "synthetic.ts",
+    ...texts,
+    eol: "Lf",
+    language: null,
+    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
+      id,
+      kind,
+      base: { start: base[0], len: base[1] },
+      local: { start: local[0], len: local[1] },
+      remote: { start: remote[0], len: remote[1] },
+    })),
+  };
+  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+}
+
 test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
@@ -56,8 +81,8 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
     "3 chunk-modified chunk-band",
     "22 chunk-modified chunk-band",
     "54 chunk-modified chunk-band",
-    "87 chunk-inserted chunk-gap-above",
-    "97 chunk-inserted chunk-gap-above",
+    "87 chunk-marker-inserted chunk-point-above",
+    "97 chunk-marker-inserted chunk-point-above",
     "103-107 chunk-modified chunk-band",
     "110-111 chunk-modified chunk-band",
     "115 chunk-modified chunk-band",
@@ -82,32 +107,49 @@ test("center colours follow their text when a line is typed above them", async (
 });
 
 test("an empty range at the end of an unterminated last line is drawn below that line", async () => {
-  const record = {
-    path: "synthetic.ts",
-    base: "a\nb",
-    local: "a\nb\nc",
-    remote: "a\nb",
-    eol: "Lf",
-    language: null,
-    chunks: [
-      {
-        id: 0,
-        kind: "LocalOnly",
-        base: { start: 2, len: 0 },
-        local: { start: 2, len: 1 },
-        remote: { start: 2, len: 0 },
-      },
-    ],
-  };
-  const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
-    "synthetic.ts",
-  );
+  const data = await synthetic({ base: "a\nb", local: "a\nb\nc", remote: "a\nb" }, [
+    { kind: "LocalOnly", base: [2, 0], local: [2, 1], remote: [2, 0] },
+  ]);
   const field = chunkField(data.chunks);
 
   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
-    "2 chunk-inserted chunk-gap-below",
+    "2 chunk-marker-inserted chunk-point-below",
   ]);
   expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
     "3 chunk-inserted chunk-band",
   ]);
+});
+
+test("a marker on another chunk's band line keeps its own tone class", async () => {
+  const data = await synthetic({ base: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
+    { kind: "Conflict", base: [0, 1], local: [0, 1], remote: [0, 1] },
+    { kind: "LocalOnly", base: [1, 0], local: [1, 1], remote: [1, 0] },
+  ]);
+  const field = chunkField(data.chunks);
+  const state = EditorState.create({
+    doc: data.base,
+    extensions: [field, centerDecorations(field)],
+  });
+
+  const joined = state.update({ changes: { from: 1, to: 2 } });
+
+  expect(runsOf(joined.state)).toEqual([
+    "1 chunk-conflict chunk-band",
+    "1 chunk-marker-inserted chunk-point-below",
+  ]);
+});
+
+test("a RemoteOnly deletion: center band and right marker are deleted, left is bare", async () => {
+  const data = await synthetic({ base: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
+    { kind: "RemoteOnly", base: [0, 2], local: [0, 2], remote: [0, 0] },
+  ]);
+  const field = chunkField(data.chunks);
+
+  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+    "1-2 chunk-deleted chunk-band",
+  ]);
+  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
+    "1 chunk-marker-deleted chunk-point-above",
+  ]);
+  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([]);
 });

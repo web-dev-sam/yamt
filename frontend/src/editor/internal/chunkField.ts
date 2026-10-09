@@ -1,9 +1,9 @@
 import { invertedEffects } from "@codemirror/commands";
-import { StateEffect, StateField, type ChangeDesc } from "@codemirror/state";
+import { StateEffect, StateField, type ChangeDesc, type Text } from "@codemirror/state";
 
 import type { Chunk } from "../../ipc";
-import { lineStart } from "./lineStart";
-import { CHANGED_SIDES, chunkTone, type Tone } from "./tone";
+import { lineSpan } from "./lineSpan";
+import { chunkTone, type Tone } from "./tone";
 
 type DocPos = number & { readonly __brand: "DocPos" };
 
@@ -26,34 +26,47 @@ function toDocPos(n: number): DocPos {
   return n;
 }
 
-function mapSpans(spans: readonly ChunkSpan[], changes: ChangeDesc): readonly ChunkSpan[] {
+function endsMidLine(span: ChunkSpan, doc: Text | null): boolean {
+  return doc !== null && span.from < span.to && doc.lineAt(span.to).from !== span.to;
+}
+
+function mapSpans(
+  spans: readonly ChunkSpan[],
+  changes: ChangeDesc,
+  doc: Text | null,
+): readonly ChunkSpan[] {
   return spans.map((span) => ({
     ...span,
     from: toDocPos(changes.mapPos(span.from, -1)),
-    to: toDocPos(changes.mapPos(span.to, -1)),
+    to: toDocPos(changes.mapPos(span.to, endsMidLine(span, doc) ? 1 : -1)),
   }));
 }
 
-const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({ map: mapSpans });
+const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
+  map: (spans, changes) => mapSpans(spans, changes, null),
+});
 
 export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
   return StateField.define<readonly ChunkSpan[]>({
     create: (state) =>
-      chunks.map((chunk) => ({
-        id: chunk.id,
-        kind: chunk.kind,
-        tone: chunkTone(chunk, CHANGED_SIDES[chunk.kind][0]),
-        from: toDocPos(lineStart(state.doc, chunk.base.start)),
-        to: toDocPos(lineStart(state.doc, chunk.base.start + chunk.base.len)),
-      })),
+      chunks.map((chunk) => {
+        const { from, to } = lineSpan(state.doc, chunk.base);
+        return {
+          id: chunk.id,
+          kind: chunk.kind,
+          tone: chunkTone(chunk, "center"),
+          from: toDocPos(from),
+          to: toDocPos(to),
+        };
+      }),
     update(spans, tr) {
-      let next = tr.docChanged ? mapSpans(spans, tr.changes) : spans;
-      for (const effect of tr.effects) {
-        if (effect.is(restoreSpans)) {
-          next = effect.value;
-        }
+      // History appends a merged event's older inverted effects after the newer ones
+      // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
+      const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
+      if (restore !== undefined) {
+        return restore.value;
       }
-      return next;
+      return tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc) : spans;
     },
     provide: (field) =>
       invertedEffects.of((tr) =>

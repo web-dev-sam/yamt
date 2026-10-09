@@ -65,3 +65,11 @@ test("a conflict is conflict on both sides, even where one side is empty", async
   expect(chunkTone(chunk, "local")).toBe("conflict");
   expect(chunkTone(chunk, "remote")).toBe("conflict");
 });
+
+test("the center takes its tone from remote for RemoteOnly and from local otherwise", async () => {
+  const remoteOnly = await chunkWith("RemoteOnly", { base: 2, local: 2, remote: 0 });
+  const localOnly = await chunkWith("LocalOnly", { base: 2, local: 0, remote: 2 });
+
+  expect(chunkTone(remoteOnly, "center")).toBe("deleted");
+  expect(chunkTone(localOnly, "center")).toBe("deleted");
+});

@@ -1,5 +1,5 @@
 {
-  "M1S1ChunkColoursR1": {
+  "M1S1ChunkColoursR2": {
     "owned": ["frontend/src/editor/**"],
     "readonly": [
       "docs/**",
@@ -9,17 +9,6 @@
       "frontend/src/style.css",
       "frontend/fixtures/**",
       "frontend/scripts/**"
-    ]
-  },
-  "M1SHHermeticTestsR1": {
-    "owned": ["crates/conflict-repo/src/lib.rs", "crates/cli/tests/commands.rs"],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "crates/cli/src/**",
-      "crates/gitio/**",
-      "crates/session/**",
-      "crates/merge-core/**"
     ]
   }
 }

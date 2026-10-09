@@ -1,23 +1,22 @@
 import type { Chunk } from "../../ipc";
 
 export type Tone = "inserted" | "modified" | "deleted" | "conflict";
-export type Side = "local" | "remote";
 
-export const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly [Side, ...Side[]]>> = {
-  LocalOnly: ["local"],
-  RemoteOnly: ["remote"],
-  BothSame: ["local", "remote"],
-  Conflict: ["local", "remote"],
-};
+function sideOf(chunk: Chunk, pane: "local" | "center" | "remote"): "local" | "remote" {
+  if (pane !== "center") {
+    return pane;
+  }
+  return chunk.kind === "RemoteOnly" ? "remote" : "local";
+}
 
-export function chunkTone(chunk: Chunk, side: Side): Tone {
+export function chunkTone(chunk: Chunk, pane: "local" | "center" | "remote"): Tone {
   if (chunk.kind === "Conflict") {
     return "conflict";
   }
   if (chunk.base.len === 0) {
     return "inserted";
   }
-  if (chunk[side].len === 0) {
+  if (chunk[sideOf(chunk, pane)].len === 0) {
     return "deleted";
   }
   return "modified";

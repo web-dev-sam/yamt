@@ -1,0 +1,524 @@
+diff --git c/frontend/src/editor/index.ts i/frontend/src/editor/index.ts
+index c378376..f4e3d53 100644
+--- c/frontend/src/editor/index.ts
++++ i/frontend/src/editor/index.ts
+@@ -16,28 +16,28 @@ export class MergeController {
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts) {
+     const { language, chunks } = data;
+-    const spans = chunkField(chunks);
++    const field = chunkField(chunks);
+     this.#views = [
+       createPane({
+         kind: "side",
+         doc: data.local,
+         language,
+         parent: hosts.left,
+-        chunks: sideDecorations(chunks, "local"),
++        decorations: sideDecorations(chunks, "local"),
+       }),
+       createPane({
+         kind: "center",
+         doc: data.base,
+         language,
+         parent: hosts.center,
+-        chunks: [spans, centerDecorations(spans)],
++        decorations: [field, centerDecorations(field)],
+       }),
+       createPane({
+         kind: "side",
+         doc: data.remote,
+         language,
+         parent: hosts.right,
+-        chunks: sideDecorations(chunks, "remote"),
++        decorations: sideDecorations(chunks, "remote"),
+       }),
+     ];
+   }
+diff --git c/frontend/src/editor/internal/chunkField.test.ts i/frontend/src/editor/internal/chunkField.test.ts
+index 523daab..21adb87 100644
+--- c/frontend/src/editor/internal/chunkField.test.ts
++++ i/frontend/src/editor/internal/chunkField.test.ts
+@@ -1,5 +1,5 @@
+-import { history, undo } from "@codemirror/commands";
+-import { EditorState, type StateField } from "@codemirror/state";
++import { history, redo, undo } from "@codemirror/commands";
++import { EditorState, type StateCommand, type StateField } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+ import { createFixtureSource, log, type FileMergeData } from "../../ipc";
+@@ -54,6 +54,17 @@ function edit(current: Center, from: number, to: number, insert: string): Center
+   return { ...current, state: current.state.update({ changes: { from, to, insert } }).state };
+ }
+ 
++function run(command: StateCommand, current: Center): Center {
++  let next = current;
++  command({
++    state: current.state,
++    dispatch: (tr) => {
++      next = { ...current, state: tr.state };
++    },
++  });
++  return next;
++}
++
+ test("a real fixture's chunks start at line starts; an empty base range is a point", async () => {
+   const data = await createFixtureSource(log).loadFile("vite-modulepreload-polyfill.ts");
+   const { state, field } = center(data);
+@@ -88,6 +99,12 @@ test("a chunk ending on the last line ends at the document end", async () => {
+   ]);
+ });
+ 
++test("typing at the end of an unterminated last line stays inside its chunk", async () => {
++  const typed = edit(center(await synthetic("a\nb", [{ start: 1, len: 1 }])), 3, 3, "\nc");
++
++  expect(ranges(typed)).toEqual([[2, 5]]);
++});
++
+ test("an edit before a chunk shifts it", async () => {
+   const shifted = edit(await mappedCenter(), 0, 0, "new\n");
+ 
+@@ -121,13 +138,7 @@ test("text typed at an empty chunk's point lands after it", async () => {
+ 
+ test("deleting all of a chunk's lines collapses it; undo restores the range", async () => {
+   const deleted = edit(await mappedCenter(), 5, 13, "");
+-  let restored = deleted;
+-  undo({
+-    state: deleted.state,
+-    dispatch: (tr) => {
+-      restored = { ...deleted, state: tr.state };
+-    },
+-  });
++  const restored = run(undo, deleted);
+ 
+   expect(ranges(deleted)).toEqual([
+     [5, 5],
+@@ -139,3 +150,22 @@ test("deleting all of a chunk's lines collapses it; undo restores the range", as
+     [19, 19],
+   ]);
+ });
++
++test("one undo restores a merged history event; redo re-applies it", async () => {
++  const deleted = edit(await mappedCenter(), 5, 13, "");
++  const typed = edit(deleted, 5, 5, "x");
++
++  const undone = run(undo, typed);
++  const redone = run(redo, undone);
++
++  expect(undone.state.doc.toString()).toBe(MAPPED_BASE);
++  expect(ranges(undone)).toEqual([
++    [5, 13],
++    [19, 19],
++  ]);
++  expect(redone.state.doc.toString()).toBe("zero\nxthree\nfour\n");
++  expect(ranges(redone)).toEqual([
++    [5, 5],
++    [12, 12],
++  ]);
++});
+diff --git c/frontend/src/editor/internal/chunkField.ts i/frontend/src/editor/internal/chunkField.ts
+index c7678d7..6c9ef1c 100644
+--- c/frontend/src/editor/internal/chunkField.ts
++++ i/frontend/src/editor/internal/chunkField.ts
+@@ -1,9 +1,9 @@
+ import { invertedEffects } from "@codemirror/commands";
+-import { StateEffect, StateField, type ChangeDesc } from "@codemirror/state";
++import { StateEffect, StateField, type ChangeDesc, type Text } from "@codemirror/state";
+ 
+ import type { Chunk } from "../../ipc";
+-import { lineStart } from "./lineStart";
+-import { CHANGED_SIDES, chunkTone, type Tone } from "./tone";
++import { lineSpan } from "./lineSpan";
++import { chunkTone, type Tone } from "./tone";
+ 
+ type DocPos = number & { readonly __brand: "DocPos" };
+ 
+@@ -26,34 +26,47 @@ function toDocPos(n: number): DocPos {
+   return n;
+ }
+ 
+-function mapSpans(spans: readonly ChunkSpan[], changes: ChangeDesc): readonly ChunkSpan[] {
++function endsMidLine(span: ChunkSpan, doc: Text | null): boolean {
++  return doc !== null && span.from < span.to && doc.lineAt(span.to).from !== span.to;
++}
++
++function mapSpans(
++  spans: readonly ChunkSpan[],
++  changes: ChangeDesc,
++  doc: Text | null,
++): readonly ChunkSpan[] {
+   return spans.map((span) => ({
+     ...span,
+     from: toDocPos(changes.mapPos(span.from, -1)),
+-    to: toDocPos(changes.mapPos(span.to, -1)),
++    to: toDocPos(changes.mapPos(span.to, endsMidLine(span, doc) ? 1 : -1)),
+   }));
+ }
+ 
+-const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({ map: mapSpans });
++const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
++  map: (spans, changes) => mapSpans(spans, changes, null),
++});
+ 
+ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
+   return StateField.define<readonly ChunkSpan[]>({
+     create: (state) =>
+-      chunks.map((chunk) => ({
+-        id: chunk.id,
+-        kind: chunk.kind,
+-        tone: chunkTone(chunk, CHANGED_SIDES[chunk.kind][0]),
+-        from: toDocPos(lineStart(state.doc, chunk.base.start)),
+-        to: toDocPos(lineStart(state.doc, chunk.base.start + chunk.base.len)),
+-      })),
++      chunks.map((chunk) => {
++        const { from, to } = lineSpan(state.doc, chunk.base);
++        return {
++          id: chunk.id,
++          kind: chunk.kind,
++          tone: chunkTone(chunk, "center"),
++          from: toDocPos(from),
++          to: toDocPos(to),
++        };
++      }),
+     update(spans, tr) {
+-      let next = tr.docChanged ? mapSpans(spans, tr.changes) : spans;
+-      for (const effect of tr.effects) {
+-        if (effect.is(restoreSpans)) {
+-          next = effect.value;
+-        }
++      // History appends a merged event's older inverted effects after the newer ones
++      // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
++      const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
++      if (restore !== undefined) {
++        return restore.value;
+       }
+-      return next;
++      return tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc) : spans;
+     },
+     provide: (field) =>
+       invertedEffects.of((tr) =>
+diff --git c/frontend/src/editor/internal/decorations.test.ts i/frontend/src/editor/internal/decorations.test.ts
+index 8ff73d9..f2f7344 100644
+--- c/frontend/src/editor/internal/decorations.test.ts
++++ i/frontend/src/editor/internal/decorations.test.ts
+@@ -2,7 +2,7 @@ import { EditorState, type Extension } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log } from "../../ipc";
++import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+ 
+@@ -34,6 +34,31 @@ function runsOf(state: EditorState): string[] {
+   );
+ }
+ 
++async function synthetic(
++  texts: { base: string; local: string; remote: string },
++  chunks: readonly {
++    kind: Chunk["kind"];
++    base: [start: number, len: number];
++    local: [start: number, len: number];
++    remote: [start: number, len: number];
++  }[],
++): Promise<FileMergeData> {
++  const record = {
++    path: "synthetic.ts",
++    ...texts,
++    eol: "Lf",
++    language: null,
++    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
++      id,
++      kind,
++      base: { start: base[0], len: base[1] },
++      local: { start: local[0], len: local[1] },
++      remote: { start: remote[0], len: remote[1] },
++    })),
++  };
++  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++}
++
+ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
+   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+@@ -56,8 +81,8 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+     "3 chunk-modified chunk-band",
+     "22 chunk-modified chunk-band",
+     "54 chunk-modified chunk-band",
+-    "87 chunk-inserted chunk-gap-above",
+-    "97 chunk-inserted chunk-gap-above",
++    "87 chunk-marker-inserted chunk-point-above",
++    "97 chunk-marker-inserted chunk-point-above",
+     "103-107 chunk-modified chunk-band",
+     "110-111 chunk-modified chunk-band",
+     "115 chunk-modified chunk-band",
+@@ -82,32 +107,49 @@ test("center colours follow their text when a line is typed above them", async (
+ });
+ 
+ test("an empty range at the end of an unterminated last line is drawn below that line", async () => {
+-  const record = {
+-    path: "synthetic.ts",
+-    base: "a\nb",
+-    local: "a\nb\nc",
+-    remote: "a\nb",
+-    eol: "Lf",
+-    language: null,
+-    chunks: [
+-      {
+-        id: 0,
+-        kind: "LocalOnly",
+-        base: { start: 2, len: 0 },
+-        local: { start: 2, len: 1 },
+-        remote: { start: 2, len: 0 },
+-      },
+-    ],
+-  };
+-  const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
+-    "synthetic.ts",
+-  );
++  const data = await synthetic({ base: "a\nb", local: "a\nb\nc", remote: "a\nb" }, [
++    { kind: "LocalOnly", base: [2, 0], local: [2, 1], remote: [2, 0] },
++  ]);
+   const field = chunkField(data.chunks);
+ 
+   expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+-    "2 chunk-inserted chunk-gap-below",
++    "2 chunk-marker-inserted chunk-point-below",
+   ]);
+   expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([
+     "3 chunk-inserted chunk-band",
+   ]);
+ });
++
++test("a marker on another chunk's band line keeps its own tone class", async () => {
++  const data = await synthetic({ base: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
++    { kind: "Conflict", base: [0, 1], local: [0, 1], remote: [0, 1] },
++    { kind: "LocalOnly", base: [1, 0], local: [1, 1], remote: [1, 0] },
++  ]);
++  const field = chunkField(data.chunks);
++  const state = EditorState.create({
++    doc: data.base,
++    extensions: [field, centerDecorations(field)],
++  });
++
++  const joined = state.update({ changes: { from: 1, to: 2 } });
++
++  expect(runsOf(joined.state)).toEqual([
++    "1 chunk-conflict chunk-band",
++    "1 chunk-marker-inserted chunk-point-below",
++  ]);
++});
++
++test("a RemoteOnly deletion: center band and right marker are deleted, left is bare", async () => {
++  const data = await synthetic({ base: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
++    { kind: "RemoteOnly", base: [0, 2], local: [0, 2], remote: [0, 0] },
++  ]);
++  const field = chunkField(data.chunks);
++
++  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
++    "1-2 chunk-deleted chunk-band",
++  ]);
++  expect(decoratedRuns(data.remote, sideDecorations(data.chunks, "remote"))).toEqual([
++    "1 chunk-marker-deleted chunk-point-above",
++  ]);
++  expect(decoratedRuns(data.local, sideDecorations(data.chunks, "local"))).toEqual([]);
++});
+diff --git c/frontend/src/editor/internal/decorations.ts i/frontend/src/editor/internal/decorations.ts
+index cbe09be..0e8f9d1 100644
+--- c/frontend/src/editor/internal/decorations.ts
++++ i/frontend/src/editor/internal/decorations.ts
+@@ -4,8 +4,17 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+ 
+ import type { Chunk } from "../../ipc";
+ import type { ChunkSpan } from "./chunkField";
+-import { lineStart } from "./lineStart";
+-import { CHANGED_SIDES, chunkTone, type Side, type Tone } from "./tone";
++import { lineSpan } from "./lineSpan";
++import { chunkTone, type Tone } from "./tone";
++
++type Side = "local" | "remote";
++
++const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
++  LocalOnly: ["local"],
++  RemoteOnly: ["remote"],
++  BothSame: ["local", "remote"],
++  Conflict: ["local", "remote"],
++};
+ 
+ type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+ 
+@@ -14,8 +23,8 @@ function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
+   for (const { from, to, tone } of bands) {
+     let line = doc.lineAt(from);
+     if (from === to) {
+-      const edge = line.from === from ? "chunk-gap-above" : "chunk-gap-below";
+-      builder.add(line.from, line.from, Decoration.line({ class: `chunk-${tone} ${edge}` }));
++      const edge = line.from === from ? "chunk-point-above" : "chunk-point-below";
++      builder.add(line.from, line.from, Decoration.line({ class: `chunk-marker-${tone} ${edge}` }));
+       continue;
+     }
+     const band = Decoration.line({ class: `chunk-${tone} chunk-band` });
+@@ -34,11 +43,7 @@ export function sideDecorations(chunks: readonly Chunk[], side: Side): Extension
+       state.doc,
+       chunks
+         .filter((chunk) => CHANGED_SIDES[chunk.kind].includes(side))
+-        .map((chunk) => ({
+-          from: lineStart(state.doc, chunk[side].start),
+-          to: lineStart(state.doc, chunk[side].start + chunk[side].len),
+-          tone: chunkTone(chunk, side),
+-        })),
++        .map((chunk) => ({ ...lineSpan(state.doc, chunk[side]), tone: chunkTone(chunk, side) })),
+     ),
+   );
+ }
+diff --git c/frontend/src/editor/internal/lineSpan.ts i/frontend/src/editor/internal/lineSpan.ts
+new file mode 100644
+index 0000000..ff097eb
+--- /dev/null
++++ i/frontend/src/editor/internal/lineSpan.ts
+@@ -0,0 +1,14 @@
++import type { Text } from "@codemirror/state";
++
++import type { Chunk } from "../../ipc";
++
++export function lineSpan(
++  doc: Text,
++  range: Chunk["base"] | Chunk["local"] | Chunk["remote"],
++): { from: number; to: number } {
++  const end = range.start + range.len;
++  return {
++    from: range.start < doc.lines ? doc.line(range.start + 1).from : doc.length,
++    to: end < doc.lines ? doc.line(end + 1).from : doc.length,
++  };
++}
+diff --git c/frontend/src/editor/internal/lineStart.ts i/frontend/src/editor/internal/lineStart.ts
+deleted file mode 100644
+index 431dd00..0000000
+--- c/frontend/src/editor/internal/lineStart.ts
++++ /dev/null
+@@ -1,5 +0,0 @@
+-import type { Text } from "@codemirror/state";
+-
+-export function lineStart(doc: Text, line: number): number {
+-  return line < doc.lines ? doc.line(line + 1).from : doc.length;
+-}
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index 95db432..530dd91 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -92,7 +92,7 @@ export function createPane(pane: {
+   doc: string;
+   language: string | null;
+   parent: HTMLElement;
+-  chunks: Extension;
++  decorations: Extension;
+ }): EditorView {
+   const languageExtension =
+     pane.language !== null && Object.hasOwn(LANGUAGES, pane.language)
+@@ -107,7 +107,7 @@ export function createPane(pane: {
+       syntaxHighlighting(paletteHighlight),
+       languageExtension?.() ?? [],
+       kindExtensions(pane.kind),
+-      pane.chunks,
++      pane.decorations,
+     ],
+   });
+   return new EditorView({ state, parent: pane.parent });
+diff --git c/frontend/src/editor/internal/tone.test.ts i/frontend/src/editor/internal/tone.test.ts
+index 1c4c31c..b86b3a2 100644
+--- c/frontend/src/editor/internal/tone.test.ts
++++ i/frontend/src/editor/internal/tone.test.ts
+@@ -65,3 +65,11 @@ test("a conflict is conflict on both sides, even where one side is empty", async
+   expect(chunkTone(chunk, "local")).toBe("conflict");
+   expect(chunkTone(chunk, "remote")).toBe("conflict");
+ });
++
++test("the center takes its tone from remote for RemoteOnly and from local otherwise", async () => {
++  const remoteOnly = await chunkWith("RemoteOnly", { base: 2, local: 2, remote: 0 });
++  const localOnly = await chunkWith("LocalOnly", { base: 2, local: 0, remote: 2 });
++
++  expect(chunkTone(remoteOnly, "center")).toBe("deleted");
++  expect(chunkTone(localOnly, "center")).toBe("deleted");
++});
+diff --git c/frontend/src/editor/internal/tone.ts i/frontend/src/editor/internal/tone.ts
+index 11efdd9..ae86c62 100644
+--- c/frontend/src/editor/internal/tone.ts
++++ i/frontend/src/editor/internal/tone.ts
+@@ -1,23 +1,22 @@
+ import type { Chunk } from "../../ipc";
+ 
+ export type Tone = "inserted" | "modified" | "deleted" | "conflict";
+-export type Side = "local" | "remote";
+ 
+-export const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly [Side, ...Side[]]>> = {
+-  LocalOnly: ["local"],
+-  RemoteOnly: ["remote"],
+-  BothSame: ["local", "remote"],
+-  Conflict: ["local", "remote"],
+-};
++function sideOf(chunk: Chunk, pane: "local" | "center" | "remote"): "local" | "remote" {
++  if (pane !== "center") {
++    return pane;
++  }
++  return chunk.kind === "RemoteOnly" ? "remote" : "local";
++}
+ 
+-export function chunkTone(chunk: Chunk, side: Side): Tone {
++export function chunkTone(chunk: Chunk, pane: "local" | "center" | "remote"): Tone {
+   if (chunk.kind === "Conflict") {
+     return "conflict";
+   }
+   if (chunk.base.len === 0) {
+     return "inserted";
+   }
+-  if (chunk[side].len === 0) {
++  if (chunk[sideOf(chunk, pane)].len === 0) {
+     return "deleted";
+   }
+   return "modified";
+diff --git c/frontend/src/editor/theme.css i/frontend/src/editor/theme.css
+index aa17a96..8dbece0 100644
+--- c/frontend/src/editor/theme.css
++++ i/frontend/src/editor/theme.css
+@@ -14,14 +14,36 @@
+   --chunk-tone: var(--color-chunk-conflict);
+ }
+ 
++.cm-editor .cm-line.chunk-marker-inserted {
++  --chunk-marker-tone: var(--color-chunk-inserted);
++}
++
++.cm-editor .cm-line.chunk-marker-modified {
++  --chunk-marker-tone: var(--color-chunk-modified);
++}
++
++.cm-editor .cm-line.chunk-marker-deleted {
++  --chunk-marker-tone: var(--color-chunk-deleted);
++}
++
++.cm-editor .cm-line.chunk-marker-conflict {
++  --chunk-marker-tone: var(--color-chunk-conflict);
++}
++
+ .cm-editor .cm-line.chunk-band {
+   background-color: var(--chunk-tone);
+ }
+ 
+-.cm-editor .cm-line.chunk-gap-above {
+-  box-shadow: inset 0 2px 0 var(--chunk-tone);
++.cm-editor .cm-line.chunk-point-above {
++  box-shadow: inset 0 2px 0 var(--chunk-marker-tone);
+ }
+ 
+-.cm-editor .cm-line.chunk-gap-below {
+-  box-shadow: inset 0 -2px 0 var(--chunk-tone);
++.cm-editor .cm-line.chunk-point-below {
++  box-shadow: inset 0 -2px 0 var(--chunk-marker-tone);
++}
++
++.cm-editor .cm-line.chunk-point-above.chunk-point-below {
++  box-shadow:
++    inset 0 2px 0 var(--chunk-marker-tone),
++    inset 0 -2px 0 var(--chunk-marker-tone);
+ }
