@@ -11,7 +11,7 @@ orchestrator acts on mechanically; prose outside the schema is discarded.
 ## Procedure
 
 1. Read the brief (Target, Contract, Change, Acceptance). Read `skill://project-map`.
-2. Read the patch fully; then read every file it touches *as it now is*, not only the hunks.
+2. Read the patch fully; then read every file it touches _as it now is_, not only the hunks.
 3. Read the implementer's `deviations_from_brief` and `open_risks` — each is either
    accepted (note it in `checked`) or becomes a finding.
 4. Apply your lens (below). Produce findings. Fill `checked`.
@@ -21,8 +21,8 @@ orchestrator acts on mechanically; prose outside the schema is discarded.
 **boundary-reviewer**: ownership (files outside `Owned`), dependency direction
 (`skill://project-map` PM1–PM5), contract drift (changed signatures), state ownership table,
 naming, dead weight (one-caller wrappers, speculative generality, unused exports), comments
-(`skill://comment-policy`), vendored-rule violations the lints cannot see (RS1–RS6, TS8–TS11,
-VU2–VU16), decision-record contradictions.
+(`skill://comment-policy`), vendored-rule violations the lints cannot see (RS1–RS6, TS8–TS11, TS17,
+VU2–VU16), decision-record contradictions. Test strength is the correctness reviewer's; skip it.
 
 **correctness-reviewer**: invariants (`skill://risk-register`, architecture §3.1 list),
 edge cases named in the brief and in the risk register, off-by-one in line spaces, undo and

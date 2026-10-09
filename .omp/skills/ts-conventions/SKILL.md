@@ -38,6 +38,9 @@ Base: `references/typescript-best-practices.md` (rule table) and
   or in-expression. Detector: oxlint `func-style: declaration`.
 - [TS11] One exported thing per file unless they are a type and its single constructor.
   Files ≤ 300 lines; functions ≤ 40 lines.
+- [TS16] No export without an importer. Detector: `pnpm unused` (knip).
+- [TS17] A table whose keys are known when the code is written is a `Readonly<Record<K, V>>`
+  literal (membership: `Record<string, true>`); `Map`/`Set` only for keys computed at runtime.
 
 ## Runtime hygiene
 

@@ -30,7 +30,8 @@ missing, say so in `deviations_from_brief` and do what the architecture doc impl
 - [SP4] Done means: every `Acceptance` line observed by you, with the evidence pasted into
   `smoke_evidence` (command + relevant output lines). No stubs, no `TODO`, no "follow-up".
   If an acceptance line is unreachable, say which and why — do not narrow it silently. A
-  detector you add ships with a committed test of its failing path.
+  detector you add ships with a committed test of its failing path. Behaviour the brief excludes
+  by owner decision (Non-goals, plan §2 row) is scope, not a stub.
 - [SP5] Tests: write the ones `Acceptance` names, plus any that pin an invariant from
   `skill://risk-register` your code touches. Never tests for wiring, defaults, or "does not throw".
 - [SP6] No new dependency without a `deviations_from_brief` entry naming why the chosen stack

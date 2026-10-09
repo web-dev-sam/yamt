@@ -1,10 +1,18 @@
 {
-  "RetroM1Early": {
-    "owned": [".omp/skills/**", ".omp/hooks/**", ".omp/GUARDRAILS.md", ".omp/RULES.md"],
-    "readonly": ["docs/**", "frontend/**", "crates/**", "justfile", ".omp/run/**"]
+  "M0S1MergeCore": {
+    "owned": ["crates/merge-core/**"],
+    "readonly": [
+      "docs/**",
+      ".omp/**",
+      "frontend/fixtures/sample/**",
+      "Cargo.toml",
+      "Cargo.lock",
+      "clippy.toml",
+      "deny.toml"
+    ]
   },
-  "M1UnusedLogExport": {
-    "owned": ["frontend/src/ipc/log.ts"],
-    "readonly": ["docs/**", ".omp/**", "frontend/**"]
+  "M0S1GitIo": {
+    "owned": ["crates/gitio/**"],
+    "readonly": ["docs/**", ".omp/**", "Cargo.toml", "Cargo.lock", "clippy.toml", "deny.toml"]
   }
 }

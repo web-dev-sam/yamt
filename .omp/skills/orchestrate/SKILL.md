@@ -39,7 +39,7 @@ Detector: hook `plain-language.ts` (word list: `.omp/hooks/lib/plain-language.js
 
 ✗ "Approve P2 hook regression tests in `just check`? Both hook bugs were untested."
 ✓ "Should the safety checks that stop agents editing the wrong files get automated tests?
-  Two of them had bugs this round that tests would have caught. Cost: minutes of agent time."
+Two of them had bugs this round that tests would have caught. Cost: minutes of agent time."
 
 ## 2. Slice map (per wave)
 
@@ -57,8 +57,8 @@ For each slice: id, owner agent, `Owned` globs, `Read-only` globs, fixed `Contra
 
 ## 3. Spawn
 
-`write` (never `edit`) `.omp/run/slices.json` **before** spawning:
-`{ "<TaskName>": { "owned": ["crates/merge-core/**"], "readonly": ["docs/**"] } }`.
+`write` `.omp/run/slices.json` with only the live task names and **commit** it before spawning;
+isolated agents see HEAD. Detector: hooks `slice-registry.ts`, `task-fanout.ts`.
 One `task` call of at most `MAX_PARALLEL_AGENTS` slices (OR10), `isolated: true`, `name` =
 slice id in CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl`, the brief as
 `task`, shared background as `context`. `solutionSpace` says how open the slice is.
@@ -76,7 +76,7 @@ brief and the patch path. Append every finding to `.omp/run/findings.jsonl`:
 
 ## 6. Rework
 
-`block` → revive the same implementer with the findings verbatim; max **two** rounds.
+`block` → respawn under a fresh name (`<Name>R<n>`) with the findings verbatim; max **two** rounds.
 Third failure → ── **Gate B** (escalate to the human with the findings). ──
 `should` → fixed in the same rework, or logged as a follow-up slice on the board.
 `nit` → log; included only in a rework already triggered.
@@ -117,4 +117,4 @@ approves; the curator applies approved ones, appends the changelog, bumps the ve
 - [OR9] Session handoff is the board + findings log + GUARDRAILS changelog; never rely on
   chat memory. Update the board before yielding to the human.
 - [OR10] At most `MAX_PARALLEL_AGENTS` agents at once; never reviewers while an implementer
-  or the verifier runs. Detector: hook `task-fanout.ts` (per call; across calls it is yours).
+  or the verifier runs. Detector: hook `task-fanout.ts` (per call, `agent://all`); across calls, you.

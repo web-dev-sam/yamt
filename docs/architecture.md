@@ -303,7 +303,8 @@ is external and is parsed with `valibot` in `ipc/fixture.ts`, the only file allo
 
 Logging crosses the boundary too: `commands.log(entry: LogEntry)` where
 `LogEntry = { level: "debug"|"info"|"warn"|"error"; event: string; fields: Record<string, string | number | boolean> }`.
-Frontend code calls `log.warn("scroll.drift", { lines })`; `log.ts` is the only file that
+Frontend code calls `log.warn("scroll.drift", { lines })` on the one logger that `ipc/` creates
+with `createLog(forward)` (`log.ts` exports the factory, not an instance); `log.ts` is the only file that
 may touch `console.*` (oxlint `no-console` with a file override): every entry is mirrored to
 the webview console as a structured line (`[warn] scroll.drift {lines: 3}`) so devtools in
 Epiphany/Tauri show it live, and forwarded to Rust fire-and-forget. Rust forwards to

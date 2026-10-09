@@ -35,7 +35,8 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   inside `useMergeController`, not a `ref`.
 - [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts)` is the
   **only** place `ui/` imports from `editor/`. It is an adaptable composable: `toRef(data)`
-  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef`.
+  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef`. Today:
+  `MergeTexts` stand-in, no `summary` (`FileMergeData` lands with `ipc/domain.ts`).
 
 ## Library use
 
@@ -43,12 +44,15 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   in `ui/` only (`editor/` is framework-free). Violation: `window.addEventListener("resize", …)` in a component.
 - [VU13] Composables (`use*.ts`) accept `MaybeRefOrGetter` for read inputs, `MaybeRef` for
   writable ones, never for callbacks; normalise with `toValue`/`toRef` inside effects.
-- [VU14] Tailwind v4 classes in templates, sorted by `oxfmt` (`sortTailwindcss`). CodeMirror
-  decoration classes (`.chunk-local`, …) live once in `editor/theme.css` via `@apply`.
+- [VU14] Tailwind v4 classes in templates, sorted by `oxfmt` (`sortTailwindcss`). The palette is
+  the `@theme` block in `src/style.css` (stock colours reset, plan §2 row 24). The CodeMirror theme
+  reads its `--color-*` variables; decoration classes (`.chunk-local`, …) live once in
+  `editor/theme.css` via `@apply` of those tokens.
 
 ## Splitting
 
 - [VU15] Split by responsibility, not by section count (overrides the vendored "3+ sections
   ⇒ split" trigger). v0 set: `App`, `FileList`, `MergeToolbar`, `MergeView`, `WarningBanner`. A sixth
-  component needs a one-line reason in `deviations_from_brief`.
+  component needs a one-line reason in `deviations_from_brief`. Detector:
+  `vue/multi-word-component-names` (`App` exempt).
 - [VU16] `App.vue` is a composition surface: layout + `useAppStore()` wiring, no feature logic.

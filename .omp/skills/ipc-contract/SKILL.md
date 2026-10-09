@@ -5,7 +5,7 @@ description: How the Rust↔frontend contract of yamt is defined, generated, cha
 
 # IPC contract
 
-One source of truth: the Rust types in `session` and `src-tauri` annotated with
+One source of truth: the Rust types in `merge-core`, `session` and `src-tauri` annotated with
 `#[derive(serde::Serialize, specta::Type)]`. `frontend/src/ipc/bindings.ts` is generated
 from them and committed.
 
@@ -47,9 +47,9 @@ log(entry: LogEntry)              -> ()          fire-and-forget; frontend never
   implementations: `TauriChunkSource` (wraps `commands`) and `FixtureChunkSource` (reads
   `fixtures/*.json`, parsed with valibot — the only runtime parse, decision 19).
   `main.ts` picks by `import.meta.env.VITE_CHUNK_SOURCE`.
-- [IPC8] `ipc/log.ts`: `log.{debug,info,warn,error}(event, fields)` → structured console line
-  always; `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)` forwards (Tauri
-  source: `commands.log`), `debug` only in `import.meta.env.DEV`. Never throws or blocks the
-  caller, including a rejected forward. Detector: `log.test.ts`.
+- [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
+  the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
+  call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,
+  the `ipc/` interface slice (Tauri: `commands.log`). Never throws or blocks, even on a rejected forward. Detector: `log.test.ts`.
 - [IPC9] A new command is a decision-record-free change only if it is a pure addition and its
   DTOs are existing types; otherwise report in `deviations_from_brief`.

@@ -15,7 +15,7 @@ just check
 ```
 
 Runs, in order: `fmt-check` → `clippy` → `test` → `deny` → `bindings-check` → `web-lint` →
-`web-typecheck` → `web-test` → `arch-check` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
+`web-typecheck` → `web-test` → `web-unused` → `arch-check` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
 with the failing recipe name and the first 30 relevant lines in `failures[].excerpt`.
 
 - [VF1] The verifier never fixes anything. A failure goes back to the owning slice.
@@ -29,38 +29,48 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
 ## Smoke recipes (pick the one for the layer; paste `observed`)
 
 **merge-core / cli**
+
 ```
 cargo run -p yamt-cli -- classify tests/golden/<case>/{base,local,remote}.txt
 ```
+
 observed: chunk table with kinds and ranges; compare against `expected.json` by eye for one case.
 
 **gitio / session**
+
 ```
 cargo nextest run -p yamt-gitio -p yamt-session
 ```
+
 observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the output.
 
 **frontend, fixture mode**
+
 ```
 just dev-web            # VITE_CHUNK_SOURCE=fixture
 epiphany http://localhost:5173
 ```
+
 observed: three panes, bands between them, apply a chunk via gutter, undo, bulk apply;
 devtools console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path.
 
 **editor layout tests (WebKit)**
+
 ```
 pnpm -C frontend test:browser
 ```
+
 observed: `scrollSync`, `strips` tests green in the `browser` project (Playwright WebKit). If
 WebKit cannot launch on this machine, say so verbatim: `pnpm test` (the `node` project) excludes
 `src/editor/**`, so the layout tests did not run, which is reported, not hidden.
 
 **tauri shell (M2+)**
+
 ```
 scripts/conflict-repo.sh /tmp/yamt-smoke     # creates a repo with 3 conflicted files incl. add/add and CRLF
 cargo tauri dev -- --repo /tmp/yamt-smoke
 ```
+
 observed: sidebar lists 3 files; finish one ⇒ `git -C /tmp/yamt-smoke ls-files -u` no longer
 lists it; reset it ⇒ listed again with three stages and markers in the worktree.
 

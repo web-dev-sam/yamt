@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `588abc9` (slice 0.0: walking skeleton). Full text: `docs/architecture.md`.
+Verified against commit: `c2cd73d` (early M1: window shell + import-rule test). Full text: `docs/architecture.md`.
 Package names (`cargo -p`, `just`, arch-check) are in parentheses. "(planned)" = not in the tree yet.
 
 ## Core visions (ranked; lower number wins a conflict)
@@ -34,7 +34,8 @@ frontend/src/model  pure TS shared by editor/ and connectors/; exists only while
 frontend/src/editor CodeMirror 6 integration; public surface = MergeController (index.ts: MergeTexts stand-in, destroy()); internal/pane.ts createPane; framework-free (engine.test.ts WebKit probe)
 frontend/src/connectors  pure band geometry → SVG path strings; no DOM (planned)
 frontend/src/ui     Vue 3 chrome: App, FileList, MergeToolbar (inert), MergeView, useMergeController (only ../editor importer), sample.ts; planned: WarningBanner, store.ts singleton
-frontend/src/main.ts     picks ChunkSource, creates store, mounts App (today: mounts App)
+frontend/src/main.ts     picks ChunkSource, creates store, mounts App (today: imports style.css, mounts App)
+frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
 frontend/scripts    check-sfc-order.ts + .test.ts (VU2); fences.ts + fences.test.ts (PM2/PM3/PM5, reads src/ itself)
 frontend/fixtures   sample/{base,local,remote}.ts.txt (window sample, `src/cart.ts`); fixture JSON for FixtureChunkSource (planned)
 frontend/tsconfig   tsconfig.app.json: src/**, types [vite/client] — no Node globals in webview code;
@@ -56,10 +57,10 @@ ipc ◄── model ◄── editor ◄── ui ◄── main.ts
 ```
 
 - [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`. Detector: `just arch-check` (`cargo tree --target all --all-features`; std::fs/process grep), clippy `disallowed_*`.
-- [PM2] `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` (at any depth). Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (planned).
-- [PM3] `editor/**`, `model/**`, `connectors/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (planned).
+- [PM2] `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` (at any depth). Detector: oxlint overrides + `frontend/scripts/fences.test.ts`.
+- [PM3] `editor/**`, `model/**`, `connectors/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`.
 - [PM4] `ipc/bindings.ts` is generated; never hand-edited. Detector: hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` (diffs a fresh export in `target/`).
-- [PM5] No module imports a sibling's `internal/` (bare `**/internal` included); no import cycles. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (planned); `import/no-cycle` everywhere.
+- [PM5] No module imports a sibling's `internal/` (bare `**/internal` included); no import cycles. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`; `import/no-cycle` everywhere.
 
 ## State ownership (vision 2)
 

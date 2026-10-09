@@ -1,0 +1,1 @@
+[OR11] If `pwd` ≠ `git rev-parse --show-toplevel`, stop before any other tool call and ask the human to restart omp from the repository root: project settings and safety hooks load only from `<cwd>/.omp`.

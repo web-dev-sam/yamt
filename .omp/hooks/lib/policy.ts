@@ -14,9 +14,19 @@ export const ORCHESTRATOR_EDITABLE = [
   "crates/*/Cargo.toml",
 ];
 
-export const SHARED_PATHS = ["Cargo.toml", "Cargo.lock", "justfile", "frontend/package.json", "frontend/pnpm-lock.yaml"];
+export const SHARED_PATHS = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "justfile",
+  "frontend/package.json",
+  "frontend/pnpm-lock.yaml",
+];
 
 export const MAX_PARALLEL_AGENTS = 2;
+
+export const IMPLEMENTER_AGENTS: Record<string, true> = { "rust-impl": true, "web-impl": true };
+
+export const SLICE_REGISTRY = ".omp/run/slices.json";
 
 export const GENERATED_PATHS = [
   "frontend/src/ipc/bindings.ts",
@@ -75,7 +85,8 @@ const HASHLINE_HEADER = /^\[([^\]#]+)#[0-9A-Fa-f]{4}\]/gm;
 export function pathsFromToolInput(toolName: string, input: Record<string, unknown>): string[] {
   const found = new Set<string>();
   if (typeof input.path === "string") found.add(input.path);
-  if (Array.isArray(input.paths)) for (const p of input.paths) if (typeof p === "string") found.add(p);
+  if (Array.isArray(input.paths))
+    for (const p of input.paths) if (typeof p === "string") found.add(p);
   if (toolName === "edit" && typeof input.input === "string") {
     for (const m of input.input.matchAll(HASHLINE_HEADER)) {
       const p = m[1];
@@ -87,7 +98,7 @@ export function pathsFromToolInput(toolName: string, input: Record<string, unkno
 
 export function readSliceRegistry(cwd: string): SliceRegistry {
   try {
-    const raw = readFileSync(resolve(cwd, ".omp/run/slices.json"), "utf8");
+    const raw = readFileSync(resolve(cwd, SLICE_REGISTRY), "utf8");
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const out: SliceRegistry = {};
@@ -103,11 +114,20 @@ export function readSliceRegistry(cwd: string): SliceRegistry {
   }
 }
 
-export function ownershipFor(agent: AgentIdentity, registry: SliceRegistry): SliceOwnership | undefined {
-  return registry[agent.id] ?? registry[agent.name] ?? registry[agent.id.toLowerCase()] ?? registry[agent.name.toLowerCase()];
+export function ownershipFor(
+  agent: AgentIdentity,
+  registry: SliceRegistry,
+): SliceOwnership | undefined {
+  return (
+    registry[agent.id] ??
+    registry[agent.name] ??
+    registry[agent.id.toLowerCase()] ??
+    registry[agent.name.toLowerCase()]
+  );
 }
 
-const REDIRECT_TARGET = /(?:>>?|\btee\s+(?:-a\s+)?|\bcp\s+(?:-\S+\s+)*\S+\s+|\bmv\s+(?:-\S+\s+)*\S+\s+)\s*["']?([^\s;&|"']+)/g;
+const REDIRECT_TARGET =
+  /(?:>>?|\btee\s+(?:-a\s+)?|\bcp\s+(?:-\S+\s+)*\S+\s+|\bmv\s+(?:-\S+\s+)*\S+\s+)\s*["']?([^\s;&|"']+)/g;
 
 export function writeTargetsFromCommand(command: string): string[] {
   const targets: string[] = [];
