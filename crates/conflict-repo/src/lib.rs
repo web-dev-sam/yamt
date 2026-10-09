@@ -1,8 +1,11 @@
 //! Test fixture: real git repositories whose merge stops with scripted conflicts.
 #![forbid(unsafe_code)]
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -16,17 +19,31 @@ pub enum Error {
     GitFailed { args: Vec<String>, stderr: String },
     #[error("merging `remote` into `local` did not conflict")]
     MergeDidNotConflict,
+    #[error("`git hash-object` started without a stdin pipe")]
+    NoStdin,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+const SUBMODULE_MODE: &str = "160000";
+const HASH_OBJECT_ARGS: [&str; 2] = ["hash-object", "--stdin"];
 
 /// One path in the scripted merge; `None` means the file does not exist on that side.
 #[derive(Clone, Copy, Debug)]
 pub struct ConflictFile<'a> {
     pub path: &'a str,
+    pub kind: FileKind,
     pub base: Option<&'a [u8]>,
     pub local: Option<&'a [u8]>,
     pub remote: Option<&'a [u8]>,
+}
+
+/// What a side's bytes are: file content, a symlink's target, or a submodule's commit oid in hex.
+#[derive(Clone, Copy, Debug)]
+pub enum FileKind {
+    Regular,
+    Symlink,
+    Submodule,
 }
 
 fn isolated_git(dir: &Path) -> Command {
@@ -57,7 +74,10 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<Output> {
 }
 
 pub fn git_ok(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = git(dir, args)?;
+    succeeded(args, git(dir, args)?)
+}
+
+fn succeeded(args: &[&str], output: Output) -> Result<Vec<u8>> {
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -70,17 +90,16 @@ pub fn git_ok(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
 
 pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
     let mut child = isolated_git(dir)
-        .args(["hash-object", "--stdin"])
+        .args(HASH_OBJECT_ARGS)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(content)?;
-    }
-    let output = child.wait_with_output()?;
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim_end()
-        .to_owned())
+    let mut stdin = child.stdin.take().ok_or(Error::NoStdin)?;
+    stdin.write_all(content)?;
+    drop(stdin);
+    let stdout = succeeded(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
+    Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
 }
 
 /// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
@@ -109,22 +128,43 @@ fn commit_side<'a>(
     message: &str,
 ) -> Result<()> {
     for file in files {
-        let worktree_file = root.join(file.path);
         match side(file) {
-            Some(bytes) => {
-                if let Some(parent) = worktree_file.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::write(&worktree_file, bytes)?;
-                git_ok(root, &["add", "--", file.path])?;
-            }
+            Some(bytes) => write_side(root, file, bytes)?,
             None => {
-                if worktree_file.exists() {
-                    git_ok(root, &["rm", "--quiet", "--", file.path])?;
-                }
+                git_ok(
+                    root,
+                    &["rm", "--quiet", "--ignore-unmatch", "--", file.path],
+                )?;
             }
         }
     }
     git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message])?;
+    Ok(())
+}
+
+fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+    let worktree_file = root.join(file.path);
+    if let Some(parent) = worktree_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match file.kind {
+        FileKind::Regular => {
+            fs::write(&worktree_file, bytes)?;
+            git_ok(root, &["add", "--", file.path])?;
+        }
+        FileKind::Symlink => {
+            if worktree_file.symlink_metadata().is_ok() {
+                fs::remove_file(&worktree_file)?;
+            }
+            symlink(OsStr::from_bytes(bytes), &worktree_file)?;
+            git_ok(root, &["add", "--", file.path])?;
+        }
+        FileKind::Submodule => {
+            fs::create_dir_all(&worktree_file)?;
+            let oid = String::from_utf8_lossy(bytes);
+            let cacheinfo = format!("{SUBMODULE_MODE},{oid},{}", file.path);
+            git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo])?;
+        }
+    }
     Ok(())
 }

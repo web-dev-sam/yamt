@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_session::{Eol, Error, FileStatus, MergeSession, UnsupportedReason};
 
 const FILE: &str = "src/cart.ts";
@@ -12,12 +12,14 @@ fn two_file_conflict() -> TempDir {
     conflict_repo(&[
         ConflictFile {
             path: FILE,
+            kind: FileKind::Regular,
             base: Some(b"one\ntwo\nthree\n"),
             local: Some(b"one\nlocal\nthree\n"),
             remote: Some(b"one\nremote\nthree\n"),
         },
         ConflictFile {
             path: OTHER,
+            kind: FileKind::Regular,
             base: Some(b"four\nfive\n"),
             local: Some(b"four\nlocal five\n"),
             remote: Some(b"four\nremote five\n"),
@@ -30,6 +32,7 @@ fn single_conflict(path: &str, sides: [&[u8]; 3]) -> TempDir {
     let [base, local, remote] = sides;
     conflict_repo(&[ConflictFile {
         path,
+        kind: FileKind::Regular,
         base: Some(base),
         local: Some(local),
         remote: Some(remote),
@@ -91,22 +94,62 @@ fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
     assert_eq!(session.remaining(), 1);
 }
 
+fn finish_and_drop_resolve_undo(dir: &TempDir, session: &mut MergeSession, path: &str) {
+    session.finish(path, "resolved\n").unwrap();
+    // `git add` leaves a resolve-undo record that `checkout -m` alone would use to bring the
+    // conflict back (git-ls-files(1) --resolve-undo); without it only the captured stages can.
+    git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+}
+
+fn assert_conflict_is_back(dir: &TempDir, session: &MergeSession, path: &str, before: &str) {
+    assert_eq!(unmerged(dir), before);
+    let worktree = fs::read_to_string(dir.path().join(path)).unwrap();
+    assert!(worktree.contains("<<<<<<<"), "no markers in {worktree:?}");
+    assert_eq!(status_of(session, path), FileStatus::Unresolved);
+}
+
 #[test]
 fn reset_after_finish_restores_git_stages_and_conflict_markers() {
     let dir = two_file_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before_finish = unmerged(&dir);
-    session.finish(FILE, "resolved\n").unwrap();
-    // `git add` leaves a resolve-undo record that `checkout -m` alone would use to bring the
-    // conflict back (git-ls-files(1) --resolve-undo); without it only the captured stages can.
-    git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+    finish_and_drop_resolve_undo(&dir, &mut session, FILE);
 
     session.reset(FILE).unwrap();
 
-    assert_eq!(unmerged(&dir), before_finish);
-    let worktree = fs::read_to_string(dir.path().join(FILE)).unwrap();
-    assert!(worktree.contains("<<<<<<<"), "no markers in {worktree:?}");
-    assert_eq!(status_of(&session, FILE), FileStatus::Unresolved);
+    assert_conflict_is_back(&dir, &session, FILE, &before_finish);
+    assert_eq!(session.remaining(), 2);
+}
+
+#[test]
+fn reset_after_finish_restores_an_add_add_conflict() {
+    const PATH: &str = "added.ts";
+    let dir = conflict_repo(&[ConflictFile {
+        path: PATH,
+        kind: FileKind::Regular,
+        base: None,
+        local: Some(b"added by local\n"),
+        remote: Some(b"added by remote\n"),
+    }])
+    .unwrap();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    let before_finish = unmerged(&dir);
+    finish_and_drop_resolve_undo(&dir, &mut session, PATH);
+
+    session.reset(PATH).unwrap();
+
+    assert_conflict_is_back(&dir, &session, PATH, &before_finish);
+}
+
+#[test]
+fn reset_of_a_file_never_finished_keeps_its_stages_and_markers() {
+    let dir = two_file_conflict();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    let before = unmerged(&dir);
+
+    session.reset(FILE).unwrap();
+
+    assert_conflict_is_back(&dir, &session, FILE, &before);
     assert_eq!(session.remaining(), 2);
 }
 
@@ -159,6 +202,7 @@ fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
     const PATH: &str = "gone.txt";
     let dir = conflict_repo(&[ConflictFile {
         path: PATH,
+        kind: FileKind::Regular,
         base: Some(b"kept\nbase\n"),
         local: None,
         remote: Some(b"kept\nremote\n"),

@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_merge_core::{ChunkKind, Options, compute_chunks};
 use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
 
@@ -11,6 +11,8 @@ const REMOTE_DELETED: &str = "d_remote_deleted.txt";
 const BINARY: &str = "e_binary.bin";
 const LATIN1: &str = "f_latin1.txt";
 const CRLF: &str = "g_crlf.txt";
+const SUBMODULE: &str = "h_submodule";
+const SYMLINK: &str = "i_symlink";
 
 const MODIFY_SIDES: [&str; 3] = [
     "one\ntwo\nthree\n",
@@ -21,42 +23,49 @@ const MODIFY_SIDES: [&str; 3] = [
 const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = [
     ConflictFile {
         path: MODIFY_TS,
+        kind: FileKind::Regular,
         base: Some(MODIFY_SIDES[0].as_bytes()),
         local: Some(MODIFY_SIDES[1].as_bytes()),
         remote: Some(MODIFY_SIDES[2].as_bytes()),
     },
     ConflictFile {
         path: ADD_ADD,
+        kind: FileKind::Regular,
         base: None,
         local: Some(b"alpha added by local\n"),
         remote: Some(b"bravo added by remote\n"),
     },
     ConflictFile {
         path: LOCAL_DELETED,
+        kind: FileKind::Regular,
         base: Some(b"charlie\ndelta\n"),
         local: None,
         remote: Some(b"charlie\nchanged by remote\n"),
     },
     ConflictFile {
         path: REMOTE_DELETED,
+        kind: FileKind::Regular,
         base: Some(b"echo\nfoxtrot\n"),
         local: Some(b"echo\nchanged by local\n"),
         remote: None,
     },
     ConflictFile {
         path: BINARY,
+        kind: FileKind::Regular,
         base: Some(b"\0binary base"),
         local: Some(b"\0binary local"),
         remote: Some(b"\0binary remote"),
     },
     ConflictFile {
         path: LATIN1,
+        kind: FileKind::Regular,
         base: Some(b"caf\xe9 base\n"),
         local: Some(b"caf\xe9 local\n"),
         remote: Some(b"caf\xe9 remote\n"),
     },
     ConflictFile {
         path: CRLF,
+        kind: FileKind::Regular,
         base: Some(b"golf\r\nhotel\r\n"),
         local: Some(b"golf\r\nlocal\r\n"),
         remote: Some(b"golf\r\nremote\r\n"),
@@ -180,6 +189,7 @@ fn load_refuses_a_side_over_eight_mib_as_too_large() {
     let huge_local = "x".repeat(EIGHT_MIB) + "\n";
     let dir = conflict_repo(&[ConflictFile {
         path: PATH,
+        kind: FileKind::Regular,
         base: Some(b"base\n"),
         local: Some(huge_local.as_bytes()),
         remote: Some(b"remote\n"),
@@ -195,4 +205,78 @@ fn load_refuses_a_side_over_eight_mib_as_too_large() {
         unsupported_error(&mut session, PATH),
         UnsupportedReason::TooLarge
     );
+}
+
+#[test]
+fn load_add_add_crlf_file_takes_its_eol_from_local() {
+    const PATH: &str = "added_crlf.txt";
+    let dir = conflict_repo(&[ConflictFile {
+        path: PATH,
+        kind: FileKind::Regular,
+        base: None,
+        local: Some(b"india\r\nlocal\r\n"),
+        remote: Some(b"india\r\nremote\r\n"),
+    }])
+    .unwrap();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    let data = session.load(PATH).unwrap();
+
+    assert_eq!(data.base, "");
+    assert_eq!(data.eol, Eol::CrLf);
+}
+
+const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+    ConflictFile {
+        path: MODIFY_TS,
+        kind: FileKind::Regular,
+        base: Some(MODIFY_SIDES[0].as_bytes()),
+        local: Some(MODIFY_SIDES[1].as_bytes()),
+        remote: Some(MODIFY_SIDES[2].as_bytes()),
+    },
+    ConflictFile {
+        path: SUBMODULE,
+        kind: FileKind::Submodule,
+        base: Some(b"1111111111111111111111111111111111111111"),
+        local: Some(b"2222222222222222222222222222222222222222"),
+        remote: Some(b"3333333333333333333333333333333333333333"),
+    },
+    ConflictFile {
+        path: SYMLINK,
+        kind: FileKind::Symlink,
+        base: Some(b"base-target"),
+        local: Some(b"local-target"),
+        remote: Some(b"remote-target"),
+    },
+];
+
+#[test]
+fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads() {
+    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    let listed: Vec<(String, Option<UnsupportedReason>)> = session
+        .files()
+        .into_iter()
+        .map(|file| (file.path, file.unsupported))
+        .collect();
+    let expected = [
+        (MODIFY_TS.to_owned(), None),
+        (SUBMODULE.to_owned(), Some(UnsupportedReason::Submodule)),
+        (SYMLINK.to_owned(), Some(UnsupportedReason::Symlink)),
+    ];
+    assert_eq!(listed, expected);
+    for (path, reason) in [
+        (SUBMODULE, UnsupportedReason::Submodule),
+        (SYMLINK, UnsupportedReason::Symlink),
+    ] {
+        assert_eq!(unsupported_error(&mut session, path), reason);
+        let error = session.finish(path, "text\n").unwrap_err();
+        assert!(
+            matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
+            "{error:?}"
+        );
+    }
+    assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
 }

@@ -6,8 +6,11 @@ use specta::Type;
 use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
 use yamt_merge_core::{Chunk, Options, compute_chunks};
 
-use crate::decode::{Eol, UnsupportedReason, decode_side, detect_eol, language_of};
+use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol, language_of};
 use crate::{Error, Result};
+
+const SYMLINK_MODE: u32 = 0o120_000;
+const SUBMODULE_MODE: u32 = 0o160_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum FileStatus {
@@ -98,8 +101,8 @@ impl MergeSession {
     }
 
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
-        let file = self.file(path)?;
-        let texts = file.texts()?;
+        let file = find_file(&mut self.files, path)?;
+        let texts = file.require_text()?;
         let eol_source = if texts.base.is_empty() {
             &texts.local
         } else {
@@ -123,26 +126,26 @@ impl MergeSession {
     }
 
     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
-        let file = self.file(path)?;
-        file.texts()?;
+        let file = find_file(&mut self.files, path)?;
+        file.require_text()?;
         let worktree_file = self.repo.root().join(&file.path);
         fs::write(&worktree_file, result).map_err(|source| Error::WriteFailed {
             path: path.to_owned(),
             source,
         })?;
         self.repo.add(&file.path)?;
-        self.file_mut(path)?.status = FileStatus::Resolved;
+        file.status = FileStatus::Resolved;
         Ok(())
     }
 
     pub fn reset(&mut self, path: &str) -> Result<()> {
-        let file = self.file(path)?;
+        let file = find_file(&mut self.files, path)?;
         self.repo.restore_stages(&file.stages.entries())?;
-        // `checkout -m` refuses a path without both sides: "does not have all necessary versions".
+        file.status = FileStatus::Unresolved;
+        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
         if file.stages.has_both_sides() {
             self.repo.checkout_merge(&file.path)?;
         }
-        self.file_mut(path)?.status = FileStatus::Unresolved;
         Ok(())
     }
 
@@ -153,24 +156,15 @@ impl MergeSession {
             .filter(|file| file.status == FileStatus::Unresolved)
             .count()
     }
+}
 
-    fn file(&self, path: &str) -> Result<&FileState> {
-        self.files
-            .iter()
-            .find(|file| file.display_path() == path)
-            .ok_or_else(|| Error::UnknownPath {
-                path: path.to_owned(),
-            })
-    }
-
-    fn file_mut(&mut self, path: &str) -> Result<&mut FileState> {
-        self.files
-            .iter_mut()
-            .find(|file| file.display_path() == path)
-            .ok_or_else(|| Error::UnknownPath {
-                path: path.to_owned(),
-            })
-    }
+fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {
+    files
+        .iter_mut()
+        .find(|file| file.path.to_string_lossy() == path)
+        .ok_or_else(|| Error::UnknownPath {
+            path: path.to_owned(),
+        })
 }
 
 impl FileState {
@@ -178,7 +172,7 @@ impl FileState {
         self.path.to_string_lossy().into_owned()
     }
 
-    fn texts(&self) -> Result<&Texts> {
+    fn require_text(&self) -> Result<&Texts> {
         match &self.content {
             Content::Text(texts) => Ok(texts),
             Content::Unsupported(reason) => Err(Error::Unsupported {
@@ -202,6 +196,13 @@ impl CapturedStages {
         self.local.is_some() && self.remote.is_some()
     }
 
+    fn has_mode(&self, mode: u32) -> bool {
+        [&self.base, &self.local, &self.remote]
+            .into_iter()
+            .flatten()
+            .any(|entry| entry.mode == mode)
+    }
+
     fn entries(&self) -> Vec<StageEntry> {
         [&self.base, &self.local, &self.remote]
             .into_iter()
@@ -214,14 +215,15 @@ impl CapturedStages {
 fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
     let mut groups: Vec<(PathBuf, CapturedStages)> = Vec::new();
     for entry in entries {
-        match groups.last_mut() {
-            Some((path, stages)) if *path == entry.path => stages.insert(entry),
-            Some(_) | None => {
-                let mut stages = CapturedStages::default();
-                let path = entry.path.clone();
-                stages.insert(entry);
-                groups.push((path, stages));
-            }
+        if let Some((path, stages)) = groups.last_mut()
+            && *path == entry.path
+        {
+            stages.insert(entry);
+        } else {
+            let mut stages = CapturedStages::default();
+            let path = entry.path.clone();
+            stages.insert(entry);
+            groups.push((path, stages));
         }
     }
     groups
@@ -230,6 +232,12 @@ fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
 fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) -> Result<Content> {
     if path.to_str().is_none() {
         return Ok(Content::Unsupported(UnsupportedReason::NonUtf8));
+    }
+    if stages.has_mode(SUBMODULE_MODE) {
+        return Ok(Content::Unsupported(UnsupportedReason::Submodule));
+    }
+    if stages.has_mode(SYMLINK_MODE) {
+        return Ok(Content::Unsupported(UnsupportedReason::Symlink));
     }
     let Some(local) = &stages.local else {
         return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted));
@@ -241,21 +249,13 @@ fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) ->
         Some(entry) => blobs.read(&entry.oid)?,
         None => Vec::new(),
     };
-    let decoded = decode_texts(base, blobs.read(&local.oid)?, blobs.read(&remote.oid)?);
-    match decoded {
-        Ok(texts) => Ok(Content::Text(texts)),
+    let sides = [base, blobs.read(&local.oid)?, blobs.read(&remote.oid)?];
+    match decode_sides(sides) {
+        Ok([base, local, remote]) => Ok(Content::Text(Texts {
+            base,
+            local,
+            remote,
+        })),
         Err(reason) => Ok(Content::Unsupported(reason)),
     }
-}
-
-fn decode_texts(
-    base: Vec<u8>,
-    local: Vec<u8>,
-    remote: Vec<u8>,
-) -> Result<Texts, UnsupportedReason> {
-    Ok(Texts {
-        base: decode_side(base)?,
-        local: decode_side(local)?,
-        remote: decode_side(remote)?,
-    })
 }

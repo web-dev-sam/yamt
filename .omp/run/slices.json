@@ -1,11 +1,11 @@
 {
-  "M0S2SessionR1": {
-    "owned": ["crates/session/**", "crates/conflict-repo/**", "crates/gitio/tests/**"],
+  "M0S2SessionR2": {
+    "owned": ["crates/session/**", "crates/conflict-repo/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
       "crates/merge-core/**",
-      "crates/gitio/src/**",
+      "crates/gitio/**",
       "Cargo.toml",
       "Cargo.lock",
       "clippy.toml",

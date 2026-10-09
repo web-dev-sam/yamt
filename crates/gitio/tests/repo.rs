@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use yamt_conflict_repo::{ConflictFile, TempDir, conflict_repo, git_ok, hash_object};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok, hash_object};
 use yamt_gitio::{Error, Oid, Repo, Stage, StageEntry};
 
 const FILE: &str = "cart.ts";
@@ -24,6 +24,7 @@ fn one_file_repo(
 ) -> TempDir {
     let file = ConflictFile {
         path,
+        kind: FileKind::Regular,
         base,
         local,
         remote,
