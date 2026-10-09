@@ -1,5 +1,5 @@
 import { redo, undo } from "@codemirror/commands";
-import type { LanguageDescription, LanguageSupport } from "@codemirror/language";
+import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
 import type { StateField, TransactionSpec } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
@@ -32,6 +32,8 @@ export type MergeHosts = {
   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
 };
 
+type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
+
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
   readonly #views: PaneViews;
@@ -45,7 +47,11 @@ export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts) {
     const description = languageOf(data.path);
     this.#field = chunkField(data.chunks);
-    this.#views = this.#createViews({ data, hosts, language: description?.support ?? null });
+    this.#views = this.#createViews({
+      data,
+      hosts,
+      language: description?.support?.language ?? null,
+    });
     this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
     this.#strips = hosts.strips;
     for (const strip of this.#strips) {
@@ -56,14 +62,14 @@ export class MergeController {
     });
     this.#requestFrame();
     if (description !== null && description.support === undefined) {
-      void this.#colour(description, data.path);
+      void this.#loadLanguage(description, data.path);
     }
   }
 
-  async #colour(description: LanguageDescription, path: string): Promise<void> {
-    let language: LanguageSupport;
+  async #loadLanguage(description: LanguageDescription, path: string): Promise<void> {
+    let support: LanguageSupport;
     try {
-      language = await description.load();
+      support = await description.load();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log.warn("language.load_failed", { path, language: description.name, reason });
@@ -72,22 +78,13 @@ export class MergeController {
     if (this.#destroyed) {
       return;
     }
-    const effects = languageCompartment.reconfigure(language);
+    const effects = languageCompartment.reconfigure(support.language);
     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
       view.dispatch({ effects });
     }
   }
 
-  #createViews({
-    data,
-    hosts,
-    language,
-  }: {
-    data: FileMergeData;
-    hosts: MergeHosts;
-    language: LanguageSupport | null;
-  }): PaneViews {
-    const { eol } = data;
+  #createViews({ data, hosts, language }: ViewSources): PaneViews {
     const field = this.#field;
     const repaint = EditorView.updateListener.of((update) => {
       if (update.docChanged || update.geometryChanged) {
@@ -97,7 +94,7 @@ export class MergeController {
     const statusSync = EditorView.updateListener.of((update) => {
       this.#statusesChanged(update);
     });
-    const shared = { eol, language };
+    const shared = { eol: data.eol, language };
     const center = createPane({
       ...shared,
       kind: "center",

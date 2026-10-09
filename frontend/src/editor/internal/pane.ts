@@ -1,6 +1,6 @@
 import "@fontsource/jetbrains-mono/400.css";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { HighlightStyle, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting, type Language } from "@codemirror/language";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   drawSelection,
@@ -70,7 +70,7 @@ export const paletteHighlight = HighlightStyle.define([
   { tag: tags.attributeValue, color: "var(--color-syntax-string)" },
   { tag: tags.escape, color: "var(--color-syntax-keyword)" },
   { tag: tags.regexp, color: "var(--color-syntax-regexp)" },
-  { tag: [tags.link, tags.url, tags.character], color: "var(--color-syntax-link)" },
+  { tag: [tags.link, tags.url], color: "var(--color-syntax-link)" },
   { tag: [tags.heading, tags.strong], fontWeight: "bold" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
@@ -98,7 +98,7 @@ export function paneState(pane: {
   kind: PaneKind;
   doc: string;
   eol: FileMergeData["eol"];
-  language: LanguageSupport | null;
+  language: Language | null;
   extensions: Extension;
 }): EditorState {
   return EditorState.create({

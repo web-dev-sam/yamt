@@ -1,5 +1,5 @@
 import { undoDepth } from "@codemirror/commands";
-import { ensureSyntaxTree, syntaxTree, type LanguageSupport } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
@@ -17,6 +17,7 @@ const VUE_SFC = `<template>
 </template>
 
 <script setup lang="ts">
+interface Props {}
 const msg: string = "hi";
 </script>
 `;
@@ -26,15 +27,20 @@ const TSX = `export function App() {
 }
 `;
 
-async function loaded(path: string): Promise<LanguageSupport> {
+const RUST = `fn initial() -> char {
+    'a'
+}
+`;
+
+async function loaded(path: string): Promise<Language> {
   const description = languageOf(path);
   if (description === null) {
     throw new Error(`no language for ${path}`);
   }
-  return description.load();
+  return (await description.load()).language;
 }
 
-function center(doc: string, language: LanguageSupport | null): EditorState {
+function center(doc: string, language: Language | null): EditorState {
   return paneState({ kind: "center", doc, eol: "Lf", language, extensions: [] });
 }
 
@@ -73,6 +79,7 @@ test("a Vue file draws template tags in the tag colour and its script setup as T
   const state = center(VUE_SFC, await loaded("App.vue"));
 
   expect(colourAt(state, "div")).toBe("var(--color-syntax-tag)");
+  expect(colourAt(state, "interface")).toBe("var(--color-syntax-keyword)");
   expect(colourAt(state, "const")).toBe("var(--color-syntax-keyword)");
   expect(colourAt(state, '"hi"')).toBe("var(--color-syntax-string)");
 });
@@ -82,6 +89,12 @@ test("a TSX file draws JSX tags in the tag colour", async () => {
 
   expect(colourAt(state, "div")).toBe("var(--color-syntax-tag)");
   expect(colourAt(state, "return")).toBe("var(--color-syntax-keyword)");
+});
+
+test("a character literal is drawn in the string colour", async () => {
+  const state = center(RUST, await loaded("lib.rs"));
+
+  expect(colourAt(state, "'a'")).toBe("var(--color-syntax-string)");
 });
 
 test("recolouring the center pane adds no undo step and keeps the chunks", async () => {
