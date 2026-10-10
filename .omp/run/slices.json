@@ -1,33 +1,10 @@
 {
-  "M1MQuietMiddlePurple": {
-    "owned": [
-      "frontend/src/editor/internal/decorations.ts",
-      "frontend/src/editor/internal/decorations.test.ts",
-      "frontend/src/editor/internal/words.ts",
-      "frontend/src/editor/internal/words.test.ts",
-      "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/pane.test.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/style.css"
-    ],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "crates/**",
-      "frontend/src/ipc/**",
-      "frontend/src/ui/**",
-      "frontend/src/connectors/**",
-      "frontend/src/main.ts",
-      "frontend/package.json",
-      "frontend/scripts/**",
-      "frontend/fixtures/**"
-    ]
-  },
-  "M1SUndoKeepsViewB": {
+  "M1SUndoKeepsViewR1": {
     "owned": [
       "frontend/src/editor/index.ts",
       "frontend/src/editor/internal/apply.ts",
-      "frontend/src/editor/internal/apply.test.ts"
+      "frontend/src/editor/internal/apply.test.ts",
+      "frontend/src/editor/internal/words.test.ts"
     ],
     "readonly": [
       "docs/**",

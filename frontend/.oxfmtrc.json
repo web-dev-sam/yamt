@@ -3,5 +3,11 @@
   "printWidth": 100,
   "sortImports": true,
   "sortTailwindcss": { "stylesheet": "./src/style.css" },
-  "ignorePatterns": ["dist/**", "pnpm-lock.yaml", "src/ipc/bindings.ts", "fixtures/golden/**"]
+  "ignorePatterns": [
+    "dist/**",
+    "pnpm-lock.yaml",
+    "src/ipc/bindings.ts",
+    "fixtures/golden/**",
+    "fixtures/showcase/**"
+  ]
 }

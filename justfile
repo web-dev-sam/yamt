@@ -21,16 +21,19 @@ bindings-check:
     cargo run --quiet -p yamt-app --bin export-bindings -- target/bindings-check.ts
     diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts
 
-fixtures: (fixtures-into "frontend/fixtures/golden")
+fixtures: (fixtures-into "frontend/fixtures")
 
 fixtures-check: (fixtures-into "target/fixtures-check")
-    diff -ru frontend/fixtures/golden target/fixtures-check
+    diff -ru frontend/fixtures/golden target/fixtures-check/golden
+    diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
 
+# Window fixtures: the 10 goldens, plus hand-written demo cases in tests/showcase/ (not goldens).
 [private]
 fixtures-into dir:
-    rm -rf {{ dir }} && mkdir -p {{ dir }}
+    rm -rf {{ dir }}/golden {{ dir }}/showcase && mkdir -p {{ dir }}/golden {{ dir }}/showcase
     cargo build --quiet -p yamt-cli
-    for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/$(basename "$case").json"; done
+    for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/golden/$(basename "$case").json"; done
+    for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
 
 web-lint: (frontend "lint")
 
