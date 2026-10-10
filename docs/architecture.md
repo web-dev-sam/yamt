@@ -687,10 +687,7 @@ product or codebase consequences. Current open ones:
 2. **"Apply both" on a conflict: your side's text first, then theirs?** That is IntelliJ's
    order and what muscle memory expects; the alternative (theirs first) is only better when
    merging upstream into a feature branch. Default: local then remote.
-3. **Files the tool cannot show in v0 (binary, non-UTF-8, one side deleted the file):** is a
-   banner saying "resolve this one in the terminal" acceptable for the first usable version,
-   with take-local/take-remote buttons added right after? The alternative delays the first
-   usable build by one milestone.
-4. **After the last file is finished, should the app close itself** (fast, mirrors
-   `git mergetool`'s loop ending) **or stay open with a "Done" button** (lets you re-open a
-   resolved file to double-check before the window goes away)?
+3. ~~Files the tool cannot show in v0~~ — answered 2026-10-10: two buttons in the middle pane in
+   v0 (plan §2 #36).
+4. ~~After the last file is finished, close or stay open~~ — answered 2026-10-10: stays open,
+   resolved files can be reopened, the top bar says everything is resolved (plan §2 #37).

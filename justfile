@@ -54,9 +54,21 @@ hooks-test:
 dev-web:
     {{ just_executable() }} frontend vite
 
-# WebKit WebDriver on a private virtual display: browser windows never appear on the owner's screens.
+# WebKit WebDriver for smoke tests. Its windows open on the owner's Samsung screen, never on the ASUS one
+# (owner, 2026-10-10; KWin rule kept by scripts/test-screen.sh); without a Samsung screen they open on a
+# private virtual display instead.
 webdriver port="4445":
-    xvfb-run -a -s "-screen 0 1700x1000x24" env -u WAYLAND_DISPLAY GDK_BACKEND=x11 WebKitWebDriver --port={{ port }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if scripts/test-screen.sh place; then
+        exec WebKitWebDriver --port={{ port }}
+    fi
+    echo "webdriver: no Samsung screen, using a private virtual display" >&2
+    exec xvfb-run -a -s "-screen 0 1700x1000x24" env -u WAYLAND_DISPLAY GDK_BACKEND=x11 WebKitWebDriver --port={{ port }}
+
+# Fails when an open test window is anywhere but the Samsung screen; run it after opening a test session.
+test-window-check:
+    scripts/test-screen.sh check
 
 dev-app:
     cargo tauri dev
