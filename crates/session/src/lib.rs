@@ -3,9 +3,11 @@
 
 mod decode;
 mod session;
+mod sides;
 
 pub use decode::{Eol, UnsupportedReason};
 pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession, merge_data};
+pub use sides::{FileSides, Side, SideContent};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

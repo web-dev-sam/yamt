@@ -167,6 +167,54 @@ fn checkout_merge_after_restore_rewrites_conflict_markers() {
     assert!(worktree.contains("<<<<<<<"), "no markers in {worktree:?}");
 }
 
+fn staged(dir: &TempDir) -> String {
+    String::from_utf8(git_ok(dir.path(), &["ls-files", "-s"]).unwrap()).unwrap()
+}
+
+#[test]
+fn resolve_with_replaces_every_stage_by_one_stage_zero_entry_of_the_chosen_side() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+    let remote = repo.unmerged().unwrap().remove(2);
+
+    repo.resolve_with(&remote).unwrap();
+
+    assert_eq!(repo.unmerged().unwrap(), []);
+    let oid = remote.oid.as_str();
+    assert_eq!(staged(&dir), format!("100644 {oid} 0\t{FILE}\n"));
+    merged_worktree(&dir);
+}
+
+fn merged_worktree(dir: &TempDir) -> Vec<u8> {
+    let worktree = fs::read(dir.path().join(FILE)).unwrap();
+    assert!(worktree.starts_with(b"one\n<<<<<<<"), "{worktree:?}");
+    worktree
+}
+
+#[test]
+fn remove_from_index_drops_every_stage_and_leaves_the_worktree_file() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+    let worktree = merged_worktree(&dir);
+
+    repo.remove_from_index(Path::new(FILE)).unwrap();
+
+    assert_eq!(staged(&dir), "");
+    assert_eq!(fs::read(dir.path().join(FILE)).unwrap(), worktree);
+}
+
+#[test]
+fn checkout_from_index_overwrites_the_worktree_with_the_stage_zero_blob() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+    let local = repo.unmerged().unwrap().remove(1);
+    repo.resolve_with(&local).unwrap();
+
+    repo.checkout_from_index(Path::new(FILE)).unwrap();
+
+    assert_eq!(fs::read(dir.path().join(FILE)).unwrap(), LOCAL);
+}
+
 #[test]
 fn failing_git_call_reports_argv_status_and_stderr() {
     const NO_SUCH_FILE: &str = "no-such-file.txt";

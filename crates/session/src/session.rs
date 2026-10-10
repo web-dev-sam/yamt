@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -7,10 +8,8 @@ use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
 use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
 
 use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
+use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
 use crate::{Error, Result};
-
-const SYMLINK_MODE: u32 = 0o120_000;
-const SUBMODULE_MODE: u32 = 0o160_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum FileStatus {
@@ -107,14 +106,10 @@ impl MergeSession {
     pub fn files(&self) -> Vec<FileEntry> {
         let mut entries = Vec::with_capacity(self.files.len());
         for file in &self.files {
-            let unsupported = match &file.content {
-                Content::Text(_) => None,
-                Content::Unsupported(reason) => Some(*reason),
-            };
             entries.push(FileEntry {
                 path: file.display_path(),
                 status: file.status,
-                unsupported,
+                unsupported: file.unsupported_reason(),
             });
         }
         entries
@@ -135,11 +130,42 @@ impl MergeSession {
         let file = find_file(&mut self.files, path)?;
         file.require_text()?;
         let worktree_file = self.repo.root().join(&file.path);
-        fs::write(&worktree_file, result).map_err(|source| Error::WriteFailed {
-            path: path.to_owned(),
-            source,
-        })?;
-        self.repo.add(&file.path)?;
+        let before = worktree_bytes(&worktree_file, path)?;
+        write_worktree_file(&worktree_file, path, result.as_bytes())?;
+        if let Err(error) = self.repo.add(&file.path) {
+            match before {
+                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes)?,
+                None => remove_worktree_file(&worktree_file, path)?,
+            }
+            return Err(error.into());
+        }
+        file.status = FileStatus::Resolved;
+        Ok(())
+    }
+
+    pub fn describe(&mut self, path: &str) -> Result<FileSides> {
+        let file = find_file(&mut self.files, path)?;
+        let mut blobs = self.repo.blob_reader()?;
+        Ok(FileSides {
+            path: file.display_path(),
+            reason: file.unsupported_reason(),
+            local: side_content(&mut blobs, file.stages.local.as_ref())?,
+            remote: side_content(&mut blobs, file.stages.remote.as_ref())?,
+        })
+    }
+
+    pub fn take(&mut self, path: &str, side: Side) -> Result<()> {
+        let file = find_file(&mut self.files, path)?;
+        let chosen = file.stages.side(side);
+        match chosen {
+            Some(entry) => self.repo.resolve_with(entry)?,
+            None => self.repo.remove_from_index(&file.path)?,
+        }
+        if let Err(error) = write_chosen_side(&self.repo, file, chosen) {
+            self.repo.restore_stages(&file.stages.entries())?;
+            file.status = FileStatus::Unresolved;
+            return Err(error);
+        }
         file.status = FileStatus::Resolved;
         Ok(())
     }
@@ -172,6 +198,41 @@ fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileS
         })
 }
 
+fn write_chosen_side(repo: &Repo, file: &FileState, chosen: Option<&StageEntry>) -> Result<()> {
+    match chosen {
+        Some(entry) if entry.mode == SUBMODULE_MODE => Ok(()),
+        Some(_) => Ok(repo.checkout_from_index(&file.path)?),
+        None if file.stages.has_mode(SUBMODULE_MODE) => Ok(()),
+        None => remove_worktree_file(&repo.root().join(&file.path), &file.display_path()),
+    }
+}
+
+fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
+    match fs::read(worktree_file) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(write_failed(path, source)),
+    }
+}
+
+fn write_worktree_file(worktree_file: &Path, path: &str, bytes: &[u8]) -> Result<()> {
+    fs::write(worktree_file, bytes).map_err(|source| write_failed(path, source))
+}
+
+fn remove_worktree_file(worktree_file: &Path, path: &str) -> Result<()> {
+    match fs::remove_file(worktree_file) {
+        Err(source) if source.kind() != io::ErrorKind::NotFound => Err(write_failed(path, source)),
+        Ok(()) | Err(_) => Ok(()),
+    }
+}
+
+fn write_failed(path: &str, source: io::Error) -> Error {
+    Error::WriteFailed {
+        path: path.to_owned(),
+        source,
+    }
+}
+
 impl FileState {
     fn display_path(&self) -> String {
         self.path.to_string_lossy().into_owned()
@@ -186,9 +247,23 @@ impl FileState {
             }),
         }
     }
+
+    fn unsupported_reason(&self) -> Option<UnsupportedReason> {
+        match &self.content {
+            Content::Text(_) => None,
+            Content::Unsupported(reason) => Some(*reason),
+        }
+    }
 }
 
 impl CapturedStages {
+    fn side(&self, side: Side) -> Option<&StageEntry> {
+        match side {
+            Side::Local => self.local.as_ref(),
+            Side::Remote => self.remote.as_ref(),
+        }
+    }
+
     fn insert(&mut self, entry: StageEntry) {
         match entry.stage {
             Stage::Base => self.base = Some(entry),

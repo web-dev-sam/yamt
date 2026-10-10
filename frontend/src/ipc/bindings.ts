@@ -8,6 +8,8 @@ export const commands = {
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
 	finishFile: (path: string, text: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("finish_file", { path, text })),
 	resetFile: (path: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("reset_file", { path })),
+	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
+	takeSide: (path: string, side: Side) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("take_side", { path, side })),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 };
 
@@ -61,6 +63,13 @@ export type FileMergeData = {
 	word_changes: WordChanges[],
 };
 
+export type FileSides = {
+	path: string,
+	reason: UnsupportedReason | null,
+	local: SideContent,
+	remote: SideContent,
+};
+
 export type FileStatus = "Unresolved" | "Resolved";
 
 /**
@@ -112,6 +121,10 @@ export type LogValue = string | number | null | boolean;
 
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
+
+export type Side = "local" | "remote";
+
+export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
 
 /**  One side of a chunk compared with base, line by line. */
 export type SideWordChanges<L> = {

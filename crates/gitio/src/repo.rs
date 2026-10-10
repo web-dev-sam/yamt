@@ -66,6 +66,30 @@ impl Repo {
         Ok(())
     }
 
+    pub fn resolve_with(&self, chosen: &StageEntry) -> Result<()> {
+        let (mode, oid) = (chosen.mode, chosen.oid.as_str());
+        let mut record = format!("{mode:o} {oid} 0\t").into_bytes();
+        record.extend_from_slice(chosen.path.as_os_str().as_bytes());
+        record.push(b'\0');
+        let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
+        run(command, Some(record), GIT_TIMEOUT)?;
+        Ok(())
+    }
+
+    pub fn remove_from_index(&self, path: &Path) -> Result<()> {
+        let mut command = self.command(Access::Write, &["update-index", "--force-remove", "--"]);
+        command.arg(path);
+        run(command, None, GIT_TIMEOUT)?;
+        Ok(())
+    }
+
+    pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
+        let mut command = self.command(Access::Write, &["checkout-index", "--force", "--"]);
+        command.arg(path);
+        run(command, None, GIT_TIMEOUT)?;
+        Ok(())
+    }
+
     fn command(&self, access: Access, args: &[&str]) -> Command {
         git_command(&self.git, &self.root, access, args)
     }

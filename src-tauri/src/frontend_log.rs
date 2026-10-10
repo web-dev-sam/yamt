@@ -28,7 +28,7 @@ pub enum LogValue {
 }
 
 impl LogEntry {
-    pub(crate) fn emit(&self) {
+    pub(crate) fn emit(self) {
         let event = &self.event;
         let fields = fields_text(&self.fields);
         match self.level {
@@ -95,7 +95,7 @@ pub(crate) mod tests {
         (result, String::from_utf8(bytes).unwrap())
     }
 
-    fn emitted(entry: &LogEntry) -> String {
+    fn emitted(entry: LogEntry) -> String {
         logged(|| entry.emit()).1
     }
 
@@ -105,7 +105,7 @@ pub(crate) mod tests {
 
     #[test]
     fn frontend_entry_is_logged_at_its_level_with_event_and_fields() {
-        let line = emitted(&entry(
+        let line = emitted(entry(
             r#"{"level":"warn","event":"scroll.drift","fields":{"lines":3,"ok":true,"name":"a b"}}"#,
         ));
         assert_eq!(
@@ -123,7 +123,7 @@ pub(crate) mod tests {
             ("error", "ERROR"),
         ] {
             let json = format!(r#"{{"level":"{level}","event":"e","fields":{{}}}}"#);
-            let line = emitted(&entry(&json));
+            let line = emitted(entry(&json));
             assert!(line.starts_with(&format!("{shown} frontend:")), "{line}");
         }
     }

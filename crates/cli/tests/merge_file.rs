@@ -137,6 +137,8 @@ fn hermetic_git(dir: &Path) -> Command {
         .env("LC_ALL", "C")
         .env_remove("GIT_CONFIG_PARAMETERS")
         .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_EXTERNAL_DIFF")
+        .env_remove("GIT_DIFF_OPTS")
         .args(["-c", "core.attributesFile=/dev/null"]);
     command
 }
@@ -203,6 +205,7 @@ fn git_hunks(base: &str, side: &str) -> Vec<Hunk> {
         .args([
             "diff",
             "--no-index",
+            "--no-ext-diff",
             "--no-color",
             "--histogram",
             "--no-indent-heuristic",

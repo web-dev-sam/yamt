@@ -1,7 +1,7 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
-use yamt_session::{FileEntry, FileMergeData, MergeSession, UnsupportedReason};
+use yamt_session::{FileEntry, FileMergeData, FileSides, MergeSession, Side, UnsupportedReason};
 
 use crate::frontend_log::LogEntry;
 
@@ -50,6 +50,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         load_file,
         finish_file,
         reset_file,
+        describe_file,
+        take_side,
         log,
     ])
 }
@@ -105,10 +107,26 @@ fn reset_file(state: State<'_, SessionState>, path: &str) -> Result<Vec<FileEntr
 
 #[tauri::command]
 #[specta::specta]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri deserialises a struct argument into an owned value"
-)]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn describe_file(state: State<'_, SessionState>, path: &str) -> Result<FileSides, IpcError> {
+    Ok(lock(&state).describe(path)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn take_side(
+    state: State<'_, SessionState>,
+    path: &str,
+    side: Side,
+) -> Result<Vec<FileEntry>, IpcError> {
+    let mut session = lock(&state);
+    session.take(path, side)?;
+    Ok(session.files())
+}
+
+#[tauri::command]
+#[specta::specta]
 fn log(entry: LogEntry) {
     entry.emit();
 }
@@ -154,7 +172,7 @@ mod tests {
     }
 
     fn open_window() -> Window {
-        let repo = conflict_repo(&[
+        open_window_on(&[
             file("added.ts", None, b"local\n", b"remote\n"),
             file(
                 CRLF_PATH,
@@ -164,7 +182,10 @@ mod tests {
             ),
             file("view.vue", Some(b"<a/>\n"), b"<b/>\n", b"<c/>\n"),
         ])
-        .unwrap();
+    }
+
+    fn open_window_on(files: &[ConflictFile]) -> Window {
+        let repo = conflict_repo(files).unwrap();
         let session = MergeSession::open(repo.path()).unwrap();
         let app = with_session(mock_builder(), session)
             .build(mock_context(noop_assets()))
@@ -259,6 +280,27 @@ mod tests {
         let worktree = fs::read_to_string(window.repo.path().join(CRLF_PATH)).unwrap();
         assert!(worktree.contains("<<<<<<<"), "{worktree}");
         assert_eq!(window.exit_on_close(), Exit::Unresolved);
+    }
+
+    #[test]
+    fn describe_file_tells_both_sides_and_take_side_remote_resolves_the_binary_file() {
+        const LOGO: &str = "logo.bin";
+        let window = open_window_on(&[file(LOGO, Some(b"\0base"), b"\0local", b"\0remote")]);
+        let path = json!({ "path": LOGO });
+        let local = json!({ "kind": "Binary", "bytes": 6 });
+        let remote = json!({ "kind": "Binary", "bytes": 7 });
+        let sides = json!({ "path": LOGO, "reason": "Binary", "local": local, "remote": remote });
+        assert_eq!(window.invoke("describe_file", path), Ok(sides));
+
+        let files = window.invoke("take_side", json!({ "path": LOGO, "side": "remote" }));
+
+        let resolved = json!({ "path": LOGO, "status": "Resolved", "unsupported": "Binary" });
+        assert_eq!(files, Ok(json!([resolved])));
+        assert_eq!(
+            fs::read(window.repo.path().join(LOGO)).unwrap(),
+            b"\0remote"
+        );
+        assert_eq!(window.unmerged(), "");
     }
 
     #[test]

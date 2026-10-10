@@ -13,7 +13,7 @@ const NVIDIA_MODULE: &str = "/sys/module/nvidia";
 )]
 pub(crate) fn disable_dmabuf_on_nvidia() {
     if needs_dmabuf_disabled(env::var_os(DMABUF_VAR).as_deref(), Path::new(NVIDIA_MODULE)) {
-        // SAFETY: no other thread exists yet: `run()` calls this before Tauri, GTK or logging start.
+        // SAFETY: `main()` calls `run()` first and `run()` calls this first: no other thread exists yet (no Tauri, GTK or logging).
         unsafe { env::set_var(DMABUF_VAR, "1") };
     }
 }
