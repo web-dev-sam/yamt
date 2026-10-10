@@ -52,7 +52,6 @@ path.chunk-band {
   width: 0;
   height: 1lh;
   vertical-align: top;
-  pointer-events: none;
 }
 
 .cm-editor .chunk-removal::after {
@@ -61,15 +60,18 @@ path.chunk-band {
   left: -1px;
   width: 2px;
   border-radius: 1px;
+  box-shadow:
+    -1px 0 0 var(--color-editor),
+    1px 0 0 var(--color-editor);
   content: "";
 }
 
 .cm-editor .chunk-removal-modified::after {
-  background-color: var(--color-chunk-modified-word);
+  background-color: var(--color-chunk-modified-removal);
 }
 
 .cm-editor .chunk-removal-conflict::after {
-  background-color: var(--color-chunk-conflict-word);
+  background-color: var(--color-chunk-conflict-removal);
 }
 
 .cm-editor .cm-line.chunk-point-above {

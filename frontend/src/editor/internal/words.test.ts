@@ -162,9 +162,9 @@ function painted(state: EditorState): string[] {
           const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
           found.push(`${line.number} ${String(decoration.spec.class)}${text}`);
         } else {
-          const tone = String(decoration.spec.widget.tone);
+          const className = String(decoration.spec.widget.className);
           const around = `${state.sliceDoc(line.from, from)}|${state.sliceDoc(from, line.to)}`;
-          found.push(`${line.number} chunk-removal-${tone} ${around}`);
+          found.push(`${line.number} ${className} ${around}`);
         }
       });
     }
@@ -205,11 +205,11 @@ test("side panes draw one bar per removal point in a CRLF file: line start, mid-
   const merge = open(await synthetic());
 
   expect(bars(merge.left)).toEqual([
-    "2 chunk-removal-conflict |const 😀 = mine;",
-    "2 chunk-removal-conflict const 😀 = mine;|",
-    "3 chunk-removal-modified a = 2|;",
+    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
+    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
+    "3 chunk-removal chunk-removal-modified a = 2|;",
   ]);
-  expect(bars(merge.right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
+  expect(bars(merge.right)).toEqual(["2 chunk-removal chunk-removal-conflict const 😀| = theirs;"]);
   expect(barPositions(merge.left)).toEqual([5, 21, 27]);
   expect(barPositions(merge.right)).toEqual([13]);
 });
@@ -225,15 +225,17 @@ test("a resolved block loses its word marks and bars on every side pane and undo
 
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
   expect(bars(applied.left)).toEqual([
-    "2 chunk-removal-conflict |const 😀 = mine;",
-    "2 chunk-removal-conflict const 😀 = mine;|",
+    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
+    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
   ]);
   expect(marks(dismissed.left)).toEqual([]);
   expect(marks(dismissed.right)).toEqual([]);
   expect(bars(dismissed.left)).toEqual([]);
   expect(bars(dismissed.right)).toEqual([]);
   expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
-  expect(bars(undone(dismissed).right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
+  expect(bars(undone(dismissed).right)).toEqual([
+    "2 chunk-removal chunk-removal-conflict const 😀| = theirs;",
+  ]);
   expect(painted(undone(undone(dismissed)).left)).toEqual(painted(start.left));
 });
 
@@ -248,15 +250,15 @@ test("a half-applied conflict keeps its tint, word marks and removal bars togeth
   expect(painted(applied.left)).toEqual([
     "2 chunk-conflict chunk-band",
     "3 chunk-modified chunk-band",
-    "2 chunk-removal-conflict |const 😀 = mine;",
+    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
     "2 chunk-word-conflict mine",
-    "2 chunk-removal-conflict const 😀 = mine;|",
+    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
     "3 chunk-word-modified 2",
-    "3 chunk-removal-modified a = 2|;",
+    "3 chunk-removal chunk-removal-modified a = 2|;",
   ]);
   expect(painted(applied.right)).toEqual([
     "2 chunk-conflict chunk-band",
-    "2 chunk-removal-conflict const 😀| = theirs;",
+    "2 chunk-removal chunk-removal-conflict const 😀| = theirs;",
     "2 chunk-word-conflict theirs",
   ]);
 });

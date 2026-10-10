@@ -7,10 +7,12 @@ import { chunkTone, type Tone } from "./tone";
 
 class RemovalPoint extends WidgetType {
   readonly tone: Tone;
+  readonly className: string;
 
   constructor(tone: Tone) {
     super();
     this.tone = tone;
+    this.className = `chunk-removal chunk-removal-${tone}`;
   }
 
   override eq(other: RemovalPoint): boolean {
@@ -19,7 +21,7 @@ class RemovalPoint extends WidgetType {
 
   toDOM(): HTMLElement {
     const bar = document.createElement("span");
-    bar.className = `chunk-removal chunk-removal-${this.tone}`;
+    bar.className = this.className;
     return bar;
   }
 
