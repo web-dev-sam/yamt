@@ -1,0 +1,101 @@
+diff --git a/frontend/src/editor/internal/indent.test.ts b/frontend/src/editor/internal/indent.test.ts
+index a80951d..35f2e7a 100644
+--- a/frontend/src/editor/internal/indent.test.ts
++++ b/frontend/src/editor/internal/indent.test.ts
+@@ -42,6 +42,31 @@ class Greeter
+ 
+ const TABS = "func f() {\n\tif x {\n\t\treturn 1\n\t}\n\treturn 0\n}\n";
+ 
++const TABS_WITH_JSDOC = `/**
++ * Returns one.
++ *
++ * Used by tests.
++ */
++func f() {
++\treturn 1
++}
++`;
++
++const TWO_WITH_BLANKS = `function f() {
++  if (x) {
++    a();
++
++    b();
++
++    c();
++    
++    d();
++
++    e();
++  }
++}
++`;
++
+ const MOSTLY_FOUR = `class A:
+     def f(self):
+         call(a,
+@@ -65,8 +90,16 @@ test("a tab-indented text indents with a tab", () => {
+   expect(indentUnitOf(TABS)).toBe("\t");
+ });
+ 
++test("a tab-indented text whose doc comment has more lines than its tab-led lines indents with a tab", () => {
++  expect(indentUnitOf(TABS_WITH_JSDOC)).toBe("\t");
++});
++
++test("blank and whitespace-only lines between deeper statements do not count as steps", () => {
++  expect(indentUnitOf(TWO_WITH_BLANKS)).toBe("  ");
++});
++
+ test("a text without indentation indents by two spaces", () => {
+-  expect(indentUnitOf("a\nb\r\nc\n")).toBe("  ");
++  expect(indentUnitOf("a\nb\nc\n")).toBe("  ");
+ });
+ 
+ test("the most common step wins over a few smaller ones", () => {
+diff --git a/frontend/src/editor/internal/indent.ts b/frontend/src/editor/internal/indent.ts
+index 1871282..297e971 100644
+--- a/frontend/src/editor/internal/indent.ts
++++ b/frontend/src/editor/internal/indent.ts
+@@ -1,26 +1,25 @@
+-const DEFAULT_UNIT = "  ";
+-const LEADING_SPACE = /^[ \t]*/;
++const DEFAULT_WIDTH = 2;
++const SMALLEST_INDENT_STEP = 2;
+ 
+ export function indentUnitOf(text: string): string {
+   const steps = new Map<number, number>();
+   let tabLines = 0;
+   let spaceLines = 0;
+   let previous = 0;
+-  for (const line of text.split(/\r?\n/)) {
++  for (const line of text.split("\n")) {
+     if (line.trim() === "") {
+       continue;
+     }
+-    const leading = LEADING_SPACE.exec(line)?.[0] ?? "";
+-    if (leading.startsWith("\t")) {
++    if (line.startsWith("\t")) {
+       tabLines += 1;
+       continue;
+     }
+-    const width = leading.length;
+-    if (width > 1) {
++    const width = line.length - line.trimStart().length;
++    if (width >= SMALLEST_INDENT_STEP) {
+       spaceLines += 1;
+     }
+     const step = width - previous;
+-    if (step > 1) {
++    if (step >= SMALLEST_INDENT_STEP) {
+       steps.set(step, (steps.get(step) ?? 0) + 1);
+     }
+     previous = width;
+@@ -28,7 +27,7 @@ export function indentUnitOf(text: string): string {
+   if (tabLines > spaceLines) {
+     return "\t";
+   }
+-  return " ".repeat(mostCommon(steps) ?? DEFAULT_UNIT.length);
++  return " ".repeat(mostCommon(steps) ?? DEFAULT_WIDTH);
+ }
+ 
+ function mostCommon(counts: ReadonlyMap<number, number>): number | null {
