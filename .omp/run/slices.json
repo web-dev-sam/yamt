@@ -1,28 +1,34 @@
 {
-  "M1ALinePairedWords": {
-    "owned": [
-      "crates/merge-core/**",
-      "crates/session/tests/**",
-      "crates/cli/tests/**",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/editor/internal/words.ts",
-      "frontend/src/editor/internal/*.test.ts",
-      "tests/showcase/**"
-    ],
+  "M1ALinePairedWordsR1": {
+    "owned": ["crates/merge-core/**", "tests/showcase/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
       "tests/golden/**",
-      "crates/session/src/**",
-      "crates/cli/src/**",
+      "crates/session/**",
+      "crates/cli/**",
+      "frontend/src/**"
+    ]
+  },
+  "M1BRemovalPoints": {
+    "owned": [
+      "frontend/src/editor/internal/words.ts",
+      "frontend/src/editor/internal/words.test.ts",
+      "frontend/src/editor/internal/decorations.ts",
+      "frontend/src/editor/internal/decorations.test.ts",
+      "frontend/src/editor/theme.css"
+    ],
+    "readonly": [
+      "docs/**",
+      ".omp/**",
+      "crates/**",
+      "frontend/src/ipc/**",
       "frontend/src/ui/**",
       "frontend/src/connectors/**",
       "frontend/src/style.css",
-      "frontend/src/editor/index.ts",
-      "frontend/src/ipc/bindings.ts"
+      "frontend/src/main.ts",
+      "frontend/package.json",
+      "frontend/scripts/**"
     ]
   }
 }

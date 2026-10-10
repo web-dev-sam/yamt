@@ -361,7 +361,9 @@ export interface ChunkSource {
 ```
 
 `FixtureChunkSource` (M1) reads `frontend/fixtures/golden/*.json` — the engine's output for each
-golden case, written by `just fixtures` and kept current by `just fixtures-check` in `check`;
+golden case — and `frontend/fixtures/showcase/*.json` — hand-written demo cases from
+`tests/showcase/<case>/` (e.g. `word-marks.ts`, every kind of word change) — both written by
+`just fixtures` and kept current by `just fixtures-check` in `check`;
 `finishFile` stores results in memory and logs the text. `TauriChunkSource` (M2) wraps
 `commands`. From M2, `main.ts` picks one by `import.meta.env.VITE_CHUNK_SOURCE`; with one
 source in M1 there is no switch (vision 5).
