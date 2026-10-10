@@ -2,7 +2,7 @@ import * as v from "valibot";
 
 import type * as Generated from "./bindings";
 import type { ChunkSource } from "./ChunkSource";
-import { toDomain, type FileEntry, type FileMergeData } from "./domain";
+import { toDomain, type FileEntry, type FileMergeData, type SourceResult } from "./domain";
 import type { Log } from "./log";
 
 type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
@@ -95,8 +95,15 @@ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, Fi
   return new Map(parsed.map((data) => [data.path, data]));
 }
 
-function lookup(fixtures: ReadonlyMap<string, FileMergeData>, path: string): FileMergeData {
-  const data = fixtures.get(path);
+function unknownPath(path: string): SourceResult<never> {
+  return { ok: false, failure: { kind: "UnknownPath", path } };
+}
+
+export async function loadFixture(
+  path: string,
+  files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+): Promise<FileMergeData> {
+  const data = parseFixtures(files).get(path);
   if (data === undefined) {
     throw new Error(`no fixture for ${path}`);
   }
@@ -123,18 +130,23 @@ export function createFixtureSource(
       return entries();
     },
     async loadFile(path) {
-      return lookup(fixtures, path);
+      const data = fixtures.get(path);
+      return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
     async finishFile(path, text) {
-      lookup(fixtures, path);
+      if (!fixtures.has(path)) {
+        return unknownPath(path);
+      }
       finished.set(path, text);
       log.info("fixture.finish", { path, text });
-      return entries();
+      return { ok: true, value: entries() };
     },
     async resetFile(path) {
-      const data = lookup(fixtures, path);
+      if (!fixtures.has(path)) {
+        return unknownPath(path);
+      }
       finished.delete(path);
-      return data;
+      return { ok: true, value: entries() };
     },
   };
 }

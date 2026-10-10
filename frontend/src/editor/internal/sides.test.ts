@@ -3,7 +3,7 @@ import type { EditorState, StateCommand, StateField } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
@@ -52,7 +52,7 @@ async function synthetic(
       remote: { changed: [], removed_at: [] },
     })),
   };
-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+  return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
 function open(data: FileMergeData): Merge {
@@ -75,7 +75,7 @@ function open(data: FileMergeData): Merge {
 }
 
 async function magicKeys(): Promise<Merge> {
-  return open(await createFixtureSource(log).loadFile(MAGIC_KEYS));
+  return open(await loadFixture(MAGIC_KEYS));
 }
 
 function mirrored(merge: Merge, center: EditorState): Merge {

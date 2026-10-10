@@ -33,6 +33,12 @@ export type FileMergeData = {
   readonly chunks: readonly Chunk[];
 };
 
+export type SourceFailure = Generated.IpcError;
+
+export type SourceResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly failure: SourceFailure };
+
 function isNonNegativeInteger(n: number): boolean {
   return Number.isSafeInteger(n) && n >= 0;
 }

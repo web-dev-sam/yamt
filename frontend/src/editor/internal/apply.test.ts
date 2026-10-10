@@ -3,7 +3,7 @@ import { Transaction, type EditorState, type StateCommand } from "@codemirror/st
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import {
   applySteps,
   bulkApplySteps,
@@ -45,7 +45,7 @@ async function synthetic(
       remote: { changed: [], removed_at: [] },
     })),
   };
-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+  return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
 function open(data: FileMergeData): ApplyTarget {
@@ -67,7 +67,7 @@ function open(data: FileMergeData): ApplyTarget {
 }
 
 async function magicKeys(): Promise<ApplyTarget> {
-  return open(await createFixtureSource(log).loadFile(MAGIC_KEYS));
+  return open(await loadFixture(MAGIC_KEYS));
 }
 
 function spanAt(merge: ApplyTarget, id: number): ChunkSpan {

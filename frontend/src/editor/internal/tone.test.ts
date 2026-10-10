@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type Chunk } from "../../ipc";
+import { loadFixture, type Chunk } from "../../ipc";
 import { chunkTone } from "./tone";
 
 async function chunkWith(
@@ -30,9 +30,7 @@ async function chunkWith(
       },
     ],
   };
-  const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
-    "synthetic.ts",
-  );
+  const data = await loadFixture("synthetic.ts", { "synthetic.json": record });
   const [chunk] = data.chunks;
   if (chunk === undefined) {
     throw new Error("synthetic fixture lost its chunk");

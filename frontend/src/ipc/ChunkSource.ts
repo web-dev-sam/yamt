@@ -1,8 +1,8 @@
-import type { FileEntry, FileMergeData } from "./domain";
+import type { FileEntry, FileMergeData, SourceResult } from "./domain";
 
 export interface ChunkSource {
   listFiles(): Promise<FileEntry[]>;
-  loadFile(path: string): Promise<FileMergeData>;
-  finishFile(path: string, text: string): Promise<FileEntry[]>;
-  resetFile(path: string): Promise<FileMergeData>;
+  loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+  finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
+  resetFile(path: string): Promise<SourceResult<FileEntry[]>>;
 }

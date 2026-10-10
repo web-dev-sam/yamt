@@ -2,7 +2,7 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import type { Side } from "./side";
@@ -70,11 +70,11 @@ async function synthetic(
       remote: { changed: [], removed_at: [] },
     })),
   };
-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+  return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
 test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
 
   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
@@ -105,7 +105,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
 });
 
 test("a side pane drops a block once its own side is handled, even in an open conflict", async () => {
-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
   const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: PENDING })));
   const state = EditorState.create({
     doc: data.local,
@@ -130,7 +130,7 @@ test("a side pane drops a block once its own side is handled, even in an open co
 });
 
 test("center colours follow their text when a line is typed above them", async () => {
-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   const state = EditorState.create({
     doc: data.base,
@@ -202,7 +202,7 @@ test("a line break pasted at the end of a band line stops at the marker that fol
 });
 
 test("random edits keep center ranges sorted, disjoint, inside the document, and drawable", async () => {
-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   let state = EditorState.create({ doc: data.base, extensions: [field, centerDecorations(field)] });
   let seed = 7;

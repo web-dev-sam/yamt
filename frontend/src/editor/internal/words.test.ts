@@ -3,7 +3,7 @@ import type { EditorState, StateField } from "@codemirror/state";
 import { EditorView, WidgetType } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
@@ -65,7 +65,7 @@ async function synthetic(): Promise<FileMergeData> {
       { chunk: MODIFIED, local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
     ],
   };
-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+  return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
 function sidePane(
@@ -321,7 +321,7 @@ test("the middle pane tints its blocks without word marks or bars: open, half-ap
 });
 
 test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes", async () => {
-  const merge = open(await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts"));
+  const merge = open(await loadFixture("vueuse-use-magic-keys.ts"));
   function tonesByLine(state: EditorState): string[] {
     return [...new Set(marks(state).map((mark) => mark.split(" ", 2).join(" ")))];
   }

@@ -2,7 +2,7 @@ import { history, redo, undo } from "@codemirror/commands";
 import { EditorState, Transaction, type StateCommand, type StateField } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log, type FileMergeData } from "../../ipc";
+import { loadFixture, type FileMergeData } from "../../ipc";
 import { chunkField, type ChunkSpan } from "./chunkField";
 
 type Center = { state: EditorState; field: StateField<readonly ChunkSpan[]> };
@@ -32,7 +32,7 @@ async function synthetic(
       remote: { changed: [], removed_at: [] },
     })),
   };
-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+  return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
 function center(data: FileMergeData): Center {
@@ -70,7 +70,7 @@ function run(command: StateCommand, current: Center): Center {
 }
 
 test("a real fixture's chunks start at line starts; an empty base range is a point", async () => {
-  const data = await createFixtureSource(log).loadFile("vite-modulepreload-polyfill.ts");
+  const data = await loadFixture("vite-modulepreload-polyfill.ts");
   const { state, field } = center(data);
   const doc = state.doc;
 

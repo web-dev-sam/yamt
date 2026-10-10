@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
-import { createFixtureSource, log } from "../../ipc";
+import { loadFixture } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
@@ -116,7 +116,7 @@ function colourAt(state: EditorState, needle: string): string | null {
 
 async function tintedLeft(): Promise<EditorState> {
   const line = { start: 0, len: 1 };
-  const data = await createFixtureSource(log, {
+  const data = await loadFixture("selection.ts", {
     "selection.json": {
       path: "selection.ts",
       base: "const a = old;\n",
@@ -132,7 +132,7 @@ async function tintedLeft(): Promise<EditorState> {
         },
       ],
     },
-  }).loadFile("selection.ts");
+  });
   const statuses = sideStatusField(
     data.chunks.map((chunk) => ({ chunk, status: { local: "pending", remote: "pending" } })),
   );
@@ -180,7 +180,7 @@ test("a character literal is drawn in the string colour", async () => {
 });
 
 test("recolouring the center pane adds no undo step and keeps the chunks", async () => {
-  const data = await createFixtureSource(log).loadFile("vue-core-playground-app.vue");
+  const data = await loadFixture("vue-core-playground-app.vue");
   const field = chunkField(data.chunks);
   const plain = paneState({
     kind: "center",

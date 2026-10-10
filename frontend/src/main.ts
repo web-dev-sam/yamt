@@ -1,11 +1,13 @@
 import { createApp } from "vue";
 
-import { createFixtureSource, log } from "./ipc";
+import { createFixtureSource, createTauriSource, log } from "./ipc";
 import App from "./ui/App.vue";
 import { createAppStore } from "./ui/store";
 
 import "./style.css";
 
-const store = createAppStore(createFixtureSource(log));
+const source =
+  import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
+const store = createAppStore(source);
 void store.loadFiles();
 createApp(App).mount("#app");

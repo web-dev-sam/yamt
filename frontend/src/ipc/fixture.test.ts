@@ -1,7 +1,8 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { createFixtureSource } from "./fixture";
+import type { SourceResult } from "./domain";
+import { createFixtureSource, loadFixture } from "./fixture";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
@@ -18,6 +19,13 @@ function quietLog(): { log: Log; entries: LogEntry[] } {
     entries.push(entry);
   });
   return { log, entries };
+}
+
+function valueOf<T>(result: SourceResult<T>): T {
+  if (!result.ok) {
+    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
+  }
+  return result.value;
 }
 
 const CHUNK = {
@@ -102,7 +110,7 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
   expect(committed).toHaveLength(11);
   for (const json of committed) {
     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
-    const data = await source.loadFile(path);
+    const data = valueOf(await source.loadFile(path));
     expect(data.chunks).toHaveLength(chunks.length);
   }
 });
@@ -110,7 +118,7 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
 test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
   const source = createFixtureSource(quietLog().log);
 
-  const data = await source.loadFile("vueuse-use-magic-keys.ts");
+  const data = valueOf(await source.loadFile("vueuse-use-magic-keys.ts"));
 
   expect(data.chunks[8]).toMatchObject({
     id: 8,
@@ -150,7 +158,10 @@ test("in-memory records are listed sorted by path and keep every field", async (
   });
 
   expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
-  expect(await source.loadFile("a.ts")).toEqual({ ...loaded("a.ts"), eol: "CrLf" });
+  expect(await source.loadFile("a.ts")).toEqual({
+    ok: true,
+    value: { ...loaded("a.ts"), eol: "CrLf" },
+  });
 });
 
 test.each([
@@ -307,33 +318,51 @@ test.each([
   );
 });
 
-test("an unknown path is rejected naming it", async () => {
-  const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts") });
+test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
+  const { log, entries } = quietLog();
+  const source = createFixtureSource(log, { "a.json": record("a.ts") });
+  const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
 
-  await expect(source.loadFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
-  await expect(source.finishFile("nope.ts", "x")).rejects.toThrow("no fixture for nope.ts");
-  await expect(source.resetFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
+  expect(await source.loadFile("nope.ts")).toEqual(failure);
+  expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
+  expect(await source.resetFile("nope.ts")).toEqual(failure);
+  expect(await source.listFiles()).toEqual([
+    { path: "a.ts", status: "Unresolved", unsupported: null },
+  ]);
+  expect(entries).toEqual([]);
 });
 
-test("finish marks the file resolved and logs its text once; reset undoes it", async () => {
+test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
   const { log, entries } = quietLog();
   const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
 
   const finished = await source.finishFile("a.ts", "merged\n");
 
-  expect(finished).toEqual([
-    { path: "a.ts", status: "Resolved", unsupported: null },
-    { path: "b.ts", status: "Unresolved", unsupported: null },
-  ]);
+  expect(finished).toEqual({
+    ok: true,
+    value: [
+      { path: "a.ts", status: "Resolved", unsupported: null },
+      { path: "b.ts", status: "Unresolved", unsupported: null },
+    ],
+  });
   expect(entries).toEqual([
     { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
   ]);
 
-  expect(await source.resetFile("a.ts")).toEqual(loaded("a.ts"));
-  expect((await source.listFiles())[0]).toEqual({
-    path: "a.ts",
-    status: "Unresolved",
-    unsupported: null,
-  });
+  const unresolved = [
+    { path: "a.ts", status: "Unresolved", unsupported: null },
+    { path: "b.ts", status: "Unresolved", unsupported: null },
+  ];
+  expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
+  expect(await source.listFiles()).toEqual(unresolved);
+  expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
+});
+
+test("loadFixture reads a committed or an in-memory record and rejects an unknown path", async () => {
+  expect((await loadFixture("word-marks.ts")).path).toBe("word-marks.ts");
+  expect(await loadFixture("a.ts", { "a.json": record("a.ts") })).toEqual(loaded("a.ts"));
+  await expect(loadFixture("nope.ts", { "a.json": record("a.ts") })).rejects.toThrow(
+    "no fixture for nope.ts",
+  );
 });
