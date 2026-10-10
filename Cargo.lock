@@ -4607,7 +4607,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "yamt-conflict-repo",
- "yamt-gitio",
  "yamt-session",
 ]
 

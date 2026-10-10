@@ -32,10 +32,10 @@ impl LogEntry {
         let event = &self.event;
         let fields = fields_text(&self.fields);
         match self.level {
-            LogLevel::Debug => tracing::debug!(target: TARGET, event, fields),
-            LogLevel::Info => tracing::info!(target: TARGET, event, fields),
-            LogLevel::Warn => tracing::warn!(target: TARGET, event, fields),
-            LogLevel::Error => tracing::error!(target: TARGET, event, fields),
+            LogLevel::Debug => tracing::debug!(target: TARGET, event, %fields),
+            LogLevel::Info => tracing::info!(target: TARGET, event, %fields),
+            LogLevel::Warn => tracing::warn!(target: TARGET, event, %fields),
+            LogLevel::Error => tracing::error!(target: TARGET, event, %fields),
         }
     }
 }
@@ -56,7 +56,7 @@ fn fields_text(fields: &BTreeMap<String, LogValue>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io;
     use std::sync::{Arc, Mutex, PoisonError};
 
@@ -77,7 +77,7 @@ mod tests {
         }
     }
 
-    fn emitted(entry: &LogEntry) -> String {
+    pub(crate) fn logged<T>(action: impl FnOnce() -> T) -> (T, String) {
         let captured = Captured::default();
         let writer = captured.clone();
         let subscriber = tracing_subscriber::fmt()
@@ -86,13 +86,17 @@ mod tests {
             .without_time()
             .with_writer(move || writer.clone())
             .finish();
-        tracing::subscriber::with_default(subscriber, || entry.emit());
+        let result = tracing::subscriber::with_default(subscriber, action);
         let bytes = captured
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        String::from_utf8(bytes).unwrap()
+        (result, String::from_utf8(bytes).unwrap())
+    }
+
+    fn emitted(entry: &LogEntry) -> String {
+        logged(|| entry.emit()).1
     }
 
     fn entry(json: &str) -> LogEntry {
@@ -106,7 +110,7 @@ mod tests {
         ));
         assert_eq!(
             line.trim_end(),
-            r#" WARN frontend: event="scroll.drift" fields="lines=3 name=\"a b\" ok=true""#
+            r#" WARN frontend: event="scroll.drift" fields=lines=3 name="a b" ok=true"#
         );
     }
 

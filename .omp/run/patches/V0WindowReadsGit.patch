@@ -1,0 +1,1478 @@
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index d7360ae..aadff5b 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -3,7 +3,7 @@ import { Transaction, type EditorState, type StateCommand } from "@codemirror/st
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import {
+   applySteps,
+   bulkApplySteps,
+@@ -45,7 +45,7 @@ async function synthetic(
+       remote: { changed: [], removed_at: [] },
+     })),
+   };
+-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+ function open(data: FileMergeData): ApplyTarget {
+@@ -67,7 +67,7 @@ function open(data: FileMergeData): ApplyTarget {
+ }
+ 
+ async function magicKeys(): Promise<ApplyTarget> {
+-  return open(await createFixtureSource(log).loadFile(MAGIC_KEYS));
++  return open(await loadFixture(MAGIC_KEYS));
+ }
+ 
+ function spanAt(merge: ApplyTarget, id: number): ChunkSpan {
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index aec43fa..75dce2f 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -2,7 +2,7 @@ import { history, redo, undo } from "@codemirror/commands";
+ import { EditorState, Transaction, type StateCommand, type StateField } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type FileMergeData } from "../../ipc";
++import { loadFixture, type FileMergeData } from "../../ipc";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ 
+ type Center = { state: EditorState; field: StateField<readonly ChunkSpan[]> };
+@@ -32,7 +32,7 @@ async function synthetic(
+       remote: { changed: [], removed_at: [] },
+     })),
+   };
+-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+ function center(data: FileMergeData): Center {
+@@ -70,7 +70,7 @@ function run(command: StateCommand, current: Center): Center {
+ }
+ 
+ test("a real fixture's chunks start at line starts; an empty base range is a point", async () => {
+-  const data = await createFixtureSource(log).loadFile("vite-modulepreload-polyfill.ts");
++  const data = await loadFixture("vite-modulepreload-polyfill.ts");
+   const { state, field } = center(data);
+   const doc = state.doc;
+ 
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index e7829b0..12bf805 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -2,7 +2,7 @@ import { EditorState, type Extension } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+ import type { Side } from "./side";
+@@ -70,11 +70,11 @@ async function synthetic(
+       remote: { changed: [], removed_at: [] },
+     })),
+   };
+-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
+-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+ 
+   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
+@@ -105,7 +105,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+ });
+ 
+ test("a side pane drops a block once its own side is handled, even in an open conflict", async () => {
+-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: PENDING })));
+   const state = EditorState.create({
+     doc: data.local,
+@@ -130,7 +130,7 @@ test("a side pane drops a block once its own side is handled, even in an open co
+ });
+ 
+ test("center colours follow their text when a line is typed above them", async () => {
+-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+   const state = EditorState.create({
+     doc: data.base,
+@@ -202,7 +202,7 @@ test("a line break pasted at the end of a band line stops at the marker that fol
+ });
+ 
+ test("random edits keep center ranges sorted, disjoint, inside the document, and drawable", async () => {
+-  const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+   let state = EditorState.create({ doc: data.base, extensions: [field, centerDecorations(field)] });
+   let seed = 7;
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index 5cc3d1b..09950b6 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
+ import { highlightTree } from "@lezer/highlight";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log } from "../../ipc";
++import { loadFixture } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { sideDecorations } from "./decorations";
+ import { languageOf } from "./language";
+@@ -116,7 +116,7 @@ function colourAt(state: EditorState, needle: string): string | null {
+ 
+ async function tintedLeft(): Promise<EditorState> {
+   const line = { start: 0, len: 1 };
+-  const data = await createFixtureSource(log, {
++  const data = await loadFixture("selection.ts", {
+     "selection.json": {
+       path: "selection.ts",
+       base: "const a = old;\n",
+@@ -132,7 +132,7 @@ async function tintedLeft(): Promise<EditorState> {
+         },
+       ],
+     },
+-  }).loadFile("selection.ts");
++  });
+   const statuses = sideStatusField(
+     data.chunks.map((chunk) => ({ chunk, status: { local: "pending", remote: "pending" } })),
+   );
+@@ -180,7 +180,7 @@ test("a character literal is drawn in the string colour", async () => {
+ });
+ 
+ test("recolouring the center pane adds no undo step and keeps the chunks", async () => {
+-  const data = await createFixtureSource(log).loadFile("vue-core-playground-app.vue");
++  const data = await loadFixture("vue-core-playground-app.vue");
+   const field = chunkField(data.chunks);
+   const plain = paneState({
+     kind: "center",
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index 6ed2ca3..f5911c9 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -3,7 +3,7 @@ import type { EditorState, StateCommand, StateField } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+@@ -52,7 +52,7 @@ async function synthetic(
+       remote: { changed: [], removed_at: [] },
+     })),
+   };
+-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+ function open(data: FileMergeData): Merge {
+@@ -75,7 +75,7 @@ function open(data: FileMergeData): Merge {
+ }
+ 
+ async function magicKeys(): Promise<Merge> {
+-  return open(await createFixtureSource(log).loadFile(MAGIC_KEYS));
++  return open(await loadFixture(MAGIC_KEYS));
+ }
+ 
+ function mirrored(merge: Merge, center: EditorState): Merge {
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index 91e6c3d..d6046d5 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type Chunk } from "../../ipc";
++import { loadFixture, type Chunk } from "../../ipc";
+ import { chunkTone } from "./tone";
+ 
+ async function chunkWith(
+@@ -30,9 +30,7 @@ async function chunkWith(
+       },
+     ],
+   };
+-  const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
+-    "synthetic.ts",
+-  );
++  const data = await loadFixture("synthetic.ts", { "synthetic.json": record });
+   const [chunk] = data.chunks;
+   if (chunk === undefined) {
+     throw new Error("synthetic fixture lost its chunk");
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index bfa6ca9..198e5dc 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -3,7 +3,7 @@ import type { EditorState, StateField } from "@codemirror/state";
+ import { EditorView, WidgetType } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget, type Steps } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+@@ -65,7 +65,7 @@ async function synthetic(): Promise<FileMergeData> {
+       { chunk: MODIFIED, local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
+     ],
+   };
+-  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+ function sidePane(
+@@ -321,7 +321,7 @@ test("the middle pane tints its blocks without word marks or bars: open, half-ap
+ });
+ 
+ test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes", async () => {
+-  const merge = open(await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts"));
++  const merge = open(await loadFixture("vueuse-use-magic-keys.ts"));
+   function tonesByLine(state: EditorState): string[] {
+     return [...new Set(marks(state).map((mark) => mark.split(" ", 2).join(" ")))];
+   }
+diff --git a/frontend/src/env.d.ts b/frontend/src/env.d.ts
+new file mode 100644
+index 0000000..2240055
+--- /dev/null
++++ b/frontend/src/env.d.ts
+@@ -0,0 +1,3 @@
++interface ImportMetaEnv {
++  readonly VITE_CHUNK_SOURCE: "tauri" | undefined;
++}
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 67bbecc..05a0e62 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,8 +1,8 @@
+-import type { FileEntry, FileMergeData } from "./domain";
++import type { FileEntry, FileMergeData, SourceResult } from "./domain";
+ 
+ export interface ChunkSource {
+   listFiles(): Promise<FileEntry[]>;
+-  loadFile(path: string): Promise<FileMergeData>;
+-  finishFile(path: string, text: string): Promise<FileEntry[]>;
+-  resetFile(path: string): Promise<FileMergeData>;
++  loadFile(path: string): Promise<SourceResult<FileMergeData>>;
++  finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
++  resetFile(path: string): Promise<SourceResult<FileEntry[]>>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 83bce23..0d0fd1f 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -33,6 +33,12 @@ export type FileMergeData = {
+   readonly chunks: readonly Chunk[];
+ };
+ 
++export type SourceFailure = Generated.IpcError;
++
++export type SourceResult<T> =
++  | { readonly ok: true; readonly value: T }
++  | { readonly ok: false; readonly failure: SourceFailure };
++
+ function isNonNegativeInteger(n: number): boolean {
+   return Number.isSafeInteger(n) && n >= 0;
+ }
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index b65a82c..adae34d 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -1,7 +1,8 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { createFixtureSource } from "./fixture";
++import type { SourceResult } from "./domain";
++import { createFixtureSource, loadFixture } from "./fixture";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+@@ -20,6 +21,13 @@ function quietLog(): { log: Log; entries: LogEntry[] } {
+   return { log, entries };
+ }
+ 
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
+ const CHUNK = {
+   id: 0,
+   kind: "Conflict",
+@@ -102,7 +110,7 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
+   expect(committed).toHaveLength(11);
+   for (const json of committed) {
+     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
+-    const data = await source.loadFile(path);
++    const data = valueOf(await source.loadFile(path));
+     expect(data.chunks).toHaveLength(chunks.length);
+   }
+ });
+@@ -110,7 +118,7 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
+ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
+   const source = createFixtureSource(quietLog().log);
+ 
+-  const data = await source.loadFile("vueuse-use-magic-keys.ts");
++  const data = valueOf(await source.loadFile("vueuse-use-magic-keys.ts"));
+ 
+   expect(data.chunks[8]).toMatchObject({
+     id: 8,
+@@ -150,7 +158,10 @@ test("in-memory records are listed sorted by path and keep every field", async (
+   });
+ 
+   expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+-  expect(await source.loadFile("a.ts")).toEqual({ ...loaded("a.ts"), eol: "CrLf" });
++  expect(await source.loadFile("a.ts")).toEqual({
++    ok: true,
++    value: { ...loaded("a.ts"), eol: "CrLf" },
++  });
+ });
+ 
+ test.each([
+@@ -307,33 +318,51 @@ test.each([
+   );
+ });
+ 
+-test("an unknown path is rejected naming it", async () => {
+-  const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts") });
++test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureSource(log, { "a.json": record("a.ts") });
++  const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
+ 
+-  await expect(source.loadFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
+-  await expect(source.finishFile("nope.ts", "x")).rejects.toThrow("no fixture for nope.ts");
+-  await expect(source.resetFile("nope.ts")).rejects.toThrow("no fixture for nope.ts");
++  expect(await source.loadFile("nope.ts")).toEqual(failure);
++  expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
++  expect(await source.resetFile("nope.ts")).toEqual(failure);
++  expect(await source.listFiles()).toEqual([
++    { path: "a.ts", status: "Unresolved", unsupported: null },
++  ]);
++  expect(entries).toEqual([]);
+ });
+ 
+-test("finish marks the file resolved and logs its text once; reset undoes it", async () => {
++test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
+ 
+   const finished = await source.finishFile("a.ts", "merged\n");
+ 
+-  expect(finished).toEqual([
+-    { path: "a.ts", status: "Resolved", unsupported: null },
+-    { path: "b.ts", status: "Unresolved", unsupported: null },
+-  ]);
++  expect(finished).toEqual({
++    ok: true,
++    value: [
++      { path: "a.ts", status: "Resolved", unsupported: null },
++      { path: "b.ts", status: "Unresolved", unsupported: null },
++    ],
++  });
+   expect(entries).toEqual([
+     { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
+   ]);
+ 
+-  expect(await source.resetFile("a.ts")).toEqual(loaded("a.ts"));
+-  expect((await source.listFiles())[0]).toEqual({
+-    path: "a.ts",
+-    status: "Unresolved",
+-    unsupported: null,
+-  });
++  const unresolved = [
++    { path: "a.ts", status: "Unresolved", unsupported: null },
++    { path: "b.ts", status: "Unresolved", unsupported: null },
++  ];
++  expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
++  expect(await source.listFiles()).toEqual(unresolved);
++  expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
+   expect(entries).toHaveLength(1);
+ });
++
++test("loadFixture reads a committed or an in-memory record and rejects an unknown path", async () => {
++  expect((await loadFixture("word-marks.ts")).path).toBe("word-marks.ts");
++  expect(await loadFixture("a.ts", { "a.json": record("a.ts") })).toEqual(loaded("a.ts"));
++  await expect(loadFixture("nope.ts", { "a.json": record("a.ts") })).rejects.toThrow(
++    "no fixture for nope.ts",
++  );
++});
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index c73e0bf..3f6dccc 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -2,7 +2,7 @@ import * as v from "valibot";
+ 
+ import type * as Generated from "./bindings";
+ import type { ChunkSource } from "./ChunkSource";
+-import { toDomain, type FileEntry, type FileMergeData } from "./domain";
++import { toDomain, type FileEntry, type FileMergeData, type SourceResult } from "./domain";
+ import type { Log } from "./log";
+ 
+ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+@@ -95,8 +95,15 @@ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, Fi
+   return new Map(parsed.map((data) => [data.path, data]));
+ }
+ 
+-function lookup(fixtures: ReadonlyMap<string, FileMergeData>, path: string): FileMergeData {
+-  const data = fixtures.get(path);
++function unknownPath(path: string): SourceResult<never> {
++  return { ok: false, failure: { kind: "UnknownPath", path } };
++}
++
++export async function loadFixture(
++  path: string,
++  files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
++): Promise<FileMergeData> {
++  const data = parseFixtures(files).get(path);
+   if (data === undefined) {
+     throw new Error(`no fixture for ${path}`);
+   }
+@@ -123,18 +130,23 @@ export function createFixtureSource(
+       return entries();
+     },
+     async loadFile(path) {
+-      return lookup(fixtures, path);
++      const data = fixtures.get(path);
++      return data === undefined ? unknownPath(path) : { ok: true, value: data };
+     },
+     async finishFile(path, text) {
+-      lookup(fixtures, path);
++      if (!fixtures.has(path)) {
++        return unknownPath(path);
++      }
+       finished.set(path, text);
+       log.info("fixture.finish", { path, text });
+-      return entries();
++      return { ok: true, value: entries() };
+     },
+     async resetFile(path) {
+-      const data = lookup(fixtures, path);
++      if (!fixtures.has(path)) {
++        return unknownPath(path);
++      }
+       finished.delete(path);
+-      return data;
++      return { ok: true, value: entries() };
+     },
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 2673b91..115eb49 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -1,7 +1,11 @@
+ import { createLog } from "./log";
++import { forwardLog } from "./tauri";
+ 
+ export type { ChunkSource } from "./ChunkSource";
+-export type { Chunk, FileEntry, FileMergeData } from "./domain";
+-export { createFixtureSource } from "./fixture";
++export type { Chunk, FileEntry, FileMergeData, SourceFailure, SourceResult } from "./domain";
++export { createFixtureSource, loadFixture } from "./fixture";
++export { createTauriSource } from "./tauri";
+ 
+-export const log = createLog();
++export const log = createLog(
++  import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? forwardLog : undefined,
++);
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+new file mode 100644
+index 0000000..46f5c46
+--- /dev/null
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -0,0 +1,129 @@
++import { beforeEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { createTauriSource, forwardLog } from "./tauri";
++
++const commands = vi.hoisted(() => ({
++  listFiles: vi.fn(),
++  loadFile: vi.fn(),
++  finishFile: vi.fn(),
++  resetFile: vi.fn(),
++  log: vi.fn(),
++}));
++
++vi.mock("./bindings", () => ({ commands }));
++
++const LINE = { start: 0, len: 1 };
++
++const DTO: Generated.FileMergeData = {
++  path: "src/a.ts",
++  base: "b\n",
++  local: "l\n",
++  remote: "r\n",
++  eol: "CrLf",
++  chunks: [{ id: 0, kind: "Conflict", base: LINE, local: LINE, remote: LINE }],
++  word_changes: [
++    {
++      chunk: 0,
++      local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
++      remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
++    },
++  ],
++};
++
++const ENTRIES: Generated.FileEntry[] = [
++  { path: "src/a.ts", status: "Resolved", unsupported: null },
++  { path: "logo.bin", status: "Unresolved", unsupported: "Binary" },
++];
++
++beforeEach(() => {
++  vi.resetAllMocks();
++});
++
++test("listFiles returns the app's entries", async () => {
++  commands.listFiles.mockResolvedValue(ENTRIES);
++
++  expect(await createTauriSource().listFiles()).toEqual(ENTRIES);
++});
++
++test("loadFile turns the app's data into domain data", async () => {
++  commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
++
++  const result = await createTauriSource().loadFile("src/a.ts");
++
++  expect(commands.loadFile).toHaveBeenCalledWith("src/a.ts");
++  expect(result).toEqual({
++    ok: true,
++    value: {
++      path: "src/a.ts",
++      base: "b\n",
++      local: "l\n",
++      remote: "r\n",
++      eol: "CrLf",
++      chunks: [
++        {
++          id: 0,
++          kind: "Conflict",
++          base: LINE,
++          local: LINE,
++          remote: LINE,
++          words: {
++            local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [] },
++            remote: { changed: [], removedAt: [{ line: 0, column: 1 }] },
++          },
++        },
++      ],
++    },
++  });
++});
++
++test("each command's error arrives as the failure, unchanged", async () => {
++  const unsupported: Generated.IpcError = {
++    kind: "Unsupported",
++    path: "logo.bin",
++    reason: "Binary",
++  };
++  const git: Generated.IpcError = { kind: "Git", message: "git add failed" };
++  const unknown: Generated.IpcError = { kind: "UnknownPath", path: "x.ts" };
++  commands.loadFile.mockResolvedValue({ status: "error", error: unsupported });
++  commands.finishFile.mockResolvedValue({ status: "error", error: git });
++  commands.resetFile.mockResolvedValue({ status: "error", error: unknown });
++  const source = createTauriSource();
++
++  expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
++  expect(await source.finishFile("src/a.ts", "text")).toEqual({ ok: false, failure: git });
++  expect(await source.resetFile("x.ts")).toEqual({ ok: false, failure: unknown });
++});
++
++test("finishFile and resetFile send their arguments and return the app's list", async () => {
++  commands.finishFile.mockResolvedValue({ status: "ok", data: ENTRIES });
++  commands.resetFile.mockResolvedValue({ status: "ok", data: ENTRIES });
++  const source = createTauriSource();
++
++  expect(await source.finishFile("src/a.ts", "merged\r\n")).toEqual({ ok: true, value: ENTRIES });
++  expect(await source.resetFile("src/a.ts")).toEqual({ ok: true, value: ENTRIES });
++  expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n");
++  expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts");
++});
++
++test("a rejected command rejects the call", async () => {
++  commands.loadFile.mockRejectedValue(new Error("ipc down"));
++
++  await expect(createTauriSource().loadFile("src/a.ts")).rejects.toThrow("ipc down");
++});
++
++test("the forward stringifies non-finite numbers and keeps every other value", async () => {
++  commands.log.mockResolvedValue(undefined);
++
++  await forwardLog({
++    level: "warn",
++    event: "scroll.drift",
++    fields: { nan: Number.NaN, up: Infinity, down: -Infinity, lines: 3.5, ok: true, name: "a" },
++  });
++
++  expect(commands.log).toHaveBeenCalledWith({
++    level: "warn",
++    event: "scroll.drift",
++    fields: { nan: "NaN", up: "Infinity", down: "-Infinity", lines: 3.5, ok: true, name: "a" },
++  });
++});
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+new file mode 100644
+index 0000000..20a815b
+--- /dev/null
++++ b/frontend/src/ipc/tauri.ts
+@@ -0,0 +1,42 @@
++import { commands, type LogValue } from "./bindings";
++import type { ChunkSource } from "./ChunkSource";
++import { toDomain, type SourceFailure, type SourceResult } from "./domain";
++import type { LogEntry } from "./log";
++
++type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: SourceFailure };
++
++function toResult<T>(result: CommandResult<T>): SourceResult<T> {
++  return result.status === "ok"
++    ? { ok: true, value: result.data }
++    : { ok: false, failure: result.error };
++}
++
++export function createTauriSource(): ChunkSource {
++  return {
++    listFiles() {
++      return commands.listFiles();
++    },
++    async loadFile(path) {
++      const result = toResult(await commands.loadFile(path));
++      return result.ok ? { ok: true, value: toDomain(result.value) } : result;
++    },
++    async finishFile(path, text) {
++      return toResult(await commands.finishFile(path, text));
++    },
++    async resetFile(path) {
++      return toResult(await commands.resetFile(path));
++    },
++  };
++}
++
++// JSON.stringify writes NaN and ±Infinity as `null` (ECMA-262 SerializeJSONProperty); the app's
++// `f64` field rejects `null`, so the whole entry would be lost.
++export function forwardLog(entry: LogEntry): Promise<void> {
++  const fields = Object.fromEntries(
++    Object.entries(entry.fields).map(([key, value]): [string, LogValue] => [
++      key,
++      typeof value === "number" && !Number.isFinite(value) ? String(value) : value,
++    ]),
++  );
++  return commands.log({ level: entry.level, event: entry.event, fields });
++}
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 61354e5..63c0206 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -1,11 +1,13 @@
+ import { createApp } from "vue";
+ 
+-import { createFixtureSource, log } from "./ipc";
++import { createFixtureSource, createTauriSource, log } from "./ipc";
+ import App from "./ui/App.vue";
+ import { createAppStore } from "./ui/store";
+ 
+ import "./style.css";
+ 
+-const store = createAppStore(createFixtureSource(log));
++const source =
++  import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
++const store = createAppStore(source);
+ void store.loadFiles();
+ createApp(App).mount("#app");
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 0c99645..49f8bb3 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -22,6 +22,8 @@
+   --color-row-selected: #2e436e;
+   --color-primary: #3574f0;
+   --color-on-primary: #ffffff;
++  --color-problem: #402929;
++  --color-problem-border: #5e3838;
+ 
+   --color-syntax-keyword: #cf8e6d;
+   --color-syntax-string: #6aab73;
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 18cd907..0967462 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -1,14 +1,18 @@
+ <script setup lang="ts">
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
++import ProblemBar from "./ProblemBar.vue";
+ import { useAppStore } from "./store";
+ 
+-const { files, active, data, open, finish, reset } = useAppStore();
++const { files, active, data, problem, open, finish, reset, dismissProblem } = useAppStore();
+ </script>
+ 
+ <template>
+   <div class="flex h-full">
+     <FileList :files="files" :active="active" @select="open" />
+-    <MergeView :data="data" @finish="finish" @reset="reset" />
++    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
++      <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
++      <MergeView :data="data" @finish="finish" @reset="reset" />
++    </div>
+   </div>
+ </template>
+diff --git a/frontend/src/ui/ProblemBar.vue b/frontend/src/ui/ProblemBar.vue
+new file mode 100644
+index 0000000..1ed6550
+--- /dev/null
++++ b/frontend/src/ui/ProblemBar.vue
+@@ -0,0 +1,30 @@
++<script setup lang="ts">
++import { computed } from "vue";
++import X from "~icons/lucide/x";
++
++import { problemText } from "./problemText";
++import type { Problem } from "./store";
++
++const props = defineProps<{ problem: Problem }>();
++const emit = defineEmits<{ close: [] }>();
++
++const text = computed(() => problemText(props.problem));
++</script>
++
++<template>
++  <div
++    role="alert"
++    class="flex shrink-0 items-start gap-2 border-b border-problem-border bg-problem px-3 py-2 text-fg"
++  >
++    <p class="min-w-0 flex-1 wrap-break-word whitespace-pre-line">{{ text }}</p>
++    <button
++      type="button"
++      title="Close"
++      aria-label="Close"
++      class="rounded p-0.5 hover:bg-problem-border"
++      @click="emit('close')"
++    >
++      <X class="size-4" aria-hidden="true" />
++    </button>
++  </div>
++</template>
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+new file mode 100644
+index 0000000..19a1c04
+--- /dev/null
++++ b/frontend/src/ui/problemText.test.ts
+@@ -0,0 +1,70 @@
++import { expect, test } from "vitest";
++
++import type { SourceFailure } from "../ipc";
++import { problemText } from "./problemText";
++import type { Problem, ProblemCause } from "./store";
++
++const PATH = "src/a.ts";
++
++function onFinish(cause: ProblemCause): Problem {
++  return { action: "finish", path: PATH, cause };
++}
++
++test.each([
++  ["open", `Could not open ${PATH}`],
++  ["finish", `Could not mark ${PATH} as resolved`],
++  ["reset", `Could not reset ${PATH}`],
++] as const)("a failed %s names the file and what failed", (action, words) => {
++  const text = problemText({ action, path: PATH, cause: { kind: "Unexpected", message: "boom" } });
++
++  expect(text).toContain(words);
++  expect(text).toContain("boom");
++});
++
++test("a failed list says the list could not be read, with the cause", () => {
++  const text = problemText({ action: "list", cause: { kind: "Unexpected", message: "repo gone" } });
++
++  expect(text).toContain("Could not list the conflicted files");
++  expect(text).toContain("repo gone");
++});
++
++test("Git carries git's own message", () => {
++  const text = problemText(onFinish({ kind: "Git", message: "git add failed: index.lock\n" }));
++
++  expect(text).toContain(`Could not mark ${PATH} as resolved`);
++  expect(text).toContain("git add failed: index.lock");
++  expect(text.endsWith("\n")).toBe(false);
++});
++
++test("UnknownPath names the path", () => {
++  const text = problemText({
++    action: "open",
++    path: PATH,
++    cause: { kind: "UnknownPath", path: PATH },
++  });
++
++  expect(text).toContain(`${PATH} is not one of the conflicted files`);
++});
++
++test("WriteFailed names the path and the system's message", () => {
++  const text = problemText(onFinish({ kind: "WriteFailed", path: PATH, message: "disk full" }));
++
++  expect(text).toContain(`writing ${PATH} failed`);
++  expect(text).toContain("disk full");
++});
++
++test.each([
++  ["Binary", "it is a binary file"],
++  ["NonUtf8", "it is not UTF-8 text"],
++  ["TooLarge", "it is larger than 8 MiB"],
++  ["LocalDeleted", "it was deleted in your branch"],
++  ["RemoteDeleted", "it was deleted in theirs"],
++  ["Symlink", "it is a symbolic link"],
++  ["Submodule", "it is a submodule"],
++] as const)("Unsupported %s says why the file cannot be shown", (reason, words) => {
++  const cause: SourceFailure = { kind: "Unsupported", path: "src/logo.png", reason };
++  const text = problemText({ action: "open", path: "src/logo.png", cause });
++
++  expect(text).toContain("src/logo.png cannot be shown in the editor");
++  expect(text).toContain(words);
++});
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+new file mode 100644
+index 0000000..411a840
+--- /dev/null
++++ b/frontend/src/ui/problemText.ts
+@@ -0,0 +1,63 @@
++import type { Problem, ProblemCause } from "./store";
++
++type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
++
++function attempted(problem: Problem): string {
++  switch (problem.action) {
++    case "list":
++      return "Could not list the conflicted files";
++    case "open":
++      return `Could not open ${problem.path}`;
++    case "finish":
++      return `Could not mark ${problem.path} as resolved`;
++    case "reset":
++      return `Could not reset ${problem.path}`;
++    default: {
++      const _exhaustive: never = problem;
++      return _exhaustive;
++    }
++  }
++}
++
++function unsupportedBecause(reason: UnsupportedReason): string {
++  switch (reason) {
++    case "Binary":
++      return "it is a binary file";
++    case "NonUtf8":
++      return "it is not UTF-8 text";
++    case "TooLarge":
++      return "it is larger than 8 MiB";
++    case "LocalDeleted":
++      return "it was deleted in your branch";
++    case "RemoteDeleted":
++      return "it was deleted in theirs";
++    case "Symlink":
++      return "it is a symbolic link";
++    case "Submodule":
++      return "it is a submodule";
++    default: {
++      const _exhaustive: never = reason;
++      return _exhaustive;
++    }
++  }
++}
++
++export function problemText(problem: Problem): string {
++  const { cause } = problem;
++  switch (cause.kind) {
++    case "Git":
++      return `${attempted(problem)}: ${cause.message.trim()}`;
++    case "UnknownPath":
++      return `${attempted(problem)}: ${cause.path} is not one of the conflicted files.`;
++    case "Unsupported":
++      return `${cause.path} cannot be shown in the editor: ${unsupportedBecause(cause.reason)}.`;
++    case "WriteFailed":
++      return `${attempted(problem)}: writing ${cause.path} failed: ${cause.message.trim()}`;
++    case "Unexpected":
++      return `${attempted(problem)}: ${cause.message.trim()}`;
++    default: {
++      const _exhaustive: never = cause;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 6bac2f3..f6f088b 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -1,17 +1,18 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import {
+-  createFixtureSource,
+-  log,
++  loadFixture,
+   type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
++  type SourceFailure,
++  type SourceResult,
+ } from "../ipc";
+ import { createAppStore, useAppStore, type AppStore } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+-  readonly resolve: (data: FileMergeData) => void;
++  readonly resolve: (result: SourceResult<FileMergeData>) => void;
+   readonly reject: (error: Error) => void;
+ };
+ 
+@@ -25,9 +26,12 @@ function entry(path: string): FileEntry {
+   return { path, status: "Unresolved", unsupported: null };
+ }
+ 
++function ok<T>(value: T): SourceResult<T> {
++  return { ok: true, value };
++}
++
+ async function dataFor(path: string): Promise<FileMergeData> {
+-  const real = await createFixtureSource(log).loadFile(MAGIC_KEYS);
+-  return { ...real, path };
++  return { ...(await loadFixture(MAGIC_KEYS)), path };
+ }
+ 
+ function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
+@@ -66,9 +70,10 @@ test("useAppStore throws before createAppStore, then returns the created store",
+   expect(fresh.useAppStore()).toBe(created);
+ });
+ 
+-test("loading the list opens the first file and logs file.loaded", async () => {
++test("loading the list opens the first file the editor can show and logs file.loaded", async () => {
+   const lines = spyConsole();
+-  const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
++  const logo: FileEntry = { ...entry("logo.bin"), unsupported: "Binary" };
++  const { source, pending } = handSource([logo, entry("a.ts"), entry("b.ts")]);
+   const store = createAppStore(source);
+   expect(useAppStore()).toBe(store);
+ 
+@@ -77,12 +82,13 @@ test("loading the list opens the first file and logs file.loaded", async () => {
+     expect(pending.map((load) => load.path)).toEqual(["a.ts"]);
+   });
+   const a = await dataFor("a.ts");
+-  pending[0]?.resolve(a);
++  pending[0]?.resolve(ok(a));
+   await loading;
+ 
+-  expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
++  expect(store.files.value).toEqual([logo, entry("a.ts"), entry("b.ts")]);
+   expect(store.active.value).toBe("a.ts");
+-  expect(store.data.value).toBe(a);
++  expect(store.data.value).toEqual(a);
++  expect(store.problem.value).toBeNull();
+   expect(lines.info).toEqual([`[info] file.loaded {path: "a.ts", chunks: ${a.chunks.length}}`]);
+ });
+ 
+@@ -97,7 +103,7 @@ test("an empty list opens nothing", async () => {
+   expect(store.data.value).toBeNull();
+ });
+ 
+-test("a rejected list opens nothing, resolves, and logs store.list_failed once", async () => {
++test("a rejected list opens nothing, resolves, and shows an Unexpected list problem", async () => {
+   const lines = spyConsole();
+   const { source, pending } = handSource([]);
+   const store = createAppStore({
+@@ -110,8 +116,14 @@ test("a rejected list opens nothing, resolves, and logs store.list_failed once",
+   expect(pending).toEqual([]);
+   expect(store.files.value).toEqual([]);
+   expect(store.data.value).toBeNull();
++  expect(store.problem.value).toEqual({
++    action: "list",
++    cause: { kind: "Unexpected", message: "repo gone" },
++  });
+   expect(lines.info).toEqual([]);
+-  expect(lines.error).toEqual(['[error] store.list_failed {reason: "repo gone"}']);
++  expect(lines.error).toEqual([
++    '[error] store.list_failed {kind: "Unexpected", message: "repo gone"}',
++  ]);
+ });
+ 
+ test("a later open wins when the earlier load resolves last", async () => {
+@@ -123,32 +135,32 @@ test("a later open wins when the earlier load resolves last", async () => {
+ 
+   const openA = store.open("a.ts");
+   const openB = store.open("b.ts");
+-  pending[1]?.resolve(b);
++  pending[1]?.resolve(ok(b));
+   await openB;
+-  pending[0]?.resolve(a);
++  pending[0]?.resolve(ok(a));
+   await openA;
+ 
+   expect(store.active.value).toBe("b.ts");
+-  expect(store.data.value).toBe(b);
++  expect(store.data.value).toEqual(b);
+   expect(lines.info).toEqual([`[info] file.loaded {path: "b.ts", chunks: ${b.chunks.length}}`]);
+ });
+ 
+-test("a rejected load keeps the previous file and logs store.load_failed", async () => {
++test("a stale failed open is logged but shows no problem", async () => {
+   const lines = spyConsole();
+   const { source, pending } = handSource([]);
+   const store = createAppStore(source);
+-  const a = await dataFor("a.ts");
++  const b = await dataFor("b.ts");
++
+   const openA = store.open("a.ts");
+-  pending[0]?.resolve(a);
++  const openB = store.open("b.ts");
++  pending[1]?.resolve(ok(b));
++  await openB;
++  pending[0]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "a.ts" } });
+   await openA;
+ 
+-  const openB = store.open("b.ts");
+-  pending[1]?.reject(new Error("disk gone"));
+-  await openB;
+-
+-  expect(store.active.value).toBe("a.ts");
+-  expect(store.data.value).toBe(a);
+-  expect(lines.error).toEqual(['[error] store.load_failed {path: "b.ts", reason: "disk gone"}']);
++  expect(store.active.value).toBe("b.ts");
++  expect(store.problem.value).toBeNull();
++  expect(lines.error).toEqual(['[error] store.open_failed {path: "a.ts", kind: "UnknownPath"}']);
+ });
+ 
+ async function openedStore(
+@@ -158,26 +170,77 @@ async function openedStore(
+   const store = createAppStore({ ...source, ...overrides });
+   const a = await dataFor("a.ts");
+   const opening = store.open("a.ts");
+-  pending[0]?.resolve(a);
++  pending[0]?.resolve(ok(a));
+   await opening;
+   return { store, pending, a };
+ }
+ 
+-test("finish sends the open file's text and shows the list finishFile returns", async () => {
++test("a failed open names the file and cause, keeps the previous file; a later open clears it", async () => {
++  const lines = spyConsole();
++  const { store, pending } = await openedStore({});
++  const shown = store.data.value;
++  const logo: SourceFailure = { kind: "Unsupported", path: "logo.bin", reason: "Binary" };
++
++  const openLogo = store.open("logo.bin");
++  pending[1]?.resolve({ ok: false, failure: logo });
++  await openLogo;
++
++  expect(store.problem.value).toEqual({ action: "open", path: "logo.bin", cause: logo });
++  expect(store.active.value).toBe("a.ts");
++  expect(store.data.value).toBe(shown);
++  expect(lines.error).toEqual([
++    '[error] store.open_failed {path: "logo.bin", kind: "Unsupported", reason: "Binary"}',
++  ]);
++
++  const openB = store.open("b.ts");
++  pending[2]?.resolve(ok(await dataFor("b.ts")));
++  await openB;
++
++  expect(store.problem.value).toBeNull();
++  expect(store.active.value).toBe("b.ts");
++});
++
++test("a rejected load is an Unexpected problem and keeps the previous file", async () => {
++  const lines = spyConsole();
++  const { store, pending } = await openedStore({});
++  const shown = store.data.value;
++
++  const openB = store.open("b.ts");
++  pending[1]?.reject(new Error("disk gone"));
++  await expect(openB).resolves.toBeUndefined();
++
++  expect(store.data.value).toBe(shown);
++  expect(store.problem.value).toEqual({
++    action: "open",
++    path: "b.ts",
++    cause: { kind: "Unexpected", message: "disk gone" },
++  });
++  expect(lines.error).toEqual([
++    '[error] store.open_failed {path: "b.ts", kind: "Unexpected", message: "disk gone"}',
++  ]);
++});
++
++test("finish sends the open file's text, shows the returned list and clears the problem", async () => {
++  spyConsole();
+   const sent: [string, string][] = [];
+   const resolved: FileEntry = { ...entry("a.ts"), status: "Resolved" };
+-  const { store, a } = await openedStore({
++  const { store, pending } = await openedStore({
+     finishFile: (path, text) => {
+       sent.push([path, text]);
+-      return Promise.resolve([resolved, entry("b.ts")]);
++      return Promise.resolve(ok([resolved, entry("b.ts")]));
+     },
+   });
++  const failed = store.open("gone.ts");
++  pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
++  await failed;
++  const shown = store.data.value;
+ 
+   await store.finish("merged\r\n");
+ 
+   expect(sent).toEqual([["a.ts", "merged\r\n"]]);
+   expect(store.files.value).toEqual([resolved, entry("b.ts")]);
+-  expect(store.data.value).toBe(a);
++  expect(store.data.value).toBe(shown);
++  expect(store.problem.value).toBeNull();
+ });
+ 
+ test("finish and reset without an open file call nothing", async () => {
+@@ -189,75 +252,103 @@ test("finish and reset without an open file call nothing", async () => {
+   await store.reset();
+ 
+   expect(store.data.value).toBeNull();
++  expect(store.problem.value).toBeNull();
+   expect(lines.error).toEqual([]);
+ });
+ 
+-test("a rejected finish keeps the list and the file and logs store.finish_failed", async () => {
++test("a failed finish keeps the list unresolved, names the path; dismissProblem clears it", async () => {
+   const lines = spyConsole();
+-  const { store, a } = await openedStore({
+-    finishFile: () => Promise.reject(new Error("index locked")),
++  const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
++  const { store, pending, a } = await openedStore({
++    listFiles: () => Promise.resolve([entry("a.ts")]),
++    finishFile: () => Promise.resolve({ ok: false, failure: git }),
+   });
++  const listing = store.loadFiles();
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(2);
++  });
++  pending[1]?.resolve(ok(a));
++  await listing;
+   const before = store.files.value;
++  const shown = store.data.value;
+ 
+   await store.finish("text");
+ 
+   expect(store.files.value).toBe(before);
+-  expect(store.data.value).toBe(a);
++  expect(store.files.value).toEqual([entry("a.ts")]);
++  expect(store.data.value).toBe(shown);
++  expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
+   expect(lines.error).toEqual([
+-    '[error] store.finish_failed {path: "a.ts", reason: "index locked"}',
++    '[error] store.finish_failed {path: "a.ts", kind: "Git", message: "git add failed: index.lock exists"}',
+   ]);
++
++  store.dismissProblem();
++
++  expect(store.problem.value).toBeNull();
+ });
+ 
+-test("reset reopens the original data as a new object and refreshes the list", async () => {
+-  const original = await dataFor("a.ts");
++test("a rejected finish is an Unexpected problem", async () => {
++  spyConsole();
++  const { store } = await openedStore({
++    finishFile: () => Promise.reject(new Error("ipc down")),
++  });
++
++  await expect(store.finish("text")).resolves.toBeUndefined();
++
++  expect(store.problem.value).toEqual({
++    action: "finish",
++    path: "a.ts",
++    cause: { kind: "Unexpected", message: "ipc down" },
++  });
++});
++
++test("reset takes the list from its result and reloads the file as a new object", async () => {
++  spyConsole();
+   const reset: string[] = [];
+-  const { store, a } = await openedStore({
++  const { store, pending, a } = await openedStore({
+     resetFile: (path) => {
+       reset.push(path);
+-      return Promise.resolve(original);
++      return Promise.resolve(ok([entry("a.ts"), entry("b.ts")]));
+     },
+-    listFiles: () => Promise.resolve([entry("a.ts")]),
++    listFiles: () => Promise.reject(new Error("not used")),
+   });
++  const shown = store.data.value;
+ 
+-  await store.reset();
++  const resetting = store.reset();
++  await vi.waitFor(() => {
++    expect(pending.map((load) => load.path)).toEqual(["a.ts", "a.ts"]);
++  });
++  pending[1]?.resolve(ok(a));
++  await resetting;
+ 
+   expect(reset).toEqual(["a.ts"]);
+-  expect(store.data.value).toEqual(original);
+-  expect(store.data.value).not.toBe(original);
++  expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
++  expect(store.data.value).toEqual(a);
+   expect(store.data.value).not.toBe(a);
+-  expect(store.files.value).toEqual([entry("a.ts")]);
++  expect(store.data.value).not.toBe(shown);
+ });
+ 
+-test("a rejected reset keeps the current file and logs store.reset_failed", async () => {
+-  const lines = spyConsole();
+-  const { store, a } = await openedStore({
+-    resetFile: () => Promise.reject(new Error("stages gone")),
++test("a failed reset keeps the current file and names the path", async () => {
++  spyConsole();
++  const { store, pending } = await openedStore({
++    resetFile: () => Promise.resolve({ ok: false, failure: { kind: "UnknownPath", path: "a.ts" } }),
+   });
++  const shown = store.data.value;
+ 
+   await store.reset();
+ 
+-  expect(store.data.value).toBe(a);
+-  expect(lines.error).toEqual(['[error] store.reset_failed {path: "a.ts", reason: "stages gone"}']);
+-});
+-
+-test("a reset whose list refresh rejects shows the original and logs store.list_failed", async () => {
+-  const lines = spyConsole();
+-  const original = await dataFor("a.ts");
+-  const { store } = await openedStore({
+-    resetFile: () => Promise.resolve(original),
+-    listFiles: () => Promise.reject(new Error("repo gone")),
++  expect(pending).toHaveLength(1);
++  expect(store.data.value).toBe(shown);
++  expect(store.problem.value).toEqual({
++    action: "reset",
++    path: "a.ts",
++    cause: { kind: "UnknownPath", path: "a.ts" },
+   });
+-  const before = store.files.value;
+-
+-  await store.reset();
+-
+-  expect(store.data.value).toEqual(original);
+-  expect(store.files.value).toBe(before);
+-  expect(lines.error).toEqual(['[error] store.list_failed {reason: "repo gone"}']);
+ });
+ 
+ test("a later open wins over a reset that resolves last", async () => {
+-  const resets: ((data: FileMergeData) => void)[] = [];
++  spyConsole();
++  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
+   const { store, pending } = await openedStore({
+     resetFile: () =>
+       new Promise((resolve) => {
+@@ -268,10 +359,12 @@ test("a later open wins over a reset that resolves last", async () => {
+ 
+   const resetting = store.reset();
+   const openB = store.open("b.ts");
+-  pending[1]?.resolve(b);
++  pending[1]?.resolve(ok(b));
+   await openB;
+-  resets[0]?.(await dataFor("a.ts"));
++  resets[0]?.(ok([entry("a.ts")]));
+   await resetting;
+ 
+-  expect(store.data.value).toBe(b);
++  expect(pending).toHaveLength(2);
++  expect(store.active.value).toBe("b.ts");
++  expect(store.files.value).toEqual([entry("a.ts")]);
+ });
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index efed1eb..9104e2c 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -1,15 +1,40 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+-import { log, type ChunkSource, type FileEntry, type FileMergeData } from "../ipc";
++import {
++  log,
++  type ChunkSource,
++  type FileEntry,
++  type FileMergeData,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++
++export type ProblemCause =
++  | SourceFailure
++  | { readonly kind: "Unexpected"; readonly message: string };
++
++export type Problem =
++  | { readonly action: "list"; readonly cause: ProblemCause }
++  | {
++      readonly action: "open" | "finish" | "reset";
++      readonly path: string;
++      readonly cause: ProblemCause;
++    };
++
++type Outcome<T> =
++  | { readonly ok: true; readonly value: T }
++  | { readonly ok: false; readonly cause: ProblemCause };
+ 
+ export type AppStore = {
+   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+   readonly active: ComputedRef<string | null>;
+   readonly data: Readonly<ShallowRef<FileMergeData | null>>;
++  readonly problem: Readonly<ShallowRef<Problem | null>>;
+   loadFiles(): Promise<void>;
+   open(path: string): Promise<void>;
+   finish(text: string): Promise<void>;
+   reset(): Promise<void>;
++  dismissProblem(): void;
+ };
+ 
+ let store: AppStore | null = null;
+@@ -17,32 +42,36 @@ let store: AppStore | null = null;
+ export function createAppStore(source: ChunkSource): AppStore {
+   const files = shallowRef<readonly FileEntry[]>([]);
+   const data = shallowRef<FileMergeData | null>(null);
++  const problem = shallowRef<Problem | null>(null);
+   const active = computed(() => data.value?.path ?? null);
+   let latestLoad = 0;
+ 
++  function report(failure: Problem): void {
++    logFailure(failure);
++    problem.value = failure;
++  }
++
+   async function open(path: string): Promise<void> {
+     latestLoad += 1;
+     const ticket = latestLoad;
+-    try {
+-      const loaded = await source.loadFile(path);
+-      if (ticket !== latestLoad) {
+-        return;
++    const outcome = await attempt(() => source.loadFile(path));
++    const current = ticket === latestLoad;
++    if (!outcome.ok) {
++      const failure: Problem = { action: "open", path, cause: outcome.cause };
++      if (current) {
++        report(failure);
++      } else {
++        logFailure(failure);
+       }
+-      data.value = loaded;
+-      log.info("file.loaded", { path, chunks: loaded.chunks.length });
+-    } catch (error) {
+-      log.error("store.load_failed", { path, reason: reasonOf(error) });
++      return;
+     }
+-  }
+-
+-  async function refreshFiles(): Promise<boolean> {
+-    try {
+-      files.value = await source.listFiles();
+-      return true;
+-    } catch (error) {
+-      log.error("store.list_failed", { reason: reasonOf(error) });
+-      return false;
++    if (!current) {
++      return;
+     }
++    // A new object, so the editor is rebuilt even when the source returns the record it cached.
++    data.value = { ...outcome.value };
++    problem.value = null;
++    log.info("file.loaded", { path, chunks: outcome.value.chunks.length });
+   }
+ 
+   async function finish(text: string): Promise<void> {
+@@ -50,11 +79,13 @@ export function createAppStore(source: ChunkSource): AppStore {
+     if (path === null) {
+       return;
+     }
+-    try {
+-      files.value = await source.finishFile(path, text);
+-    } catch (error) {
+-      log.error("store.finish_failed", { path, reason: reasonOf(error) });
++    const outcome = await attempt(() => source.finishFile(path, text));
++    if (!outcome.ok) {
++      report({ action: "finish", path, cause: outcome.cause });
++      return;
+     }
++    files.value = outcome.value;
++    problem.value = null;
+   }
+ 
+   async function reset(): Promise<void> {
+@@ -64,36 +95,52 @@ export function createAppStore(source: ChunkSource): AppStore {
+     }
+     latestLoad += 1;
+     const ticket = latestLoad;
+-    try {
+-      const original = await source.resetFile(path);
+-      if (ticket !== latestLoad) {
+-        return;
+-      }
+-      // A new object, so the editor is rebuilt even when the source returns the record it cached.
+-      data.value = { ...original };
+-    } catch (error) {
+-      log.error("store.reset_failed", { path, reason: reasonOf(error) });
++    const outcome = await attempt(() => source.resetFile(path));
++    if (!outcome.ok) {
++      report({ action: "reset", path, cause: outcome.cause });
+       return;
+     }
+-    await refreshFiles();
++    files.value = outcome.value;
++    if (ticket === latestLoad) {
++      await open(path);
++    }
+   }
+ 
+   async function loadFiles(): Promise<void> {
+-    if (!(await refreshFiles())) {
++    const outcome = await attempt(async () => ({ ok: true, value: await source.listFiles() }));
++    if (!outcome.ok) {
++      report({ action: "list", cause: outcome.cause });
+       return;
+     }
+-    const first = files.value[0];
++    files.value = outcome.value;
++    problem.value = null;
++    const first = outcome.value.find((file) => file.unsupported === null);
+     if (first !== undefined) {
+       await open(first.path);
+     }
+   }
+ 
+-  store = { files, active, data, loadFiles, open, finish, reset };
++  function dismissProblem(): void {
++    problem.value = null;
++  }
++
++  store = { files, active, data, problem, loadFiles, open, finish, reset, dismissProblem };
+   return store;
+ }
+ 
+-function reasonOf(error: unknown): string {
+-  return error instanceof Error ? error.message : String(error);
++async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<Outcome<T>> {
++  try {
++    const result = await call();
++    return result.ok ? result : { ok: false, cause: result.failure };
++  } catch (error) {
++    const message = error instanceof Error ? error.message : String(error);
++    return { ok: false, cause: { kind: "Unexpected", message } };
++  }
++}
++
++function logFailure(failure: Problem): void {
++  const where = failure.action === "list" ? {} : { path: failure.path };
++  log.error(`store.${failure.action}_failed`, { ...where, ...failure.cause });
+ }
+ 
+ export function useAppStore(): AppStore {

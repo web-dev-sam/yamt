@@ -1,9 +1,10 @@
 //! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
-#![forbid(unsafe_code)]
 
 mod args;
 mod commands;
 mod frontend_log;
+#[cfg(target_os = "linux")]
+mod graphics;
 mod outcome;
 mod window;
 
@@ -21,6 +22,8 @@ const LOG_FILTER_VAR: &str = "YAMT_LOG";
 
 #[must_use]
 pub fn run() -> ExitCode {
+    #[cfg(target_os = "linux")]
+    graphics::disable_dmabuf_on_nvidia();
     init_tracing();
     match args::parse(std::env::args_os().skip(1).collect()) {
         Ok(Invocation::Help) => {
@@ -42,7 +45,7 @@ pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
 
 fn merge(repo: &Path) -> Ending {
     match startup(repo) {
-        Startup::Merge { root, session } => window::run(&root, session),
+        Startup::Merge(session) => window::run(session),
         Startup::Done(ending) => ending,
     }
 }

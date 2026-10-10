@@ -3,8 +3,8 @@
   "productName": "yamt",
   "identifier": "dev.yamt.merge",
   "build": {
-    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm -C frontend dev --port 5173 --strictPort",
-    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm -C frontend build",
+    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm dev --port 5173 --strictPort",
+    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../frontend/dist"
   },

@@ -1,7 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
-use yamt_gitio::Repo;
 use yamt_session::MergeSession;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,28 +33,19 @@ impl Ending {
 }
 
 pub(crate) enum Startup {
-    Merge {
-        root: PathBuf,
-        session: MergeSession,
-    },
+    Merge(MergeSession),
     Done(Ending),
 }
 
 pub(crate) fn startup(repo: &Path) -> Startup {
-    match open(repo) {
+    match MergeSession::open(repo) {
         Err(error) => Startup::Done(Ending::failure(error.to_string())),
-        Ok((root, session)) if session.files().is_empty() => Startup::Done(Ending {
+        Ok(session) if session.files().is_empty() => Startup::Done(Ending {
             exit: Exit::Success,
-            message: Some(format!("nothing to merge in {}", root.display())),
+            message: Some(format!("nothing to merge in {}", session.root().display())),
         }),
-        Ok((root, session)) => Startup::Merge { root, session },
+        Ok(session) => Startup::Merge(session),
     }
-}
-
-fn open(repo: &Path) -> yamt_session::Result<(PathBuf, MergeSession)> {
-    let root = Repo::discover(repo)?.root().to_owned();
-    let session = MergeSession::open(&root)?;
-    Ok((root, session))
 }
 
 pub(crate) fn ending_on_close(session: &MergeSession) -> Ending {
@@ -93,7 +83,9 @@ mod tests {
 
     fn ending(startup: Startup) -> Ending {
         match startup {
-            Startup::Merge { root, .. } => panic!("expected an ending, got a merge in {root:?}"),
+            Startup::Merge(session) => {
+                panic!("expected an ending, got a merge in {:?}", session.root())
+            }
             Startup::Done(ending) => ending,
         }
     }
@@ -108,10 +100,10 @@ mod tests {
         .unwrap();
         let inside = repo.path().join("inside");
         std::fs::create_dir(&inside).unwrap();
-        let Startup::Merge { root, session } = startup(&inside) else {
+        let Startup::Merge(session) = startup(&inside) else {
             panic!("expected a merge");
         };
-        assert_eq!(root, repo.path().canonicalize().unwrap());
+        assert_eq!(session.root(), repo.path().canonicalize().unwrap());
         let paths: Vec<String> = session.files().into_iter().map(|file| file.path).collect();
         assert_eq!(paths, ["a.ts", "b.ts", "c.ts"]);
     }

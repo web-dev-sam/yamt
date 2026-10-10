@@ -4,11 +4,7 @@
 # cases (.ts, .vue, .tsx) at their original paths, a CRLF file, an add/add file, a binary file and a file
 # deleted on one side. Prints the conflicted paths. Uses no user or system git config (risk RK19).
 set -euo pipefail
-
-die() {
-    echo "conflict-repo: $*" >&2
-    exit 1
-}
+source "$(dirname "$0")/git-sandbox.sh"
 
 [ $# -eq 1 ] || die "usage: $0 <dir>"
 dir=$1
@@ -16,23 +12,8 @@ golden_dir="$(cd "$(dirname "$0")/.." && pwd)/tests/golden"
 golden_cases=(vue-core-compiler-von vue-core-playground-app tanstack-query-persist-provider)
 expected_conflicts=$((${#golden_cases[@]} + 4))
 
-if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
-    die "refusing to overwrite $dir: it exists and is not empty"
-fi
-
-git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
-read -r git_major git_minor <<<"$git_version"
-if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
-    die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
-fi
-
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
-repo_git() {
-    git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
-        -c commit.gpgsign=false -c core.autocrlf=false \
-        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
-}
+require_empty_dir "$dir"
+isolate_git_config
 
 # $1: path in the repo, $2: printf format giving the content (\r, \0 allowed).
 write() {
@@ -47,8 +28,7 @@ put_golden() {
     local name case_dir path ext
     for name in "${golden_cases[@]}"; do
         case_dir="$golden_dir/$name"
-        path=$(sed -n 's/^- File: //p' "$case_dir/README.md")
-        [ -n "$path" ] || die "$case_dir/README.md has no '- File: <path>' line"
+        path=$(golden_file_path "$case_dir")
         ext=${path##*.}
         [ -f "$case_dir/$1.$ext" ] || die "missing $case_dir/$1.$ext"
         if [ -s "$case_dir/$1.$ext" ]; then

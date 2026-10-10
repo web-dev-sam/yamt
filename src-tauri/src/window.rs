@@ -15,8 +15,9 @@ const MIN_HEIGHT: f64 = 600.0;
 // `--color-window` in frontend/src/style.css.
 const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
 
-pub(crate) fn run(root: &Path, session: MergeSession) -> Ending {
-    match open_and_wait(&window_title(root), session) {
+pub(crate) fn run(session: MergeSession) -> Ending {
+    let title = window_title(session.root());
+    match open_and_wait(&title, session) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }

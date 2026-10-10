@@ -2,11 +2,7 @@
 # Usage: scripts/golden-repo.sh <case> <dir>
 # Builds a git repo in <dir> with tests/golden/<case> left mid-merge (local merging remote).
 set -euo pipefail
-
-die() {
-    echo "golden-repo: $*" >&2
-    exit 1
-}
+source "$(dirname "$0")/git-sandbox.sh"
 
 [ $# -eq 2 ] || die "usage: $0 <case> <dir>"
 case_name=$1
@@ -14,30 +10,16 @@ dir=$2
 case_dir="$(cd "$(dirname "$0")/.." && pwd)/tests/golden/$case_name"
 
 [ -f "$case_dir/README.md" ] || die "no such case: $case_dir"
-if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
-    die "refusing to overwrite $dir: it exists and is not empty"
-fi
+require_empty_dir "$dir"
 
-path=$(sed -n 's/^- File: //p' "$case_dir/README.md")
-[ -n "$path" ] || die "$case_dir/README.md has no '- File: <path>' line"
+path=$(golden_file_path "$case_dir")
 ext=${path##*.}
 for side in base local remote; do
     [ -f "$case_dir/$side.$ext" ] || die "missing $case_dir/$side.$ext"
 done
 
-git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
-read -r git_major git_minor <<<"$git_version"
-if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
-    die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
-fi
+isolate_git_config
 
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
-repo_git() {
-    git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
-        -c commit.gpgsign=false -c core.autocrlf=false \
-        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
-}
 put() {
     mkdir -p "$(dirname "$dir/$path")"
     cp "$case_dir/$1.$ext" "$dir/$path"

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::needless_pass_by_value,
-    reason = "tauri commands receive state and arguments by value"
-)]
-
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
@@ -74,38 +69,46 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
 
 #[tauri::command]
 #[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn list_files(state: State<'_, SessionState>) -> Vec<FileEntry> {
     lock(&state).files()
 }
 
 #[tauri::command]
 #[specta::specta]
-fn load_file(state: State<'_, SessionState>, path: String) -> Result<FileMergeData, IpcError> {
-    Ok(lock(&state).load(&path)?)
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn load_file(state: State<'_, SessionState>, path: &str) -> Result<FileMergeData, IpcError> {
+    Ok(lock(&state).load(path)?)
 }
 
 #[tauri::command]
 #[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn finish_file(
     state: State<'_, SessionState>,
-    path: String,
-    text: String,
+    path: &str,
+    text: &str,
 ) -> Result<Vec<FileEntry>, IpcError> {
     let mut session = lock(&state);
-    session.finish(&path, &text)?;
+    session.finish(path, text)?;
     Ok(session.files())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn reset_file(state: State<'_, SessionState>, path: String) -> Result<Vec<FileEntry>, IpcError> {
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn reset_file(state: State<'_, SessionState>, path: &str) -> Result<Vec<FileEntry>, IpcError> {
     let mut session = lock(&state);
-    session.reset(&path)?;
+    session.reset(path)?;
     Ok(session.files())
 }
 
 #[tauri::command]
 #[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri deserialises a struct argument into an owned value"
+)]
 fn log(entry: LogEntry) {
     entry.emit();
 }
@@ -124,6 +127,7 @@ mod tests {
     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 
     use super::*;
+    use crate::frontend_log::tests::logged;
     use crate::outcome::{Exit, ending_on_close};
 
     const CRLF_PATH: &str = "crlf.ts";
@@ -301,13 +305,15 @@ mod tests {
     }
 
     #[test]
-    fn log_accepts_a_frontend_entry_and_rejects_an_unknown_level() {
+    fn log_emits_a_frontend_entry_to_tracing_and_rejects_an_unknown_level() {
         let window = open_window();
         let fields = json!({ "lines": 3, "ok": true, "name": "a" });
         let entry = json!({ "level": "warn", "event": "scroll.drift", "fields": fields });
+        let (response, logged) = logged(|| window.invoke("log", json!({ "entry": entry })));
+        assert_eq!(response, Ok(Value::Null));
         assert_eq!(
-            window.invoke("log", json!({ "entry": entry })),
-            Ok(Value::Null)
+            logged.trim_end(),
+            r#" WARN frontend: event="scroll.drift" fields=lines=3 name="a" ok=true"#
         );
         let bad = json!({ "level": "loud", "event": "scroll.drift", "fields": {} });
         let rejected = window.invoke("log", json!({ "entry": bad })).unwrap_err();

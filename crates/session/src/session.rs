@@ -99,6 +99,11 @@ impl MergeSession {
     }
 
     #[must_use]
+    pub fn root(&self) -> &Path {
+        self.repo.root()
+    }
+
+    #[must_use]
     pub fn files(&self) -> Vec<FileEntry> {
         let mut entries = Vec::with_capacity(self.files.len());
         for file in &self.files {
