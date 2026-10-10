@@ -1,5 +1,5 @@
 import "../theme.css";
-import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
+import { RangeSetBuilder, StateField, type Extension, type Text } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
 import type { ChunkSpan } from "./chunkField";
@@ -7,6 +7,7 @@ import { lineSpan } from "./lineSpan";
 import { sideChanged, type Side } from "./side";
 import { isResolved, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
+import { centerWordMarks, sideWordMarks } from "./words";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
@@ -33,25 +34,33 @@ export function sideDecorations(
   statuses: StateField<readonly ChunkState[]>,
   side: Side,
 ): Extension {
-  return EditorView.decorations.compute([statuses], (state) =>
-    bandDecorations(
-      state.doc,
-      state
-        .field(statuses)
-        .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
-        .map(({ chunk }) => ({
-          ...lineSpan(state.doc, chunk[side]),
-          tone: chunkTone(chunk, side),
-        })),
-    ),
-  );
+  return EditorView.decorations.computeN([statuses], (state) => {
+    const tinted = state
+      .field(statuses)
+      .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
+      .map(({ chunk }) => chunk);
+    const bands = tinted.map((chunk) => ({
+      ...lineSpan(state.doc, chunk[side]),
+      tone: chunkTone(chunk, side),
+    }));
+    return [bandDecorations(state.doc, bands), sideWordMarks(state.doc, tinted, side)];
+  });
 }
 
+const baseText = StateField.define<Text>({
+  create: (state) => state.doc,
+  update: (doc) => doc,
+});
+
 export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
-  return EditorView.decorations.compute([field], (state) =>
-    bandDecorations(
-      state.doc,
-      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
-    ),
-  );
+  return [
+    baseText,
+    EditorView.decorations.computeN([field, "doc"], (state) => {
+      const tinted = state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status));
+      return [
+        bandDecorations(state.doc, tinted),
+        centerWordMarks(state.doc, state.field(baseText), tinted),
+      ];
+    }),
+  ];
 }

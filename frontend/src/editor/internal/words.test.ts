@@ -6,11 +6,11 @@ import { expect, test } from "vitest";
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
 import { applySpec, dismissSpec } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
+import { centerDecorations, sideDecorations } from "./decorations";
 import { paneState } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
-import { centerWordMarks, sideWordMarks } from "./words";
 
 type Columns = readonly [line: number, start: number, len: number];
 type Merge = {
@@ -69,7 +69,7 @@ function sidePane(
     language: null,
     kind: "side",
     doc: data[side],
-    extensions: [statuses, sideWordMarks(statuses, side)],
+    extensions: [statuses, sideDecorations(statuses, side)],
   });
 }
 
@@ -80,7 +80,7 @@ function open(data: FileMergeData): Merge {
     language: null,
     kind: "center",
     doc: data.base,
-    extensions: [field, centerWordMarks(field)],
+    extensions: [field, centerDecorations(field)],
   });
   const statuses = sideStatusField(
     center.field(field).map(({ chunk, status }) => ({ chunk, status })),
@@ -139,18 +139,21 @@ function chunk(merge: Merge, id: number): Chunk {
   return span.chunk;
 }
 
-function marks(state: EditorState): string[] {
+function painted(state: EditorState): string[] {
   const found: string[] = [];
   for (const source of state.facet(EditorView.decorations)) {
     if (typeof source !== "function") {
       source.between(0, state.doc.length, (from, to, decoration) => {
-        found.push(
-          `${state.doc.lineAt(from).number} ${String(decoration.spec.class)} ${state.sliceDoc(from, to)}`,
-        );
+        const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
+        found.push(`${state.doc.lineAt(from).number} ${String(decoration.spec.class)}${text}`);
       });
     }
   }
   return found;
+}
+
+function marks(state: EditorState): string[] {
+  return painted(state).filter((entry) => entry.includes("chunk-word-"));
 }
 
 test("side panes mark exactly the changed words, in a CRLF file and after an emoji", async () => {
@@ -175,6 +178,38 @@ test("a resolved block loses its word marks on every pane and undo brings them b
   expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
 });
 
+test("a half-applied conflict keeps its tint and its word marks together on both sides", async () => {
+  const start = open(await synthetic());
+
+  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
+
+  expect(painted(applied.left)).toEqual([
+    "2 chunk-conflict chunk-band",
+    "3 chunk-modified chunk-band",
+    "2 chunk-word-conflict mine",
+    "3 chunk-word-modified 2",
+  ]);
+  expect(painted(applied.right)).toEqual([
+    "2 chunk-conflict chunk-band",
+    "2 chunk-word-conflict theirs",
+  ]);
+});
+
+test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
+  const merge = open(await synthetic());
+  const line = merge.left.doc.line(2);
+
+  const selected = merge.left.update({ selection: { anchor: line.from, head: line.to } }).state;
+
+  expect(painted(selected)).toEqual([
+    "2 selected-text const 😀 = mine;",
+    "2 chunk-conflict chunk-band",
+    "3 chunk-modified chunk-band",
+    "2 chunk-word-conflict mine",
+    "3 chunk-word-modified 2",
+  ]);
+});
+
 test("middle pane marks an open conflict's base words until a side is applied; undo restores them", async () => {
   const start = open(await synthetic());
 
@@ -189,12 +224,16 @@ test("middle pane marks an open conflict's base words until a side is applied; u
 test("middle pane: typing inside a block hides its marks, typing a line above moves them", async () => {
   const start = open(await synthetic());
   const conflictLine = start.center.doc.line(2);
+  const oldWord = conflictLine.from + "const 😀 = ".length;
 
   const inside = run(start, { changes: { from: conflictLine.to, insert: " // x" } });
+  const sameLength = run(start, { changes: { from: oldWord, to: oldWord + 3, insert: "new" } });
   const above = run(start, { changes: { from: 0, insert: "// top\r\n" } });
 
   expect(marks(inside.center)).toEqual(["3 chunk-word-modified 1"]);
   expect(marks(undone(inside).center)).toEqual(marks(start.center));
+  expect(sameLength.center.sliceDoc(conflictLine.from, conflictLine.to)).toBe("const 😀 = new;");
+  expect(marks(sameLength.center)).toEqual(["3 chunk-word-modified 1"]);
   expect(marks(above.center)).toEqual(["3 chunk-word-conflict old", "4 chunk-word-modified 1"]);
 });
 

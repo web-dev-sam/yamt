@@ -25,7 +25,9 @@ function runsOf(state: EditorState): string[] {
       continue;
     }
     source.between(0, state.doc.length, (from, _to, decoration) => {
-      lines.push({ line: state.doc.lineAt(from).number, classes: String(decoration.spec.class) });
+      if (decoration.point) {
+        lines.push({ line: state.doc.lineAt(from).number, classes: String(decoration.spec.class) });
+      }
     });
   }
   const runs: { first: number; last: number; classes: string }[] = [];

@@ -21,7 +21,6 @@ import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type MergeSummary } from "./internal/status";
 import { keepEditorFocus, paintStrips, type ChunkAction } from "./internal/strips";
-import { centerWordMarks, sideWordMarks } from "./internal/words";
 
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
@@ -101,7 +100,7 @@ export class MergeController {
       kind: "center",
       doc: data.base,
       parent: hosts.center,
-      extensions: [field, centerDecorations(field), centerWordMarks(field), repaint, statusSync],
+      extensions: [field, centerDecorations(field), repaint, statusSync],
     });
     const statuses = sideStatusField(
       center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
@@ -112,12 +111,7 @@ export class MergeController {
         kind: "side",
         doc: data.local,
         parent: hosts.left,
-        extensions: [
-          statuses,
-          sideDecorations(statuses, "local"),
-          sideWordMarks(statuses, "local"),
-          repaint,
-        ],
+        extensions: [statuses, sideDecorations(statuses, "local"), repaint],
       }),
       center,
       right: createPane({
@@ -125,12 +119,7 @@ export class MergeController {
         kind: "side",
         doc: data.remote,
         parent: hosts.right,
-        extensions: [
-          statuses,
-          sideDecorations(statuses, "remote"),
-          sideWordMarks(statuses, "remote"),
-          repaint,
-        ],
+        extensions: [statuses, sideDecorations(statuses, "remote"), repaint],
       }),
     };
   }

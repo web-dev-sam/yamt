@@ -1,8 +1,9 @@
 import "@fontsource/jetbrains-mono/400.css";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting, type Language } from "@codemirror/language";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import {
+  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -36,6 +37,7 @@ const darkTheme = EditorView.theme(
     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
       { backgroundColor: "var(--color-selection)" },
     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
+    ".selected-text": { backgroundColor: "var(--color-selection)" },
     ".cm-gutters": {
       backgroundColor: "var(--color-editor)",
       color: "var(--color-gutter)",
@@ -76,6 +78,20 @@ export const paletteHighlight = HighlightStyle.define([
   { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
 
+const selectedText = Decoration.mark({ class: "selected-text" });
+
+// drawSelection paints behind every line background (@codemirror/view LayerView.setZIndex: z-index -1);
+// the highest-precedence mark is the innermost span, so it covers block and word tints under the text.
+const selectionOverTints = Prec.highest(
+  EditorView.decorations.compute(["selection"], (state) =>
+    Decoration.set(
+      state.selection.ranges
+        .filter((range) => !range.empty)
+        .map((range) => selectedText.range(range.from, range.to)),
+    ),
+  ),
+);
+
 function kindExtensions(kind: PaneKind): Extension {
   switch (kind) {
     case "side":
@@ -107,6 +123,7 @@ export function paneState(pane: {
       lineNumbers(),
       pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
       drawSelection(),
+      selectionOverTints,
       darkTheme,
       syntaxHighlighting(paletteHighlight),
       languageCompartment.of(pane.language ?? []),
