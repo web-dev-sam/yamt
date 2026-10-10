@@ -9,16 +9,18 @@ ignore = []
 
 [licenses]
 allow = [
-    "MIT",
-    "Apache-2.0",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "Unicode-3.0",
-    "Zlib",
-    "MPL-2.0",
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "MPL-2.0",
 ]
 confidence-threshold = 0.8
+# Build-time only (Tauri's system-library lookup on Linux); Apache-2.0 plus the permissive LLVM exception.
+exceptions = [{ allow = ["Apache-2.0 WITH LLVM-exception"], crate = "target-lexicon" }]
 
 [licenses.private]
 ignore = true
