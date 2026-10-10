@@ -106,9 +106,6 @@ if (!options.setupBindings.has(macro)) {
 // N3 unrelated call (local)
 yield `${macro}, `;
 
-// N4 call sharing only closing symbols (remote)
-});
-
 // M1 wrapped in a condition (remote)
 a();
 b();
@@ -157,6 +154,15 @@ a(1);
 user.name;
 user.age;
 user.id;
+
+// N4 call sharing only closing symbols (local)
+});
+
+// N5 short call sharing only closing symbols (remote)
+});
+
+// N6 entry sharing only a comma (local)
+},
 
 // X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
 const data = fetchUser(id);

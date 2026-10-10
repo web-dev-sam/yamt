@@ -286,3 +286,13 @@ fn n3_unrelated_call_is_new() {
 fn n4_call_sharing_only_closing_symbols_is_new() {
     assert_eq!(one_line("});", "foo(a, b);"), "[foo(a, b);]");
 }
+
+#[test]
+fn n5_short_call_sharing_only_closing_symbols_is_new() {
+    assert_eq!(one_line("});", "bar();"), "[bar();]");
+}
+
+#[test]
+fn n6_entry_sharing_only_a_comma_is_new() {
+    assert_eq!(one_line("},", "foo,"), "[foo,]");
+}

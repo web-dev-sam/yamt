@@ -78,9 +78,11 @@ fn similar_pairs(base: &[&str], side: &[&str], first: LinePosition) -> Vec<LineP
     let best = best_totals(&base, &side);
     let mut pairs = Vec::new();
     let (mut base_line, mut side_line) = (0, 0);
-    while let (Some(base_tokens), Some(side_tokens)) = (base.get(base_line), side.get(side_line)) {
+    while let (Some(base_compared), Some(side_compared)) =
+        (base.get(base_line), side.get(side_line))
+    {
         let total = best.at(base_line, side_line);
-        let pairs_here = match pair_score(base_tokens, side_tokens) {
+        let pairs_here = match pair_score(base_compared, side_compared) {
             Some(score) => total == score + best.at(base_line + 1, side_line + 1),
             None => false,
         };
@@ -100,11 +102,12 @@ fn similar_pairs(base: &[&str], side: &[&str], first: LinePosition) -> Vec<LineP
     pairs
 }
 
-/// One line's tokens as the pairing measure sees them, each list sorted.
+/// One line as the pairing measure sees it; the token lists are sorted.
 struct ComparedLine<'a> {
     words: Vec<&'a str>,
     /// Every token but whitespace: the words and the symbols.
     visible: Vec<&'a str>,
+    without_whitespace: String,
 }
 
 fn compared_line(line: &str) -> ComparedLine<'_> {
@@ -122,16 +125,27 @@ fn compared_line(line: &str) -> ComparedLine<'_> {
     }
     words.sort_unstable();
     visible.sort_unstable();
-    ComparedLine { words, visible }
+    ComparedLine {
+        words,
+        visible,
+        without_whitespace: without_whitespace(line),
+    }
 }
 
 /// The shared percentage of two lines' words, or of all their visible tokens when either line has
-/// no word; `None` below `MIN_SHARED_PERCENT`.
+/// no word; `None` below `MIN_SHARED_PERCENT`. A wordless line facing a worded one must also occur
+/// inside it, whitespace removed: `}` pairs with `} else {`, `});` never with `bar();`.
 fn pair_score(base: &ComparedLine, side: &ComparedLine) -> Option<usize> {
-    let (base_tokens, side_tokens) = if base.words.is_empty() || side.words.is_empty() {
-        (&base.visible, &side.visible)
-    } else {
-        (&base.words, &side.words)
+    let (base_tokens, side_tokens) = match (base.words.is_empty(), side.words.is_empty()) {
+        (false, false) => (&base.words, &side.words),
+        (true, true) => (&base.visible, &side.visible),
+        (true, false) if side.without_whitespace.contains(&base.without_whitespace) => {
+            (&base.visible, &side.visible)
+        }
+        (false, true) if base.without_whitespace.contains(&side.without_whitespace) => {
+            (&base.visible, &side.visible)
+        }
+        (true, false) | (false, true) => return None,
     };
     let percent = (DICE_PERCENT_SCALE * shared_count(base_tokens, side_tokens))
         .checked_div(base_tokens.len() + side_tokens.len())?;
@@ -143,9 +157,9 @@ fn best_totals(base: &[ComparedLine], side: &[ComparedLine]) -> Table {
     let mut best = Table {
         rows: vec![vec![0; side.len()]; base.len()],
     };
-    for (base_line, base_tokens) in base.iter().enumerate().rev() {
-        for (side_line, side_tokens) in side.iter().enumerate().rev() {
-            let paired = match pair_score(base_tokens, side_tokens) {
+    for (base_line, base_compared) in base.iter().enumerate().rev() {
+        for (side_line, side_compared) in side.iter().enumerate().rev() {
+            let paired = match pair_score(base_compared, side_compared) {
                 Some(score) => score + best.at(base_line + 1, side_line + 1),
                 None => 0,
             };
@@ -256,6 +270,16 @@ mod tests {
         assert_eq!(pairs(&["} else {\n"], &["}\n"]), [(0, 0)]);
         assert_eq!(pairs(&["});\n"], &["}, { passive });\n"]), [(0, 0)]);
         assert_eq!(pairs(&["});\n"], &["foo(a, b);\n"]), []);
+    }
+
+    #[test]
+    fn a_wordless_line_pairs_only_when_it_occurs_inside_the_worded_one() {
+        assert_eq!(pairs(&["});\n"], &["bar();\n"]), []);
+        assert_eq!(pairs(&["bar();\n"], &["});\n"]), []);
+        assert_eq!(pairs(&["},\n"], &["foo,\n"]), []);
+        assert_eq!(pairs(&["foo,\n"], &["},\n"]), []);
+        assert_eq!(pairs(&["} ;\n"], &["};\tx\n"]), [(0, 0)]);
+        assert_eq!(pairs(&["};\tx\n"], &["} ;\n"]), [(0, 0)]);
     }
 
     #[test]

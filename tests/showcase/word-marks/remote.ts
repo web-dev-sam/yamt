@@ -106,9 +106,6 @@ if (scriptSetupRanges.defineModel.length) {
 // N3 unrelated call (local)
 yield `${macro}, `;
 
-// N4 call sharing only closing symbols (remote)
-foo(a, b);
-
 // M1 wrapped in a condition (remote)
 if (ok) {
 	a();
@@ -161,6 +158,15 @@ a(1);
 account.name;
 account.age;
 account.id;
+
+// N4 call sharing only closing symbols (local)
+});
+
+// N5 short call sharing only closing symbols (remote)
+bar();
+
+// N6 entry sharing only a comma (local)
+},
 
 // X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
 const user = fetchUser(id);
