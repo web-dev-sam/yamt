@@ -189,15 +189,25 @@ Invariants (property-tested with `proptest`):
 - reconstruction: base with each chunk's base range replaced by its local lines `==` local,
   byte for byte; same for remote (proves the side-range mapping of step 4).
 
-**Word changes** (plan §2 #30): `pub fn word_changes(base, local, remote, chunks: &[Chunk]) -> Vec<WordChanges>`,
-one per chunk in order. Line-anchored, as IntelliJ: each side's chunk lines are diffed against the
-chunk's base lines first; lines equal to their matched base line get nothing; inside each changed
-line hunk the text is diffed over tokens (word runs, whitespace runs, line breaks, single other
-characters; imara-diff histogram); the
-changed tokens become `InlineRange<L> { line: L, start: u32, len: u32 }` — one line each, line break
-never inside, columns in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions).
-`WordChanges { chunk, local, base, remote }`; `base` is the union of base text changed by either
-side; a side whose chunk text or base text is empty gets none (the block tint says it all). Pure.
+**Word changes** (plan §2 #30, #31): `pub fn word_changes(base, local, remote, chunks: &[Chunk]) -> Vec<WordChanges>`,
+one per chunk in order; each side is compared with base on its own, line by line
+(`line_pairs.rs`, `word.rs`, tokens in `token.rs`):
+
+1. anchors — the chunk's lines diffed with all whitespace removed (imara-diff histogram), so a
+   re-indented line pairs with its original; exact line equality is not a separate anchor;
+   another depth;
+2. gaps between anchors — base and side lines paired in order by shared words (Dice ≥
+   `MIN_SHARED_PERCENT` = 50; wordless lines by their symbols; a maximum-sum table, at most
+   `MAX_GAP_COMBINATIONS` cells, above it the gap's side lines are new);
+3. inside each pair — a token diff (word runs, whitespace runs, single other characters).
+
+Output per side, `SideWordChanges<L> { changed: Vec<InlineRange<L>>, removed_at: Vec<InlinePoint<L>> }`:
+`changed` = side text not in base (an unpaired side line whole; ranges on one line separated only by
+whitespace joined), `removed_at` = zero-width places where base text the side removed would sit
+(inside a pair, or one per run of unpaired base lines with nothing new in their place).
+`InlineRange<L> { line, start, len }` and `InlinePoint<L> { line, column }` stay on one line, columns
+in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions). A side whose chunk
+text or base text is empty gets nothing (the block tint says it all). Pure.
 
 ### 3.2 `gitio` — subprocess only
 
@@ -308,7 +318,9 @@ export type Eol = "Lf" | "CrLf" | "Mixed";
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
 export type InlineRange<L> = { line: L; start: number; len: number };   // UTF-16 columns, one line
-export type WordChanges = { chunk: ChunkId; local: InlineRange<LocalLine>[]; base: InlineRange<BaseLine>[]; remote: InlineRange<RemoteLine>[] };
+export type InlinePoint<L> = { line: L; column: number };               // zero-width, UTF-16 column
+export type SideWordChanges<L> = { changed: InlineRange<L>[]; removed_at: InlinePoint<L>[] };
+export type WordChanges = { chunk: ChunkId; local: SideWordChanges<LocalLine>; remote: SideWordChanges<RemoteLine> };
 export type FileMergeData = { path: string; base: string; local: string; remote: string; eol: Eol; chunks: Chunk[]; word_changes: WordChanges[] };
 export const commands: { listFiles(): Promise<FileEntry[]>; loadFile(path: string): Promise<FileMergeData>; … };
 ```

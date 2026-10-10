@@ -1,0 +1,3246 @@
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index 8800034..735b31d 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -6,10 +6,12 @@ mod apply;
+ mod chunk;
+ mod compute;
+ mod line;
++mod line_pairs;
++mod token;
+ mod word;
+ 
+ pub use apply::apply_non_conflicting;
+ pub use chunk::{Chunk, ChunkId, ChunkKind};
+ pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+-pub use line::{BaseLine, InlineRange, LineRange, LocalLine, RemoteLine};
+-pub use word::{WordChanges, word_changes};
++pub use line::{BaseLine, InlinePoint, InlineRange, LineRange, LocalLine, RemoteLine};
++pub use word::{SideWordChanges, WordChanges, word_changes};
+diff --git a/crates/merge-core/src/line.rs b/crates/merge-core/src/line.rs
+index d5fc422..b0c20a2 100644
+--- a/crates/merge-core/src/line.rs
++++ b/crates/merge-core/src/line.rs
+@@ -68,6 +68,16 @@ pub struct InlineRange<L> {
+     pub len: u32,
+ }
+ 
++/// A zero-width place inside one line of one text: `column` UTF-16 code units from the line's
++/// start, at most the line's length without its line break.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct InlinePoint<L> {
++    /// The line holding the point.
++    pub line: L,
++    /// Column of the point.
++    pub column: u32,
++}
++
+ pub(crate) fn split_lines(text: &str) -> Vec<&str> {
+     text.split_inclusive('\n').collect()
+ }
+diff --git a/crates/merge-core/src/line_pairs.rs b/crates/merge-core/src/line_pairs.rs
+new file mode 100644
+index 0000000..2783075
+--- /dev/null
++++ b/crates/merge-core/src/line_pairs.rs
+@@ -0,0 +1,256 @@
++use std::cmp::Ordering;
++
++use imara_diff::{Algorithm, Diff, InternedInput};
++
++use crate::line::lines_in;
++use crate::token::{TokenKind, line_tokens, without_line_break};
++
++/// Two lines pair when the words they share are at least this percentage of their average word
++/// count (Dice): `a(1);`/`a(2);` share 50 and pair; `if (!emitted) {` and
++/// `if (!scriptSetup || !scriptSetupRanges) {`, sharing only `if`, reach 40 and stay apart.
++const MIN_SHARED_PERCENT: usize = 50;
++
++/// A gap with more base × side line combinations than this gets no similarity pairing: the
++/// table that chooses the pairs has one cell per combination (100 × 100 lines).
++const MAX_GAP_COMBINATIONS: usize = 10_000;
++
++/// A base line and the side line compared with it, both counted from the chunk's first line.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) struct LinePair {
++    pub(crate) base: u32,
++    pub(crate) side: u32,
++}
++
++/// The pairs of a chunk's base and side lines, in order: lines equal but for whitespace, then
++/// similar lines in the gaps between them.
++pub(crate) fn line_pairs(base: &[&str], side: &[&str]) -> Vec<LinePair> {
++    let base_squeezed: Vec<String> = base.iter().map(|line| without_whitespace(line)).collect();
++    let side_squeezed: Vec<String> = side.iter().map(|line| without_whitespace(line)).collect();
++    let mut input = InternedInput::default();
++    input.update_before(base_squeezed.iter().map(String::as_str));
++    input.update_after(side_squeezed.iter().map(String::as_str));
++    let mut diff = Diff::compute(Algorithm::Histogram, &input);
++    diff.postprocess_lines(&input);
++    let mut pairs = Vec::new();
++    let mut equal_from = LinePair { base: 0, side: 0 };
++    for hunk in diff.hunks() {
++        pairs.extend(equal_run(equal_from, hunk.before.start));
++        pairs.extend(similar_pairs(
++            lines_in(base, &hunk.before),
++            lines_in(side, &hunk.after),
++            LinePair {
++                base: hunk.before.start,
++                side: hunk.after.start,
++            },
++        ));
++        equal_from = LinePair {
++            base: hunk.before.end,
++            side: hunk.after.end,
++        };
++    }
++    let base_len = u32::try_from(base.len()).unwrap_or(u32::MAX);
++    pairs.extend(equal_run(equal_from, base_len));
++    pairs
++}
++
++fn without_whitespace(line: &str) -> String {
++    line.chars()
++        .filter(|character| !character.is_whitespace())
++        .collect()
++}
++
++fn equal_run(from: LinePair, base_end: u32) -> impl Iterator<Item = LinePair> {
++    (from.base..base_end)
++        .zip(from.side..)
++        .map(|(base, side)| LinePair { base, side })
++}
++
++/// Pairs lines of one gap in order so that the sum of their shared percentages is the largest.
++fn similar_pairs(base: &[&str], side: &[&str], first: LinePair) -> Vec<LinePair> {
++    if base.len().saturating_mul(side.len()) > MAX_GAP_COMBINATIONS {
++        return Vec::new();
++    }
++    let base: Vec<Vec<&str>> = base.iter().map(|line| compared_words(line)).collect();
++    let side: Vec<Vec<&str>> = side.iter().map(|line| compared_words(line)).collect();
++    let best = best_totals(&base, &side);
++    let mut pairs = Vec::new();
++    let (mut base_line, mut side_line) = (0, 0);
++    while let (Some(base_words), Some(side_words)) = (base.get(base_line), side.get(side_line)) {
++        let paired = pair_score(base_words, side_words);
++        let total = best.at(base_line, side_line);
++        if paired > 0 && total == paired + best.at(base_line + 1, side_line + 1) {
++            pairs.push(LinePair {
++                base: first.base + u32::try_from(base_line).unwrap_or(u32::MAX),
++                side: first.side + u32::try_from(side_line).unwrap_or(u32::MAX),
++            });
++            base_line += 1;
++            side_line += 1;
++        } else if total == best.at(base_line + 1, side_line) {
++            base_line += 1;
++        } else {
++            side_line += 1;
++        }
++    }
++    pairs
++}
++
++/// The words of a line, sorted; a line without words gives its other non-space characters.
++fn compared_words(line: &str) -> Vec<&str> {
++    let tokens = line_tokens(without_line_break(line));
++    let has_words = tokens.iter().any(|token| token.kind == TokenKind::Word);
++    let compared_kind = if has_words {
++        TokenKind::Word
++    } else {
++        TokenKind::Symbol
++    };
++    let mut words: Vec<&str> = tokens
++        .iter()
++        .filter(|token| token.kind == compared_kind)
++        .map(|token| token.text)
++        .collect();
++    words.sort_unstable();
++    words
++}
++
++/// The shared percentage of two lines' words, or 0 when it is below `MIN_SHARED_PERCENT`.
++fn pair_score(base: &[&str], side: &[&str]) -> usize {
++    let percent = (200 * shared_count(base, side))
++        .checked_div(base.len() + side.len())
++        .unwrap_or(0);
++    if percent >= MIN_SHARED_PERCENT {
++        percent
++    } else {
++        0
++    }
++}
++
++/// For every pair of starting lines, the largest score sum reachable from there.
++fn best_totals(base: &[Vec<&str>], side: &[Vec<&str>]) -> Table {
++    let mut best = Table {
++        rows: vec![vec![0; side.len()]; base.len()],
++    };
++    for (base_line, base_words) in base.iter().enumerate().rev() {
++        for (side_line, side_words) in side.iter().enumerate().rev() {
++            let paired = match pair_score(base_words, side_words) {
++                0 => 0,
++                score => score + best.at(base_line + 1, side_line + 1),
++            };
++            let total = paired
++                .max(best.at(base_line + 1, side_line))
++                .max(best.at(base_line, side_line + 1));
++            best.set(base_line, side_line, total);
++        }
++    }
++    best
++}
++
++fn shared_count(base: &[&str], side: &[&str]) -> usize {
++    let (mut base_index, mut side_index, mut shared) = (0, 0, 0);
++    while let (Some(base_word), Some(side_word)) = (base.get(base_index), side.get(side_index)) {
++        match base_word.cmp(side_word) {
++            Ordering::Less => base_index += 1,
++            Ordering::Greater => side_index += 1,
++            Ordering::Equal => {
++                shared += 1;
++                base_index += 1;
++                side_index += 1;
++            }
++        }
++    }
++    shared
++}
++
++/// One cell per base line × side line; reading past the last row or column gives 0.
++struct Table {
++    rows: Vec<Vec<usize>>,
++}
++
++impl Table {
++    fn at(&self, row: usize, column: usize) -> usize {
++        self.rows
++            .get(row)
++            .and_then(|cells| cells.get(column))
++            .copied()
++            .unwrap_or(0)
++    }
++
++    fn set(&mut self, row: usize, column: usize, value: usize) {
++        if let Some(cell) = self
++            .rows
++            .get_mut(row)
++            .and_then(|cells| cells.get_mut(column))
++        {
++            *cell = value;
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn pairs(base: &[&str], side: &[&str]) -> Vec<(u32, u32)> {
++        line_pairs(base, side)
++            .iter()
++            .map(|pair| (pair.base, pair.side))
++            .collect()
++    }
++
++    #[test]
++    fn a_repeated_word_is_shared_as_often_as_both_lines_hold_it() {
++        assert_eq!(shared_count(&["a", "a", "b"], &["a", "b", "b"]), 2);
++        assert_eq!(shared_count(&["a", "b", "b"], &["a", "a", "b"]), 2);
++        assert_eq!(shared_count(&["a", "a"], &["a", "a", "a"]), 2);
++    }
++
++    #[test]
++    fn lines_equal_but_for_whitespace_pair_in_order() {
++        let base = ["\t\tx();\n", "\t\t}\n", "\t}\n"];
++        let side = ["\tx();\n", "\t}\n", "}\n"];
++        assert_eq!(pairs(&base, &side), [(0, 0), (1, 1), (2, 2)]);
++    }
++
++    #[test]
++    fn a_new_line_between_similar_lines_stays_unpaired() {
++        let base = ["a(1);\n", "b(1);\n"];
++        let side = ["a(2);\n", "log();\n", "b(2);\n"];
++        assert_eq!(pairs(&base, &side), [(0, 0), (1, 2)]);
++    }
++
++    #[test]
++    fn a_split_line_pairs_with_the_piece_sharing_more_words() {
++        assert_eq!(pairs(&["foo(a, b)\n"], &["foo(a,\n", "\tb)\n"]), [(0, 0)]);
++        assert_eq!(pairs(&["foo(a,\n", "\tb)\n"], &["foo(a, b)\n"]), [(0, 0)]);
++    }
++
++    #[test]
++    fn lines_sharing_only_a_keyword_do_not_pair() {
++        let base = ["if (!options.setupBindings.has(macro)) {\n"];
++        let side = ["if (scriptSetupRanges.defineModel.length) {\n"];
++        assert_eq!(pairs(&base, &side), []);
++    }
++
++    #[test]
++    fn lines_without_words_compare_their_other_characters() {
++        assert_eq!(pairs(&["}\n"], &["};\n"]), [(0, 0)]);
++        assert_eq!(pairs(&["}\n"], &["{\n"]), []);
++    }
++
++    #[test]
++    fn half_of_the_words_shared_is_enough_to_pair() {
++        assert_eq!(pairs(&["return a;\n"], &["return b;\n"]), [(0, 0)]);
++        assert_eq!(pairs(&["a b c\n"], &["a d e\n"]), []);
++    }
++
++    #[test]
++    fn a_gap_over_the_combination_cap_pairs_nothing_but_one_at_the_cap_does() {
++        let base: Vec<String> = (0..101).map(|line| format!("x = {line};\n")).collect();
++        let side: Vec<String> = (0..100).map(|line| format!("x = {line}a;\n")).collect();
++        let mut base: Vec<&str> = base.iter().map(String::as_str).collect();
++        let mut side: Vec<&str> = side.iter().map(String::as_str).collect();
++        base.push("end\n");
++        side.push("\tend\n");
++        assert_eq!(pairs(&base, &side), [(101, 100)]);
++        assert_eq!(pairs(&base[1..], &side).len(), 101);
++    }
++}
+diff --git a/crates/merge-core/src/token.rs b/crates/merge-core/src/token.rs
+new file mode 100644
+index 0000000..c19d7e9
+--- /dev/null
++++ b/crates/merge-core/src/token.rs
+@@ -0,0 +1,61 @@
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum TokenKind {
++    Word,
++    Space,
++    Symbol,
++}
++
++/// A piece of one line's content: a run of word characters, a run of whitespace, or one other
++/// character.
++pub(crate) struct Token<'a> {
++    pub(crate) text: &'a str,
++    pub(crate) kind: TokenKind,
++    pub(crate) column: u32,
++    pub(crate) width: u32,
++}
++
++pub(crate) fn line_tokens(content: &str) -> Vec<Token<'_>> {
++    let mut tokens = Vec::new();
++    let mut column = 0;
++    let mut rest = content;
++    while let Some(first) = rest.chars().next() {
++        let kind = kind_of(first);
++        let byte_len = match kind {
++            TokenKind::Word | TokenKind::Space => rest
++                .find(|next| kind_of(next) != kind)
++                .unwrap_or(rest.len()),
++            TokenKind::Symbol => first.len_utf8(),
++        };
++        let (text, after) = rest.split_at(byte_len);
++        let width = utf16_len(text);
++        tokens.push(Token {
++            text,
++            kind,
++            column,
++            width,
++        });
++        column += width;
++        rest = after;
++    }
++    tokens
++}
++
++pub(crate) fn without_line_break(line: &str) -> &str {
++    line.strip_suffix("\r\n")
++        .or_else(|| line.strip_suffix('\n'))
++        .unwrap_or(line)
++}
++
++pub(crate) fn utf16_len(text: &str) -> u32 {
++    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
++}
++
++fn kind_of(character: char) -> TokenKind {
++    if character.is_alphanumeric() || character == '_' {
++        TokenKind::Word
++    } else if character.is_whitespace() {
++        TokenKind::Space
++    } else {
++        TokenKind::Symbol
++    }
++}
+diff --git a/crates/merge-core/src/word.rs b/crates/merge-core/src/word.rs
+index 7bddfcb..a1638fd 100644
+--- a/crates/merge-core/src/word.rs
++++ b/crates/merge-core/src/word.rs
+@@ -1,69 +1,33 @@
+ use std::ops::Range;
+ 
+-use imara_diff::{Algorithm, Diff, InternedInput};
++use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
+ use serde::Serialize;
+ use specta::Type;
+ 
+ use crate::chunk::{Chunk, ChunkId};
+-use crate::line::{BaseLine, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
++use crate::line::{InlinePoint, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
++use crate::line_pairs::{LinePair, line_pairs};
++use crate::token::{Token, TokenKind, line_tokens, utf16_len, without_line_break};
+ 
+-/// Where one chunk's sides differ from base, word by word. `base` marks the base text that
+-/// either side changed (the union).
++/// One side of a chunk compared with base, line by line.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct SideWordChanges<L> {
++    /// Side text that is not in base: sorted by line then start, disjoint, never empty,
++    /// never across a line break.
++    pub changed: Vec<InlineRange<L>>,
++    /// Places where base text this side removed would sit: sorted, at most one per place.
++    pub removed_at: Vec<InlinePoint<L>>,
++}
++
++/// Where one chunk's sides differ from base.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct WordChanges {
+-    /// The chunk these ranges belong to.
++    /// The chunk these changes belong to.
+     pub chunk: ChunkId,
+-    /// Changed text in the chunk's local lines.
+-    pub local: Vec<InlineRange<LocalLine>>,
+-    /// Base text changed by local, remote or both.
+-    pub base: Vec<InlineRange<BaseLine>>,
+-    /// Changed text in the chunk's remote lines.
+-    pub remote: Vec<InlineRange<RemoteLine>>,
+-}
+-
+-#[derive(Clone, Copy, PartialEq, Eq)]
+-enum CharKind {
+-    Word,
+-    Space,
+-    Symbol,
+-}
+-
+-#[derive(Clone, Copy)]
+-enum TokenKind {
+-    Text(CharKind),
+-    LineBreak,
+-}
+-
+-struct Token<'a> {
+-    text: &'a str,
+-    kind: TokenKind,
+-    line: u32,
+-    column: u32,
+-    width: u32,
+-}
+-
+-struct ChunkText<'a> {
+-    lines: &'a [&'a str],
+-    first_line: u32,
+-    tokens: Vec<Token<'a>>,
+-}
+-
+-impl<'a> ChunkText<'a> {
+-    fn new(all_lines: &'a [&'a str], range: &Range<u32>) -> ChunkText<'a> {
+-        let lines = lines_in(all_lines, range);
+-        ChunkText {
+-            lines,
+-            first_line: range.start,
+-            tokens: tokens(lines, range.start),
+-        }
+-    }
+-
+-    fn token_span(&self, lines: &Range<u32>) -> Range<usize> {
+-        let start = self.first_line + lines.start;
+-        let end = self.first_line + lines.end;
+-        self.tokens.partition_point(|token| token.line < start)
+-            ..self.tokens.partition_point(|token| token.line < end)
+-    }
++    /// Local compared with base.
++    pub local: SideWordChanges<LocalLine>,
++    /// Remote compared with base.
++    pub remote: SideWordChanges<RemoteLine>,
+ }
+ 
+ /// One entry per chunk, in the order of `chunks`.
+@@ -72,181 +36,154 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) ->
+     let base_lines = split_lines(base);
+     let local_lines = split_lines(local);
+     let remote_lines = split_lines(remote);
+-    let mut changes = Vec::with_capacity(chunks.len());
+-    for chunk in chunks {
+-        let base = ChunkText::new(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
+-        let local = ChunkText::new(&local_lines, &(chunk.local.start.0..chunk.local.end().0));
+-        let remote = ChunkText::new(&remote_lines, &(chunk.remote.start.0..chunk.remote.end().0));
+-        let (base_by_local, local_changed) = changed_tokens(&base, &local);
+-        let (base_by_remote, remote_changed) = changed_tokens(&base, &remote);
+-        let base_changed: Vec<bool> = base_by_local
+-            .iter()
+-            .zip(&base_by_remote)
+-            .map(|(by_local, by_remote)| *by_local || *by_remote)
++    chunks
++        .iter()
++        .map(|chunk| {
++            let base = lines_in(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
++            let local = chunk.local.start.0..chunk.local.end().0;
++            let remote = chunk.remote.start.0..chunk.remote.end().0;
++            WordChanges {
++                chunk: chunk.id,
++                local: side_word_changes(base, &local_lines, local, LocalLine),
++                remote: side_word_changes(base, &remote_lines, remote, RemoteLine),
++            }
++        })
++        .collect()
++}
++
++fn side_word_changes<L: Copy + PartialEq>(
++    base: &[&str],
++    all_side_lines: &[&str],
++    side_range: Range<u32>,
++    line_of: fn(u32) -> L,
++) -> SideWordChanges<L> {
++    let mut marker = SideMarker {
++        side: lines_in(all_side_lines, &side_range),
++        first_line: side_range.start,
++        line_of,
++        changes: SideWordChanges {
++            changed: Vec::new(),
++            removed_at: Vec::new(),
++        },
++    };
++    if base.is_empty() || marker.side.is_empty() {
++        return marker.changes;
++    }
++    let mut after_previous = LinePair { base: 0, side: 0 };
++    for pair in line_pairs(base, marker.side) {
++        marker.mark_gap(after_previous, pair);
++        marker.mark_pair(line_text(base, pair.base), pair.side);
++        after_previous = LinePair {
++            base: pair.base + 1,
++            side: pair.side + 1,
++        };
++    }
++    let chunk_end = LinePair {
++        base: u32::try_from(base.len()).unwrap_or(u32::MAX),
++        side: marker.side_len(),
++    };
++    marker.mark_gap(after_previous, chunk_end);
++    marker.changes.removed_at.dedup();
++    marker.changes
++}
++
++struct SideMarker<'a, L> {
++    side: &'a [&'a str],
++    first_line: u32,
++    line_of: fn(u32) -> L,
++    changes: SideWordChanges<L>,
++}
++
++impl<L: Copy> SideMarker<'_, L> {
++    /// Marks the unpaired lines between two pairs (or a chunk edge): new side lines in full, and
++    /// removed base lines as one point when no side line replaces them.
++    fn mark_gap(&mut self, from: LinePair, until: LinePair) {
++        for side_line in from.side..until.side {
++            let width = self.width(side_line);
++            if width > 0 {
++                self.mark_range(side_line, 0, width);
++            }
++        }
++        if from.side < until.side || from.base == until.base {
++            return;
++        }
++        if until.side < self.side_len() {
++            self.mark_point(until.side, 0);
++        } else if let Some(previous) = from.side.checked_sub(1) {
++            self.mark_point(previous, self.width(previous));
++        }
++    }
++
++    fn mark_pair(&mut self, base_text: &str, side_line: u32) {
++        let side_text = line_text(self.side, side_line);
++        if base_text == side_text {
++            return;
++        }
++        let base_tokens = line_tokens(without_line_break(base_text));
++        let side_tokens = line_tokens(without_line_break(side_text));
++        let diff = token_diff(&base_tokens, &side_tokens);
++        for hunk in diff.hunks().filter(Hunk::is_pure_removal) {
++            let column = side_tokens
++                .get(hunk.after.start as usize)
++                .map_or_else(|| self.width(side_line), |token| token.column);
++            self.mark_point(side_line, column);
++        }
++        let added: Vec<bool> = (0..)
++            .zip(&side_tokens)
++            .map(|(index, _)| diff.is_added(index))
+             .collect();
+-        changes.push(WordChanges {
+-            chunk: chunk.id,
+-            local: ranges(&local.tokens, &local_changed, LocalLine),
+-            base: ranges(&base.tokens, &base_changed, BaseLine),
+-            remote: ranges(&remote.tokens, &remote_changed, RemoteLine),
+-        });
+-    }
+-    changes
+-}
+-
+-fn tokens<'a>(lines: &'a [&'a str], first_line: u32) -> Vec<Token<'a>> {
+-    let mut tokens = Vec::new();
+-    for (line, text) in (first_line..).zip(lines) {
+-        let (content, line_break) = split_line_break(text);
+-        let mut column = 0;
+-        let mut rest = content;
+-        while let Some(first) = rest.chars().next() {
+-            let kind = kind_of(first);
+-            let byte_len = match kind {
+-                CharKind::Word | CharKind::Space => rest
+-                    .find(|next| kind_of(next) != kind)
+-                    .unwrap_or(rest.len()),
+-                CharKind::Symbol => first.len_utf8(),
+-            };
+-            let (text, after) = rest.split_at(byte_len);
+-            let width = utf16_len(text);
+-            tokens.push(Token {
+-                text,
+-                kind: TokenKind::Text(kind),
+-                line,
+-                column,
+-                width,
+-            });
+-            column += width;
+-            rest = after;
+-        }
+-        if !line_break.is_empty() {
+-            tokens.push(Token {
+-                text: line_break,
+-                kind: TokenKind::LineBreak,
+-                line,
+-                column,
+-                width: utf16_len(line_break),
+-            });
++        for (start, len) in marked_spans(&side_tokens, &added) {
++            self.mark_range(side_line, start, len);
+         }
+     }
+-    tokens
+-}
+ 
+-fn split_line_break(line: &str) -> (&str, &'static str) {
+-    if let Some(content) = line.strip_suffix("\r\n") {
+-        (content, "\r\n")
+-    } else if let Some(content) = line.strip_suffix('\n') {
+-        (content, "\n")
+-    } else {
+-        (line, "")
++    fn mark_range(&mut self, side_line: u32, start: u32, len: u32) {
++        let line = (self.line_of)(self.first_line + side_line);
++        self.changes.changed.push(InlineRange { line, start, len });
++    }
++
++    fn mark_point(&mut self, side_line: u32, column: u32) {
++        let line = (self.line_of)(self.first_line + side_line);
++        self.changes.removed_at.push(InlinePoint { line, column });
++    }
++
++    fn width(&self, side_line: u32) -> u32 {
++        utf16_len(without_line_break(line_text(self.side, side_line)))
++    }
++
++    fn side_len(&self) -> u32 {
++        u32::try_from(self.side.len()).unwrap_or(u32::MAX)
+     }
+ }
+ 
+-fn kind_of(character: char) -> CharKind {
+-    if character.is_alphanumeric() || character == '_' {
+-        CharKind::Word
+-    } else if character.is_whitespace() {
+-        CharKind::Space
+-    } else {
+-        CharKind::Symbol
+-    }
++fn line_text<'a>(lines: &[&'a str], index: u32) -> &'a str {
++    lines.get(index as usize).copied().unwrap_or_default()
+ }
+ 
+-fn utf16_len(text: &str) -> u32 {
+-    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
+-}
+-
+-fn changed_tokens(base: &ChunkText, side: &ChunkText) -> (Vec<bool>, Vec<bool>) {
+-    let mut base_changed = vec![false; base.tokens.len()];
+-    let mut side_changed = vec![false; side.tokens.len()];
+-    if base.lines.is_empty() || side.lines.is_empty() {
+-        return (base_changed, side_changed);
+-    }
+-    let mut input = InternedInput::default();
+-    input.update_before(base.lines.iter().copied());
+-    input.update_after(side.lines.iter().copied());
+-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+-    diff.postprocess_lines(&input);
+-    for hunk in diff.hunks() {
+-        let base_span = base.token_span(&hunk.before);
+-        let side_span = side.token_span(&hunk.after);
+-        mark_changed_tokens(
+-            base.tokens.get(base_span.clone()).unwrap_or_default(),
+-            side.tokens.get(side_span.clone()).unwrap_or_default(),
+-            base_changed.get_mut(base_span).unwrap_or_default(),
+-            side_changed.get_mut(side_span).unwrap_or_default(),
+-        );
+-    }
+-    (base_changed, side_changed)
+-}
+-
+-fn mark_changed_tokens(
+-    base: &[Token],
+-    side: &[Token],
+-    base_changed: &mut [bool],
+-    side_changed: &mut [bool],
+-) {
+-    if base.is_empty() || side.is_empty() {
+-        base_changed.fill(true);
+-        side_changed.fill(true);
+-        return;
+-    }
++fn token_diff(base: &[Token], side: &[Token]) -> Diff {
+     let mut input = InternedInput::default();
+     input.update_before(base.iter().map(|token| token.text));
+     input.update_after(side.iter().map(|token| token.text));
+-    let diff = Diff::compute(Algorithm::Histogram, &input);
+-    for (index, changed) in (0..).zip(base_changed) {
+-        *changed = diff.is_removed(index);
+-    }
+-    for (index, changed) in (0..).zip(side_changed) {
+-        *changed = diff.is_added(index);
+-    }
++    let mut diff = Diff::compute(Algorithm::Histogram, &input);
++    diff.postprocess_no_heuristic(&input);
++    diff
+ }
+ 
+-fn ranges<L: Copy + PartialEq>(
+-    tokens: &[Token],
+-    changed: &[bool],
+-    line_of: fn(u32) -> L,
+-) -> Vec<InlineRange<L>> {
+-    let text_changed: Vec<bool> = tokens
+-        .iter()
+-        .zip(changed)
+-        .map(|(token, changed)| *changed && !matches!(token.kind, TokenKind::LineBreak))
+-        .collect();
+-    let mut ranges: Vec<InlineRange<L>> = Vec::new();
+-    for (index, (token, is_changed)) in tokens.iter().zip(&text_changed).enumerate() {
+-        let before = index
+-            .checked_sub(1)
+-            .and_then(|before| text_changed.get(before));
+-        let after = text_changed.get(index + 1);
+-        if !is_highlighted(
+-            token.kind,
+-            *is_changed,
+-            before == Some(&true),
+-            after == Some(&true),
+-        ) {
++/// `(start, len)` of each run of added tokens; whitespace between two added tokens joins them.
++fn marked_spans(tokens: &[Token], added: &[bool]) -> Vec<(u32, u32)> {
++    let is_added = |index: Option<usize>| index.and_then(|index| added.get(index)) == Some(&true);
++    let mut spans: Vec<(u32, u32)> = Vec::new();
++    for (index, token) in tokens.iter().enumerate() {
++        let joins_neighbours = token.kind == TokenKind::Space
++            && is_added(index.checked_sub(1))
++            && is_added(Some(index + 1));
++        if !is_added(Some(index)) && !joins_neighbours {
+             continue;
+         }
+-        let line = line_of(token.line);
+-        match ranges.last_mut() {
+-            Some(last) if last.line == line && last.start + last.len == token.column => {
+-                last.len += token.width;
+-            }
+-            Some(_) | None => ranges.push(InlineRange {
+-                line,
+-                start: token.column,
+-                len: token.width,
+-            }),
++        match spans.last_mut() {
++            Some((start, len)) if *start + *len == token.column => *len += token.width,
++            Some(_) | None => spans.push((token.column, token.width)),
+         }
+     }
+-    ranges
+-}
+-
+-fn is_highlighted(kind: TokenKind, is_changed: bool, before: bool, after: bool) -> bool {
+-    match kind {
+-        TokenKind::LineBreak => false,
+-        TokenKind::Text(CharKind::Word | CharKind::Symbol) => is_changed,
+-        TokenKind::Text(CharKind::Space) => is_changed || (before && after),
+-    }
++    spans
+ }
+diff --git a/crates/merge-core/tests/marks/mod.rs b/crates/merge-core/tests/marks/mod.rs
+new file mode 100644
+index 0000000..2fdb461
+--- /dev/null
++++ b/crates/merge-core/tests/marks/mod.rs
+@@ -0,0 +1,96 @@
++use yamt_merge_core::{
++    Chunk, ChunkKind, Options, SideWordChanges, WordChanges, compute_chunks, word_changes,
++};
++
++pub const HEAD: &str = "head();\n";
++pub const TAIL: &str = "tail();\n";
++
++/// The chunk's side lines in the brief's notation: `[…]` one changed range, `|` one point.
++pub fn marked_lines<L: Copy>(
++    text: &str,
++    first: u32,
++    len: u32,
++    changes: &SideWordChanges<L>,
++    index: fn(L) -> u32,
++) -> Vec<String> {
++    let lines: Vec<&str> = text.split_inclusive('\n').collect();
++    (first..first + len)
++        .map(|line| {
++            let ranges: Vec<(usize, usize)> = changes
++                .changed
++                .iter()
++                .filter(|range| index(range.line) == line)
++                .map(|range| (range.start as usize, (range.start + range.len) as usize))
++                .collect();
++            let points: Vec<usize> = changes
++                .removed_at
++                .iter()
++                .filter(|point| index(point.line) == line)
++                .map(|point| point.column as usize)
++                .collect();
++            marked_line(lines[line as usize], &ranges, &points)
++        })
++        .collect()
++}
++
++fn marked_line(line: &str, ranges: &[(usize, usize)], points: &[usize]) -> String {
++    let content = line
++        .strip_suffix("\r\n")
++        .or_else(|| line.strip_suffix('\n'))
++        .unwrap_or(line);
++    let mut marked = String::new();
++    let mut column = 0;
++    for character in content.chars().map(Some).chain([None]) {
++        for _ in ranges.iter().filter(|range| range.1 == column) {
++            marked.push(']');
++        }
++        for _ in points.iter().filter(|point| **point == column) {
++            marked.push('|');
++        }
++        for _ in ranges.iter().filter(|range| range.0 == column) {
++            marked.push('[');
++        }
++        if let Some(character) = character {
++            marked.push(character);
++            column += character.len_utf16();
++        }
++    }
++    marked
++}
++
++pub fn only_chunk(base: &str, local: &str, remote: &str) -> (Chunk, WordChanges) {
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    assert_eq!(chunks.len(), 1, "{chunks:?}");
++    let mut words = word_changes(base, local, remote, &chunks);
++    assert_eq!(words.len(), 1);
++    (chunks[0], words.remove(0))
++}
++
++/// The side's chunk lines, marked, for an edit made on local; the same edit made on remote
++/// must give the same marks, and the unchanged side none.
++pub fn one_sided(base: &str, side: &str) -> Vec<String> {
++    let base = format!("{HEAD}{base}{TAIL}");
++    let side = format!("{HEAD}{side}{TAIL}");
++    let (chunk, words) = only_chunk(&base, &side, &base);
++    assert_eq!(chunk.kind, ChunkKind::LocalOnly);
++    assert!(words.remote.changed.is_empty() && words.remote.removed_at.is_empty());
++    let local = marked_lines(
++        &side,
++        chunk.local.start.0,
++        chunk.local.len,
++        &words.local,
++        |line| line.0,
++    );
++    let (chunk, words) = only_chunk(&base, &base, &side);
++    assert_eq!(chunk.kind, ChunkKind::RemoteOnly);
++    assert!(words.local.changed.is_empty() && words.local.removed_at.is_empty());
++    let remote = marked_lines(
++        &side,
++        chunk.remote.start.0,
++        chunk.remote.len,
++        &words.remote,
++        |line| line.0,
++    );
++    assert_eq!(local, remote);
++    local
++}
+diff --git a/crates/merge-core/tests/word_blocks.rs b/crates/merge-core/tests/word_blocks.rs
+new file mode 100644
+index 0000000..7a2ddf2
+--- /dev/null
++++ b/crates/merge-core/tests/word_blocks.rs
+@@ -0,0 +1,237 @@
++mod marks;
++
++use marks::{HEAD, TAIL, marked_lines, one_sided, only_chunk};
++use yamt_merge_core::{ChunkKind, Options, compute_chunks, word_changes};
++
++fn conflict(base: &str, local: &str, remote: &str) -> (Vec<String>, Vec<String>) {
++    let base = format!("{HEAD}{base}{TAIL}");
++    let local = format!("{HEAD}{local}{TAIL}");
++    let remote = format!("{HEAD}{remote}{TAIL}");
++    let (chunk, words) = only_chunk(&base, &local, &remote);
++    assert_eq!(chunk.kind, ChunkKind::Conflict);
++    (
++        marked_lines(
++            &local,
++            chunk.local.start.0,
++            chunk.local.len,
++            &words.local,
++            |line| line.0,
++        ),
++        marked_lines(
++            &remote,
++            chunk.remote.start.0,
++            chunk.remote.len,
++            &words.remote,
++            |line| line.0,
++        ),
++    )
++}
++
++#[test]
++fn m1_wrapped_in_a_condition() {
++    assert_eq!(
++        one_sided("a();\nb();\n", "if (ok) {\n\ta();\n\tb();\n}\n"),
++        ["[if (ok) {]", "[\t]a();", "[\t]b();", "[}]"]
++    );
++}
++
++#[test]
++fn m2_unwrapped_from_a_condition() {
++    assert_eq!(
++        one_sided("if (ok) {\n\ta();\n\tb();\n}\n", "a();\nb();\n"),
++        ["|a();", "|b();|"]
++    );
++}
++
++#[test]
++fn m3_line_inserted_between_changed_lines() {
++    assert_eq!(
++        one_sided("a(1);\nb(1);\n", "a(2);\nlog();\nb(2);\n"),
++        ["a([2]);", "[log();]", "b([2]);"]
++    );
++}
++
++#[test]
++fn m4_line_removed_between_changed_lines() {
++    assert_eq!(
++        one_sided("a(1);\nb();\nc(1);\n", "a(2);\nc(2);\n"),
++        ["a([2]);", "|c([2]);"]
++    );
++}
++
++#[test]
++fn m5_line_split() {
++    assert_eq!(
++        one_sided("foo(a, b)\n", "foo(a,\n\tb)\n"),
++        ["foo(a,|", "[\tb)]"]
++    );
++}
++
++#[test]
++fn m6_lines_joined() {
++    assert_eq!(one_sided("foo(a,\n\tb)\n", "foo(a, b)\n"), ["foo(a,[ b)]|"]);
++}
++
++#[test]
++fn m7_lines_swapped() {
++    assert_eq!(
++        one_sided("a();\nb();\n", "b();\na();\n"),
++        ["|b();", "[a();]"]
++    );
++}
++
++#[test]
++fn m8_block_rewritten_without_shared_words() {
++    assert_eq!(
++        one_sided(
++            "alpha();\nbeta();\ngamma();\n",
++            "one = 1;\ntwo = 2;\nthree = 3;\n"
++        ),
++        ["[one = 1;]", "[two = 2;]", "[three = 3;]"]
++    );
++}
++
++#[test]
++fn m9_nest_dedented_pairs_each_closer_with_its_own() {
++    assert_eq!(
++        one_sided("\t\tx();\n\t\t}\n\t}\n", "\tx();\n\t}\n}\n"),
++        ["[\t]x();", "[\t]}", "|}"]
++    );
++}
++
++#[test]
++fn m10_blank_line_removed_after_a_change() {
++    assert_eq!(one_sided("a(1);\n\n", "a(2);\n"), ["a([2]);|"]);
++}
++
++#[test]
++fn m11_same_rename_on_every_line() {
++    assert_eq!(
++        one_sided(
++            "user.name;\nuser.age;\nuser.id;\n",
++            "account.name;\naccount.age;\naccount.id;\n"
++        ),
++        ["[account].name;", "[account].age;", "[account].id;"]
++    );
++}
++
++#[test]
++fn m12_crlf_and_emoji_keep_utf16_columns_and_breaks_outside() {
++    assert_eq!(
++        one_sided("😀 é old\r\nx;\r\n", "😀 é new\r\nx\r\nadded\r\n"),
++        ["😀 é [new]", "x|", "[added]"]
++    );
++}
++
++#[test]
++fn m13_conflict_marks_each_side_as_its_own_case() {
++    let base = "import { ref, computed } from 'vue';\nif (ok) {\n\ta(1);\n\tb(1);\n}\n";
++    let local = "import { ref, computed } from 'vue';\na(1);\nb(1);\n";
++    let remote =
++        "import { ref, computed, watch } from 'vue';\nif (ok) {\n\ta(2);\n\tlog();\n\tb(2);\n}\n";
++    let (local, remote) = conflict(base, local, remote);
++    assert_eq!(
++        local,
++        ["import { ref, computed } from 'vue';", "|a(1);", "|b(1);|"]
++    );
++    assert_eq!(
++        remote,
++        [
++            "import { ref, computed[, watch] } from 'vue';",
++            "if (ok) {",
++            "\ta([2]);",
++            "[\tlog();]",
++            "\tb([2]);",
++            "}"
++        ]
++    );
++}
++
++fn language_tools_chunk_3() -> (Vec<String>, Vec<String>) {
++    let base = include_str!("../../../tests/golden/language-tools-script-setup/base.ts");
++    let local = include_str!("../../../tests/golden/language-tools-script-setup/local.ts");
++    let remote = include_str!("../../../tests/golden/language-tools-script-setup/remote.ts");
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    let words = word_changes(base, local, remote, &chunks);
++    let chunk = chunks[3];
++    assert_eq!(chunk.kind, ChunkKind::Conflict);
++    (
++        marked_lines(
++            local,
++            chunk.local.start.0,
++            chunk.local.len,
++            &words[3].local,
++            |line| line.0,
++        ),
++        marked_lines(
++            remote,
++            chunk.remote.start.0,
++            chunk.remote.len,
++            &words[3].remote,
++            |line| line.0,
++        ),
++    )
++}
++
++#[test]
++fn m14_local_dedent_marks_only_indentation_and_the_two_removed_lines() {
++    assert_eq!(
++        language_tools_chunk_3().0,
++        [
++            "|[\t]let emitted = false;",
++            "[\t]for (const macro of Object.keys(options.vueCompilerOptions.macros)) {",
++            "[\t\t]if (!options.setupBindings.has(macro)) {",
++            "[\t\t\t]if (!emitted) {",
++            "[\t\t\t\t]yield `// @ts-ignore${newLine}import { `;",
++            "[\t\t\t\t]emitted = true;",
++            "[\t\t\t]}",
++            "[\t\t\t]yield `${macro}, `;",
++            "[\t\t]}",
++            "[\t]}",
++            "[\t]if (emitted) {",
++            "[\t\t]yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;|",
++        ]
++    );
++}
++
++const M14_REMOTE: [&str; 34] = [
++    "\tif (options.vueCompilerOptions.target >= 3.3) {",
++    "[\t\tconst scriptSetup = options.scriptSetup;]",
++    "[\t\tconst scriptSetupRanges = options.scriptSetupRanges;]",
++    "[\t\tif (!scriptSetup || !scriptSetupRanges) {]",
++    "[\t\t\treturn;]",
++    "[\t\t]}",
++    "",
++    "[\t\tconst usedMacros: { canonical: string; alias: string }[] = [];]",
++    "[\t\tconst add = (canonical: string, exp: TextRange | undefined) => {]",
++    "[\t\t\tif (exp) {]",
++    "[\t\t\t\tusedMacros.push({ canonical, alias: getRangeText(scriptSetup, exp) });]",
++    "\t\t\t}",
++    "[\t\t};]",
++    "[\t\tadd('defineProps', scriptSetupRanges.defineProps?.exp);]",
++    "[\t\tadd('defineEmits', scriptSetupRanges.defineEmits?.exp);]",
++    "[\t\tadd('defineSlots', scriptSetupRanges.defineSlots?.exp);]",
++    "[\t\tadd('defineExpose', scriptSetupRanges.defineExpose?.exp);]",
++    "[\t\tadd('withDefaults', scriptSetupRanges.withDefaults?.exp);]",
++    "[\t\tif (scriptSetupRanges.defineModel.length) {]",
++    "[\t\t\tusedMacros.push({ canonical: 'defineModel', alias: 'defineModel' });]",
++    "[\t\t}]",
++    "[\t\tif (scriptSetupRanges.defineOptions) {]",
++    "[\t\t\tusedMacros.push({ canonical: 'defineOptions', alias: 'defineOptions' });]",
++    "[\t\t}]",
++    "",
++    "[\t\tconst toImport = usedMacros.filter(({ alias }) => !options.setupBindings.has(alias));]",
++    "",
++    "[\t\tif (toImport.length) {]",
++    "[\t\t\tyield `import { `;]",
++    "[\t\t\tfor (const { canonical, alias } of toImport) {]",
++    "[\t\t\t\tyield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;]",
++    "[\t\t\t]}",
++    "|\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;",
++    "\t\t}",
++];
++
++#[test]
++fn m14_remote_rewrite_marks_new_lines_whole_and_leaves_base_lines_unmarked() {
++    assert_eq!(language_tools_chunk_3().1, M14_REMOTE);
++}
+diff --git a/crates/merge-core/tests/word_catalogue.rs b/crates/merge-core/tests/word_catalogue.rs
+new file mode 100644
+index 0000000..99bab19
+--- /dev/null
++++ b/crates/merge-core/tests/word_catalogue.rs
+@@ -0,0 +1,273 @@
++mod marks;
++
++use marks::one_sided;
++
++fn one_line(base: &str, side: &str) -> String {
++    let mut lines = one_sided(&format!("{base}\n"), &format!("{side}\n"));
++    assert_eq!(lines.len(), 1, "{lines:?}");
++    lines.remove(0)
++}
++
++#[test]
++fn c1_renamed_property() {
++    assert_eq!(
++        one_line("if (obj.a) {", "if (obj.renamed) {"),
++        "if (obj.[renamed]) {"
++    );
++}
++
++#[test]
++fn c2_condition_grows() {
++    assert_eq!(
++        one_line("if(obj.a)", "if (obj.renamed && obj.new)"),
++        "if[ ](obj.[renamed && obj.new])"
++    );
++}
++
++#[test]
++fn c3_argument_added() {
++    assert_eq!(one_line("foo(a, b)", "foo(a, b, c)"), "foo(a, b[, c])");
++}
++
++#[test]
++fn c4_argument_removed() {
++    assert_eq!(one_line("foo(a, b, c)", "foo(a, c)"), "foo(a, |c)");
++}
++
++#[test]
++fn c5_string_grows() {
++    assert_eq!(
++        one_line("const label = 'Save';", "const label = 'Save changes';"),
++        "const label = 'Save[ changes]';"
++    );
++}
++
++#[test]
++fn c6_number_changed() {
++    assert_eq!(
++        one_line("timeout: 300,", "timeout: 3000,"),
++        "timeout: [3000],"
++    );
++}
++
++#[test]
++fn c7_optional_chaining() {
++    assert_eq!(
++        one_line("return user.profile.name;", "return user.profile?.name;"),
++        "return user.profile[?].name;"
++    );
++}
++
++#[test]
++fn c8_await_added() {
++    assert_eq!(
++        one_line(
++            "const data = fetchUser(id);",
++            "const data = await fetchUser(id);"
++        ),
++        "const data = [await ]fetchUser(id);"
++    );
++}
++
++#[test]
++fn c9_types_added() {
++    assert_eq!(
++        one_line(
++            "function load(id) {",
++            "function load(id: string): Promise<User> {"
++        ),
++        "function load(id[: string])[: Promise<User>] {"
++    );
++}
++
++#[test]
++fn c10_value_wrapped() {
++    assert_eq!(
++        one_line("return value;", "return ref(value);"),
++        "return [ref(]value[)];"
++    );
++}
++
++#[test]
++fn c11_condition_negated() {
++    assert_eq!(
++        one_line("if (isReady) {", "if (!isReady) {"),
++        "if ([!]isReady) {"
++    );
++}
++
++#[test]
++fn c12_operator_changed() {
++    assert_eq!(
++        one_line("if (a === b) {", "if (a !== b) {"),
++        "if (a [!]== b) {"
++    );
++}
++
++#[test]
++fn c13_variable_renamed() {
++    assert_eq!(
++        one_line("const count = list.length;", "const size = list.length;"),
++        "const [size] = list.length;"
++    );
++}
++
++#[test]
++fn c14_import_added() {
++    assert_eq!(
++        one_line(
++            "import { ref, computed } from 'vue';",
++            "import { ref, computed, watch } from 'vue';"
++        ),
++        "import { ref, computed[, watch] } from 'vue';"
++    );
++}
++
++#[test]
++fn c15_import_removed() {
++    assert_eq!(
++        one_line(
++            "import { ref, computed, watch } from 'vue';",
++            "import { ref, watch } from 'vue';"
++        ),
++        "import { ref, |watch } from 'vue';"
++    );
++}
++
++#[test]
++fn c16_attribute_added() {
++    assert_eq!(
++        one_line(
++            "<button @click=\"save\">",
++            "<button :disabled=\"busy\" @click=\"save\">"
++        ),
++        "<button [:disabled=\"busy\" ]@click=\"save\">"
++    );
++}
++
++#[test]
++fn c17_jsx_expression_changed() {
++    assert_eq!(
++        one_line(
++            "<Item key={id} label={name} />",
++            "<Item key={item.id} label={name} />"
++        ),
++        "<Item key={[item.]id} label={name} />"
++    );
++}
++
++#[test]
++fn c18_php_method_renamed() {
++    assert_eq!(
++        one_line("$name = $user->getName();", "$name = $user->getFullName();"),
++        "$name = $user->[getFullName]();"
++    );
++}
++
++#[test]
++fn c19_php_parameter_added() {
++    assert_eq!(
++        one_line(
++            "public function save(array $data)",
++            "public function save(array $data, bool $force = false)"
++        ),
++        "public function save(array $data[, bool $force = false])"
++    );
++}
++
++#[test]
++fn c20_trailing_comma_added() {
++    assert_eq!(one_line("  b: 2", "  b: 2,"), "  b: 2[,]");
++}
++
++#[test]
++fn c21_semicolon_removed() {
++    assert_eq!(one_line("return x;", "return x"), "return x|");
++}
++
++#[test]
++fn c22_comment_grows() {
++    assert_eq!(
++        one_line("// TODO: fix this", "// TODO: fix this before release"),
++        "// TODO: fix this[ before release]"
++    );
++}
++
++#[test]
++fn c23_dedented() {
++    assert_eq!(one_line("\t\tlet x = 1;", "\tlet x = 1;"), "[\t]let x = 1;");
++}
++
++#[test]
++fn c24_indented() {
++    assert_eq!(
++        one_line("\tlet x = 1;", "\t\tlet x = 1;"),
++        "[\t\t]let x = 1;"
++    );
++}
++
++#[test]
++fn c25_spaces_to_tab() {
++    assert_eq!(one_line("    foo();", "\tfoo();"), "[\t]foo();");
++}
++
++#[test]
++fn c26_dedented_and_changed() {
++    assert_eq!(
++        one_line("\t\tlet x = 1;", "\tlet x = 2;"),
++        "[\t]let x = [2];"
++    );
++}
++
++#[test]
++fn c27_indentation_removed() {
++    assert_eq!(one_line("\tfoo();", "foo();"), "|foo();");
++}
++
++#[test]
++fn c28_inner_spaces_removed() {
++    assert_eq!(one_line("foo( a )", "foo(a)"), "foo(|a|)");
++}
++
++#[test]
++fn c29_single_word_replaced() {
++    assert_eq!(one_line("return a;", "return b;"), "return [b];");
++}
++
++#[test]
++fn c30_symbol_added_to_a_wordless_line() {
++    assert_eq!(one_line("}", "};"), "}[;]");
++}
++
++#[test]
++fn n1_unrelated_statement_is_new() {
++    assert_eq!(
++        one_line(
++            "let emitted = false;",
++            "const scriptSetup = options.scriptSetup;"
++        ),
++        "[const scriptSetup = options.scriptSetup;]"
++    );
++}
++
++#[test]
++fn n2_condition_sharing_only_if_is_new() {
++    assert_eq!(
++        one_line(
++            "if (!options.setupBindings.has(macro)) {",
++            "if (scriptSetupRanges.defineModel.length) {"
++        ),
++        "[if (scriptSetupRanges.defineModel.length) {]"
++    );
++}
++
++#[test]
++fn n3_unrelated_call_is_new() {
++    assert_eq!(
++        one_line(
++            "yield `${macro}, `;",
++            "usedMacros.push({ canonical, alias });"
++        ),
++        "[usedMacros.push({ canonical, alias });]"
++    );
++}
+diff --git a/crates/merge-core/tests/word_changes.rs b/crates/merge-core/tests/word_changes.rs
+index d5c5e70..c43265c 100644
+--- a/crates/merge-core/tests/word_changes.rs
++++ b/crates/merge-core/tests/word_changes.rs
+@@ -1,149 +1,108 @@
++mod marks;
++
++use marks::{marked_lines, one_sided, only_chunk};
+ use yamt_merge_core::{
+-    BaseLine, ChunkId, ChunkKind, InlineRange, LocalLine, Options, RemoteLine, WordChanges,
+-    compute_chunks, word_changes,
++    ChunkId, ChunkKind, InlinePoint, InlineRange, LocalLine, Options, RemoteLine, SideWordChanges,
++    WordChanges, compute_chunks, word_changes,
+ };
+ 
+-type Ranges<'a> = &'a [(u32, u32, u32)];
+-
+-fn ranges<L>(line_of: fn(u32) -> L, expected: Ranges) -> Vec<InlineRange<L>> {
+-    expected
+-        .iter()
+-        .map(|&(line, start, len)| InlineRange {
+-            line: line_of(line),
+-            start,
+-            len,
+-        })
+-        .collect()
+-}
+-
+-fn expected(local: Ranges, base: Ranges, remote: Ranges) -> WordChanges {
+-    WordChanges {
+-        chunk: ChunkId(0),
+-        local: ranges(LocalLine, local),
+-        base: ranges(BaseLine, base),
+-        remote: ranges(RemoteLine, remote),
++fn nothing<L>() -> SideWordChanges<L> {
++    SideWordChanges {
++        changed: Vec::new(),
++        removed_at: Vec::new(),
+     }
+ }
+ 
+-fn only_chunk_words(base: &str, local: &str, remote: &str) -> (ChunkKind, WordChanges) {
+-    let chunks = compute_chunks(base, local, remote, &Options::default());
+-    let mut changes = word_changes(base, local, remote, &chunks);
+-    assert_eq!(chunks.len(), 1, "{chunks:?}");
+-    assert_eq!(changes.len(), 1);
+-    (chunks[0].kind, changes.remove(0))
+-}
+-
+ #[test]
+-fn one_changed_word_is_one_range_on_the_changed_side_and_base() {
+-    let base = "foo(a, b)\n";
+-    let (kind, words) = only_chunk_words(base, "foo(a, c)\n", base);
+-    assert_eq!(kind, ChunkKind::LocalOnly);
+-    assert_eq!(words, expected(&[(0, 7, 1)], &[(0, 7, 1)], &[]));
+-}
+-
+-#[test]
+-fn two_changed_words_separated_by_a_space_become_one_range() {
+-    let base = "a old words z\n";
+-    let (kind, words) = only_chunk_words(base, base, "a new terms z\n");
+-    assert_eq!(kind, ChunkKind::RemoteOnly);
+-    assert_eq!(words, expected(&[], &[(0, 2, 9)], &[(0, 2, 9)]));
+-}
+-
+-#[test]
+-fn changed_words_on_later_lines_of_a_chunk_carry_their_own_line() {
+-    let base = "head\nalpha\nbeta gamma\ntail\n";
+-    let (_, words) = only_chunk_words(base, "head\nALPHA\nbeta delta\ntail\n", base);
++fn a_changed_word_and_a_removed_word_carry_absolute_lines_and_utf16_columns() {
++    let base = "keep\né😀 old x y;\n";
++    let (_, words) = only_chunk(base, "keep\né😀 new x;\n", base);
+     assert_eq!(
+         words,
+-        expected(&[(1, 0, 5), (2, 5, 5)], &[(1, 0, 5), (2, 5, 5)], &[])
++        WordChanges {
++            chunk: ChunkId(0),
++            local: SideWordChanges {
++                changed: vec![InlineRange {
++                    line: LocalLine(1),
++                    start: 4,
++                    len: 3,
++                }],
++                removed_at: vec![InlinePoint {
++                    line: LocalLine(1),
++                    column: 9,
++                }],
++            },
++            remote: nothing(),
++        }
+     );
+ }
+ 
+ #[test]
+-fn a_line_added_inside_a_modified_chunk_is_a_full_line_range_without_its_break() {
+-    let base = "a\nb\n";
+-    let (_, words) = only_chunk_words(base, "a!\nnew line\nb\n", base);
+-    assert_eq!(words, expected(&[(0, 1, 1), (1, 0, 8)], &[], &[]));
+-}
+-
+-#[test]
+-fn columns_count_utf16_code_units_of_a_non_ascii_prefix() {
+-    let base = "é😀 x\n";
+-    let (_, words) = only_chunk_words(base, "é😀 yy\n", base);
+-    assert_eq!(words, expected(&[(0, 4, 2)], &[(0, 4, 1)], &[]));
+-}
+-
+-#[test]
+-fn crlf_line_breaks_stay_outside_every_range() {
+-    let base = "keep\r\nold value\r\n";
+-    let (_, words) = only_chunk_words(base, "keep\r\nnew value\r\nadded\r\n", base);
+-    assert_eq!(words, expected(&[(1, 0, 3), (2, 0, 5)], &[(1, 0, 3)], &[]));
+-}
+-
+-#[test]
+-fn a_changed_line_break_alone_yields_no_range() {
++fn a_changed_line_break_alone_yields_nothing() {
+     let base = "a\r\nb\n";
+-    let (_, words) = only_chunk_words(base, "a\nb\n", base);
+-    assert_eq!(words, expected(&[], &[], &[]));
++    let (_, words) = only_chunk(base, "a\nb\n", base);
++    assert_eq!(words.local, nothing());
+ }
+ 
+ #[test]
+-fn a_space_between_a_changed_word_and_a_changed_line_break_stays_unmarked() {
+-    let (_, words) = only_chunk_words("x old \n", "x new \r\n", "x old \n");
+-    assert_eq!(words, expected(&[(0, 2, 3)], &[(0, 2, 3)], &[]));
+-}
+-
+-#[test]
+-fn words_are_diffed_only_inside_changed_lines_so_an_equal_line_stays_unmarked() {
+-    let base = "import { it } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\n";
+-    let local = "import { it, vi } from 'vitest'\nimport { mount } from 'nuxt-vitest/utils'\nimport { flush } from '@vue/test-utils'\n";
+-    let (kind, words) = only_chunk_words(base, local, base);
+-    assert_eq!(kind, ChunkKind::LocalOnly);
+-    assert_eq!(words, expected(&[(0, 11, 4), (2, 0, 39)], &[], &[]));
+-}
+-
+-#[test]
+-fn a_conflict_on_different_words_marks_each_side_and_their_union_in_base() {
+-    let (kind, words) = only_chunk_words("let a = 1;\n", "let b = 1;\n", "let a = 2;\n");
+-    assert_eq!(kind, ChunkKind::Conflict);
++fn a_space_before_a_changed_line_break_stays_unmarked() {
++    let (_, words) = only_chunk("x old \n", "x new \r\n", "x old \n");
+     assert_eq!(
+-        words,
+-        expected(&[(0, 4, 1)], &[(0, 4, 1), (0, 8, 1)], &[(0, 8, 1)])
++        marked_lines("x new \r\n", 0, 1, &words.local, |line| line.0),
++        ["x [new] "]
+     );
+ }
+ 
+-#[test]
+-fn overlapping_base_ranges_of_both_sides_merge_into_one() {
+-    let (_, words) = only_chunk_words("x a+b y\n", "x c+b y\n", "x d-b y\n");
+-    assert_eq!(words, expected(&[(0, 2, 1)], &[(0, 2, 2)], &[(0, 2, 2)]));
+-}
+-
+ #[test]
+ fn an_underscore_belongs_to_its_word() {
+-    let base = "snake_case\n";
+-    let (_, words) = only_chunk_words(base, "snake_name\n", base);
+-    assert_eq!(words, expected(&[(0, 0, 10)], &[(0, 0, 10)], &[]));
++    assert_eq!(one_sided("snake_case\n", "snake_name\n"), ["[snake_name]"]);
+ }
+ 
+ #[test]
+-fn both_same_gives_both_sides_the_same_ranges() {
+-    let (kind, words) = only_chunk_words("fn a()\n", "fn b()\n", "fn b()\n");
+-    assert_eq!(kind, ChunkKind::BothSame);
+-    assert_eq!(words, expected(&[(0, 3, 1)], &[(0, 3, 1)], &[(0, 3, 1)]));
++fn two_changed_words_separated_by_an_unchanged_space_become_one_range() {
++    assert_eq!(
++        one_sided("a old words z\n", "a new terms z\n"),
++        ["a [new terms] z"]
++    );
+ }
+ 
+ #[test]
+-fn add_add_has_no_ranges() {
+-    let (kind, words) = only_chunk_words("", "local\n", "remote\n");
+-    assert_eq!(kind, ChunkKind::Conflict);
+-    assert_eq!(words, expected(&[], &[], &[]));
++fn a_new_blank_line_is_not_marked_but_a_new_indented_line_is() {
++    assert_eq!(
++        one_sided("a(1);\n", "a(2);\n\n\t\n"),
++        ["a([2]);", "", "[\t]"]
++    );
+ }
+ 
+ #[test]
+-fn lines_differing_only_in_whitespace_mark_the_whitespace_run() {
+-    let base = "a  b\n";
+-    let (_, words) = only_chunk_words(base, "a b\n", base);
+-    assert_eq!(words, expected(&[(0, 1, 1)], &[(0, 1, 2)], &[]));
++fn removed_lines_at_the_chunk_start_point_at_the_first_side_line() {
++    assert_eq!(one_sided("gone();\nx(1);\n", "x(2);\n"), ["|x([2]);"]);
++}
++
++#[test]
++fn a_pure_deletion_has_no_point() {
++    let base = "a\nb\nc\n";
++    let (chunk, words) = only_chunk(base, "a\nc\n", base);
++    assert!(chunk.local.is_empty());
++    assert_eq!(words.local, nothing());
++}
++
++#[test]
++fn both_same_gives_both_sides_the_same_marks() {
++    let side = "lead\nfn b(x)\n";
++    let (chunk, words) = only_chunk("fn a(x, y)\n", side, side);
++    assert_eq!(chunk.kind, ChunkKind::BothSame);
++    let local = marked_lines(side, 0, 2, &words.local, |line| line.0);
++    let remote = marked_lines(side, 0, 2, &words.remote, |line| line.0);
++    assert_eq!(local, ["[lead]", "fn [b](x|)"]);
++    assert_eq!(local, remote);
++}
++
++#[test]
++fn add_add_has_no_marks() {
++    let (chunk, words) = only_chunk("", "local\n", "remote\n");
++    assert_eq!(chunk.kind, ChunkKind::Conflict);
++    assert_eq!((words.local, words.remote), (nothing(), nothing()));
+ }
+ 
+ #[test]
+@@ -155,6 +114,13 @@ fn each_chunk_gets_its_own_entry_in_chunk_order() {
+     let words = word_changes(base, local, remote, &chunks);
+     let ids: Vec<ChunkId> = words.iter().map(|change| change.chunk).collect();
+     assert_eq!(ids, [ChunkId(0), ChunkId(1)]);
+-    assert_eq!(words[1].remote, ranges(RemoteLine, &[(4, 2, 1)]));
+-    assert_eq!(words[1].base, ranges(BaseLine, &[(4, 2, 1)]));
++    assert_eq!(
++        words[1].remote.changed,
++        [InlineRange {
++            line: RemoteLine(4),
++            start: 2,
++            len: 1,
++        }]
++    );
++    assert_eq!(words[1].local, nothing());
+ }
+diff --git a/crates/merge-core/tests/word_invariants.rs b/crates/merge-core/tests/word_invariants.rs
+index 2776d4a..0b5281a 100644
+--- a/crates/merge-core/tests/word_invariants.rs
++++ b/crates/merge-core/tests/word_invariants.rs
+@@ -3,8 +3,8 @@ use proptest::option;
+ use proptest::prelude::*;
+ use proptest::sample::Index;
+ use yamt_merge_core::{
+-    BaseLine, Chunk, ChunkId, ChunkKind, InlineRange, LineRange, LocalLine, Options, RemoteLine,
+-    compute_chunks, word_changes,
++    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, Options, RemoteLine,
++    SideWordChanges, compute_chunks, word_changes,
+ };
+ 
+ const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
+@@ -96,36 +96,72 @@ fn content(line: &str) -> &str {
+         .unwrap_or(line)
+ }
+ 
+-fn plain<L: Copy>(ranges: &[InlineRange<L>], index: fn(L) -> u32) -> Vec<(u32, u32, u32)> {
+-    ranges
+-        .iter()
+-        .map(|range| (index(range.line), range.start, range.len))
+-        .collect()
++#[derive(Debug, PartialEq)]
++struct PlainSide {
++    ranges: Vec<(u32, u32, u32)>,
++    points: Vec<(u32, u32)>,
+ }
+ 
+-fn check_side(
+-    ranges: &[(u32, u32, u32)],
+-    text: &str,
+-    chunk_lines: (u32, u32),
+-) -> Result<(), TestCaseError> {
++fn nothing() -> PlainSide {
++    PlainSide {
++        ranges: Vec::new(),
++        points: Vec::new(),
++    }
++}
++
++fn plain<L: Copy>(side: &SideWordChanges<L>, index: fn(L) -> u32) -> PlainSide {
++    PlainSide {
++        ranges: side
++            .changed
++            .iter()
++            .map(|range| (index(range.line), range.start, range.len))
++            .collect(),
++        points: side
++            .removed_at
++            .iter()
++            .map(|point| (index(point.line), point.column))
++            .collect(),
++    }
++}
++
++fn is_char_boundary(line: &str, column: u32) -> bool {
++    let units: Vec<u16> = content(line).encode_utf16().collect();
++    units
++        .get(..column as usize)
++        .is_some_and(|prefix| String::from_utf16(prefix).is_ok())
++}
++
++fn check_side(side: &PlainSide, text: &str, chunk_lines: (u32, u32)) -> Result<(), TestCaseError> {
+     let lines: Vec<&str> = text.split_inclusive('\n').collect();
+     let (first, len) = chunk_lines;
+-    for &(line, start, range_len) in ranges {
++    let in_chunk = |line: u32| line >= first && line < first + len;
++    for &(line, start, range_len) in &side.ranges {
++        prop_assert!(in_chunk(line), "{side:?} {chunk_lines:?}");
++        let line_text = lines[line as usize];
+         prop_assert!(
+-            line >= first && line < first + len,
+-            "{ranges:?} {chunk_lines:?}"
++            is_char_boundary(line_text, start) && is_char_boundary(line_text, start + range_len),
++            "{side:?} {text:?}"
+         );
+-        let width = content(lines[line as usize]).encode_utf16().count();
+-        prop_assert!((start + range_len) as usize <= width, "{ranges:?} {text:?}");
+-        prop_assert!(range_len > 0, "{ranges:?}");
++        prop_assert!(range_len > 0, "{side:?}");
+     }
+-    for pair in ranges.windows(2) {
++    for pair in side.ranges.windows(2) {
+         let ((line, start, len), (next_line, next_start, _)) = (pair[0], pair[1]);
+         prop_assert!(
+             line < next_line || (line == next_line && start + len < next_start),
+-            "{ranges:?}"
++            "{side:?}"
+         );
+     }
++    for &(line, column) in &side.points {
++        prop_assert!(in_chunk(line), "{side:?} {chunk_lines:?}");
++        prop_assert!(
++            is_char_boundary(lines[line as usize], column),
++            "{side:?} {text:?}"
++        );
++    }
++    prop_assert!(
++        side.points.windows(2).all(|pair| pair[0] < pair[1]),
++        "{side:?}"
++    );
+     Ok(())
+ }
+ 
+@@ -145,6 +181,12 @@ fn without_ranges(text: &str, first: u32, len: u32, ranges: &[(u32, u32, u32)])
+     Some(kept.chars().filter(|c| !c.is_whitespace()).collect())
+ }
+ 
++fn is_subsequence(part: &str, whole: &str) -> bool {
++    let mut whole = whole.chars();
++    part.chars()
++        .all(|wanted| whole.any(|character| character == wanted))
++}
++
+ fn whole_text_chunk(text: &str) -> Chunk {
+     let len: u32 = text.split_inclusive('\n').map(|_| 1).sum();
+     Chunk {
+@@ -169,7 +211,7 @@ proptest! {
+     #![proptest_config(ProptestConfig::with_cases(CASES))]
+ 
+     #[test]
+-    fn every_range_lies_sorted_and_disjoint_on_a_line_of_its_chunk(triple in triple()) {
++    fn every_mark_lies_sorted_and_disjoint_on_a_line_of_its_chunk(triple in triple()) {
+         let Triple { base, local, remote } = &triple;
+         let chunks = compute_chunks(base, local, remote, &Options::default());
+         let words = word_changes(base, local, remote, &chunks);
+@@ -177,30 +219,31 @@ proptest! {
+         for (chunk, change) in chunks.iter().zip(&words) {
+             prop_assert_eq!(change.chunk, chunk.id);
+             check_side(&plain(&change.local, |line| line.0), local, (chunk.local.start.0, chunk.local.len))?;
+-            check_side(&plain(&change.base, |line| line.0), base, (chunk.base.start.0, chunk.base.len))?;
+             check_side(&plain(&change.remote, |line| line.0), remote, (chunk.remote.start.0, chunk.remote.len))?;
+         }
+     }
+ 
+     #[test]
+-    fn removing_ranges_then_whitespace_leaves_both_texts_equal(triple in triple()) {
++    fn unmarked_side_text_is_in_base_in_order(triple in triple()) {
+         let Triple { base, local, .. } = &triple;
+         let chunks = compute_chunks(base, local, base, &Options::default());
+         for (chunk, change) in chunks.iter().zip(word_changes(base, local, base, &chunks)) {
+-            prop_assert!(change.remote.is_empty());
+-            if chunk.base.is_empty() || chunk.local.is_empty() {
+-                prop_assert!(change.local.is_empty() && change.base.is_empty());
+-                continue;
++            prop_assert_eq!(plain(&change.remote, |line| line.0), nothing());
++            let local_rest = without_ranges(local, chunk.local.start.0, chunk.local.len, &plain(&change.local, |line| line.0).ranges);
++            let base_rest = without_ranges(base, chunk.base.start.0, chunk.base.len, &[]);
++            let (Some(local_rest), Some(base_rest)) = (local_rest, base_rest) else {
++                return Err(TestCaseError::fail("a range splits a character"));
++            };
++            if chunk.base.is_empty() {
++                prop_assert!(change.local.changed.is_empty() && change.local.removed_at.is_empty());
++            } else {
++                prop_assert!(is_subsequence(&local_rest, &base_rest), "{local_rest:?} {base_rest:?}");
+             }
+-            let local_rest = without_ranges(local, chunk.local.start.0, chunk.local.len, &plain(&change.local, |line| line.0));
+-            let base_rest = without_ranges(base, chunk.base.start.0, chunk.base.len, &plain(&change.base, |line| line.0));
+-            prop_assert!(local_rest.is_some() && base_rest.is_some(), "a range splits a character");
+-            prop_assert_eq!(local_rest, base_rest);
+         }
+     }
+ 
+     #[test]
+-    fn both_same_chunks_give_both_sides_equal_ranges(triple in triple()) {
++    fn both_same_chunks_give_both_sides_equal_marks(triple in triple()) {
+         let Triple { base, local, .. } = &triple;
+         let chunks = compute_chunks(base, local, local, &Options::default());
+         for change in word_changes(base, local, local, &chunks) {
+@@ -209,12 +252,13 @@ proptest! {
+     }
+ 
+     #[test]
+-    fn identical_texts_give_no_ranges(text in doc()) {
++    fn identical_texts_give_no_marks(text in doc()) {
+         let text = text.text();
+         prop_assert!(word_changes(&text, &text, &text, &compute_chunks(&text, &text, &text, &Options::default())).is_empty());
+         let whole = whole_text_chunk(&text);
+         for change in word_changes(&text, &text, &text, &[whole]) {
+-            prop_assert!(change.local.is_empty() && change.base.is_empty() && change.remote.is_empty());
++            prop_assert_eq!(plain(&change.local, |line| line.0), nothing());
++            prop_assert_eq!(plain(&change.remote, |line| line.0), nothing());
+         }
+     }
+ }
+diff --git a/crates/merge-core/tests/word_stress.rs b/crates/merge-core/tests/word_stress.rs
+new file mode 100644
+index 0000000..7b747f1
+--- /dev/null
++++ b/crates/merge-core/tests/word_stress.rs
+@@ -0,0 +1,251 @@
++use proptest::collection::vec;
++use proptest::prelude::*;
++use proptest::sample::Index;
++use yamt_merge_core::{Options, SideWordChanges, compute_chunks, word_changes};
++
++const INDENTS: [&str; 5] = ["", "\t", "\t\t", "  ", "    "];
++const WORDS_PER_LINE: usize = 3;
++const MIN_LINES: usize = 3;
++const MAX_LINES: usize = 30;
++const MAX_EDITS: usize = 10;
++const CASES: u32 = 512;
++
++#[derive(Clone, Debug)]
++struct Line {
++    indent: &'static str,
++    words: Vec<String>,
++}
++
++impl Line {
++    fn text(&self) -> String {
++        format!("{}{};\n", self.indent, self.words.join(" "))
++    }
++
++    fn word_columns(&self, word: usize) -> (usize, usize) {
++        let before: usize = self.words[..word].iter().map(|word| word.len() + 1).sum();
++        let start = self.indent.len() + before;
++        (start, start + self.words[word].len())
++    }
++}
++
++#[derive(Clone, Debug)]
++enum Edit {
++    Reindent(Index),
++    ReplaceWord(Index),
++    InsertWord(Index),
++    DeleteWord(Index),
++    InsertLine,
++    DeleteLine,
++    Split(Index),
++    Join,
++}
++
++/// What the marks of one side line may be, known from the edit that made it.
++#[derive(Clone, Copy, Debug)]
++enum Truth {
++    Untouched,
++    Reindented { width: usize },
++    OneWord { start: usize, end: usize },
++    WordDeleted,
++    Unconstrained,
++}
++
++#[derive(Debug, Default)]
++struct Side {
++    text: String,
++    truths: Vec<Truth>,
++    fresh_words: u32,
++}
++
++impl Side {
++    fn push(&mut self, text: &str, truth: Truth) {
++        self.text += text;
++        self.truths.push(truth);
++    }
++
++    fn fresh_word(&mut self) -> String {
++        self.fresh_words += 1;
++        format!("new{}", self.fresh_words)
++    }
++
++    fn push_edited(&mut self, line: &Line, edit: &Edit) {
++        let mut line = line.clone();
++        match edit {
++            Edit::Reindent(at) => {
++                let mut indent = at.index(INDENTS.len());
++                if INDENTS[indent] == line.indent {
++                    indent = (indent + 1) % INDENTS.len();
++                }
++                line.indent = INDENTS[indent];
++                let width = line.indent.len();
++                self.push(&line.text(), Truth::Reindented { width });
++            }
++            Edit::ReplaceWord(at) => {
++                let position = at.index(WORDS_PER_LINE);
++                line.words[position] = self.fresh_word();
++                self.push_one_word(&line, position);
++            }
++            Edit::InsertWord(at) => {
++                let position = at.index(WORDS_PER_LINE + 1);
++                line.words.insert(position, self.fresh_word());
++                self.push_one_word(&line, position);
++            }
++            Edit::DeleteWord(at) => {
++                line.words.remove(at.index(WORDS_PER_LINE));
++                self.push(&line.text(), Truth::WordDeleted);
++            }
++            Edit::InsertLine => {
++                let words = (0..WORDS_PER_LINE).map(|_| self.fresh_word()).collect();
++                let indent = line.indent;
++                self.push(&Line { indent, words }.text(), Truth::Unconstrained);
++                self.push(&line.text(), Truth::Untouched);
++            }
++            Edit::DeleteLine => {}
++            Edit::Split(at) => self.push_split(&line, 1 + at.index(WORDS_PER_LINE - 1)),
++            Edit::Join => self.push(&line.text(), Truth::Untouched),
++        }
++    }
++
++    fn push_one_word(&mut self, line: &Line, position: usize) {
++        let (start, end) = line.word_columns(position);
++        self.push(&line.text(), Truth::OneWord { start, end });
++    }
++
++    fn push_split(&mut self, line: &Line, position: usize) {
++        let first = format!("{}{}\n", line.indent, line.words[..position].join(" "));
++        let second = format!("{}\t{};\n", line.indent, line.words[position..].join(" "));
++        self.push(&first, Truth::Unconstrained);
++        self.push(&second, Truth::Unconstrained);
++    }
++}
++
++fn base_lines(indents: &[Index]) -> Vec<Line> {
++    (0..)
++        .zip(indents)
++        .map(|(line, indent): (usize, &Index)| Line {
++            indent: INDENTS[indent.index(INDENTS.len())],
++            words: ["a", "b", "c"]
++                .iter()
++                .map(|suffix| format!("l{line}{suffix}"))
++                .collect(),
++        })
++        .collect()
++}
++
++/// Applies at most one edit per base line; a join also consumes the next line.
++fn edited(base: &[Line], edits: &[(Index, Edit)]) -> Side {
++    let mut planned: Vec<Option<&Edit>> = vec![None; base.len()];
++    for (at, edit) in edits {
++        planned[at.index(base.len())].get_or_insert(edit);
++    }
++    let mut side = Side::default();
++    let mut line = 0;
++    while line < base.len() {
++        let next_is_free = line + 1 < base.len() && planned[line + 1].is_none();
++        match planned[line] {
++            Some(Edit::Join) if next_is_free => {
++                let joined = format!(
++                    "{} {}",
++                    base[line].text().trim_end(),
++                    base[line + 1].text().trim()
++                );
++                side.push(&format!("{joined}\n"), Truth::Unconstrained);
++                line += 2;
++                continue;
++            }
++            Some(edit) => side.push_edited(&base[line], edit),
++            None => side.push(&base[line].text(), Truth::Untouched),
++        }
++        line += 1;
++    }
++    side
++}
++
++fn edit() -> impl Strategy<Value = Edit> {
++    prop_oneof![
++        any::<Index>().prop_map(Edit::Reindent),
++        any::<Index>().prop_map(Edit::ReplaceWord),
++        any::<Index>().prop_map(Edit::InsertWord),
++        any::<Index>().prop_map(Edit::DeleteWord),
++        Just(Edit::InsertLine),
++        Just(Edit::DeleteLine),
++        any::<Index>().prop_map(Edit::Split),
++        Just(Edit::Join),
++    ]
++}
++
++fn case() -> impl Strategy<Value = (Vec<Line>, Side, Side)> {
++    (
++        vec(any::<Index>(), MIN_LINES..=MAX_LINES),
++        vec((any::<Index>(), edit()), 1..=MAX_EDITS),
++        vec((any::<Index>(), edit()), 0..=MAX_EDITS),
++    )
++        .prop_map(|(indents, local_edits, remote_edits)| {
++            let base = base_lines(&indents);
++            let local = edited(&base, &local_edits);
++            let remote = edited(&base, &remote_edits);
++            (base, local, remote)
++        })
++}
++
++fn check_promises<'a, L: Copy + 'a>(
++    side: &Side,
++    changes: impl Iterator<Item = &'a SideWordChanges<L>>,
++    index: fn(L) -> u32,
++) -> Result<(), TestCaseError> {
++    let mut ranges: Vec<Vec<(usize, usize)>> = vec![Vec::new(); side.truths.len()];
++    let mut points: Vec<usize> = vec![0; side.truths.len()];
++    for change in changes {
++        for range in &change.changed {
++            let (start, end) = (range.start as usize, (range.start + range.len) as usize);
++            ranges[index(range.line) as usize].push((start, end));
++        }
++        for point in &change.removed_at {
++            points[index(point.line) as usize] += 1;
++        }
++    }
++    for (line, truth) in side.truths.iter().enumerate() {
++        let on_line = &ranges[line];
++        let message = format!("line {line} {truth:?} ranges {on_line:?}\n{}", side.text);
++        match *truth {
++            Truth::Untouched => prop_assert!(on_line.is_empty(), "{}", message),
++            Truth::Reindented { width } => {
++                prop_assert!(on_line.iter().all(|&(_, end)| end <= width), "{}", message);
++            }
++            Truth::OneWord { start, end } => prop_assert!(
++                on_line
++                    .iter()
++                    .all(|&(from, to)| from + 1 >= start && to <= end + 1),
++                "{}",
++                message
++            ),
++            Truth::WordDeleted => prop_assert!(points[line] > 0, "{}", message),
++            Truth::Unconstrained => {}
++        }
++    }
++    Ok(())
++}
++
++proptest! {
++    #![proptest_config(ProptestConfig::with_cases(CASES))]
++
++    #[test]
++    fn edits_on_one_side_keep_every_promise((base, local, _) in case()) {
++        let base: String = base.iter().map(Line::text).collect();
++        let chunks = compute_chunks(&base, &local.text, &base, &Options::default());
++        let words = word_changes(&base, &local.text, &base, &chunks);
++        check_promises(&local, words.iter().map(|change| &change.local), |line| line.0)?;
++        for change in &words {
++            prop_assert!(change.remote.changed.is_empty() && change.remote.removed_at.is_empty());
++        }
++    }
++
++    #[test]
++    fn edits_on_both_sides_keep_every_promise_on_each((base, local, remote) in case()) {
++        let base: String = base.iter().map(Line::text).collect();
++        let chunks = compute_chunks(&base, &local.text, &remote.text, &Options::default());
++        let words = word_changes(&base, &local.text, &remote.text, &chunks);
++        check_promises(&local, words.iter().map(|change| &change.local), |line| line.0)?;
++        check_promises(&remote, words.iter().map(|change| &change.remote), |line| line.0)?;
++    }
++}
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 10c79b8..749a571 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -39,7 +39,11 @@ async function synthetic(
+       local: { start: chunk.side[0], len: chunk.side[1] },
+       remote: { start: chunk.side[0], len: chunk.side[1] },
+     })),
+-    word_changes: chunks.map((_chunk, id) => ({ chunk: id, local: [], base: [], remote: [] })),
++    word_changes: chunks.map((_chunk, id) => ({
++      chunk: id,
++      local: { changed: [], removed_at: [] },
++      remote: { changed: [], removed_at: [] },
++    })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index 7864252..aec43fa 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -26,7 +26,11 @@ async function synthetic(
+       local: { start: 0, len: 1 },
+       remote: { start: 0, len: 1 },
+     })),
+-    word_changes: ranges.map((_range, id) => ({ chunk: id, local: [], base: [], remote: [] })),
++    word_changes: ranges.map((_range, id) => ({
++      chunk: id,
++      local: { changed: [], removed_at: [] },
++      remote: { changed: [], removed_at: [] },
++    })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index 160827e..ee036ba 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -64,7 +64,11 @@ async function synthetic(
+       local: { start: local[0], len: local[1] },
+       remote: { start: remote[0], len: remote[1] },
+     })),
+-    word_changes: chunks.map((_chunk, id) => ({ chunk: id, local: [], base: [], remote: [] })),
++    word_changes: chunks.map((_chunk, id) => ({
++      chunk: id,
++      local: { changed: [], removed_at: [] },
++      remote: { changed: [], removed_at: [] },
++    })),
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+ }
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index 5394892..725434f 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -91,9 +91,8 @@ async function tintedLeft(): Promise<EditorState> {
+       word_changes: [
+         {
+           chunk: 0,
+-          local: [{ line: 0, start: 10, len: 4 }],
+-          base: [{ line: 0, start: 10, len: 3 }],
+-          remote: [{ line: 0, start: 10, len: 6 }],
++          local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
++          remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
+         },
+       ],
+     },
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index 4f9e6e8..91e6c3d 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -22,7 +22,13 @@ async function chunkWith(
+         remote: { start: 0, len: lens.remote },
+       },
+     ],
+-    word_changes: [{ chunk: 0, local: [], base: [], remote: [] }],
++    word_changes: [
++      {
++        chunk: 0,
++        local: { changed: [], removed_at: [] },
++        remote: { changed: [], removed_at: [] },
++      },
++    ],
+   };
+   const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
+     "synthetic.ts",
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index 9f746f7..0e0c125 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -31,8 +31,8 @@ function block(line: number): { start: number; len: number } {
+   return { start: line, len: 1 };
+ }
+ 
+-function words(ranges: readonly Columns[]): object[] {
+-  return ranges.map(([line, start, len]) => ({ line, start, len }));
++function words(ranges: readonly Columns[]): object {
++  return { changed: ranges.map(([line, start, len]) => ({ line, start, len })), removed_at: [] };
+ }
+ 
+ async function synthetic(): Promise<FileMergeData> {
+@@ -47,13 +47,8 @@ async function synthetic(): Promise<FileMergeData> {
+       { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
+     ],
+     word_changes: [
+-      {
+-        chunk: CONFLICT,
+-        local: words([[1, 11, 4]]),
+-        base: words([[1, 11, 3]]),
+-        remote: words([[1, 11, 6]]),
+-      },
+-      { chunk: MODIFIED, local: words([[2, 4, 1]]), base: words([[2, 4, 1]]), remote: [] },
++      { chunk: CONFLICT, local: words([[1, 11, 4]]), remote: words([[1, 11, 6]]) },
++      { chunk: MODIFIED, local: words([[2, 4, 1]]), remote: words([]) },
+     ],
+   };
+   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
+@@ -241,6 +236,7 @@ test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both si
+     "105 chunk-word-modified",
+     "107 chunk-word-modified",
+     "115 chunk-word-modified",
++    "129 chunk-word-conflict",
+     "130 chunk-word-conflict",
+     "131 chunk-word-conflict",
+     "132 chunk-word-conflict",
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+index b4290c5..534365a 100644
+--- a/frontend/src/editor/internal/words.ts
++++ b/frontend/src/editor/internal/words.ts
+@@ -9,7 +9,7 @@ export function sideWordMarks(doc: Text, chunks: readonly Chunk[], side: Side):
+   const marks: Range<Decoration>[] = [];
+   for (const chunk of chunks) {
+     const mark = Decoration.mark({ class: `chunk-word-${chunkTone(chunk, side)}` });
+-    for (const range of chunk.words[side]) {
++    for (const range of chunk.words[side].changed) {
+       const from = doc.line(range.line + 1).from + range.start;
+       marks.push(mark.range(from, from + range.len));
+     }
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 31e9546..692fac6 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -50,6 +50,17 @@ export type FileMergeData = {
+ 
+ export type FileStatus = "Unresolved" | "Resolved";
+ 
++/**
++ *  A zero-width place inside one line of one text: `column` UTF-16 code units from the line's
++ *  start, at most the line's length without its line break.
++ */
++export type InlinePoint<L> = {
++	/**  The line holding the point. */
++	line: L,
++	/**  Column of the point. */
++	column: number,
++};
++
+ /**
+  *  Changed text inside one line of one text: `len` UTF-16 code units from column `start`
+  *  (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
+@@ -77,19 +88,25 @@ export type LocalLine = number;
+ /**  0-based line index in the remote text. */
+ export type RemoteLine = number;
+ 
++/**  One side of a chunk compared with base, line by line. */
++export type SideWordChanges<L> = {
++	/**
++	 *  Side text that is not in base: sorted by line then start, disjoint, never empty,
++	 *  never across a line break.
++	 */
++	changed: InlineRange<L>[],
++	/**  Places where base text this side removed would sit: sorted, at most one per place. */
++	removed_at: InlinePoint<L>[],
++};
++
+ export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
+ 
+-/**
+- *  Where one chunk's sides differ from base, word by word. `base` marks the base text that
+- *  either side changed (the union).
+- */
++/**  Where one chunk's sides differ from base. */
+ export type WordChanges = {
+-	/**  The chunk these ranges belong to. */
++	/**  The chunk these changes belong to. */
+ 	chunk: ChunkId,
+-	/**  Changed text in the chunk's local lines. */
+-	local: InlineRange<LocalLine>[],
+-	/**  Base text changed by local, remote or both. */
+-	base: InlineRange<BaseLine>[],
+-	/**  Changed text in the chunk's remote lines. */
+-	remote: InlineRange<RemoteLine>[],
++	/**  Local compared with base. */
++	local: SideWordChanges<LocalLine>,
++	/**  Remote compared with base. */
++	remote: SideWordChanges<RemoteLine>,
+ };
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 3c96141..83bce23 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -6,12 +6,12 @@ type RemoteLine = number & { readonly __brand: "RemoteLine" };
+ type ChunkId = number & { readonly __brand: "ChunkId" };
+ type LineRange<L> = { readonly start: L; readonly len: number };
+ type InlineRange<L> = { readonly line: L; readonly start: number; readonly len: number };
+-
+-type ChunkWords = {
+-  readonly local: readonly InlineRange<LocalLine>[];
+-  readonly base: readonly InlineRange<BaseLine>[];
+-  readonly remote: readonly InlineRange<RemoteLine>[];
++type InlinePoint<L> = { readonly line: L; readonly column: number };
++type SideWords<L> = {
++  readonly changed: readonly InlineRange<L>[];
++  readonly removedAt: readonly InlinePoint<L>[];
+ };
++type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideWords<RemoteLine> };
+ 
+ export type Chunk = {
+   readonly id: ChunkId;
+@@ -79,18 +79,42 @@ function toInlineRange<L extends number>({
+   return { line, start, len };
+ }
+ 
+-function toInlineRanges<L extends number>({
+-  ranges,
++function toInlinePoint<L extends number>({
++  point,
+   isLine,
+   field,
+ }: {
+-  ranges: readonly Generated.InlineRange<number>[];
++  point: Generated.InlinePoint<number>;
+   isLine: (n: number) => n is L;
+   field: string;
+-}): InlineRange<L>[] {
+-  return ranges.map((range, index) =>
+-    toInlineRange({ range, isLine, field: `${field}[${index}]` }),
+-  );
++}): InlinePoint<L> {
++  const { line, column } = point;
++  if (!isLine(line)) {
++    throw invalid(`${field}.line`, line);
++  }
++  if (!isNonNegativeInteger(column)) {
++    throw invalid(`${field}.column`, column);
++  }
++  return { line, column };
++}
++
++function toSideWords<L extends number>({
++  side,
++  isLine,
++  field,
++}: {
++  side: Generated.SideWordChanges<number>;
++  isLine: (n: number) => n is L;
++  field: string;
++}): SideWords<L> {
++  return {
++    changed: side.changed.map((range, index) =>
++      toInlineRange({ range, isLine, field: `${field}.changed[${index}]` }),
++    ),
++    removedAt: side.removed_at.map((point, index) =>
++      toInlinePoint({ point, isLine, field: `${field}.removed_at[${index}]` }),
++    ),
++  };
+ }
+ 
+ function toWords({
+@@ -106,13 +130,8 @@ function toWords({
+     throw new Error(`${field}.chunk must be ${chunkId}, got ${words.chunk}`);
+   }
+   return {
+-    local: toInlineRanges({ ranges: words.local, isLine: isLocalLine, field: `${field}.local` }),
+-    base: toInlineRanges({ ranges: words.base, isLine: isBaseLine, field: `${field}.base` }),
+-    remote: toInlineRanges({
+-      ranges: words.remote,
+-      isLine: isRemoteLine,
+-      field: `${field}.remote`,
+-    }),
++    local: toSideWords({ side: words.local, isLine: isLocalLine, field: `${field}.local` }),
++    remote: toSideWords({ side: words.remote, isLine: isRemoteLine, field: `${field}.remote` }),
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index c8ac5e7..b65a82c 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -5,7 +5,7 @@ import { createFixtureSource } from "./fixture";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+-  "../../fixtures/golden/*.json",
++  ["../../fixtures/golden/*.json", "../../fixtures/showcase/*.json"],
+   { eager: true, import: "default" },
+ );
+ 
+@@ -29,9 +29,13 @@ const CHUNK = {
+ };
+ 
+ const WORDS = {
+-  local: [{ line: 0, start: 0, len: 1 }],
+-  base: [],
+-  remote: [{ line: 0, start: 1, len: 1 }],
++  local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [{ line: 0, column: 1 }] },
++  remote: { changed: [{ line: 0, start: 1, len: 1 }], removed_at: [] },
++};
++
++const DOMAIN_WORDS = {
++  local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [{ line: 0, column: 1 }] },
++  remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
+ };
+ 
+ function record(
+@@ -57,7 +61,7 @@ function loaded(path: string): Record<string, unknown> {
+     local: "l\n",
+     remote: "r\n",
+     eol: "Lf",
+-    chunks: [{ ...CHUNK, words: WORDS }],
++    chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
+   };
+ }
+ 
+@@ -69,7 +73,7 @@ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+ 
+-test("the committed fixtures list 10 files, sorted by path, all unresolved", async () => {
++test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
+   const source = createFixtureSource(quietLog().log);
+ 
+   const files = await source.listFiles();
+@@ -85,6 +89,7 @@ test("the committed fixtures list 10 files, sorted by path, all unresolved", asy
+     "vue-core-script-context.ts",
+     "vue-router-playground-app.vue",
+     "vueuse-use-magic-keys.ts",
++    "word-marks.ts",
+   ]);
+   for (const file of files) {
+     expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
+@@ -94,8 +99,7 @@ test("the committed fixtures list 10 files, sorted by path, all unresolved", asy
+ test("each committed fixture loads with its JSON's chunk count", async () => {
+   const source = createFixtureSource(quietLog().log);
+   const committed = Object.values(COMMITTED);
+-  expect(committed).toHaveLength(10);
+-
++  expect(committed).toHaveLength(11);
+   for (const json of committed) {
+     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
+     const data = await source.loadFile(path);
+@@ -122,17 +126,21 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
+   expect(data).toMatchObject({ path: "vueuse-use-magic-keys.ts", eol: "Lf" });
+ 
+   const words = data.chunks[8]?.words;
+-  expect(words?.local).toHaveLength(7);
+-  expect(words?.base[0]).toEqual({ line: 128, start: 2, len: 13 });
+-  expect(data.base.split("\n")[128]?.slice(2, 15)).toBe("if (target) {");
+-  expect(words?.remote).toEqual([
+-    { line: 150, start: 0, len: 12 },
+-    { line: 151, start: 0, len: 54 },
+-    { line: 152, start: 0, len: 55 },
++  expect(words?.local.changed).toHaveLength(8);
++  expect(words?.local.changed[0]).toEqual({ line: 128, start: 0, len: 2 });
++  expect(words?.local.removedAt).toEqual([
++    { line: 128, column: 0 },
++    { line: 135, column: 17 },
+   ]);
+-  expect(data.remote.split("\n")[151]).toBe(
+-    "    useEventListener('blur', reset, { passive: true })",
+-  );
++  expect(data.local.split("\n")[135]).toBe("  }, { passive })");
++  expect(words?.remote).toEqual({
++    changed: [
++      { line: 150, start: 0, len: 12 },
++      { line: 151, start: 0, len: 54 },
++      { line: 152, start: 0, len: 55 },
++    ],
++    removedAt: [],
++  });
+ });
+ 
+ test("in-memory records are listed sorted by path and keep every field", async () => {
+@@ -160,8 +168,18 @@ test.each([
+   ],
+   [
+     "a string word column",
+-    record("x.ts", {}, { base: [{ line: 0, start: "1", len: 1 }] }),
+-    "word_changes.0.base.0.start",
++    record("x.ts", {}, { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } }),
++    "word_changes.0.local.changed.0.start",
++  ],
++  [
++    "a string point column",
++    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } }),
++    "word_changes.0.remote.removed_at.0.column",
++  ],
++  [
++    "the old flat word shape",
++    record("x.ts", {}, { local: [], base: [], remote: [] }),
++    "word_changes.0.local",
+   ],
+   ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
+ ])("a record with %s is rejected naming the file", (_case, json, detail) => {
+@@ -216,13 +234,13 @@ test.each([
+   ],
+   [
+     "a negative word line",
+-    record("x.ts", {}, { local: [{ line: -1, start: 0, len: 1 }] }),
+-    "word_changes[0].local[0].line must be a non-negative safe integer, got -1",
++    record("x.ts", {}, { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } }),
++    "word_changes[0].local.changed[0].line must be a non-negative safe integer, got -1",
+   ],
+   [
+-    "a non-integer base word line",
+-    record("x.ts", {}, { base: [{ line: 0.5, start: 0, len: 1 }] }),
+-    "word_changes[0].base[0].line must be a non-negative safe integer, got 0.5",
++    "a non-integer remote word line",
++    record("x.ts", {}, { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } }),
++    "word_changes[0].remote.changed[0].line must be a non-negative safe integer, got 0.5",
+   ],
+   [
+     "a negative word column",
+@@ -230,23 +248,58 @@ test.each([
+       "x.ts",
+       {},
+       {
+-        remote: [
+-          { line: 0, start: 1, len: 1 },
+-          { line: 0, start: -1, len: 1 },
+-        ],
++        remote: {
++          changed: [
++            { line: 0, start: 1, len: 1 },
++            { line: 0, start: -1, len: 1 },
++          ],
++          removed_at: [],
++        },
+       },
+     ),
+-    "word_changes[0].remote[1].start must be a non-negative safe integer, got -1",
++    "word_changes[0].remote.changed[1].start must be a non-negative safe integer, got -1",
+   ],
+   [
+     "an empty word range",
+-    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0 }] }),
+-    "word_changes[0].local[0].len must be a positive safe integer, got 0",
++    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } }),
++    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0",
+   ],
+   [
+     "a fractional word length",
+-    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0.5 }] }),
+-    "word_changes[0].local[0].len must be a positive safe integer, got 0.5",
++    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } }),
++    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0.5",
++  ],
++  [
++    "a negative point line",
++    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } }),
++    "word_changes[0].remote.removed_at[0].line must be a non-negative safe integer, got -1",
++  ],
++  [
++    "a negative point column",
++    record(
++      "x.ts",
++      {},
++      {
++        local: {
++          changed: [],
++          removed_at: [
++            { line: 0, column: 0 },
++            { line: 0, column: -1 },
++          ],
++        },
++      },
++    ),
++    "word_changes[0].local.removed_at[1].column must be a non-negative safe integer, got -1",
++  ],
++  [
++    "a fractional point column",
++    record("x.ts", {}, { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } }),
++    "word_changes[0].local.removed_at[0].column must be a non-negative safe integer, got 0.5",
++  ],
++  [
++    "an unsafe point column",
++    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } }),
++    `word_changes[0].remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
+   ],
+ ])("a record with %s is rejected naming its word_changes entry", (_case, json, message) => {
+   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 026b7ac..c73e0bf 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -8,8 +8,8 @@ import type { Log } from "./log";
+ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+ 
+ // Stryker disable all: Vite needs import.meta.glob arguments as literals
+-const GOLDEN_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
+-  "../../fixtures/golden/*.json",
++const FIXTURE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
++  ["../../fixtures/golden/*.json", "../../fixtures/showcase/*.json"],
+   { eager: true, import: "default" },
+ );
+ // Stryker restore all
+@@ -49,11 +49,20 @@ const INLINE_RANGE = v.object({
+   len: v.number(),
+ } satisfies SchemaOf<Generated.InlineRange<number>>);
+ 
++const INLINE_POINT = v.object({
++  line: v.number(),
++  column: v.number(),
++} satisfies SchemaOf<Generated.InlinePoint<number>>);
++
++const SIDE_WORD_CHANGES = v.object({
++  changed: v.array(INLINE_RANGE),
++  removed_at: v.array(INLINE_POINT),
++} satisfies SchemaOf<Generated.SideWordChanges<number>>);
++
+ const WORD_CHANGES = v.object({
+   chunk: v.number(),
+-  local: v.array(INLINE_RANGE),
+-  base: v.array(INLINE_RANGE),
+-  remote: v.array(INLINE_RANGE),
++  local: SIDE_WORD_CHANGES,
++  remote: SIDE_WORD_CHANGES,
+ } satisfies SchemaOf<Generated.WordChanges>);
+ 
+ const FILE_MERGE_DATA = v.object({
+@@ -96,7 +105,7 @@ function lookup(fixtures: ReadonlyMap<string, FileMergeData>, path: string): Fil
+ 
+ export function createFixtureSource(
+   log: Log,
+-  files: Readonly<Record<string, unknown>> = GOLDEN_FILES,
++  files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+ ): ChunkSource {
+   const fixtures = parseFixtures(files);
+   const finished = new Map<string, string>();
+diff --git a/tests/showcase/word-marks/base.ts b/tests/showcase/word-marks/base.ts
+new file mode 100644
+index 0000000..141b219
+--- /dev/null
++++ b/tests/showcase/word-marks/base.ts
+@@ -0,0 +1,194 @@
++// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.
++// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.
++
++// C1 renamed property (local)
++if (obj.a) {
++
++// C2 condition grows (remote)
++if(obj.a)
++
++// C3 argument added (local)
++foo(a, b)
++
++// C4 argument removed (remote)
++foo(a, b, c)
++
++// C5 string grows (local)
++const label = 'Save';
++
++// C6 number changed (remote)
++timeout: 300,
++
++// C7 optional chaining (local)
++return user.profile.name;
++
++// C8 await added (remote)
++const data = fetchUser(id);
++
++// C9 types added (local)
++function load(id) {
++
++// C10 value wrapped (remote)
++return value;
++
++// C11 condition negated (local)
++if (isReady) {
++
++// C12 operator changed (remote)
++if (a === b) {
++
++// C13 variable renamed (local)
++const count = list.length;
++
++// C14 import added (remote)
++import { ref, computed } from 'vue';
++
++// C15 import removed (local)
++import { ref, computed, watch } from 'vue';
++
++// C16 attribute added (remote)
++<button @click="save">
++
++// C17 JSX expression changed (local)
++<Item key={id} label={name} />
++
++// C18 PHP method renamed (remote)
++$name = $user->getName();
++
++// C19 PHP parameter added (local)
++public function save(array $data)
++
++// C20 trailing comma added (remote)
++  b: 2
++
++// C21 semicolon removed (local)
++return x;
++
++// C22 comment grows (remote)
++// TODO: fix this
++
++// C23 dedented (local)
++		let x = 1;
++
++// C24 indented (remote)
++	let x = 1;
++
++// C25 spaces to tab (local)
++    foo();
++
++// C26 dedented and changed (remote)
++		let x = 1;
++
++// C27 indentation removed (local)
++	foo();
++
++// C28 inner spaces removed (remote)
++foo( a )
++
++// C29 single word replaced (local)
++return a;
++
++// C30 symbol added to a wordless line (remote)
++}
++
++// N1 unrelated statement (local)
++let emitted = false;
++
++// N2 condition sharing only `if` (remote)
++if (!options.setupBindings.has(macro)) {
++
++// N3 unrelated call (local)
++yield `${macro}, `;
++
++// M1 wrapped in a condition (remote)
++a();
++b();
++
++// M2 unwrapped from a condition (local)
++if (ok) {
++	a();
++	b();
++}
++
++// M3 line inserted between changed lines (remote)
++a(1);
++b(1);
++
++// M4 line removed between changed lines (local)
++a(1);
++b();
++c(1);
++
++// M5 line split (remote)
++foo(a, b)
++
++// M6 lines joined (local)
++foo(a,
++	b)
++
++// M7 lines swapped (remote)
++a();
++b();
++
++// M8 block rewritten without shared words (local)
++alpha();
++beta();
++gamma();
++
++// M9 nest dedented (remote)
++		x();
++		}
++	}
++
++// M10 blank line removed after a change (local)
++a(1);
++
++
++// M11 same rename on every line (remote)
++user.name;
++user.age;
++user.id;
++
++// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
++const data = fetchUser(id);
++
++// X2 conflict: C15 import removed (local) vs C14 import added (remote)
++import { ref, computed, watch } from 'vue';
++
++// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)
++		let x = 1;
++
++// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)
++save(1);
++load(1);
++
++// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)
++return a;
++
++// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)
++if(obj.a)
++
++// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)
++import { ref, computed } from 'vue';
++if (ok) {
++	a(1);
++	b(1);
++}
++
++// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)
++	if (options.vueCompilerOptions.target >= 3.3) {
++		let emitted = false;
++		for (const macro of Object.keys(options.vueCompilerOptions.macros)) {
++			if (!options.setupBindings.has(macro)) {
++				if (!emitted) {
++					yield `// @ts-ignore${newLine}import { `;
++					emitted = true;
++				}
++				yield `${macro}, `;
++			}
++		}
++		if (emitted) {
++			yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;
++		}
++
++// end
+diff --git a/tests/showcase/word-marks/local.ts b/tests/showcase/word-marks/local.ts
+new file mode 100644
+index 0000000..88418d5
+--- /dev/null
++++ b/tests/showcase/word-marks/local.ts
+@@ -0,0 +1,187 @@
++// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.
++// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.
++
++// C1 renamed property (local)
++if (obj.renamed) {
++
++// C2 condition grows (remote)
++if(obj.a)
++
++// C3 argument added (local)
++foo(a, b, c)
++
++// C4 argument removed (remote)
++foo(a, b, c)
++
++// C5 string grows (local)
++const label = 'Save changes';
++
++// C6 number changed (remote)
++timeout: 300,
++
++// C7 optional chaining (local)
++return user.profile?.name;
++
++// C8 await added (remote)
++const data = fetchUser(id);
++
++// C9 types added (local)
++function load(id: string): Promise<User> {
++
++// C10 value wrapped (remote)
++return value;
++
++// C11 condition negated (local)
++if (!isReady) {
++
++// C12 operator changed (remote)
++if (a === b) {
++
++// C13 variable renamed (local)
++const size = list.length;
++
++// C14 import added (remote)
++import { ref, computed } from 'vue';
++
++// C15 import removed (local)
++import { ref, watch } from 'vue';
++
++// C16 attribute added (remote)
++<button @click="save">
++
++// C17 JSX expression changed (local)
++<Item key={item.id} label={name} />
++
++// C18 PHP method renamed (remote)
++$name = $user->getName();
++
++// C19 PHP parameter added (local)
++public function save(array $data, bool $force = false)
++
++// C20 trailing comma added (remote)
++  b: 2
++
++// C21 semicolon removed (local)
++return x
++
++// C22 comment grows (remote)
++// TODO: fix this
++
++// C23 dedented (local)
++	let x = 1;
++
++// C24 indented (remote)
++	let x = 1;
++
++// C25 spaces to tab (local)
++	foo();
++
++// C26 dedented and changed (remote)
++		let x = 1;
++
++// C27 indentation removed (local)
++foo();
++
++// C28 inner spaces removed (remote)
++foo( a )
++
++// C29 single word replaced (local)
++return b;
++
++// C30 symbol added to a wordless line (remote)
++}
++
++// N1 unrelated statement (local)
++const scriptSetup = options.scriptSetup;
++
++// N2 condition sharing only `if` (remote)
++if (!options.setupBindings.has(macro)) {
++
++// N3 unrelated call (local)
++usedMacros.push({ canonical, alias });
++
++// M1 wrapped in a condition (remote)
++a();
++b();
++
++// M2 unwrapped from a condition (local)
++a();
++b();
++
++// M3 line inserted between changed lines (remote)
++a(1);
++b(1);
++
++// M4 line removed between changed lines (local)
++a(2);
++c(2);
++
++// M5 line split (remote)
++foo(a, b)
++
++// M6 lines joined (local)
++foo(a, b)
++
++// M7 lines swapped (remote)
++a();
++b();
++
++// M8 block rewritten without shared words (local)
++one = 1;
++two = 2;
++three = 3;
++
++// M9 nest dedented (remote)
++		x();
++		}
++	}
++
++// M10 blank line removed after a change (local)
++a(2);
++
++// M11 same rename on every line (remote)
++user.name;
++user.age;
++user.id;
++
++// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
++const data = await fetchUser(id);
++
++// X2 conflict: C15 import removed (local) vs C14 import added (remote)
++import { ref, watch } from 'vue';
++
++// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)
++	let x = 1;
++
++// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)
++if (ready) {
++	save(1);
++	load(1);
++}
++
++// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)
++throw new Error('gone');
++
++// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)
++if (obj.renamed && obj.new)
++
++// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)
++import { ref, computed } from 'vue';
++a(1);
++b(1);
++
++// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)
++	let emitted = false;
++	for (const macro of Object.keys(options.vueCompilerOptions.macros)) {
++		if (!options.setupBindings.has(macro)) {
++			if (!emitted) {
++				yield `// @ts-ignore${newLine}import { `;
++				emitted = true;
++			}
++			yield `${macro}, `;
++		}
++	}
++	if (emitted) {
++		yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;
++
++// end
+diff --git a/tests/showcase/word-marks/remote.ts b/tests/showcase/word-marks/remote.ts
+new file mode 100644
+index 0000000..d30dd78
+--- /dev/null
++++ b/tests/showcase/word-marks/remote.ts
+@@ -0,0 +1,220 @@
++// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.
++// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.
++
++// C1 renamed property (local)
++if (obj.a) {
++
++// C2 condition grows (remote)
++if (obj.renamed && obj.new)
++
++// C3 argument added (local)
++foo(a, b)
++
++// C4 argument removed (remote)
++foo(a, c)
++
++// C5 string grows (local)
++const label = 'Save';
++
++// C6 number changed (remote)
++timeout: 3000,
++
++// C7 optional chaining (local)
++return user.profile.name;
++
++// C8 await added (remote)
++const data = await fetchUser(id);
++
++// C9 types added (local)
++function load(id) {
++
++// C10 value wrapped (remote)
++return ref(value);
++
++// C11 condition negated (local)
++if (isReady) {
++
++// C12 operator changed (remote)
++if (a !== b) {
++
++// C13 variable renamed (local)
++const count = list.length;
++
++// C14 import added (remote)
++import { ref, computed, watch } from 'vue';
++
++// C15 import removed (local)
++import { ref, computed, watch } from 'vue';
++
++// C16 attribute added (remote)
++<button :disabled="busy" @click="save">
++
++// C17 JSX expression changed (local)
++<Item key={id} label={name} />
++
++// C18 PHP method renamed (remote)
++$name = $user->getFullName();
++
++// C19 PHP parameter added (local)
++public function save(array $data)
++
++// C20 trailing comma added (remote)
++  b: 2,
++
++// C21 semicolon removed (local)
++return x;
++
++// C22 comment grows (remote)
++// TODO: fix this before release
++
++// C23 dedented (local)
++		let x = 1;
++
++// C24 indented (remote)
++		let x = 1;
++
++// C25 spaces to tab (local)
++    foo();
++
++// C26 dedented and changed (remote)
++	let x = 2;
++
++// C27 indentation removed (local)
++	foo();
++
++// C28 inner spaces removed (remote)
++foo(a)
++
++// C29 single word replaced (local)
++return a;
++
++// C30 symbol added to a wordless line (remote)
++};
++
++// N1 unrelated statement (local)
++let emitted = false;
++
++// N2 condition sharing only `if` (remote)
++if (scriptSetupRanges.defineModel.length) {
++
++// N3 unrelated call (local)
++yield `${macro}, `;
++
++// M1 wrapped in a condition (remote)
++if (ok) {
++	a();
++	b();
++}
++
++// M2 unwrapped from a condition (local)
++if (ok) {
++	a();
++	b();
++}
++
++// M3 line inserted between changed lines (remote)
++a(2);
++log();
++b(2);
++
++// M4 line removed between changed lines (local)
++a(1);
++b();
++c(1);
++
++// M5 line split (remote)
++foo(a,
++	b)
++
++// M6 lines joined (local)
++foo(a,
++	b)
++
++// M7 lines swapped (remote)
++b();
++a();
++
++// M8 block rewritten without shared words (local)
++alpha();
++beta();
++gamma();
++
++// M9 nest dedented (remote)
++	x();
++	}
++}
++
++// M10 blank line removed after a change (local)
++a(1);
++
++
++// M11 same rename on every line (remote)
++account.name;
++account.age;
++account.id;
++
++// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
++const user = fetchUser(id);
++
++// X2 conflict: C15 import removed (local) vs C14 import added (remote)
++import { ref, computed, watch, onMounted } from 'vue';
++
++// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)
++		let x = 2;
++
++// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)
++save(2);
++notify();
++load(2);
++
++// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)
++return b;
++
++// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)
++if(!obj.a)
++
++// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)
++import { ref, computed, watch } from 'vue';
++if (ok) {
++	a(2);
++	log();
++	b(2);
++}
++
++// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)
++	if (options.vueCompilerOptions.target >= 3.3) {
++		const scriptSetup = options.scriptSetup;
++		const scriptSetupRanges = options.scriptSetupRanges;
++		if (!scriptSetup || !scriptSetupRanges) {
++			return;
++		}
++
++		const usedMacros: { canonical: string; alias: string }[] = [];
++		const add = (canonical: string, exp: TextRange | undefined) => {
++			if (exp) {
++				usedMacros.push({ canonical, alias: getRangeText(scriptSetup, exp) });
++			}
++		};
++		add('defineProps', scriptSetupRanges.defineProps?.exp);
++		add('defineEmits', scriptSetupRanges.defineEmits?.exp);
++		add('defineSlots', scriptSetupRanges.defineSlots?.exp);
++		add('defineExpose', scriptSetupRanges.defineExpose?.exp);
++		add('withDefaults', scriptSetupRanges.withDefaults?.exp);
++		if (scriptSetupRanges.defineModel.length) {
++			usedMacros.push({ canonical: 'defineModel', alias: 'defineModel' });
++		}
++		if (scriptSetupRanges.defineOptions) {
++			usedMacros.push({ canonical: 'defineOptions', alias: 'defineOptions' });
++		}
++
++		const toImport = usedMacros.filter(({ alias }) => !options.setupBindings.has(alias));
++
++		if (toImport.length) {
++			yield `import { `;
++			for (const { canonical, alias } of toImport) {
++				yield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;
++			}
++			yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;
++		}
++
++// end
