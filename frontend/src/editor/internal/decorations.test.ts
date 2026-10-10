@@ -25,7 +25,7 @@ function runsOf(state: EditorState): string[] {
       continue;
     }
     source.between(0, state.doc.length, (from, _to, decoration) => {
-      if (decoration.point) {
+      if (decoration.point && decoration.spec.widget === undefined) {
         lines.push({ line: state.doc.lineAt(from).number, classes: String(decoration.spec.class) });
       }
     });

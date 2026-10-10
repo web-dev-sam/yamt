@@ -1,5 +1,5 @@
 import "../theme.css";
-import { RangeSetBuilder, StateField, type Extension, type Text } from "@codemirror/state";
+import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
 import type { ChunkSpan } from "./chunkField";
@@ -7,7 +7,7 @@ import { lineSpan } from "./lineSpan";
 import { sideChanged, type Side } from "./side";
 import { isResolved, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
-import { sideWordMarks } from "./words";
+import { sideWordDecorations } from "./words";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
@@ -43,7 +43,7 @@ export function sideDecorations(
       ...lineSpan(state.doc, chunk[side]),
       tone: chunkTone(chunk, side),
     }));
-    return [bandDecorations(state.doc, bands), sideWordMarks(state.doc, tinted, side)];
+    return [bandDecorations(state.doc, bands), sideWordDecorations(state.doc, tinted, side)];
   });
 }
 

@@ -13,6 +13,7 @@ import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
 
 type Columns = readonly [line: number, start: number, len: number];
+type Point = readonly [line: number, column: number];
 type Merge = {
   readonly field: StateField<readonly ChunkSpan[]>;
   readonly center: EditorState;
@@ -31,8 +32,11 @@ function block(line: number): { start: number; len: number } {
   return { start: line, len: 1 };
 }
 
-function words(ranges: readonly Columns[]): object {
-  return { changed: ranges.map(([line, start, len]) => ({ line, start, len })), removed_at: [] };
+function words(ranges: readonly Columns[], points: readonly Point[]): object {
+  return {
+    changed: ranges.map(([line, start, len]) => ({ line, start, len })),
+    removed_at: points.map(([line, column]) => ({ line, column })),
+  };
 }
 
 async function synthetic(): Promise<FileMergeData> {
@@ -47,8 +51,18 @@ async function synthetic(): Promise<FileMergeData> {
       { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
     ],
     word_changes: [
-      { chunk: CONFLICT, local: words([[1, 11, 4]]), remote: words([[1, 11, 6]]) },
-      { chunk: MODIFIED, local: words([[2, 4, 1]]), remote: words([]) },
+      {
+        chunk: CONFLICT,
+        local: words(
+          [[1, 11, 4]],
+          [
+            [1, 0],
+            [1, 16],
+          ],
+        ),
+        remote: words([[1, 11, 6]], [[1, 8]]),
+      },
+      { chunk: MODIFIED, local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
     ],
   };
   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
@@ -143,8 +157,15 @@ function painted(state: EditorState): string[] {
   for (const source of state.facet(EditorView.decorations)) {
     if (typeof source !== "function") {
       source.between(0, state.doc.length, (from, to, decoration) => {
-        const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
-        found.push(`${state.doc.lineAt(from).number} ${String(decoration.spec.class)}${text}`);
+        const line = state.doc.lineAt(from);
+        if (decoration.spec.widget === undefined) {
+          const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
+          found.push(`${line.number} ${String(decoration.spec.class)}${text}`);
+        } else {
+          const tone = String(decoration.spec.widget.tone);
+          const around = `${state.sliceDoc(line.from, from)}|${state.sliceDoc(from, line.to)}`;
+          found.push(`${line.number} chunk-removal-${tone} ${around}`);
+        }
       });
     }
   }
@@ -155,6 +176,24 @@ function marks(state: EditorState): string[] {
   return painted(state).filter((entry) => entry.includes("chunk-word-"));
 }
 
+function bars(state: EditorState): string[] {
+  return painted(state).filter((entry) => entry.includes("chunk-removal-"));
+}
+
+function barPositions(state: EditorState): number[] {
+  const found: number[] = [];
+  for (const source of state.facet(EditorView.decorations)) {
+    if (typeof source !== "function") {
+      source.between(0, state.doc.length, (from, _to, decoration) => {
+        if (decoration.spec.widget !== undefined) {
+          found.push(from);
+        }
+      });
+    }
+  }
+  return found;
+}
+
 test("side panes mark exactly the changed words, in a CRLF file and after an emoji", async () => {
   const merge = open(await synthetic());
 
@@ -162,7 +201,20 @@ test("side panes mark exactly the changed words, in a CRLF file and after an emo
   expect(marks(merge.right)).toEqual(["2 chunk-word-conflict theirs"]);
 });
 
-test("a resolved block loses its word marks on every side pane and undo brings them back", async () => {
+test("side panes draw one bar per removal point in a CRLF file: line start, mid-line, line end", async () => {
+  const merge = open(await synthetic());
+
+  expect(bars(merge.left)).toEqual([
+    "2 chunk-removal-conflict |const 😀 = mine;",
+    "2 chunk-removal-conflict const 😀 = mine;|",
+    "3 chunk-removal-modified a = 2|;",
+  ]);
+  expect(bars(merge.right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
+  expect(barPositions(merge.left)).toEqual([5, 21, 27]);
+  expect(barPositions(merge.right)).toEqual([13]);
+});
+
+test("a resolved block loses its word marks and bars on every side pane and undo brings them back", async () => {
   const start = open(await synthetic());
 
   const applied = run(
@@ -172,13 +224,20 @@ test("a resolved block loses its word marks on every side pane and undo brings t
   const dismissed = run(applied, dismissSteps(target(applied), chunk(applied, CONFLICT)));
 
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
+  expect(bars(applied.left)).toEqual([
+    "2 chunk-removal-conflict |const 😀 = mine;",
+    "2 chunk-removal-conflict const 😀 = mine;|",
+  ]);
   expect(marks(dismissed.left)).toEqual([]);
   expect(marks(dismissed.right)).toEqual([]);
+  expect(bars(dismissed.left)).toEqual([]);
+  expect(bars(dismissed.right)).toEqual([]);
   expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
-  expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
+  expect(bars(undone(dismissed).right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
+  expect(painted(undone(undone(dismissed)).left)).toEqual(painted(start.left));
 });
 
-test("a half-applied conflict keeps its tint and its word marks together on both sides", async () => {
+test("a half-applied conflict keeps its tint, word marks and removal bars together on both sides", async () => {
   const start = open(await synthetic());
 
   const applied = run(
@@ -189,16 +248,20 @@ test("a half-applied conflict keeps its tint and its word marks together on both
   expect(painted(applied.left)).toEqual([
     "2 chunk-conflict chunk-band",
     "3 chunk-modified chunk-band",
+    "2 chunk-removal-conflict |const 😀 = mine;",
     "2 chunk-word-conflict mine",
+    "2 chunk-removal-conflict const 😀 = mine;|",
     "3 chunk-word-modified 2",
+    "3 chunk-removal-modified a = 2|;",
   ]);
   expect(painted(applied.right)).toEqual([
     "2 chunk-conflict chunk-band",
+    "2 chunk-removal-conflict const 😀| = theirs;",
     "2 chunk-word-conflict theirs",
   ]);
 });
 
-test("the middle pane tints its blocks without word marks: open, half-applied, applied, undone", async () => {
+test("the middle pane tints its blocks without word marks or bars: open, half-applied, applied, undone", async () => {
   const start = open(await synthetic());
 
   const halfApplied = run(
