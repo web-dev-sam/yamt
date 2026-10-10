@@ -46,11 +46,12 @@ wave-3 brief. Once 2.0 lands, the generated `commands` (`just bindings-check`) a
 
 ## Frontend side
 
-- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`) is the interface the app talks to. Until 2.1 there is
-  one implementation: the fixture source in `ipc/fixture.ts`, which reads `fixtures/golden/*.json`
-  and `fixtures/showcase/*.json` with valibot (the only runtime parse, decision 19); `main.ts`
-  creates it directly. 2.1 adds `TauriChunkSource` (wraps `commands`), and `main.ts` then picks by
-  `import.meta.env.VITE_CHUNK_SOURCE` (architecture §4).
+- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`; load/finish/reset return `SourceResult`, failure =
+  the generated `IpcError`) is the interface the app talks to. Two implementations: `createTauriSource`
+  (`ipc/tauri.ts`, maps the generated `commands`; `forwardLog` stringifies non-finite numbers) and
+  the fixture source (`ipc/fixture.ts`, valibot over `fixtures/{golden,showcase}/*.json`, the only
+  runtime parse, decision 19). `import.meta.env.VITE_CHUNK_SOURCE === "tauri"` (set by the app's
+  dev/build commands) is read only in `main.ts` (source) and `ipc/index.ts` (log forward).
 - [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
   the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
   call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,

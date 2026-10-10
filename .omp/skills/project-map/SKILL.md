@@ -88,6 +88,7 @@ connectors ◄── editor                 (model/ is empty and unused)
 | scroll positions                         | DOM, driven by `editor/scrollSync`                                                                                                                                |
 | connector geometry                       | derived per frame, never stored                                                                                                                                   |
 | file list, active file, loaded file data | `ui/store.ts` singleton via `useAppStore()`                                                                                                                       |
+| failure shown in the window              | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
 | summary counts of the open file          | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
 | captured index stages (for reset)        | `session::FileState.stages`, captured at `open()`                                                                                                                 |
 

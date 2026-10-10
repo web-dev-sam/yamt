@@ -52,7 +52,7 @@ yamt/
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
 │  ├─ src/
-│  │  ├─ ipc/                 ChunkSource interface; TauriChunkSource; FixtureChunkSource
+│  │  ├─ ipc/                 ChunkSource interface; tauri.ts (createTauriSource); fixture.ts
 │  │  │  └─ bindings.ts       GENERATED from Rust (tauri-specta). Never hand-edited
 │  │  ├─ model/               pure TS, framework-free: chunk state, scroll map, apply math
 │  │  ├─ editor/              CodeMirror integration; exports ONLY MergeController
@@ -354,21 +354,22 @@ blocked by a hook and caught by `just bindings-check`.
 `frontend/src/ipc/ChunkSource.ts`:
 
 ```ts
+export type SourceResult<T> = { ok: true; value: T } | { ok: false; failure: SourceFailure }; // SourceFailure = IpcError
 export interface ChunkSource {
   listFiles(): Promise<FileEntry[]>;
-  loadFile(path: string): Promise<FileMergeData>;
-  finishFile(path: string, text: string): Promise<FileEntry[]>;
-  resetFile(path: string): Promise<FileMergeData>;
+  loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+  finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
+  resetFile(path: string): Promise<SourceResult<FileEntry[]>>; // the window reloads the file
 }
 ```
 
-`FixtureChunkSource` (M1) reads `frontend/fixtures/golden/*.json` — the engine's output for each
+The fixture source reads `frontend/fixtures/golden/*.json` — the engine's output for each
 golden case — and `frontend/fixtures/showcase/*.json` — hand-written demo cases from
 `tests/showcase/<case>/` (e.g. `word-marks.ts`, every kind of word change) — both written by
-`just fixtures` and kept current by `just fixtures-check` in `check`;
-`finishFile` stores results in memory and logs the text. `TauriChunkSource` (M2) wraps
-`commands`. From M2, `main.ts` picks one by `import.meta.env.VITE_CHUNK_SOURCE`; with one
-source in M1 there is no switch (vision 5).
+`just fixtures` and kept current by `just fixtures-check` in `check`; `finishFile` stores results
+in memory and logs the text. `createTauriSource` (2.1) maps the generated `commands`. `main.ts`
+picks one by `import.meta.env.VITE_CHUNK_SOURCE` (`"tauri"` from the app's dev and build
+commands); a failure reaches the window's problem bar through `ui/problemText.ts`.
 
 ---
 
