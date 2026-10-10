@@ -2,9 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "frontend: dev server",
+      "label": "yamt: run the merge window",
+      "detail": "Start the merge window (just dev-web), then open http://localhost:5173 in GNOME Web. Stop it with Ctrl+C in its terminal.",
       "type": "shell",
-      "command": "pnpm -C frontend dev",
+      "command": "just dev-web",
       "isBackground": true,
       "problemMatcher": {
         "owner": "vite",
@@ -15,14 +16,24 @@
           "endsPattern": "Local:\\s+http"
         }
       },
-      "presentation": { "panel": "dedicated", "reveal": "always" }
+      "presentation": { "panel": "dedicated", "reveal": "always" },
+      "options": {
+        "statusbar": {
+          "label": "$(play)",
+          "running": { "label": "$(radio-tower)" }
+        }
+      }
     },
     {
       "label": "golden: build conflict repo",
+      "detail": "Rebuild one of the 10 real conflicts as a git repo in /tmp/yamt-<case>, to open it in WebStorm/PhpStorm.",
       "type": "shell",
       "command": "just golden-repo ${input:goldenCase} /tmp/yamt-${input:goldenCase}",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "always" }
+      "presentation": { "panel": "shared", "reveal": "always" },
+      "options": {
+        "statusbar": { "label": "$(git-merge)" }
+      }
     }
   ],
   "inputs": [
