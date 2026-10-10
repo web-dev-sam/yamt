@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@iconify-json/lucide": "1.2.142",
+    "@iconify-json/vscode-icons": "1.2.87",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@tailwindcss/vite": "4.3.3",
