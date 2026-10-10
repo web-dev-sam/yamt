@@ -1,23 +1,9 @@
 {
-  "M1ALinePairedWordsR2": {
-    "owned": ["crates/merge-core/**", "tests/showcase/**"],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "tests/golden/**",
-      "crates/session/**",
-      "crates/cli/**",
-      "frontend/src/**"
-    ]
-  },
-  "M1BRemovalPointsR1": {
+  "M1BRemovalPointsR2": {
     "owned": [
       "frontend/src/editor/internal/words.ts",
       "frontend/src/editor/internal/words.test.ts",
-      "frontend/src/editor/internal/decorations.ts",
-      "frontend/src/editor/internal/decorations.test.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/style.css"
+      "frontend/src/editor/theme.css"
     ],
     "readonly": [
       "docs/**",
@@ -26,6 +12,7 @@
       "frontend/src/ipc/**",
       "frontend/src/ui/**",
       "frontend/src/connectors/**",
+      "frontend/src/style.css",
       "frontend/src/main.ts",
       "frontend/package.json",
       "frontend/scripts/**"
