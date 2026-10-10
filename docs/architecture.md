@@ -195,7 +195,6 @@ one per chunk in order; each side is compared with base on its own, line by line
 
 1. anchors — the chunk's lines diffed with all whitespace removed (imara-diff histogram), so a
    re-indented line pairs with its original; exact line equality is not a separate anchor;
-   another depth;
 2. gaps between anchors — base and side lines paired in order by shared words (Dice ≥
    `MIN_SHARED_PERCENT` = 50; wordless lines by their symbols; a maximum-sum table, at most
    `MAX_GAP_COMBINATIONS` cells, above it the gap's side lines are new);
