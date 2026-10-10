@@ -1,1 +1,25 @@
-{}
+{
+  "V0KeepWorkPerFile": {
+    "owned": [
+      "frontend/src/ui/**",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/window.ts",
+      "frontend/src/ipc/window.test.ts",
+      "frontend/src/style.css",
+      "frontend/.oxlintrc.json",
+      "src-tauri/capabilities/**"
+    ]
+  },
+  "V0ChooseASide": {
+    "owned": [
+      "crates/session/**",
+      "src-tauri/src/**",
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/tests/**",
+      "crates/cli/tests/merge_file.rs",
+      "crates/cli/tests/merge_file.proptest-regressions"
+    ]
+  }
+}
