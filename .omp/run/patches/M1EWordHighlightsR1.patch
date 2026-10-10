@@ -1,0 +1,389 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 720a7ee..1c46ef4 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -21,7 +21,6 @@ import type { Side } from "./internal/side";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type MergeSummary } from "./internal/status";
+ import { keepEditorFocus, paintStrips, type ChunkAction } from "./internal/strips";
+-import { centerWordMarks, sideWordMarks } from "./internal/words";
+ 
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+@@ -101,7 +100,7 @@ export class MergeController {
+       kind: "center",
+       doc: data.base,
+       parent: hosts.center,
+-      extensions: [field, centerDecorations(field), centerWordMarks(field), repaint, statusSync],
++      extensions: [field, centerDecorations(field), repaint, statusSync],
+     });
+     const statuses = sideStatusField(
+       center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
+@@ -112,12 +111,7 @@ export class MergeController {
+         kind: "side",
+         doc: data.local,
+         parent: hosts.left,
+-        extensions: [
+-          statuses,
+-          sideDecorations(statuses, "local"),
+-          sideWordMarks(statuses, "local"),
+-          repaint,
+-        ],
++        extensions: [statuses, sideDecorations(statuses, "local"), repaint],
+       }),
+       center,
+       right: createPane({
+@@ -125,12 +119,7 @@ export class MergeController {
+         kind: "side",
+         doc: data.remote,
+         parent: hosts.right,
+-        extensions: [
+-          statuses,
+-          sideDecorations(statuses, "remote"),
+-          sideWordMarks(statuses, "remote"),
+-          repaint,
+-        ],
++        extensions: [statuses, sideDecorations(statuses, "remote"), repaint],
+       }),
+     };
+   }
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index b530ab5..160827e 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -25,7 +25,9 @@ function runsOf(state: EditorState): string[] {
+       continue;
+     }
+     source.between(0, state.doc.length, (from, _to, decoration) => {
+-      lines.push({ line: state.doc.lineAt(from).number, classes: String(decoration.spec.class) });
++      if (decoration.point) {
++        lines.push({ line: state.doc.lineAt(from).number, classes: String(decoration.spec.class) });
++      }
+     });
+   }
+   const runs: { first: number; last: number; classes: string }[] = [];
+diff --git a/frontend/src/editor/internal/decorations.ts b/frontend/src/editor/internal/decorations.ts
+index df79e7c..2f0dbaa 100644
+--- a/frontend/src/editor/internal/decorations.ts
++++ b/frontend/src/editor/internal/decorations.ts
+@@ -1,5 +1,5 @@
+ import "../theme.css";
+-import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
++import { RangeSetBuilder, StateField, type Extension, type Text } from "@codemirror/state";
+ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+ 
+ import type { ChunkSpan } from "./chunkField";
+@@ -7,6 +7,7 @@ import { lineSpan } from "./lineSpan";
+ import { sideChanged, type Side } from "./side";
+ import { isResolved, type ChunkState } from "./status";
+ import { chunkTone, type Tone } from "./tone";
++import { centerWordMarks, sideWordMarks } from "./words";
+ 
+ type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+ 
+@@ -33,25 +34,33 @@ export function sideDecorations(
+   statuses: StateField<readonly ChunkState[]>,
+   side: Side,
+ ): Extension {
+-  return EditorView.decorations.compute([statuses], (state) =>
+-    bandDecorations(
+-      state.doc,
+-      state
+-        .field(statuses)
+-        .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
+-        .map(({ chunk }) => ({
+-          ...lineSpan(state.doc, chunk[side]),
+-          tone: chunkTone(chunk, side),
+-        })),
+-    ),
+-  );
++  return EditorView.decorations.computeN([statuses], (state) => {
++    const tinted = state
++      .field(statuses)
++      .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
++      .map(({ chunk }) => chunk);
++    const bands = tinted.map((chunk) => ({
++      ...lineSpan(state.doc, chunk[side]),
++      tone: chunkTone(chunk, side),
++    }));
++    return [bandDecorations(state.doc, bands), sideWordMarks(state.doc, tinted, side)];
++  });
+ }
+ 
++const baseText = StateField.define<Text>({
++  create: (state) => state.doc,
++  update: (doc) => doc,
++});
++
+ export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
+-  return EditorView.decorations.compute([field], (state) =>
+-    bandDecorations(
+-      state.doc,
+-      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
+-    ),
+-  );
++  return [
++    baseText,
++    EditorView.decorations.computeN([field, "doc"], (state) => {
++      const tinted = state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status));
++      return [
++        bandDecorations(state.doc, tinted),
++        centerWordMarks(state.doc, state.field(baseText), tinted),
++      ];
++    }),
++  ];
+ }
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index 45b4e41..d8957ec 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -1,8 +1,9 @@
+ import "@fontsource/jetbrains-mono/400.css";
+ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+ import { HighlightStyle, syntaxHighlighting, type Language } from "@codemirror/language";
+-import { Compartment, EditorState, type Extension } from "@codemirror/state";
++import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+ import {
++  Decoration,
+   drawSelection,
+   EditorView,
+   highlightActiveLine,
+@@ -36,6 +37,7 @@ const darkTheme = EditorView.theme(
+     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+       { backgroundColor: "var(--color-selection)" },
+     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
++    ".selected-text": { backgroundColor: "var(--color-selection)" },
+     ".cm-gutters": {
+       backgroundColor: "var(--color-editor)",
+       color: "var(--color-gutter)",
+@@ -76,6 +78,20 @@ export const paletteHighlight = HighlightStyle.define([
+   { tag: tags.strikethrough, textDecoration: "line-through" },
+ ]);
+ 
++const selectedText = Decoration.mark({ class: "selected-text" });
++
++// drawSelection paints behind every line background (@codemirror/view LayerView.setZIndex: z-index -1);
++// the highest-precedence mark is the innermost span, so it covers block and word tints under the text.
++const selectionOverTints = Prec.highest(
++  EditorView.decorations.compute(["selection"], (state) =>
++    Decoration.set(
++      state.selection.ranges
++        .filter((range) => !range.empty)
++        .map((range) => selectedText.range(range.from, range.to)),
++    ),
++  ),
++);
++
+ function kindExtensions(kind: PaneKind): Extension {
+   switch (kind) {
+     case "side":
+@@ -107,6 +123,7 @@ export function paneState(pane: {
+       lineNumbers(),
+       pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
+       drawSelection(),
++      selectionOverTints,
+       darkTheme,
+       syntaxHighlighting(paletteHighlight),
+       languageCompartment.of(pane.language ?? []),
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index 586d453..d38d8e3 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -6,11 +6,11 @@ import { expect, test } from "vitest";
+ import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
+ import { applySpec, dismissSpec } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
++import { centerDecorations, sideDecorations } from "./decorations";
+ import { paneState } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import type { ChunkState } from "./status";
+-import { centerWordMarks, sideWordMarks } from "./words";
+ 
+ type Columns = readonly [line: number, start: number, len: number];
+ type Merge = {
+@@ -69,7 +69,7 @@ function sidePane(
+     language: null,
+     kind: "side",
+     doc: data[side],
+-    extensions: [statuses, sideWordMarks(statuses, side)],
++    extensions: [statuses, sideDecorations(statuses, side)],
+   });
+ }
+ 
+@@ -80,7 +80,7 @@ function open(data: FileMergeData): Merge {
+     language: null,
+     kind: "center",
+     doc: data.base,
+-    extensions: [field, centerWordMarks(field)],
++    extensions: [field, centerDecorations(field)],
+   });
+   const statuses = sideStatusField(
+     center.field(field).map(({ chunk, status }) => ({ chunk, status })),
+@@ -139,20 +139,23 @@ function chunk(merge: Merge, id: number): Chunk {
+   return span.chunk;
+ }
+ 
+-function marks(state: EditorState): string[] {
++function painted(state: EditorState): string[] {
+   const found: string[] = [];
+   for (const source of state.facet(EditorView.decorations)) {
+     if (typeof source !== "function") {
+       source.between(0, state.doc.length, (from, to, decoration) => {
+-        found.push(
+-          `${state.doc.lineAt(from).number} ${String(decoration.spec.class)} ${state.sliceDoc(from, to)}`,
+-        );
++        const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
++        found.push(`${state.doc.lineAt(from).number} ${String(decoration.spec.class)}${text}`);
+       });
+     }
+   }
+   return found;
+ }
+ 
++function marks(state: EditorState): string[] {
++  return painted(state).filter((entry) => entry.includes("chunk-word-"));
++}
++
+ test("side panes mark exactly the changed words, in a CRLF file and after an emoji", async () => {
+   const merge = open(await synthetic());
+ 
+@@ -175,6 +178,38 @@ test("a resolved block loses its word marks on every pane and undo brings them b
+   expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
+ });
+ 
++test("a half-applied conflict keeps its tint and its word marks together on both sides", async () => {
++  const start = open(await synthetic());
++
++  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
++
++  expect(painted(applied.left)).toEqual([
++    "2 chunk-conflict chunk-band",
++    "3 chunk-modified chunk-band",
++    "2 chunk-word-conflict mine",
++    "3 chunk-word-modified 2",
++  ]);
++  expect(painted(applied.right)).toEqual([
++    "2 chunk-conflict chunk-band",
++    "2 chunk-word-conflict theirs",
++  ]);
++});
++
++test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
++  const merge = open(await synthetic());
++  const line = merge.left.doc.line(2);
++
++  const selected = merge.left.update({ selection: { anchor: line.from, head: line.to } }).state;
++
++  expect(painted(selected)).toEqual([
++    "2 selected-text const 😀 = mine;",
++    "2 chunk-conflict chunk-band",
++    "3 chunk-modified chunk-band",
++    "2 chunk-word-conflict mine",
++    "3 chunk-word-modified 2",
++  ]);
++});
++
+ test("middle pane marks an open conflict's base words until a side is applied; undo restores them", async () => {
+   const start = open(await synthetic());
+ 
+@@ -189,12 +224,16 @@ test("middle pane marks an open conflict's base words until a side is applied; u
+ test("middle pane: typing inside a block hides its marks, typing a line above moves them", async () => {
+   const start = open(await synthetic());
+   const conflictLine = start.center.doc.line(2);
++  const oldWord = conflictLine.from + "const 😀 = ".length;
+ 
+   const inside = run(start, { changes: { from: conflictLine.to, insert: " // x" } });
++  const sameLength = run(start, { changes: { from: oldWord, to: oldWord + 3, insert: "new" } });
+   const above = run(start, { changes: { from: 0, insert: "// top\r\n" } });
+ 
+   expect(marks(inside.center)).toEqual(["3 chunk-word-modified 1"]);
+   expect(marks(undone(inside).center)).toEqual(marks(start.center));
++  expect(sameLength.center.sliceDoc(conflictLine.from, conflictLine.to)).toBe("const 😀 = new;");
++  expect(marks(sameLength.center)).toEqual(["3 chunk-word-modified 1"]);
+   expect(marks(above.center)).toEqual(["3 chunk-word-conflict old", "4 chunk-word-modified 1"]);
+ });
+ 
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+index 667571d..caf9b96 100644
+--- a/frontend/src/editor/internal/words.ts
++++ b/frontend/src/editor/internal/words.ts
+@@ -1,23 +1,15 @@
+-import { StateField, type Extension, type Range, type Text } from "@codemirror/state";
+-import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
++import type { Range, Text } from "@codemirror/state";
++import { Decoration, type DecorationSet } from "@codemirror/view";
+ 
++import type { Chunk } from "../../ipc";
+ import type { ChunkSpan } from "./chunkField";
+ import { lineSpan } from "./lineSpan";
+-import { sideChanged, type Side } from "./side";
+-import { isResolved, type ChunkState } from "./status";
++import type { Side } from "./side";
+ import { chunkTone } from "./tone";
+ 
+-const originalDoc = StateField.define<Text>({
+-  create: (state) => state.doc,
+-  update: (doc) => doc,
+-});
+-
+-function sideMarks(doc: Text, states: readonly ChunkState[], side: Side): DecorationSet {
++export function sideWordMarks(doc: Text, chunks: readonly Chunk[], side: Side): DecorationSet {
+   const marks: Range<Decoration>[] = [];
+-  for (const { chunk, status } of states) {
+-    if (!sideChanged(chunk, side) || isResolved(chunk, status)) {
+-      continue;
+-    }
++  for (const chunk of chunks) {
+     const mark = Decoration.mark({ class: `chunk-word-${chunkTone(chunk, side)}` });
+     for (const range of chunk.words[side]) {
+       const from = doc.line(range.line + 1).from + range.start;
+@@ -27,39 +19,28 @@ function sideMarks(doc: Text, states: readonly ChunkState[], side: Side): Decora
+   return Decoration.set(marks, true);
+ }
+ 
+-function centerMarks(doc: Text, base: Text, spans: readonly ChunkSpan[]): DecorationSet {
++export function centerWordMarks(
++  doc: Text,
++  baseText: Text,
++  spans: readonly ChunkSpan[],
++): DecorationSet {
+   const marks: Range<Decoration>[] = [];
+   for (const span of spans) {
+-    if (span.chunk.words.base.length === 0 || isResolved(span.chunk, span.status)) {
++    if (span.chunk.words.base.length === 0) {
+       continue;
+     }
+-    const original = lineSpan(base, span.chunk.base);
++    const original = lineSpan(baseText, span.chunk.base);
+     const untouched =
+       span.to - span.from === original.to - original.from &&
+-      doc.sliceString(span.from, span.to) === base.sliceString(original.from, original.to);
++      doc.sliceString(span.from, span.to) === baseText.sliceString(original.from, original.to);
+     if (!untouched) {
+       continue;
+     }
+     const mark = Decoration.mark({ class: `chunk-word-${span.tone}` });
+     for (const range of span.chunk.words.base) {
+-      const from = span.from - original.from + base.line(range.line + 1).from + range.start;
++      const from = span.from - original.from + baseText.line(range.line + 1).from + range.start;
+       marks.push(mark.range(from, from + range.len));
+     }
+   }
+   return Decoration.set(marks, true);
+ }
+-
+-export function sideWordMarks(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
+-  return EditorView.decorations.compute([statuses], (state) =>
+-    sideMarks(state.doc, state.field(statuses), side),
+-  );
+-}
+-
+-export function centerWordMarks(field: StateField<readonly ChunkSpan[]>): Extension {
+-  return [
+-    originalDoc,
+-    EditorView.decorations.compute([field, "doc"], (state) =>
+-      centerMarks(state.doc, state.field(originalDoc), state.field(field)),
+-    ),
+-  ];
+-}
