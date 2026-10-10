@@ -1,0 +1,204 @@
+diff --git a/crates/merge-core/src/line_pairs.rs b/crates/merge-core/src/line_pairs.rs
+index bf948bb..0a4d30a 100644
+--- a/crates/merge-core/src/line_pairs.rs
++++ b/crates/merge-core/src/line_pairs.rs
+@@ -78,9 +78,11 @@ fn similar_pairs(base: &[&str], side: &[&str], first: LinePosition) -> Vec<LineP
+     let best = best_totals(&base, &side);
+     let mut pairs = Vec::new();
+     let (mut base_line, mut side_line) = (0, 0);
+-    while let (Some(base_tokens), Some(side_tokens)) = (base.get(base_line), side.get(side_line)) {
++    while let (Some(base_compared), Some(side_compared)) =
++        (base.get(base_line), side.get(side_line))
++    {
+         let total = best.at(base_line, side_line);
+-        let pairs_here = match pair_score(base_tokens, side_tokens) {
++        let pairs_here = match pair_score(base_compared, side_compared) {
+             Some(score) => total == score + best.at(base_line + 1, side_line + 1),
+             None => false,
+         };
+@@ -100,11 +102,12 @@ fn similar_pairs(base: &[&str], side: &[&str], first: LinePosition) -> Vec<LineP
+     pairs
+ }
+ 
+-/// One line's tokens as the pairing measure sees them, each list sorted.
++/// One line as the pairing measure sees it; the token lists are sorted.
+ struct ComparedLine<'a> {
+     words: Vec<&'a str>,
+     /// Every token but whitespace: the words and the symbols.
+     visible: Vec<&'a str>,
++    without_whitespace: String,
+ }
+ 
+ fn compared_line(line: &str) -> ComparedLine<'_> {
+@@ -122,16 +125,27 @@ fn compared_line(line: &str) -> ComparedLine<'_> {
+     }
+     words.sort_unstable();
+     visible.sort_unstable();
+-    ComparedLine { words, visible }
++    ComparedLine {
++        words,
++        visible,
++        without_whitespace: without_whitespace(line),
++    }
+ }
+ 
+ /// The shared percentage of two lines' words, or of all their visible tokens when either line has
+-/// no word; `None` below `MIN_SHARED_PERCENT`.
++/// no word; `None` below `MIN_SHARED_PERCENT`. A wordless line facing a worded one must also occur
++/// inside it, whitespace removed: `}` pairs with `} else {`, `});` never with `bar();`.
+ fn pair_score(base: &ComparedLine, side: &ComparedLine) -> Option<usize> {
+-    let (base_tokens, side_tokens) = if base.words.is_empty() || side.words.is_empty() {
+-        (&base.visible, &side.visible)
+-    } else {
+-        (&base.words, &side.words)
++    let (base_tokens, side_tokens) = match (base.words.is_empty(), side.words.is_empty()) {
++        (false, false) => (&base.words, &side.words),
++        (true, true) => (&base.visible, &side.visible),
++        (true, false) if side.without_whitespace.contains(&base.without_whitespace) => {
++            (&base.visible, &side.visible)
++        }
++        (false, true) if base.without_whitespace.contains(&side.without_whitespace) => {
++            (&base.visible, &side.visible)
++        }
++        (true, false) | (false, true) => return None,
+     };
+     let percent = (DICE_PERCENT_SCALE * shared_count(base_tokens, side_tokens))
+         .checked_div(base_tokens.len() + side_tokens.len())?;
+@@ -143,9 +157,9 @@ fn best_totals(base: &[ComparedLine], side: &[ComparedLine]) -> Table {
+     let mut best = Table {
+         rows: vec![vec![0; side.len()]; base.len()],
+     };
+-    for (base_line, base_tokens) in base.iter().enumerate().rev() {
+-        for (side_line, side_tokens) in side.iter().enumerate().rev() {
+-            let paired = match pair_score(base_tokens, side_tokens) {
++    for (base_line, base_compared) in base.iter().enumerate().rev() {
++        for (side_line, side_compared) in side.iter().enumerate().rev() {
++            let paired = match pair_score(base_compared, side_compared) {
+                 Some(score) => score + best.at(base_line + 1, side_line + 1),
+                 None => 0,
+             };
+@@ -258,6 +272,16 @@ mod tests {
+         assert_eq!(pairs(&["});\n"], &["foo(a, b);\n"]), []);
+     }
+ 
++    #[test]
++    fn a_wordless_line_pairs_only_when_it_occurs_inside_the_worded_one() {
++        assert_eq!(pairs(&["});\n"], &["bar();\n"]), []);
++        assert_eq!(pairs(&["bar();\n"], &["});\n"]), []);
++        assert_eq!(pairs(&["},\n"], &["foo,\n"]), []);
++        assert_eq!(pairs(&["foo,\n"], &["},\n"]), []);
++        assert_eq!(pairs(&["} ;\n"], &["};\tx\n"]), [(0, 0)]);
++        assert_eq!(pairs(&["};\tx\n"], &["} ;\n"]), [(0, 0)]);
++    }
++
+     #[test]
+     fn half_of_the_words_shared_is_enough_to_pair() {
+         assert_eq!(pairs(&["return a;\n"], &["return b;\n"]), [(0, 0)]);
+diff --git a/crates/merge-core/tests/word_catalogue.rs b/crates/merge-core/tests/word_catalogue.rs
+index f5b1746..1ff9b78 100644
+--- a/crates/merge-core/tests/word_catalogue.rs
++++ b/crates/merge-core/tests/word_catalogue.rs
+@@ -286,3 +286,13 @@ fn n3_unrelated_call_is_new() {
+ fn n4_call_sharing_only_closing_symbols_is_new() {
+     assert_eq!(one_line("});", "foo(a, b);"), "[foo(a, b);]");
+ }
++
++#[test]
++fn n5_short_call_sharing_only_closing_symbols_is_new() {
++    assert_eq!(one_line("});", "bar();"), "[bar();]");
++}
++
++#[test]
++fn n6_entry_sharing_only_a_comma_is_new() {
++    assert_eq!(one_line("},", "foo,"), "[foo,]");
++}
+diff --git a/tests/showcase/word-marks/base.ts b/tests/showcase/word-marks/base.ts
+index bb84b3d..1824a62 100644
+--- a/tests/showcase/word-marks/base.ts
++++ b/tests/showcase/word-marks/base.ts
+@@ -106,9 +106,6 @@ if (!options.setupBindings.has(macro)) {
+ // N3 unrelated call (local)
+ yield `${macro}, `;
+ 
+-// N4 call sharing only closing symbols (remote)
+-});
+-
+ // M1 wrapped in a condition (remote)
+ a();
+ b();
+@@ -158,6 +155,15 @@ user.name;
+ user.age;
+ user.id;
+ 
++// N4 call sharing only closing symbols (local)
++});
++
++// N5 short call sharing only closing symbols (remote)
++});
++
++// N6 entry sharing only a comma (local)
++},
++
+ // X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
+ const data = fetchUser(id);
+ 
+diff --git a/tests/showcase/word-marks/local.ts b/tests/showcase/word-marks/local.ts
+index 4bd4c5d..d23d137 100644
+--- a/tests/showcase/word-marks/local.ts
++++ b/tests/showcase/word-marks/local.ts
+@@ -106,9 +106,6 @@ if (!options.setupBindings.has(macro)) {
+ // N3 unrelated call (local)
+ usedMacros.push({ canonical, alias });
+ 
+-// N4 call sharing only closing symbols (remote)
+-});
+-
+ // M1 wrapped in a condition (remote)
+ a();
+ b();
+@@ -153,6 +150,15 @@ user.name;
+ user.age;
+ user.id;
+ 
++// N4 call sharing only closing symbols (local)
++foo(a, b);
++
++// N5 short call sharing only closing symbols (remote)
++});
++
++// N6 entry sharing only a comma (local)
++foo,
++
+ // X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
+ const data = await fetchUser(id);
+ 
+diff --git a/tests/showcase/word-marks/remote.ts b/tests/showcase/word-marks/remote.ts
+index d6109c1..f24bcf3 100644
+--- a/tests/showcase/word-marks/remote.ts
++++ b/tests/showcase/word-marks/remote.ts
+@@ -106,9 +106,6 @@ if (scriptSetupRanges.defineModel.length) {
+ // N3 unrelated call (local)
+ yield `${macro}, `;
+ 
+-// N4 call sharing only closing symbols (remote)
+-foo(a, b);
+-
+ // M1 wrapped in a condition (remote)
+ if (ok) {
+ 	a();
+@@ -162,6 +159,15 @@ account.name;
+ account.age;
+ account.id;
+ 
++// N4 call sharing only closing symbols (local)
++});
++
++// N5 short call sharing only closing symbols (remote)
++bar();
++
++// N6 entry sharing only a comma (local)
++},
++
+ // X1 conflict: C8 await added (local) vs C13 variable renamed (remote)
+ const user = fetchUser(id);
+ 

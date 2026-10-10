@@ -1,0 +1,145 @@
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index 11e5c29..df29b34 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -162,9 +162,9 @@ function painted(state: EditorState): string[] {
+           const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
+           found.push(`${line.number} ${String(decoration.spec.class)}${text}`);
+         } else {
+-          const tone = String(decoration.spec.widget.tone);
++          const className = String(decoration.spec.widget.className);
+           const around = `${state.sliceDoc(line.from, from)}|${state.sliceDoc(from, line.to)}`;
+-          found.push(`${line.number} chunk-removal-${tone} ${around}`);
++          found.push(`${line.number} ${className} ${around}`);
+         }
+       });
+     }
+@@ -205,11 +205,11 @@ test("side panes draw one bar per removal point in a CRLF file: line start, mid-
+   const merge = open(await synthetic());
+ 
+   expect(bars(merge.left)).toEqual([
+-    "2 chunk-removal-conflict |const 😀 = mine;",
+-    "2 chunk-removal-conflict const 😀 = mine;|",
+-    "3 chunk-removal-modified a = 2|;",
++    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
++    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
++    "3 chunk-removal chunk-removal-modified a = 2|;",
+   ]);
+-  expect(bars(merge.right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
++  expect(bars(merge.right)).toEqual(["2 chunk-removal chunk-removal-conflict const 😀| = theirs;"]);
+   expect(barPositions(merge.left)).toEqual([5, 21, 27]);
+   expect(barPositions(merge.right)).toEqual([13]);
+ });
+@@ -225,15 +225,17 @@ test("a resolved block loses its word marks and bars on every side pane and undo
+ 
+   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
+   expect(bars(applied.left)).toEqual([
+-    "2 chunk-removal-conflict |const 😀 = mine;",
+-    "2 chunk-removal-conflict const 😀 = mine;|",
++    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
++    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
+   ]);
+   expect(marks(dismissed.left)).toEqual([]);
+   expect(marks(dismissed.right)).toEqual([]);
+   expect(bars(dismissed.left)).toEqual([]);
+   expect(bars(dismissed.right)).toEqual([]);
+   expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
+-  expect(bars(undone(dismissed).right)).toEqual(["2 chunk-removal-conflict const 😀| = theirs;"]);
++  expect(bars(undone(dismissed).right)).toEqual([
++    "2 chunk-removal chunk-removal-conflict const 😀| = theirs;",
++  ]);
+   expect(painted(undone(undone(dismissed)).left)).toEqual(painted(start.left));
+ });
+ 
+@@ -248,15 +250,15 @@ test("a half-applied conflict keeps its tint, word marks and removal bars togeth
+   expect(painted(applied.left)).toEqual([
+     "2 chunk-conflict chunk-band",
+     "3 chunk-modified chunk-band",
+-    "2 chunk-removal-conflict |const 😀 = mine;",
++    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
+     "2 chunk-word-conflict mine",
+-    "2 chunk-removal-conflict const 😀 = mine;|",
++    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
+     "3 chunk-word-modified 2",
+-    "3 chunk-removal-modified a = 2|;",
++    "3 chunk-removal chunk-removal-modified a = 2|;",
+   ]);
+   expect(painted(applied.right)).toEqual([
+     "2 chunk-conflict chunk-band",
+-    "2 chunk-removal-conflict const 😀| = theirs;",
++    "2 chunk-removal chunk-removal-conflict const 😀| = theirs;",
+     "2 chunk-word-conflict theirs",
+   ]);
+ });
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+index 17da247..ccb8cc0 100644
+--- a/frontend/src/editor/internal/words.ts
++++ b/frontend/src/editor/internal/words.ts
+@@ -7,10 +7,12 @@ import { chunkTone, type Tone } from "./tone";
+ 
+ class RemovalPoint extends WidgetType {
+   readonly tone: Tone;
++  readonly className: string;
+ 
+   constructor(tone: Tone) {
+     super();
+     this.tone = tone;
++    this.className = `chunk-removal chunk-removal-${tone}`;
+   }
+ 
+   override eq(other: RemovalPoint): boolean {
+@@ -19,7 +21,7 @@ class RemovalPoint extends WidgetType {
+ 
+   toDOM(): HTMLElement {
+     const bar = document.createElement("span");
+-    bar.className = `chunk-removal chunk-removal-${this.tone}`;
++    bar.className = this.className;
+     return bar;
+   }
+ 
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 0b9d024..a44fc7d 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -52,7 +52,6 @@ path.chunk-band {
+   width: 0;
+   height: 1lh;
+   vertical-align: top;
+-  pointer-events: none;
+ }
+ 
+ .cm-editor .chunk-removal::after {
+@@ -61,15 +60,18 @@ path.chunk-band {
+   left: -1px;
+   width: 2px;
+   border-radius: 1px;
++  box-shadow:
++    -1px 0 0 var(--color-editor),
++    1px 0 0 var(--color-editor);
+   content: "";
+ }
+ 
+ .cm-editor .chunk-removal-modified::after {
+-  background-color: var(--color-chunk-modified-word);
++  background-color: var(--color-chunk-modified-removal);
+ }
+ 
+ .cm-editor .chunk-removal-conflict::after {
+-  background-color: var(--color-chunk-conflict-word);
++  background-color: var(--color-chunk-conflict-removal);
+ }
+ 
+ .cm-editor .cm-line.chunk-point-above {
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 5b436da..0c99645 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -40,6 +40,8 @@
+   --color-chunk-conflict: #8150be6b;
+   --color-chunk-modified-word: #43698da6;
+   --color-chunk-conflict-word: #8150bea6;
++  --color-chunk-modified-removal: #6b9bfa;
++  --color-chunk-conflict-removal: #b589ec;
+ }
+ 
+ @layer base {
