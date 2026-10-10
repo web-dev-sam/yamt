@@ -7,7 +7,7 @@ import { lineSpan } from "./lineSpan";
 import { sideChanged, type Side } from "./side";
 import { isResolved, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
-import { centerWordMarks, sideWordMarks } from "./words";
+import { sideWordMarks } from "./words";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
@@ -47,20 +47,11 @@ export function sideDecorations(
   });
 }
 
-const baseText = StateField.define<Text>({
-  create: (state) => state.doc,
-  update: (doc) => doc,
-});
-
 export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
-  return [
-    baseText,
-    EditorView.decorations.computeN([field, "doc"], (state) => {
-      const tinted = state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status));
-      return [
-        bandDecorations(state.doc, tinted),
-        centerWordMarks(state.doc, state.field(baseText), tinted),
-      ];
-    }),
-  ];
+  return EditorView.decorations.compute([field, "doc"], (state) =>
+    bandDecorations(
+      state.doc,
+      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
+    ),
+  );
 }

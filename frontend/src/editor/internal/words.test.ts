@@ -163,7 +163,7 @@ test("side panes mark exactly the changed words, in a CRLF file and after an emo
   expect(marks(merge.right)).toEqual(["2 chunk-word-conflict theirs"]);
 });
 
-test("a resolved block loses its word marks on every pane and undo brings them back", async () => {
+test("a resolved block loses its word marks on every side pane and undo brings them back", async () => {
   const start = open(await synthetic());
 
   const applied = run(start, applySpec(target(start), chunk(start, MODIFIED), "local"));
@@ -172,9 +172,7 @@ test("a resolved block loses its word marks on every pane and undo brings them b
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
   expect(marks(dismissed.left)).toEqual([]);
   expect(marks(dismissed.right)).toEqual([]);
-  expect(marks(dismissed.center)).toEqual([]);
   expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
-  expect(marks(undone(dismissed).center)).toEqual(["2 chunk-word-conflict old"]);
   expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
 });
 
@@ -195,49 +193,28 @@ test("a half-applied conflict keeps its tint and its word marks together on both
   ]);
 });
 
-test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
-  const merge = open(await synthetic());
-  const line = merge.left.doc.line(2);
+test("the middle pane tints its blocks without word marks: open, half-applied, applied, undone", async () => {
+  const start = open(await synthetic());
 
-  const selected = merge.left.update({ selection: { anchor: line.from, head: line.to } }).state;
+  const halfApplied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
+  const applied = run(
+    halfApplied,
+    applySpec(target(halfApplied), chunk(halfApplied, MODIFIED), "local"),
+  );
+  const undoneOnce = undone(applied);
+  const undoneTwice = undone(undoneOnce);
 
-  expect(painted(selected)).toEqual([
-    "2 selected-text const 😀 = mine;",
+  expect(painted(start.center)).toEqual([
     "2 chunk-conflict chunk-band",
     "3 chunk-modified chunk-band",
-    "2 chunk-word-conflict mine",
-    "3 chunk-word-modified 2",
   ]);
+  expect(painted(halfApplied.center)).toEqual(painted(start.center));
+  expect(painted(applied.center)).toEqual(["2 chunk-conflict chunk-band"]);
+  expect(painted(undoneOnce.center)).toEqual(painted(start.center));
+  expect(painted(undoneTwice.center)).toEqual(painted(start.center));
 });
 
-test("middle pane marks an open conflict's base words until a side is applied; undo restores them", async () => {
-  const start = open(await synthetic());
-
-  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
-
-  expect(marks(start.center)).toEqual(["2 chunk-word-conflict old", "3 chunk-word-modified 1"]);
-  expect(applied.center.field(applied.field)[CONFLICT]?.status).toBe("applied-local");
-  expect(marks(applied.center)).toEqual(["3 chunk-word-modified 1"]);
-  expect(marks(undone(applied).center)).toEqual(marks(start.center));
-});
-
-test("middle pane: typing inside a block hides its marks, typing a line above moves them", async () => {
-  const start = open(await synthetic());
-  const conflictLine = start.center.doc.line(2);
-  const oldWord = conflictLine.from + "const 😀 = ".length;
-
-  const inside = run(start, { changes: { from: conflictLine.to, insert: " // x" } });
-  const sameLength = run(start, { changes: { from: oldWord, to: oldWord + 3, insert: "new" } });
-  const above = run(start, { changes: { from: 0, insert: "// top\r\n" } });
-
-  expect(marks(inside.center)).toEqual(["3 chunk-word-modified 1"]);
-  expect(marks(undone(inside).center)).toEqual(marks(start.center));
-  expect(sameLength.center.sliceDoc(conflictLine.from, conflictLine.to)).toBe("const 😀 = new;");
-  expect(marks(sameLength.center)).toEqual(["3 chunk-word-modified 1"]);
-  expect(marks(above.center)).toEqual(["3 chunk-word-conflict old", "4 chunk-word-modified 1"]);
-});
-
-test("vueuse-use-magic-keys: a mark's colour follows its block's tone on every pane", async () => {
+test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes", async () => {
   const merge = open(await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts"));
   function tonesByLine(state: EditorState): string[] {
     return [...new Set(marks(state).map((mark) => mark.split(" ", 2).join(" ")))];
@@ -263,6 +240,4 @@ test("vueuse-use-magic-keys: a mark's colour follows its block's tone on every p
     "152 chunk-word-conflict     useEventListener('blur', reset, { passive: true })",
     "153 chunk-word-conflict     useEventListener('focus', reset, { passive: true })",
   ]);
-  expect(marks(merge.center)).toContain("129 chunk-word-conflict if (target) {");
-  expect(tonesByLine(merge.center).at(0)).toBe("3 chunk-word-modified");
 });

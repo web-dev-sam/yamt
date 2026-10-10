@@ -34,10 +34,9 @@ const darkTheme = EditorView.theme(
     },
     ".cm-content": { caretColor: "var(--color-caret)" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
       { backgroundColor: "var(--color-selection)" },
     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
-    ".selected-text": { backgroundColor: "var(--color-selection)" },
     ".cm-gutters": {
       backgroundColor: "var(--color-editor)",
       color: "var(--color-gutter)",

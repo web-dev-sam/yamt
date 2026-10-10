@@ -1,13 +1,16 @@
 import { undoDepth } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log } from "../../ipc";
 import { chunkField } from "./chunkField";
+import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
 import { languageCompartment, paletteHighlight, paneState } from "./pane";
+import { sideStatusField } from "./sideStatus";
 
 const PARSE_BUDGET_MS = 5000;
 const COLOUR = /(?:^|[{ ])color: ([^;]+);/;
@@ -75,6 +78,48 @@ function colourAt(state: EditorState, needle: string): string | null {
   return colour;
 }
 
+async function tintedLeft(): Promise<EditorState> {
+  const line = { start: 0, len: 1 };
+  const data = await createFixtureSource(log, {
+    "selection.json": {
+      path: "selection.ts",
+      base: "const a = old;\n",
+      local: "const a = mine;\n",
+      remote: "const a = theirs;\n",
+      eol: "Lf",
+      chunks: [{ id: 0, kind: "Conflict", base: line, local: line, remote: line }],
+      word_changes: [
+        {
+          chunk: 0,
+          local: [{ line: 0, start: 10, len: 4 }],
+          base: [{ line: 0, start: 10, len: 3 }],
+          remote: [{ line: 0, start: 10, len: 6 }],
+        },
+      ],
+    },
+  }).loadFile("selection.ts");
+  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
+  return paneState({
+    kind: "side",
+    doc: data.local,
+    eol: data.eol,
+    language: null,
+    extensions: [statuses, sideDecorations(statuses, "local")],
+  });
+}
+
+function painted(state: EditorState): string[] {
+  const found: string[] = [];
+  for (const source of state.facet(EditorView.decorations)) {
+    if (typeof source !== "function") {
+      source.between(0, state.doc.length, (from, to, decoration) => {
+        found.push(`${String(decoration.spec.class)} ${state.sliceDoc(from, to)}`.trimEnd());
+      });
+    }
+  }
+  return found;
+}
+
 test("a Vue file draws template tags in the tag colour and its script setup as TypeScript", async () => {
   const state = center(VUE_SFC, await loaded("App.vue"));
 
@@ -117,4 +162,17 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
   expect(undoDepth(coloured)).toBe(0);
   expect(coloured.field(field)).toBe(plain.field(field));
   expect(coloured.doc).toBe(plain.doc);
+});
+
+test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
+  const tinted = await tintedLeft();
+  const line = tinted.doc.line(1);
+
+  const selected = tinted.update({ selection: { anchor: line.from, head: line.to } }).state;
+
+  expect(painted(selected)).toEqual([
+    "selected-text const a = mine;",
+    "chunk-conflict chunk-band",
+    "chunk-word-conflict mine",
+  ]);
 });
