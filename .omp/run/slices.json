@@ -27,7 +27,8 @@
       "frontend/src/ui/App.vue",
       "frontend/src/ui/ProblemBar.vue",
       "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts"
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/editor/**/*.test.ts"
     ]
   }
 }
