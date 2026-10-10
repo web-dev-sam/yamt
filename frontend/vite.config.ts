@@ -1,10 +1,11 @@
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
 import { playwright } from "@vitest/browser-playwright";
+import Icons from "unplugin-icons/vite";
 import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue(), tailwindcss(), Icons({ compiler: "vue3" })],
   test: {
     projects: [
       {
