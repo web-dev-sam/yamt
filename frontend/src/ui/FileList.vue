@@ -2,14 +2,10 @@
 import Check from "~icons/lucide/check";
 
 import type { FileEntry } from "../ipc";
+import { fileIcon } from "./fileIcon";
 
 defineProps<{ files: readonly FileEntry[]; active: string | null }>();
 const emit = defineEmits<{ select: [path: string] }>();
-
-function extension(path: string): string {
-  const dot = path.lastIndexOf(".");
-  return dot === -1 ? "" : path.slice(dot + 1).toUpperCase();
-}
 </script>
 
 <template>
@@ -24,9 +20,7 @@ function extension(path: string): string {
         class="mx-1 flex cursor-default items-center gap-2 rounded px-2 py-1 hover:bg-hover aria-selected:bg-row-selected"
         @click="emit('select', file.path)"
       >
-        <span class="rounded-sm bg-primary px-1 text-[9px] leading-tight font-bold text-on-primary">
-          {{ extension(file.path) }}
-        </span>
+        <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
         <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
           {{ file.path }}
         </span>
