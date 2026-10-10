@@ -1,1 +1,3 @@
-{}
+{
+  "M1RulesApply": { "owned": [".omp/skills/**", ".omp/hooks/**", ".omp/GUARDRAILS.md"] }
+}
