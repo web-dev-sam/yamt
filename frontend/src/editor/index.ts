@@ -8,6 +8,7 @@ import {
   applySteps,
   bulkApplySteps,
   dismissSteps,
+  dispatchSteps,
   type ApplyTarget,
   type SideDocs,
   type Steps,
@@ -131,9 +132,9 @@ export class MergeController {
   }
 
   #dispatch(steps: Steps): void {
-    for (const spec of steps) {
+    dispatchSteps((spec) => {
       this.#views.center.dispatch(spec);
-    }
+    }, steps);
   }
 
   #visibleLines(): VisibleLines {
@@ -154,7 +155,9 @@ export class MergeController {
   #act(action: ChunkAction): void {
     switch (action.kind) {
       case "apply":
-        this.#dispatch(applySteps(this.#target(), action.chunk, action.side));
+        this.#dispatch(
+          applySteps({ target: this.#target(), chunk: action.chunk, side: action.side }),
+        );
         return;
       case "dismiss":
         this.#dispatch(dismissSteps(this.#target(), action.chunk));
@@ -192,7 +195,7 @@ export class MergeController {
   }
 
   applyAllNonConflicting(side: Side): void {
-    this.#dispatch(bulkApplySteps(this.#target(), side, this.#visibleLines()));
+    this.#dispatch(bulkApplySteps({ target: this.#target(), side, visible: this.#visibleLines() }));
   }
 
   undo(): boolean {

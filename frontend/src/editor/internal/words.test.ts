@@ -1,10 +1,10 @@
 import { undo } from "@codemirror/commands";
-import type { EditorState, StateField, TransactionSpec } from "@codemirror/state";
+import type { EditorState, StateField } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
-import { applySpec, dismissSpec } from "./apply";
+import { applySteps, dismissSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { paneState } from "./pane";
@@ -105,11 +105,15 @@ function mirrored(merge: Merge, center: EditorState): Merge {
   };
 }
 
-function run(merge: Merge, spec: TransactionSpec | null): Merge {
-  if (spec === null) {
+function run(merge: Merge, steps: Steps): Merge {
+  if (steps.length === 0) {
     throw new Error("expected a transaction");
   }
-  return mirrored(merge, merge.center.update(spec).state);
+  let center = merge.center;
+  dispatchSteps((spec) => {
+    center = center.update(spec).state;
+  }, steps);
+  return mirrored(merge, center);
 }
 
 function undone(merge: Merge): Merge {
@@ -123,7 +127,7 @@ function undone(merge: Merge): Merge {
   return mirrored(merge, center);
 }
 
-function target(merge: Merge): Parameters<typeof applySpec>[0] {
+function target(merge: Merge): ApplyTarget {
   return {
     state: merge.center,
     field: merge.field,
@@ -166,8 +170,11 @@ test("side panes mark exactly the changed words, in a CRLF file and after an emo
 test("a resolved block loses its word marks on every side pane and undo brings them back", async () => {
   const start = open(await synthetic());
 
-  const applied = run(start, applySpec(target(start), chunk(start, MODIFIED), "local"));
-  const dismissed = run(applied, dismissSpec(target(applied), chunk(applied, CONFLICT)));
+  const applied = run(
+    start,
+    applySteps({ target: target(start), chunk: chunk(start, MODIFIED), side: "local" }),
+  );
+  const dismissed = run(applied, dismissSteps(target(applied), chunk(applied, CONFLICT)));
 
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
   expect(marks(dismissed.left)).toEqual([]);
@@ -179,7 +186,10 @@ test("a resolved block loses its word marks on every side pane and undo brings t
 test("a half-applied conflict keeps its tint and its word marks together on both sides", async () => {
   const start = open(await synthetic());
 
-  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
+  const applied = run(
+    start,
+    applySteps({ target: target(start), chunk: chunk(start, CONFLICT), side: "local" }),
+  );
 
   expect(painted(applied.left)).toEqual([
     "2 chunk-conflict chunk-band",
@@ -196,10 +206,13 @@ test("a half-applied conflict keeps its tint and its word marks together on both
 test("the middle pane tints its blocks without word marks: open, half-applied, applied, undone", async () => {
   const start = open(await synthetic());
 
-  const halfApplied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
+  const halfApplied = run(
+    start,
+    applySteps({ target: target(start), chunk: chunk(start, CONFLICT), side: "local" }),
+  );
   const applied = run(
     halfApplied,
-    applySpec(target(halfApplied), chunk(halfApplied, MODIFIED), "local"),
+    applySteps({ target: target(halfApplied), chunk: chunk(halfApplied, MODIFIED), side: "local" }),
   );
   const undoneOnce = undone(applied);
   const undoneTwice = undone(undoneOnce);

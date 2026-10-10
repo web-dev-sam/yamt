@@ -52,37 +52,65 @@ function spanOf(target: ApplyTarget, chunk: Chunk): ChunkSpan | undefined {
 
 // History restores the selection from before the action's transaction, so the cursor moves in a
 // transaction of its own (@codemirror/commands history: HistEvent.startSelection).
-function steps(cursor: number | null, action: TransactionSpec | null): Steps {
-  if (action === null) {
-    return [];
-  }
-  if (cursor === null) {
-    return [action];
-  }
-  return [
-    { selection: EditorSelection.cursor(cursor), annotations: Transaction.addToHistory.of(false) },
-    action,
-  ];
+function moveCursor(pos: number): TransactionSpec {
+  return {
+    selection: EditorSelection.cursor(pos),
+    annotations: Transaction.addToHistory.of(false),
+  };
 }
 
-function cursorInView(state: EditorState, visible: VisibleLines): number | null {
+// A selection step after the action lands in the action's HistEvent.selectionsAfter: redo restores
+// it instead of mapping the start selection with assoc 1, and later typing no longer joins the
+// action's undo step (@codemirror/commands history: HistoryState.addChanges, pop).
+function recordSelection(selection: EditorSelection): TransactionSpec {
+  return { selection };
+}
+
+function bulkCursorTarget(state: EditorState, visible: VisibleLines): number | null {
   const line = state.doc.lineAt(state.selection.main.head).number;
   return line >= visible.first && line <= visible.last ? null : state.doc.line(visible.first).from;
 }
 
-export function applySpec(target: ApplyTarget, chunk: Chunk, side: Side): TransactionSpec | null {
-  const span = spanOf(target, chunk);
-  if (span === undefined || !canApply(span.chunk, span.status, side)) {
-    return null;
+export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps: Steps): void {
+  for (const spec of steps) {
+    dispatch(spec);
   }
-  return {
-    changes: applyChange(target, span, side),
-    effects: setStatus.of({ id: chunk.id, status: statusAfterApply(span.status, side) }),
-    userEvent: "yamt.apply",
-  };
 }
 
-function bulkApplySpec(target: ApplyTarget, side: Side): TransactionSpec | null {
+export function applySteps({
+  target,
+  chunk,
+  side,
+}: {
+  readonly target: ApplyTarget;
+  readonly chunk: Chunk;
+  readonly side: Side;
+}): Steps {
+  const span = spanOf(target, chunk);
+  if (span === undefined || !canApply(span.chunk, span.status, side)) {
+    return [];
+  }
+  const changes = target.state.changes(applyChange(target, span, side));
+  return [
+    moveCursor(span.from),
+    {
+      changes,
+      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(span.status, side) }),
+      userEvent: "yamt.apply",
+    },
+    recordSelection(EditorSelection.single(span.from).map(changes)),
+  ];
+}
+
+export function bulkApplySteps({
+  target,
+  side,
+  visible,
+}: {
+  readonly target: ApplyTarget;
+  readonly side: Side;
+  readonly visible: VisibleLines;
+}): Steps {
   const spans = target.state
     .field(target.field)
     .filter(
@@ -92,36 +120,31 @@ function bulkApplySpec(target: ApplyTarget, side: Side): TransactionSpec | null 
         sideChanged(span.chunk, side),
     );
   if (spans.length === 0) {
-    return null;
+    return [];
   }
-  return {
-    changes: target.state.changes(spans.map((span) => applyChange(target, span, side))),
+  const changes = target.state.changes(spans.map((span) => applyChange(target, span, side)));
+  const action = {
+    changes,
     effects: spans.map((span) =>
       setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.status, side) }),
     ),
     userEvent: "yamt.apply",
   };
-}
-
-export function dismissSpec(target: ApplyTarget, chunk: Chunk): TransactionSpec | null {
-  const span = spanOf(target, chunk);
-  if (span === undefined || isResolved(span.chunk, span.status)) {
-    return null;
+  const cursor = bulkCursorTarget(target.state, visible);
+  if (cursor === null) {
+    return [action, recordSelection(target.state.selection.map(changes))];
   }
-  return {
-    effects: setStatus.of({ id: chunk.id, status: "dismissed" }),
-    userEvent: "yamt.dismiss",
-  };
-}
-
-export function applySteps(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
-  return steps(spanOf(target, chunk)?.from ?? null, applySpec(target, chunk, side));
-}
-
-export function bulkApplySteps(target: ApplyTarget, side: Side, visible: VisibleLines): Steps {
-  return steps(cursorInView(target.state, visible), bulkApplySpec(target, side));
+  return [moveCursor(cursor), action, recordSelection(EditorSelection.single(cursor).map(changes))];
 }
 
 export function dismissSteps(target: ApplyTarget, chunk: Chunk): Steps {
-  return steps(spanOf(target, chunk)?.from ?? null, dismissSpec(target, chunk));
+  const span = spanOf(target, chunk);
+  if (span === undefined || isResolved(span.chunk, span.status)) {
+    return [];
+  }
+  return [
+    moveCursor(span.from),
+    { effects: setStatus.of({ id: chunk.id, status: "dismissed" }), userEvent: "yamt.dismiss" },
+    recordSelection(EditorSelection.single(span.from)),
+  ];
 }
