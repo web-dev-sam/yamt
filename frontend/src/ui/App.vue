@@ -1,10 +1,30 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
+
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
 import ProblemBar from "./ProblemBar.vue";
+import QuestionDialog from "./QuestionDialog.vue";
 import { useAppStore } from "./store";
 
-const { files, active, data, problem, open, finish, reset, dismissProblem } = useAppStore();
+const {
+  files,
+  opened,
+  active,
+  problem,
+  question,
+  allResolved,
+  open,
+  finish,
+  reset,
+  dismissProblem,
+  answer,
+  watchWindowClose,
+} = useAppStore();
+
+onMounted(() => {
+  void watchWindowClose();
+});
 </script>
 
 <template>
@@ -12,7 +32,24 @@ const { files, active, data, problem, open, finish, reset, dismissProblem } = us
     <FileList :files="files" :active="active" @select="open" />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
-      <MergeView :data="data" @finish="finish" @reset="reset" />
+      <p
+        v-else-if="allResolved"
+        role="status"
+        class="shrink-0 border-b border-success-border bg-success px-3 py-2 text-fg"
+      >
+        All files are resolved. Close the window to finish the merge.
+      </p>
+      <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+        <MergeView
+          v-for="file in opened"
+          :key="file.path"
+          :data="file"
+          :shown="file.path === active"
+          @finish="finish"
+          @reset="reset"
+        />
+      </div>
     </div>
+    <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />
   </div>
 </template>

@@ -112,6 +112,14 @@ test("a rejected command rejects the call", async () => {
   await expect(createTauriSource().loadFile("src/a.ts")).rejects.toThrow("ipc down");
 });
 
+test("a string error from Tauri's IPC layer rejects the call with that message", async () => {
+  commands.finishFile.mockResolvedValue({ status: "error", error: "finish_file not allowed" });
+
+  await expect(createTauriSource().finishFile("src/a.ts", "text")).rejects.toThrow(
+    new Error("finish_file not allowed"),
+  );
+});
+
 test("the forward stringifies non-finite numbers and keeps every other value", async () => {
   commands.log.mockResolvedValue(undefined);
 

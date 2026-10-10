@@ -3,12 +3,20 @@ import type { ChunkSource } from "./ChunkSource";
 import { toDomain, type SourceFailure, type SourceResult } from "./domain";
 import type { LogEntry } from "./log";
 
-type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: SourceFailure };
+// Tauri's own IPC layer (invalid arguments, unknown command, ACL denial) rejects with a string,
+// which the generated `typedError` returns as the command's error.
+type CommandResult<T> =
+  | { status: "ok"; data: T }
+  | { status: "error"; error: SourceFailure | string };
 
 function toResult<T>(result: CommandResult<T>): SourceResult<T> {
-  return result.status === "ok"
-    ? { ok: true, value: result.data }
-    : { ok: false, failure: result.error };
+  if (result.status === "ok") {
+    return { ok: true, value: result.data };
+  }
+  if (typeof result.error === "string") {
+    throw new Error(result.error);
+  }
+  return { ok: false, failure: result.error };
 }
 
 export function createTauriSource(): ChunkSource {

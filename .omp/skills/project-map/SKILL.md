@@ -36,7 +36,8 @@ scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, no
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (the M1 source:
-                    valibot over fixtures/golden/*.json and fixtures/showcase/*.json); bindings.ts (GENERATED); log.ts; tauri.ts (`createTauriSource` over `commands`, 2.1)
+                    valibot over fixtures/golden/*.json and fixtures/showcase/*.json); bindings.ts (GENERATED); log.ts; tauri.ts (`createTauriSource` over `commands`, 2.1);
+                    window.ts (close-request guard, the only `@tauri-apps/api/window` importer, 2.K)
 frontend/src/model  empty and unused (AGENTS.md only); reserved for pure TS shared by more than one module
 frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s): undo, redo, resultText, summary,
                     onSummaryChange, applyAllNonConflicting, destroy; types `Side`, `MergeSummary`. internal/: pane, chunkField, status, sideStatus, apply,
@@ -45,7 +46,8 @@ frontend/src/editor CodeMirror 6 integration; public surface = MergeController(F
 frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
-                    useMergeController (only ../editor importer), store.ts singleton; ProblemBar + problemText.ts (failures in words, 2.1)
+                    useMergeController (only ../editor importer), store.ts singleton; ProblemBar + problemText.ts (failures in words, 2.1);
+                    QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), creates the store, loads the file list, mounts App
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself
@@ -79,18 +81,18 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 ## State ownership (vision 2)
 
-| state                                    | owner                                                                                                                                                             |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)          | CodeMirror `EditorState`                                                                                                                                          |
-| chunk current positions (center)         | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
-| chunk apply status                       | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
-| left/right decorations                   | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
-| scroll positions                         | DOM, driven by `editor/scrollSync`                                                                                                                                |
-| connector geometry                       | derived per frame, never stored                                                                                                                                   |
-| file list, active file, loaded file data | `ui/store.ts` singleton via `useAppStore()`                                                                                                                       |
-| failure shown in the window              | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
-| summary counts of the open file          | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
-| captured index stages (for reset)        | `session::FileState.stages`, captured at `open()`                                                                                                                 |
+| state                                                        | owner                                                                                                                                                             |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)                              | CodeMirror `EditorState`                                                                                                                                          |
+| chunk current positions (center)                             | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
+| chunk apply status                                           | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
+| left/right decorations                                       | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
+| scroll positions                                             | DOM, driven by `editor/scrollSync`                                                                                                                                |
+| connector geometry                                           | derived per frame, never stored                                                                                                                                   |
+| file list, opened files, active file, per-file finished text | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ resultText, loadedText }` with `store.track`     |
+| failure shown in the window                                  | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
+| summary counts of the open file                              | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
+| captured index stages (for reset)                            | `session::FileState.stages`, captured at `open()`                                                                                                                 |
 
 Vue state never holds an `EditorView`, a position, or document text.
 
