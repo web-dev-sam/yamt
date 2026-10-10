@@ -22,40 +22,17 @@
       "frontend/src/editor/internal/words.test.ts",
       "frontend/src/editor/theme.css",
       "frontend/src/ui/**",
-      "frontend/src/icons.d.ts"
+      "frontend/src/icons.d.ts",
+      "frontend/src/editor/internal/pane.test.ts"
     ],
     "readonly": [
       "docs/**",
       ".omp/**",
       "crates/**",
       "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/pane.test.ts",
       "frontend/src/editor/internal/indent.ts",
       "frontend/src/editor/internal/indent.test.ts",
       "frontend/src/ipc/**",
-      "frontend/src/connectors/**",
-      "frontend/src/style.css",
-      "frontend/src/main.ts",
-      "frontend/package.json",
-      "frontend/vite.config.ts",
-      "frontend/scripts/**"
-    ]
-  },
-  "M1TTabIndent": {
-    "owned": [
-      "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/pane.test.ts",
-      "frontend/src/editor/internal/indent.ts",
-      "frontend/src/editor/internal/indent.test.ts"
-    ],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "crates/**",
-      "frontend/src/editor/index.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/ipc/**",
-      "frontend/src/ui/**",
       "frontend/src/connectors/**",
       "frontend/src/style.css",
       "frontend/src/main.ts",
