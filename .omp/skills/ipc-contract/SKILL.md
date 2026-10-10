@@ -37,12 +37,14 @@ list_files()                      -> Vec<FileEntry>
 load_file(path)                   -> FileMergeData
 finish_file(path, text: String)   -> Vec<FileEntry>
 reset_file(path)                  -> Vec<FileEntry>
+describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit)
+take_side(path, side: Side)       -> Vec<FileEntry>   resolve with one side (deleted side = git rm), plan §2 #36
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 ```
 
 Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window
-exits 0 only when every file is resolved. The #36 take-left/take-right command is named by its
-wave-3 brief. Once 2.0 lands, the generated `commands` (`just bindings-check`) are the authority.
+exits 0 only when every file is resolved. The generated `commands` (`just bindings-check`) are the
+authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u32)]`).
 
 ## Frontend side
 
