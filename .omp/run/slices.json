@@ -1,23 +1,28 @@
 {
-  "M1SUndoKeepsViewR1": {
+  "M1ALinePairedWords": {
     "owned": [
-      "frontend/src/editor/index.ts",
-      "frontend/src/editor/internal/apply.ts",
-      "frontend/src/editor/internal/apply.test.ts",
-      "frontend/src/editor/internal/words.test.ts"
+      "crates/merge-core/**",
+      "crates/session/tests/**",
+      "crates/cli/tests/**",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/editor/internal/words.ts",
+      "frontend/src/editor/internal/*.test.ts",
+      "tests/showcase/**"
     ],
     "readonly": [
       "docs/**",
       ".omp/**",
-      "crates/**",
-      "frontend/src/ipc/**",
+      "tests/golden/**",
+      "crates/session/src/**",
+      "crates/cli/src/**",
       "frontend/src/ui/**",
       "frontend/src/connectors/**",
       "frontend/src/style.css",
-      "frontend/src/main.ts",
-      "frontend/package.json",
-      "frontend/scripts/**",
-      "frontend/fixtures/**"
+      "frontend/src/editor/index.ts",
+      "frontend/src/ipc/bindings.ts"
     ]
   }
 }

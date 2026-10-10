@@ -400,11 +400,13 @@ Internals (`editor/internal/`, not importable from `ui/`):
   sides, `history()` for center only.
 - `language.ts` — the file's language from its base name via `@codemirror/language-data` (plan §2 #29).
 - `chunkField.ts` — the center `StateField` + effects described above (CM1, CM2, CM8).
-- `status.ts`, `apply.ts` — status rules and the steps for apply, ignore and bulk apply: a
-  cursor move first (its own transaction, outside history, no scroll — so undo/redo return to the
-  block, not to an old cursor), then the action: current mapped range from `chunkField`,
-  replacement text from `data.local/remote` sliced by the chunk's fixed side range, plus the
-  status effect.
+- `status.ts`, `apply.ts` — status rules and the steps for apply, ignore and bulk apply, sent one
+  dispatch each through `dispatchSteps`: (1) a cursor move to the block (bulk: to the first
+  visible line, only if the cursor is off screen), outside history, no scroll — undo returns
+  there; (2) the action: current mapped range from `chunkField`, replacement text from
+  `data.local/remote` sliced by the chunk's fixed side range, plus the status effect; (3) the same
+  cursor again as a selection step history records — redo returns there, and typing right after
+  an apply starts its own undo step.
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
   filter per side pane decides which blocks are tinted and feeds both the line bands and the word
   marks; the middle pane draws bands only (plan §2 #31).
