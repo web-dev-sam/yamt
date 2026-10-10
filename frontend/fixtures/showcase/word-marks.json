@@ -1,8 +1,8 @@
 {
   "path": "word-marks.ts",
-  "base": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(1);\nload(1);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn a;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\nif (ok) {\n\ta(1);\n\tb(1);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tlet emitted = false;\n\t\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\t\tif (!options.setupBindings.has(macro)) {\n\t\t\t\tif (!emitted) {\n\t\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\t\temitted = true;\n\t\t\t\t}\n\t\t\t\tyield `${macro}, `;\n\t\t\t}\n\t\t}\n\t\tif (emitted) {\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
-  "local": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.renamed) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b, c)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save changes';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile?.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id: string): Promise<User> {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (!isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst size = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={item.id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data, bool $force = false)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n\tfoo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\nfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn b;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// N1 unrelated statement (local)\nconst scriptSetup = options.scriptSetup;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nusedMacros.push({ canonical, alias });\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\na();\nb();\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(2);\nc(2);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a, b)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\none = 1;\ntwo = 2;\nthree = 3;\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(2);\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = await fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nif (ready) {\n\tsave(1);\n\tload(1);\n}\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nthrow new Error('gone');\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif (obj.renamed && obj.new)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\na(1);\nb(1);\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tlet emitted = false;\n\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\tif (!options.setupBindings.has(macro)) {\n\t\t\tif (!emitted) {\n\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\temitted = true;\n\t\t\t}\n\t\t\tyield `${macro}, `;\n\t\t}\n\t}\n\tif (emitted) {\n\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\n// end\n",
-  "remote": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif (obj.renamed && obj.new)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 3000,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = await fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn ref(value);\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a !== b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button :disabled=\"busy\" @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getFullName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2,\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this before release\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\t\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\tlet x = 2;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo(a)\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n};\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (scriptSetupRanges.defineModel.length) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// M1 wrapped in a condition (remote)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(2);\nlog();\nb(2);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a,\n\tb)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\nb();\na();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\tx();\n\t}\n}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\naccount.name;\naccount.age;\naccount.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst user = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch, onMounted } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 2;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(2);\nnotify();\nload(2);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn b;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(!obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed, watch } from 'vue';\nif (ok) {\n\ta(2);\n\tlog();\n\tb(2);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tconst scriptSetup = options.scriptSetup;\n\t\tconst scriptSetupRanges = options.scriptSetupRanges;\n\t\tif (!scriptSetup || !scriptSetupRanges) {\n\t\t\treturn;\n\t\t}\n\n\t\tconst usedMacros: { canonical: string; alias: string }[] = [];\n\t\tconst add = (canonical: string, exp: TextRange | undefined) => {\n\t\t\tif (exp) {\n\t\t\t\tusedMacros.push({ canonical, alias: getRangeText(scriptSetup, exp) });\n\t\t\t}\n\t\t};\n\t\tadd('defineProps', scriptSetupRanges.defineProps?.exp);\n\t\tadd('defineEmits', scriptSetupRanges.defineEmits?.exp);\n\t\tadd('defineSlots', scriptSetupRanges.defineSlots?.exp);\n\t\tadd('defineExpose', scriptSetupRanges.defineExpose?.exp);\n\t\tadd('withDefaults', scriptSetupRanges.withDefaults?.exp);\n\t\tif (scriptSetupRanges.defineModel.length) {\n\t\t\tusedMacros.push({ canonical: 'defineModel', alias: 'defineModel' });\n\t\t}\n\t\tif (scriptSetupRanges.defineOptions) {\n\t\t\tusedMacros.push({ canonical: 'defineOptions', alias: 'defineOptions' });\n\t\t}\n\n\t\tconst toImport = usedMacros.filter(({ alias }) => !options.setupBindings.has(alias));\n\n\t\tif (toImport.length) {\n\t\t\tyield `import { `;\n\t\t\tfor (const { canonical, alias } of toImport) {\n\t\t\t\tyield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;\n\t\t\t}\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
+  "base": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// C31 else added after a closing brace (local)\n}\n\n// C32 options added before a closing call (remote)\n});\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// N4 call sharing only closing symbols (remote)\n});\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(1);\nload(1);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn a;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\nif (ok) {\n\ta(1);\n\tb(1);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tlet emitted = false;\n\t\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\t\tif (!options.setupBindings.has(macro)) {\n\t\t\t\tif (!emitted) {\n\t\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\t\temitted = true;\n\t\t\t\t}\n\t\t\t\tyield `${macro}, `;\n\t\t\t}\n\t\t}\n\t\tif (emitted) {\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
+  "local": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.renamed) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b, c)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save changes';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile?.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id: string): Promise<User> {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (!isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst size = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={item.id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data, bool $force = false)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n\tfoo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\nfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn b;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// C31 else added after a closing brace (local)\n} else {\n\n// C32 options added before a closing call (remote)\n});\n\n// N1 unrelated statement (local)\nconst scriptSetup = options.scriptSetup;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nusedMacros.push({ canonical, alias });\n\n// N4 call sharing only closing symbols (remote)\n});\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\na();\nb();\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(2);\nc(2);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a, b)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\none = 1;\ntwo = 2;\nthree = 3;\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(2);\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = await fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nif (ready) {\n\tsave(1);\n\tload(1);\n}\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nthrow new Error('gone');\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif (obj.renamed && obj.new)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\na(1);\nb(1);\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tlet emitted = false;\n\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\tif (!options.setupBindings.has(macro)) {\n\t\t\tif (!emitted) {\n\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\temitted = true;\n\t\t\t}\n\t\t\tyield `${macro}, `;\n\t\t}\n\t}\n\tif (emitted) {\n\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\n// end\n",
+  "remote": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif (obj.renamed && obj.new)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 3000,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = await fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn ref(value);\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a !== b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button :disabled=\"busy\" @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getFullName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2,\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this before release\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\t\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\tlet x = 2;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo(a)\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n};\n\n// C31 else added after a closing brace (local)\n}\n\n// C32 options added before a closing call (remote)\n}, { passive });\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (scriptSetupRanges.defineModel.length) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// N4 call sharing only closing symbols (remote)\nfoo(a, b);\n\n// M1 wrapped in a condition (remote)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(2);\nlog();\nb(2);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a,\n\tb)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\nb();\na();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\tx();\n\t}\n}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\naccount.name;\naccount.age;\naccount.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst user = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch, onMounted } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 2;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(2);\nnotify();\nload(2);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn b;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(!obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed, watch } from 'vue';\nif (ok) {\n\ta(2);\n\tlog();\n\tb(2);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tconst scriptSetup = options.scriptSetup;\n\t\tconst scriptSetupRanges = options.scriptSetupRanges;\n\t\tif (!scriptSetup || !scriptSetupRanges) {\n\t\t\treturn;\n\t\t}\n\n\t\tconst usedMacros: { canonical: string; alias: string }[] = [];\n\t\tconst add = (canonical: string, exp: TextRange | undefined) => {\n\t\t\tif (exp) {\n\t\t\t\tusedMacros.push({ canonical, alias: getRangeText(scriptSetup, exp) });\n\t\t\t}\n\t\t};\n\t\tadd('defineProps', scriptSetupRanges.defineProps?.exp);\n\t\tadd('defineEmits', scriptSetupRanges.defineEmits?.exp);\n\t\tadd('defineSlots', scriptSetupRanges.defineSlots?.exp);\n\t\tadd('defineExpose', scriptSetupRanges.defineExpose?.exp);\n\t\tadd('withDefaults', scriptSetupRanges.withDefaults?.exp);\n\t\tif (scriptSetupRanges.defineModel.length) {\n\t\t\tusedMacros.push({ canonical: 'defineModel', alias: 'defineModel' });\n\t\t}\n\t\tif (scriptSetupRanges.defineOptions) {\n\t\t\tusedMacros.push({ canonical: 'defineOptions', alias: 'defineOptions' });\n\t\t}\n\n\t\tconst toImport = usedMacros.filter(({ alias }) => !options.setupBindings.has(alias));\n\n\t\tif (toImport.length) {\n\t\t\tyield `import { `;\n\t\t\tfor (const { canonical, alias } of toImport) {\n\t\t\t\tyield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;\n\t\t\t}\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
   "eol": "Lf",
   "chunks": [
     {
@@ -538,170 +538,186 @@
       "kind": "RemoteOnly",
       "base": {
         "start": 103,
-        "len": 2
+        "len": 1
       },
       "local": {
         "start": 103,
-        "len": 2
+        "len": 1
       },
       "remote": {
         "start": 103,
-        "len": 4
+        "len": 1
       }
     },
     {
       "id": 34,
       "kind": "LocalOnly",
       "base": {
-        "start": 107,
-        "len": 4
+        "start": 106,
+        "len": 1
       },
       "local": {
-        "start": 107,
-        "len": 2
+        "start": 106,
+        "len": 1
       },
       "remote": {
-        "start": 109,
-        "len": 4
+        "start": 106,
+        "len": 1
       }
     },
     {
       "id": 35,
       "kind": "RemoteOnly",
       "base": {
-        "start": 113,
-        "len": 2
+        "start": 109,
+        "len": 1
       },
       "local": {
-        "start": 111,
-        "len": 2
+        "start": 109,
+        "len": 1
       },
       "remote": {
-        "start": 115,
-        "len": 3
+        "start": 109,
+        "len": 1
       }
     },
     {
       "id": 36,
-      "kind": "LocalOnly",
+      "kind": "RemoteOnly",
       "base": {
-        "start": 117,
-        "len": 3
+        "start": 112,
+        "len": 2
       },
       "local": {
-        "start": 115,
+        "start": 112,
         "len": 2
       },
       "remote": {
-        "start": 120,
-        "len": 3
+        "start": 112,
+        "len": 4
       }
     },
     {
       "id": 37,
-      "kind": "RemoteOnly",
+      "kind": "LocalOnly",
       "base": {
-        "start": 122,
-        "len": 1
+        "start": 116,
+        "len": 4
       },
       "local": {
-        "start": 119,
-        "len": 1
+        "start": 116,
+        "len": 2
       },
       "remote": {
-        "start": 125,
-        "len": 2
+        "start": 118,
+        "len": 4
       }
     },
     {
       "id": 38,
-      "kind": "LocalOnly",
+      "kind": "RemoteOnly",
       "base": {
-        "start": 125,
+        "start": 122,
         "len": 2
       },
       "local": {
-        "start": 122,
-        "len": 1
+        "start": 120,
+        "len": 2
       },
       "remote": {
-        "start": 129,
-        "len": 2
+        "start": 124,
+        "len": 3
       }
     },
     {
       "id": 39,
-      "kind": "RemoteOnly",
+      "kind": "LocalOnly",
       "base": {
-        "start": 129,
-        "len": 2
+        "start": 126,
+        "len": 3
       },
       "local": {
-        "start": 125,
+        "start": 124,
         "len": 2
       },
       "remote": {
-        "start": 133,
-        "len": 2
+        "start": 129,
+        "len": 3
       }
     },
     {
       "id": 40,
-      "kind": "LocalOnly",
+      "kind": "RemoteOnly",
       "base": {
-        "start": 133,
-        "len": 3
+        "start": 131,
+        "len": 1
       },
       "local": {
-        "start": 129,
-        "len": 3
+        "start": 128,
+        "len": 1
       },
       "remote": {
-        "start": 137,
-        "len": 3
+        "start": 134,
+        "len": 2
       }
     },
     {
       "id": 41,
-      "kind": "RemoteOnly",
+      "kind": "LocalOnly",
       "base": {
-        "start": 138,
-        "len": 3
+        "start": 134,
+        "len": 2
       },
       "local": {
-        "start": 134,
-        "len": 3
+        "start": 131,
+        "len": 1
       },
       "remote": {
-        "start": 142,
-        "len": 3
+        "start": 138,
+        "len": 2
       }
     },
     {
       "id": 42,
-      "kind": "LocalOnly",
+      "kind": "RemoteOnly",
       "base": {
-        "start": 143,
+        "start": 138,
         "len": 2
       },
       "local": {
-        "start": 139,
-        "len": 1
+        "start": 134,
+        "len": 2
       },
       "remote": {
-        "start": 147,
+        "start": 142,
         "len": 2
       }
     },
     {
       "id": 43,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 142,
+        "len": 3
+      },
+      "local": {
+        "start": 138,
+        "len": 3
+      },
+      "remote": {
+        "start": 146,
+        "len": 3
+      }
+    },
+    {
+      "id": 44,
       "kind": "RemoteOnly",
       "base": {
         "start": 147,
         "len": 3
       },
       "local": {
-        "start": 142,
+        "start": 143,
         "len": 3
       },
       "remote": {
@@ -710,51 +726,35 @@
       }
     },
     {
-      "id": 44,
-      "kind": "Conflict",
+      "id": 45,
+      "kind": "LocalOnly",
       "base": {
         "start": 152,
-        "len": 1
+        "len": 2
       },
       "local": {
-        "start": 147,
+        "start": 148,
         "len": 1
       },
       "remote": {
         "start": 156,
-        "len": 1
-      }
-    },
-    {
-      "id": 45,
-      "kind": "Conflict",
-      "base": {
-        "start": 155,
-        "len": 1
-      },
-      "local": {
-        "start": 150,
-        "len": 1
-      },
-      "remote": {
-        "start": 159,
-        "len": 1
+        "len": 2
       }
     },
     {
       "id": 46,
-      "kind": "Conflict",
+      "kind": "RemoteOnly",
       "base": {
-        "start": 158,
-        "len": 1
+        "start": 156,
+        "len": 3
       },
       "local": {
-        "start": 153,
-        "len": 1
+        "start": 151,
+        "len": 3
       },
       "remote": {
-        "start": 162,
-        "len": 1
+        "start": 160,
+        "len": 3
       }
     },
     {
@@ -762,30 +762,30 @@
       "kind": "Conflict",
       "base": {
         "start": 161,
-        "len": 2
+        "len": 1
       },
       "local": {
         "start": 156,
-        "len": 4
+        "len": 1
       },
       "remote": {
         "start": 165,
-        "len": 3
+        "len": 1
       }
     },
     {
       "id": 48,
       "kind": "Conflict",
       "base": {
-        "start": 165,
+        "start": 164,
         "len": 1
       },
       "local": {
-        "start": 162,
+        "start": 159,
         "len": 1
       },
       "remote": {
-        "start": 170,
+        "start": 168,
         "len": 1
       }
     },
@@ -793,15 +793,15 @@
       "id": 49,
       "kind": "Conflict",
       "base": {
-        "start": 168,
+        "start": 167,
         "len": 1
       },
       "local": {
-        "start": 165,
+        "start": 162,
         "len": 1
       },
       "remote": {
-        "start": 173,
+        "start": 171,
         "len": 1
       }
     },
@@ -809,31 +809,79 @@
       "id": 50,
       "kind": "Conflict",
       "base": {
-        "start": 171,
-        "len": 5
+        "start": 170,
+        "len": 2
       },
       "local": {
-        "start": 168,
-        "len": 3
+        "start": 165,
+        "len": 4
       },
       "remote": {
-        "start": 176,
-        "len": 6
+        "start": 174,
+        "len": 3
       }
     },
     {
       "id": 51,
       "kind": "Conflict",
       "base": {
-        "start": 178,
+        "start": 174,
+        "len": 1
+      },
+      "local": {
+        "start": 171,
+        "len": 1
+      },
+      "remote": {
+        "start": 179,
+        "len": 1
+      }
+    },
+    {
+      "id": 52,
+      "kind": "Conflict",
+      "base": {
+        "start": 177,
+        "len": 1
+      },
+      "local": {
+        "start": 174,
+        "len": 1
+      },
+      "remote": {
+        "start": 182,
+        "len": 1
+      }
+    },
+    {
+      "id": 53,
+      "kind": "Conflict",
+      "base": {
+        "start": 180,
+        "len": 5
+      },
+      "local": {
+        "start": 177,
+        "len": 3
+      },
+      "remote": {
+        "start": 185,
+        "len": 6
+      }
+    },
+    {
+      "id": 54,
+      "kind": "Conflict",
+      "base": {
+        "start": 187,
         "len": 14
       },
       "local": {
-        "start": 173,
+        "start": 182,
         "len": 12
       },
       "remote": {
-        "start": 184,
+        "start": 193,
         "len": 34
       }
     }
@@ -1374,8 +1422,8 @@
         "changed": [
           {
             "line": 94,
-            "start": 0,
-            "len": 40
+            "start": 1,
+            "len": 7
           }
         ],
         "removed_at": []
@@ -1395,8 +1443,8 @@
         "changed": [
           {
             "line": 97,
-            "start": 0,
-            "len": 43
+            "start": 1,
+            "len": 13
           }
         ],
         "removed_at": []
@@ -1409,7 +1457,7 @@
           {
             "line": 100,
             "start": 0,
-            "len": 38
+            "len": 40
           }
         ],
         "removed_at": []
@@ -1430,22 +1478,7 @@
           {
             "line": 103,
             "start": 0,
-            "len": 9
-          },
-          {
-            "line": 104,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 105,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 106,
-            "start": 0,
-            "len": 1
+            "len": 43
           }
         ],
         "removed_at": []
@@ -1454,21 +1487,14 @@
     {
       "chunk": 34,
       "local": {
-        "changed": [],
-        "removed_at": [
+        "changed": [
           {
-            "line": 107,
-            "column": 0
-          },
-          {
-            "line": 108,
-            "column": 0
-          },
-          {
-            "line": 108,
-            "column": 4
+            "line": 106,
+            "start": 0,
+            "len": 38
           }
-        ]
+        ],
+        "removed_at": []
       },
       "remote": {
         "changed": [],
@@ -1484,19 +1510,9 @@
       "remote": {
         "changed": [
           {
-            "line": 115,
-            "start": 2,
-            "len": 1
-          },
-          {
-            "line": 116,
+            "line": 109,
             "start": 0,
-            "len": 6
-          },
-          {
-            "line": 117,
-            "start": 2,
-            "len": 1
+            "len": 10
           }
         ],
         "removed_at": []
@@ -1505,21 +1521,104 @@
     {
       "chunk": 36,
       "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
         "changed": [
           {
+            "line": 112,
+            "start": 0,
+            "len": 9
+          },
+          {
+            "line": 113,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 114,
+            "start": 0,
+            "len": 1
+          },
+          {
             "line": 115,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 37,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 116,
+            "column": 0
+          },
+          {
+            "line": 117,
+            "column": 0
+          },
+          {
+            "line": 117,
+            "column": 4
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 38,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 124,
             "start": 2,
             "len": 1
           },
           {
-            "line": 116,
+            "line": 125,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 126,
+            "start": 2,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 39,
+      "local": {
+        "changed": [
+          {
+            "line": 124,
+            "start": 2,
+            "len": 1
+          },
+          {
+            "line": 125,
             "start": 2,
             "len": 1
           }
         ],
         "removed_at": [
           {
-            "line": 116,
+            "line": 125,
             "column": 0
           }
         ]
@@ -1530,7 +1629,7 @@
       }
     },
     {
-      "chunk": 37,
+      "chunk": 40,
       "local": {
         "changed": [],
         "removed_at": []
@@ -1538,32 +1637,32 @@
       "remote": {
         "changed": [
           {
-            "line": 126,
+            "line": 135,
             "start": 0,
             "len": 3
           }
         ],
         "removed_at": [
           {
-            "line": 125,
+            "line": 134,
             "column": 6
           }
         ]
       }
     },
     {
-      "chunk": 38,
+      "chunk": 41,
       "local": {
         "changed": [
           {
-            "line": 122,
+            "line": 131,
             "start": 6,
             "len": 3
           }
         ],
         "removed_at": [
           {
-            "line": 122,
+            "line": 131,
             "column": 9
           }
         ]
@@ -1574,7 +1673,7 @@
       }
     },
     {
-      "chunk": 39,
+      "chunk": 42,
       "local": {
         "changed": [],
         "removed_at": []
@@ -1582,35 +1681,35 @@
       "remote": {
         "changed": [
           {
-            "line": 134,
+            "line": 143,
             "start": 0,
             "len": 4
           }
         ],
         "removed_at": [
           {
-            "line": 133,
+            "line": 142,
             "column": 0
           }
         ]
       }
     },
     {
-      "chunk": 40,
+      "chunk": 43,
       "local": {
         "changed": [
           {
-            "line": 129,
+            "line": 138,
             "start": 0,
             "len": 8
           },
           {
-            "line": 130,
+            "line": 139,
             "start": 0,
             "len": 8
           },
           {
-            "line": 131,
+            "line": 140,
             "start": 0,
             "len": 10
           }
@@ -1623,7 +1722,7 @@
       }
     },
     {
-      "chunk": 41,
+      "chunk": 44,
       "local": {
         "changed": [],
         "removed_at": []
@@ -1631,37 +1730,37 @@
       "remote": {
         "changed": [
           {
-            "line": 142,
+            "line": 151,
             "start": 0,
             "len": 1
           },
           {
-            "line": 143,
+            "line": 152,
             "start": 0,
             "len": 1
           }
         ],
         "removed_at": [
           {
-            "line": 144,
+            "line": 153,
             "column": 0
           }
         ]
       }
     },
     {
-      "chunk": 42,
+      "chunk": 45,
       "local": {
         "changed": [
           {
-            "line": 139,
+            "line": 148,
             "start": 2,
             "len": 1
           }
         ],
         "removed_at": [
           {
-            "line": 139,
+            "line": 148,
             "column": 5
           }
         ]
@@ -1672,95 +1771,27 @@
       }
     },
     {
-      "chunk": 43,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 151,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 152,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 153,
-            "start": 0,
-            "len": 7
-          }
-        ],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 44,
-      "local": {
-        "changed": [
-          {
-            "line": 147,
-            "start": 13,
-            "len": 6
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 156,
-            "start": 6,
-            "len": 4
-          }
-        ],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 45,
-      "local": {
-        "changed": [],
-        "removed_at": [
-          {
-            "line": 150,
-            "column": 14
-          }
-        ]
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 159,
-            "start": 29,
-            "len": 11
-          }
-        ],
-        "removed_at": []
-      }
-    },
-    {
       "chunk": 46,
       "local": {
-        "changed": [
-          {
-            "line": 153,
-            "start": 0,
-            "len": 1
-          }
-        ],
+        "changed": [],
         "removed_at": []
       },
       "remote": {
         "changed": [
           {
+            "line": 160,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 161,
+            "start": 0,
+            "len": 7
+          },
+          {
             "line": 162,
-            "start": 10,
-            "len": 1
+            "start": 0,
+            "len": 7
           }
         ],
         "removed_at": []
@@ -1772,23 +1803,8 @@
         "changed": [
           {
             "line": 156,
-            "start": 0,
-            "len": 12
-          },
-          {
-            "line": 157,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 158,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 159,
-            "start": 0,
-            "len": 1
+            "start": 13,
+            "len": 6
           }
         ],
         "removed_at": []
@@ -1797,18 +1813,8 @@
         "changed": [
           {
             "line": 165,
-            "start": 5,
-            "len": 1
-          },
-          {
-            "line": 166,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 167,
-            "start": 5,
-            "len": 1
+            "start": 6,
+            "len": 4
           }
         ],
         "removed_at": []
@@ -1817,21 +1823,20 @@
     {
       "chunk": 48,
       "local": {
-        "changed": [
+        "changed": [],
+        "removed_at": [
           {
-            "line": 162,
-            "start": 0,
-            "len": 24
+            "line": 159,
+            "column": 14
           }
-        ],
-        "removed_at": []
+        ]
       },
       "remote": {
         "changed": [
           {
-            "line": 170,
-            "start": 7,
-            "len": 1
+            "line": 168,
+            "start": 29,
+            "len": 11
           }
         ],
         "removed_at": []
@@ -1842,14 +1847,9 @@
       "local": {
         "changed": [
           {
-            "line": 165,
-            "start": 2,
+            "line": 162,
+            "start": 0,
             "len": 1
-          },
-          {
-            "line": 165,
-            "start": 8,
-            "len": 18
           }
         ],
         "removed_at": []
@@ -1857,8 +1857,8 @@
       "remote": {
         "changed": [
           {
-            "line": 173,
-            "start": 3,
+            "line": 171,
+            "start": 10,
             "len": 1
           }
         ],
@@ -1868,42 +1868,45 @@
     {
       "chunk": 50,
       "local": {
-        "changed": [],
-        "removed_at": [
+        "changed": [
           {
-            "line": 169,
-            "column": 0
+            "line": 165,
+            "start": 0,
+            "len": 12
           },
           {
-            "line": 170,
-            "column": 0
+            "line": 166,
+            "start": 0,
+            "len": 1
           },
           {
-            "line": 170,
-            "column": 5
+            "line": 167,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 168,
+            "start": 0,
+            "len": 1
           }
-        ]
+        ],
+        "removed_at": []
       },
       "remote": {
         "changed": [
           {
-            "line": 176,
-            "start": 22,
-            "len": 7
-          },
-          {
-            "line": 178,
-            "start": 3,
+            "line": 174,
+            "start": 5,
             "len": 1
           },
           {
-            "line": 179,
+            "line": 175,
             "start": 0,
-            "len": 7
+            "len": 9
           },
           {
-            "line": 180,
-            "start": 3,
+            "line": 176,
+            "start": 5,
             "len": 1
           }
         ],
@@ -1915,50 +1918,101 @@
       "local": {
         "changed": [
           {
-            "line": 173,
+            "line": 171,
             "start": 0,
+            "len": 24
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 179,
+            "start": 7,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 52,
+      "local": {
+        "changed": [
+          {
+            "line": 174,
+            "start": 2,
             "len": 1
           },
           {
             "line": 174,
-            "start": 0,
+            "start": 8,
+            "len": 18
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 182,
+            "start": 3,
             "len": 1
-          },
-          {
-            "line": 175,
-            "start": 0,
-            "len": 2
-          },
-          {
-            "line": 176,
-            "start": 0,
-            "len": 3
-          },
-          {
-            "line": 177,
-            "start": 0,
-            "len": 4
-          },
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 53,
+      "local": {
+        "changed": [],
+        "removed_at": [
           {
             "line": 178,
-            "start": 0,
-            "len": 4
+            "column": 0
           },
           {
             "line": 179,
-            "start": 0,
-            "len": 3
+            "column": 0
           },
           {
-            "line": 180,
-            "start": 0,
-            "len": 3
+            "line": 179,
+            "column": 5
+          }
+        ]
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 185,
+            "start": 22,
+            "len": 7
           },
           {
-            "line": 181,
-            "start": 0,
-            "len": 2
+            "line": 187,
+            "start": 3,
+            "len": 1
           },
+          {
+            "line": 188,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 189,
+            "start": 3,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 54,
+      "local": {
+        "changed": [
           {
             "line": 182,
             "start": 0,
@@ -1973,15 +2027,60 @@
             "line": 184,
             "start": 0,
             "len": 2
+          },
+          {
+            "line": 185,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 186,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 187,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 188,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 189,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 190,
+            "start": 0,
+            "len": 2
+          },
+          {
+            "line": 191,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 192,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 193,
+            "start": 0,
+            "len": 2
           }
         ],
         "removed_at": [
           {
-            "line": 173,
+            "line": 182,
             "column": 0
           },
           {
-            "line": 184,
+            "line": 193,
             "column": 65
           }
         ]
@@ -1989,144 +2088,144 @@
       "remote": {
         "changed": [
           {
-            "line": 185,
+            "line": 194,
             "start": 0,
             "len": 42
           },
           {
-            "line": 186,
+            "line": 195,
             "start": 0,
             "len": 54
           },
           {
-            "line": 187,
+            "line": 196,
             "start": 0,
             "len": 43
           },
           {
-            "line": 188,
+            "line": 197,
             "start": 0,
             "len": 10
           },
           {
-            "line": 189,
+            "line": 198,
             "start": 0,
             "len": 2
           },
           {
-            "line": 191,
+            "line": 200,
             "start": 0,
             "len": 64
           },
           {
-            "line": 192,
+            "line": 201,
             "start": 0,
             "len": 66
           },
           {
-            "line": 193,
+            "line": 202,
             "start": 0,
             "len": 13
           },
           {
-            "line": 194,
+            "line": 203,
             "start": 0,
             "len": 74
           },
           {
-            "line": 196,
+            "line": 205,
             "start": 0,
             "len": 4
           },
           {
-            "line": 197,
-            "start": 0,
-            "len": 57
-          },
-          {
-            "line": 198,
-            "start": 0,
-            "len": 57
-          },
-          {
-            "line": 199,
-            "start": 0,
-            "len": 57
-          },
-          {
-            "line": 200,
-            "start": 0,
-            "len": 59
-          },
-          {
-            "line": 201,
-            "start": 0,
-            "len": 59
-          },
-          {
-            "line": 202,
-            "start": 0,
-            "len": 45
-          },
-          {
-            "line": 203,
-            "start": 0,
-            "len": 71
-          },
-          {
-            "line": 204,
-            "start": 0,
-            "len": 3
-          },
-          {
-            "line": 205,
-            "start": 0,
-            "len": 40
-          },
-          {
             "line": 206,
             "start": 0,
-            "len": 75
+            "len": 57
           },
           {
             "line": 207,
             "start": 0,
-            "len": 3
+            "len": 57
+          },
+          {
+            "line": 208,
+            "start": 0,
+            "len": 57
           },
           {
             "line": 209,
             "start": 0,
-            "len": 87
+            "len": 59
+          },
+          {
+            "line": 210,
+            "start": 0,
+            "len": 59
           },
           {
             "line": 211,
             "start": 0,
-            "len": 24
+            "len": 45
           },
           {
             "line": 212,
             "start": 0,
-            "len": 21
+            "len": 71
           },
           {
             "line": 213,
             "start": 0,
-            "len": 49
+            "len": 3
           },
           {
             "line": 214,
             "start": 0,
-            "len": 80
+            "len": 40
           },
           {
             "line": 215,
+            "start": 0,
+            "len": 75
+          },
+          {
+            "line": 216,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 218,
+            "start": 0,
+            "len": 87
+          },
+          {
+            "line": 220,
+            "start": 0,
+            "len": 24
+          },
+          {
+            "line": 221,
+            "start": 0,
+            "len": 21
+          },
+          {
+            "line": 222,
+            "start": 0,
+            "len": 49
+          },
+          {
+            "line": 223,
+            "start": 0,
+            "len": 80
+          },
+          {
+            "line": 224,
             "start": 0,
             "len": 3
           }
         ],
         "removed_at": [
           {
-            "line": 216,
+            "line": 225,
             "column": 0
           }
         ]

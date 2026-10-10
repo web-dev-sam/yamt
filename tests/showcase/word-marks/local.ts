@@ -91,6 +91,12 @@ return b;
 // C30 symbol added to a wordless line (remote)
 }
 
+// C31 else added after a closing brace (local)
+} else {
+
+// C32 options added before a closing call (remote)
+});
+
 // N1 unrelated statement (local)
 const scriptSetup = options.scriptSetup;
 
@@ -99,6 +105,9 @@ if (!options.setupBindings.has(macro)) {
 
 // N3 unrelated call (local)
 usedMacros.push({ canonical, alias });
+
+// N4 call sharing only closing symbols (remote)
+});
 
 // M1 wrapped in a condition (remote)
 a();

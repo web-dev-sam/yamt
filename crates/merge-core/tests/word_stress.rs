@@ -46,7 +46,7 @@ enum Truth {
     Untouched,
     Reindented { width: usize },
     OneWord { start: usize, end: usize },
-    WordDeleted,
+    WordDeleted { column: usize },
     Unconstrained,
 }
 
@@ -90,10 +90,7 @@ impl Side {
                 line.words.insert(position, self.fresh_word());
                 self.push_one_word(&line, position);
             }
-            Edit::DeleteWord(at) => {
-                line.words.remove(at.index(WORDS_PER_LINE));
-                self.push(&line.text(), Truth::WordDeleted);
-            }
+            Edit::DeleteWord(at) => self.push_word_deleted(line, at.index(WORDS_PER_LINE)),
             Edit::InsertLine => {
                 let words = (0..WORDS_PER_LINE).map(|_| self.fresh_word()).collect();
                 let indent = line.indent;
@@ -109,6 +106,18 @@ impl Side {
     fn push_one_word(&mut self, line: &Line, position: usize) {
         let (start, end) = line.word_columns(position);
         self.push(&line.text(), Truth::OneWord { start, end });
+    }
+
+    /// The point is pinned at the start of the word that moved into the deleted one's place, or
+    /// at the end of the line's words when the last one was deleted.
+    fn push_word_deleted(&mut self, mut line: Line, position: usize) {
+        line.words.remove(position);
+        let column = if position < line.words.len() {
+            line.word_columns(position).0
+        } else {
+            line.word_columns(position - 1).1
+        };
+        self.push(&line.text(), Truth::WordDeleted { column });
     }
 
     fn push_split(&mut self, line: &Line, position: usize) {
@@ -194,14 +203,14 @@ fn check_promises<'a, L: Copy + 'a>(
     index: fn(L) -> u32,
 ) -> Result<(), TestCaseError> {
     let mut ranges: Vec<Vec<(usize, usize)>> = vec![Vec::new(); side.truths.len()];
-    let mut points: Vec<usize> = vec![0; side.truths.len()];
+    let mut points: Vec<Vec<usize>> = vec![Vec::new(); side.truths.len()];
     for change in changes {
         for range in &change.changed {
             let (start, end) = (range.start as usize, (range.start + range.len) as usize);
             ranges[index(range.line) as usize].push((start, end));
         }
         for point in &change.removed_at {
-            points[index(point.line) as usize] += 1;
+            points[index(point.line) as usize].push(point.column as usize);
         }
     }
     for (line, truth) in side.truths.iter().enumerate() {
@@ -219,7 +228,14 @@ fn check_promises<'a, L: Copy + 'a>(
                 "{}",
                 message
             ),
-            Truth::WordDeleted => prop_assert!(points[line] > 0, "{}", message),
+            Truth::WordDeleted { column } => {
+                prop_assert!(
+                    points[line].contains(&column),
+                    "{} points {:?}",
+                    message,
+                    points[line]
+                );
+            }
             Truth::Unconstrained => {}
         }
     }

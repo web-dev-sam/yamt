@@ -2,28 +2,31 @@ use std::cmp::Ordering;
 
 use imara_diff::{Algorithm, Diff, InternedInput};
 
-use crate::line::lines_in;
-use crate::token::{TokenKind, line_tokens, without_line_break};
+use crate::line::{lines_in, without_line_break};
+use crate::token::{TokenKind, line_tokens};
 
-/// Two lines pair when the words they share are at least this percentage of their average word
+/// Two lines pair when the tokens they share are at least this percentage of their average token
 /// count (Dice): `a(1);`/`a(2);` share 50 and pair; `if (!emitted) {` and
 /// `if (!scriptSetup || !scriptSetupRanges) {`, sharing only `if`, reach 40 and stay apart.
 const MIN_SHARED_PERCENT: usize = 50;
+
+/// Dice counts each shared token once in each line (× 2) and gives a percentage (× 100).
+const DICE_PERCENT_SCALE: usize = 200;
 
 /// A gap with more base × side line combinations than this gets no similarity pairing: the
 /// table that chooses the pairs has one cell per combination (100 × 100 lines).
 const MAX_GAP_COMBINATIONS: usize = 10_000;
 
-/// A base line and the side line compared with it, both counted from the chunk's first line.
+/// A line index in base and one in side, counted from the chunk's first line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LinePair {
+pub(crate) struct LinePosition {
     pub(crate) base: u32,
     pub(crate) side: u32,
 }
 
 /// The pairs of a chunk's base and side lines, in order: lines equal but for whitespace, then
 /// similar lines in the gaps between them.
-pub(crate) fn line_pairs(base: &[&str], side: &[&str]) -> Vec<LinePair> {
+pub(crate) fn line_pairs(base: &[&str], side: &[&str]) -> Vec<LinePosition> {
     let base_squeezed: Vec<String> = base.iter().map(|line| without_whitespace(line)).collect();
     let side_squeezed: Vec<String> = side.iter().map(|line| without_whitespace(line)).collect();
     let mut input = InternedInput::default();
@@ -32,18 +35,18 @@ pub(crate) fn line_pairs(base: &[&str], side: &[&str]) -> Vec<LinePair> {
     let mut diff = Diff::compute(Algorithm::Histogram, &input);
     diff.postprocess_lines(&input);
     let mut pairs = Vec::new();
-    let mut equal_from = LinePair { base: 0, side: 0 };
+    let mut equal_from = LinePosition { base: 0, side: 0 };
     for hunk in diff.hunks() {
         pairs.extend(equal_run(equal_from, hunk.before.start));
         pairs.extend(similar_pairs(
             lines_in(base, &hunk.before),
             lines_in(side, &hunk.after),
-            LinePair {
+            LinePosition {
                 base: hunk.before.start,
                 side: hunk.after.start,
             },
         ));
-        equal_from = LinePair {
+        equal_from = LinePosition {
             base: hunk.before.end,
             side: hunk.after.end,
         };
@@ -59,27 +62,30 @@ fn without_whitespace(line: &str) -> String {
         .collect()
 }
 
-fn equal_run(from: LinePair, base_end: u32) -> impl Iterator<Item = LinePair> {
+fn equal_run(from: LinePosition, base_end: u32) -> impl Iterator<Item = LinePosition> {
     (from.base..base_end)
         .zip(from.side..)
-        .map(|(base, side)| LinePair { base, side })
+        .map(|(base, side)| LinePosition { base, side })
 }
 
 /// Pairs lines of one gap in order so that the sum of their shared percentages is the largest.
-fn similar_pairs(base: &[&str], side: &[&str], first: LinePair) -> Vec<LinePair> {
+fn similar_pairs(base: &[&str], side: &[&str], first: LinePosition) -> Vec<LinePosition> {
     if base.len().saturating_mul(side.len()) > MAX_GAP_COMBINATIONS {
         return Vec::new();
     }
-    let base: Vec<Vec<&str>> = base.iter().map(|line| compared_words(line)).collect();
-    let side: Vec<Vec<&str>> = side.iter().map(|line| compared_words(line)).collect();
+    let base: Vec<ComparedLine> = base.iter().map(|line| compared_line(line)).collect();
+    let side: Vec<ComparedLine> = side.iter().map(|line| compared_line(line)).collect();
     let best = best_totals(&base, &side);
     let mut pairs = Vec::new();
     let (mut base_line, mut side_line) = (0, 0);
-    while let (Some(base_words), Some(side_words)) = (base.get(base_line), side.get(side_line)) {
-        let paired = pair_score(base_words, side_words);
+    while let (Some(base_tokens), Some(side_tokens)) = (base.get(base_line), side.get(side_line)) {
         let total = best.at(base_line, side_line);
-        if paired > 0 && total == paired + best.at(base_line + 1, side_line + 1) {
-            pairs.push(LinePair {
+        let pairs_here = match pair_score(base_tokens, side_tokens) {
+            Some(score) => total == score + best.at(base_line + 1, side_line + 1),
+            None => false,
+        };
+        if pairs_here {
+            pairs.push(LinePosition {
                 base: first.base + u32::try_from(base_line).unwrap_or(u32::MAX),
                 side: first.side + u32::try_from(side_line).unwrap_or(u32::MAX),
             });
@@ -94,46 +100,54 @@ fn similar_pairs(base: &[&str], side: &[&str], first: LinePair) -> Vec<LinePair>
     pairs
 }
 
-/// The words of a line, sorted; a line without words gives its other non-space characters.
-fn compared_words(line: &str) -> Vec<&str> {
-    let tokens = line_tokens(without_line_break(line));
-    let has_words = tokens.iter().any(|token| token.kind == TokenKind::Word);
-    let compared_kind = if has_words {
-        TokenKind::Word
-    } else {
-        TokenKind::Symbol
-    };
-    let mut words: Vec<&str> = tokens
-        .iter()
-        .filter(|token| token.kind == compared_kind)
-        .map(|token| token.text)
-        .collect();
-    words.sort_unstable();
-    words
+/// One line's tokens as the pairing measure sees them, each list sorted.
+struct ComparedLine<'a> {
+    words: Vec<&'a str>,
+    /// Every token but whitespace: the words and the symbols.
+    visible: Vec<&'a str>,
 }
 
-/// The shared percentage of two lines' words, or 0 when it is below `MIN_SHARED_PERCENT`.
-fn pair_score(base: &[&str], side: &[&str]) -> usize {
-    let percent = (200 * shared_count(base, side))
-        .checked_div(base.len() + side.len())
-        .unwrap_or(0);
-    if percent >= MIN_SHARED_PERCENT {
-        percent
-    } else {
-        0
+fn compared_line(line: &str) -> ComparedLine<'_> {
+    let mut words = Vec::new();
+    let mut visible = Vec::new();
+    for token in line_tokens(without_line_break(line)) {
+        match token.kind {
+            TokenKind::Word => {
+                words.push(token.text);
+                visible.push(token.text);
+            }
+            TokenKind::Symbol => visible.push(token.text),
+            TokenKind::Space => {}
+        }
     }
+    words.sort_unstable();
+    visible.sort_unstable();
+    ComparedLine { words, visible }
+}
+
+/// The shared percentage of two lines' words, or of all their visible tokens when either line has
+/// no word; `None` below `MIN_SHARED_PERCENT`.
+fn pair_score(base: &ComparedLine, side: &ComparedLine) -> Option<usize> {
+    let (base_tokens, side_tokens) = if base.words.is_empty() || side.words.is_empty() {
+        (&base.visible, &side.visible)
+    } else {
+        (&base.words, &side.words)
+    };
+    let percent = (DICE_PERCENT_SCALE * shared_count(base_tokens, side_tokens))
+        .checked_div(base_tokens.len() + side_tokens.len())?;
+    (percent >= MIN_SHARED_PERCENT).then_some(percent)
 }
 
 /// For every pair of starting lines, the largest score sum reachable from there.
-fn best_totals(base: &[Vec<&str>], side: &[Vec<&str>]) -> Table {
+fn best_totals(base: &[ComparedLine], side: &[ComparedLine]) -> Table {
     let mut best = Table {
         rows: vec![vec![0; side.len()]; base.len()],
     };
-    for (base_line, base_words) in base.iter().enumerate().rev() {
-        for (side_line, side_words) in side.iter().enumerate().rev() {
-            let paired = match pair_score(base_words, side_words) {
-                0 => 0,
-                score => score + best.at(base_line + 1, side_line + 1),
+    for (base_line, base_tokens) in base.iter().enumerate().rev() {
+        for (side_line, side_tokens) in side.iter().enumerate().rev() {
+            let paired = match pair_score(base_tokens, side_tokens) {
+                Some(score) => score + best.at(base_line + 1, side_line + 1),
+                None => 0,
             };
             let total = paired
                 .max(best.at(base_line + 1, side_line))
@@ -234,6 +248,14 @@ mod tests {
     fn lines_without_words_compare_their_other_characters() {
         assert_eq!(pairs(&["}\n"], &["};\n"]), [(0, 0)]);
         assert_eq!(pairs(&["}\n"], &["{\n"]), []);
+    }
+
+    #[test]
+    fn a_wordless_line_pairs_with_a_worded_one_by_words_and_symbols() {
+        assert_eq!(pairs(&["}\n"], &["} else {\n"]), [(0, 0)]);
+        assert_eq!(pairs(&["} else {\n"], &["}\n"]), [(0, 0)]);
+        assert_eq!(pairs(&["});\n"], &["}, { passive });\n"]), [(0, 0)]);
+        assert_eq!(pairs(&["});\n"], &["foo(a, b);\n"]), []);
     }
 
     #[test]

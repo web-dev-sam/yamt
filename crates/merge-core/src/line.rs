@@ -87,3 +87,13 @@ pub(crate) fn lines_in<'a>(lines: &'a [&'a str], range: &Range<u32>) -> &'a [&'a
         .get(range.start as usize..range.end as usize)
         .unwrap_or_default()
 }
+
+pub(crate) fn without_line_break(line: &str) -> &str {
+    line.strip_suffix("\r\n")
+        .or_else(|| line.strip_suffix('\n'))
+        .unwrap_or(line)
+}
+
+pub(crate) fn utf16_len(text: &str) -> u32 {
+    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
+}

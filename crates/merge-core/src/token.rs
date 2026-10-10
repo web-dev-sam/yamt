@@ -1,3 +1,5 @@
+use crate::line::utf16_len;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TokenKind {
     Word,
@@ -38,16 +40,6 @@ pub(crate) fn line_tokens(content: &str) -> Vec<Token<'_>> {
         rest = after;
     }
     tokens
-}
-
-pub(crate) fn without_line_break(line: &str) -> &str {
-    line.strip_suffix("\r\n")
-        .or_else(|| line.strip_suffix('\n'))
-        .unwrap_or(line)
-}
-
-pub(crate) fn utf16_len(text: &str) -> u32 {
-    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
 fn kind_of(character: char) -> TokenKind {

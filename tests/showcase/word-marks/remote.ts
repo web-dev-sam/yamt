@@ -91,6 +91,12 @@ return a;
 // C30 symbol added to a wordless line (remote)
 };
 
+// C31 else added after a closing brace (local)
+}
+
+// C32 options added before a closing call (remote)
+}, { passive });
+
 // N1 unrelated statement (local)
 let emitted = false;
 
@@ -99,6 +105,9 @@ if (scriptSetupRanges.defineModel.length) {
 
 // N3 unrelated call (local)
 yield `${macro}, `;
+
+// N4 call sharing only closing symbols (remote)
+foo(a, b);
 
 // M1 wrapped in a condition (remote)
 if (ok) {

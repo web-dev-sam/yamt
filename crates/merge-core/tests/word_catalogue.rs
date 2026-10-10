@@ -240,6 +240,16 @@ fn c30_symbol_added_to_a_wordless_line() {
 }
 
 #[test]
+fn c31_else_added_after_a_closing_brace() {
+    assert_eq!(one_line("}", "} else {"), "}[ else {]");
+}
+
+#[test]
+fn c32_options_added_before_a_closing_call() {
+    assert_eq!(one_line("});", "}, { passive });"), "}[, { passive }]);");
+}
+
+#[test]
 fn n1_unrelated_statement_is_new() {
     assert_eq!(
         one_line(
@@ -270,4 +280,9 @@ fn n3_unrelated_call_is_new() {
         ),
         "[usedMacros.push({ canonical, alias });]"
     );
+}
+
+#[test]
+fn n4_call_sharing_only_closing_symbols_is_new() {
+    assert_eq!(one_line("});", "foo(a, b);"), "[foo(a, b);]");
 }

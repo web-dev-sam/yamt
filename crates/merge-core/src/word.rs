@@ -5,9 +5,12 @@ use serde::Serialize;
 use specta::Type;
 
 use crate::chunk::{Chunk, ChunkId};
-use crate::line::{InlinePoint, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
-use crate::line_pairs::{LinePair, line_pairs};
-use crate::token::{Token, TokenKind, line_tokens, utf16_len, without_line_break};
+use crate::line::{
+    InlinePoint, InlineRange, LocalLine, RemoteLine, lines_in, split_lines, utf16_len,
+    without_line_break,
+};
+use crate::line_pairs::{LinePosition, line_pairs};
+use crate::token::{Token, TokenKind, line_tokens};
 
 /// One side of a chunk compared with base, line by line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -69,16 +72,16 @@ fn side_word_changes<L: Copy + PartialEq>(
     if base.is_empty() || marker.side.is_empty() {
         return marker.changes;
     }
-    let mut after_previous = LinePair { base: 0, side: 0 };
+    let mut after_previous = LinePosition { base: 0, side: 0 };
     for pair in line_pairs(base, marker.side) {
         marker.mark_gap(after_previous, pair);
         marker.mark_pair(line_text(base, pair.base), pair.side);
-        after_previous = LinePair {
+        after_previous = LinePosition {
             base: pair.base + 1,
             side: pair.side + 1,
         };
     }
-    let chunk_end = LinePair {
+    let chunk_end = LinePosition {
         base: u32::try_from(base.len()).unwrap_or(u32::MAX),
         side: marker.side_len(),
     };
@@ -97,7 +100,7 @@ struct SideMarker<'a, L> {
 impl<L: Copy> SideMarker<'_, L> {
     /// Marks the unpaired lines between two pairs (or a chunk edge): new side lines in full, and
     /// removed base lines as one point when no side line replaces them.
-    fn mark_gap(&mut self, from: LinePair, until: LinePair) {
+    fn mark_gap(&mut self, from: LinePosition, until: LinePosition) {
         for side_line in from.side..until.side {
             let width = self.width(side_line);
             if width > 0 {
