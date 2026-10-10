@@ -83,7 +83,7 @@ the probe did not run, which is reported, not hidden.
 ```
 scripts/conflict-repo.sh /tmp/yamt-test-merge   # 7 conflicts: 3 goldens, CRLF, add/add, binary, deleted on one side
 scripts/test-screen.sh place                    # re-points the KWin rules; exits non-zero without a Samsung screen
-just dev-app --repo /tmp/yamt-test-merge        # = cargo tauri dev -- -- --repo …; NVIDIA: WEBKIT_DISABLE_DMABUF_RENDERER=1 until the guard lands
+just dev-app --repo /tmp/yamt-test-merge        # = cargo tauri dev -- -- --repo …; the app disables DMABUF on NVIDIA itself (plan §2 #43)
 ```
 
 The smoke repository's folder contains `yamt-test` and the window title is `<repository folder> — yamt`

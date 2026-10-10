@@ -20,6 +20,13 @@ if [ -n "$forbidden_in_core" ]; then
     failed=1
 fi
 
+app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+forbidden_in_app=$(grep -xE 'yamt-(gitio|merge-core)' <<<"$app_deps" || true)
+if [ -n "$forbidden_in_app" ]; then
+    echo "arch-check: yamt-app depends on yamt-session only, not:" $forbidden_in_app >&2
+    failed=1
+fi
+
 if grep -rnE 'std::(fs|process)' crates/merge-core/src >&2; then
     echo "arch-check: yamt-merge-core must not use std::fs or std::process" >&2
     failed=1

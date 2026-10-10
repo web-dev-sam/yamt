@@ -32,7 +32,7 @@ scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-co
 scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map
 scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
 scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
-scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19)
+scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (the M1 source:
@@ -70,7 +70,7 @@ ipc ◄── editor ◄── ui ◄── main.ts      (ui reaches editor only
 connectors ◄── editor                 (model/ is empty and unused)
 ```
 
-- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`. Detector: `just arch-check` (`cargo tree --target all --all-features`; std::fs/process grep), clippy `disallowed_*`.
+- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`; `src-tauri` (yamt-app) depends on `session` only, never directly on `gitio`/`merge-core`. Detector: `just arch-check` (`cargo tree --target all --all-features`; yamt-app's direct deps; std::fs/process grep), clippy `disallowed_*`.
 - [PM2] `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` (at any depth). Detector: oxlint overrides + `frontend/scripts/fences.test.ts`.
 - [PM3] `editor/**`, `model/**`, `connectors/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`, or `~icons/*` without `?raw`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (`~icons/*`: `fences.test.ts` only).
 - [PM4] `ipc/bindings.ts` is generated; never hand-edited. Detector: hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` (diffs a fresh export in `target/`).

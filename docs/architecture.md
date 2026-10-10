@@ -301,7 +301,7 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   the last file (#37).
 - Errors: one `#[serde(tag = "kind")] enum IpcError` (`Git`, `UnknownPath`, `Unsupported`,
   `WriteFailed`) mirrored into TS; no stringly errors.
-- `main()`: DMABUF guard (plan §3) **before** `tauri::Builder` (M3 row); CLI `yamt [--repo <path>]`;
+- `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`.
