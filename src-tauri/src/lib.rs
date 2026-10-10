@@ -1,0 +1,59 @@
+//! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
+#![forbid(unsafe_code)]
+
+mod args;
+mod commands;
+mod frontend_log;
+mod outcome;
+mod window;
+
+use std::path::Path;
+use std::process::ExitCode;
+
+use specta_typescript::Typescript;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
+
+use crate::args::{Invocation, USAGE};
+use crate::outcome::{Ending, Startup, startup};
+
+const LOG_FILTER_VAR: &str = "YAMT_LOG";
+
+#[must_use]
+pub fn run() -> ExitCode {
+    init_tracing();
+    match args::parse(std::env::args_os().skip(1).collect()) {
+        Ok(Invocation::Help) => {
+            print!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        Ok(Invocation::Version) => {
+            println!("yamt {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Ok(Invocation::Merge { repo }) => merge(&repo).report(),
+        Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
+    }
+}
+
+pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
+    commands::specta_builder::<tauri::Wry>().export(Typescript::default(), path)
+}
+
+fn merge(repo: &Path) -> Ending {
+    match startup(repo) {
+        Startup::Merge { root, session } => window::run(&root, session),
+        Startup::Done(ending) => ending,
+    }
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .with_env_var(LOG_FILTER_VAR)
+        .from_env_lossy();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
+}

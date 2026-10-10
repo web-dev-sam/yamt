@@ -1,3 +1,3 @@
-fn main() {
-    println!("yamt: no commands yet");
+fn main() -> std::process::ExitCode {
+    yamt_app::run()
 }

@@ -4600,7 +4600,6 @@ dependencies = [
  "serde",
  "serde_json",
  "specta",
- "specta-serde",
  "specta-typescript",
  "tauri",
  "tauri-build",
@@ -4608,6 +4607,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "yamt-conflict-repo",
+ "yamt-gitio",
  "yamt-session",
 ]
 
