@@ -558,7 +558,8 @@ IPC; Rust does not know languages. Unknown → no highlighting.
 - edition 2024, pinned stable via `rust-toolchain.toml`.
 - Workspace `[lints]`: `clippy::pedantic = warn`, `clippy::unwrap_used/expect_used/panic = deny`,
   `clippy::wildcard_enum_match_arm = deny`, `clippy::disallowed_methods` (per crate in
-  `clippy.toml`), `missing_docs = warn` on `merge-core` public items only, `unsafe_code = forbid`.
+  `clippy.toml`), `missing_docs = warn` on `merge-core` public items only, `unsafe_code = deny`
+  (libraries `forbid`; the one exception is the NVIDIA start-up guard, plan §2 #43, checked by `arch-check`).
 - `cargo nextest`, `insta` (goldens), `proptest` (invariants), `cargo-deny`, `tracing` for logs.
 - deps: `imara-diff`, `thiserror`, `serde`, `specta` + `tauri-specta`, `tauri 2`, `tracing`.
 - **Readable-by-a-Rust-beginner rules** (the product owner reads this code; cleverness is a

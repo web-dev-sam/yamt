@@ -1,12 +1,11 @@
 {
-  "V0DesktopShell": {
-    "owned": ["src-tauri/**", "scripts/conflict-repo.sh", "crates/session/src/session.rs"]
-  },
-  "V0FileIcons": {
+  "V0DesktopShellR1": {
     "owned": [
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/fileIcon.ts",
-      "frontend/src/ui/fileIcon.test.ts"
+      "src-tauri/**",
+      "crates/session/src/session.rs",
+      "scripts/conflict-repo.sh",
+      "scripts/golden-repo.sh",
+      "scripts/git-sandbox.sh"
     ]
   }
 }

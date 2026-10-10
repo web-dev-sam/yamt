@@ -32,6 +32,17 @@ if [ "$root_threshold" != "$core_threshold" ]; then
     failed=1
 fi
 
+# The one allowed `unsafe` is the NVIDIA start-up guard (plan §2 #43): one block, in graphics.rs only.
+readonly UNSAFE_HOME=src-tauri/src/graphics.rs
+if grep -rnw --include='*.rs' 'unsafe' crates src-tauri/src | grep -v "^$UNSAFE_HOME:" >&2; then
+    echo "arch-check: \`unsafe\` is allowed only in $UNSAFE_HOME" >&2
+    failed=1
+fi
+if [ -f "$UNSAFE_HOME" ] && [ "$(grep -cw 'unsafe' "$UNSAFE_HOME")" -gt 1 ]; then
+    echo "arch-check: $UNSAFE_HOME may hold one \`unsafe\` block" >&2
+    failed=1
+fi
+
 if [ "$failed" -eq 0 ]; then
     echo "arch-check: ok"
 fi

@@ -64,7 +64,8 @@ The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic
 
 `clippy::pedantic = warn`, `clippy::unwrap_used/expect_used/panic/unreachable = deny`,
 `clippy::wildcard_enum_match_arm = deny`, `clippy::too_many_lines = warn` (40),
-`unsafe_code = forbid`, `missing_docs = warn` on `merge-core` only.
+`unsafe_code = deny` + `clippy::undocumented_unsafe_blocks = deny`; every library crate `#![forbid(unsafe_code)]`; the
+one exception is the NVIDIA guard in `src-tauri/src/graphics.rs` (plan §2 #43, arch-check); `missing_docs = warn` on `merge-core` only.
 `#[allow]` requires a one-line reason and is a `should` finding by default.
 
 ## References (read on demand, `references/rust-skills/<rule>.md`)
