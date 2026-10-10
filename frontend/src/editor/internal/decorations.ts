@@ -4,8 +4,8 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
-import { sideChanged, type Side } from "./side";
-import { isResolved, type ChunkState } from "./status";
+import type { Side } from "./side";
+import { isResolved, isSideOpen, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
 import { sideWordDecorations } from "./words";
 
@@ -37,7 +37,7 @@ export function sideDecorations(
   return EditorView.decorations.computeN([statuses], (state) => {
     const tinted = state
       .field(statuses)
-      .filter(({ chunk, status }) => sideChanged(chunk, side) && !isResolved(chunk, status))
+      .filter(({ chunk, status }) => isSideOpen(chunk, status, side))
       .map(({ chunk }) => chunk);
     const bands = tinted.map((chunk) => ({
       ...lineSpan(state.doc, chunk[side]),

@@ -1,20 +1,25 @@
 import "../theme.css";
 import type { EditorView } from "@codemirror/view";
+import chevronsLeft from "~icons/lucide/chevrons-left?raw";
+import chevronsRight from "~icons/lucide/chevrons-right?raw";
+import cornerLeftDown from "~icons/lucide/corner-left-down?raw";
+import cornerRightDown from "~icons/lucide/corner-right-down?raw";
+import x from "~icons/lucide/x?raw";
 
 import { bandPath, type Band } from "../../connectors";
 import type { Chunk } from "../../ipc";
 import type { ChunkRow, PaneViews } from "./geometry";
-import { sideChanged, type Side } from "./side";
-import { canApply, isResolved } from "./status";
+import type { Side } from "./side";
+import { applyMode, isSideOpen, type ApplyMode } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
 export type ChunkAction =
   | { readonly kind: "apply"; readonly chunk: Chunk; readonly side: Side }
-  | { readonly kind: "dismiss"; readonly chunk: Chunk };
+  | { readonly kind: "ignore"; readonly chunk: Chunk; readonly side: Side };
 
 type OnAction = (action: ChunkAction) => void;
 type ToneBand = Band & { readonly tone: Tone };
-type Arrow = { readonly top: number; readonly chunk: Chunk };
+type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
 type ArrowPane = {
   readonly view: EditorView;
   readonly side: Side;
@@ -23,12 +28,20 @@ type ArrowPane = {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ACTION_WIDTH_PX = 16;
-const GLYPH_CENTER = 0.5;
-const APPLY_GLYPH: Readonly<Record<Side, string>> = { local: "»", remote: "«" };
+const ICON_PX = 14;
+const CENTER = 0.5;
+const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
+  local: { replace: chevronsRight, append: cornerRightDown },
+  remote: { replace: chevronsLeft, append: cornerLeftDown },
+};
+const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+  replace: "Apply",
+  append: "Apply after the other side",
+};
 
 function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
   return rows
-    .filter((row) => sideChanged(row.chunk, side) && !isResolved(row.chunk, row.status))
+    .filter((row) => isSideOpen(row.chunk, row.status, side))
     .map((row) => ({
       left: side === "local" ? row.left : row.center,
       right: side === "local" ? row.center : row.right,
@@ -38,8 +51,12 @@ function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
 
 export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
   return rows
-    .filter((row) => canApply(row.chunk, row.status, side))
-    .map((row) => ({ top: (side === "local" ? row.left : row.right).top, chunk: row.chunk }));
+    .filter((row) => isSideOpen(row.chunk, row.status, side))
+    .map((row) => ({
+      top: (side === "local" ? row.left : row.right).top,
+      chunk: row.chunk,
+      mode: applyMode(row.status, side),
+    }));
 }
 
 function bandPaths(
@@ -68,8 +85,22 @@ function bandPaths(
   return paths;
 }
 
+function iconElement(markup: string, lineHeight: number): SVGSVGElement {
+  const holder = document.createElementNS(SVG_NS, "g");
+  holder.innerHTML = markup;
+  const icon = holder.firstElementChild;
+  if (!(icon instanceof SVGSVGElement)) {
+    throw new Error("icon markup is not an <svg>");
+  }
+  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * CENTER));
+  icon.setAttribute("y", String((lineHeight - ICON_PX) * CENTER));
+  icon.setAttribute("width", String(ICON_PX));
+  icon.setAttribute("height", String(ICON_PX));
+  return icon;
+}
+
 function actionButton(
-  button: { x: number; lineHeight: number; glyph: string; title: string },
+  button: { x: number; lineHeight: number; icon: string; title: string },
   action: ChunkAction,
   onAction: OnAction,
 ): SVGGElement {
@@ -81,11 +112,7 @@ function actionButton(
   const hit = document.createElementNS(SVG_NS, "rect");
   hit.setAttribute("width", String(ACTION_WIDTH_PX));
   hit.setAttribute("height", String(button.lineHeight));
-  const glyph = document.createElementNS(SVG_NS, "text");
-  glyph.setAttribute("x", String(ACTION_WIDTH_PX * GLYPH_CENTER));
-  glyph.setAttribute("y", String(button.lineHeight * GLYPH_CENTER));
-  glyph.textContent = button.glyph;
-  group.append(title, hit, glyph);
+  group.append(title, hit, iconElement(button.icon, button.lineHeight));
   group.addEventListener("pointerdown", (event) => {
     if (event.button === 0) {
       onAction(action);
@@ -104,21 +131,21 @@ function arrowGroups(
   const lineHeight = view.defaultLineHeight;
   const height = strip.clientHeight;
   const applyX = side === "local" ? 0 : strip.clientWidth - ACTION_WIDTH_PX;
-  const dismissX = side === "local" ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
+  const ignoreX = side === "local" ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
   return arrows
     .filter(({ top }) => top + shift + lineHeight >= 0 && top + shift <= height)
-    .map(({ top, chunk }) => {
+    .map(({ top, chunk, mode }) => {
       const row = document.createElementNS(SVG_NS, "g");
       row.setAttribute("transform", `translate(0 ${top + shift})`);
       row.append(
         actionButton(
-          { x: applyX, lineHeight, glyph: APPLY_GLYPH[side], title: "Apply" },
+          { x: applyX, lineHeight, icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] },
           { kind: "apply", chunk, side },
           onAction,
         ),
         actionButton(
-          { x: dismissX, lineHeight, glyph: "×", title: "Ignore" },
-          { kind: "dismiss", chunk },
+          { x: ignoreX, lineHeight, icon: x, title: "Ignore" },
+          { kind: "ignore", chunk, side },
           onAction,
         ),
       );

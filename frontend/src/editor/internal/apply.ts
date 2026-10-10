@@ -10,8 +10,8 @@ import {
 
 import type { Chunk } from "../../ipc";
 import { setStatus, type ChunkSpan } from "./chunkField";
-import { sideChanged, type Side } from "./side";
-import { canApply, isResolved, statusAfterApply } from "./status";
+import type { Side } from "./side";
+import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
 
 export type SideDocs = Readonly<Record<Side, Text>>;
 
@@ -42,7 +42,7 @@ function wholeLines(doc: Text, range: { from: number; to: number }, lines: strin
 
 function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSpec {
   const lines = sideLines(target.sides[side], span.chunk[side]);
-  const from = span.status === "pending" ? span.from : span.to;
+  const from = applyMode(span.status, side) === "replace" ? span.from : span.to;
   return wholeLines(target.state.doc, { from, to: span.to }, lines);
 }
 
@@ -87,7 +87,7 @@ export function applySteps({
   readonly side: Side;
 }): Steps {
   const span = spanOf(target, chunk);
-  if (span === undefined || !canApply(span.chunk, span.status, side)) {
+  if (span === undefined || !isSideOpen(span.chunk, span.status, side)) {
     return [];
   }
   const changes = target.state.changes(applyChange(target, span, side));
@@ -95,7 +95,10 @@ export function applySteps({
     moveCursor(span.from),
     {
       changes,
-      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(span.status, side) }),
+      effects: setStatus.of({
+        id: chunk.id,
+        status: statusAfterApply(span.chunk, span.status, side),
+      }),
       userEvent: "yamt.apply",
     },
     recordSelection(EditorSelection.single(span.from).map(changes)),
@@ -113,12 +116,7 @@ export function bulkApplySteps({
 }): Steps {
   const spans = target.state
     .field(target.field)
-    .filter(
-      (span) =>
-        span.status === "pending" &&
-        span.chunk.kind !== "Conflict" &&
-        sideChanged(span.chunk, side),
-    );
+    .filter((span) => canBulkApply(span.chunk, span.status, side));
   if (spans.length === 0) {
     return [];
   }
@@ -126,7 +124,7 @@ export function bulkApplySteps({
   const action = {
     changes,
     effects: spans.map((span) =>
-      setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.status, side) }),
+      setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.chunk, span.status, side) }),
     ),
     userEvent: "yamt.apply",
   };
@@ -137,14 +135,28 @@ export function bulkApplySteps({
   return [moveCursor(cursor), action, recordSelection(EditorSelection.single(cursor).map(changes))];
 }
 
-export function dismissSteps(target: ApplyTarget, chunk: Chunk): Steps {
+export function ignoreSteps({
+  target,
+  chunk,
+  side,
+}: {
+  readonly target: ApplyTarget;
+  readonly chunk: Chunk;
+  readonly side: Side;
+}): Steps {
   const span = spanOf(target, chunk);
-  if (span === undefined || isResolved(span.chunk, span.status)) {
+  if (span === undefined || !isSideOpen(span.chunk, span.status, side)) {
     return [];
   }
   return [
     moveCursor(span.from),
-    { effects: setStatus.of({ id: chunk.id, status: "dismissed" }), userEvent: "yamt.dismiss" },
+    {
+      effects: setStatus.of({
+        id: chunk.id,
+        status: statusAfterIgnore(span.chunk, span.status, side),
+      }),
+      userEvent: "yamt.ignore",
+    },
     recordSelection(EditorSelection.single(span.from)),
   ];
 }

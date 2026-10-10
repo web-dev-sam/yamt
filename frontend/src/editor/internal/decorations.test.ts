@@ -7,10 +7,10 @@ import { chunkField } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
-import type { ChunkState } from "./status";
+import { PENDING, type ChunkState } from "./status";
 
 function sideBands(chunks: readonly Chunk[], side: Side): Extension {
-  const statuses = sideStatusField(chunks.map((chunk) => ({ chunk, status: "pending" })));
+  const statuses = sideStatusField(chunks.map((chunk) => ({ chunk, status: PENDING })));
   return [statuses, sideDecorations(statuses, side)];
 }
 
@@ -104,16 +104,19 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
   ]);
 });
 
-test("a side pane drops a resolved change's band and keeps a half-applied conflict", async () => {
+test("a side pane drops a block once its own side is handled, even in an open conflict", async () => {
   const data = await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts");
-  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
+  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: PENDING })));
   const state = EditorState.create({
     doc: data.local,
     extensions: [statuses, sideDecorations(statuses, "local")],
   });
   const reported = data.chunks.map((chunk) => ({
     chunk,
-    status: chunk.id === 0 || chunk.kind === "Conflict" ? "applied-local" : "pending",
+    status:
+      chunk.id === 0 || chunk.kind === "Conflict"
+        ? { local: chunk.id === 0 ? "applied" : "ignored", remote: "pending" }
+        : PENDING,
   })) satisfies ChunkState[];
 
   const updated = state.update({ effects: showStatuses.of(reported) }).state;
@@ -123,7 +126,6 @@ test("a side pane drops a resolved change's band and keeps a half-applied confli
     "54 chunk-modified chunk-band",
     "103-107 chunk-modified chunk-band",
     "115 chunk-modified chunk-band",
-    "129-136 chunk-conflict chunk-band",
   ]);
 });
 

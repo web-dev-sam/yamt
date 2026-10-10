@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Check from "~icons/lucide/check";
+
 import type { FileEntry } from "../ipc";
 
 defineProps<{ files: readonly FileEntry[]; active: string | null }>();
@@ -28,8 +30,12 @@ function extension(path: string): string {
         <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
           {{ file.path }}
         </span>
-        <span v-if="file.status === 'Resolved'" class="ml-auto shrink-0 text-fg-muted">
-          ✓ resolved
+        <span
+          v-if="file.status === 'Resolved'"
+          class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+        >
+          <Check class="size-3.5" aria-hidden="true" />
+          resolved
         </span>
       </li>
     </ul>

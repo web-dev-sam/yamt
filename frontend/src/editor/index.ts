@@ -7,8 +7,8 @@ import { log, type FileMergeData } from "../ipc";
 import {
   applySteps,
   bulkApplySteps,
-  dismissSteps,
   dispatchSteps,
+  ignoreSteps,
   type ApplyTarget,
   type SideDocs,
   type Steps,
@@ -152,20 +152,25 @@ export class MergeController {
     };
   }
 
-  #act(action: ChunkAction): void {
+  #stepsFor(action: ChunkAction): Steps {
+    const request = { target: this.#target(), chunk: action.chunk, side: action.side };
     switch (action.kind) {
       case "apply":
-        this.#dispatch(
-          applySteps({ target: this.#target(), chunk: action.chunk, side: action.side }),
-        );
-        return;
-      case "dismiss":
-        this.#dispatch(dismissSteps(this.#target(), action.chunk));
-        return;
+        return applySteps(request);
+      case "ignore":
+        return ignoreSteps(request);
       default: {
         const _exhaustive: never = action;
         return _exhaustive;
       }
+    }
+  }
+
+  #act(action: ChunkAction): void {
+    this.#dispatch(this.#stepsFor(action));
+    const center = this.#views.center;
+    if (!center.hasFocus) {
+      center.focus();
     }
   }
 

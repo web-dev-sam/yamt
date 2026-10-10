@@ -4,7 +4,7 @@ import { EditorView, WidgetType } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
-import { applySteps, dismissSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
+import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { paneState } from "./pane";
@@ -247,25 +247,36 @@ test("a resolved block loses its word marks and bars on every side pane and undo
     start,
     applySteps({ target: target(start), chunk: chunk(start, MODIFIED), side: "local" }),
   );
-  const dismissed = run(applied, dismissSteps(target(applied), chunk(applied, CONFLICT)));
+  const leftIgnored = run(
+    applied,
+    ignoreSteps({ target: target(applied), chunk: chunk(applied, CONFLICT), side: "local" }),
+  );
+  const resolved = run(
+    leftIgnored,
+    ignoreSteps({
+      target: target(leftIgnored),
+      chunk: chunk(leftIgnored, CONFLICT),
+      side: "remote",
+    }),
+  );
 
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
   expect(bars(applied.left)).toEqual([
     "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
     "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
   ]);
-  expect(marks(dismissed.left)).toEqual([]);
-  expect(marks(dismissed.right)).toEqual([]);
-  expect(bars(dismissed.left)).toEqual([]);
-  expect(bars(dismissed.right)).toEqual([]);
-  expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
-  expect(bars(undone(dismissed).right)).toEqual([
+  expect(marks(resolved.left)).toEqual([]);
+  expect(marks(resolved.right)).toEqual([]);
+  expect(bars(resolved.left)).toEqual([]);
+  expect(bars(resolved.right)).toEqual([]);
+  expect(marks(undone(resolved).right)).toEqual(["2 chunk-word-conflict theirs"]);
+  expect(bars(undone(resolved).right)).toEqual([
     "2 chunk-removal chunk-removal-conflict const 😀| = theirs;",
   ]);
-  expect(painted(undone(undone(dismissed)).left)).toEqual(painted(start.left));
+  expect(painted(undone(undone(undone(resolved))).left)).toEqual(painted(start.left));
 });
 
-test("a half-applied conflict keeps its tint, word marks and removal bars together on both sides", async () => {
+test("applying one side of a conflict drops that side's tint, word marks and bars; the other keeps them", async () => {
   const start = open(await synthetic());
 
   const applied = run(
@@ -274,11 +285,7 @@ test("a half-applied conflict keeps its tint, word marks and removal bars togeth
   );
 
   expect(painted(applied.left)).toEqual([
-    "2 chunk-conflict chunk-band",
     "3 chunk-modified chunk-band",
-    "2 chunk-removal chunk-removal-conflict |const 😀 = mine;",
-    "2 chunk-word-conflict mine",
-    "2 chunk-removal chunk-removal-conflict const 😀 = mine;|",
     "3 chunk-word-modified 2",
     "3 chunk-removal chunk-removal-modified a = 2|;",
   ]);

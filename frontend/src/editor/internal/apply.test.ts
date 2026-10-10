@@ -7,8 +7,8 @@ import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../
 import {
   applySteps,
   bulkApplySteps,
-  dismissSteps,
   dispatchSteps,
+  ignoreSteps,
   type ApplyTarget,
   type Steps,
   type VisibleLines,
@@ -18,7 +18,7 @@ import { centerDecorations } from "./decorations";
 import { lineSpan } from "./lineSpan";
 import { paneState, paneText } from "./pane";
 import type { Side } from "./side";
-import { summarize, type ChunkStatus } from "./status";
+import { summarize } from "./status";
 import { gapArrows } from "./strips";
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
@@ -121,8 +121,8 @@ function command(merge: ApplyTarget, cmd: StateCommand): ApplyTarget {
   return next;
 }
 
-function statuses(merge: ApplyTarget): ChunkStatus[] {
-  return merge.state.field(merge.field).map((span) => span.status);
+function statuses(merge: ApplyTarget): string[] {
+  return merge.state.field(merge.field).map(({ status }) => `${status.local} ${status.remote}`);
 }
 
 function centerText(merge: ApplyTarget, id: number): string {
@@ -168,7 +168,7 @@ test("apply local: the change gets the left text, resolves, and loses colour and
 
   expect(centerText(applied, 0)).toBe(sideText(applied, 0, "local"));
   expect(centerText(applied, 0)).not.toBe(centerText(start, 0));
-  expect(statuses(applied)[0]).toBe("applied-local");
+  expect(statuses(applied)[0]).toBe("applied pending");
   expect(decoratedLines(start.state)).toContain(3);
   expect(decoratedLines(applied.state)).not.toContain(3);
   expect(arrowLines(start, "local")).toContain(3);
@@ -189,7 +189,7 @@ test("apply remote inserts the right lines at an empty base range", async () => 
 
   expect(centerText(applied, 3)).toBe(sideText(applied, 3, "remote"));
   expect(applied.state.doc.lines).toBe(start.state.doc.lines + 1);
-  expect(statuses(applied)[3]).toBe("applied-remote");
+  expect(statuses(applied)[3]).toBe("pending applied");
   expect(arrowLines(applied, "remote")).not.toContain(arrowLines(start, "remote")[0]);
 });
 
@@ -200,13 +200,13 @@ test("a conflict applied from both sides holds local then remote text", async ()
   const local = run(start, applySteps({ target: start, chunk: conflict, side: "local" }));
   const both = run(local, applySteps({ target: local, chunk: conflict, side: "remote" }));
 
-  expect(statuses(local)[8]).toBe("applied-local");
+  expect(statuses(local)[8]).toBe("applied pending");
   expect(summarize(local.state.field(local.field))).toEqual({ changes: 8, conflicts: 1 });
   expect(arrowLines(local, "local")).not.toContain(129);
   expect(arrowLines(local, "remote")).toContain(141);
   expect(decoratedLines(local.state)).toContain(129);
   expect(centerText(both, 8)).toBe(sideText(both, 8, "local") + sideText(both, 8, "remote"));
-  expect(statuses(both)[8]).toBe("applied-both");
+  expect(statuses(both)[8]).toBe("applied applied");
   expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
   expect(arrowLines(both, "remote")).not.toContain(141);
   expect(decoratedLines(both.state)).not.toContain(129);
@@ -215,21 +215,18 @@ test("a conflict applied from both sides holds local then remote text", async ()
 test("ignore keeps the text and resolves a change or a half-applied conflict", async () => {
   const start = await magicKeys();
 
-  const ignored = run(start, dismissSteps(start, chunkAt(start, 1)));
-  const half = run(
-    ignored,
-    applySteps({ target: ignored, chunk: chunkAt(ignored, 8), side: "remote" }),
-  );
-  const settled = run(half, dismissSteps(half, chunkAt(half, 8)));
+  const done = run(start, ignoreSteps({ target: start, chunk: chunkAt(start, 1), side: "local" }));
+  const half = run(done, applySteps({ target: done, chunk: chunkAt(done, 8), side: "remote" }));
+  const settled = run(half, ignoreSteps({ target: half, chunk: chunkAt(half, 8), side: "local" }));
 
-  expect(ignored.state.doc.toString()).toBe(start.state.doc.toString());
-  expect(statuses(ignored)[1]).toBe("dismissed");
-  expect(decoratedLines(ignored.state)).not.toContain(22);
-  expect(arrowLines(ignored, "local")).not.toContain(22);
+  expect(done.state.doc.toString()).toBe(start.state.doc.toString());
+  expect(statuses(done)[1]).toBe("ignored pending");
+  expect(decoratedLines(done.state)).not.toContain(22);
+  expect(arrowLines(done, "local")).not.toContain(22);
   expect(centerText(settled, 8)).toBe(sideText(settled, 8, "remote"));
-  expect(statuses(settled)[8]).toBe("dismissed");
+  expect(statuses(settled)[8]).toBe("ignored applied");
   expect(summarize(settled.state.field(settled.field))).toEqual({ changes: 7, conflicts: 0 });
-  expect(dismissSteps(settled, chunkAt(settled, 8))).toEqual([]);
+  expect(ignoreSteps({ target: settled, chunk: chunkAt(settled, 8), side: "local" })).toEqual([]);
 });
 
 test("applying after an edit inside the change replaces the current range", async () => {
@@ -261,21 +258,21 @@ test("undo after apply restores text and status; redo re-applies", async () => {
   const redone = command(undone, redo);
 
   expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
-  expect(statuses(undone)[0]).toBe("pending");
+  expect(statuses(undone)[0]).toBe("pending pending");
   expect(decoratedLines(undone.state)).toContain(3);
   expect(redone.state.doc.toString()).toBe(applied.state.doc.toString());
-  expect(statuses(redone)[0]).toBe("applied-local");
+  expect(statuses(redone)[0]).toBe("applied pending");
 });
 
 test("undo after ignore brings the change back; redo ignores it again", async () => {
   const start = await magicKeys();
-  const ignored = run(start, dismissSteps(start, chunkAt(start, 1)));
+  const done = run(start, ignoreSteps({ target: start, chunk: chunkAt(start, 1), side: "local" }));
 
-  const undone = command(ignored, undo);
+  const undone = command(done, undo);
   const redone = command(undone, redo);
 
-  expect(statuses(undone)[1]).toBe("pending");
-  expect(statuses(redone)[1]).toBe("dismissed");
+  expect(statuses(undone)[1]).toBe("pending pending");
+  expect(statuses(redone)[1]).toBe("ignored pending");
 });
 
 test("undo and redo after an arrow or × show that change, not the old cursor at line 1", async () => {
@@ -290,7 +287,7 @@ test("undo and redo after an arrow or × show that change, not the old cursor at
     { merge: start, id: 6, act: (target, chunk) => applySteps({ target, chunk, side: "remote" }) },
     { merge: start, id: 8, act: (target, chunk) => applySteps({ target, chunk, side: "local" }) },
     { merge: start, id: 8, act: (target, chunk) => applySteps({ target, chunk, side: "remote" }) },
-    { merge: start, id: 7, act: (target, chunk) => dismissSteps(target, chunk) },
+    { merge: start, id: 7, act: (target, chunk) => ignoreSteps({ target, chunk, side: "local" }) },
     { merge: same, id: 0, act: (target, chunk) => applySteps({ target, chunk, side: "local" }) },
     { merge: same, id: 0, act: (target, chunk) => applySteps({ target, chunk, side: "remote" }) },
   ];
@@ -381,15 +378,15 @@ test("bulk apply from the left resolves every LocalOnly change; one undo restore
   const undone = command(bulk, undo);
 
   expect(statuses(bulk)).toEqual([
-    "applied-local",
-    "applied-local",
-    "applied-local",
-    "pending",
-    "pending",
-    "applied-local",
-    "pending",
-    "applied-local",
-    "pending",
+    "applied pending",
+    "applied pending",
+    "applied pending",
+    "pending pending",
+    "pending pending",
+    "applied pending",
+    "pending pending",
+    "applied pending",
+    "pending pending",
   ]);
   for (const id of [0, 1, 2, 5, 7]) {
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "local"));
@@ -423,8 +420,8 @@ test("a BothSame change resolves from either arrow and from either bulk apply", 
   expect(fromRight.state.sliceDoc()).toBe("a\nB\nc\n");
   expect(arrowLines(fromRight, "local")).toEqual([]);
   expect(summarize(fromRight.state.field(fromRight.field))).toEqual({ changes: 0, conflicts: 0 });
-  expect(statuses(bulkLeft)).toEqual(["applied-local"]);
-  expect(statuses(bulkRight)).toEqual(["applied-remote"]);
+  expect(statuses(bulkLeft)).toEqual(["applied applied"]);
+  expect(statuses(bulkRight)).toEqual(["applied applied"]);
   expect(bulkRight.state.sliceDoc()).toBe("a\nB\nc\n");
 });
 
@@ -437,7 +434,7 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
   );
 
   for (const id of [3, 4, 6]) {
-    expect(statuses(bulk)[id]).toBe("applied-remote");
+    expect(statuses(bulk)[id]).toBe("pending applied");
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "remote"));
   }
   expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
@@ -452,9 +449,9 @@ test("deleting all of a change's lines in the middle pane ignores it", async () 
     state: start.state.update({ changes: { from: line.from, to: line.to + 1 } }).state,
   };
 
-  expect(statuses(deleted)[0]).toBe("dismissed");
+  expect(statuses(deleted)[0]).toBe("ignored ignored");
   expect(summarize(deleted.state.field(deleted.field))).toEqual({ changes: 7, conflicts: 1 });
-  expect(statuses(command(deleted, undo))[0]).toBe("pending");
+  expect(statuses(command(deleted, undo))[0]).toBe("pending pending");
 });
 
 test("resultText of a CRLF file keeps CRLF after an apply", async () => {
@@ -498,7 +495,7 @@ test("a conflict applied from both sides after its separator line is deleted pus
 
   expect(centerText(both, 0)).toBe("L\nR\n");
   expect(centerText(both, 1)).toBe("d\n");
-  expect(statuses(both)).toEqual(["applied-both", "pending"]);
+  expect(statuses(both)).toEqual(["applied applied", "pending pending"]);
   expect(paneText(next.state)).toBe("a\nL\nR\nD\nz\n");
 });
 

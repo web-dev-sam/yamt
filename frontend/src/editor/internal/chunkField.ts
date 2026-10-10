@@ -9,7 +9,7 @@ import {
 
 import type { Chunk } from "../../ipc";
 import { lineSpan } from "./lineSpan";
-import { isResolved, type ChunkState, type ChunkStatus } from "./status";
+import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
 type DocPos = number & { readonly __brand: "DocPos" };
@@ -89,7 +89,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
   return mapped.map((span, index) => {
     const status =
       changed.get(span.chunk.id) ??
-      (collapsedByUser(spans[index], span) ? "dismissed" : span.status);
+      (collapsedByUser(spans[index], span) ? DELETED_BY_USER : span.status);
     return status === span.status ? span : { ...span, status };
   });
 }
@@ -106,7 +106,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
         return {
           chunk,
           tone: chunkTone(chunk, "center"),
-          status: "pending",
+          status: PENDING,
           from: toDocPos(from),
           to: toDocPos(to),
         };

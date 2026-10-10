@@ -91,22 +91,16 @@ path.chunk-band {
 }
 
 .chunk-action {
+  color: var(--color-fg-muted);
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
 }
 
+.chunk-action:hover {
+  color: var(--color-fg);
+}
+
 .chunk-action rect {
   fill: transparent;
-}
-
-.chunk-action text {
-  fill: var(--color-fg-muted);
-  font-family: var(--font-mono);
-  text-anchor: middle;
-  dominant-baseline: central;
-}
-
-.chunk-action:hover text {
-  fill: var(--color-fg);
 }
