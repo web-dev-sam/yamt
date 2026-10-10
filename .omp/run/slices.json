@@ -1,13 +1,6 @@
 {
-  "M1TTabIndentR2": {
-    "owned": ["frontend/src/editor/internal/indent.test.ts"],
-    "readonly": [
-      "docs/**",
-      ".omp/**",
-      "crates/**",
-      "frontend/src/**",
-      "frontend/package.json",
-      "frontend/vite.config.ts"
-    ]
+  "M1IgnoreTabVerify": {
+    "owned": ["tests/showcase/.verifier-none/**"],
+    "readonly": ["**"]
   }
 }
