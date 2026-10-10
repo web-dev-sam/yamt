@@ -6,17 +6,15 @@ import type { Side } from "./side";
 import { chunkTone, type Tone } from "./tone";
 
 class RemovalPoint extends WidgetType {
-  readonly tone: Tone;
   readonly className: string;
 
   constructor(tone: Tone) {
     super();
-    this.tone = tone;
     this.className = `chunk-removal chunk-removal-${tone}`;
   }
 
   override eq(other: RemovalPoint): boolean {
-    return other.tone === this.tone;
+    return other.className === this.className;
   }
 
   toDOM(): HTMLElement {

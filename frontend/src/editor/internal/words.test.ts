@@ -1,6 +1,6 @@
 import { undo } from "@codemirror/commands";
 import type { EditorState, StateField } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, WidgetType } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
@@ -212,6 +212,32 @@ test("side panes draw one bar per removal point in a CRLF file: line start, mid-
   expect(bars(merge.right)).toEqual(["2 chunk-removal chunk-removal-conflict const 😀| = theirs;"]);
   expect(barPositions(merge.left)).toEqual([5, 21, 27]);
   expect(barPositions(merge.right)).toEqual([13]);
+});
+
+test("a bar equals another pane's bar of the same tone and differs from a bar of another tone", async () => {
+  const merge = open(await synthetic());
+  function widgets(state: EditorState): WidgetType[] {
+    const found: WidgetType[] = [];
+    for (const source of state.facet(EditorView.decorations)) {
+      if (typeof source !== "function") {
+        source.between(0, state.doc.length, (_from, _to, decoration) => {
+          const widget: unknown = decoration.spec.widget;
+          if (widget instanceof WidgetType) {
+            found.push(widget);
+          }
+        });
+      }
+    }
+    return found;
+  }
+  const [leftConflict, , leftModified] = widgets(merge.left);
+  const [rightConflict] = widgets(merge.right);
+  if (leftConflict === undefined || leftModified === undefined || rightConflict === undefined) {
+    throw new Error("missing bars");
+  }
+
+  expect(leftConflict.eq(rightConflict)).toBe(true);
+  expect(leftConflict.eq(leftModified)).toBe(false);
 });
 
 test("a resolved block loses its word marks and bars on every side pane and undo brings them back", async () => {
