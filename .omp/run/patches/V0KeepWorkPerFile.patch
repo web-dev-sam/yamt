@@ -1,0 +1,1423 @@
+diff --git a/frontend/.oxlintrc.json b/frontend/.oxlintrc.json
+index 54eff72..5d585ab 100644
+--- a/frontend/.oxlintrc.json
++++ b/frontend/.oxlintrc.json
+@@ -89,12 +89,6 @@
+         "max-lines-per-function": "off"
+       }
+     },
+-    {
+-      "files": ["src/ui/store.ts", "src/ui/useMergeController.ts"],
+-      "rules": {
+-        "max-lines-per-function": "off"
+-      }
+-    },
+     {
+       "files": ["src/ui/**"],
+       "rules": {
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 115eb49..57af0a7 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -1,11 +1,16 @@
+ import { createLog } from "./log";
+ import { forwardLog } from "./tauri";
++import { guardWindowClose } from "./window";
+ 
+ export type { ChunkSource } from "./ChunkSource";
+ export type { Chunk, FileEntry, FileMergeData, SourceFailure, SourceResult } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createTauriSource } from "./tauri";
+ 
+-export const log = createLog(
+-  import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? forwardLog : undefined,
+-);
++const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++
++export const log = createLog(IN_APP ? forwardLog : undefined);
++
++export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
++  return IN_APP ? guardWindowClose(mayClose) : Promise.resolve();
++}
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 46f5c46..62e6311 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -112,6 +112,14 @@ test("a rejected command rejects the call", async () => {
+   await expect(createTauriSource().loadFile("src/a.ts")).rejects.toThrow("ipc down");
+ });
+ 
++test("a string error from Tauri's IPC layer rejects the call with that message", async () => {
++  commands.finishFile.mockResolvedValue({ status: "error", error: "finish_file not allowed" });
++
++  await expect(createTauriSource().finishFile("src/a.ts", "text")).rejects.toThrow(
++    new Error("finish_file not allowed"),
++  );
++});
++
+ test("the forward stringifies non-finite numbers and keeps every other value", async () => {
+   commands.log.mockResolvedValue(undefined);
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 20a815b..10361f3 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -3,12 +3,20 @@ import type { ChunkSource } from "./ChunkSource";
+ import { toDomain, type SourceFailure, type SourceResult } from "./domain";
+ import type { LogEntry } from "./log";
+ 
+-type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: SourceFailure };
++// Tauri's own IPC layer (invalid arguments, unknown command, ACL denial) rejects with a string,
++// which the generated `typedError` returns as the command's error.
++type CommandResult<T> =
++  | { status: "ok"; data: T }
++  | { status: "error"; error: SourceFailure | string };
+ 
+ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+-  return result.status === "ok"
+-    ? { ok: true, value: result.data }
+-    : { ok: false, failure: result.error };
++  if (result.status === "ok") {
++    return { ok: true, value: result.data };
++  }
++  if (typeof result.error === "string") {
++    throw new Error(result.error);
++  }
++  return { ok: false, failure: result.error };
+ }
+ 
+ export function createTauriSource(): ChunkSource {
+diff --git a/frontend/src/ipc/window.test.ts b/frontend/src/ipc/window.test.ts
+new file mode 100644
+index 0000000..c77be33
+--- /dev/null
++++ b/frontend/src/ipc/window.test.ts
+@@ -0,0 +1,30 @@
++import { expect, test, vi } from "vitest";
++
++import { guardWindowClose } from "./window";
++
++type CloseRequest = { preventDefault: () => void };
++
++const handlers = vi.hoisted(() => new Array<(event: CloseRequest) => Promise<void>>());
++
++vi.mock("@tauri-apps/api/window", () => ({
++  getCurrentWindow: () => ({
++    onCloseRequested: (handler: (event: CloseRequest) => Promise<void>) => {
++      handlers.push(handler);
++      return Promise.resolve(() => undefined);
++    },
++  }),
++}));
++
++async function closeAnswered(answer: boolean): Promise<boolean> {
++  handlers.length = 0;
++  await guardWindowClose(() => Promise.resolve(answer));
++  const prevented = vi.fn();
++  await handlers[0]?.({ preventDefault: prevented });
++  return prevented.mock.calls.length > 0;
++}
++
++test("the window stays open exactly when the check answers no", async () => {
++  expect(await closeAnswered(false)).toBe(true);
++  expect(await closeAnswered(true)).toBe(false);
++  expect(handlers).toHaveLength(1);
++});
+diff --git a/frontend/src/ipc/window.ts b/frontend/src/ipc/window.ts
+new file mode 100644
+index 0000000..fd0fa50
+--- /dev/null
++++ b/frontend/src/ipc/window.ts
+@@ -0,0 +1,9 @@
++import { getCurrentWindow } from "@tauri-apps/api/window";
++
++export async function guardWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
++  await getCurrentWindow().onCloseRequested(async (event) => {
++    if (!(await mayClose())) {
++      event.preventDefault();
++    }
++  });
++}
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 49f8bb3..650c9a7 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -24,6 +24,8 @@
+   --color-on-primary: #ffffff;
+   --color-problem: #402929;
+   --color-problem-border: #5e3838;
++  --color-success: #253627;
++  --color-success-border: #375239;
+ 
+   --color-syntax-keyword: #cf8e6d;
+   --color-syntax-string: #6aab73;
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 0967462..c273b27 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -1,10 +1,30 @@
+ <script setup lang="ts">
++import { onMounted } from "vue";
++
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+ import ProblemBar from "./ProblemBar.vue";
++import QuestionDialog from "./QuestionDialog.vue";
+ import { useAppStore } from "./store";
+ 
+-const { files, active, data, problem, open, finish, reset, dismissProblem } = useAppStore();
++const {
++  files,
++  opened,
++  active,
++  problem,
++  question,
++  allResolved,
++  open,
++  finish,
++  reset,
++  dismissProblem,
++  answer,
++  watchWindowClose,
++} = useAppStore();
++
++onMounted(() => {
++  void watchWindowClose();
++});
+ </script>
+ 
+ <template>
+@@ -12,7 +32,24 @@ const { files, active, data, problem, open, finish, reset, dismissProblem } = us
+     <FileList :files="files" :active="active" @select="open" />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+-      <MergeView :data="data" @finish="finish" @reset="reset" />
++      <p
++        v-else-if="allResolved"
++        role="status"
++        class="shrink-0 border-b border-success-border bg-success px-3 py-2 text-fg"
++      >
++        All files are resolved. Close the window to finish the merge.
++      </p>
++      <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
++        <MergeView
++          v-for="file in opened"
++          :key="file.path"
++          :data="file"
++          :shown="file.path === active"
++          @finish="finish"
++          @reset="reset"
++        />
++      </div>
+     </div>
++    <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />
+   </div>
+ </template>
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 0012d96..8d657f7 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -1,40 +1,48 @@
+ <script setup lang="ts">
+-import { useTemplateRef } from "vue";
++import { onUnmounted, useTemplateRef } from "vue";
+ 
+ import type { FileMergeData } from "../ipc";
+ import MergeToolbar from "./MergeToolbar.vue";
++import { useAppStore, type FileWork, type FinishRequest } from "./store";
+ import { useMergeController } from "./useMergeController";
+ 
+-const props = defineProps<{ data: FileMergeData | null }>();
+-const emit = defineEmits<{ finish: [text: string]; reset: [] }>();
++const props = defineProps<{ data: FileMergeData; shown: boolean }>();
++const emit = defineEmits<{ finish: [request: FinishRequest]; reset: [path: string] }>();
+ 
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-const { summary, applyAllNonConflicting, undo, redo, resultText } = useMergeController(
++const { summary, applyAllNonConflicting, undo, redo, resultText, loadedText } = useMergeController(
+   () => props.data,
+   { left, center, right, strips: [leftStrip, rightStrip] },
+ );
++const { track, untrack } = useAppStore();
++const work: FileWork = { resultText, loadedText };
++track(props.data.path, work);
++
++onUnmounted(() => {
++  untrack(props.data.path, work);
++});
+ 
+ function finish(): void {
+   const text = resultText();
+-  if (text !== null) {
+-    emit("finish", text);
++  if (text !== null && summary.value !== null) {
++    emit("finish", { path: props.data.path, text, summary: summary.value });
+   }
+ }
+ </script>
+ 
+ <template>
+-  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
++  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
+     <MergeToolbar
+       :summary="summary"
+       @apply-left="applyAllNonConflicting('local')"
+       @apply-right="applyAllNonConflicting('remote')"
+       @undo="undo"
+       @redo="redo"
+-      @reset="emit('reset')"
++      @reset="emit('reset', data.path)"
+       @finish="finish"
+     />
+     <section
+diff --git a/frontend/src/ui/QuestionDialog.vue b/frontend/src/ui/QuestionDialog.vue
+new file mode 100644
+index 0000000..96bac44
+--- /dev/null
++++ b/frontend/src/ui/QuestionDialog.vue
+@@ -0,0 +1,53 @@
++<script setup lang="ts">
++import { computed, onMounted, useTemplateRef } from "vue";
++
++import { questionText, type Question } from "./question";
++
++const props = defineProps<{ question: Question }>();
++const emit = defineEmits<{ answer: [yes: boolean] }>();
++
++const dialog = useTemplateRef<HTMLDialogElement>("dialog");
++
++const text = computed(() => questionText(props.question));
++
++onMounted(() => {
++  dialog.value?.showModal();
++});
++
++function cancel(event: Event): void {
++  event.preventDefault();
++  emit("answer", false);
++}
++</script>
++
++<template>
++  <dialog
++    ref="dialog"
++    aria-labelledby="question-title"
++    class="m-auto w-[30rem] rounded-lg border border-separator bg-window p-5 text-fg"
++    @cancel="cancel"
++  >
++    <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
++    <p>{{ text.message }}</p>
++    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto font-mono">
++      <li v-for="file in text.files" :key="file" class="truncate">{{ file }}</li>
++    </ul>
++    <div class="mt-5 flex justify-end gap-2">
++      <button
++        type="button"
++        autofocus
++        class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110"
++        @click="emit('answer', true)"
++      >
++        {{ text.confirm }}
++      </button>
++      <button
++        type="button"
++        class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="emit('answer', false)"
++      >
++        {{ text.cancel }}
++      </button>
++    </div>
++  </dialog>
++</template>
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+new file mode 100644
+index 0000000..e7b6ee1
+--- /dev/null
++++ b/frontend/src/ui/question.test.ts
+@@ -0,0 +1,51 @@
++import { expect, test } from "vitest";
++
++import { exitMustAsk, finishMustAsk, questionText } from "./question";
++
++function unprocessed(conflicts: number, changes: number): string {
++  return questionText({ kind: "unprocessed", summary: { conflicts, changes } }).message;
++}
++
++test("Mark resolved asks exactly when the summary counts a conflict or a change", () => {
++  expect(finishMustAsk({ conflicts: 0, changes: 0 })).toBe(false);
++  expect(finishMustAsk({ conflicts: 1, changes: 0 })).toBe(true);
++  expect(finishMustAsk({ conflicts: 0, changes: 1 })).toBe(true);
++});
++
++test("quitting asks exactly when some file has unsaved work", () => {
++  expect(exitMustAsk([])).toBe(false);
++  expect(exitMustAsk(["src/App.vue"])).toBe(true);
++});
++
++test("the unprocessed sentence names only the non-zero counts with singular and plural", () => {
++  const both = unprocessed(2, 3);
++  expect(both).toContain("2 unresolved conflicts and 3 unprocessed changes still remain.");
++  expect(both).toContain("The file will be saved exactly as shown in the Result pane.");
++
++  expect(unprocessed(1, 1)).toContain(
++    "1 unresolved conflict and 1 unprocessed change still remain.",
++  );
++  expect(unprocessed(1, 0)).toContain("1 unresolved conflict still remains.");
++  expect(unprocessed(0, 1)).toContain("1 unprocessed change still remains.");
++  expect(unprocessed(0, 4)).toContain("4 unprocessed changes still remain.");
++  expect(unprocessed(0, 4)).not.toContain("conflict");
++  expect(unprocessed(5, 0)).not.toContain("change");
++});
++
++test("each question carries WebStorm's title and buttons, and the exit one lists its files", () => {
++  expect(
++    questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }),
++  ).toMatchObject({
++    title: "Unprocessed Changes",
++    files: [],
++    confirm: "Save Current Result",
++    cancel: "Back to Resolving",
++  });
++  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] })).toMatchObject({
++    title: "Cancel File Merge",
++    message: "Are you sure you want to exit without applying changes?",
++    files: ["src/App.vue", "a.ts"],
++    confirm: "Exit",
++    cancel: "Cancel",
++  });
++});
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+new file mode 100644
+index 0000000..91b61f8
+--- /dev/null
++++ b/frontend/src/ui/question.ts
+@@ -0,0 +1,55 @@
++import type { MergeSummary } from "./useMergeController";
++
++export type Question =
++  | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
++  | { readonly kind: "exit"; readonly files: readonly string[] };
++
++export type QuestionText = {
++  readonly title: string;
++  readonly message: string;
++  readonly files: readonly string[];
++  readonly confirm: string;
++  readonly cancel: string;
++};
++
++export function finishMustAsk(summary: MergeSummary): boolean {
++  return summary.conflicts > 0 || summary.changes > 0;
++}
++
++export function exitMustAsk(unsaved: readonly string[]): boolean {
++  return unsaved.length > 0;
++}
++
++function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
++  const parts = [
++    ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),
++    ...(changes > 0 ? [`${changes} unprocessed change${changes === 1 ? "" : "s"}`] : []),
++  ];
++  const verb = conflicts + changes === 1 ? "remains" : "remain";
++  return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
++}
++
++export function questionText(question: Question): QuestionText {
++  switch (question.kind) {
++    case "unprocessed":
++      return {
++        title: "Unprocessed Changes",
++        message: unprocessedSentence(question.summary),
++        files: [],
++        confirm: "Save Current Result",
++        cancel: "Back to Resolving",
++      };
++    case "exit":
++      return {
++        title: "Cancel File Merge",
++        message: "Are you sure you want to exit without applying changes?",
++        files: question.files,
++        confirm: "Exit",
++        cancel: "Cancel",
++      };
++    default: {
++      const _exhaustive: never = question;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index f6f088b..a05a623 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -8,7 +8,7 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+-import { createAppStore, useAppStore, type AppStore } from "./store";
++import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -16,7 +16,10 @@ type PendingLoad = {
+   readonly reject: (error: Error) => void;
+ };
+ 
++type FakeView = { text: string; readonly work: FileWork };
++
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
++const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -26,6 +29,10 @@ function entry(path: string): FileEntry {
+   return { path, status: "Unresolved", unsupported: null };
+ }
+ 
++function resolvedEntry(path: string): FileEntry {
++  return { ...entry(path), status: "Resolved" };
++}
++
+ function ok<T>(value: T): SourceResult<T> {
+   return { ok: true, value };
+ }
+@@ -59,6 +66,24 @@ function spyConsole(): { info: string[]; error: string[] } {
+   return lines;
+ }
+ 
++function fakeView(store: AppStore, path: string, loaded: string): FakeView {
++  const view: FakeView = {
++    text: loaded,
++    work: { resultText: () => view.text, loadedText: () => loaded },
++  };
++  store.track(path, view.work);
++  return view;
++}
++
++async function openNow(store: AppStore, pending: PendingLoad[], path: string): Promise<void> {
++  const opening = store.open(path);
++  await vi.waitFor(() => {
++    expect(pending.at(-1)?.path).toBe(path);
++  });
++  pending.at(-1)?.resolve(ok(await dataFor(path)));
++  await opening;
++}
++
+ test("useAppStore throws before createAppStore, then returns the created store", async () => {
+   // The singleton is module state; only a fresh module instance has never seen createAppStore.
+   vi.resetModules();
+@@ -87,7 +112,7 @@ test("loading the list opens the first file the editor can show and logs file.lo
+ 
+   expect(store.files.value).toEqual([logo, entry("a.ts"), entry("b.ts")]);
+   expect(store.active.value).toBe("a.ts");
+-  expect(store.data.value).toEqual(a);
++  expect(store.opened.value).toEqual([a]);
+   expect(store.problem.value).toBeNull();
+   expect(lines.info).toEqual([`[info] file.loaded {path: "a.ts", chunks: ${a.chunks.length}}`]);
+ });
+@@ -100,7 +125,7 @@ test("an empty list opens nothing", async () => {
+ 
+   expect(pending).toEqual([]);
+   expect(store.active.value).toBeNull();
+-  expect(store.data.value).toBeNull();
++  expect(store.opened.value).toEqual([]);
+ });
+ 
+ test("a rejected list opens nothing, resolves, and shows an Unexpected list problem", async () => {
+@@ -115,7 +140,7 @@ test("a rejected list opens nothing, resolves, and shows an Unexpected list prob
+ 
+   expect(pending).toEqual([]);
+   expect(store.files.value).toEqual([]);
+-  expect(store.data.value).toBeNull();
++  expect(store.opened.value).toEqual([]);
+   expect(store.problem.value).toEqual({
+     action: "list",
+     cause: { kind: "Unexpected", message: "repo gone" },
+@@ -126,6 +151,50 @@ test("a rejected list opens nothing, resolves, and shows an Unexpected list prob
+   ]);
+ });
+ 
++test("opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing", async () => {
++  spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore(source);
++
++  await openNow(store, pending, "a.ts");
++  await openNow(store, pending, "b.ts");
++  const [a, b] = store.opened.value;
++  await store.open("a.ts");
++
++  expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.opened.value).toHaveLength(2);
++  expect(store.opened.value[0]).toBe(a);
++  expect(store.opened.value[1]).toBe(b);
++
++  await store.open("a.ts");
++
++  expect(pending).toHaveLength(2);
++  expect(store.active.value).toBe("a.ts");
++});
++
++test("switching to an opened file wins over a load that resolves later and clears the problem", async () => {
++  const lines = spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore(source);
++  await openNow(store, pending, "a.ts");
++  await openNow(store, pending, "b.ts");
++  const failed = store.open("gone.ts");
++  pending[2]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
++  await failed;
++  expect(store.problem.value).not.toBeNull();
++
++  const openC = store.open("c.ts");
++  await store.open("a.ts");
++  pending[3]?.resolve(ok(await dataFor("c.ts")));
++  await openC;
++
++  expect(store.active.value).toBe("a.ts");
++  expect(store.problem.value).toBeNull();
++  expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts", "b.ts"]);
++  expect(lines.info).toHaveLength(2);
++});
++
+ test("a later open wins when the earlier load resolves last", async () => {
+   const lines = spyConsole();
+   const { source, pending } = handSource([]);
+@@ -141,7 +210,7 @@ test("a later open wins when the earlier load resolves last", async () => {
+   await openA;
+ 
+   expect(store.active.value).toBe("b.ts");
+-  expect(store.data.value).toEqual(b);
++  expect(store.opened.value).toEqual([b]);
+   expect(lines.info).toEqual([`[info] file.loaded {path: "b.ts", chunks: ${b.chunks.length}}`]);
+ });
+ 
+@@ -178,7 +247,7 @@ async function openedStore(
+ test("a failed open names the file and cause, keeps the previous file; a later open clears it", async () => {
+   const lines = spyConsole();
+   const { store, pending } = await openedStore({});
+-  const shown = store.data.value;
++  const shown = store.opened.value;
+   const logo: SourceFailure = { kind: "Unsupported", path: "logo.bin", reason: "Binary" };
+ 
+   const openLogo = store.open("logo.bin");
+@@ -187,7 +256,7 @@ test("a failed open names the file and cause, keeps the previous file; a later o
+ 
+   expect(store.problem.value).toEqual({ action: "open", path: "logo.bin", cause: logo });
+   expect(store.active.value).toBe("a.ts");
+-  expect(store.data.value).toBe(shown);
++  expect(store.opened.value).toBe(shown);
+   expect(lines.error).toEqual([
+     '[error] store.open_failed {path: "logo.bin", kind: "Unsupported", reason: "Binary"}',
+   ]);
+@@ -203,13 +272,14 @@ test("a failed open names the file and cause, keeps the previous file; a later o
+ test("a rejected load is an Unexpected problem and keeps the previous file", async () => {
+   const lines = spyConsole();
+   const { store, pending } = await openedStore({});
+-  const shown = store.data.value;
++  const shown = store.opened.value;
+ 
+   const openB = store.open("b.ts");
+   pending[1]?.reject(new Error("disk gone"));
+   await expect(openB).resolves.toBeUndefined();
+ 
+-  expect(store.data.value).toBe(shown);
++  expect(store.opened.value).toBe(shown);
++  expect(store.active.value).toBe("a.ts");
+   expect(store.problem.value).toEqual({
+     action: "open",
+     path: "b.ts",
+@@ -220,63 +290,85 @@ test("a rejected load is an Unexpected problem and keeps the previous file", asy
+   ]);
+ });
+ 
+-test("finish sends the open file's text, shows the returned list and clears the problem", async () => {
++test("a finish with nothing left sends the text without asking, keeps the file opened and saved", async () => {
+   spyConsole();
+   const sent: [string, string][] = [];
+-  const resolved: FileEntry = { ...entry("a.ts"), status: "Resolved" };
+   const { store, pending } = await openedStore({
+     finishFile: (path, text) => {
+       sent.push([path, text]);
+-      return Promise.resolve(ok([resolved, entry("b.ts")]));
++      return Promise.resolve(ok([resolvedEntry("a.ts"), entry("b.ts")]));
+     },
+   });
++  const view = fakeView(store, "a.ts", "loaded\n");
+   const failed = store.open("gone.ts");
+   pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
+   await failed;
+-  const shown = store.data.value;
++  const shown = store.opened.value;
++  view.text = "merged\r\n";
++  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ 
+-  await store.finish("merged\r\n");
++  await store.finish({ path: "a.ts", text: "merged\r\n", summary: NOTHING_LEFT });
+ 
++  expect(store.question.value).toBeNull();
+   expect(sent).toEqual([["a.ts", "merged\r\n"]]);
+-  expect(store.files.value).toEqual([resolved, entry("b.ts")]);
+-  expect(store.data.value).toBe(shown);
++  expect(store.files.value).toEqual([resolvedEntry("a.ts"), entry("b.ts")]);
++  expect(store.opened.value).toBe(shown);
++  expect(store.active.value).toBe("a.ts");
+   expect(store.problem.value).toBeNull();
++  expect(store.unsavedFiles()).toEqual([]);
++
++  view.text = "edited again\n";
++  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ });
+ 
+-test("finish and reset without an open file call nothing", async () => {
+-  const lines = spyConsole();
+-  const { source } = handSource([]);
+-  const store = createAppStore(source);
++test("a finish with work left asks; Back writes nothing, Save writes the text", async () => {
++  spyConsole();
++  const sent: string[] = [];
++  const { store } = await openedStore({
++    finishFile: (_path, text) => {
++      sent.push(text);
++      return Promise.resolve(ok([resolvedEntry("a.ts")]));
++    },
++  });
++  const summary = { conflicts: 1, changes: 2 };
+ 
+-  await store.finish("text");
+-  await store.reset();
++  const back = store.finish({ path: "a.ts", text: "first", summary });
++  expect(store.question.value).toEqual({ kind: "unprocessed", summary });
++  store.answer(false);
++  await back;
+ 
+-  expect(store.data.value).toBeNull();
+-  expect(store.problem.value).toBeNull();
+-  expect(lines.error).toEqual([]);
++  expect(store.question.value).toBeNull();
++  expect(sent).toEqual([]);
++
++  const save = store.finish({ path: "a.ts", text: "second", summary });
++  store.answer(true);
++  await save;
++
++  expect(sent).toEqual(["second"]);
++  expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
+ });
+ 
+-test("a failed finish keeps the list unresolved, names the path; dismissProblem clears it", async () => {
++test("a failed finish keeps the list unresolved and the old saved text; dismissProblem clears it", async () => {
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
+   const { store, pending, a } = await openedStore({
+     listFiles: () => Promise.resolve([entry("a.ts")]),
+     finishFile: () => Promise.resolve({ ok: false, failure: git }),
+   });
+-  const listing = store.loadFiles();
+-  await vi.waitFor(() => {
+-    expect(pending).toHaveLength(2);
+-  });
+-  pending[1]?.resolve(ok(a));
+-  await listing;
++  const view = fakeView(store, "a.ts", "loaded\n");
++  await store.loadFiles();
++  expect(pending).toHaveLength(1);
+   const before = store.files.value;
+-  const shown = store.data.value;
++  const shown = store.opened.value;
++  view.text = "text";
+ 
+-  await store.finish("text");
++  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT });
+ 
+   expect(store.files.value).toBe(before);
+   expect(store.files.value).toEqual([entry("a.ts")]);
+-  expect(store.data.value).toBe(shown);
++  expect(store.opened.value).toBe(shown);
++  expect(store.opened.value).toEqual([a]);
++  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
+   expect(lines.error).toEqual([
+     '[error] store.finish_failed {path: "a.ts", kind: "Git", message: "git add failed: index.lock exists"}',
+@@ -293,7 +385,9 @@ test("a rejected finish is an Unexpected problem", async () => {
+     finishFile: () => Promise.reject(new Error("ipc down")),
+   });
+ 
+-  await expect(store.finish("text")).resolves.toBeUndefined();
++  await expect(
++    store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT }),
++  ).resolves.toBeUndefined();
+ 
+   expect(store.problem.value).toEqual({
+     action: "finish",
+@@ -302,30 +396,116 @@ test("a rejected finish is an Unexpected problem", async () => {
+   });
+ });
+ 
+-test("reset takes the list from its result and reloads the file as a new object", async () => {
++test("the unsaved list names exactly the opened files whose text differs from loaded or finished", async () => {
++  spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore({
++    ...source,
++    finishFile: () => Promise.resolve(ok([])),
++  });
++  for (const path of ["a.ts", "b.ts", "c.ts", "d.ts"]) {
++    await openNow(store, pending, path);
++  }
++  const a = fakeView(store, "a.ts", "a\n");
++  fakeView(store, "b.ts", "b\n");
++  const c = fakeView(store, "c.ts", "c\n");
++  const d = fakeView(store, "d.ts", "d\n");
++  a.text = "a edited\n";
++  c.text = "c finished\n";
++  await store.finish({ path: "c.ts", text: "c finished\n", summary: NOTHING_LEFT });
++  d.text = "d finished\n";
++  await store.finish({ path: "d.ts", text: "d finished\n", summary: NOTHING_LEFT });
++  d.text = "d\n";
++
++  expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
++
++  store.untrack("a.ts", { resultText: () => "other", loadedText: () => "other" });
++  expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
++  store.untrack("a.ts", a.work);
++  expect(store.unsavedFiles()).toEqual(["d.ts"]);
++});
++
++test("closing asks only with unsaved work and answers with the choice", async () => {
++  spyConsole();
++  const { store } = await openedStore({});
++  const view = fakeView(store, "a.ts", "a\n");
++
++  expect(await store.mayClose()).toBe(true);
++  expect(store.question.value).toBeNull();
++
++  view.text = "a typed\n";
++  const cancelled = store.mayClose();
++  expect(store.question.value).toEqual({ kind: "exit", files: ["a.ts"] });
++  expect(await store.mayClose()).toBe(false);
++  store.answer(false);
++  expect(await cancelled).toBe(false);
++  expect(store.question.value).toBeNull();
++
++  const exited = store.mayClose();
++  store.answer(true);
++  expect(await exited).toBe(true);
++});
++
++test("everything is resolved only when every listed file is", async () => {
++  spyConsole();
++  const { source, pending } = handSource([resolvedEntry("a.ts"), entry("b.ts")]);
++  const store = createAppStore({
++    ...source,
++    finishFile: () => Promise.resolve(ok([resolvedEntry("a.ts"), resolvedEntry("b.ts")])),
++  });
++  expect(store.allResolved.value).toBe(false);
++
++  const loading = store.loadFiles();
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(1);
++  });
++  pending[0]?.resolve(ok(await dataFor("a.ts")));
++  await loading;
++  expect(store.allResolved.value).toBe(false);
++
++  await store.finish({ path: "b.ts", text: "b", summary: NOTHING_LEFT });
++
++  expect(store.allResolved.value).toBe(true);
++});
++
++test("reset of A reloads only A as a new object and keeps B opened", async () => {
+   spyConsole();
+   const reset: string[] = [];
+-  const { store, pending, a } = await openedStore({
++  const { source, pending } = handSource([]);
++  const store = createAppStore({
++    ...source,
+     resetFile: (path) => {
+       reset.push(path);
+       return Promise.resolve(ok([entry("a.ts"), entry("b.ts")]));
+     },
+-    listFiles: () => Promise.reject(new Error("not used")),
++    finishFile: () => Promise.resolve(ok([])),
+   });
+-  const shown = store.data.value;
++  await openNow(store, pending, "a.ts");
++  await openNow(store, pending, "b.ts");
++  await store.open("a.ts");
++  const [shownA, shownB] = store.opened.value;
++  const view = fakeView(store, "a.ts", "a\n");
++  view.text = "finished\n";
++  await store.finish({ path: "a.ts", text: "finished\n", summary: NOTHING_LEFT });
++  const a = await dataFor("a.ts");
+ 
+-  const resetting = store.reset();
++  const resetting = store.reset("a.ts");
+   await vi.waitFor(() => {
+-    expect(pending.map((load) => load.path)).toEqual(["a.ts", "a.ts"]);
++    expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
+   });
+-  pending[1]?.resolve(ok(a));
++  pending[2]?.resolve(ok(a));
+   await resetting;
+ 
+   expect(reset).toEqual(["a.ts"]);
+   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
+-  expect(store.data.value).toEqual(a);
+-  expect(store.data.value).not.toBe(a);
+-  expect(store.data.value).not.toBe(shown);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.opened.value).toHaveLength(2);
++  expect(store.opened.value).toContain(shownB);
++  expect(store.opened.value).not.toContain(shownA);
++  const reloaded = store.opened.value.find((file) => file.path === "a.ts");
++  expect(reloaded).toEqual(a);
++  expect(reloaded).not.toBe(a);
++  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ });
+ 
+ test("a failed reset keeps the current file and names the path", async () => {
+@@ -333,12 +513,12 @@ test("a failed reset keeps the current file and names the path", async () => {
+   const { store, pending } = await openedStore({
+     resetFile: () => Promise.resolve({ ok: false, failure: { kind: "UnknownPath", path: "a.ts" } }),
+   });
+-  const shown = store.data.value;
++  const shown = store.opened.value;
+ 
+-  await store.reset();
++  await store.reset("a.ts");
+ 
+   expect(pending).toHaveLength(1);
+-  expect(store.data.value).toBe(shown);
++  expect(store.opened.value).toBe(shown);
+   expect(store.problem.value).toEqual({
+     action: "reset",
+     path: "a.ts",
+@@ -346,7 +526,7 @@ test("a failed reset keeps the current file and names the path", async () => {
+   });
+ });
+ 
+-test("a later open wins over a reset that resolves last", async () => {
++test("a later open wins over a reset that resolves last, and the reset file is dropped", async () => {
+   spyConsole();
+   const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
+   const { store, pending } = await openedStore({
+@@ -357,7 +537,7 @@ test("a later open wins over a reset that resolves last", async () => {
+   });
+   const b = await dataFor("b.ts");
+ 
+-  const resetting = store.reset();
++  const resetting = store.reset("a.ts");
+   const openB = store.open("b.ts");
+   pending[1]?.resolve(ok(b));
+   await openB;
+@@ -367,4 +547,5 @@ test("a later open wins over a reset that resolves last", async () => {
+   expect(pending).toHaveLength(2);
+   expect(store.active.value).toBe("b.ts");
+   expect(store.files.value).toEqual([entry("a.ts")]);
++  expect(store.opened.value).toEqual([b]);
+ });
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 9104e2c..ac3d1f8 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -2,142 +2,270 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import {
+   log,
++  onWindowClose,
+   type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
++import { exitMustAsk, finishMustAsk, type Question } from "./question";
++import type { MergeSummary } from "./useMergeController";
+ 
+-export type ProblemCause =
+-  | SourceFailure
+-  | { readonly kind: "Unexpected"; readonly message: string };
++type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
++
++export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type Problem =
+-  | { readonly action: "list"; readonly cause: ProblemCause }
++  | { readonly action: "list"; readonly cause: Unexpected }
+   | {
+       readonly action: "open" | "finish" | "reset";
+       readonly path: string;
+       readonly cause: ProblemCause;
+     };
+ 
++export type FileWork = { resultText(): string | null; loadedText(): string | null };
++
++export type FinishRequest = {
++  readonly path: string;
++  readonly text: string;
++  readonly summary: MergeSummary;
++};
++
+ type Outcome<T> =
+   | { readonly ok: true; readonly value: T }
+   | { readonly ok: false; readonly cause: ProblemCause };
+ 
++type Asking = { readonly question: Question; readonly answer: (yes: boolean) => void };
++
++type State = {
++  readonly source: ChunkSource;
++  readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly opened: ShallowRef<readonly FileMergeData[]>;
++  readonly active: ShallowRef<string | null>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly asking: ShallowRef<Asking | null>;
++  readonly work: Map<string, FileWork>;
++  readonly finished: Map<string, string>;
++  latestLoad: number;
++};
++
+ export type AppStore = {
+   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+-  readonly active: ComputedRef<string | null>;
+-  readonly data: Readonly<ShallowRef<FileMergeData | null>>;
++  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
++  readonly active: Readonly<ShallowRef<string | null>>;
+   readonly problem: Readonly<ShallowRef<Problem | null>>;
++  readonly question: ComputedRef<Question | null>;
++  readonly allResolved: ComputedRef<boolean>;
+   loadFiles(): Promise<void>;
+   open(path: string): Promise<void>;
+-  finish(text: string): Promise<void>;
+-  reset(): Promise<void>;
++  finish(request: FinishRequest): Promise<void>;
++  reset(path: string): Promise<void>;
+   dismissProblem(): void;
++  answer(yes: boolean): void;
++  track(path: string, work: FileWork): void;
++  untrack(path: string, work: FileWork): void;
++  unsavedFiles(): string[];
++  mayClose(): Promise<boolean>;
++  watchWindowClose(): Promise<void>;
+ };
+ 
+ let store: AppStore | null = null;
+ 
+ export function createAppStore(source: ChunkSource): AppStore {
+-  const files = shallowRef<readonly FileEntry[]>([]);
+-  const data = shallowRef<FileMergeData | null>(null);
+-  const problem = shallowRef<Problem | null>(null);
+-  const active = computed(() => data.value?.path ?? null);
+-  let latestLoad = 0;
+-
+-  function report(failure: Problem): void {
+-    logFailure(failure);
+-    problem.value = failure;
+-  }
+-
+-  async function open(path: string): Promise<void> {
+-    latestLoad += 1;
+-    const ticket = latestLoad;
+-    const outcome = await attempt(() => source.loadFile(path));
+-    const current = ticket === latestLoad;
+-    if (!outcome.ok) {
+-      const failure: Problem = { action: "open", path, cause: outcome.cause };
+-      if (current) {
+-        report(failure);
+-      } else {
+-        logFailure(failure);
+-      }
+-      return;
+-    }
+-    if (!current) {
+-      return;
+-    }
+-    // A new object, so the editor is rebuilt even when the source returns the record it cached.
+-    data.value = { ...outcome.value };
+-    problem.value = null;
+-    log.info("file.loaded", { path, chunks: outcome.value.chunks.length });
+-  }
+-
+-  async function finish(text: string): Promise<void> {
+-    const path = active.value;
+-    if (path === null) {
+-      return;
+-    }
+-    const outcome = await attempt(() => source.finishFile(path, text));
+-    if (!outcome.ok) {
+-      report({ action: "finish", path, cause: outcome.cause });
+-      return;
+-    }
+-    files.value = outcome.value;
+-    problem.value = null;
+-  }
+-
+-  async function reset(): Promise<void> {
+-    const path = active.value;
+-    if (path === null) {
+-      return;
+-    }
+-    latestLoad += 1;
+-    const ticket = latestLoad;
+-    const outcome = await attempt(() => source.resetFile(path));
+-    if (!outcome.ok) {
+-      report({ action: "reset", path, cause: outcome.cause });
+-      return;
+-    }
+-    files.value = outcome.value;
+-    if (ticket === latestLoad) {
+-      await open(path);
+-    }
+-  }
+-
+-  async function loadFiles(): Promise<void> {
+-    const outcome = await attempt(async () => ({ ok: true, value: await source.listFiles() }));
+-    if (!outcome.ok) {
+-      report({ action: "list", cause: outcome.cause });
+-      return;
+-    }
+-    files.value = outcome.value;
+-    problem.value = null;
+-    const first = outcome.value.find((file) => file.unsupported === null);
+-    if (first !== undefined) {
+-      await open(first.path);
+-    }
+-  }
+-
+-  function dismissProblem(): void {
+-    problem.value = null;
+-  }
+-
+-  store = { files, active, data, problem, loadFiles, open, finish, reset, dismissProblem };
++  const state: State = {
++    source,
++    files: shallowRef<readonly FileEntry[]>([]),
++    opened: shallowRef<readonly FileMergeData[]>([]),
++    active: shallowRef<string | null>(null),
++    problem: shallowRef<Problem | null>(null),
++    asking: shallowRef<Asking | null>(null),
++    work: new Map(),
++    finished: new Map(),
++    latestLoad: 0,
++  };
++  const { files, opened, active, problem } = state;
++  store = {
++    files,
++    opened,
++    active,
++    problem,
++    question: computed(() => state.asking.value?.question ?? null),
++    allResolved: computed(
++      () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
++    ),
++    loadFiles: () => loadFiles(state),
++    open: (path) => open(state, path),
++    finish: (request) => finish(state, request),
++    reset: (path) => reset(state, path),
++    dismissProblem: () => dismissProblem(state),
++    answer: (yes) => answer(state, yes),
++    track: (path, work) => track(state, path, work),
++    untrack: (path, work) => untrack(state, path, work),
++    unsavedFiles: () => unsavedFiles(state),
++    mayClose: () => mayClose(state),
++    watchWindowClose: () => watchWindowClose(state),
++  };
+   return store;
+ }
+ 
++function report(state: State, failure: Problem): void {
++  logFailure(failure);
++  state.problem.value = failure;
++}
++
++function dismissProblem(state: State): void {
++  state.problem.value = null;
++}
++
++function track(state: State, path: string, work: FileWork): void {
++  state.work.set(path, work);
++}
++
++function untrack(state: State, path: string, work: FileWork): void {
++  if (state.work.get(path) === work) {
++    state.work.delete(path);
++  }
++}
++
++async function loadFiles(state: State): Promise<void> {
++  let listed: FileEntry[];
++  try {
++    listed = await state.source.listFiles();
++  } catch (error) {
++    report(state, { action: "list", cause: unexpected(error) });
++    return;
++  }
++  state.files.value = listed;
++  state.problem.value = null;
++  const first = listed.find((file) => file.unsupported === null);
++  if (first !== undefined) {
++    await open(state, first.path);
++  }
++}
++
++async function open(state: State, path: string): Promise<void> {
++  if (path === state.active.value) {
++    return;
++  }
++  if (state.opened.value.some((file) => file.path === path)) {
++    state.latestLoad += 1;
++    state.active.value = path;
++    state.problem.value = null;
++    return;
++  }
++  await load(state, path);
++}
++
++async function load(state: State, path: string): Promise<void> {
++  state.latestLoad += 1;
++  const ticket = state.latestLoad;
++  const outcome = await attempt(() => state.source.loadFile(path));
++  const current = ticket === state.latestLoad;
++  if (!outcome.ok) {
++    const failure: Problem = { action: "open", path, cause: outcome.cause };
++    if (current) {
++      report(state, failure);
++    } else {
++      logFailure(failure);
++    }
++    return;
++  }
++  if (!current) {
++    return;
++  }
++  // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
++  const loaded = { ...outcome.value };
++  const opened = state.opened.value;
++  state.opened.value = opened.some((file) => file.path === path)
++    ? opened.map((file) => (file.path === path ? loaded : file))
++    : [...opened, loaded];
++  state.active.value = path;
++  state.problem.value = null;
++  log.info("file.loaded", { path, chunks: loaded.chunks.length });
++}
++
++async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
++  if (finishMustAsk(summary) && !(await ask(state, { kind: "unprocessed", summary }))) {
++    return;
++  }
++  const outcome = await attempt(() => state.source.finishFile(path, text));
++  if (!outcome.ok) {
++    report(state, { action: "finish", path, cause: outcome.cause });
++    return;
++  }
++  state.files.value = outcome.value;
++  state.finished.set(path, text);
++  state.problem.value = null;
++}
++
++async function reset(state: State, path: string): Promise<void> {
++  state.latestLoad += 1;
++  const ticket = state.latestLoad;
++  const outcome = await attempt(() => state.source.resetFile(path));
++  if (!outcome.ok) {
++    report(state, { action: "reset", path, cause: outcome.cause });
++    return;
++  }
++  state.files.value = outcome.value;
++  state.opened.value = state.opened.value.filter((file) => file.path !== path);
++  state.finished.delete(path);
++  if (ticket === state.latestLoad) {
++    await load(state, path);
++  }
++}
++
++function ask(state: State, question: Question): Promise<boolean> {
++  if (state.asking.value !== null) {
++    return Promise.resolve(false);
++  }
++  return new Promise((resolve) => {
++    state.asking.value = { question, answer: resolve };
++  });
++}
++
++function answer(state: State, yes: boolean): void {
++  const asking = state.asking.value;
++  state.asking.value = null;
++  asking?.answer(yes);
++}
++
++function unsavedFiles(state: State): string[] {
++  return state.opened.value
++    .map((file) => file.path)
++    .filter((path) => {
++      const work = state.work.get(path);
++      const text = work?.resultText() ?? null;
++      return text !== null && text !== (state.finished.get(path) ?? work?.loadedText());
++    });
++}
++
++async function mayClose(state: State): Promise<boolean> {
++  const files = unsavedFiles(state);
++  return exitMustAsk(files) ? ask(state, { kind: "exit", files }) : true;
++}
++
++async function watchWindowClose(state: State): Promise<void> {
++  try {
++    await onWindowClose(() => mayClose(state));
++  } catch (error) {
++    log.error("store.close_guard_failed", { ...unexpected(error) });
++  }
++}
++
+ async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<Outcome<T>> {
+   try {
+     const result = await call();
+     return result.ok ? result : { ok: false, cause: result.failure };
+   } catch (error) {
+-    const message = error instanceof Error ? error.message : String(error);
+-    return { ok: false, cause: { kind: "Unexpected", message } };
++    return { ok: false, cause: unexpected(error) };
+   }
+ }
+ 
++function unexpected(error: unknown): Unexpected {
++  return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
++}
++
+ function logFailure(failure: Problem): void {
+   const where = failure.action === "list" ? {} : { path: failure.path };
+   log.error(`store.${failure.action}_failed`, { ...where, ...failure.cause });
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index 9eedf0a..e22c97d 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -14,54 +14,73 @@ export type { MergeSummary } from "../editor";
+ 
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+-export function useMergeController(
+-  data: MaybeRefOrGetter<FileMergeData | null>,
+-  hosts: {
+-    left: Host<HTMLDivElement>;
+-    center: Host<HTMLDivElement>;
+-    right: Host<HTMLDivElement>;
+-    strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
+-  },
+-): {
+-  summary: Readonly<ShallowRef<MergeSummary | null>>;
++type Hosts = {
++  readonly left: Host<HTMLDivElement>;
++  readonly center: Host<HTMLDivElement>;
++  readonly right: Host<HTMLDivElement>;
++  readonly strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
++};
++
++type MergeHandle = {
++  readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
+   applyAllNonConflicting(side: Side): void;
+   undo(): void;
+   redo(): void;
+   resultText(): string | null;
+-} {
++  loadedText(): string | null;
++};
++
++type HostElements = readonly [
++  HTMLDivElement | null,
++  HTMLDivElement | null,
++  HTMLDivElement | null,
++  SVGSVGElement | null,
++  SVGSVGElement | null,
++];
++
++function createController(
++  data: FileMergeData | null,
++  [left, center, right, leftStrip, rightStrip]: HostElements,
++): MergeController | null {
++  if (
++    data === null ||
++    left === null ||
++    center === null ||
++    right === null ||
++    leftStrip === null ||
++    rightStrip === null
++  ) {
++    return null;
++  }
++  return new MergeController(data, { left, center, right, strips: [leftStrip, rightStrip] });
++}
++
++export function useMergeController(
++  data: MaybeRefOrGetter<FileMergeData | null>,
++  hosts: Hosts,
++): MergeHandle {
+   const summary = shallowRef<MergeSummary | null>(null);
+   let controller: MergeController | null = null;
++  let loaded: string | null = null;
+ 
+   function destroyController(): void {
+     controller?.destroy();
+     controller = null;
++    loaded = null;
+     summary.value = null;
+   }
+ 
+   watch(
+     [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+-    ([current, left, center, right, leftStrip, rightStrip]) => {
++    ([current, ...elements]) => {
+       destroyController();
+-      if (
+-        current === null ||
+-        left === null ||
+-        center === null ||
+-        right === null ||
+-        leftStrip === null ||
+-        rightStrip === null
+-      ) {
+-        return;
+-      }
+-      controller = new MergeController(current, {
+-        left,
+-        center,
+-        right,
+-        strips: [leftStrip, rightStrip],
+-      });
+-      controller.onSummaryChange((next) => {
++      const created = createController(current, elements);
++      created?.onSummaryChange((next) => {
+         summary.value = next;
+       });
+-      summary.value = controller.summary();
++      controller = created;
++      summary.value = created?.summary() ?? null;
++      loaded = created?.resultText() ?? null;
+     },
+     { immediate: true, flush: "post" },
+   );
+@@ -74,5 +93,6 @@ export function useMergeController(
+     undo: () => controller?.undo(),
+     redo: () => controller?.redo(),
+     resultText: () => controller?.resultText() ?? null,
++    loadedText: () => loaded,
+   };
+ }
+diff --git a/src-tauri/capabilities/main.json b/src-tauri/capabilities/main.json
+new file mode 100644
+index 0000000..59485c1
+--- /dev/null
++++ b/src-tauri/capabilities/main.json
+@@ -0,0 +1,7 @@
++{
++  "$schema": "../gen/schemas/desktop-schema.json",
++  "identifier": "main",
++  "description": "The merge window asks before closing: it listens for the close request and destroys itself.",
++  "windows": ["main"],
++  "permissions": ["core:event:allow-listen", "core:window:allow-destroy"]
++}
