@@ -35,8 +35,8 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
   inside `useMergeController`, not a `ref`.
 - [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts)` is the
   **only** place `ui/` imports from `editor/`. It is an adaptable composable: `toRef(data)`
-  in a `watch` creates/destroys the controller; `summary` arrives via `shallowRef` (with the
-  apply slice; today no `summary`).
+  in a `watch` creates/destroys the controller; `summary` is a `shallowRef` fed by
+  `onSummaryChange`.
 
 ## Library use
 

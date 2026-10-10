@@ -13,9 +13,10 @@ Base: `references/typescript-best-practices.md` (rule table) and
 - [TS1] Line numbers are branded: `BaseLine`, `LocalLine`, `RemoteLine` (created only in
   `ipc/domain.ts`), `DocPos` (created only in `editor/`). `LineRange<L> = { start: L; len: number }`.
   A function taking a line takes the branded type. Violation: `function lineTop(line: number)`.
-- [TS2] Variants are discriminated unions with a `kind` field; no optional-field bags.
-  Chunk status is `"pending" | "applied-local" | "applied-remote" | "applied-both" | "dismissed"`,
-  never `{ applied?: boolean; side?: Side }`.
+- [TS2] Variants are discriminated unions with a `kind` field (`ChunkAction = { kind: "apply" | "ignore"; chunk; side }`);
+  no optional-field bags. A fact held per side is a `Readonly<Record<Side, …>>` of a closed union:
+  chunk status is `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2 #33), never
+  `{ applied?: boolean; side?: Side }`.
 - [TS3] Every `switch` over a union ends in `default: { const _exhaustive: never = x; return _exhaustive; }`
   or has no default and is covered by tsgolint `switch-exhaustiveness-check` (enabled; both forms pass).
 - [TS4] No `as`, no `!`, no `any`. The only exception is `ipc/fixture.ts`, after valibot parsing.
@@ -25,8 +26,11 @@ Base: `references/typescript-best-practices.md` (rule table) and
   domain type. Tauri IPC payloads are generated from Rust and trusted (decision 19).
 - [TS6] Derive before declaring: `Pick`/`Omit`/`ReturnType`/`Parameters`/`typeof` over a
   parallel interface. The generated `bindings.ts` is the authority for DTO shapes.
-- [TS7] Object parameters for functions with ≥ 3 arguments, except per-frame paths
-  (`connectors/`, `editor/internal/scrollSync.ts`, `strips.ts`) where positional is allowed.
+- [TS7] A function with ≥ 3 parameters takes an object parameter when two of them have types that
+  can be swapped without a type error (two `number`s, two `string`s, two `Side`s). Positional is
+  fine when every parameter has its own type (`isSideOpen(chunk, status, side)`,
+  `mapSpans(spans, changes, doc, applied)`), and in the per-frame paths (`connectors/`,
+  `scrollSync.ts`, `strips.ts`). Violation: `lineSpan(doc, from: number, to: number)`.
 
 ## Modules and files (Rust-typical, vision 1)
 
@@ -36,8 +40,12 @@ Base: `references/typescript-best-practices.md` (rule table) and
   No `types/`, `utils/`, `helpers/`, `common/`, `lib/` directories. Detector: review.
 - [TS10] Top-level functions are `function` declarations; arrow functions only as arguments
   or in-expression. Detector: oxlint `func-style: declaration`.
-- [TS11] One exported thing per file unless they are a type and its single constructor.
-  Files ≤ 300 lines; functions ≤ 40 lines.
+- [TS11] One concept per file: a type with its constructors and predicates (`status.ts`:
+  `ChunkStatus`, `isSideOpen`, `statusAfterApply`, `summarize`), or one module-private vocabulary
+  (`geometry.ts`: `Pane`, `PaneViews`, `ChunkRow`, `rangeSpan`). Not "one export". A file that mixes
+  two concepts is split. Violation: `tone.ts` exporting `Side` and `sideChanged` next to `Tone` (#152).
+  Functions ≤ 40 lines, non-test files ≤ 300; test files have no line cap. Detector: oxlint
+  `max-lines-per-function`, `max-lines`.
 - [TS16] No export without an importer. Detector: `pnpm unused` (knip).
 - [TS17] A table whose keys are known when the code is written is a `Readonly<Record<K, V>>`
   literal (membership: `Record<string, true>`); `Map`/`Set` only for keys computed at runtime.
@@ -50,8 +58,10 @@ Base: `references/typescript-best-practices.md` (rule table) and
   (`log` is the only fire-and-forget). Detector: tsgolint `no-floating-promises`.
 - [TS14] No magic numbers; `const LINE_HEIGHT_PX = …` next to its only user. Detector:
   oxlint `no-magic-numbers` (0, 1, -1 ignored).
-- [TS15] Mutable module state is forbidden except the store singleton in `ui/store.ts` and the
-  controller instance held by `useMergeController`. Everything else is a parameter or a return.
+- [TS15] Mutable module state is forbidden except: the store singleton in `ui/store.ts`; the
+  controller instance held by `useMergeController`; and parse-once caches of constant build-time
+  inputs, read through one function and copied per use (`strips.ts` `parsedIcons`: Lucide markup →
+  parsed `<svg>`, `cloneNode` per button). Everything else is a parameter or a return.
 
 ## Strictness (tsconfig, do not loosen)
 

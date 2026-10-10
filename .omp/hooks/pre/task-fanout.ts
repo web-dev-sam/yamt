@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 import {
@@ -10,19 +8,6 @@ import {
 } from "../lib/policy";
 
 const BROADCAST = "agent://all";
-
-function registryNotCommitted(cwd: string): string | undefined {
-  try {
-    const status = execFileSync("git", ["status", "--porcelain", "--", SLICE_REGISTRY], {
-      cwd,
-      encoding: "utf8",
-    });
-    if (status === "") return undefined;
-    return `${SLICE_REGISTRY} has uncommitted changes; isolated agents run in a copy of HEAD, so commit it before spawning`;
-  } catch (error) {
-    return `cannot read the git status of ${SLICE_REGISTRY}: ${error instanceof Error ? error.message : String(error)}`;
-  }
-}
 
 function spawnProblem(
   item: unknown,
@@ -38,12 +23,12 @@ function spawnProblem(
   if (typeof name !== "string")
     return `an implementer spawn needs an explicit \`name\` registered in ${SLICE_REGISTRY}`;
   if (spawned.has(name)) {
-    return `"${name}" was already spawned in this session; a repeat is renamed "${name}-2", which ${SLICE_REGISTRY} does not list. Use a fresh name (${name}R1), register it, commit, then spawn`;
+    return `"${name}" was already spawned in this session; a repeat is renamed "${name}-2", which ${SLICE_REGISTRY} does not list. Use a fresh name (${name}R1), register it, then spawn`;
   }
   if (readSliceRegistry(cwd)[name] === undefined) {
-    return `"${name}" is not a key of ${SLICE_REGISTRY}; write the registry with only the live task names, commit, then spawn`;
+    return `"${name}" is not a key of ${SLICE_REGISTRY}; write the registry with only the live task names, then spawn`;
   }
-  return isolated ? registryNotCommitted(cwd) : undefined;
+  return undefined;
 }
 
 export default function taskFanout(pi: ExtensionAPI): void {
@@ -62,6 +47,18 @@ export default function taskFanout(pi: ExtensionAPI): void {
       return {
         block: true,
         reason: `[task-fanout/OR10] ${items.length} tasks in one call; at most MAX_PARALLEL_AGENTS (${MAX_PARALLEL_AGENTS}) agents run at once. Split the call.`,
+      };
+    }
+    if (
+      items.filter(
+        (item) =>
+          item !== null && typeof item === "object" && Reflect.get(item, "isolated") === true,
+      ).length > 1
+    ) {
+      return {
+        block: true,
+        reason:
+          "[task-fanout/OR1] isolated agents race on `git worktree add` when spawned together; one isolated agent per call",
       };
     }
     for (const item of items) {

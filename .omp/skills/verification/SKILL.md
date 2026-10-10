@@ -1,6 +1,6 @@
 ---
 name: verification
-description: What counts as proof in yamt — the `just check` gate, per-layer smoke recipes (CLI goldens, fixture browser in Epiphany, Tauri on a scripted conflict repo), and how to report evidence. Autoloaded into verifier; implementers read it for the smoke recipe of their layer.
+description: What counts as proof in yamt — the `just check` gate, per-layer smoke recipes (CLI goldens, fixture browser in WebKit (MiniBrowser through `just webdriver`), Tauri on a scripted conflict repo), and how to report evidence. Autoloaded into verifier; implementers read it for the smoke recipe of their layer.
 ---
 
 # Verification
@@ -15,7 +15,7 @@ just check
 ```
 
 Runs, in order: `fmt-check` → `clippy` → `test` → `deny` → `bindings-check` → `fixtures-check` →
-`web-lint` → `web-typecheck` → `web-test` → `web-unused` → `arch-check` → `golden` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
+`web-lint` → `web-typecheck` → `web-test` → `web-unused` → `arch-check` → `map-check` → `golden` → `sfc-order` → `hooks-test`. Any non-zero exit is `gate: fail`
 with the failing recipe name and the first 30 relevant lines in `failures[].excerpt`.
 
 - [VF1] The verifier never fixes anything. A failure goes back to the owning slice.
@@ -24,7 +24,8 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
 - [VF3] The gate is run from a clean tree state as merged by the orchestrator, not inside
   an implementer's isolated workspace.
 - [VF6] Verifier recipes are read-only commands; a detector's failing path is proven by a
-  committed test, never by tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no writes).
+  committed test, never by tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no
+  repository writes; the scratch dir is exempt).
 - [VF7] After `just check`, once per wave: `just mutants <base>` (`<base>` = the commit before the
   wave's patches; not in `check`). It mutates the wave's changed Rust lines (cargo-mutants) and
   changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS); reports in
@@ -51,16 +52,18 @@ observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the o
 **frontend, fixture mode**
 
 ```
-pnpm -C frontend dev --port <own port>   # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until M2
-just webdriver <own port>                # WebKitWebDriver on a private virtual display (Xvfb)
+pnpm -C frontend dev --port <own port>   # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until 2.1
+just webdriver <own port>                # test windows on the Samsung screen (scripts/test-screen.sh place); private display without one
 # session capabilities: browserName "MiniBrowser",
 #   webkitgtk:browserOptions { binary: "/usr/lib/webkitgtk-6.0/MiniBrowser", args: ["--automation"] }
+just test-window-check                   # optional: lists where each test window went (VF8)
 ```
 
-- [VF8] Agents never open a browser window on the owner's screens (owner, 2026-10-09: windows
-  appeared under their mouse). Drive WebKit only through `just webdriver`; never start
-  `WebKitWebDriver`, `MiniBrowser` or `epiphany` directly. Set the window size with WebDriver
-  `setWindowRect`. Stop the driver and the dev server when done.
+- [VF8] WebKit test sessions start through `just webdriver`: it places test windows on the owner's
+  Samsung screen when one is connected, otherwise on a private virtual display (plan §2 #40). A test
+  window on another screen is not a failure (owner 2026-10-10: "atm not important spawn wherever").
+  `just test-window-check` is optional, useful to see where a window went. Set the window size with
+  WebDriver `setWindowRect`. When done, stop the driver, the dev server and the app you started.
 
 observed: three panes, bands between them, apply a change via its arrow, undo, bulk apply;
 console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path.
@@ -71,18 +74,23 @@ console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot pa
 pnpm -C frontend test:browser
 ```
 
-observed: `scrollSync`, `strips` tests green in the `browser` project (Playwright WebKit). If
-WebKit cannot launch on this machine, say so verbatim: `pnpm test` (the `node` project) excludes
-`src/editor/**`, so the layout tests did not run, which is reported, not hidden.
+observed: `engine.browser.test.ts` green in the `browser` project (Playwright WebKit); every other
+editor test runs in `node` (`pnpm test`). If WebKit cannot launch on this machine, say so verbatim:
+the probe did not run, which is reported, not hidden.
 
-**tauri shell (M2+)**
+**tauri shell (2.0+)**
 
 ```
-scripts/conflict-repo.sh /tmp/yamt-smoke     # (planned, M2) a repo with 3 conflicted files incl. add/add and CRLF
-cargo tauri dev -- --repo /tmp/yamt-smoke
+scripts/conflict-repo.sh /tmp/yamt-test-merge   # (planned) a repo with 3 conflicted files incl. add/add and CRLF
+scripts/test-screen.sh place                    # re-points the KWin rules; exits non-zero without a Samsung screen
+cargo tauri dev -- --repo /tmp/yamt-test-merge
 ```
 
-observed: sidebar lists 3 files; finish one ⇒ `git -C /tmp/yamt-smoke ls-files -u` no longer
+The smoke repository's folder contains `yamt-test` and the window title is `<repository folder> — yamt`
+(plan §2 #41), so the title rule places the window on the Samsung screen when it can and the owner's
+own `yamt` windows are not moved (VF8).
+
+observed: sidebar lists 3 files; finish one ⇒ `git -C /tmp/yamt-test-merge ls-files -u` no longer
 lists it; reset it ⇒ listed again with three stages and markers in the worktree.
 
 ## Output schema

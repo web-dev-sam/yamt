@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `c08ca96` (M1 wave 1 landed: fixtures in the window, palette test). Full text: `docs/architecture.md`.
+Verified against commit: `6f86732` (M1 retro applied: word marks, apply/undo, toolbar, showcase fixtures, tauri deps). Full text: `docs/architecture.md`.
 Package names (`cargo -p`, `just`, arch-check) are in parentheses. "(planned)" = not in the tree yet.
 
 ## Core visions (ranked; lower number wins a conflict)
@@ -19,30 +19,40 @@ Package names (`cargo -p`, `just`, arch-check) are in parentheses. "(planned)" =
 ## Tree
 
 ```
-crates/merge-core   (yamt-merge-core) pure diff3 chunk model. NO I/O, NO git, NO tauri, NO serde_json, NO tokio
+crates/merge-core   (yamt-merge-core) pure diff3 chunk model and per-side word changes: chunk, compute, apply, line (InlineRange/InlinePoint),
+                    token (tokenizer), line_pairs (line pairing, Dice ≥ 50 %), word (`word_changes`). NO I/O, NO git, NO tauri, NO serde_json, NO tokio
 crates/gitio        (yamt-gitio) git subprocess layer (ls-files -u, cat-file --batch, update-index, add, checkout -m). NO diff logic
 crates/session      (yamt-session) MergeSession state machine; the only crate that knows both of the above
 crates/cli          (yamt-cli, bin yamt-cli) headless binary: classify / scan / golden / fixture
 crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge stops with scripted conflicts (regular, symlink, gitlink); dev-dependency of gitio, session, cli
-src-tauri           (yamt-app) bins `yamt` (shell stub) and `export-bindings` (specta → ipc/bindings.ts: FileEntry, FileMergeData). No lib.rs, no tauri dep yet
+src-tauri           (yamt-app) bins `yamt` (shell stub) and `export-bindings` (specta → ipc/bindings.ts: FileEntry, FileMergeData). No lib.rs; tauri/tauri-specta declared (8576e54); commands land in 2.0 (plan §2 #41)
 scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-core, clippy threshold parity
+scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map
+scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
-frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts;
-                    fixture.ts (the M1 source: valibot over fixtures/golden/*.json); bindings.ts (GENERATED); log.ts; TauriChunkSource is M2
+frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (the M1 source:
+                    valibot over fixtures/golden/*.json and fixtures/showcase/*.json); bindings.ts (GENERATED); log.ts; TauriChunkSource is 2.1
 frontend/src/model  empty and unused (AGENTS.md only); reserved for pure TS shared by more than one module
-frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s) + destroy(); internal/: pane, chunkField, decorations, side, tone, lineSpan, geometry, strips, scrollSync; theme.css; framework-free (engine.browser.test.ts WebKit probe; other tests in `node`)
+frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s): undo, redo, resultText, summary,
+                    onSummaryChange, applyAllNonConflicting, destroy; types `Side`, `MergeSummary`. internal/: pane, chunkField, status, sideStatus, apply,
+                    decorations, words, language, indent, side, tone, lineSpan, geometry, strips, scrollSync; theme.css; framework-free
+                    (all `*.test.ts` in `node`; `engine.browser.test.ts` is the WebKit probe)
+frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
-frontend/src/ui     Vue 3 chrome: App, FileList (emits select), MergeToolbar (inert), MergeView, useMergeController (only ../editor importer), store.ts singleton; planned: WarningBanner
-frontend/src/main.ts     creates the fixture source and the store, loads the file list, mounts App; `VITE_CHUNK_SOURCE` picks a source from M2
+frontend/src/ui     Vue 3 chrome: App, FileList (emits select), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
+                    useMergeController (only ../editor importer), store.ts singleton; planned: WarningBanner
+frontend/src/main.ts     creates the fixture source and the store, loads the file list, mounts App; `VITE_CHUNK_SOURCE` picks a source from 2.1
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
-frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5); palette.ts (VU17) — each with a .test.ts that reads src/ itself
-frontend/fixtures   sample/{base,local,remote}.ts.txt (`just smoke-cli`); golden/<case>.json GENERATED by `just fixtures`, checked by `just fixtures-check`
+frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself
+frontend/fixtures   sample/{base,local,remote}.ts.txt (`just smoke-cli`); golden/<case>.json GENERATED by `just fixtures`, checked by `just fixtures-check`;
+                    showcase/<case>.json GENERATED from `tests/showcase/<case>/` by `just fixtures` (demo cases, not goldens)
 frontend/tsconfig   tsconfig.app.json: src/**, types [vite/client] — no Node globals in webview code;
                     tsconfig.node.json: scripts/**, vite.config.ts, types [node]. typecheck = `vue-tsc -b`
-frontend/vite.config.ts  Vitest projects: `node` (model, connectors, ipc, ui, scripts) = `pnpm test`;
-                    `browser` (editor, Playwright WebKit) = `pnpm test:browser`, not in `just check`
+frontend/vite.config.ts  Vitest projects: `node` (model, connectors, ipc, ui, editor `*.test.ts`, scripts) = `pnpm test`;
+                    `browser` (`editor/**/*.browser.test.ts`, Playwright WebKit) = `pnpm test:browser`, not in `just check`
 tests/golden/<case>      base.<ext> local.<ext> remote.<ext> README.md, expected.json (generated, `just golden-update`); scripts/golden-repo.sh rebuilds a case as a repo
+tests/showcase/<case>    hand-written base/local/remote demo (`word-marks`), source of `fixtures/showcase`
 docs/                    plan.md (decisions §2), architecture.md, ai-system.md, slices/SLICES.md, slices/briefs/, walkthroughs/
 AGENTS.md                root, plus one per module: crates/*, src-tauri, frontend/src/*
 ```
@@ -58,37 +68,38 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 - [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`. Detector: `just arch-check` (`cargo tree --target all --all-features`; std::fs/process grep), clippy `disallowed_*`.
 - [PM2] `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` (at any depth). Detector: oxlint overrides + `frontend/scripts/fences.test.ts`.
-- [PM3] `editor/**`, `model/**`, `connectors/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`.
+- [PM3] `editor/**`, `model/**`, `connectors/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`, or `~icons/*` without `?raw`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (`~icons/*`: `fences.test.ts` only).
 - [PM4] `ipc/bindings.ts` is generated; never hand-edited. Detector: hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` (diffs a fresh export in `target/`).
 - [PM5] No module imports a sibling's `internal/` (bare `**/internal` included); no import cycles. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`; `import/no-cycle` everywhere.
+- [PM6] Every non-test source file under `frontend/src/` (except `ipc/bindings.ts`), `frontend/scripts/`, `scripts/`, `crates/merge-core/src/` is named in this map. Detector: `just map-check`.
 
 ## State ownership (vision 2)
 
-| state                                    | owner                                                                                                                                        |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)          | CodeMirror `EditorState`                                                                                                                     |
-| chunk current positions (center)         | `editor/chunkField` StateField, mapped per CM1 (`-1`; `to` `+1` only when it ends mid-line); restored on undo by an `invertedEffects` effect |
-| chunk apply status                       | same StateField, changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)                                        |
-| left/right decorations                   | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                          |
-| scroll positions                         | DOM, driven by `editor/scrollSync`                                                                                                           |
-| connector geometry                       | derived per frame, never stored                                                                                                              |
-| file list, active file, loaded file data | `ui/store.ts` singleton via `useAppStore()`                                                                                                  |
-| summary counts of the open file          | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                               |
-| captured index stages (for reset)        | `session::FileState.stages`, captured at `open()`                                                                                            |
+| state                                    | owner                                                                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)          | CodeMirror `EditorState`                                                                                                                                          |
+| chunk current positions (center)         | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
+| chunk apply status                       | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
+| left/right decorations                   | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
+| scroll positions                         | DOM, driven by `editor/scrollSync`                                                                                                                                |
+| connector geometry                       | derived per frame, never stored                                                                                                                                   |
+| file list, active file, loaded file data | `ui/store.ts` singleton via `useAppStore()`                                                                                                                       |
+| summary counts of the open file          | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
+| captured index stages (for reset)        | `session::FileState.stages`, captured at `open()`                                                                                                                 |
 
 Vue state never holds an `EditorView`, a position, or document text.
 
 ## Where does X go?
 
-| X                                                      | place                                                                              |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| a new git operation                                    | `gitio::Repo` method; bytes in/out; integration test with a real tempdir repo      |
-| a new chunk property                                   | `merge_core::Chunk` → regenerate bindings → `ipc/domain.ts`                        |
-| a new IPC command                                      | `src-tauri/src/commands.rs` (≤ 15 lines, delegates to `session`) → `just bindings` |
-| an editor behaviour (apply, undo, decorations, gutter) | `editor/internal/*`, exposed only through `MergeController`                        |
-| a new chrome widget                                    | `ui/<Name>.vue`, state in `store.ts`, actions in `store.ts`                        |
-| a tunable number                                       | one `const` next to its only user, or `merge_core::DEFAULT_GAP`                    |
-| a cross-cutting decision                               | `docs/plan.md` §2 row citing a vision                                              |
+| X                                                            | place                                                                              |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| a new git operation                                          | `gitio::Repo` method; bytes in/out; integration test with a real tempdir repo      |
+| a new chunk property                                         | `merge_core::Chunk` → regenerate bindings → `ipc/domain.ts`                        |
+| a new IPC command                                            | `src-tauri/src/commands.rs` (≤ 15 lines, delegates to `session`) → `just bindings` |
+| an editor behaviour (apply, undo, decorations, strip arrows) | `editor/internal/*`, exposed only through `MergeController`                        |
+| a new chrome widget                                          | `ui/<Name>.vue`, state in `store.ts`, actions in `store.ts`                        |
+| a tunable number                                             | one `const` next to its only user, or `merge_core::DEFAULT_GAP`                    |
+| a cross-cutting decision                                     | `docs/plan.md` §2 row citing a vision                                              |
 
 ## Line spaces (vision 4)
 

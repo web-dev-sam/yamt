@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export const PRODUCT_CODE_ROOTS = ["crates/**", "frontend/**", "src-tauri/**", "tests/golden/**"];
 
@@ -96,9 +97,24 @@ export function pathsFromToolInput(toolName: string, input: Record<string, unkno
   return [...found];
 }
 
+function mainCheckoutPath(cwd: string): string {
+  try {
+    const [gitDir, commonDir, prefix] = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-prefix"],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).split("\n");
+    // Only a linked worktree's git dir differs from the common dir it shares (git-worktree(1)).
+    if (gitDir === undefined || commonDir === undefined || gitDir === commonDir) return cwd;
+    return resolve(dirname(commonDir), prefix ?? "");
+  } catch {
+    return cwd;
+  }
+}
+
 export function readSliceRegistry(cwd: string): SliceRegistry {
   try {
-    const raw = readFileSync(resolve(cwd, SLICE_REGISTRY), "utf8");
+    const raw = readFileSync(resolve(mainCheckoutPath(cwd), SLICE_REGISTRY), "utf8");
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const out: SliceRegistry = {};
@@ -127,13 +143,18 @@ export function ownershipFor(
 }
 
 const REDIRECT_TARGET =
-  /(?:>>?|\btee\s+(?:-a\s+)?|\bcp\s+(?:-\S+\s+)*\S+\s+|\bmv\s+(?:-\S+\s+)*\S+\s+)\s*["']?([^\s;&|"']+)/g;
+  /(?:(?<![=-])>>?|\btee\s+(?:-a\s+)?|\bcp\s+(?:-\S+\s+)*\S+\s+|\bmv\s+(?:-\S+\s+)*\S+\s+)\s*["']?([^\s;&|"']+)/g;
+
+const CD_TARGET = /\bcd\s+["']?([^\s;&|"']+)/g;
 
 export function writeTargetsFromCommand(command: string): string[] {
+  const cds = [...command.matchAll(CD_TARGET)];
   const targets: string[] = [];
   for (const m of command.matchAll(REDIRECT_TARGET)) {
     const t = m[1];
-    if (t !== undefined && t !== "/dev/null" && !t.startsWith("&")) targets.push(t);
+    if (t === undefined || t === "/dev/null" || t.startsWith("&")) continue;
+    const dir = cds.findLast((cd) => cd.index < m.index)?.[1];
+    targets.push(dir !== undefined && isAbsolute(dir) && !isAbsolute(t) ? resolve(dir, t) : t);
   }
   return targets;
 }

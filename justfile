@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-check: fmt-check clippy test deny bindings-check fixtures-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
+check: fmt-check clippy test deny bindings-check fixtures-check web-lint web-typecheck web-test web-unused arch-check map-check golden sfc-order hooks-test
 
 fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
@@ -45,6 +45,9 @@ web-unused: (frontend "unused")
 
 arch-check:
     scripts/arch-check.sh
+
+map-check:
+    scripts/map-check.sh
 
 sfc-order: (frontend "sfc-order")
 

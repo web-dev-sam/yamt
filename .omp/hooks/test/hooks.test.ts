@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { flaggedTerms, readPlainLanguageLists } from "../lib/plain-language";
-import type { AgentIdentity } from "../lib/policy";
+import { type AgentIdentity, readSliceRegistry } from "../lib/policy";
 import bashGuard from "../pre/bash-guard";
 import generated from "../pre/generated";
 import ownership from "../pre/ownership";
@@ -208,40 +208,82 @@ test("task-fanout: at most MAX_PARALLEL_AGENTS tasks per main call", async () =>
   await assertVerdict(h, task(3), MAIN, true);
 });
 
-test("task-fanout: implementer spawns are registered, committed, and never reuse a name", async () => {
+test("task-fanout: one isolated agent per main call", async () => {
   const h = toolCallHandler(taskFanout);
-  const spawn = (name: string, isolated = false): ToolCall => ({
+  const tasks = (...items: Array<Record<string, unknown>>): ToolCall => ({
     toolName: "task",
-    input: { tasks: [{ name, agent: "web-impl", isolated }] },
+    input: { tasks: items },
+  });
+  await assertVerdict(
+    h,
+    tasks({ name: "A", isolated: true }, { name: "B", isolated: true }),
+    MAIN,
+    true,
+    FIXTURE_REPO,
+  );
+  await assertVerdict(
+    h,
+    tasks({ name: "M0S1MergeCore", agent: "web-impl", isolated: true }, { name: "T1" }),
+    MAIN,
+    false,
+    FIXTURE_REPO,
+  );
+});
+
+test("task-fanout: implementer spawns are registered and never reuse a name", async () => {
+  const h = toolCallHandler(taskFanout);
+  const spawn = (name: string): ToolCall => ({
+    toolName: "task",
+    input: { tasks: [{ name, agent: "web-impl" }] },
   });
   await assertVerdict(h, spawn("Stranger"), MAIN, true, FIXTURE_REPO);
   await assertVerdict(h, spawn("M0S1MergeCore"), MAIN, false, FIXTURE_REPO);
   await assertVerdict(h, spawn("M0S1MergeCore"), MAIN, true, FIXTURE_REPO);
+});
 
-  const repo = mkdtempSync(resolve(tmpdir(), "yamt-fanout-"));
+test("policy: hooks in a linked worktree read the main checkout's uncommitted registry", async () => {
+  const main = mkdtempSync(resolve(tmpdir(), "yamt-main-"));
+  const worktreeParent = mkdtempSync(resolve(tmpdir(), "yamt-worktree-"));
+  const worktree = resolve(worktreeParent, "m");
   const git = (...args: string[]): string =>
     execFileSync(
       "git",
       ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
-      {
-        cwd: repo,
-        encoding: "utf8",
-      },
+      { cwd: main, encoding: "utf8" },
     );
   try {
     git("init", "--quiet");
-    mkdirSync(resolve(repo, ".omp/run"), { recursive: true });
-    const registry = resolve(repo, ".omp/run/slices.json");
-    writeFileSync(registry, JSON.stringify({ A: { owned: ["a/**"] }, B: { owned: ["b/**"] } }));
-    await assertVerdict(toolCallHandler(taskFanout), spawn("A", true), MAIN, true, repo);
+    mkdirSync(resolve(main, ".omp/run"), { recursive: true });
+    const registry = resolve(main, ".omp/run/slices.json");
+    writeFileSync(registry, JSON.stringify({ B: { owned: ["b/**"] } }));
     git("add", ".omp/run/slices.json");
     git("commit", "--quiet", "-m", "registry");
-    await assertVerdict(toolCallHandler(taskFanout), spawn("A", true), MAIN, false, repo);
-    writeFileSync(registry, JSON.stringify({ B: { owned: ["b/**"] } }));
-    await assertVerdict(toolCallHandler(taskFanout), spawn("B", true), MAIN, true, repo);
+    git("worktree", "add", "--quiet", worktree);
+    writeFileSync(registry, JSON.stringify({ A: { owned: ["a/**"] } }));
+
+    assert.deepEqual(readSliceRegistry(worktree), { A: { owned: ["a/**"] } });
+    await assertVerdict(
+      toolCallHandler(taskFanout),
+      { toolName: "task", input: { tasks: [{ name: "A", agent: "web-impl", isolated: true }] } },
+      MAIN,
+      false,
+      worktree,
+    );
   } finally {
-    rmSync(repo, { recursive: true, force: true });
+    rmSync(main, { recursive: true, force: true });
+    rmSync(worktreeParent, { recursive: true, force: true });
   }
+});
+
+test("ownership: arrows are not redirects; targets after `cd <dir>` resolve against it", async () => {
+  const h = toolCallHandler(ownership);
+  const cases: Array<[string, boolean]> = [
+    [`curl -d '{"script":"x => 1"}' http://127.0.0.1:4445/session`, false],
+    [`cd ${resolve(tmpdir(), "rk13")} && printf a > base`, false],
+    ["printf a > base", true],
+  ];
+  for (const [command, blocked] of cases)
+    await assertVerdict(h, bash(command), UNREGISTERED, blocked, FIXTURE_REPO);
 });
 
 test("task-fanout: broadcasts are blocked for everyone, named messages pass", async () => {

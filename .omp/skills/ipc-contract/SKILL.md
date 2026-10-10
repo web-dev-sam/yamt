@@ -23,8 +23,8 @@ from them and committed.
 - [IPC3] Rust newtypes (`BaseLine`, `LocalLine`, `RemoteLine`, `ChunkId`) arrive as `number`;
   `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is BaseLine`), never `as` (TS4).
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
-  (`GitFailed { args, stderr }`, `Unsupported { path, reason }`, …); never a string. The
-  frontend `switch`es on `kind` exhaustively.
+  (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`); never a
+  string. The frontend `switch`es on `kind` exhaustively.
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
   method, map the error. No logic in `src-tauri`.
 - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
@@ -36,17 +36,21 @@ from them and committed.
 list_files()                      -> Vec<FileEntry>
 load_file(path)                   -> FileMergeData
 finish_file(path, text: String)   -> Vec<FileEntry>
-reset_file(path)                  -> FileMergeData
-quit_if_done()                    -> bool
+reset_file(path)                  -> Vec<FileEntry>
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 ```
 
+Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window
+exits 0 only when every file is resolved. The #36 take-left/take-right command is named by its
+wave-3 brief. Once 2.0 lands, the generated `commands` (`just bindings-check`) are the authority.
+
 ## Frontend side
 
-- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`) is the interface the app talks to. M1: one
-  implementation, the fixture source in `ipc/fixture.ts` (reads `fixtures/golden/*.json`, valibot —
-  the only runtime parse, decision 19); `main.ts` creates it directly. M2 adds `TauriChunkSource`
-  (wraps `commands`), and `main.ts` then picks by `import.meta.env.VITE_CHUNK_SOURCE` (architecture §4).
+- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`) is the interface the app talks to. Until 2.1 there is
+  one implementation: the fixture source in `ipc/fixture.ts`, which reads `fixtures/golden/*.json`
+  and `fixtures/showcase/*.json` with valibot (the only runtime parse, decision 19); `main.ts`
+  creates it directly. 2.1 adds `TauriChunkSource` (wraps `commands`), and `main.ts` then picks by
+  `import.meta.env.VITE_CHUNK_SOURCE` (architecture §4).
 - [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
   the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
   call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,

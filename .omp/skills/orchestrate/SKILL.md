@@ -58,9 +58,9 @@ recipe; editor slices list `skill://cm6-rules` under `## Skills`. Hand failing-p
 
 ## 3. Spawn
 
-`write` `.omp/run/slices.json` with only the live task names and **commit** it before spawning;
-isolated agents see HEAD. Detector: hooks `slice-registry.ts`, `task-fanout.ts`.
-One `task` call of at most `MAX_PARALLEL_AGENTS` slices (OR10), `isolated: true`, `name` = slice id in
+`write` `.omp/run/slices.json` with only the live task names; hooks in isolated worktrees read the
+main checkout's copy, so a grant applies at once. Detector: hooks `slice-registry.ts`, `task-fanout.ts`.
+One `task` call per isolated slice (at most `MAX_PARALLEL_AGENTS` live, OR10), `isolated: true`, `name` = slice id in
 CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl` (language-neutral work: `rust-impl`; the
 default `task` agent is disabled), brief as `task`, background as `context`, `solutionSpace` = openness.
 

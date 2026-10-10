@@ -295,13 +295,15 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 ### 3.5 `src-tauri`
 
 - One `tauri::State<Mutex<MergeSession>>`.
-- Commands (thin, typed with `tauri-specta`; fallback `ts-rs` if specta lags Tauri):
-  `list_files() -> Vec<FileEntry>`, `load_file(path) -> FileMergeData`,
-  `finish_file(path, text) -> Vec<FileEntry>`, `reset_file(path) -> FileMergeData`,
-  `quit_if_done() -> bool`.
-- Errors: one `#[serde(tag = "kind")] enum IpcError` mirrored into TS; no stringly errors.
-- `main()`: DMABUF guard (plan §3) **before** `tauri::Builder`; CLI args: `--repo <path>`;
-  exit code 0 iff `remaining() == 0` at close.
+- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Vec<FileEntry>`,
+  `load_file(path) -> FileMergeData`, `finish_file(path, text) -> Vec<FileEntry>`,
+  `reset_file(path) -> Vec<FileEntry>`, `log(entry)`. No `quit_if_done`: the app stays open after
+  the last file (#37).
+- Errors: one `#[serde(tag = "kind")] enum IpcError` (`Git`, `UnknownPath`, `Unsupported`,
+  `WriteFailed`) mirrored into TS; no stringly errors.
+- `main()`: DMABUF guard (plan §3) **before** `tauri::Builder` (M3 row); CLI `yamt [--repo <path>]`;
+  nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
+  `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`.
 
 ---

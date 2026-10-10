@@ -45,7 +45,12 @@
           }
         ]
       }
-    ]
+    ],
+    "max-lines-per-function": [
+      "error",
+      { "max": 40, "skipBlankLines": true, "skipComments": true }
+    ],
+    "max-lines": ["error", { "max": 300 }]
   },
   "overrides": [
     {
@@ -79,7 +84,15 @@
     {
       "files": ["**/*.test.ts"],
       "rules": {
-        "no-magic-numbers": "off"
+        "no-magic-numbers": "off",
+        "max-lines": "off",
+        "max-lines-per-function": "off"
+      }
+    },
+    {
+      "files": ["src/ui/store.ts", "src/ui/useMergeController.ts"],
+      "rules": {
+        "max-lines-per-function": "off"
       }
     },
     {

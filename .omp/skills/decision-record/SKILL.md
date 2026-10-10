@@ -18,10 +18,15 @@ session). Read it before any design work; it is the list of things not to re-exp
 - [DR3] Adding a dependency is a decision (vision 5): name what the chosen stack cannot do
   without it. Rust: the crate list in `docs/architecture.md` §7 is closed unless a row is
   added. Frontend: same for `package.json` runtime deps.
-- [DR4] Reopening a row: write the proposed replacement row *below* the old one with the new
+- [DR4] Reopening a row: write the proposed replacement row _below_ the old one with the new
   information in the "Rejected" column of the old row, and stop — Gate D (human) decides.
 - [DR5] Agents never edit `docs/plan.md`; they put the proposed row in
   `deviations_from_brief` / `open_risks` and the orchestrator records it.
+- [DR6] An interaction WebStorm already has (merge-window buttons, marks, keys, focus, undo) is
+  designed from WebStorm's own behaviour. The brief cites its source (`intellij-community`
+  diff-impl `merge/`, e.g. `MergeConflictModel.ignoreChange`/`replaceChange`) or an observed run.
+  A deviation is a product question for the owner, never an orchestrator default. Violation: 1.4's
+  × resolved the whole conflict, while WebStorm ignores one side (#255, plan §2 #33).
 
 ## Product questions, not technical questions
 
