@@ -1,0 +1,557 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 10e619e..58f4392 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4607,7 +4607,6 @@ dependencies = [
+  "tracing",
+  "tracing-subscriber",
+  "yamt-conflict-repo",
+- "yamt-gitio",
+  "yamt-session",
+ ]
+ 
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index d3bb941..2d4c3f9 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -98,6 +98,11 @@ impl MergeSession {
+         Ok(MergeSession { repo, files })
+     }
+ 
++    #[must_use]
++    pub fn root(&self) -> &Path {
++        self.repo.root()
++    }
++
+     #[must_use]
+     pub fn files(&self) -> Vec<FileEntry> {
+         let mut entries = Vec::with_capacity(self.files.len());
+diff --git a/scripts/conflict-repo.sh b/scripts/conflict-repo.sh
+index e767151..9ee79e6 100755
+--- a/scripts/conflict-repo.sh
++++ b/scripts/conflict-repo.sh
+@@ -4,11 +4,7 @@
+ # cases (.ts, .vue, .tsx) at their original paths, a CRLF file, an add/add file, a binary file and a file
+ # deleted on one side. Prints the conflicted paths. Uses no user or system git config (risk RK19).
+ set -euo pipefail
+-
+-die() {
+-    echo "conflict-repo: $*" >&2
+-    exit 1
+-}
++source "$(dirname "$0")/git-sandbox.sh"
+ 
+ [ $# -eq 1 ] || die "usage: $0 <dir>"
+ dir=$1
+@@ -16,23 +12,8 @@ golden_dir="$(cd "$(dirname "$0")/.." && pwd)/tests/golden"
+ golden_cases=(vue-core-compiler-von vue-core-playground-app tanstack-query-persist-provider)
+ expected_conflicts=$((${#golden_cases[@]} + 4))
+ 
+-if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
+-    die "refusing to overwrite $dir: it exists and is not empty"
+-fi
+-
+-git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+-read -r git_major git_minor <<<"$git_version"
+-if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
+-    die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
+-fi
+-
+-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+-repo_git() {
+-    git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
+-        -c commit.gpgsign=false -c core.autocrlf=false \
+-        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+-}
++require_empty_dir "$dir"
++isolate_git_config
+ 
+ # $1: path in the repo, $2: printf format giving the content (\r, \0 allowed).
+ write() {
+@@ -47,8 +28,7 @@ put_golden() {
+     local name case_dir path ext
+     for name in "${golden_cases[@]}"; do
+         case_dir="$golden_dir/$name"
+-        path=$(sed -n 's/^- File: //p' "$case_dir/README.md")
+-        [ -n "$path" ] || die "$case_dir/README.md has no '- File: <path>' line"
++        path=$(golden_file_path "$case_dir")
+         ext=${path##*.}
+         [ -f "$case_dir/$1.$ext" ] || die "missing $case_dir/$1.$ext"
+         if [ -s "$case_dir/$1.$ext" ]; then
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+new file mode 100644
+index 0000000..e186be5
+--- /dev/null
++++ b/scripts/git-sandbox.sh
+@@ -0,0 +1,42 @@
++# Sourced by scripts/conflict-repo.sh and scripts/golden-repo.sh: the shared prelude for building a
++# scripted repository in "$dir" without any user or system git config (risk RK19).
++# GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
++
++sandbox_name=$(basename "$0" .sh)
++
++die() {
++    echo "$sandbox_name: $*" >&2
++    exit 1
++}
++
++# $1: the directory for the repository; refuses one that exists and is not empty.
++require_empty_dir() {
++    if [ -e "$1" ] && [ -n "$(ls -A "$1")" ]; then
++        die "refusing to overwrite $1: it exists and is not empty"
++    fi
++}
++
++# $1: a golden case directory. Prints the path its README.md names on the `- File: <path>` line.
++golden_file_path() {
++    local path
++    path=$(sed -n 's/^- File: //p' "$1/README.md")
++    [ -n "$path" ] || die "$1/README.md has no '- File: <path>' line"
++    echo "$path"
++}
++
++isolate_git_config() {
++    local git_version git_major git_minor
++    git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
++    read -r git_major git_minor <<<"$git_version"
++    if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
++        die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
++    fi
++    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
++    unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
++}
++
++repo_git() {
++    git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
++        -c commit.gpgsign=false -c core.autocrlf=false \
++        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
++}
+diff --git a/scripts/golden-repo.sh b/scripts/golden-repo.sh
+index 78c6bb7..bd526b7 100755
+--- a/scripts/golden-repo.sh
++++ b/scripts/golden-repo.sh
+@@ -2,11 +2,7 @@
+ # Usage: scripts/golden-repo.sh <case> <dir>
+ # Builds a git repo in <dir> with tests/golden/<case> left mid-merge (local merging remote).
+ set -euo pipefail
+-
+-die() {
+-    echo "golden-repo: $*" >&2
+-    exit 1
+-}
++source "$(dirname "$0")/git-sandbox.sh"
+ 
+ [ $# -eq 2 ] || die "usage: $0 <case> <dir>"
+ case_name=$1
+@@ -14,30 +10,16 @@ dir=$2
+ case_dir="$(cd "$(dirname "$0")/.." && pwd)/tests/golden/$case_name"
+ 
+ [ -f "$case_dir/README.md" ] || die "no such case: $case_dir"
+-if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
+-    die "refusing to overwrite $dir: it exists and is not empty"
+-fi
++require_empty_dir "$dir"
+ 
+-path=$(sed -n 's/^- File: //p' "$case_dir/README.md")
+-[ -n "$path" ] || die "$case_dir/README.md has no '- File: <path>' line"
++path=$(golden_file_path "$case_dir")
+ ext=${path##*.}
+ for side in base local remote; do
+     [ -f "$case_dir/$side.$ext" ] || die "missing $case_dir/$side.$ext"
+ done
+ 
+-git_version=$(git version | sed -n 's/^git version \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+-read -r git_major git_minor <<<"$git_version"
+-if [ -z "$git_version" ] || [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 32 ]; }; then
+-    die "git >= 2.32 is required (GIT_CONFIG_GLOBAL); found: $(git version)"
+-fi
++isolate_git_config
+ 
+-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+-unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+-repo_git() {
+-    git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
+-        -c commit.gpgsign=false -c core.autocrlf=false \
+-        -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+-}
+ put() {
+     mkdir -p "$(dirname "$dir/$path")"
+     cp "$case_dir/$1.$ext" "$dir/$path"
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index a4769ff..15d7a36 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `args.rs` (`yamt [--repo <path>]`), `outcome.rs` (start-up decision, exit status 0/1/2), `window.rs` (the one window), `commands.rs` (commands ≤ 15 lines delegating to `session`, `IpcError`, one `Mutex<MergeSession>`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`). `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). DMABUF guard: wave 4.
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `outcome.rs` (start-up decision, exit status 0/1/2), `window.rs` (the one window), `commands.rs` (commands ≤ 15 lines delegating to `session`, `IpcError`, one `Mutex<MergeSession>`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`). `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). Depends on `session` only, never on `gitio`.
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 6c49a22..5964eb6 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -13,7 +13,6 @@ path = "src/main.rs"
+ tauri-build.workspace = true
+ 
+ [dependencies]
+-yamt-gitio.workspace = true
+ yamt-session.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index f98b6e7..65af1c9 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -1,8 +1,3 @@
+-#![allow(
+-    clippy::needless_pass_by_value,
+-    reason = "tauri commands receive state and arguments by value"
+-)]
+-
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::{Runtime, State};
+@@ -74,38 +69,46 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
+ 
+ #[tauri::command]
+ #[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn list_files(state: State<'_, SessionState>) -> Vec<FileEntry> {
+     lock(&state).files()
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+-fn load_file(state: State<'_, SessionState>, path: String) -> Result<FileMergeData, IpcError> {
+-    Ok(lock(&state).load(&path)?)
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++fn load_file(state: State<'_, SessionState>, path: &str) -> Result<FileMergeData, IpcError> {
++    Ok(lock(&state).load(path)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn finish_file(
+     state: State<'_, SessionState>,
+-    path: String,
+-    text: String,
++    path: &str,
++    text: &str,
+ ) -> Result<Vec<FileEntry>, IpcError> {
+     let mut session = lock(&state);
+-    session.finish(&path, &text)?;
++    session.finish(path, text)?;
+     Ok(session.files())
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+-fn reset_file(state: State<'_, SessionState>, path: String) -> Result<Vec<FileEntry>, IpcError> {
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++fn reset_file(state: State<'_, SessionState>, path: &str) -> Result<Vec<FileEntry>, IpcError> {
+     let mut session = lock(&state);
+-    session.reset(&path)?;
++    session.reset(path)?;
+     Ok(session.files())
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri deserialises a struct argument into an owned value"
++)]
+ fn log(entry: LogEntry) {
+     entry.emit();
+ }
+@@ -124,6 +127,7 @@ mod tests {
+     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ 
+     use super::*;
++    use crate::frontend_log::tests::logged;
+     use crate::outcome::{Exit, ending_on_close};
+ 
+     const CRLF_PATH: &str = "crlf.ts";
+@@ -301,13 +305,15 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn log_accepts_a_frontend_entry_and_rejects_an_unknown_level() {
++    fn log_emits_a_frontend_entry_to_tracing_and_rejects_an_unknown_level() {
+         let window = open_window();
+         let fields = json!({ "lines": 3, "ok": true, "name": "a" });
+         let entry = json!({ "level": "warn", "event": "scroll.drift", "fields": fields });
++        let (response, logged) = logged(|| window.invoke("log", json!({ "entry": entry })));
++        assert_eq!(response, Ok(Value::Null));
+         assert_eq!(
+-            window.invoke("log", json!({ "entry": entry })),
+-            Ok(Value::Null)
++            logged.trim_end(),
++            r#" WARN frontend: event="scroll.drift" fields=lines=3 name="a" ok=true"#
+         );
+         let bad = json!({ "level": "loud", "event": "scroll.drift", "fields": {} });
+         let rejected = window.invoke("log", json!({ "entry": bad })).unwrap_err();
+diff --git a/src-tauri/src/frontend_log.rs b/src-tauri/src/frontend_log.rs
+index 1f949b6..0dca849 100644
+--- a/src-tauri/src/frontend_log.rs
++++ b/src-tauri/src/frontend_log.rs
+@@ -32,10 +32,10 @@ impl LogEntry {
+         let event = &self.event;
+         let fields = fields_text(&self.fields);
+         match self.level {
+-            LogLevel::Debug => tracing::debug!(target: TARGET, event, fields),
+-            LogLevel::Info => tracing::info!(target: TARGET, event, fields),
+-            LogLevel::Warn => tracing::warn!(target: TARGET, event, fields),
+-            LogLevel::Error => tracing::error!(target: TARGET, event, fields),
++            LogLevel::Debug => tracing::debug!(target: TARGET, event, %fields),
++            LogLevel::Info => tracing::info!(target: TARGET, event, %fields),
++            LogLevel::Warn => tracing::warn!(target: TARGET, event, %fields),
++            LogLevel::Error => tracing::error!(target: TARGET, event, %fields),
+         }
+     }
+ }
+@@ -56,7 +56,7 @@ fn fields_text(fields: &BTreeMap<String, LogValue>) -> String {
+ }
+ 
+ #[cfg(test)]
+-mod tests {
++pub(crate) mod tests {
+     use std::io;
+     use std::sync::{Arc, Mutex, PoisonError};
+ 
+@@ -77,7 +77,7 @@ mod tests {
+         }
+     }
+ 
+-    fn emitted(entry: &LogEntry) -> String {
++    pub(crate) fn logged<T>(action: impl FnOnce() -> T) -> (T, String) {
+         let captured = Captured::default();
+         let writer = captured.clone();
+         let subscriber = tracing_subscriber::fmt()
+@@ -86,13 +86,17 @@ mod tests {
+             .without_time()
+             .with_writer(move || writer.clone())
+             .finish();
+-        tracing::subscriber::with_default(subscriber, || entry.emit());
++        let result = tracing::subscriber::with_default(subscriber, action);
+         let bytes = captured
+             .0
+             .lock()
+             .unwrap_or_else(PoisonError::into_inner)
+             .clone();
+-        String::from_utf8(bytes).unwrap()
++        (result, String::from_utf8(bytes).unwrap())
++    }
++
++    fn emitted(entry: &LogEntry) -> String {
++        logged(|| entry.emit()).1
+     }
+ 
+     fn entry(json: &str) -> LogEntry {
+@@ -106,7 +110,7 @@ mod tests {
+         ));
+         assert_eq!(
+             line.trim_end(),
+-            r#" WARN frontend: event="scroll.drift" fields="lines=3 name=\"a b\" ok=true""#
++            r#" WARN frontend: event="scroll.drift" fields=lines=3 name="a b" ok=true"#
+         );
+     }
+ 
+diff --git a/src-tauri/src/graphics.rs b/src-tauri/src/graphics.rs
+new file mode 100644
+index 0000000..5b9e34c
+--- /dev/null
++++ b/src-tauri/src/graphics.rs
+@@ -0,0 +1,54 @@
++use std::env;
++use std::ffi::OsStr;
++use std::path::Path;
++
++const DMABUF_VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
++// Present while the proprietary NVIDIA kernel module is loaded; WebKitGTK's DMA-BUF renderer then
++// fails on Wayland (https://v2.tauri.app/develop/debug/linux-graphics/).
++const NVIDIA_MODULE: &str = "/sys/module/nvidia";
++
++#[expect(
++    unsafe_code,
++    reason = "std::env::set_var needs it since edition 2024; the one allowed site (plan §2 #43)"
++)]
++pub(crate) fn disable_dmabuf_on_nvidia() {
++    if needs_dmabuf_disabled(env::var_os(DMABUF_VAR).as_deref(), Path::new(NVIDIA_MODULE)) {
++        // SAFETY: no other thread exists yet: `run()` calls this before Tauri, GTK or logging start.
++        unsafe { env::set_var(DMABUF_VAR, "1") };
++    }
++}
++
++fn needs_dmabuf_disabled(current: Option<&OsStr>, nvidia_module: &Path) -> bool {
++    current.is_none() && nvidia_module.exists()
++}
++
++#[cfg(test)]
++mod tests {
++    use yamt_conflict_repo::TempDir;
++
++    use super::*;
++
++    #[test]
++    fn nvidia_module_without_the_variable_disables_dmabuf() {
++        let sys_module = TempDir::new().unwrap();
++        assert!(needs_dmabuf_disabled(None, sys_module.path()));
++    }
++
++    #[test]
++    fn a_user_value_is_respected_even_when_it_is_zero() {
++        let sys_module = TempDir::new().unwrap();
++        for value in ["1", "0"] {
++            assert!(
++                !needs_dmabuf_disabled(Some(OsStr::new(value)), sys_module.path()),
++                "{value}"
++            );
++        }
++    }
++
++    #[test]
++    fn without_the_nvidia_module_nothing_changes() {
++        let sys_module = TempDir::new().unwrap();
++        let absent = sys_module.path().join("nvidia");
++        assert!(!needs_dmabuf_disabled(None, &absent));
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e65bbfa..6d78574 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,9 +1,10 @@
+ //! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
+-#![forbid(unsafe_code)]
+ 
+ mod args;
+ mod commands;
+ mod frontend_log;
++#[cfg(target_os = "linux")]
++mod graphics;
+ mod outcome;
+ mod window;
+ 
+@@ -21,6 +22,8 @@ const LOG_FILTER_VAR: &str = "YAMT_LOG";
+ 
+ #[must_use]
+ pub fn run() -> ExitCode {
++    #[cfg(target_os = "linux")]
++    graphics::disable_dmabuf_on_nvidia();
+     init_tracing();
+     match args::parse(std::env::args_os().skip(1).collect()) {
+         Ok(Invocation::Help) => {
+@@ -42,7 +45,7 @@ pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
+ 
+ fn merge(repo: &Path) -> Ending {
+     match startup(repo) {
+-        Startup::Merge { root, session } => window::run(&root, session),
++        Startup::Merge(session) => window::run(session),
+         Startup::Done(ending) => ending,
+     }
+ }
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index dd247d0..1bbaf08 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -1,7 +1,6 @@
+-use std::path::{Path, PathBuf};
++use std::path::Path;
+ use std::process::ExitCode;
+ 
+-use yamt_gitio::Repo;
+ use yamt_session::MergeSession;
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+@@ -34,30 +33,21 @@ impl Ending {
+ }
+ 
+ pub(crate) enum Startup {
+-    Merge {
+-        root: PathBuf,
+-        session: MergeSession,
+-    },
++    Merge(MergeSession),
+     Done(Ending),
+ }
+ 
+ pub(crate) fn startup(repo: &Path) -> Startup {
+-    match open(repo) {
++    match MergeSession::open(repo) {
+         Err(error) => Startup::Done(Ending::failure(error.to_string())),
+-        Ok((root, session)) if session.files().is_empty() => Startup::Done(Ending {
++        Ok(session) if session.files().is_empty() => Startup::Done(Ending {
+             exit: Exit::Success,
+-            message: Some(format!("nothing to merge in {}", root.display())),
++            message: Some(format!("nothing to merge in {}", session.root().display())),
+         }),
+-        Ok((root, session)) => Startup::Merge { root, session },
++        Ok(session) => Startup::Merge(session),
+     }
+ }
+ 
+-fn open(repo: &Path) -> yamt_session::Result<(PathBuf, MergeSession)> {
+-    let root = Repo::discover(repo)?.root().to_owned();
+-    let session = MergeSession::open(&root)?;
+-    Ok((root, session))
+-}
+-
+ pub(crate) fn ending_on_close(session: &MergeSession) -> Ending {
+     let unresolved = session.remaining();
+     if unresolved == 0 {
+@@ -93,7 +83,9 @@ mod tests {
+ 
+     fn ending(startup: Startup) -> Ending {
+         match startup {
+-            Startup::Merge { root, .. } => panic!("expected an ending, got a merge in {root:?}"),
++            Startup::Merge(session) => {
++                panic!("expected an ending, got a merge in {:?}", session.root())
++            }
+             Startup::Done(ending) => ending,
+         }
+     }
+@@ -108,10 +100,10 @@ mod tests {
+         .unwrap();
+         let inside = repo.path().join("inside");
+         std::fs::create_dir(&inside).unwrap();
+-        let Startup::Merge { root, session } = startup(&inside) else {
++        let Startup::Merge(session) = startup(&inside) else {
+             panic!("expected a merge");
+         };
+-        assert_eq!(root, repo.path().canonicalize().unwrap());
++        assert_eq!(session.root(), repo.path().canonicalize().unwrap());
+         let paths: Vec<String> = session.files().into_iter().map(|file| file.path).collect();
+         assert_eq!(paths, ["a.ts", "b.ts", "c.ts"]);
+     }
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 285c0b2..49859c3 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -15,8 +15,9 @@ const MIN_HEIGHT: f64 = 600.0;
+ // `--color-window` in frontend/src/style.css.
+ const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
+ 
+-pub(crate) fn run(root: &Path, session: MergeSession) -> Ending {
+-    match open_and_wait(&window_title(root), session) {
++pub(crate) fn run(session: MergeSession) -> Ending {
++    let title = window_title(session.root());
++    match open_and_wait(&title, session) {
+         Ok(ending) => ending,
+         Err(error) => Ending::failure(error.to_string()),
+     }
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 4d65ae9..3746694 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -3,8 +3,8 @@
+   "productName": "yamt",
+   "identifier": "dev.yamt.merge",
+   "build": {
+-    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm -C frontend dev --port 5173 --strictPort",
+-    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm -C frontend build",
++    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm dev --port 5173 --strictPort",
++    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm build",
+     "devUrl": "http://localhost:5173",
+     "frontendDist": "../frontend/dist"
+   },
