@@ -1,3 +1,6 @@
 {
-  "M1RulesApply": { "owned": [".omp/skills/**", ".omp/hooks/**", ".omp/GUARDRAILS.md"] }
+  "V0DesktopShell": { "owned": ["src-tauri/**", "scripts/conflict-repo.sh"] },
+  "V0GitCrossCheck": {
+    "owned": ["crates/cli/tests/merge_file.rs", "crates/cli/tests/merge_file.proptest-regressions"]
+  }
 }
