@@ -1,0 +1,346 @@
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 198dadc..27b14c0 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -92,6 +92,28 @@ test("connectors re-exporting @vueuse/core violates PM3", () => {
+   ]);
+ });
+ 
++test("editor importing a Lucide icon as a component violates PM3", () => {
++  const files = [
++    { path: "src/editor/internal/strips.ts", text: `import x from "~icons/lucide/x";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM3", file: "src/editor/internal/strips.ts", specifier: "~icons/lucide/x" },
++  ]);
++});
++
++test("a ?raw icon in editor and an icon component in ui violate nothing", () => {
++  const files = [
++    { path: "src/editor/internal/strips.ts", text: `import x from "~icons/lucide/x?raw";` },
++    {
++      path: "src/ui/FileList.vue",
++      text: `<script setup lang="ts">\nimport C from "~icons/lucide/check";\n</script>`,
++    },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("both script blocks of a ui .vue file are checked", () => {
+   const text = `<script lang="ts">
+ import "@codemirror/state";
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 78cec31..1f2b9b3 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -27,6 +27,8 @@ const FRAMEWORK_FREE_MODULES: Record<string, true> = {
+   connectors: true,
+ };
+ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
++const ICON_PREFIX = "~icons/";
++const RAW_QUERY = "?raw";
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -49,15 +51,23 @@ function relativeTarget(importer: string, bare: string): string | undefined {
+   return posix.join(posix.dirname(importer), bare).replace(/\/$/, "");
+ }
+ 
+-function packageFinding(module: string | undefined, bare: string): Finding | undefined {
++function packageFinding(module: string | undefined, specifier: string): Finding | undefined {
++  const bare = specifier.replace(QUERY_SUFFIX, "");
+   if (module === "ui" && bare.startsWith("@codemirror/")) {
+     return { rule: "PM2", reason: "ui/ never imports CodeMirror; go through editor/index.ts" };
+   }
+-  const isFrameworkPackage =
+-    bare === "vue" || FRAMEWORK_PACKAGE_PREFIXES.some((prefix) => bare.startsWith(prefix));
+-  if (module !== undefined && Object.hasOwn(FRAMEWORK_FREE_MODULES, module) && isFrameworkPackage) {
++  if (module === undefined || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
++    return undefined;
++  }
++  if (bare === "vue" || FRAMEWORK_PACKAGE_PREFIXES.some((prefix) => bare.startsWith(prefix))) {
+     return { rule: "PM3", reason: `${module}/ is framework-free` };
+   }
++  if (bare.startsWith(ICON_PREFIX) && !specifier.endsWith(RAW_QUERY)) {
++    return {
++      rule: "PM3",
++      reason: `${module}/ is framework-free; an icon without ${RAW_QUERY} is a Vue component`,
++    };
++  }
+   return undefined;
+ }
+ 
+@@ -165,7 +175,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+       const bare = specifier.replace(QUERY_SUFFIX, "");
+       const target = relativeTarget(file.path, bare);
+       const finding =
+-        target === undefined ? packageFinding(module, bare) : pathFinding(module, target);
++        target === undefined ? packageFinding(module, specifier) : pathFinding(module, target);
+       if (finding !== undefined) {
+         violations.push({ ...finding, file: file.path, specifier });
+       }
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index 2a3722d..5cc3d1b 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -133,7 +133,9 @@ async function tintedLeft(): Promise<EditorState> {
+       ],
+     },
+   }).loadFile("selection.ts");
+-  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
++  const statuses = sideStatusField(
++    data.chunks.map((chunk) => ({ chunk, status: { local: "pending", remote: "pending" } })),
++  );
+   return paneState({
+     kind: "side",
+     doc: data.local,
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index ff9ff45..6ed2ca3 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -11,7 +11,7 @@ import { lineSpan } from "./lineSpan";
+ import { paneState } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+-import { summarize, type MergeSummary, type SideStatus } from "./status";
++import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
+ import { gapArrows } from "./strips";
+ 
+ type Merge = {
+@@ -79,9 +79,8 @@ async function magicKeys(): Promise<Merge> {
+ }
+ 
+ function mirrored(merge: Merge, center: EditorState): Merge {
+-  const effects = showStatuses.of(
+-    center.field(merge.field).map(({ chunk, status }) => ({ chunk, status })),
+-  );
++  const spans = center.field(merge.field).map(({ chunk, status }) => ({ chunk, status }));
++  const effects = showStatuses.of(spans);
+   return {
+     ...merge,
+     center,
+@@ -163,14 +162,14 @@ function outside(lines: readonly number[], { first, last }: Lines): number[] {
+   return lines.filter((line) => line < first || line > last);
+ }
+ 
+-function arrows(merge: Merge, side: Side): string[] {
++function arrows(merge: Merge, side: Side): ReadonlyMap<number, ApplyMode> {
+   const rows = merge.center.field(merge.field).map((span) => ({
+     ...span,
+     left: { top: span.chunk.local.start + 1, bottom: 0 },
+     center: { top: 0, bottom: 0 },
+     right: { top: span.chunk.remote.start + 1, bottom: 0 },
+   }));
+-  return gapArrows(rows, side).map(({ top, mode }) => `${top} ${mode}`);
++  return new Map(gapArrows(rows, side).map(({ top, mode }) => [top, mode]));
+ }
+ 
+ function expectOneUndoStep(before: Merge, after: Merge): void {
+@@ -202,14 +201,14 @@ test("× on a conflict's left side keeps the middle and the right side; « then
+     outside(decoratedLines(start.left), CONFLICT_LEFT_LINES),
+   );
+   expect(decoratedLines(ignored.right)).toEqual(decoratedLines(start.right));
+-  expect(arrows(start, "local")).toContain("129 replace");
+-  expect(arrows(ignored, "local")).not.toContain("129 replace");
+-  expect(arrows(ignored, "remote")).toContain("141 replace");
++  expect(arrows(start, "local").get(129)).toBe("replace");
++  expect(arrows(ignored, "local").get(129)).toBeUndefined();
++  expect(arrows(ignored, "remote").get(141)).toBe("replace");
+   expect(decoratedLines(ignored.center)).toEqual(decoratedLines(start.center));
+   expect(summary(ignored)).toEqual({ changes: 8, conflicts: 1 });
+   expect(centerText(replaced, CONFLICT)).toBe(sideText(replaced, CONFLICT, "remote"));
+   expect(status(replaced, CONFLICT)).toBe("ignored applied");
+-  expect(arrows(replaced, "remote")).not.toContain("141 replace");
++  expect(arrows(replaced, "remote").get(141)).toBeUndefined();
+   expect(decoratedLines(replaced.center)).toEqual(
+     outside(decoratedLines(start.center), CONFLICT_MIDDLE_LINES),
+   );
+@@ -225,11 +224,11 @@ test("» then « on a conflict appends; the right arrow offers that only while t
+   const both = click(left, CONFLICT, { kind: "apply", side: "remote" });
+   const ignored = click(start, CONFLICT, { kind: "ignore", side: "local" });
+ 
+-  expect(arrows(start, "remote")).toContain("141 replace");
+-  expect(arrows(left, "remote")).toContain("141 append");
+-  expect(arrows(left, "local")).not.toContain("129 replace");
++  expect(arrows(start, "remote").get(141)).toBe("replace");
++  expect(arrows(left, "remote").get(141)).toBe("append");
++  expect(arrows(left, "local").get(129)).toBeUndefined();
+   expect(decoratedLines(left.right)).toEqual(decoratedLines(start.right));
+-  expect(arrows(ignored, "remote")).toContain("141 replace");
++  expect(arrows(ignored, "remote").get(141)).toBe("replace");
+   expect(centerText(both, CONFLICT)).toBe(
+     sideText(both, CONFLICT, "local") + sideText(both, CONFLICT, "remote"),
+   );
+@@ -272,8 +271,7 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
+   expect(status(sameApplied, 0)).toBe("applied applied");
+   expect(sameApplied.center.sliceDoc()).toBe("a\nB\nc\n");
+   for (const resolved of [sameIgnored, sameApplied]) {
+-    expect(arrows(resolved, "local")).toEqual([]);
+-    expect(arrows(resolved, "remote")).toEqual([]);
++    expect([...arrows(resolved, "local"), ...arrows(resolved, "remote")]).toEqual([]);
+     expect(decoratedLines(resolved.left)).toEqual([]);
+     expect(decoratedLines(resolved.right)).toEqual([]);
+     expect(summary(resolved)).toEqual({ changes: 0, conflicts: 0 });
+@@ -283,18 +281,20 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
+   expectOneUndoStep(same, sameApplied);
+ });
+ 
+-test("deleting a whole open conflict in the middle pane ignores every side; undo restores it", async () => {
+-  const start = await magicKeys();
+-  const from = start.center.doc.line(CONFLICT_MIDDLE_LINES.first).from;
+-  const to = start.center.doc.line(CONFLICT_MIDDLE_LINES.last + 1).from;
++test("deleting a whole open or half-applied conflict in the middle pane ignores every side", async () => {
++  const fresh = await magicKeys();
++  const halfApplied = click(fresh, CONFLICT, { kind: "apply", side: "local" });
+ 
+-  const deleted = mirrored(start, start.center.update({ changes: { from, to } }).state);
++  for (const start of [fresh, halfApplied]) {
++    const { from, to } = spanAt(start, CONFLICT);
++    const deleted = mirrored(start, start.center.update({ changes: { from, to } }).state);
+ 
+-  expect(status(deleted, CONFLICT)).toBe("ignored ignored");
+-  expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0 });
+-  expect(arrows(deleted, "remote")).not.toContain("141 replace");
+-  expect(decoratedLines(deleted.right)).toEqual(
+-    outside(decoratedLines(start.right), CONFLICT_RIGHT_LINES),
+-  );
+-  expectOneUndoStep(start, deleted);
++    expect(status(deleted, CONFLICT)).toBe("ignored ignored");
++    expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0 });
++    expect(arrows(deleted, "remote").get(141)).toBeUndefined();
++    expect(decoratedLines(deleted.right)).toEqual(
++      outside(decoratedLines(start.right), CONFLICT_RIGHT_LINES),
++    );
++    expectOneUndoStep(start, deleted);
++  }
+ });
+diff --git a/frontend/src/editor/internal/status.ts b/frontend/src/editor/internal/status.ts
+index 009f54f..ae8bd19 100644
+--- a/frontend/src/editor/internal/status.ts
++++ b/frontend/src/editor/internal/status.ts
+@@ -34,7 +34,14 @@ export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
+   return status[OTHER[side]] === "applied" ? "append" : "replace";
+ }
+ 
+-function handle(chunk: Chunk, status: ChunkStatus, side: Side, value: SideStatus): ChunkStatus {
++type SideMark = {
++  readonly chunk: Chunk;
++  readonly status: ChunkStatus;
++  readonly side: Side;
++  readonly value: SideStatus;
++};
++
++function markConflictSideOrChange({ chunk, status, side, value }: SideMark): ChunkStatus {
+   const sides = chunk.kind === "Conflict" ? [side] : SIDES.filter((s) => sideChanged(chunk, s));
+   return {
+     local: sides.includes("local") ? value : status.local,
+@@ -43,15 +50,15 @@ function handle(chunk: Chunk, status: ChunkStatus, side: Side, value: SideStatus
+ }
+ 
+ export function statusAfterApply(chunk: Chunk, status: ChunkStatus, side: Side): ChunkStatus {
+-  const applied = handle(chunk, status, side, "applied");
++  const applied = markConflictSideOrChange({ chunk, status, side, value: "applied" });
+   const other = OTHER[side];
+   return chunk.kind === "Conflict" && applied[other] === "pending" && chunk[other].len === 0
+-    ? handle(chunk, applied, other, "ignored")
++    ? markConflictSideOrChange({ chunk, status: applied, side: other, value: "ignored" })
+     : applied;
+ }
+ 
+ export function statusAfterIgnore(chunk: Chunk, status: ChunkStatus, side: Side): ChunkStatus {
+-  return handle(chunk, status, side, "ignored");
++  return markConflictSideOrChange({ chunk, status, side, value: "ignored" });
+ }
+ 
+ export function summarize(states: readonly ChunkState[]): MergeSummary {
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index bbf2db9..64d119a 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -1,10 +1,10 @@
+ import "../theme.css";
+ import type { EditorView } from "@codemirror/view";
+-import chevronsLeft from "~icons/lucide/chevrons-left?raw";
+-import chevronsRight from "~icons/lucide/chevrons-right?raw";
+-import cornerLeftDown from "~icons/lucide/corner-left-down?raw";
+-import cornerRightDown from "~icons/lucide/corner-right-down?raw";
+-import x from "~icons/lucide/x?raw";
++import chevronsLeftIcon from "~icons/lucide/chevrons-left?raw";
++import chevronsRightIcon from "~icons/lucide/chevrons-right?raw";
++import cornerLeftDownIcon from "~icons/lucide/corner-left-down?raw";
++import cornerRightDownIcon from "~icons/lucide/corner-right-down?raw";
++import xIcon from "~icons/lucide/x?raw";
+ 
+ import { bandPath, type Band } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+@@ -29,15 +29,16 @@ type ArrowPane = {
+ const SVG_NS = "http://www.w3.org/2000/svg";
+ const ACTION_WIDTH_PX = 16;
+ const ICON_PX = 14;
+-const CENTER = 0.5;
++const HALF = 0.5;
+ const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
+-  local: { replace: chevronsRight, append: cornerRightDown },
+-  remote: { replace: chevronsLeft, append: cornerLeftDown },
++  local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
++  remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
+ };
+ const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+   replace: "Apply",
+   append: "Apply after the other side",
+ };
++const parsedIcons = new Map<string, SVGSVGElement>();
+ 
+ function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
+   return rows
+@@ -85,15 +86,25 @@ function bandPaths(
+   return paths;
+ }
+ 
+-function iconElement(markup: string, lineHeight: number): SVGSVGElement {
++function parsedIcon(markup: string): SVGSVGElement {
++  const cached = parsedIcons.get(markup);
++  if (cached !== undefined) {
++    return cached;
++  }
+   const holder = document.createElementNS(SVG_NS, "g");
+   holder.innerHTML = markup;
+   const icon = holder.firstElementChild;
+   if (!(icon instanceof SVGSVGElement)) {
+     throw new Error("icon markup is not an <svg>");
+   }
+-  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * CENTER));
+-  icon.setAttribute("y", String((lineHeight - ICON_PX) * CENTER));
++  parsedIcons.set(markup, icon);
++  return icon;
++}
++
++function iconElement(markup: string, lineHeight: number): SVGSVGElement {
++  const icon = document.importNode(parsedIcon(markup), true);
++  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * HALF));
++  icon.setAttribute("y", String((lineHeight - ICON_PX) * HALF));
+   icon.setAttribute("width", String(ICON_PX));
+   icon.setAttribute("height", String(ICON_PX));
+   return icon;
+@@ -144,7 +155,7 @@ function arrowGroups(
+           onAction,
+         ),
+         actionButton(
+-          { x: ignoreX, lineHeight, icon: x, title: "Ignore" },
++          { x: ignoreX, lineHeight, icon: xIcon, title: "Ignore" },
+           { kind: "ignore", chunk, side },
+           onAction,
+         ),
+diff --git a/frontend/src/icons.d.ts b/frontend/src/icons.d.ts
+index b5ab69f..0352d9a 100644
+--- a/frontend/src/icons.d.ts
++++ b/frontend/src/icons.d.ts
+@@ -1,4 +1,5 @@
+-// Of two wildcard patterns with the same prefix TypeScript uses the first declared, so `?raw` comes first.
++// Of two wildcard patterns with the same prefix TypeScript uses the first declared, so `?raw` comes first
++// (TypeScript `findBestPatternMatch`, src/compiler/utilities.ts: the first pattern with the longest prefix wins).
+ declare module "~icons/*?raw" {
+   const markup: string;
+   export default markup;
