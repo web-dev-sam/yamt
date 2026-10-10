@@ -367,7 +367,6 @@ source in M1 there is no switch (vision 5).
 | chunk current positions in center                                                          | `editor/chunkField` (`StateField`)                                                                                                                                          | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
 | chunk apply status (`pending`/`applied-local`/`applied-remote`/`applied-both`/`dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects`; side panes hold a read-only mirror the controller pushes after each center transaction | **undo must revert status together with text**                                                                                      |
 | left/right decorations                                                                     | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
-| original base text (middle-pane word-mark gate)                                            | `baseText` `StateField<Text>` in `editor/internal/decorations.ts`, set once from the center's initial doc, never updated                                                    | a fixed input, holds no positions; `chunkField` stays the only position owner                                                       |
 | scroll positions                                                                           | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
 | connector geometry                                                                         | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
 | file list, active file, loaded file data                                                   | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia)                                                                                                              | chrome only                                                                                                                         |
@@ -401,13 +400,15 @@ Internals (`editor/internal/`, not importable from `ui/`):
   sides, `history()` for center only.
 - `language.ts` — the file's language from its base name via `@codemirror/language-data` (plan §2 #29).
 - `chunkField.ts` — the center `StateField` + effects described above (CM1, CM2, CM8).
-- `status.ts`, `apply.ts` — status rules and the `TransactionSpec` builders for apply, ignore and
-  bulk apply: current mapped range from `chunkField`, replacement text from `data.local/remote`
-  sliced by the chunk's fixed side range, plus the status effect.
+- `status.ts`, `apply.ts` — status rules and the steps for apply, ignore and bulk apply: a
+  cursor move first (its own transaction, outside history, no scroll — so undo/redo return to the
+  block, not to an old cursor), then the action: current mapped range from `chunkField`,
+  replacement text from `data.local/remote` sliced by the chunk's fixed side range, plus the
+  status effect.
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
-  filter per pane decides which blocks are tinted and feeds both the line bands and the word marks.
-- `words.ts` — word marks (plan §2 #30) from `chunk.words`; in the middle pane only while a block's
-  text still equals its base text.
+  filter per side pane decides which blocks are tinted and feeds both the line bands and the word
+  marks; the middle pane draws bands only (plan §2 #31).
+- `words.ts` — side-pane word marks from `chunk.words` (plan §2 #30, #31).
 - `geometry.ts`, `strips.ts` — bands and the apply/ignore arrows in the two `<svg>` strips
   (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
   WebKit).

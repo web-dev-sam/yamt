@@ -1,0 +1,297 @@
+diff --git a/frontend/src/editor/internal/decorations.ts b/frontend/src/editor/internal/decorations.ts
+index 2f0dbaa..14ac7b3 100644
+--- a/frontend/src/editor/internal/decorations.ts
++++ b/frontend/src/editor/internal/decorations.ts
+@@ -7,7 +7,7 @@ import { lineSpan } from "./lineSpan";
+ import { sideChanged, type Side } from "./side";
+ import { isResolved, type ChunkState } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+-import { centerWordMarks, sideWordMarks } from "./words";
++import { sideWordMarks } from "./words";
+ 
+ type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+ 
+@@ -47,20 +47,11 @@ export function sideDecorations(
+   });
+ }
+ 
+-const baseText = StateField.define<Text>({
+-  create: (state) => state.doc,
+-  update: (doc) => doc,
+-});
+-
+ export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
+-  return [
+-    baseText,
+-    EditorView.decorations.computeN([field, "doc"], (state) => {
+-      const tinted = state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status));
+-      return [
+-        bandDecorations(state.doc, tinted),
+-        centerWordMarks(state.doc, state.field(baseText), tinted),
+-      ];
+-    }),
+-  ];
++  return EditorView.decorations.compute([field, "doc"], (state) =>
++    bandDecorations(
++      state.doc,
++      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
++    ),
++  );
+ }
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index fbb3b9e..5394892 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -1,13 +1,16 @@
+ import { undoDepth } from "@codemirror/commands";
+ import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
+ import type { EditorState } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
+ import { highlightTree } from "@lezer/highlight";
+ import { expect, test } from "vitest";
+ 
+ import { createFixtureSource, log } from "../../ipc";
+ import { chunkField } from "./chunkField";
++import { sideDecorations } from "./decorations";
+ import { languageOf } from "./language";
+ import { languageCompartment, paletteHighlight, paneState } from "./pane";
++import { sideStatusField } from "./sideStatus";
+ 
+ const PARSE_BUDGET_MS = 5000;
+ const COLOUR = /(?:^|[{ ])color: ([^;]+);/;
+@@ -75,6 +78,48 @@ function colourAt(state: EditorState, needle: string): string | null {
+   return colour;
+ }
+ 
++async function tintedLeft(): Promise<EditorState> {
++  const line = { start: 0, len: 1 };
++  const data = await createFixtureSource(log, {
++    "selection.json": {
++      path: "selection.ts",
++      base: "const a = old;\n",
++      local: "const a = mine;\n",
++      remote: "const a = theirs;\n",
++      eol: "Lf",
++      chunks: [{ id: 0, kind: "Conflict", base: line, local: line, remote: line }],
++      word_changes: [
++        {
++          chunk: 0,
++          local: [{ line: 0, start: 10, len: 4 }],
++          base: [{ line: 0, start: 10, len: 3 }],
++          remote: [{ line: 0, start: 10, len: 6 }],
++        },
++      ],
++    },
++  }).loadFile("selection.ts");
++  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
++  return paneState({
++    kind: "side",
++    doc: data.local,
++    eol: data.eol,
++    language: null,
++    extensions: [statuses, sideDecorations(statuses, "local")],
++  });
++}
++
++function painted(state: EditorState): string[] {
++  const found: string[] = [];
++  for (const source of state.facet(EditorView.decorations)) {
++    if (typeof source !== "function") {
++      source.between(0, state.doc.length, (from, to, decoration) => {
++        found.push(`${String(decoration.spec.class)} ${state.sliceDoc(from, to)}`.trimEnd());
++      });
++    }
++  }
++  return found;
++}
++
+ test("a Vue file draws template tags in the tag colour and its script setup as TypeScript", async () => {
+   const state = center(VUE_SFC, await loaded("App.vue"));
+ 
+@@ -118,3 +163,16 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
+   expect(coloured.field(field)).toBe(plain.field(field));
+   expect(coloured.doc).toBe(plain.doc);
+ });
++
++test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
++  const tinted = await tintedLeft();
++  const line = tinted.doc.line(1);
++
++  const selected = tinted.update({ selection: { anchor: line.from, head: line.to } }).state;
++
++  expect(painted(selected)).toEqual([
++    "selected-text const a = mine;",
++    "chunk-conflict chunk-band",
++    "chunk-word-conflict mine",
++  ]);
++});
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index d8957ec..83e0468 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -34,10 +34,9 @@ const darkTheme = EditorView.theme(
+     },
+     ".cm-content": { caretColor: "var(--color-caret)" },
+     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
+-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
++    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
+       { backgroundColor: "var(--color-selection)" },
+     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
+-    ".selected-text": { backgroundColor: "var(--color-selection)" },
+     ".cm-gutters": {
+       backgroundColor: "var(--color-editor)",
+       color: "var(--color-gutter)",
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index d38d8e3..7c296de 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -163,7 +163,7 @@ test("side panes mark exactly the changed words, in a CRLF file and after an emo
+   expect(marks(merge.right)).toEqual(["2 chunk-word-conflict theirs"]);
+ });
+ 
+-test("a resolved block loses its word marks on every pane and undo brings them back", async () => {
++test("a resolved block loses its word marks on every side pane and undo brings them back", async () => {
+   const start = open(await synthetic());
+ 
+   const applied = run(start, applySpec(target(start), chunk(start, MODIFIED), "local"));
+@@ -172,9 +172,7 @@ test("a resolved block loses its word marks on every pane and undo brings them b
+   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
+   expect(marks(dismissed.left)).toEqual([]);
+   expect(marks(dismissed.right)).toEqual([]);
+-  expect(marks(dismissed.center)).toEqual([]);
+   expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
+-  expect(marks(undone(dismissed).center)).toEqual(["2 chunk-word-conflict old"]);
+   expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
+ });
+ 
+@@ -195,49 +193,28 @@ test("a half-applied conflict keeps its tint and its word marks together on both
+   ]);
+ });
+ 
+-test("a selection across a word mark is the innermost mark, drawn over block and word tints", async () => {
+-  const merge = open(await synthetic());
+-  const line = merge.left.doc.line(2);
++test("the middle pane tints its blocks without word marks: open, half-applied, applied, undone", async () => {
++  const start = open(await synthetic());
+ 
+-  const selected = merge.left.update({ selection: { anchor: line.from, head: line.to } }).state;
++  const halfApplied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
++  const applied = run(
++    halfApplied,
++    applySpec(target(halfApplied), chunk(halfApplied, MODIFIED), "local"),
++  );
++  const undoneOnce = undone(applied);
++  const undoneTwice = undone(undoneOnce);
+ 
+-  expect(painted(selected)).toEqual([
+-    "2 selected-text const 😀 = mine;",
++  expect(painted(start.center)).toEqual([
+     "2 chunk-conflict chunk-band",
+     "3 chunk-modified chunk-band",
+-    "2 chunk-word-conflict mine",
+-    "3 chunk-word-modified 2",
+   ]);
++  expect(painted(halfApplied.center)).toEqual(painted(start.center));
++  expect(painted(applied.center)).toEqual(["2 chunk-conflict chunk-band"]);
++  expect(painted(undoneOnce.center)).toEqual(painted(start.center));
++  expect(painted(undoneTwice.center)).toEqual(painted(start.center));
+ });
+ 
+-test("middle pane marks an open conflict's base words until a side is applied; undo restores them", async () => {
+-  const start = open(await synthetic());
+-
+-  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
+-
+-  expect(marks(start.center)).toEqual(["2 chunk-word-conflict old", "3 chunk-word-modified 1"]);
+-  expect(applied.center.field(applied.field)[CONFLICT]?.status).toBe("applied-local");
+-  expect(marks(applied.center)).toEqual(["3 chunk-word-modified 1"]);
+-  expect(marks(undone(applied).center)).toEqual(marks(start.center));
+-});
+-
+-test("middle pane: typing inside a block hides its marks, typing a line above moves them", async () => {
+-  const start = open(await synthetic());
+-  const conflictLine = start.center.doc.line(2);
+-  const oldWord = conflictLine.from + "const 😀 = ".length;
+-
+-  const inside = run(start, { changes: { from: conflictLine.to, insert: " // x" } });
+-  const sameLength = run(start, { changes: { from: oldWord, to: oldWord + 3, insert: "new" } });
+-  const above = run(start, { changes: { from: 0, insert: "// top\r\n" } });
+-
+-  expect(marks(inside.center)).toEqual(["3 chunk-word-modified 1"]);
+-  expect(marks(undone(inside).center)).toEqual(marks(start.center));
+-  expect(sameLength.center.sliceDoc(conflictLine.from, conflictLine.to)).toBe("const 😀 = new;");
+-  expect(marks(sameLength.center)).toEqual(["3 chunk-word-modified 1"]);
+-  expect(marks(above.center)).toEqual(["3 chunk-word-conflict old", "4 chunk-word-modified 1"]);
+-});
+-
+-test("vueuse-use-magic-keys: a mark's colour follows its block's tone on every pane", async () => {
++test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes", async () => {
+   const merge = open(await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts"));
+   function tonesByLine(state: EditorState): string[] {
+     return [...new Set(marks(state).map((mark) => mark.split(" ", 2).join(" ")))];
+@@ -263,6 +240,4 @@ test("vueuse-use-magic-keys: a mark's colour follows its block's tone on every p
+     "152 chunk-word-conflict     useEventListener('blur', reset, { passive: true })",
+     "153 chunk-word-conflict     useEventListener('focus', reset, { passive: true })",
+   ]);
+-  expect(marks(merge.center)).toContain("129 chunk-word-conflict if (target) {");
+-  expect(tonesByLine(merge.center).at(0)).toBe("3 chunk-word-modified");
+ });
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+index caf9b96..b4290c5 100644
+--- a/frontend/src/editor/internal/words.ts
++++ b/frontend/src/editor/internal/words.ts
+@@ -2,8 +2,6 @@ import type { Range, Text } from "@codemirror/state";
+ import { Decoration, type DecorationSet } from "@codemirror/view";
+ 
+ import type { Chunk } from "../../ipc";
+-import type { ChunkSpan } from "./chunkField";
+-import { lineSpan } from "./lineSpan";
+ import type { Side } from "./side";
+ import { chunkTone } from "./tone";
+ 
+@@ -18,29 +16,3 @@ export function sideWordMarks(doc: Text, chunks: readonly Chunk[], side: Side):
+   }
+   return Decoration.set(marks, true);
+ }
+-
+-export function centerWordMarks(
+-  doc: Text,
+-  baseText: Text,
+-  spans: readonly ChunkSpan[],
+-): DecorationSet {
+-  const marks: Range<Decoration>[] = [];
+-  for (const span of spans) {
+-    if (span.chunk.words.base.length === 0) {
+-      continue;
+-    }
+-    const original = lineSpan(baseText, span.chunk.base);
+-    const untouched =
+-      span.to - span.from === original.to - original.from &&
+-      doc.sliceString(span.from, span.to) === baseText.sliceString(original.from, original.to);
+-    if (!untouched) {
+-      continue;
+-    }
+-    const mark = Decoration.mark({ class: `chunk-word-${span.tone}` });
+-    for (const range of span.chunk.words.base) {
+-      const from = span.from - original.from + baseText.line(range.line + 1).from + range.start;
+-      marks.push(mark.range(from, from + range.len));
+-    }
+-  }
+-  return Decoration.set(marks, true);
+-}
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 3b64a26..5b436da 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -37,9 +37,9 @@
+   --color-chunk-inserted: #4471525c;
+   --color-chunk-modified: #43698d5c;
+   --color-chunk-deleted: #656e765c;
+-  --color-chunk-conflict: #8f52476b;
++  --color-chunk-conflict: #8150be6b;
+   --color-chunk-modified-word: #43698da6;
+-  --color-chunk-conflict-word: #8f5247a6;
++  --color-chunk-conflict-word: #8150bea6;
+ }
+ 
+ @layer base {
