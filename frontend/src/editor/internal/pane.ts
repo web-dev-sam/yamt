@@ -1,6 +1,11 @@
 import "@fontsource/jetbrains-mono/400.css";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { HighlightStyle, syntaxHighlighting, type Language } from "@codemirror/language";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+  HighlightStyle,
+  indentUnit,
+  syntaxHighlighting,
+  type Language,
+} from "@codemirror/language";
 import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -14,6 +19,7 @@ import {
 import { tags } from "@lezer/highlight";
 
 import type { FileMergeData } from "../../ipc";
+import { indentUnitOf } from "./indent";
 
 type PaneKind = "side" | "center";
 
@@ -91,14 +97,15 @@ const selectionOverTints = Prec.highest(
   ),
 );
 
-function kindExtensions(kind: PaneKind): Extension {
+function kindExtensions(kind: PaneKind, doc: string): Extension {
   switch (kind) {
     case "side":
       return [EditorState.readOnly.of(true), EditorView.editable.of(false)];
     case "center":
       return [
         history(),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
+        indentUnit.of(indentUnitOf(doc)),
+        keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         highlightActiveLine(),
         highlightActiveLineGutter(),
       ];
@@ -126,7 +133,7 @@ export function paneState(pane: {
       darkTheme,
       syntaxHighlighting(paletteHighlight),
       languageCompartment.of(pane.language ?? []),
-      kindExtensions(pane.kind),
+      kindExtensions(pane.kind, pane.doc),
       pane.extensions,
     ],
   });
