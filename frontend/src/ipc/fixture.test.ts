@@ -5,7 +5,7 @@ import { createFixtureSource } from "./fixture";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
-  "../../fixtures/golden/*.json",
+  ["../../fixtures/golden/*.json", "../../fixtures/showcase/*.json"],
   { eager: true, import: "default" },
 );
 
@@ -29,9 +29,13 @@ const CHUNK = {
 };
 
 const WORDS = {
-  local: [{ line: 0, start: 0, len: 1 }],
-  base: [],
-  remote: [{ line: 0, start: 1, len: 1 }],
+  local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [{ line: 0, column: 1 }] },
+  remote: { changed: [{ line: 0, start: 1, len: 1 }], removed_at: [] },
+};
+
+const DOMAIN_WORDS = {
+  local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [{ line: 0, column: 1 }] },
+  remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
 };
 
 function record(
@@ -57,7 +61,7 @@ function loaded(path: string): Record<string, unknown> {
     local: "l\n",
     remote: "r\n",
     eol: "Lf",
-    chunks: [{ ...CHUNK, words: WORDS }],
+    chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
   };
 }
 
@@ -69,7 +73,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("the committed fixtures list 10 files, sorted by path, all unresolved", async () => {
+test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
   const source = createFixtureSource(quietLog().log);
 
   const files = await source.listFiles();
@@ -85,6 +89,7 @@ test("the committed fixtures list 10 files, sorted by path, all unresolved", asy
     "vue-core-script-context.ts",
     "vue-router-playground-app.vue",
     "vueuse-use-magic-keys.ts",
+    "word-marks.ts",
   ]);
   for (const file of files) {
     expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
@@ -94,8 +99,7 @@ test("the committed fixtures list 10 files, sorted by path, all unresolved", asy
 test("each committed fixture loads with its JSON's chunk count", async () => {
   const source = createFixtureSource(quietLog().log);
   const committed = Object.values(COMMITTED);
-  expect(committed).toHaveLength(10);
-
+  expect(committed).toHaveLength(11);
   for (const json of committed) {
     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
     const data = await source.loadFile(path);
@@ -122,17 +126,21 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
   expect(data).toMatchObject({ path: "vueuse-use-magic-keys.ts", eol: "Lf" });
 
   const words = data.chunks[8]?.words;
-  expect(words?.local).toHaveLength(7);
-  expect(words?.base[0]).toEqual({ line: 128, start: 2, len: 13 });
-  expect(data.base.split("\n")[128]?.slice(2, 15)).toBe("if (target) {");
-  expect(words?.remote).toEqual([
-    { line: 150, start: 0, len: 12 },
-    { line: 151, start: 0, len: 54 },
-    { line: 152, start: 0, len: 55 },
+  expect(words?.local.changed).toHaveLength(8);
+  expect(words?.local.changed[0]).toEqual({ line: 128, start: 0, len: 2 });
+  expect(words?.local.removedAt).toEqual([
+    { line: 128, column: 0 },
+    { line: 135, column: 17 },
   ]);
-  expect(data.remote.split("\n")[151]).toBe(
-    "    useEventListener('blur', reset, { passive: true })",
-  );
+  expect(data.local.split("\n")[135]).toBe("  }, { passive })");
+  expect(words?.remote).toEqual({
+    changed: [
+      { line: 150, start: 0, len: 12 },
+      { line: 151, start: 0, len: 54 },
+      { line: 152, start: 0, len: 55 },
+    ],
+    removedAt: [],
+  });
 });
 
 test("in-memory records are listed sorted by path and keep every field", async () => {
@@ -160,8 +168,18 @@ test.each([
   ],
   [
     "a string word column",
-    record("x.ts", {}, { base: [{ line: 0, start: "1", len: 1 }] }),
-    "word_changes.0.base.0.start",
+    record("x.ts", {}, { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } }),
+    "word_changes.0.local.changed.0.start",
+  ],
+  [
+    "a string point column",
+    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } }),
+    "word_changes.0.remote.removed_at.0.column",
+  ],
+  [
+    "the old flat word shape",
+    record("x.ts", {}, { local: [], base: [], remote: [] }),
+    "word_changes.0.local",
   ],
   ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
 ])("a record with %s is rejected naming the file", (_case, json, detail) => {
@@ -216,13 +234,13 @@ test.each([
   ],
   [
     "a negative word line",
-    record("x.ts", {}, { local: [{ line: -1, start: 0, len: 1 }] }),
-    "word_changes[0].local[0].line must be a non-negative safe integer, got -1",
+    record("x.ts", {}, { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } }),
+    "word_changes[0].local.changed[0].line must be a non-negative safe integer, got -1",
   ],
   [
-    "a non-integer base word line",
-    record("x.ts", {}, { base: [{ line: 0.5, start: 0, len: 1 }] }),
-    "word_changes[0].base[0].line must be a non-negative safe integer, got 0.5",
+    "a non-integer remote word line",
+    record("x.ts", {}, { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } }),
+    "word_changes[0].remote.changed[0].line must be a non-negative safe integer, got 0.5",
   ],
   [
     "a negative word column",
@@ -230,23 +248,58 @@ test.each([
       "x.ts",
       {},
       {
-        remote: [
-          { line: 0, start: 1, len: 1 },
-          { line: 0, start: -1, len: 1 },
-        ],
+        remote: {
+          changed: [
+            { line: 0, start: 1, len: 1 },
+            { line: 0, start: -1, len: 1 },
+          ],
+          removed_at: [],
+        },
       },
     ),
-    "word_changes[0].remote[1].start must be a non-negative safe integer, got -1",
+    "word_changes[0].remote.changed[1].start must be a non-negative safe integer, got -1",
   ],
   [
     "an empty word range",
-    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0 }] }),
-    "word_changes[0].local[0].len must be a positive safe integer, got 0",
+    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } }),
+    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0",
   ],
   [
     "a fractional word length",
-    record("x.ts", {}, { local: [{ line: 0, start: 0, len: 0.5 }] }),
-    "word_changes[0].local[0].len must be a positive safe integer, got 0.5",
+    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } }),
+    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0.5",
+  ],
+  [
+    "a negative point line",
+    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } }),
+    "word_changes[0].remote.removed_at[0].line must be a non-negative safe integer, got -1",
+  ],
+  [
+    "a negative point column",
+    record(
+      "x.ts",
+      {},
+      {
+        local: {
+          changed: [],
+          removed_at: [
+            { line: 0, column: 0 },
+            { line: 0, column: -1 },
+          ],
+        },
+      },
+    ),
+    "word_changes[0].local.removed_at[1].column must be a non-negative safe integer, got -1",
+  ],
+  [
+    "a fractional point column",
+    record("x.ts", {}, { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } }),
+    "word_changes[0].local.removed_at[0].column must be a non-negative safe integer, got 0.5",
+  ],
+  [
+    "an unsafe point column",
+    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } }),
+    `word_changes[0].remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
   ],
 ])("a record with %s is rejected naming its word_changes entry", (_case, json, message) => {
   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(

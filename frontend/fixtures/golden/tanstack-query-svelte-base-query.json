@@ -25,9 +25,14 @@
   "word_changes": [
     {
       "chunk": 0,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     }
   ]
 }

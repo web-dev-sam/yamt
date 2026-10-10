@@ -57,65 +57,69 @@
   "word_changes": [
     {
       "chunk": 0,
-      "local": [],
-      "base": [],
-      "remote": [
-        {
-          "line": 15,
-          "start": 22,
-          "len": 16
-        }
-      ]
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 15,
+            "start": 22,
+            "len": 16
+          }
+        ],
+        "removed_at": []
+      }
     },
     {
       "chunk": 1,
-      "local": [
-        {
-          "line": 18,
-          "start": 0,
-          "len": 7
-        },
-        {
-          "line": 18,
-          "start": 20,
-          "len": 8
-        }
-      ],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [
+          {
+            "line": 18,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 18,
+            "start": 20,
+            "len": 8
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 2,
-      "local": [],
-      "base": [
-        {
-          "line": 86,
-          "start": 46,
-          "len": 8
-        },
-        {
-          "line": 87,
-          "start": 47,
-          "len": 12
-        },
-        {
-          "line": 87,
-          "start": 63,
-          "len": 8
-        }
-      ],
-      "remote": [
-        {
-          "line": 84,
-          "start": 47,
-          "len": 14
-        },
-        {
-          "line": 84,
-          "start": 65,
-          "len": 9
-        }
-      ]
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 84,
+            "start": 47,
+            "len": 14
+          },
+          {
+            "line": 84,
+            "start": 65,
+            "len": 9
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 83,
+            "column": 46
+          }
+        ]
+      }
     }
   ]
 }

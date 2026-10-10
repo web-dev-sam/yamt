@@ -64,7 +64,11 @@ async function synthetic(
       local: { start: local[0], len: local[1] },
       remote: { start: remote[0], len: remote[1] },
     })),
-    word_changes: chunks.map((_chunk, id) => ({ chunk: id, local: [], base: [], remote: [] })),
+    word_changes: chunks.map((_chunk, id) => ({
+      chunk: id,
+      local: { changed: [], removed_at: [] },
+      remote: { changed: [], removed_at: [] },
+    })),
   };
   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
 }

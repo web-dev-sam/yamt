@@ -121,222 +121,213 @@
   "word_changes": [
     {
       "chunk": 0,
-      "local": [
-        {
-          "line": 3,
-          "start": 0,
-          "len": 2
-        },
-        {
-          "line": 4,
-          "start": 0,
-          "len": 6
-        },
-        {
-          "line": 5,
-          "start": 0,
-          "len": 11
-        },
-        {
-          "line": 6,
-          "start": 0,
-          "len": 2
-        },
-        {
-          "line": 6,
-          "start": 17,
-          "len": 1
-        },
-        {
-          "line": 7,
-          "start": 0,
-          "len": 13
-        }
-      ],
-      "base": [
-        {
-          "line": 2,
-          "start": 8,
-          "len": 1
-        },
-        {
-          "line": 2,
-          "start": 14,
-          "len": 10
-        },
-        {
-          "line": 2,
-          "start": 36,
-          "len": 1
-        },
-        {
-          "line": 2,
-          "start": 52,
-          "len": 1
-        }
-      ],
-      "remote": []
+      "local": {
+        "changed": [
+          {
+            "line": 2,
+            "start": 0,
+            "len": 8
+          },
+          {
+            "line": 3,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 4,
+            "start": 0,
+            "len": 18
+          },
+          {
+            "line": 5,
+            "start": 0,
+            "len": 11
+          },
+          {
+            "line": 6,
+            "start": 0,
+            "len": 18
+          },
+          {
+            "line": 7,
+            "start": 0,
+            "len": 13
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 8,
+            "column": 0
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 1,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 2,
-      "local": [
-        {
-          "line": 28,
-          "start": 8,
-          "len": 10
-        },
-        {
-          "line": 28,
-          "start": 20,
-          "len": 14
-        },
-        {
-          "line": 29,
-          "start": 14,
-          "len": 7
-        },
-        {
-          "line": 30,
-          "start": 0,
-          "len": 11
-        },
-        {
-          "line": 31,
-          "start": 0,
-          "len": 6
-        },
-        {
-          "line": 31,
-          "start": 39,
-          "len": 11
-        },
-        {
-          "line": 32,
-          "start": 0,
-          "len": 6
-        },
-        {
-          "line": 33,
-          "start": 0,
-          "len": 3
-        },
-        {
-          "line": 34,
-          "start": 15,
-          "len": 7
-        },
-        {
-          "line": 35,
-          "start": 0,
-          "len": 11
-        },
-        {
-          "line": 36,
-          "start": 0,
-          "len": 6
-        },
-        {
-          "line": 36,
-          "start": 39,
-          "len": 11
-        },
-        {
-          "line": 37,
-          "start": 0,
-          "len": 6
-        },
-        {
-          "line": 38,
-          "start": 0,
-          "len": 3
-        }
-      ],
-      "base": [
-        {
-          "line": 22,
-          "start": 8,
-          "len": 14
-        },
-        {
-          "line": 22,
-          "start": 24,
-          "len": 10
-        },
-        {
-          "line": 24,
-          "start": 0,
-          "len": 4
-        },
-        {
-          "line": 25,
-          "start": 0,
-          "len": 4
-        },
-        {
-          "line": 27,
-          "start": 0,
-          "len": 4
-        },
-        {
-          "line": 28,
-          "start": 0,
-          "len": 4
-        }
-      ],
-      "remote": []
+      "local": {
+        "changed": [
+          {
+            "line": 28,
+            "start": 8,
+            "len": 10
+          },
+          {
+            "line": 28,
+            "start": 20,
+            "len": 14
+          },
+          {
+            "line": 29,
+            "start": 0,
+            "len": 21
+          },
+          {
+            "line": 30,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 31,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 31,
+            "start": 39,
+            "len": 11
+          },
+          {
+            "line": 32,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 33,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 34,
+            "start": 0,
+            "len": 22
+          },
+          {
+            "line": 35,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 36,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 36,
+            "start": 39,
+            "len": 11
+          },
+          {
+            "line": 37,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 38,
+            "start": 0,
+            "len": 4
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 32,
+            "column": 46
+          },
+          {
+            "line": 37,
+            "column": 51
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 3,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 4,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 5,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 6,
-      "local": [
-        {
-          "line": 83,
-          "start": 4,
-          "len": 5
-        },
-        {
-          "line": 85,
-          "start": 0,
-          "len": 32
-        }
-      ],
-      "base": [
-        {
-          "line": 69,
-          "start": 4,
-          "len": 27
-        }
-      ],
-      "remote": [
-        {
-          "line": 73,
-          "start": 0,
-          "len": 55
-        }
-      ]
+      "local": {
+        "changed": [
+          {
+            "line": 83,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 85,
+            "start": 0,
+            "len": 32
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 73,
+            "start": 0,
+            "len": 55
+          }
+        ],
+        "removed_at": []
+      }
     }
   ]
 }

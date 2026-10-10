@@ -68,6 +68,16 @@ pub struct InlineRange<L> {
     pub len: u32,
 }
 
+/// A zero-width place inside one line of one text: `column` UTF-16 code units from the line's
+/// start, at most the line's length without its line break.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct InlinePoint<L> {
+    /// The line holding the point.
+    pub line: L,
+    /// Column of the point.
+    pub column: u32,
+}
+
 pub(crate) fn split_lines(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').collect()
 }

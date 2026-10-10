@@ -9,7 +9,7 @@ export function sideWordMarks(doc: Text, chunks: readonly Chunk[], side: Side): 
   const marks: Range<Decoration>[] = [];
   for (const chunk of chunks) {
     const mark = Decoration.mark({ class: `chunk-word-${chunkTone(chunk, side)}` });
-    for (const range of chunk.words[side]) {
+    for (const range of chunk.words[side].changed) {
       const from = doc.line(range.line + 1).from + range.start;
       marks.push(mark.range(from, from + range.len));
     }

@@ -6,12 +6,12 @@ type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
 type LineRange<L> = { readonly start: L; readonly len: number };
 type InlineRange<L> = { readonly line: L; readonly start: number; readonly len: number };
-
-type ChunkWords = {
-  readonly local: readonly InlineRange<LocalLine>[];
-  readonly base: readonly InlineRange<BaseLine>[];
-  readonly remote: readonly InlineRange<RemoteLine>[];
+type InlinePoint<L> = { readonly line: L; readonly column: number };
+type SideWords<L> = {
+  readonly changed: readonly InlineRange<L>[];
+  readonly removedAt: readonly InlinePoint<L>[];
 };
+type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideWords<RemoteLine> };
 
 export type Chunk = {
   readonly id: ChunkId;
@@ -79,18 +79,42 @@ function toInlineRange<L extends number>({
   return { line, start, len };
 }
 
-function toInlineRanges<L extends number>({
-  ranges,
+function toInlinePoint<L extends number>({
+  point,
   isLine,
   field,
 }: {
-  ranges: readonly Generated.InlineRange<number>[];
+  point: Generated.InlinePoint<number>;
   isLine: (n: number) => n is L;
   field: string;
-}): InlineRange<L>[] {
-  return ranges.map((range, index) =>
-    toInlineRange({ range, isLine, field: `${field}[${index}]` }),
-  );
+}): InlinePoint<L> {
+  const { line, column } = point;
+  if (!isLine(line)) {
+    throw invalid(`${field}.line`, line);
+  }
+  if (!isNonNegativeInteger(column)) {
+    throw invalid(`${field}.column`, column);
+  }
+  return { line, column };
+}
+
+function toSideWords<L extends number>({
+  side,
+  isLine,
+  field,
+}: {
+  side: Generated.SideWordChanges<number>;
+  isLine: (n: number) => n is L;
+  field: string;
+}): SideWords<L> {
+  return {
+    changed: side.changed.map((range, index) =>
+      toInlineRange({ range, isLine, field: `${field}.changed[${index}]` }),
+    ),
+    removedAt: side.removed_at.map((point, index) =>
+      toInlinePoint({ point, isLine, field: `${field}.removed_at[${index}]` }),
+    ),
+  };
 }
 
 function toWords({
@@ -106,13 +130,8 @@ function toWords({
     throw new Error(`${field}.chunk must be ${chunkId}, got ${words.chunk}`);
   }
   return {
-    local: toInlineRanges({ ranges: words.local, isLine: isLocalLine, field: `${field}.local` }),
-    base: toInlineRanges({ ranges: words.base, isLine: isBaseLine, field: `${field}.base` }),
-    remote: toInlineRanges({
-      ranges: words.remote,
-      isLine: isRemoteLine,
-      field: `${field}.remote`,
-    }),
+    local: toSideWords({ side: words.local, isLine: isLocalLine, field: `${field}.local` }),
+    remote: toSideWords({ side: words.remote, isLine: isRemoteLine, field: `${field}.remote` }),
   };
 }
 

@@ -51,6 +51,17 @@ export type FileMergeData = {
 export type FileStatus = "Unresolved" | "Resolved";
 
 /**
+ *  A zero-width place inside one line of one text: `column` UTF-16 code units from the line's
+ *  start, at most the line's length without its line break.
+ */
+export type InlinePoint<L> = {
+	/**  The line holding the point. */
+	line: L,
+	/**  Column of the point. */
+	column: number,
+};
+
+/**
  *  Changed text inside one line of one text: `len` UTF-16 code units from column `start`
  *  (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
  */
@@ -77,19 +88,25 @@ export type LocalLine = number;
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
+/**  One side of a chunk compared with base, line by line. */
+export type SideWordChanges<L> = {
+	/**
+	 *  Side text that is not in base: sorted by line then start, disjoint, never empty,
+	 *  never across a line break.
+	 */
+	changed: InlineRange<L>[],
+	/**  Places where base text this side removed would sit: sorted, at most one per place. */
+	removed_at: InlinePoint<L>[],
+};
+
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 
-/**
- *  Where one chunk's sides differ from base, word by word. `base` marks the base text that
- *  either side changed (the union).
- */
+/**  Where one chunk's sides differ from base. */
 export type WordChanges = {
-	/**  The chunk these ranges belong to. */
+	/**  The chunk these changes belong to. */
 	chunk: ChunkId,
-	/**  Changed text in the chunk's local lines. */
-	local: InlineRange<LocalLine>[],
-	/**  Base text changed by local, remote or both. */
-	base: InlineRange<BaseLine>[],
-	/**  Changed text in the chunk's remote lines. */
-	remote: InlineRange<RemoteLine>[],
+	/**  Local compared with base. */
+	local: SideWordChanges<LocalLine>,
+	/**  Remote compared with base. */
+	remote: SideWordChanges<RemoteLine>,
 };

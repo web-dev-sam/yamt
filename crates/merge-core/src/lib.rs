@@ -6,10 +6,12 @@ mod apply;
 mod chunk;
 mod compute;
 mod line;
+mod line_pairs;
+mod token;
 mod word;
 
 pub use apply::apply_non_conflicting;
 pub use chunk::{Chunk, ChunkId, ChunkKind};
 pub use compute::{DEFAULT_GAP, Options, compute_chunks};
-pub use line::{BaseLine, InlineRange, LineRange, LocalLine, RemoteLine};
-pub use word::{WordChanges, word_changes};
+pub use line::{BaseLine, InlinePoint, InlineRange, LineRange, LocalLine, RemoteLine};
+pub use word::{SideWordChanges, WordChanges, word_changes};

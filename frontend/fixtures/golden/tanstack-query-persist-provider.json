@@ -73,204 +73,165 @@
   "word_changes": [
     {
       "chunk": 0,
-      "local": [],
-      "base": [
-        {
-          "line": 3,
-          "start": 8,
-          "len": 20
-        }
-      ],
-      "remote": [
-        {
-          "line": 4,
-          "start": 0,
-          "len": 28
-        },
-        {
-          "line": 5,
-          "start": 0,
-          "len": 30
-        }
-      ]
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 3,
+            "start": 0,
+            "len": 8
+          },
+          {
+            "line": 4,
+            "start": 0,
+            "len": 28
+          },
+          {
+            "line": 5,
+            "start": 0,
+            "len": 30
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 6,
+            "column": 0
+          }
+        ]
+      }
     },
     {
       "chunk": 1,
-      "local": [
-        {
-          "line": 10,
-          "start": 20,
-          "len": 26
-        }
-      ],
-      "base": [
-        {
-          "line": 10,
-          "start": 20,
-          "len": 4
-        }
-      ],
-      "remote": []
+      "local": {
+        "changed": [
+          {
+            "line": 10,
+            "start": 0,
+            "len": 46
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 2,
-      "local": [],
-      "base": [],
-      "remote": []
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
     },
     {
       "chunk": 3,
-      "local": [
-        {
-          "line": 37,
-          "start": 19,
-          "len": 6
-        },
-        {
-          "line": 38,
-          "start": 8,
-          "len": 5
-        },
-        {
-          "line": 39,
-          "start": 0,
-          "len": 16
-        },
-        {
-          "line": 40,
-          "start": 8,
-          "len": 11
-        },
-        {
-          "line": 41,
-          "start": 0,
-          "len": 10
-        },
-        {
-          "line": 42,
-          "start": 0,
-          "len": 9
-        }
-      ],
-      "base": [
-        {
-          "line": 32,
-          "start": 6,
-          "len": 28
-        },
-        {
-          "line": 32,
-          "start": 37,
-          "len": 19
-        },
-        {
-          "line": 33,
-          "start": 8,
-          "len": 3
-        },
-        {
-          "line": 33,
-          "start": 24,
-          "len": 15
-        },
-        {
-          "line": 34,
-          "start": 8,
-          "len": 20
-        },
-        {
-          "line": 37,
-          "start": 0,
-          "len": 26
-        },
-        {
-          "line": 38,
-          "start": 0,
-          "len": 34
-        },
-        {
-          "line": 39,
-          "start": 0,
-          "len": 29
-        },
-        {
-          "line": 40,
-          "start": 0,
-          "len": 8
-        },
-        {
-          "line": 42,
-          "start": 0,
-          "len": 20
-        },
-        {
-          "line": 43,
-          "start": 0,
-          "len": 21
-        },
-        {
-          "line": 44,
-          "start": 0,
-          "len": 7
-        }
-      ],
-      "remote": [
-        {
-          "line": 39,
-          "start": 6,
-          "len": 48
-        },
-        {
-          "line": 39,
-          "start": 56,
-          "len": 1
-        },
-        {
-          "line": 40,
-          "start": 8,
-          "len": 5
-        },
-        {
-          "line": 41,
-          "start": 0,
-          "len": 16
-        },
-        {
-          "line": 41,
-          "start": 29,
-          "len": 13
-        },
-        {
-          "line": 42,
-          "start": 8,
-          "len": 11
-        },
-        {
-          "line": 43,
-          "start": 0,
-          "len": 31
-        },
-        {
-          "line": 44,
-          "start": 0,
-          "len": 9
-        },
-        {
-          "line": 47,
-          "start": 11,
-          "len": 14
-        },
-        {
-          "line": 47,
-          "start": 34,
-          "len": 39
-        },
-        {
-          "line": 48,
-          "start": 12,
-          "len": 13
-        }
-      ]
+      "local": {
+        "changed": [
+          {
+            "line": 37,
+            "start": 19,
+            "len": 6
+          },
+          {
+            "line": 38,
+            "start": 0,
+            "len": 13
+          },
+          {
+            "line": 39,
+            "start": 0,
+            "len": 16
+          },
+          {
+            "line": 40,
+            "start": 0,
+            "len": 19
+          },
+          {
+            "line": 41,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 42,
+            "start": 0,
+            "len": 9
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 39,
+            "start": 0,
+            "len": 59
+          },
+          {
+            "line": 40,
+            "start": 0,
+            "len": 13
+          },
+          {
+            "line": 41,
+            "start": 0,
+            "len": 16
+          },
+          {
+            "line": 42,
+            "start": 0,
+            "len": 19
+          },
+          {
+            "line": 43,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 44,
+            "start": 0,
+            "len": 9
+          },
+          {
+            "line": 46,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 47,
+            "start": 11,
+            "len": 14
+          },
+          {
+            "line": 47,
+            "start": 34,
+            "len": 39
+          },
+          {
+            "line": 48,
+            "start": 12,
+            "len": 13
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 46,
+            "column": 0
+          },
+          {
+            "line": 47,
+            "column": 0
+          }
+        ]
+      }
     }
   ]
 }

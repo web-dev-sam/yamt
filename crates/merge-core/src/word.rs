@@ -1,69 +1,33 @@
 use std::ops::Range;
 
-use imara_diff::{Algorithm, Diff, InternedInput};
+use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
 use serde::Serialize;
 use specta::Type;
 
 use crate::chunk::{Chunk, ChunkId};
-use crate::line::{BaseLine, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
+use crate::line::{InlinePoint, InlineRange, LocalLine, RemoteLine, lines_in, split_lines};
+use crate::line_pairs::{LinePair, line_pairs};
+use crate::token::{Token, TokenKind, line_tokens, utf16_len, without_line_break};
 
-/// Where one chunk's sides differ from base, word by word. `base` marks the base text that
-/// either side changed (the union).
+/// One side of a chunk compared with base, line by line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct SideWordChanges<L> {
+    /// Side text that is not in base: sorted by line then start, disjoint, never empty,
+    /// never across a line break.
+    pub changed: Vec<InlineRange<L>>,
+    /// Places where base text this side removed would sit: sorted, at most one per place.
+    pub removed_at: Vec<InlinePoint<L>>,
+}
+
+/// Where one chunk's sides differ from base.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct WordChanges {
-    /// The chunk these ranges belong to.
+    /// The chunk these changes belong to.
     pub chunk: ChunkId,
-    /// Changed text in the chunk's local lines.
-    pub local: Vec<InlineRange<LocalLine>>,
-    /// Base text changed by local, remote or both.
-    pub base: Vec<InlineRange<BaseLine>>,
-    /// Changed text in the chunk's remote lines.
-    pub remote: Vec<InlineRange<RemoteLine>>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CharKind {
-    Word,
-    Space,
-    Symbol,
-}
-
-#[derive(Clone, Copy)]
-enum TokenKind {
-    Text(CharKind),
-    LineBreak,
-}
-
-struct Token<'a> {
-    text: &'a str,
-    kind: TokenKind,
-    line: u32,
-    column: u32,
-    width: u32,
-}
-
-struct ChunkText<'a> {
-    lines: &'a [&'a str],
-    first_line: u32,
-    tokens: Vec<Token<'a>>,
-}
-
-impl<'a> ChunkText<'a> {
-    fn new(all_lines: &'a [&'a str], range: &Range<u32>) -> ChunkText<'a> {
-        let lines = lines_in(all_lines, range);
-        ChunkText {
-            lines,
-            first_line: range.start,
-            tokens: tokens(lines, range.start),
-        }
-    }
-
-    fn token_span(&self, lines: &Range<u32>) -> Range<usize> {
-        let start = self.first_line + lines.start;
-        let end = self.first_line + lines.end;
-        self.tokens.partition_point(|token| token.line < start)
-            ..self.tokens.partition_point(|token| token.line < end)
-    }
+    /// Local compared with base.
+    pub local: SideWordChanges<LocalLine>,
+    /// Remote compared with base.
+    pub remote: SideWordChanges<RemoteLine>,
 }
 
 /// One entry per chunk, in the order of `chunks`.
@@ -72,181 +36,154 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> 
     let base_lines = split_lines(base);
     let local_lines = split_lines(local);
     let remote_lines = split_lines(remote);
-    let mut changes = Vec::with_capacity(chunks.len());
-    for chunk in chunks {
-        let base = ChunkText::new(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
-        let local = ChunkText::new(&local_lines, &(chunk.local.start.0..chunk.local.end().0));
-        let remote = ChunkText::new(&remote_lines, &(chunk.remote.start.0..chunk.remote.end().0));
-        let (base_by_local, local_changed) = changed_tokens(&base, &local);
-        let (base_by_remote, remote_changed) = changed_tokens(&base, &remote);
-        let base_changed: Vec<bool> = base_by_local
-            .iter()
-            .zip(&base_by_remote)
-            .map(|(by_local, by_remote)| *by_local || *by_remote)
+    chunks
+        .iter()
+        .map(|chunk| {
+            let base = lines_in(&base_lines, &(chunk.base.start.0..chunk.base.end().0));
+            let local = chunk.local.start.0..chunk.local.end().0;
+            let remote = chunk.remote.start.0..chunk.remote.end().0;
+            WordChanges {
+                chunk: chunk.id,
+                local: side_word_changes(base, &local_lines, local, LocalLine),
+                remote: side_word_changes(base, &remote_lines, remote, RemoteLine),
+            }
+        })
+        .collect()
+}
+
+fn side_word_changes<L: Copy + PartialEq>(
+    base: &[&str],
+    all_side_lines: &[&str],
+    side_range: Range<u32>,
+    line_of: fn(u32) -> L,
+) -> SideWordChanges<L> {
+    let mut marker = SideMarker {
+        side: lines_in(all_side_lines, &side_range),
+        first_line: side_range.start,
+        line_of,
+        changes: SideWordChanges {
+            changed: Vec::new(),
+            removed_at: Vec::new(),
+        },
+    };
+    if base.is_empty() || marker.side.is_empty() {
+        return marker.changes;
+    }
+    let mut after_previous = LinePair { base: 0, side: 0 };
+    for pair in line_pairs(base, marker.side) {
+        marker.mark_gap(after_previous, pair);
+        marker.mark_pair(line_text(base, pair.base), pair.side);
+        after_previous = LinePair {
+            base: pair.base + 1,
+            side: pair.side + 1,
+        };
+    }
+    let chunk_end = LinePair {
+        base: u32::try_from(base.len()).unwrap_or(u32::MAX),
+        side: marker.side_len(),
+    };
+    marker.mark_gap(after_previous, chunk_end);
+    marker.changes.removed_at.dedup();
+    marker.changes
+}
+
+struct SideMarker<'a, L> {
+    side: &'a [&'a str],
+    first_line: u32,
+    line_of: fn(u32) -> L,
+    changes: SideWordChanges<L>,
+}
+
+impl<L: Copy> SideMarker<'_, L> {
+    /// Marks the unpaired lines between two pairs (or a chunk edge): new side lines in full, and
+    /// removed base lines as one point when no side line replaces them.
+    fn mark_gap(&mut self, from: LinePair, until: LinePair) {
+        for side_line in from.side..until.side {
+            let width = self.width(side_line);
+            if width > 0 {
+                self.mark_range(side_line, 0, width);
+            }
+        }
+        if from.side < until.side || from.base == until.base {
+            return;
+        }
+        if until.side < self.side_len() {
+            self.mark_point(until.side, 0);
+        } else if let Some(previous) = from.side.checked_sub(1) {
+            self.mark_point(previous, self.width(previous));
+        }
+    }
+
+    fn mark_pair(&mut self, base_text: &str, side_line: u32) {
+        let side_text = line_text(self.side, side_line);
+        if base_text == side_text {
+            return;
+        }
+        let base_tokens = line_tokens(without_line_break(base_text));
+        let side_tokens = line_tokens(without_line_break(side_text));
+        let diff = token_diff(&base_tokens, &side_tokens);
+        for hunk in diff.hunks().filter(Hunk::is_pure_removal) {
+            let column = side_tokens
+                .get(hunk.after.start as usize)
+                .map_or_else(|| self.width(side_line), |token| token.column);
+            self.mark_point(side_line, column);
+        }
+        let added: Vec<bool> = (0..)
+            .zip(&side_tokens)
+            .map(|(index, _)| diff.is_added(index))
             .collect();
-        changes.push(WordChanges {
-            chunk: chunk.id,
-            local: ranges(&local.tokens, &local_changed, LocalLine),
-            base: ranges(&base.tokens, &base_changed, BaseLine),
-            remote: ranges(&remote.tokens, &remote_changed, RemoteLine),
-        });
-    }
-    changes
-}
-
-fn tokens<'a>(lines: &'a [&'a str], first_line: u32) -> Vec<Token<'a>> {
-    let mut tokens = Vec::new();
-    for (line, text) in (first_line..).zip(lines) {
-        let (content, line_break) = split_line_break(text);
-        let mut column = 0;
-        let mut rest = content;
-        while let Some(first) = rest.chars().next() {
-            let kind = kind_of(first);
-            let byte_len = match kind {
-                CharKind::Word | CharKind::Space => rest
-                    .find(|next| kind_of(next) != kind)
-                    .unwrap_or(rest.len()),
-                CharKind::Symbol => first.len_utf8(),
-            };
-            let (text, after) = rest.split_at(byte_len);
-            let width = utf16_len(text);
-            tokens.push(Token {
-                text,
-                kind: TokenKind::Text(kind),
-                line,
-                column,
-                width,
-            });
-            column += width;
-            rest = after;
-        }
-        if !line_break.is_empty() {
-            tokens.push(Token {
-                text: line_break,
-                kind: TokenKind::LineBreak,
-                line,
-                column,
-                width: utf16_len(line_break),
-            });
+        for (start, len) in marked_spans(&side_tokens, &added) {
+            self.mark_range(side_line, start, len);
         }
     }
-    tokens
-}
 
-fn split_line_break(line: &str) -> (&str, &'static str) {
-    if let Some(content) = line.strip_suffix("\r\n") {
-        (content, "\r\n")
-    } else if let Some(content) = line.strip_suffix('\n') {
-        (content, "\n")
-    } else {
-        (line, "")
+    fn mark_range(&mut self, side_line: u32, start: u32, len: u32) {
+        let line = (self.line_of)(self.first_line + side_line);
+        self.changes.changed.push(InlineRange { line, start, len });
+    }
+
+    fn mark_point(&mut self, side_line: u32, column: u32) {
+        let line = (self.line_of)(self.first_line + side_line);
+        self.changes.removed_at.push(InlinePoint { line, column });
+    }
+
+    fn width(&self, side_line: u32) -> u32 {
+        utf16_len(without_line_break(line_text(self.side, side_line)))
+    }
+
+    fn side_len(&self) -> u32 {
+        u32::try_from(self.side.len()).unwrap_or(u32::MAX)
     }
 }
 
-fn kind_of(character: char) -> CharKind {
-    if character.is_alphanumeric() || character == '_' {
-        CharKind::Word
-    } else if character.is_whitespace() {
-        CharKind::Space
-    } else {
-        CharKind::Symbol
-    }
+fn line_text<'a>(lines: &[&'a str], index: u32) -> &'a str {
+    lines.get(index as usize).copied().unwrap_or_default()
 }
 
-fn utf16_len(text: &str) -> u32 {
-    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
-}
-
-fn changed_tokens(base: &ChunkText, side: &ChunkText) -> (Vec<bool>, Vec<bool>) {
-    let mut base_changed = vec![false; base.tokens.len()];
-    let mut side_changed = vec![false; side.tokens.len()];
-    if base.lines.is_empty() || side.lines.is_empty() {
-        return (base_changed, side_changed);
-    }
-    let mut input = InternedInput::default();
-    input.update_before(base.lines.iter().copied());
-    input.update_after(side.lines.iter().copied());
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
-    for hunk in diff.hunks() {
-        let base_span = base.token_span(&hunk.before);
-        let side_span = side.token_span(&hunk.after);
-        mark_changed_tokens(
-            base.tokens.get(base_span.clone()).unwrap_or_default(),
-            side.tokens.get(side_span.clone()).unwrap_or_default(),
-            base_changed.get_mut(base_span).unwrap_or_default(),
-            side_changed.get_mut(side_span).unwrap_or_default(),
-        );
-    }
-    (base_changed, side_changed)
-}
-
-fn mark_changed_tokens(
-    base: &[Token],
-    side: &[Token],
-    base_changed: &mut [bool],
-    side_changed: &mut [bool],
-) {
-    if base.is_empty() || side.is_empty() {
-        base_changed.fill(true);
-        side_changed.fill(true);
-        return;
-    }
+fn token_diff(base: &[Token], side: &[Token]) -> Diff {
     let mut input = InternedInput::default();
     input.update_before(base.iter().map(|token| token.text));
     input.update_after(side.iter().map(|token| token.text));
-    let diff = Diff::compute(Algorithm::Histogram, &input);
-    for (index, changed) in (0..).zip(base_changed) {
-        *changed = diff.is_removed(index);
-    }
-    for (index, changed) in (0..).zip(side_changed) {
-        *changed = diff.is_added(index);
-    }
+    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+    diff.postprocess_no_heuristic(&input);
+    diff
 }
 
-fn ranges<L: Copy + PartialEq>(
-    tokens: &[Token],
-    changed: &[bool],
-    line_of: fn(u32) -> L,
-) -> Vec<InlineRange<L>> {
-    let text_changed: Vec<bool> = tokens
-        .iter()
-        .zip(changed)
-        .map(|(token, changed)| *changed && !matches!(token.kind, TokenKind::LineBreak))
-        .collect();
-    let mut ranges: Vec<InlineRange<L>> = Vec::new();
-    for (index, (token, is_changed)) in tokens.iter().zip(&text_changed).enumerate() {
-        let before = index
-            .checked_sub(1)
-            .and_then(|before| text_changed.get(before));
-        let after = text_changed.get(index + 1);
-        if !is_highlighted(
-            token.kind,
-            *is_changed,
-            before == Some(&true),
-            after == Some(&true),
-        ) {
+/// `(start, len)` of each run of added tokens; whitespace between two added tokens joins them.
+fn marked_spans(tokens: &[Token], added: &[bool]) -> Vec<(u32, u32)> {
+    let is_added = |index: Option<usize>| index.and_then(|index| added.get(index)) == Some(&true);
+    let mut spans: Vec<(u32, u32)> = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        let joins_neighbours = token.kind == TokenKind::Space
+            && is_added(index.checked_sub(1))
+            && is_added(Some(index + 1));
+        if !is_added(Some(index)) && !joins_neighbours {
             continue;
         }
-        let line = line_of(token.line);
-        match ranges.last_mut() {
-            Some(last) if last.line == line && last.start + last.len == token.column => {
-                last.len += token.width;
-            }
-            Some(_) | None => ranges.push(InlineRange {
-                line,
-                start: token.column,
-                len: token.width,
-            }),
+        match spans.last_mut() {
+            Some((start, len)) if *start + *len == token.column => *len += token.width,
+            Some(_) | None => spans.push((token.column, token.width)),
         }
     }
-    ranges
-}
-
-fn is_highlighted(kind: TokenKind, is_changed: bool, before: bool, after: bool) -> bool {
-    match kind {
-        TokenKind::LineBreak => false,
-        TokenKind::Text(CharKind::Word | CharKind::Symbol) => is_changed,
-        TokenKind::Text(CharKind::Space) => is_changed || (before && after),
-    }
+    spans
 }

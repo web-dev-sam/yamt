@@ -8,8 +8,8 @@ import type { Log } from "./log";
 type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
 
 // Stryker disable all: Vite needs import.meta.glob arguments as literals
-const GOLDEN_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
-  "../../fixtures/golden/*.json",
+const FIXTURE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
+  ["../../fixtures/golden/*.json", "../../fixtures/showcase/*.json"],
   { eager: true, import: "default" },
 );
 // Stryker restore all
@@ -49,11 +49,20 @@ const INLINE_RANGE = v.object({
   len: v.number(),
 } satisfies SchemaOf<Generated.InlineRange<number>>);
 
+const INLINE_POINT = v.object({
+  line: v.number(),
+  column: v.number(),
+} satisfies SchemaOf<Generated.InlinePoint<number>>);
+
+const SIDE_WORD_CHANGES = v.object({
+  changed: v.array(INLINE_RANGE),
+  removed_at: v.array(INLINE_POINT),
+} satisfies SchemaOf<Generated.SideWordChanges<number>>);
+
 const WORD_CHANGES = v.object({
   chunk: v.number(),
-  local: v.array(INLINE_RANGE),
-  base: v.array(INLINE_RANGE),
-  remote: v.array(INLINE_RANGE),
+  local: SIDE_WORD_CHANGES,
+  remote: SIDE_WORD_CHANGES,
 } satisfies SchemaOf<Generated.WordChanges>);
 
 const FILE_MERGE_DATA = v.object({
@@ -96,7 +105,7 @@ function lookup(fixtures: ReadonlyMap<string, FileMergeData>, path: string): Fil
 
 export function createFixtureSource(
   log: Log,
-  files: Readonly<Record<string, unknown>> = GOLDEN_FILES,
+  files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
 ): ChunkSource {
   const fixtures = parseFixtures(files);
   const finished = new Map<string, string>();

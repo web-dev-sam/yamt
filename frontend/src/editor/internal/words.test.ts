@@ -31,8 +31,8 @@ function block(line: number): { start: number; len: number } {
   return { start: line, len: 1 };
 }
 
-function words(ranges: readonly Columns[]): object[] {
-  return ranges.map(([line, start, len]) => ({ line, start, len }));
+function words(ranges: readonly Columns[]): object {
+  return { changed: ranges.map(([line, start, len]) => ({ line, start, len })), removed_at: [] };
 }
 
 async function synthetic(): Promise<FileMergeData> {
@@ -47,13 +47,8 @@ async function synthetic(): Promise<FileMergeData> {
       { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
     ],
     word_changes: [
-      {
-        chunk: CONFLICT,
-        local: words([[1, 11, 4]]),
-        base: words([[1, 11, 3]]),
-        remote: words([[1, 11, 6]]),
-      },
-      { chunk: MODIFIED, local: words([[2, 4, 1]]), base: words([[2, 4, 1]]), remote: [] },
+      { chunk: CONFLICT, local: words([[1, 11, 4]]), remote: words([[1, 11, 6]]) },
+      { chunk: MODIFIED, local: words([[2, 4, 1]]), remote: words([]) },
     ],
   };
   return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
@@ -241,6 +236,7 @@ test("vueuse-use-magic-keys: a mark's colour follows its block's tone on both si
     "105 chunk-word-modified",
     "107 chunk-word-modified",
     "115 chunk-word-modified",
+    "129 chunk-word-conflict",
     "130 chunk-word-conflict",
     "131 chunk-word-conflict",
     "132 chunk-word-conflict",

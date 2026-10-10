@@ -3,8 +3,8 @@ use proptest::option;
 use proptest::prelude::*;
 use proptest::sample::Index;
 use yamt_merge_core::{
-    BaseLine, Chunk, ChunkId, ChunkKind, InlineRange, LineRange, LocalLine, Options, RemoteLine,
-    compute_chunks, word_changes,
+    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, Options, RemoteLine,
+    SideWordChanges, compute_chunks, word_changes,
 };
 
 const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
@@ -96,36 +96,72 @@ fn content(line: &str) -> &str {
         .unwrap_or(line)
 }
 
-fn plain<L: Copy>(ranges: &[InlineRange<L>], index: fn(L) -> u32) -> Vec<(u32, u32, u32)> {
-    ranges
-        .iter()
-        .map(|range| (index(range.line), range.start, range.len))
-        .collect()
+#[derive(Debug, PartialEq)]
+struct PlainSide {
+    ranges: Vec<(u32, u32, u32)>,
+    points: Vec<(u32, u32)>,
 }
 
-fn check_side(
-    ranges: &[(u32, u32, u32)],
-    text: &str,
-    chunk_lines: (u32, u32),
-) -> Result<(), TestCaseError> {
+fn nothing() -> PlainSide {
+    PlainSide {
+        ranges: Vec::new(),
+        points: Vec::new(),
+    }
+}
+
+fn plain<L: Copy>(side: &SideWordChanges<L>, index: fn(L) -> u32) -> PlainSide {
+    PlainSide {
+        ranges: side
+            .changed
+            .iter()
+            .map(|range| (index(range.line), range.start, range.len))
+            .collect(),
+        points: side
+            .removed_at
+            .iter()
+            .map(|point| (index(point.line), point.column))
+            .collect(),
+    }
+}
+
+fn is_char_boundary(line: &str, column: u32) -> bool {
+    let units: Vec<u16> = content(line).encode_utf16().collect();
+    units
+        .get(..column as usize)
+        .is_some_and(|prefix| String::from_utf16(prefix).is_ok())
+}
+
+fn check_side(side: &PlainSide, text: &str, chunk_lines: (u32, u32)) -> Result<(), TestCaseError> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let (first, len) = chunk_lines;
-    for &(line, start, range_len) in ranges {
+    let in_chunk = |line: u32| line >= first && line < first + len;
+    for &(line, start, range_len) in &side.ranges {
+        prop_assert!(in_chunk(line), "{side:?} {chunk_lines:?}");
+        let line_text = lines[line as usize];
         prop_assert!(
-            line >= first && line < first + len,
-            "{ranges:?} {chunk_lines:?}"
+            is_char_boundary(line_text, start) && is_char_boundary(line_text, start + range_len),
+            "{side:?} {text:?}"
         );
-        let width = content(lines[line as usize]).encode_utf16().count();
-        prop_assert!((start + range_len) as usize <= width, "{ranges:?} {text:?}");
-        prop_assert!(range_len > 0, "{ranges:?}");
+        prop_assert!(range_len > 0, "{side:?}");
     }
-    for pair in ranges.windows(2) {
+    for pair in side.ranges.windows(2) {
         let ((line, start, len), (next_line, next_start, _)) = (pair[0], pair[1]);
         prop_assert!(
             line < next_line || (line == next_line && start + len < next_start),
-            "{ranges:?}"
+            "{side:?}"
         );
     }
+    for &(line, column) in &side.points {
+        prop_assert!(in_chunk(line), "{side:?} {chunk_lines:?}");
+        prop_assert!(
+            is_char_boundary(lines[line as usize], column),
+            "{side:?} {text:?}"
+        );
+    }
+    prop_assert!(
+        side.points.windows(2).all(|pair| pair[0] < pair[1]),
+        "{side:?}"
+    );
     Ok(())
 }
 
@@ -143,6 +179,12 @@ fn without_ranges(text: &str, first: u32, len: u32, ranges: &[(u32, u32, u32)]) 
         kept += &String::from_utf16(&rest).ok()?;
     }
     Some(kept.chars().filter(|c| !c.is_whitespace()).collect())
+}
+
+fn is_subsequence(part: &str, whole: &str) -> bool {
+    let mut whole = whole.chars();
+    part.chars()
+        .all(|wanted| whole.any(|character| character == wanted))
 }
 
 fn whole_text_chunk(text: &str) -> Chunk {
@@ -169,7 +211,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(CASES))]
 
     #[test]
-    fn every_range_lies_sorted_and_disjoint_on_a_line_of_its_chunk(triple in triple()) {
+    fn every_mark_lies_sorted_and_disjoint_on_a_line_of_its_chunk(triple in triple()) {
         let Triple { base, local, remote } = &triple;
         let chunks = compute_chunks(base, local, remote, &Options::default());
         let words = word_changes(base, local, remote, &chunks);
@@ -177,30 +219,31 @@ proptest! {
         for (chunk, change) in chunks.iter().zip(&words) {
             prop_assert_eq!(change.chunk, chunk.id);
             check_side(&plain(&change.local, |line| line.0), local, (chunk.local.start.0, chunk.local.len))?;
-            check_side(&plain(&change.base, |line| line.0), base, (chunk.base.start.0, chunk.base.len))?;
             check_side(&plain(&change.remote, |line| line.0), remote, (chunk.remote.start.0, chunk.remote.len))?;
         }
     }
 
     #[test]
-    fn removing_ranges_then_whitespace_leaves_both_texts_equal(triple in triple()) {
+    fn unmarked_side_text_is_in_base_in_order(triple in triple()) {
         let Triple { base, local, .. } = &triple;
         let chunks = compute_chunks(base, local, base, &Options::default());
         for (chunk, change) in chunks.iter().zip(word_changes(base, local, base, &chunks)) {
-            prop_assert!(change.remote.is_empty());
-            if chunk.base.is_empty() || chunk.local.is_empty() {
-                prop_assert!(change.local.is_empty() && change.base.is_empty());
-                continue;
+            prop_assert_eq!(plain(&change.remote, |line| line.0), nothing());
+            let local_rest = without_ranges(local, chunk.local.start.0, chunk.local.len, &plain(&change.local, |line| line.0).ranges);
+            let base_rest = without_ranges(base, chunk.base.start.0, chunk.base.len, &[]);
+            let (Some(local_rest), Some(base_rest)) = (local_rest, base_rest) else {
+                return Err(TestCaseError::fail("a range splits a character"));
+            };
+            if chunk.base.is_empty() {
+                prop_assert!(change.local.changed.is_empty() && change.local.removed_at.is_empty());
+            } else {
+                prop_assert!(is_subsequence(&local_rest, &base_rest), "{local_rest:?} {base_rest:?}");
             }
-            let local_rest = without_ranges(local, chunk.local.start.0, chunk.local.len, &plain(&change.local, |line| line.0));
-            let base_rest = without_ranges(base, chunk.base.start.0, chunk.base.len, &plain(&change.base, |line| line.0));
-            prop_assert!(local_rest.is_some() && base_rest.is_some(), "a range splits a character");
-            prop_assert_eq!(local_rest, base_rest);
         }
     }
 
     #[test]
-    fn both_same_chunks_give_both_sides_equal_ranges(triple in triple()) {
+    fn both_same_chunks_give_both_sides_equal_marks(triple in triple()) {
         let Triple { base, local, .. } = &triple;
         let chunks = compute_chunks(base, local, local, &Options::default());
         for change in word_changes(base, local, local, &chunks) {
@@ -209,12 +252,13 @@ proptest! {
     }
 
     #[test]
-    fn identical_texts_give_no_ranges(text in doc()) {
+    fn identical_texts_give_no_marks(text in doc()) {
         let text = text.text();
         prop_assert!(word_changes(&text, &text, &text, &compute_chunks(&text, &text, &text, &Options::default())).is_empty());
         let whole = whole_text_chunk(&text);
         for change in word_changes(&text, &text, &text, &[whole]) {
-            prop_assert!(change.local.is_empty() && change.base.is_empty() && change.remote.is_empty());
+            prop_assert_eq!(plain(&change.local, |line| line.0), nothing());
+            prop_assert_eq!(plain(&change.remote, |line| line.0), nothing());
         }
     }
 }

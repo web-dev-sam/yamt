@@ -22,7 +22,13 @@ async function chunkWith(
         remote: { start: 0, len: lens.remote },
       },
     ],
-    word_changes: [{ chunk: 0, local: [], base: [], remote: [] }],
+    word_changes: [
+      {
+        chunk: 0,
+        local: { changed: [], removed_at: [] },
+        remote: { changed: [], removed_at: [] },
+      },
+    ],
   };
   const data = await createFixtureSource(log, { "synthetic.json": record }).loadFile(
     "synthetic.ts",

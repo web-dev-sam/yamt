@@ -1,0 +1,2136 @@
+{
+  "path": "word-marks.ts",
+  "base": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(1);\nload(1);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn a;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\nif (ok) {\n\ta(1);\n\tb(1);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tlet emitted = false;\n\t\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\t\tif (!options.setupBindings.has(macro)) {\n\t\t\t\tif (!emitted) {\n\t\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\t\temitted = true;\n\t\t\t\t}\n\t\t\t\tyield `${macro}, `;\n\t\t\t}\n\t\t}\n\t\tif (emitted) {\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
+  "local": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.renamed) {\n\n// C2 condition grows (remote)\nif(obj.a)\n\n// C3 argument added (local)\nfoo(a, b, c)\n\n// C4 argument removed (remote)\nfoo(a, b, c)\n\n// C5 string grows (local)\nconst label = 'Save changes';\n\n// C6 number changed (remote)\ntimeout: 300,\n\n// C7 optional chaining (local)\nreturn user.profile?.name;\n\n// C8 await added (remote)\nconst data = fetchUser(id);\n\n// C9 types added (local)\nfunction load(id: string): Promise<User> {\n\n// C10 value wrapped (remote)\nreturn value;\n\n// C11 condition negated (local)\nif (!isReady) {\n\n// C12 operator changed (remote)\nif (a === b) {\n\n// C13 variable renamed (local)\nconst size = list.length;\n\n// C14 import added (remote)\nimport { ref, computed } from 'vue';\n\n// C15 import removed (local)\nimport { ref, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={item.id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data, bool $force = false)\n\n// C20 trailing comma added (remote)\n  b: 2\n\n// C21 semicolon removed (local)\nreturn x\n\n// C22 comment grows (remote)\n// TODO: fix this\n\n// C23 dedented (local)\n\tlet x = 1;\n\n// C24 indented (remote)\n\tlet x = 1;\n\n// C25 spaces to tab (local)\n\tfoo();\n\n// C26 dedented and changed (remote)\n\t\tlet x = 1;\n\n// C27 indentation removed (local)\nfoo();\n\n// C28 inner spaces removed (remote)\nfoo( a )\n\n// C29 single word replaced (local)\nreturn b;\n\n// C30 symbol added to a wordless line (remote)\n}\n\n// N1 unrelated statement (local)\nconst scriptSetup = options.scriptSetup;\n\n// N2 condition sharing only `if` (remote)\nif (!options.setupBindings.has(macro)) {\n\n// N3 unrelated call (local)\nusedMacros.push({ canonical, alias });\n\n// M1 wrapped in a condition (remote)\na();\nb();\n\n// M2 unwrapped from a condition (local)\na();\nb();\n\n// M3 line inserted between changed lines (remote)\na(1);\nb(1);\n\n// M4 line removed between changed lines (local)\na(2);\nc(2);\n\n// M5 line split (remote)\nfoo(a, b)\n\n// M6 lines joined (local)\nfoo(a, b)\n\n// M7 lines swapped (remote)\na();\nb();\n\n// M8 block rewritten without shared words (local)\none = 1;\ntwo = 2;\nthree = 3;\n\n// M9 nest dedented (remote)\n\t\tx();\n\t\t}\n\t}\n\n// M10 blank line removed after a change (local)\na(2);\n\n// M11 same rename on every line (remote)\nuser.name;\nuser.age;\nuser.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst data = await fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, watch } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\tlet x = 1;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nif (ready) {\n\tsave(1);\n\tload(1);\n}\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nthrow new Error('gone');\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif (obj.renamed && obj.new)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed } from 'vue';\na(1);\nb(1);\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tlet emitted = false;\n\tfor (const macro of Object.keys(options.vueCompilerOptions.macros)) {\n\t\tif (!options.setupBindings.has(macro)) {\n\t\t\tif (!emitted) {\n\t\t\t\tyield `// @ts-ignore${newLine}import { `;\n\t\t\t\temitted = true;\n\t\t\t}\n\t\t\tyield `${macro}, `;\n\t\t}\n\t}\n\tif (emitted) {\n\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\n// end\n",
+  "remote": "// Word marks: one block per case of docs/slices/briefs/1.A-line-paired-word-marks.md.\n// One-sided cases alternate between local (left) and remote (right); X* and M13/M14 are conflicts.\n\n// C1 renamed property (local)\nif (obj.a) {\n\n// C2 condition grows (remote)\nif (obj.renamed && obj.new)\n\n// C3 argument added (local)\nfoo(a, b)\n\n// C4 argument removed (remote)\nfoo(a, c)\n\n// C5 string grows (local)\nconst label = 'Save';\n\n// C6 number changed (remote)\ntimeout: 3000,\n\n// C7 optional chaining (local)\nreturn user.profile.name;\n\n// C8 await added (remote)\nconst data = await fetchUser(id);\n\n// C9 types added (local)\nfunction load(id) {\n\n// C10 value wrapped (remote)\nreturn ref(value);\n\n// C11 condition negated (local)\nif (isReady) {\n\n// C12 operator changed (remote)\nif (a !== b) {\n\n// C13 variable renamed (local)\nconst count = list.length;\n\n// C14 import added (remote)\nimport { ref, computed, watch } from 'vue';\n\n// C15 import removed (local)\nimport { ref, computed, watch } from 'vue';\n\n// C16 attribute added (remote)\n<button :disabled=\"busy\" @click=\"save\">\n\n// C17 JSX expression changed (local)\n<Item key={id} label={name} />\n\n// C18 PHP method renamed (remote)\n$name = $user->getFullName();\n\n// C19 PHP parameter added (local)\npublic function save(array $data)\n\n// C20 trailing comma added (remote)\n  b: 2,\n\n// C21 semicolon removed (local)\nreturn x;\n\n// C22 comment grows (remote)\n// TODO: fix this before release\n\n// C23 dedented (local)\n\t\tlet x = 1;\n\n// C24 indented (remote)\n\t\tlet x = 1;\n\n// C25 spaces to tab (local)\n    foo();\n\n// C26 dedented and changed (remote)\n\tlet x = 2;\n\n// C27 indentation removed (local)\n\tfoo();\n\n// C28 inner spaces removed (remote)\nfoo(a)\n\n// C29 single word replaced (local)\nreturn a;\n\n// C30 symbol added to a wordless line (remote)\n};\n\n// N1 unrelated statement (local)\nlet emitted = false;\n\n// N2 condition sharing only `if` (remote)\nif (scriptSetupRanges.defineModel.length) {\n\n// N3 unrelated call (local)\nyield `${macro}, `;\n\n// M1 wrapped in a condition (remote)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M2 unwrapped from a condition (local)\nif (ok) {\n\ta();\n\tb();\n}\n\n// M3 line inserted between changed lines (remote)\na(2);\nlog();\nb(2);\n\n// M4 line removed between changed lines (local)\na(1);\nb();\nc(1);\n\n// M5 line split (remote)\nfoo(a,\n\tb)\n\n// M6 lines joined (local)\nfoo(a,\n\tb)\n\n// M7 lines swapped (remote)\nb();\na();\n\n// M8 block rewritten without shared words (local)\nalpha();\nbeta();\ngamma();\n\n// M9 nest dedented (remote)\n\tx();\n\t}\n}\n\n// M10 blank line removed after a change (local)\na(1);\n\n\n// M11 same rename on every line (remote)\naccount.name;\naccount.age;\naccount.id;\n\n// X1 conflict: C8 await added (local) vs C13 variable renamed (remote)\nconst user = fetchUser(id);\n\n// X2 conflict: C15 import removed (local) vs C14 import added (remote)\nimport { ref, computed, watch, onMounted } from 'vue';\n\n// X3 conflict: C23 dedented (local) vs C29 single word replaced (remote)\n\t\tlet x = 2;\n\n// X4 conflict: M1 wrapped in a condition (local) vs M3 line inserted (remote)\nsave(2);\nnotify();\nload(2);\n\n// X5 conflict: N1 unrelated statement (local) vs C29 single word replaced (remote)\nreturn b;\n\n// X6 conflict: C2 condition grows (local) vs C11 condition negated (remote)\nif(!obj.a)\n\n// M13 conflict: M2 unwrapped (local) vs C14 import added + M3 line inserted (remote)\nimport { ref, computed, watch } from 'vue';\nif (ok) {\n\ta(2);\n\tlog();\n\tb(2);\n}\n\n// M14 conflict: the shape of language-tools-script-setup chunk 3 (vuejs/language-tools, MIT)\n\tif (options.vueCompilerOptions.target >= 3.3) {\n\t\tconst scriptSetup = options.scriptSetup;\n\t\tconst scriptSetupRanges = options.scriptSetupRanges;\n\t\tif (!scriptSetup || !scriptSetupRanges) {\n\t\t\treturn;\n\t\t}\n\n\t\tconst usedMacros: { canonical: string; alias: string }[] = [];\n\t\tconst add = (canonical: string, exp: TextRange | undefined) => {\n\t\t\tif (exp) {\n\t\t\t\tusedMacros.push({ canonical, alias: getRangeText(scriptSetup, exp) });\n\t\t\t}\n\t\t};\n\t\tadd('defineProps', scriptSetupRanges.defineProps?.exp);\n\t\tadd('defineEmits', scriptSetupRanges.defineEmits?.exp);\n\t\tadd('defineSlots', scriptSetupRanges.defineSlots?.exp);\n\t\tadd('defineExpose', scriptSetupRanges.defineExpose?.exp);\n\t\tadd('withDefaults', scriptSetupRanges.withDefaults?.exp);\n\t\tif (scriptSetupRanges.defineModel.length) {\n\t\t\tusedMacros.push({ canonical: 'defineModel', alias: 'defineModel' });\n\t\t}\n\t\tif (scriptSetupRanges.defineOptions) {\n\t\t\tusedMacros.push({ canonical: 'defineOptions', alias: 'defineOptions' });\n\t\t}\n\n\t\tconst toImport = usedMacros.filter(({ alias }) => !options.setupBindings.has(alias));\n\n\t\tif (toImport.length) {\n\t\t\tyield `import { `;\n\t\t\tfor (const { canonical, alias } of toImport) {\n\t\t\t\tyield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;\n\t\t\t}\n\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;\n\t\t}\n\n// end\n",
+  "eol": "Lf",
+  "chunks": [
+    {
+      "id": 0,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 4,
+        "len": 1
+      },
+      "local": {
+        "start": 4,
+        "len": 1
+      },
+      "remote": {
+        "start": 4,
+        "len": 1
+      }
+    },
+    {
+      "id": 1,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 7,
+        "len": 1
+      },
+      "local": {
+        "start": 7,
+        "len": 1
+      },
+      "remote": {
+        "start": 7,
+        "len": 1
+      }
+    },
+    {
+      "id": 2,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 10,
+        "len": 1
+      },
+      "local": {
+        "start": 10,
+        "len": 1
+      },
+      "remote": {
+        "start": 10,
+        "len": 1
+      }
+    },
+    {
+      "id": 3,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 13,
+        "len": 1
+      },
+      "local": {
+        "start": 13,
+        "len": 1
+      },
+      "remote": {
+        "start": 13,
+        "len": 1
+      }
+    },
+    {
+      "id": 4,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 16,
+        "len": 1
+      },
+      "local": {
+        "start": 16,
+        "len": 1
+      },
+      "remote": {
+        "start": 16,
+        "len": 1
+      }
+    },
+    {
+      "id": 5,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 19,
+        "len": 1
+      },
+      "local": {
+        "start": 19,
+        "len": 1
+      },
+      "remote": {
+        "start": 19,
+        "len": 1
+      }
+    },
+    {
+      "id": 6,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 22,
+        "len": 1
+      },
+      "local": {
+        "start": 22,
+        "len": 1
+      },
+      "remote": {
+        "start": 22,
+        "len": 1
+      }
+    },
+    {
+      "id": 7,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 25,
+        "len": 1
+      },
+      "local": {
+        "start": 25,
+        "len": 1
+      },
+      "remote": {
+        "start": 25,
+        "len": 1
+      }
+    },
+    {
+      "id": 8,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 28,
+        "len": 1
+      },
+      "local": {
+        "start": 28,
+        "len": 1
+      },
+      "remote": {
+        "start": 28,
+        "len": 1
+      }
+    },
+    {
+      "id": 9,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 31,
+        "len": 1
+      },
+      "local": {
+        "start": 31,
+        "len": 1
+      },
+      "remote": {
+        "start": 31,
+        "len": 1
+      }
+    },
+    {
+      "id": 10,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 34,
+        "len": 1
+      },
+      "local": {
+        "start": 34,
+        "len": 1
+      },
+      "remote": {
+        "start": 34,
+        "len": 1
+      }
+    },
+    {
+      "id": 11,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 37,
+        "len": 1
+      },
+      "local": {
+        "start": 37,
+        "len": 1
+      },
+      "remote": {
+        "start": 37,
+        "len": 1
+      }
+    },
+    {
+      "id": 12,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 40,
+        "len": 1
+      },
+      "local": {
+        "start": 40,
+        "len": 1
+      },
+      "remote": {
+        "start": 40,
+        "len": 1
+      }
+    },
+    {
+      "id": 13,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 43,
+        "len": 1
+      },
+      "local": {
+        "start": 43,
+        "len": 1
+      },
+      "remote": {
+        "start": 43,
+        "len": 1
+      }
+    },
+    {
+      "id": 14,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 46,
+        "len": 1
+      },
+      "local": {
+        "start": 46,
+        "len": 1
+      },
+      "remote": {
+        "start": 46,
+        "len": 1
+      }
+    },
+    {
+      "id": 15,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 49,
+        "len": 1
+      },
+      "local": {
+        "start": 49,
+        "len": 1
+      },
+      "remote": {
+        "start": 49,
+        "len": 1
+      }
+    },
+    {
+      "id": 16,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 52,
+        "len": 1
+      },
+      "local": {
+        "start": 52,
+        "len": 1
+      },
+      "remote": {
+        "start": 52,
+        "len": 1
+      }
+    },
+    {
+      "id": 17,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 55,
+        "len": 1
+      },
+      "local": {
+        "start": 55,
+        "len": 1
+      },
+      "remote": {
+        "start": 55,
+        "len": 1
+      }
+    },
+    {
+      "id": 18,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 58,
+        "len": 1
+      },
+      "local": {
+        "start": 58,
+        "len": 1
+      },
+      "remote": {
+        "start": 58,
+        "len": 1
+      }
+    },
+    {
+      "id": 19,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 61,
+        "len": 1
+      },
+      "local": {
+        "start": 61,
+        "len": 1
+      },
+      "remote": {
+        "start": 61,
+        "len": 1
+      }
+    },
+    {
+      "id": 20,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 64,
+        "len": 1
+      },
+      "local": {
+        "start": 64,
+        "len": 1
+      },
+      "remote": {
+        "start": 64,
+        "len": 1
+      }
+    },
+    {
+      "id": 21,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 67,
+        "len": 1
+      },
+      "local": {
+        "start": 67,
+        "len": 1
+      },
+      "remote": {
+        "start": 67,
+        "len": 1
+      }
+    },
+    {
+      "id": 22,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 70,
+        "len": 1
+      },
+      "local": {
+        "start": 70,
+        "len": 1
+      },
+      "remote": {
+        "start": 70,
+        "len": 1
+      }
+    },
+    {
+      "id": 23,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 73,
+        "len": 1
+      },
+      "local": {
+        "start": 73,
+        "len": 1
+      },
+      "remote": {
+        "start": 73,
+        "len": 1
+      }
+    },
+    {
+      "id": 24,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 76,
+        "len": 1
+      },
+      "local": {
+        "start": 76,
+        "len": 1
+      },
+      "remote": {
+        "start": 76,
+        "len": 1
+      }
+    },
+    {
+      "id": 25,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 79,
+        "len": 1
+      },
+      "local": {
+        "start": 79,
+        "len": 1
+      },
+      "remote": {
+        "start": 79,
+        "len": 1
+      }
+    },
+    {
+      "id": 26,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 82,
+        "len": 1
+      },
+      "local": {
+        "start": 82,
+        "len": 1
+      },
+      "remote": {
+        "start": 82,
+        "len": 1
+      }
+    },
+    {
+      "id": 27,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 85,
+        "len": 1
+      },
+      "local": {
+        "start": 85,
+        "len": 1
+      },
+      "remote": {
+        "start": 85,
+        "len": 1
+      }
+    },
+    {
+      "id": 28,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 88,
+        "len": 1
+      },
+      "local": {
+        "start": 88,
+        "len": 1
+      },
+      "remote": {
+        "start": 88,
+        "len": 1
+      }
+    },
+    {
+      "id": 29,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 91,
+        "len": 1
+      },
+      "local": {
+        "start": 91,
+        "len": 1
+      },
+      "remote": {
+        "start": 91,
+        "len": 1
+      }
+    },
+    {
+      "id": 30,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 94,
+        "len": 1
+      },
+      "local": {
+        "start": 94,
+        "len": 1
+      },
+      "remote": {
+        "start": 94,
+        "len": 1
+      }
+    },
+    {
+      "id": 31,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 97,
+        "len": 1
+      },
+      "local": {
+        "start": 97,
+        "len": 1
+      },
+      "remote": {
+        "start": 97,
+        "len": 1
+      }
+    },
+    {
+      "id": 32,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 100,
+        "len": 1
+      },
+      "local": {
+        "start": 100,
+        "len": 1
+      },
+      "remote": {
+        "start": 100,
+        "len": 1
+      }
+    },
+    {
+      "id": 33,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 103,
+        "len": 2
+      },
+      "local": {
+        "start": 103,
+        "len": 2
+      },
+      "remote": {
+        "start": 103,
+        "len": 4
+      }
+    },
+    {
+      "id": 34,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 107,
+        "len": 4
+      },
+      "local": {
+        "start": 107,
+        "len": 2
+      },
+      "remote": {
+        "start": 109,
+        "len": 4
+      }
+    },
+    {
+      "id": 35,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 113,
+        "len": 2
+      },
+      "local": {
+        "start": 111,
+        "len": 2
+      },
+      "remote": {
+        "start": 115,
+        "len": 3
+      }
+    },
+    {
+      "id": 36,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 117,
+        "len": 3
+      },
+      "local": {
+        "start": 115,
+        "len": 2
+      },
+      "remote": {
+        "start": 120,
+        "len": 3
+      }
+    },
+    {
+      "id": 37,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 122,
+        "len": 1
+      },
+      "local": {
+        "start": 119,
+        "len": 1
+      },
+      "remote": {
+        "start": 125,
+        "len": 2
+      }
+    },
+    {
+      "id": 38,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 125,
+        "len": 2
+      },
+      "local": {
+        "start": 122,
+        "len": 1
+      },
+      "remote": {
+        "start": 129,
+        "len": 2
+      }
+    },
+    {
+      "id": 39,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 129,
+        "len": 2
+      },
+      "local": {
+        "start": 125,
+        "len": 2
+      },
+      "remote": {
+        "start": 133,
+        "len": 2
+      }
+    },
+    {
+      "id": 40,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 133,
+        "len": 3
+      },
+      "local": {
+        "start": 129,
+        "len": 3
+      },
+      "remote": {
+        "start": 137,
+        "len": 3
+      }
+    },
+    {
+      "id": 41,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 138,
+        "len": 3
+      },
+      "local": {
+        "start": 134,
+        "len": 3
+      },
+      "remote": {
+        "start": 142,
+        "len": 3
+      }
+    },
+    {
+      "id": 42,
+      "kind": "LocalOnly",
+      "base": {
+        "start": 143,
+        "len": 2
+      },
+      "local": {
+        "start": 139,
+        "len": 1
+      },
+      "remote": {
+        "start": 147,
+        "len": 2
+      }
+    },
+    {
+      "id": 43,
+      "kind": "RemoteOnly",
+      "base": {
+        "start": 147,
+        "len": 3
+      },
+      "local": {
+        "start": 142,
+        "len": 3
+      },
+      "remote": {
+        "start": 151,
+        "len": 3
+      }
+    },
+    {
+      "id": 44,
+      "kind": "Conflict",
+      "base": {
+        "start": 152,
+        "len": 1
+      },
+      "local": {
+        "start": 147,
+        "len": 1
+      },
+      "remote": {
+        "start": 156,
+        "len": 1
+      }
+    },
+    {
+      "id": 45,
+      "kind": "Conflict",
+      "base": {
+        "start": 155,
+        "len": 1
+      },
+      "local": {
+        "start": 150,
+        "len": 1
+      },
+      "remote": {
+        "start": 159,
+        "len": 1
+      }
+    },
+    {
+      "id": 46,
+      "kind": "Conflict",
+      "base": {
+        "start": 158,
+        "len": 1
+      },
+      "local": {
+        "start": 153,
+        "len": 1
+      },
+      "remote": {
+        "start": 162,
+        "len": 1
+      }
+    },
+    {
+      "id": 47,
+      "kind": "Conflict",
+      "base": {
+        "start": 161,
+        "len": 2
+      },
+      "local": {
+        "start": 156,
+        "len": 4
+      },
+      "remote": {
+        "start": 165,
+        "len": 3
+      }
+    },
+    {
+      "id": 48,
+      "kind": "Conflict",
+      "base": {
+        "start": 165,
+        "len": 1
+      },
+      "local": {
+        "start": 162,
+        "len": 1
+      },
+      "remote": {
+        "start": 170,
+        "len": 1
+      }
+    },
+    {
+      "id": 49,
+      "kind": "Conflict",
+      "base": {
+        "start": 168,
+        "len": 1
+      },
+      "local": {
+        "start": 165,
+        "len": 1
+      },
+      "remote": {
+        "start": 173,
+        "len": 1
+      }
+    },
+    {
+      "id": 50,
+      "kind": "Conflict",
+      "base": {
+        "start": 171,
+        "len": 5
+      },
+      "local": {
+        "start": 168,
+        "len": 3
+      },
+      "remote": {
+        "start": 176,
+        "len": 6
+      }
+    },
+    {
+      "id": 51,
+      "kind": "Conflict",
+      "base": {
+        "start": 178,
+        "len": 14
+      },
+      "local": {
+        "start": 173,
+        "len": 12
+      },
+      "remote": {
+        "start": 184,
+        "len": 34
+      }
+    }
+  ],
+  "word_changes": [
+    {
+      "chunk": 0,
+      "local": {
+        "changed": [
+          {
+            "line": 4,
+            "start": 8,
+            "len": 7
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 1,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 7,
+            "start": 2,
+            "len": 1
+          },
+          {
+            "line": 7,
+            "start": 8,
+            "len": 18
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 2,
+      "local": {
+        "changed": [
+          {
+            "line": 10,
+            "start": 8,
+            "len": 3
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 3,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 13,
+            "column": 7
+          }
+        ]
+      }
+    },
+    {
+      "chunk": 4,
+      "local": {
+        "changed": [
+          {
+            "line": 16,
+            "start": 19,
+            "len": 8
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 5,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 19,
+            "start": 9,
+            "len": 4
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 6,
+      "local": {
+        "changed": [
+          {
+            "line": 22,
+            "start": 19,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 7,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 25,
+            "start": 13,
+            "len": 6
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 8,
+      "local": {
+        "changed": [
+          {
+            "line": 28,
+            "start": 16,
+            "len": 8
+          },
+          {
+            "line": 28,
+            "start": 25,
+            "len": 15
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 9,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 31,
+            "start": 7,
+            "len": 4
+          },
+          {
+            "line": 31,
+            "start": 16,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 10,
+      "local": {
+        "changed": [
+          {
+            "line": 34,
+            "start": 4,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 11,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 37,
+            "start": 6,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 12,
+      "local": {
+        "changed": [
+          {
+            "line": 40,
+            "start": 6,
+            "len": 4
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 13,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 43,
+            "start": 22,
+            "len": 7
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 14,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 46,
+            "column": 14
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 15,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 49,
+            "start": 8,
+            "len": 17
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 16,
+      "local": {
+        "changed": [
+          {
+            "line": 52,
+            "start": 11,
+            "len": 5
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 17,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 55,
+            "start": 15,
+            "len": 11
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 18,
+      "local": {
+        "changed": [
+          {
+            "line": 58,
+            "start": 32,
+            "len": 21
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 19,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 61,
+            "start": 6,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 20,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 64,
+            "column": 8
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 21,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 67,
+            "start": 17,
+            "len": 15
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 22,
+      "local": {
+        "changed": [
+          {
+            "line": 70,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 23,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 73,
+            "start": 0,
+            "len": 2
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 24,
+      "local": {
+        "changed": [
+          {
+            "line": 76,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 25,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 79,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 79,
+            "start": 9,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 26,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 82,
+            "column": 0
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 27,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 85,
+            "column": 4
+          },
+          {
+            "line": 85,
+            "column": 5
+          }
+        ]
+      }
+    },
+    {
+      "chunk": 28,
+      "local": {
+        "changed": [
+          {
+            "line": 88,
+            "start": 7,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 29,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 91,
+            "start": 1,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 30,
+      "local": {
+        "changed": [
+          {
+            "line": 94,
+            "start": 0,
+            "len": 40
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 31,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 97,
+            "start": 0,
+            "len": 43
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 32,
+      "local": {
+        "changed": [
+          {
+            "line": 100,
+            "start": 0,
+            "len": 38
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 33,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 103,
+            "start": 0,
+            "len": 9
+          },
+          {
+            "line": 104,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 105,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 106,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 34,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 107,
+            "column": 0
+          },
+          {
+            "line": 108,
+            "column": 0
+          },
+          {
+            "line": 108,
+            "column": 4
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 35,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 115,
+            "start": 2,
+            "len": 1
+          },
+          {
+            "line": 116,
+            "start": 0,
+            "len": 6
+          },
+          {
+            "line": 117,
+            "start": 2,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 36,
+      "local": {
+        "changed": [
+          {
+            "line": 115,
+            "start": 2,
+            "len": 1
+          },
+          {
+            "line": 116,
+            "start": 2,
+            "len": 1
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 116,
+            "column": 0
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 37,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 126,
+            "start": 0,
+            "len": 3
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 125,
+            "column": 6
+          }
+        ]
+      }
+    },
+    {
+      "chunk": 38,
+      "local": {
+        "changed": [
+          {
+            "line": 122,
+            "start": 6,
+            "len": 3
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 122,
+            "column": 9
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 39,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 134,
+            "start": 0,
+            "len": 4
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 133,
+            "column": 0
+          }
+        ]
+      }
+    },
+    {
+      "chunk": 40,
+      "local": {
+        "changed": [
+          {
+            "line": 129,
+            "start": 0,
+            "len": 8
+          },
+          {
+            "line": 130,
+            "start": 0,
+            "len": 8
+          },
+          {
+            "line": 131,
+            "start": 0,
+            "len": 10
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 41,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 142,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 143,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 144,
+            "column": 0
+          }
+        ]
+      }
+    },
+    {
+      "chunk": 42,
+      "local": {
+        "changed": [
+          {
+            "line": 139,
+            "start": 2,
+            "len": 1
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 139,
+            "column": 5
+          }
+        ]
+      },
+      "remote": {
+        "changed": [],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 43,
+      "local": {
+        "changed": [],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 151,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 152,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 153,
+            "start": 0,
+            "len": 7
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 44,
+      "local": {
+        "changed": [
+          {
+            "line": 147,
+            "start": 13,
+            "len": 6
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 156,
+            "start": 6,
+            "len": 4
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 45,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 150,
+            "column": 14
+          }
+        ]
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 159,
+            "start": 29,
+            "len": 11
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 46,
+      "local": {
+        "changed": [
+          {
+            "line": 153,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 162,
+            "start": 10,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 47,
+      "local": {
+        "changed": [
+          {
+            "line": 156,
+            "start": 0,
+            "len": 12
+          },
+          {
+            "line": 157,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 158,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 159,
+            "start": 0,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 165,
+            "start": 5,
+            "len": 1
+          },
+          {
+            "line": 166,
+            "start": 0,
+            "len": 9
+          },
+          {
+            "line": 167,
+            "start": 5,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 48,
+      "local": {
+        "changed": [
+          {
+            "line": 162,
+            "start": 0,
+            "len": 24
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 170,
+            "start": 7,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 49,
+      "local": {
+        "changed": [
+          {
+            "line": 165,
+            "start": 2,
+            "len": 1
+          },
+          {
+            "line": 165,
+            "start": 8,
+            "len": 18
+          }
+        ],
+        "removed_at": []
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 173,
+            "start": 3,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 50,
+      "local": {
+        "changed": [],
+        "removed_at": [
+          {
+            "line": 169,
+            "column": 0
+          },
+          {
+            "line": 170,
+            "column": 0
+          },
+          {
+            "line": 170,
+            "column": 5
+          }
+        ]
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 176,
+            "start": 22,
+            "len": 7
+          },
+          {
+            "line": 178,
+            "start": 3,
+            "len": 1
+          },
+          {
+            "line": 179,
+            "start": 0,
+            "len": 7
+          },
+          {
+            "line": 180,
+            "start": 3,
+            "len": 1
+          }
+        ],
+        "removed_at": []
+      }
+    },
+    {
+      "chunk": 51,
+      "local": {
+        "changed": [
+          {
+            "line": 173,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 174,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 175,
+            "start": 0,
+            "len": 2
+          },
+          {
+            "line": 176,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 177,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 178,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 179,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 180,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 181,
+            "start": 0,
+            "len": 2
+          },
+          {
+            "line": 182,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 183,
+            "start": 0,
+            "len": 1
+          },
+          {
+            "line": 184,
+            "start": 0,
+            "len": 2
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 173,
+            "column": 0
+          },
+          {
+            "line": 184,
+            "column": 65
+          }
+        ]
+      },
+      "remote": {
+        "changed": [
+          {
+            "line": 185,
+            "start": 0,
+            "len": 42
+          },
+          {
+            "line": 186,
+            "start": 0,
+            "len": 54
+          },
+          {
+            "line": 187,
+            "start": 0,
+            "len": 43
+          },
+          {
+            "line": 188,
+            "start": 0,
+            "len": 10
+          },
+          {
+            "line": 189,
+            "start": 0,
+            "len": 2
+          },
+          {
+            "line": 191,
+            "start": 0,
+            "len": 64
+          },
+          {
+            "line": 192,
+            "start": 0,
+            "len": 66
+          },
+          {
+            "line": 193,
+            "start": 0,
+            "len": 13
+          },
+          {
+            "line": 194,
+            "start": 0,
+            "len": 74
+          },
+          {
+            "line": 196,
+            "start": 0,
+            "len": 4
+          },
+          {
+            "line": 197,
+            "start": 0,
+            "len": 57
+          },
+          {
+            "line": 198,
+            "start": 0,
+            "len": 57
+          },
+          {
+            "line": 199,
+            "start": 0,
+            "len": 57
+          },
+          {
+            "line": 200,
+            "start": 0,
+            "len": 59
+          },
+          {
+            "line": 201,
+            "start": 0,
+            "len": 59
+          },
+          {
+            "line": 202,
+            "start": 0,
+            "len": 45
+          },
+          {
+            "line": 203,
+            "start": 0,
+            "len": 71
+          },
+          {
+            "line": 204,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 205,
+            "start": 0,
+            "len": 40
+          },
+          {
+            "line": 206,
+            "start": 0,
+            "len": 75
+          },
+          {
+            "line": 207,
+            "start": 0,
+            "len": 3
+          },
+          {
+            "line": 209,
+            "start": 0,
+            "len": 87
+          },
+          {
+            "line": 211,
+            "start": 0,
+            "len": 24
+          },
+          {
+            "line": 212,
+            "start": 0,
+            "len": 21
+          },
+          {
+            "line": 213,
+            "start": 0,
+            "len": 49
+          },
+          {
+            "line": 214,
+            "start": 0,
+            "len": 80
+          },
+          {
+            "line": 215,
+            "start": 0,
+            "len": 3
+          }
+        ],
+        "removed_at": [
+          {
+            "line": 216,
+            "column": 0
+          }
+        ]
+      }
+    }
+  ]
+}
