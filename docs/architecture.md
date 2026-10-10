@@ -421,9 +421,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
   cursor again as a selection step history records — redo returns there, and typing right after
   an apply starts its own undo step.
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
-  filter per side pane decides which blocks are tinted and feeds both the line bands and the word
-  marks; the middle pane draws bands only (plan §2 #31).
-- `words.ts` — side-pane word marks from `chunk.words` (plan §2 #30, #31).
+  filter per side pane decides which blocks are tinted and feeds the line bands, the word marks
+  and the removal bars; the middle pane draws bands only (plan §2 #31).
+- `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
+  bar where the side removed text) from `chunk.words` (plan §2 #30, #31).
 - `geometry.ts`, `strips.ts` — bands and the apply/ignore arrows in the two `<svg>` strips
   (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
   WebKit).
