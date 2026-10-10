@@ -27,6 +27,8 @@ const FRAMEWORK_FREE_MODULES: Record<string, true> = {
   connectors: true,
 };
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
+const ICON_PREFIX = "~icons/";
+const RAW_QUERY = "?raw";
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -49,14 +51,22 @@ function relativeTarget(importer: string, bare: string): string | undefined {
   return posix.join(posix.dirname(importer), bare).replace(/\/$/, "");
 }
 
-function packageFinding(module: string | undefined, bare: string): Finding | undefined {
+function packageFinding(module: string | undefined, specifier: string): Finding | undefined {
+  const bare = specifier.replace(QUERY_SUFFIX, "");
   if (module === "ui" && bare.startsWith("@codemirror/")) {
     return { rule: "PM2", reason: "ui/ never imports CodeMirror; go through editor/index.ts" };
   }
-  const isFrameworkPackage =
-    bare === "vue" || FRAMEWORK_PACKAGE_PREFIXES.some((prefix) => bare.startsWith(prefix));
-  if (module !== undefined && Object.hasOwn(FRAMEWORK_FREE_MODULES, module) && isFrameworkPackage) {
+  if (module === undefined || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
+    return undefined;
+  }
+  if (bare === "vue" || FRAMEWORK_PACKAGE_PREFIXES.some((prefix) => bare.startsWith(prefix))) {
     return { rule: "PM3", reason: `${module}/ is framework-free` };
+  }
+  if (bare.startsWith(ICON_PREFIX) && !specifier.endsWith(RAW_QUERY)) {
+    return {
+      rule: "PM3",
+      reason: `${module}/ is framework-free; an icon without ${RAW_QUERY} is a Vue component`,
+    };
   }
   return undefined;
 }
@@ -165,7 +175,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
       const bare = specifier.replace(QUERY_SUFFIX, "");
       const target = relativeTarget(file.path, bare);
       const finding =
-        target === undefined ? packageFinding(module, bare) : pathFinding(module, target);
+        target === undefined ? packageFinding(module, specifier) : pathFinding(module, target);
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }

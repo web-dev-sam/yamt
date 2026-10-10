@@ -133,7 +133,9 @@ async function tintedLeft(): Promise<EditorState> {
       ],
     },
   }).loadFile("selection.ts");
-  const statuses = sideStatusField(data.chunks.map((chunk) => ({ chunk, status: "pending" })));
+  const statuses = sideStatusField(
+    data.chunks.map((chunk) => ({ chunk, status: { local: "pending", remote: "pending" } })),
+  );
   return paneState({
     kind: "side",
     doc: data.local,

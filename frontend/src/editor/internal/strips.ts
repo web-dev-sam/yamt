@@ -1,10 +1,10 @@
 import "../theme.css";
 import type { EditorView } from "@codemirror/view";
-import chevronsLeft from "~icons/lucide/chevrons-left?raw";
-import chevronsRight from "~icons/lucide/chevrons-right?raw";
-import cornerLeftDown from "~icons/lucide/corner-left-down?raw";
-import cornerRightDown from "~icons/lucide/corner-right-down?raw";
-import x from "~icons/lucide/x?raw";
+import chevronsLeftIcon from "~icons/lucide/chevrons-left?raw";
+import chevronsRightIcon from "~icons/lucide/chevrons-right?raw";
+import cornerLeftDownIcon from "~icons/lucide/corner-left-down?raw";
+import cornerRightDownIcon from "~icons/lucide/corner-right-down?raw";
+import xIcon from "~icons/lucide/x?raw";
 
 import { bandPath, type Band } from "../../connectors";
 import type { Chunk } from "../../ipc";
@@ -29,15 +29,16 @@ type ArrowPane = {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ACTION_WIDTH_PX = 16;
 const ICON_PX = 14;
-const CENTER = 0.5;
+const HALF = 0.5;
 const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
-  local: { replace: chevronsRight, append: cornerRightDown },
-  remote: { replace: chevronsLeft, append: cornerLeftDown },
+  local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
+  remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
 };
 const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
   replace: "Apply",
   append: "Apply after the other side",
 };
+const parsedIcons = new Map<string, SVGSVGElement>();
 
 function gapBands(rows: readonly ChunkRow[], side: Side): ToneBand[] {
   return rows
@@ -85,15 +86,25 @@ function bandPaths(
   return paths;
 }
 
-function iconElement(markup: string, lineHeight: number): SVGSVGElement {
+function parsedIcon(markup: string): SVGSVGElement {
+  const cached = parsedIcons.get(markup);
+  if (cached !== undefined) {
+    return cached;
+  }
   const holder = document.createElementNS(SVG_NS, "g");
   holder.innerHTML = markup;
   const icon = holder.firstElementChild;
   if (!(icon instanceof SVGSVGElement)) {
     throw new Error("icon markup is not an <svg>");
   }
-  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * CENTER));
-  icon.setAttribute("y", String((lineHeight - ICON_PX) * CENTER));
+  parsedIcons.set(markup, icon);
+  return icon;
+}
+
+function iconElement(markup: string, lineHeight: number): SVGSVGElement {
+  const icon = document.importNode(parsedIcon(markup), true);
+  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * HALF));
+  icon.setAttribute("y", String((lineHeight - ICON_PX) * HALF));
   icon.setAttribute("width", String(ICON_PX));
   icon.setAttribute("height", String(ICON_PX));
   return icon;
@@ -144,7 +155,7 @@ function arrowGroups(
           onAction,
         ),
         actionButton(
-          { x: ignoreX, lineHeight, icon: x, title: "Ignore" },
+          { x: ignoreX, lineHeight, icon: xIcon, title: "Ignore" },
           { kind: "ignore", chunk, side },
           onAction,
         ),

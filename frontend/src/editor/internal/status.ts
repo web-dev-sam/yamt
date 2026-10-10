@@ -34,7 +34,14 @@ export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
   return status[OTHER[side]] === "applied" ? "append" : "replace";
 }
 
-function handle(chunk: Chunk, status: ChunkStatus, side: Side, value: SideStatus): ChunkStatus {
+type SideMark = {
+  readonly chunk: Chunk;
+  readonly status: ChunkStatus;
+  readonly side: Side;
+  readonly value: SideStatus;
+};
+
+function markConflictSideOrChange({ chunk, status, side, value }: SideMark): ChunkStatus {
   const sides = chunk.kind === "Conflict" ? [side] : SIDES.filter((s) => sideChanged(chunk, s));
   return {
     local: sides.includes("local") ? value : status.local,
@@ -43,15 +50,15 @@ function handle(chunk: Chunk, status: ChunkStatus, side: Side, value: SideStatus
 }
 
 export function statusAfterApply(chunk: Chunk, status: ChunkStatus, side: Side): ChunkStatus {
-  const applied = handle(chunk, status, side, "applied");
+  const applied = markConflictSideOrChange({ chunk, status, side, value: "applied" });
   const other = OTHER[side];
   return chunk.kind === "Conflict" && applied[other] === "pending" && chunk[other].len === 0
-    ? handle(chunk, applied, other, "ignored")
+    ? markConflictSideOrChange({ chunk, status: applied, side: other, value: "ignored" })
     : applied;
 }
 
 export function statusAfterIgnore(chunk: Chunk, status: ChunkStatus, side: Side): ChunkStatus {
-  return handle(chunk, status, side, "ignored");
+  return markConflictSideOrChange({ chunk, status, side, value: "ignored" });
 }
 
 export function summarize(states: readonly ChunkState[]): MergeSummary {

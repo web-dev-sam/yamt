@@ -92,6 +92,28 @@ test("connectors re-exporting @vueuse/core violates PM3", () => {
   ]);
 });
 
+test("editor importing a Lucide icon as a component violates PM3", () => {
+  const files = [
+    { path: "src/editor/internal/strips.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/editor/internal/strips.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("a ?raw icon in editor and an icon component in ui violate nothing", () => {
+  const files = [
+    { path: "src/editor/internal/strips.ts", text: `import x from "~icons/lucide/x?raw";` },
+    {
+      path: "src/ui/FileList.vue",
+      text: `<script setup lang="ts">\nimport C from "~icons/lucide/check";\n</script>`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("both script blocks of a ui .vue file are checked", () => {
   const text = `<script lang="ts">
 import "@codemirror/state";
