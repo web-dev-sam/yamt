@@ -1,0 +1,37 @@
+diff --git a/frontend/src/editor/internal/indent.test.ts b/frontend/src/editor/internal/indent.test.ts
+index 35f2e7a..32ae782 100644
+--- a/frontend/src/editor/internal/indent.test.ts
++++ b/frontend/src/editor/internal/indent.test.ts
+@@ -59,7 +59,6 @@ const TWO_WITH_BLANKS = `function f() {
+     b();
+ 
+     c();
+-    
+     d();
+ 
+     e();
+@@ -67,6 +66,8 @@ const TWO_WITH_BLANKS = `function f() {
+ }
+ `;
+ 
++const FOUR_WITH_WHITESPACE_ONLY = "f {\n    a();\n  \n    b();\n  \n    c();\n}\n";
++
+ const MOSTLY_FOUR = `class A:
+     def f(self):
+         call(a,
+@@ -94,10 +95,14 @@ test("a tab-indented text whose doc comment has more lines than its tab-led line
+   expect(indentUnitOf(TABS_WITH_JSDOC)).toBe("\t");
+ });
+ 
+-test("blank and whitespace-only lines between deeper statements do not count as steps", () => {
++test("blank lines between deeper statements do not count as steps", () => {
+   expect(indentUnitOf(TWO_WITH_BLANKS)).toBe("  ");
+ });
+ 
++test("whitespace-only lines between deeper statements do not count as steps", () => {
++  expect(indentUnitOf(FOUR_WITH_WHITESPACE_ONLY)).toBe("    ");
++});
++
+ test("a text without indentation indents by two spaces", () => {
+   expect(indentUnitOf("a\nb\nc\n")).toBe("  ");
+ });
