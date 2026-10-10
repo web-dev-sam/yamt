@@ -1,0 +1,387 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 1c46ef4..720a7ee 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -21,6 +21,7 @@ import type { Side } from "./internal/side";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type MergeSummary } from "./internal/status";
+ import { keepEditorFocus, paintStrips, type ChunkAction } from "./internal/strips";
++import { centerWordMarks, sideWordMarks } from "./internal/words";
+ 
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+@@ -100,7 +101,7 @@ export class MergeController {
+       kind: "center",
+       doc: data.base,
+       parent: hosts.center,
+-      extensions: [field, centerDecorations(field), repaint, statusSync],
++      extensions: [field, centerDecorations(field), centerWordMarks(field), repaint, statusSync],
+     });
+     const statuses = sideStatusField(
+       center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
+@@ -111,7 +112,12 @@ export class MergeController {
+         kind: "side",
+         doc: data.local,
+         parent: hosts.left,
+-        extensions: [statuses, sideDecorations(statuses, "local"), repaint],
++        extensions: [
++          statuses,
++          sideDecorations(statuses, "local"),
++          sideWordMarks(statuses, "local"),
++          repaint,
++        ],
+       }),
+       center,
+       right: createPane({
+@@ -119,7 +125,12 @@ export class MergeController {
+         kind: "side",
+         doc: data.remote,
+         parent: hosts.right,
+-        extensions: [statuses, sideDecorations(statuses, "remote"), repaint],
++        extensions: [
++          statuses,
++          sideDecorations(statuses, "remote"),
++          sideWordMarks(statuses, "remote"),
++          repaint,
++        ],
+       }),
+     };
+   }
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+new file mode 100644
+index 0000000..586d453
+--- /dev/null
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -0,0 +1,229 @@
++import { undo } from "@codemirror/commands";
++import type { EditorState, StateField, TransactionSpec } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++import { expect, test } from "vitest";
++
++import { createFixtureSource, log, type Chunk, type FileMergeData } from "../../ipc";
++import { applySpec, dismissSpec } from "./apply";
++import { chunkField, type ChunkSpan } from "./chunkField";
++import { paneState } from "./pane";
++import type { Side } from "./side";
++import { showStatuses, sideStatusField } from "./sideStatus";
++import type { ChunkState } from "./status";
++import { centerWordMarks, sideWordMarks } from "./words";
++
++type Columns = readonly [line: number, start: number, len: number];
++type Merge = {
++  readonly field: StateField<readonly ChunkSpan[]>;
++  readonly center: EditorState;
++  readonly left: EditorState;
++  readonly right: EditorState;
++};
++
++const CONFLICT = 0;
++const MODIFIED = 1;
++
++function texts(word: string, value: string): string {
++  return `keep\r\nconst 😀 = ${word};\r\na = ${value};\r\nend\r\n`;
++}
++
++function block(line: number): { start: number; len: number } {
++  return { start: line, len: 1 };
++}
++
++function words(ranges: readonly Columns[]): object[] {
++  return ranges.map(([line, start, len]) => ({ line, start, len }));
++}
++
++async function synthetic(): Promise<FileMergeData> {
++  const record = {
++    path: "synthetic.ts",
++    base: texts("old", "1"),
++    local: texts("mine", "2"),
++    remote: texts("theirs", "1"),
++    eol: "CrLf",
++    chunks: [
++      { id: CONFLICT, kind: "Conflict", base: block(1), local: block(1), remote: block(1) },
++      { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
++    ],
++    word_changes: [
++      {
++        chunk: CONFLICT,
++        local: words([[1, 11, 4]]),
++        base: words([[1, 11, 3]]),
++        remote: words([[1, 11, 6]]),
++      },
++      { chunk: MODIFIED, local: words([[2, 4, 1]]), base: words([[2, 4, 1]]), remote: [] },
++    ],
++  };
++  return createFixtureSource(log, { "synthetic.json": record }).loadFile("synthetic.ts");
++}
++
++function sidePane(
++  data: FileMergeData,
++  statuses: StateField<readonly ChunkState[]>,
++  side: Side,
++): EditorState {
++  return paneState({
++    eol: data.eol,
++    language: null,
++    kind: "side",
++    doc: data[side],
++    extensions: [statuses, sideWordMarks(statuses, side)],
++  });
++}
++
++function open(data: FileMergeData): Merge {
++  const field = chunkField(data.chunks);
++  const center = paneState({
++    eol: data.eol,
++    language: null,
++    kind: "center",
++    doc: data.base,
++    extensions: [field, centerWordMarks(field)],
++  });
++  const statuses = sideStatusField(
++    center.field(field).map(({ chunk, status }) => ({ chunk, status })),
++  );
++  return {
++    field,
++    center,
++    left: sidePane(data, statuses, "local"),
++    right: sidePane(data, statuses, "remote"),
++  };
++}
++
++function mirrored(merge: Merge, center: EditorState): Merge {
++  const effects = showStatuses.of(
++    center.field(merge.field).map(({ chunk, status }) => ({ chunk, status })),
++  );
++  return {
++    ...merge,
++    center,
++    left: merge.left.update({ effects }).state,
++    right: merge.right.update({ effects }).state,
++  };
++}
++
++function run(merge: Merge, spec: TransactionSpec | null): Merge {
++  if (spec === null) {
++    throw new Error("expected a transaction");
++  }
++  return mirrored(merge, merge.center.update(spec).state);
++}
++
++function undone(merge: Merge): Merge {
++  let center = merge.center;
++  undo({
++    state: center,
++    dispatch: (tr) => {
++      center = tr.state;
++    },
++  });
++  return mirrored(merge, center);
++}
++
++function target(merge: Merge): Parameters<typeof applySpec>[0] {
++  return {
++    state: merge.center,
++    field: merge.field,
++    sides: { local: merge.left.doc, remote: merge.right.doc },
++  };
++}
++
++function chunk(merge: Merge, id: number): Chunk {
++  const span = merge.center.field(merge.field)[id];
++  if (span === undefined) {
++    throw new Error(`no chunk ${id}`);
++  }
++  return span.chunk;
++}
++
++function marks(state: EditorState): string[] {
++  const found: string[] = [];
++  for (const source of state.facet(EditorView.decorations)) {
++    if (typeof source !== "function") {
++      source.between(0, state.doc.length, (from, to, decoration) => {
++        found.push(
++          `${state.doc.lineAt(from).number} ${String(decoration.spec.class)} ${state.sliceDoc(from, to)}`,
++        );
++      });
++    }
++  }
++  return found;
++}
++
++test("side panes mark exactly the changed words, in a CRLF file and after an emoji", async () => {
++  const merge = open(await synthetic());
++
++  expect(marks(merge.left)).toEqual(["2 chunk-word-conflict mine", "3 chunk-word-modified 2"]);
++  expect(marks(merge.right)).toEqual(["2 chunk-word-conflict theirs"]);
++});
++
++test("a resolved block loses its word marks on every pane and undo brings them back", async () => {
++  const start = open(await synthetic());
++
++  const applied = run(start, applySpec(target(start), chunk(start, MODIFIED), "local"));
++  const dismissed = run(applied, dismissSpec(target(applied), chunk(applied, CONFLICT)));
++
++  expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
++  expect(marks(dismissed.left)).toEqual([]);
++  expect(marks(dismissed.right)).toEqual([]);
++  expect(marks(dismissed.center)).toEqual([]);
++  expect(marks(undone(dismissed).right)).toEqual(["2 chunk-word-conflict theirs"]);
++  expect(marks(undone(dismissed).center)).toEqual(["2 chunk-word-conflict old"]);
++  expect(marks(undone(undone(dismissed)).left)).toEqual(marks(start.left));
++});
++
++test("middle pane marks an open conflict's base words until a side is applied; undo restores them", async () => {
++  const start = open(await synthetic());
++
++  const applied = run(start, applySpec(target(start), chunk(start, CONFLICT), "local"));
++
++  expect(marks(start.center)).toEqual(["2 chunk-word-conflict old", "3 chunk-word-modified 1"]);
++  expect(applied.center.field(applied.field)[CONFLICT]?.status).toBe("applied-local");
++  expect(marks(applied.center)).toEqual(["3 chunk-word-modified 1"]);
++  expect(marks(undone(applied).center)).toEqual(marks(start.center));
++});
++
++test("middle pane: typing inside a block hides its marks, typing a line above moves them", async () => {
++  const start = open(await synthetic());
++  const conflictLine = start.center.doc.line(2);
++
++  const inside = run(start, { changes: { from: conflictLine.to, insert: " // x" } });
++  const above = run(start, { changes: { from: 0, insert: "// top\r\n" } });
++
++  expect(marks(inside.center)).toEqual(["3 chunk-word-modified 1"]);
++  expect(marks(undone(inside).center)).toEqual(marks(start.center));
++  expect(marks(above.center)).toEqual(["3 chunk-word-conflict old", "4 chunk-word-modified 1"]);
++});
++
++test("vueuse-use-magic-keys: a mark's colour follows its block's tone on every pane", async () => {
++  const merge = open(await createFixtureSource(log).loadFile("vueuse-use-magic-keys.ts"));
++  function tonesByLine(state: EditorState): string[] {
++    return [...new Set(marks(state).map((mark) => mark.split(" ", 2).join(" ")))];
++  }
++
++  expect(tonesByLine(merge.left)).toEqual([
++    "3 chunk-word-modified",
++    "22 chunk-word-modified",
++    "54 chunk-word-modified",
++    "103 chunk-word-modified",
++    "105 chunk-word-modified",
++    "107 chunk-word-modified",
++    "115 chunk-word-modified",
++    "130 chunk-word-conflict",
++    "131 chunk-word-conflict",
++    "132 chunk-word-conflict",
++    "133 chunk-word-conflict",
++    "134 chunk-word-conflict",
++    "135 chunk-word-conflict",
++    "136 chunk-word-conflict",
++  ]);
++  expect(marks(merge.right).slice(-2)).toEqual([
++    "152 chunk-word-conflict     useEventListener('blur', reset, { passive: true })",
++    "153 chunk-word-conflict     useEventListener('focus', reset, { passive: true })",
++  ]);
++  expect(marks(merge.center)).toContain("129 chunk-word-conflict if (target) {");
++  expect(tonesByLine(merge.center).at(0)).toBe("3 chunk-word-modified");
++});
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+new file mode 100644
+index 0000000..667571d
+--- /dev/null
++++ b/frontend/src/editor/internal/words.ts
+@@ -0,0 +1,65 @@
++import { StateField, type Extension, type Range, type Text } from "@codemirror/state";
++import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
++
++import type { ChunkSpan } from "./chunkField";
++import { lineSpan } from "./lineSpan";
++import { sideChanged, type Side } from "./side";
++import { isResolved, type ChunkState } from "./status";
++import { chunkTone } from "./tone";
++
++const originalDoc = StateField.define<Text>({
++  create: (state) => state.doc,
++  update: (doc) => doc,
++});
++
++function sideMarks(doc: Text, states: readonly ChunkState[], side: Side): DecorationSet {
++  const marks: Range<Decoration>[] = [];
++  for (const { chunk, status } of states) {
++    if (!sideChanged(chunk, side) || isResolved(chunk, status)) {
++      continue;
++    }
++    const mark = Decoration.mark({ class: `chunk-word-${chunkTone(chunk, side)}` });
++    for (const range of chunk.words[side]) {
++      const from = doc.line(range.line + 1).from + range.start;
++      marks.push(mark.range(from, from + range.len));
++    }
++  }
++  return Decoration.set(marks, true);
++}
++
++function centerMarks(doc: Text, base: Text, spans: readonly ChunkSpan[]): DecorationSet {
++  const marks: Range<Decoration>[] = [];
++  for (const span of spans) {
++    if (span.chunk.words.base.length === 0 || isResolved(span.chunk, span.status)) {
++      continue;
++    }
++    const original = lineSpan(base, span.chunk.base);
++    const untouched =
++      span.to - span.from === original.to - original.from &&
++      doc.sliceString(span.from, span.to) === base.sliceString(original.from, original.to);
++    if (!untouched) {
++      continue;
++    }
++    const mark = Decoration.mark({ class: `chunk-word-${span.tone}` });
++    for (const range of span.chunk.words.base) {
++      const from = span.from - original.from + base.line(range.line + 1).from + range.start;
++      marks.push(mark.range(from, from + range.len));
++    }
++  }
++  return Decoration.set(marks, true);
++}
++
++export function sideWordMarks(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
++  return EditorView.decorations.compute([statuses], (state) =>
++    sideMarks(state.doc, state.field(statuses), side),
++  );
++}
++
++export function centerWordMarks(field: StateField<readonly ChunkSpan[]>): Extension {
++  return [
++    originalDoc,
++    EditorView.decorations.compute([field, "doc"], (state) =>
++      centerMarks(state.doc, state.field(originalDoc), state.field(field)),
++    ),
++  ];
++}
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 00828a1..262a2eb 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -38,6 +38,14 @@ path.chunk-band {
+   fill: var(--chunk-tone);
+ }
+ 
++.cm-editor .chunk-word-modified {
++  background-color: var(--color-chunk-modified-word);
++}
++
++.cm-editor .chunk-word-conflict {
++  background-color: var(--color-chunk-conflict-word);
++}
++
+ .cm-editor .cm-line.chunk-point-above {
+   box-shadow: inset 0 2px 0 var(--chunk-marker-tone);
+ }
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index a7f22bf..3b64a26 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -38,6 +38,8 @@
+   --color-chunk-modified: #43698d5c;
+   --color-chunk-deleted: #656e765c;
+   --color-chunk-conflict: #8f52476b;
++  --color-chunk-modified-word: #43698da6;
++  --color-chunk-conflict-word: #8f5247a6;
+ }
+ 
+ @layer base {

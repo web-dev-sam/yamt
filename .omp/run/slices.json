@@ -1,6 +1,6 @@
 {
-  "M1EWordHighlights": {
-    "owned": ["frontend/src/editor/**", "frontend/src/style.css"],
+  "M1EWordHighlightsR1": {
+    "owned": ["frontend/src/editor/**"],
     "readonly": [
       "docs/**",
       ".omp/**",
@@ -8,6 +8,7 @@
       "frontend/src/ipc/**",
       "frontend/src/ui/**",
       "frontend/src/connectors/**",
+      "frontend/src/style.css",
       "frontend/src/main.ts",
       "frontend/package.json",
       "frontend/scripts/**",
