@@ -25,10 +25,12 @@ crates/gitio        (yamt-gitio) git subprocess layer (ls-files -u, cat-file --b
 crates/session      (yamt-session) MergeSession state machine; the only crate that knows both of the above
 crates/cli          (yamt-cli, bin yamt-cli) headless binary: classify / scan / golden / fixture
 crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge stops with scripted conflicts (regular, symlink, gitlink); dev-dependency of gitio, session, cli
-src-tauri           (yamt-app) bins `yamt` (shell stub) and `export-bindings` (specta → ipc/bindings.ts: FileEntry, FileMergeData). No lib.rs; tauri/tauri-specta declared (8576e54); commands land in 2.0 (plan §2 #41)
+src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-specta builder for both bins) + args, outcome (start-up decision, exit status), window, commands (IpcError), frontend_log;
+                    bins `yamt` and `export-bindings` (→ ipc/bindings.ts); tauri.conf.json; icons/icon.svg source (plan §2 #41)
 scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-core, clippy threshold parity
 scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map
 scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
+scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (the M1 source:

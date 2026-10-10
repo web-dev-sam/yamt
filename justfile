@@ -73,8 +73,9 @@ webdriver port="4445":
 test-window-check:
     scripts/test-screen.sh check
 
-dev-app:
-    cargo tauri dev
+# Desktop app in dev mode; arguments go to yamt (`just dev-app --repo /tmp/yamt-test-merge`).
+dev-app *args:
+    cargo tauri dev -- -- {{ args }}
 
 smoke-cli:
     cargo run --quiet -p yamt-cli -- classify frontend/fixtures/sample/{base,local,remote}.ts.txt
