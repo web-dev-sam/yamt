@@ -1,26 +1,25 @@
-const DEFAULT_UNIT = "  ";
-const LEADING_SPACE = /^[ \t]*/;
+const DEFAULT_WIDTH = 2;
+const SMALLEST_INDENT_STEP = 2;
 
 export function indentUnitOf(text: string): string {
   const steps = new Map<number, number>();
   let tabLines = 0;
   let spaceLines = 0;
   let previous = 0;
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of text.split("\n")) {
     if (line.trim() === "") {
       continue;
     }
-    const leading = LEADING_SPACE.exec(line)?.[0] ?? "";
-    if (leading.startsWith("\t")) {
+    if (line.startsWith("\t")) {
       tabLines += 1;
       continue;
     }
-    const width = leading.length;
-    if (width > 1) {
+    const width = line.length - line.trimStart().length;
+    if (width >= SMALLEST_INDENT_STEP) {
       spaceLines += 1;
     }
     const step = width - previous;
-    if (step > 1) {
+    if (step >= SMALLEST_INDENT_STEP) {
       steps.set(step, (steps.get(step) ?? 0) + 1);
     }
     previous = width;
@@ -28,7 +27,7 @@ export function indentUnitOf(text: string): string {
   if (tabLines > spaceLines) {
     return "\t";
   }
-  return " ".repeat(mostCommon(steps) ?? DEFAULT_UNIT.length);
+  return " ".repeat(mostCommon(steps) ?? DEFAULT_WIDTH);
 }
 
 function mostCommon(counts: ReadonlyMap<number, number>): number | null {

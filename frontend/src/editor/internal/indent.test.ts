@@ -42,6 +42,31 @@ class Greeter
 
 const TABS = "func f() {\n\tif x {\n\t\treturn 1\n\t}\n\treturn 0\n}\n";
 
+const TABS_WITH_JSDOC = `/**
+ * Returns one.
+ *
+ * Used by tests.
+ */
+func f() {
+\treturn 1
+}
+`;
+
+const TWO_WITH_BLANKS = `function f() {
+  if (x) {
+    a();
+
+    b();
+
+    c();
+    
+    d();
+
+    e();
+  }
+}
+`;
+
 const MOSTLY_FOUR = `class A:
     def f(self):
         call(a,
@@ -65,8 +90,16 @@ test("a tab-indented text indents with a tab", () => {
   expect(indentUnitOf(TABS)).toBe("\t");
 });
 
+test("a tab-indented text whose doc comment has more lines than its tab-led lines indents with a tab", () => {
+  expect(indentUnitOf(TABS_WITH_JSDOC)).toBe("\t");
+});
+
+test("blank and whitespace-only lines between deeper statements do not count as steps", () => {
+  expect(indentUnitOf(TWO_WITH_BLANKS)).toBe("  ");
+});
+
 test("a text without indentation indents by two spaces", () => {
-  expect(indentUnitOf("a\nb\r\nc\n")).toBe("  ");
+  expect(indentUnitOf("a\nb\nc\n")).toBe("  ");
 });
 
 test("the most common step wins over a few smaller ones", () => {

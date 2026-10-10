@@ -374,16 +374,16 @@ source in M1 there is no switch (vision 5).
 
 ### 5.1 State ownership — the table that prevents the classic mistake
 
-| state                                                                                      | owner                                                                                                                                                                       | why                                                                                                                                 |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| left/right/center document text                                                            | CodeMirror `EditorState`                                                                                                                                                    | rope, transactions, undo                                                                                                            |
-| chunk current positions in center                                                          | `editor/chunkField` (`StateField`)                                                                                                                                          | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
-| chunk apply status (`pending`/`applied-local`/`applied-remote`/`applied-both`/`dismissed`) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects`; side panes hold a read-only mirror the controller pushes after each center transaction | **undo must revert status together with text**                                                                                      |
-| left/right decorations                                                                     | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
-| scroll positions                                                                           | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
-| connector geometry                                                                         | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
-| file list, active file, loaded file data                                                   | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia)                                                                                                              | chrome only                                                                                                                         |
-| summary counts of the open file                                                            | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                              | per controller                                                                                                                      |
+| state                                                                                               | owner                                                                                                                                                                       | why                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| left/right/center document text                                                                     | CodeMirror `EditorState`                                                                                                                                                    | rope, transactions, undo                                                                                                            |
+| chunk current positions in center                                                                   | `editor/chunkField` (`StateField`)                                                                                                                                          | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
+| chunk apply status, per side (`{ local, remote }`, each `pending`/`applied`/`ignored`; plan §2 #33) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects`; side panes hold a read-only mirror the controller pushes after each center transaction | **undo must revert status together with text**                                                                                      |
+| left/right decorations                                                                              | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
+| scroll positions                                                                                    | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
+| connector geometry                                                                                  | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
+| file list, active file, loaded file data                                                            | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia)                                                                                                              | chrome only                                                                                                                         |
+| summary counts of the open file                                                                     | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                              | per controller                                                                                                                      |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
 text passes through once, from `resultText()` to `store.finish`.
@@ -410,24 +410,30 @@ Internals (`editor/internal/`, not importable from `ui/`):
 - `pane.ts` — shared extensions (bundled font theme, line numbers, Lezer highlight with the
   language compartment, `EditorState.lineSeparator` for CRLF, a highest-precedence selection mark
   so selected text shows over block tints and word marks), `readOnly` + `editable(false)` for
-  sides, `history()` for center only.
+  sides, `history()` and Tab / Shift+Tab (`indentWithTab`) for center only, with the indent unit
+  guessed from the starting text by `indent.ts` (plan §2 #35).
 - `language.ts` — the file's language from its base name via `@codemirror/language-data` (plan §2 #29).
 - `chunkField.ts` — the center `StateField` + effects described above (CM1, CM2, CM8).
-- `status.ts`, `apply.ts` — status rules and the steps for apply, ignore and bulk apply, sent one
-  dispatch each through `dispatchSteps`: (1) a cursor move to the block (bulk: to the first
+- `status.ts`, `apply.ts` — every status rule (a side still open, resolved, append or replace,
+  status after apply / ignore; plan §2 #33) and the steps for apply, ignore and bulk apply, sent
+  one dispatch each through `dispatchSteps`: (1) a cursor move to the block (bulk: to the first
   visible line, only if the cursor is off screen), outside history, no scroll — undo returns
   there; (2) the action: current mapped range from `chunkField`, replacement text from
   `data.local/remote` sliced by the chunk's fixed side range, plus the status effect; (3) the same
   cursor again as a selection step history records — redo returns there, and typing right after
-  an apply starts its own undo step.
+  an apply starts its own undo step. After a strip action the middle pane takes focus if it had
+  none, without scrolling.
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
-  filter per side pane decides which blocks are tinted and feeds the line bands, the word marks
-  and the removal bars; the middle pane draws bands only (plan §2 #31).
+  rule per side pane (that side still open) decides which blocks are tinted and feeds the line
+  bands, the word marks and the removal bars; the middle pane draws bands only, until both sides
+  are handled (plan §2 #31, #33).
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
   bar where the side removed text) from `chunk.words` (plan §2 #30, #31).
-- `geometry.ts`, `strips.ts` — bands and the apply/ignore arrows in the two `<svg>` strips
+- `geometry.ts`, `strips.ts` — bands and the apply/ignore buttons in the two `<svg>` strips
   (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
-  WebKit).
+  WebKit). Icons are Lucide SVG markup imported as strings (`~icons/lucide/<name>?raw`), parsed
+  once and cloned per button (plan §2 #34); the apply button turns into "add below" while the
+  other side is applied.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
   interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
   of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan
@@ -515,11 +521,14 @@ imports → types → macros (defineProps / defineEmits<…>() / defineModel) �
 
 **Applying a chunk** when the user already edited inside it: the mapped range may have
 grown/shrunk; replacement still targets the current mapped range (IntelliJ behaviour). If the
-range collapsed to empty because the user deleted it, the status becomes `Dismissed` and the
-gutter button disappears.
+range collapsed to empty because the user deleted it, every side becomes `ignored` and the
+buttons disappear.
 
-**"Apply both"** (`Conflict` chunks): local text followed by remote text — the IntelliJ
-default; the user edits from there.
+**Conflicts, side by side** (plan §2 #33, IntelliJ `MergeConflictModel`): each side is applied or
+ignored on its own. Applying a side replaces the block's current range, or appends after it when
+the other side was applied before ("apply both": local text followed by remote text, the
+IntelliJ default; the user edits from there). Applying a side while the other side's lines are
+empty resolves the whole conflict.
 
 **Bulk apply**: one transaction containing all `LocalOnly` (or `RemoteOnly`) + `BothSame`
 `Pending` chunks, built back-to-front so earlier ranges are not invalidated — or simpler and
