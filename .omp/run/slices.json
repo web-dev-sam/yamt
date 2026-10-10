@@ -23,7 +23,7 @@
       "frontend/fixtures/**"
     ]
   },
-  "M1SUndoKeepsView": {
+  "M1SUndoKeepsViewB": {
     "owned": [
       "frontend/src/editor/index.ts",
       "frontend/src/editor/internal/apply.ts",
