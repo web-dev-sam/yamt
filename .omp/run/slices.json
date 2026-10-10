@@ -7,5 +7,27 @@
       "scripts/golden-repo.sh",
       "scripts/git-sandbox.sh"
     ]
+  },
+  "V0WindowReadsGit": {
+    "owned": [
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/log.ts",
+      "frontend/src/ipc/log.test.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/main.ts",
+      "frontend/src/env.d.ts",
+      "frontend/src/style.css",
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/ProblemBar.vue",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts"
+    ]
   }
 }
