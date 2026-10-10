@@ -40,7 +40,7 @@ frontend/src/editor CodeMirror 6 integration; public surface = MergeController(F
                     (all `*.test.ts` in `node`; `engine.browser.test.ts` is the WebKit probe)
 frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
-frontend/src/ui     Vue 3 chrome: App, FileList (emits select), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
+frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
                     useMergeController (only ../editor importer), store.ts singleton; planned: WarningBanner
 frontend/src/main.ts     creates the fixture source and the store, loads the file list, mounts App; `VITE_CHUNK_SOURCE` picks a source from 2.1
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
