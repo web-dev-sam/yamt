@@ -2,7 +2,11 @@
   "V0DesktopShell": {
     "owned": ["src-tauri/**", "scripts/conflict-repo.sh", "crates/session/src/session.rs"]
   },
-  "V0GitCrossCheck": {
-    "owned": ["crates/cli/tests/merge_file.rs", "crates/cli/tests/merge_file.proptest-regressions"]
+  "V0FileIcons": {
+    "owned": [
+      "frontend/src/ui/FileList.vue",
+      "frontend/src/ui/fileIcon.ts",
+      "frontend/src/ui/fileIcon.test.ts"
+    ]
   }
 }
