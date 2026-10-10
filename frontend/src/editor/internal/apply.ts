@@ -1,5 +1,7 @@
 import {
+  EditorSelection,
   Text,
+  Transaction,
   type ChangeSpec,
   type EditorState,
   type StateField,
@@ -18,6 +20,10 @@ export type ApplyTarget = {
   readonly field: StateField<readonly ChunkSpan[]>;
   readonly sides: SideDocs;
 };
+
+export type VisibleLines = { readonly first: number; readonly last: number };
+
+export type Steps = readonly TransactionSpec[];
 
 function sideLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): string[] {
   return Array.from({ length: range.len }, (_, index) => doc.line(range.start + 1 + index).text);
@@ -44,6 +50,26 @@ function spanOf(target: ApplyTarget, chunk: Chunk): ChunkSpan | undefined {
   return target.state.field(target.field).find((span) => span.chunk.id === chunk.id);
 }
 
+// History restores the selection from before the action's transaction, so the cursor moves in a
+// transaction of its own (@codemirror/commands history: HistEvent.startSelection).
+function steps(cursor: number | null, action: TransactionSpec | null): Steps {
+  if (action === null) {
+    return [];
+  }
+  if (cursor === null) {
+    return [action];
+  }
+  return [
+    { selection: EditorSelection.cursor(cursor), annotations: Transaction.addToHistory.of(false) },
+    action,
+  ];
+}
+
+function cursorInView(state: EditorState, visible: VisibleLines): number | null {
+  const line = state.doc.lineAt(state.selection.main.head).number;
+  return line >= visible.first && line <= visible.last ? null : state.doc.line(visible.first).from;
+}
+
 export function applySpec(target: ApplyTarget, chunk: Chunk, side: Side): TransactionSpec | null {
   const span = spanOf(target, chunk);
   if (span === undefined || !canApply(span.chunk, span.status, side)) {
@@ -56,7 +82,7 @@ export function applySpec(target: ApplyTarget, chunk: Chunk, side: Side): Transa
   };
 }
 
-export function bulkApplySpec(target: ApplyTarget, side: Side): TransactionSpec | null {
+function bulkApplySpec(target: ApplyTarget, side: Side): TransactionSpec | null {
   const spans = target.state
     .field(target.field)
     .filter(
@@ -86,4 +112,16 @@ export function dismissSpec(target: ApplyTarget, chunk: Chunk): TransactionSpec 
     effects: setStatus.of({ id: chunk.id, status: "dismissed" }),
     userEvent: "yamt.dismiss",
   };
+}
+
+export function applySteps(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
+  return steps(spanOf(target, chunk)?.from ?? null, applySpec(target, chunk, side));
+}
+
+export function bulkApplySteps(target: ApplyTarget, side: Side, visible: VisibleLines): Steps {
+  return steps(cursorInView(target.state, visible), bulkApplySpec(target, side));
+}
+
+export function dismissSteps(target: ApplyTarget, chunk: Chunk): Steps {
+  return steps(spanOf(target, chunk)?.from ?? null, dismissSpec(target, chunk));
 }

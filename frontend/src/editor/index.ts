@@ -1,15 +1,17 @@
 import { redo, undo } from "@codemirror/commands";
 import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
-import type { StateField, TransactionSpec } from "@codemirror/state";
+import type { StateField } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { log, type FileMergeData } from "../ipc";
 import {
-  applySpec,
-  bulkApplySpec,
-  dismissSpec,
+  applySteps,
+  bulkApplySteps,
+  dismissSteps,
   type ApplyTarget,
   type SideDocs,
+  type Steps,
+  type VisibleLines,
 } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
@@ -128,19 +130,34 @@ export class MergeController {
     return { state: this.#views.center.state, field: this.#field, sides: this.#sides };
   }
 
-  #dispatch(spec: TransactionSpec | null): void {
-    if (spec !== null) {
+  #dispatch(steps: Steps): void {
+    for (const spec of steps) {
       this.#views.center.dispatch(spec);
     }
+  }
+
+  #visibleLines(): VisibleLines {
+    const view = this.#views.center;
+    const top = view.scrollDOM.getBoundingClientRect().top - view.documentTop;
+    const bottom = top + view.scrollDOM.clientHeight;
+    const first = view.lineBlockAtHeight(top);
+    const last = view.lineBlockAtHeight(bottom);
+    const doc = view.state.doc;
+    const firstLine = doc.lineAt(first.from).number;
+    const lastLine = doc.lineAt(last.from).number;
+    return {
+      first: first.top < top && firstLine < lastLine ? firstLine + 1 : firstLine,
+      last: last.bottom > bottom && lastLine > firstLine ? lastLine - 1 : lastLine,
+    };
   }
 
   #act(action: ChunkAction): void {
     switch (action.kind) {
       case "apply":
-        this.#dispatch(applySpec(this.#target(), action.chunk, action.side));
+        this.#dispatch(applySteps(this.#target(), action.chunk, action.side));
         return;
       case "dismiss":
-        this.#dispatch(dismissSpec(this.#target(), action.chunk));
+        this.#dispatch(dismissSteps(this.#target(), action.chunk));
         return;
       default: {
         const _exhaustive: never = action;
@@ -175,7 +192,7 @@ export class MergeController {
   }
 
   applyAllNonConflicting(side: Side): void {
-    this.#dispatch(bulkApplySpec(this.#target(), side));
+    this.#dispatch(bulkApplySteps(this.#target(), side, this.#visibleLines()));
   }
 
   undo(): boolean {
