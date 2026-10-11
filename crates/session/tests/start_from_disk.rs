@@ -1,11 +1,12 @@
 #![cfg(test)]
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
 };
-use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
+use yamt_session::{DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle};
 
 const TEXT: &str = "f.txt";
 const DELETED: &str = "gone.txt";
@@ -274,16 +275,22 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
     assert_eq!(target.to_str(), Some("local-target"));
 }
 
+// gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a
+// non-zero exit marks a conflict.
+const MARKER_WRITING_DRIVER: &str = "{ echo '<<<<<<< ours'; echo local; echo '======='; echo remote; echo '>>>>>>> theirs'; } > %A; exit 1";
+
 #[test]
-fn a_custom_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
-    let dir = merged(&[], Some("f.txt merge=mergiraf\n"));
-    assert!(read(&dir, TEXT).contains("<<<<<<<"));
+fn a_configured_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
+    let config = [("merge.mergiraf.driver", MARKER_WRITING_DRIVER)];
+    let dir = merged(&config, Some("f.txt merge=mergiraf\n"));
+    let driver_output = "<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\n";
+    assert_eq!(read(&dir, TEXT), driver_output);
 
     let (mut session, list) = first_list(&dir);
 
     assert_eq!(
         changes(&list),
-        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
+        [(TEXT, &DiskResult::MarkersLeft { conflicts: 1 })]
     );
     assert!(matches!(
         session.load(TEXT).unwrap().middle,
@@ -291,43 +298,60 @@ fn a_custom_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
     ));
 }
 
-fn utf16(text: &str) -> Vec<u8> {
-    let mut bytes = vec![0xFF, 0xFE];
-    for unit in text.encode_utf16() {
-        bytes.extend_from_slice(&unit.to_le_bytes());
-    }
-    bytes
+#[test]
+fn a_merge_driver_name_without_a_configured_driver_is_merged_as_text_and_untouched() {
+    let dir = merged(&[], Some("f.txt merge=lfs\n"));
+    assert!(read(&dir, TEXT).contains("<<<<<<<"));
+    assert_untouched(&dir);
 }
 
 #[test]
-fn a_working_tree_encoding_file_is_never_staged() {
-    const ENCODED: &str = "u.txt";
-    let sides = [
-        utf16("one\ntwo\n"),
-        utf16("one\nlocal\n"),
-        utf16("one\nremote\n"),
-    ];
+fn merge_default_binary_keeps_ours_and_the_file_is_untouched() {
+    let dir = merged(&[("merge.default", "binary")], None);
+    assert_eq!(read(&dir, TEXT), OURS);
+    assert_untouched(&dir);
+}
+
+#[test]
+fn a_file_merge_ort_aligned_with_histogram_is_untouched() {
     let file = ConflictFile {
-        path: ENCODED,
+        path: TEXT,
         kind: FileKind::Regular,
-        base: Some(&sides[0]),
-        local: Some(&sides[1]),
-        remote: Some(&sides[2]),
+        base: Some(b"{\na\n}\nx\nx\nb\n"),
+        local: Some(b"{\nx\nx\n}\nb\n"),
+        remote: Some(b"a\n}\nx\nx\nb\n"),
     };
-    let setup = Setup {
-        attributes: Some("u.txt working-tree-encoding=UTF-16\n"),
-        ..Setup::default()
-    };
-    let dir = conflict_repo_with(&[file], &setup).unwrap();
-    let (mut session, list) = first_list(&dir);
-    assert_eq!(list.disk_changes, []);
-    write(&dir, ENCODED, &utf16("resolved\n"));
-
-    let changed = session.refresh().unwrap();
-
-    assert_eq!(
-        changes(&changed),
-        [(ENCODED, &DiskResult::MarkersLeft { conflicts: 0 })]
+    let dir = conflict_repo_with(&[file], &Setup::default()).unwrap();
+    let git_output = read(&dir, TEXT);
+    assert!(
+        git_output.ends_with("=======\na\n>>>>>>> remote\n}\nb\n"),
+        "{git_output}"
     );
-    assert!(unmerged(&dir).contains(ENCODED));
+
+    let (_, list) = first_list(&dir);
+
+    assert_eq!(list.disk_changes, []);
+}
+
+#[test]
+fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
+    const NO_ACCESS: u32 = 0o000;
+    const READ_WRITE: u32 = 0o644;
+    let dir = zdiff3();
+    let path = dir.path().join(TEXT);
+    fs::set_permissions(&path, fs::Permissions::from_mode(NO_ACCESS)).unwrap();
+
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    let finished = session.finish(TEXT, "merged\n", DiskVersion(0));
+    assert!(
+        matches!(finished, Err(Error::ReadFailed { .. })),
+        "{finished:?}"
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(READ_WRITE)).unwrap();
+    assert_eq!(
+        changes(&session.refresh().unwrap()),
+        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
+    );
 }

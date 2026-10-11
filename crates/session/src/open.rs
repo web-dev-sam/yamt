@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use yamt_gitio::{BlobReader, MergeAttributes, Repo, StageEntry};
+use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
 
 use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
-use crate::disk::{MarkerRule, Seen, read_on_disk};
+use crate::disk::{MarkerRule, Seen, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
 use crate::remote_name::read_remote_name;
 use crate::session::{Content, FileState, FileStatus, MergeSession};
@@ -30,7 +30,8 @@ impl MergeSession {
         let groups = group_by_path(repo.unmerged()?);
         let paths: Vec<&Path> = groups.iter().map(|(path, _)| path.as_path()).collect();
         let attributes = repo.attributes(&paths)?;
-        let files = open_files(&repo, groups, &attributes)?;
+        let config = repo.merge_config()?;
+        let files = open_files(&repo, groups, &attributes, &config)?;
         let remote_name = read_remote_name(&repo);
         Ok(MergeSession {
             repo,
@@ -44,13 +45,15 @@ fn open_files(
     repo: &Repo,
     groups: Vec<(PathBuf, CapturedStages)>,
     attributes: &[MergeAttributes],
+    config: &MergeConfig,
 ) -> Result<Vec<FileState>> {
     let mut blobs = repo.blob_reader()?;
     let mut check = StartCheck::new(repo);
     let mut files = Vec::with_capacity(groups.len());
     let mut looks = Vec::with_capacity(groups.len());
     for ((path, stages), found) in groups.into_iter().zip(attributes) {
-        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, found)?;
+        let attributes = Attributes::from_git(found, config);
+        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, &attributes)?;
         files.push(file);
         looks.push(look);
     }
@@ -71,11 +74,17 @@ fn open_file(
     check: &mut StartCheck,
     path: PathBuf,
     stages: CapturedStages,
-    found: &MergeAttributes,
+    attributes: &Attributes,
 ) -> Result<(FileState, StartLook)> {
-    let attributes = Attributes::from_git(found);
     let stored = stored(blobs, &stages)?;
-    let disk = read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE))?;
+    let disk = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
+        Ok(disk) => disk,
+        Err(error) => {
+            warn_unread(&path.to_string_lossy(), &error);
+            let file = file_state(path, stages, stored, attributes, Seen::GitOutput);
+            return Ok((file, StartLook::Changed));
+        }
+    };
     let sides = match &stored {
         Stored::Regular { sides, .. } => Some(sides),
         Stored::Submodule | Stored::Symlink | Stored::BothDeleted => None,
@@ -84,22 +93,33 @@ fn open_file(
         path: &path,
         stages: &stages,
         sides,
-        attributes: &attributes,
+        attributes,
         disk: &disk,
     };
     let look = check.look(&start, blobs)?;
+    let seen = Seen::ViewFromStages(disk);
+    let file = file_state(path, stages, stored, attributes, seen);
+    Ok((file, look))
+}
+
+fn file_state(
+    path: PathBuf,
+    stages: CapturedStages,
+    stored: Stored,
+    attributes: &Attributes,
+    seen: Seen,
+) -> FileState {
     let content = content(&path, stored);
-    let file = FileState {
-        rule: marker_rule(&content, &attributes),
+    FileState {
+        rule: marker_rule(&content, attributes),
         path,
         stages,
         status: FileStatus::Unresolved,
         content,
         marker_size: attributes.marker_size,
-        seen: Seen::Stages(disk),
+        seen,
         settled: None,
-    };
-    Ok((file, look))
+    }
 }
 
 fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {

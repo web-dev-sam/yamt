@@ -2,51 +2,13 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
 use yamt_session::{
-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side,
-    UnsupportedReason, WriteReply,
+    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side, WriteReply,
 };
 
 use crate::frontend_log::LogEntry;
+use crate::ipc_error::IpcError;
 
 pub(crate) type SessionState = Mutex<MergeSession>;
-
-#[derive(Debug, serde::Serialize, specta::Type)]
-#[serde(tag = "kind")]
-pub enum IpcError {
-    Git {
-        message: String,
-    },
-    UnknownPath {
-        path: String,
-    },
-    Unsupported {
-        path: String,
-        reason: UnsupportedReason,
-    },
-    WriteFailed {
-        path: String,
-        message: String,
-    },
-}
-
-impl From<yamt_session::Error> for IpcError {
-    fn from(error: yamt_session::Error) -> IpcError {
-        match error {
-            yamt_session::Error::Git(source) => IpcError::Git {
-                message: source.to_string(),
-            },
-            yamt_session::Error::UnknownPath { path } => IpcError::UnknownPath { path },
-            yamt_session::Error::Unsupported { path, reason } => {
-                IpcError::Unsupported { path, reason }
-            }
-            yamt_session::Error::WriteFailed { path, source }
-            | yamt_session::Error::ReadFailed { path, source } => IpcError::WriteFailed {
-                path,
-                message: source.to_string(),
-            },
-        }
-    }
-}
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
@@ -368,48 +330,6 @@ mod tests {
         assert_eq!(
             window.invoke("load_file", json!({ "path": "missing.ts" })),
             Err(json!({ "kind": "UnknownPath", "path": "missing.ts" }))
-        );
-    }
-
-    #[test]
-    fn every_session_error_serialises_with_its_kind_and_fields() {
-        let plain_dir = TempDir::new().unwrap();
-        let Err(git_error) = MergeSession::open(plain_dir.path()) else {
-            panic!("a plain directory opened as a merge");
-        };
-        let git_json = serde_json::to_value(IpcError::from(git_error)).unwrap();
-        assert_eq!(git_json["kind"], "Git");
-        assert!(
-            git_json["message"]
-                .as_str()
-                .unwrap()
-                .contains("not a git repository"),
-            "{git_json}"
-        );
-
-        let unsupported = yamt_session::Error::Unsupported {
-            path: "logo.png".to_owned(),
-            reason: UnsupportedReason::Binary,
-        };
-        assert_eq!(
-            serde_json::to_value(IpcError::from(unsupported)).unwrap(),
-            json!({ "kind": "Unsupported", "path": "logo.png", "reason": "Binary" })
-        );
-        let write_failed = yamt_session::Error::WriteFailed {
-            path: "a.ts".to_owned(),
-            source: std::io::Error::other("disk full"),
-        };
-        assert_eq!(
-            serde_json::to_value(IpcError::from(write_failed)).unwrap(),
-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
-        );
-        let read_failed = yamt_session::Error::ReadFailed {
-            path: "a.ts".to_owned(),
-            source: std::io::Error::other("permission denied"),
-        };
-        assert_eq!(
-            serde_json::to_value(IpcError::from(read_failed)).unwrap(),
-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "permission denied" })
         );
     }
 

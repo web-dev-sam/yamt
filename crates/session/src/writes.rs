@@ -4,9 +4,9 @@ use std::path::Path;
 
 use yamt_gitio::{Repo, StageEntry};
 
-use crate::disk::{DiskChange, DiskVersion, OnDisk, Seen};
+use crate::disk::{DiskChange, DiskVersion, OnDisk, Seen, warn_unread};
 use crate::session::{
-    FileState, FileStatus, LOG_TARGET, MergeSession, Settled, WriteReply, find_file,
+    FileState, FileStatus, LOG_TARGET, MergeSession, Settled, WriteReply, file_index, find_file,
 };
 use crate::sides::{SUBMODULE_MODE, Side};
 use crate::{Error, Result};
@@ -30,7 +30,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         let worktree_file = self.repo.root().join(&file.path);
-        let before = worktree_bytes(&worktree_file, path)?;
+        let before = file_bytes_before_write(&self.repo, file)?;
         write_worktree_file(&worktree_file, path, result.as_bytes())?;
         if let Err(error) = self.repo.add_paths(&[file.path.as_path()]) {
             let rollback = match before {
@@ -43,10 +43,10 @@ impl MergeSession {
             return Err(error.into());
         }
         file.status = FileStatus::Resolved;
-        let read_back = file.read_disk(&self.repo)?;
+        let written = OnDisk::File(result.as_bytes().to_vec());
         file.seen = match &file.seen {
-            Seen::Disk(_) => Seen::Disk(read_back),
-            Seen::Stages(_) | Seen::GitOutput => Seen::Stages(read_back),
+            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(written),
+            Seen::ViewFromStages(_) | Seen::GitOutput => Seen::ViewFromStages(written),
         };
         Ok(self.written_reply())
     }
@@ -81,7 +81,7 @@ impl MergeSession {
             return Err(error);
         }
         file.status = FileStatus::Resolved;
-        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
+        read_back(&self.repo, file);
         Ok(self.written_reply())
     }
 
@@ -97,7 +97,7 @@ impl MergeSession {
         if file.stages.can_rebuild_markers() {
             self.repo.checkout_merge(&file.path)?;
         }
-        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
+        read_back(&self.repo, file);
         Ok(self.written_reply())
     }
 
@@ -108,6 +108,7 @@ impl MergeSession {
         path: &str,
         disk_version: DiskVersion,
     ) -> Result<Option<DiskChange>> {
+        let index = file_index(&self.files, path)?;
         let file = find_file(&mut self.files, path)?;
         if let Some(Settled { version, result }) = &file.settled
             && *version != disk_version
@@ -120,19 +121,7 @@ impl MergeSession {
         let Some(disk) = file.look(&self.repo)? else {
             return Ok(None);
         };
-        let mut disk = Some(disk);
-        let looked: Vec<Option<OnDisk>> = self
-            .files
-            .iter()
-            .map(|other| {
-                if other.path.to_string_lossy() == path {
-                    disk.take()
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let change = self.settle(looked).pop();
+        let change = self.settle(vec![(index, disk)]).pop();
         self.refresh_statuses()?;
         Ok(change)
     }
@@ -171,11 +160,20 @@ fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
     tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
 }
 
-fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
-    match fs::read(worktree_file) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(write_failed(path, source)),
+fn file_bytes_before_write(repo: &Repo, file: &FileState) -> Result<Option<Vec<u8>>> {
+    match file.read_disk(repo)? {
+        OnDisk::File(bytes) => Ok(Some(bytes)),
+        OnDisk::Missing => Ok(None),
+        OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => Err(Error::NotAFile {
+            path: file.display_path(),
+        }),
+    }
+}
+
+fn read_back(repo: &Repo, file: &mut FileState) {
+    match file.read_disk(repo) {
+        Ok(disk) => file.seen = Seen::ViewFromStages(disk),
+        Err(error) => warn_unread(&file.display_path(), &error),
     }
 }
 

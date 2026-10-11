@@ -2,8 +2,10 @@
 
 use std::fs;
 
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
-use yamt_session::{DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok, hash_object};
+use yamt_session::{
+    DiskChange, DiskResult, DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason,
+};
 
 const FILE: &str = "src/cart.ts";
 const OTHER: &str = "src/other.ts";
@@ -233,4 +235,24 @@ fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
 
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status_of(&session, PATH), FileStatus::Unresolved);
+}
+
+#[test]
+fn a_finished_file_changed_again_is_staged_again_with_its_new_bytes() {
+    let dir = two_file_conflict();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    session.finish(FILE, "merged\n", DiskVersion(0)).unwrap();
+    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    fs::write(dir.path().join(FILE), "user\n").unwrap();
+
+    let list = session.refresh().unwrap();
+
+    let staged = DiskChange {
+        path: FILE.to_owned(),
+        result: DiskResult::Staged,
+    };
+    assert_eq!(list.disk_changes, [staged]);
+    let oid = hash_object(dir.path(), b"user\n").unwrap();
+    let index = git_ok(dir.path(), &["ls-files", "-s", "--", FILE]).unwrap();
+    assert_eq!(index, format!("100644 {oid} 0\t{FILE}\n").as_bytes());
 }

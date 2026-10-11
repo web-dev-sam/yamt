@@ -7,7 +7,7 @@ use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo, conflict_repo_with, git_ok, hash_object,
 };
 use yamt_gitio::{
-    AttributeValue, Error, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Repo,
+    AttributeValue, Error, GitVersion, MergeAttributes, MergeConfig, MergeFileOptions, Repo,
 };
 
 const FIRST: &str = "a.txt";
@@ -111,12 +111,10 @@ fn hash_objects_cleans_each_file_through_autocrlf_like_git_add() {
 
 fn merged(repo: &Repo, scratch: &Path, inputs: [&[u8]; 3], options: &MergeFileOptions) -> String {
     let [base, local, remote] = inputs;
-    let inputs = MergeInputs {
-        base,
-        local,
-        remote,
-    };
-    text(repo.merge_file(scratch, &inputs, options).unwrap())
+    text(
+        repo.merge_file(scratch, base, local, remote, options)
+            .unwrap(),
+    )
 }
 
 const BASE: &[u8] = b"a\nb\nc\nd\ne\n";
@@ -168,17 +166,15 @@ fn merge_file_honours_union_histogram_and_marker_size() {
 fn merge_file_of_binary_input_is_a_git_failure_and_a_missing_scratch_dir_a_write_failure() {
     let (_dir, repo) = two_conflicts(&Setup::default());
     let scratch = TempDir::new().unwrap();
-    let binary = MergeInputs {
-        base: b"\0base",
-        local: b"\0local",
-        remote: b"\0remote",
-    };
+    let [base, local, remote]: [&[u8]; 3] = [b"\0base", b"\0local", b"\0remote"];
 
     let error = repo
-        .merge_file(scratch.path(), &binary, &PLAIN)
+        .merge_file(scratch.path(), base, local, remote, &PLAIN)
         .unwrap_err();
     let gone = scratch.path().join("gone");
-    let missing = repo.merge_file(&gone, &binary, &PLAIN).unwrap_err();
+    let missing = repo
+        .merge_file(&gone, base, local, remote, &PLAIN)
+        .unwrap_err();
 
     assert!(
         matches!(error, Error::GitFailed { status: Some(code), .. } if code >= 128),
@@ -250,4 +246,50 @@ fn add_paths_and_remove_paths_stage_every_path_in_one_call() {
         ""
     );
     assert!(conflicts.path().join(SECOND).exists());
+}
+
+#[test]
+fn merge_file_with_histogram_aligns_like_merge_ort_where_myers_does_not() {
+    let (_dir, repo) = two_conflicts(&Setup::default());
+    let scratch = TempDir::new().unwrap();
+    let triple: [&[u8]; 3] = [
+        b"{\na\n}\nx\nx\nb\n",
+        b"{\nx\nx\n}\nb\n",
+        b"a\n}\nx\nx\nb\n",
+    ];
+    let histogram = MergeFileOptions {
+        histogram: true,
+        ..PLAIN
+    };
+
+    let with_histogram = merged(&repo, scratch.path(), triple, &histogram);
+    let with_myers = merged(&repo, scratch.path(), triple, &PLAIN);
+
+    assert!(
+        with_histogram.ends_with("=======\na\n>>>>>>> theirs\n}\nb\n"),
+        "{with_histogram}"
+    );
+    assert!(
+        with_myers.ends_with("=======\na\n}\n>>>>>>> theirs\nx\nx\n}\nb\n"),
+        "{with_myers}"
+    );
+}
+
+#[test]
+fn merge_config_reads_the_default_driver_and_the_names_of_configured_drivers() {
+    let (dir, repo) = two_conflicts(&Setup::default());
+    let no_config = repo.merge_config().unwrap();
+    for (key, value) in [
+        ("merge.default", "binary"),
+        ("merge.mergiraf.driver", "mergiraf merge %O %A %B"),
+        ("merge.Named.Only.name", "a driver without a command"),
+    ] {
+        git_ok(dir.path(), &["config", key, value]).unwrap();
+    }
+
+    let config = repo.merge_config().unwrap();
+
+    assert_eq!(no_config, MergeConfig::default());
+    assert_eq!(config.default, Some(b"binary".to_vec()));
+    assert_eq!(config.drivers, [b"mergiraf".to_vec()]);
 }

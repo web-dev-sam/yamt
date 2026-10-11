@@ -10,14 +10,6 @@ use crate::{Error, Result};
 // conflicts otherwise (truncated to 127 if there are more than that many conflicts)."
 const FIRST_ERROR_STATUS: i32 = 128;
 
-/// The three versions one `git merge-file` run merges.
-#[derive(Clone, Copy, Debug)]
-pub struct MergeInputs<'a> {
-    pub base: &'a [u8],
-    pub local: &'a [u8],
-    pub remote: &'a [u8],
-}
-
 /// How `git merge-file` merges: marker length, `--union`, and `--diff-algorithm=histogram`.
 #[derive(Clone, Copy, Debug)]
 pub struct MergeFileOptions {
@@ -27,17 +19,20 @@ pub struct MergeFileOptions {
 }
 
 impl Repo {
-    /// git's merge of `inputs`, written with the labels `ours`, `base` and `theirs`; the three
-    /// inputs are written to files in `scratch`, an existing directory the caller removes.
+    /// git's merge of `base`, `local` and `remote`, written with the labels `ours`, `base` and
+    /// `theirs`; the three inputs are written to files in `scratch`, an existing directory the
+    /// caller removes.
     pub fn merge_file(
         &self,
         scratch: &Path,
-        inputs: &MergeInputs<'_>,
+        base: &[u8],
+        local: &[u8],
+        remote: &[u8],
         options: &MergeFileOptions,
     ) -> Result<Vec<u8>> {
-        let local = write_input(scratch, "local", inputs.local)?;
-        let base = write_input(scratch, "base", inputs.base)?;
-        let remote = write_input(scratch, "remote", inputs.remote)?;
+        let local = write_input(scratch, "local", local)?;
+        let base = write_input(scratch, "base", base)?;
+        let remote = write_input(scratch, "remote", remote)?;
         let marker_size = format!("--marker-size={}", options.marker_size);
         let mut args = vec!["merge-file", "-p", "-q", marker_size.as_str()];
         if options.union {

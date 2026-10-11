@@ -1,11 +1,12 @@
 use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use yamt_gitio::{
-    AttributeValue, BlobReader, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Oid,
+    AttributeValue, BlobReader, GitVersion, MergeAttributes, MergeConfig, MergeFileOptions, Oid,
     Repo, StageEntry,
 };
 
@@ -24,6 +25,7 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
     minor: 44,
 };
 const SCRATCH_ATTEMPTS: u32 = 1000;
+const SCRATCH_MODE: u32 = 0o700;
 
 /// The gitattributes that decide what git wrote to a conflicted path.
 pub(crate) struct Attributes {
@@ -86,7 +88,7 @@ pub(crate) struct StartCheck<'r> {
 struct ScratchDir(PathBuf);
 
 impl Attributes {
-    pub(crate) fn from_git(found: &MergeAttributes) -> Attributes {
+    pub(crate) fn from_git(found: &MergeAttributes, config: &MergeConfig) -> Attributes {
         let marker_size = match &found.conflict_marker_size {
             AttributeValue::Value(value) => std::str::from_utf8(value)
                 .ok()
@@ -97,16 +99,7 @@ impl Attributes {
                 DEFAULT_MARKER_SIZE
             }
         };
-        let driver = match &found.merge {
-            AttributeValue::Unspecified | AttributeValue::Set => MergeDriver::Text,
-            AttributeValue::Unset => MergeDriver::Binary,
-            AttributeValue::Value(name) => match name.as_slice() {
-                b"text" => MergeDriver::Text,
-                b"union" => MergeDriver::Union,
-                b"binary" => MergeDriver::Binary,
-                _ => MergeDriver::Custom,
-            },
-        };
+        let driver = merge_driver(&found.merge, config);
         let encoded = match &found.working_tree_encoding {
             AttributeValue::Value(_) => true,
             AttributeValue::Unspecified | AttributeValue::Unset | AttributeValue::Set => false,
@@ -116,6 +109,28 @@ impl Attributes {
             driver,
             encoded,
         }
+    }
+}
+
+// merge-ll.c `find_ll_merge_driver`: an unspecified attribute takes `merge.default`; a name is
+// looked up in the configured drivers first, then the built-in ones, "default to the 3-way".
+fn merge_driver(attribute: &AttributeValue, config: &MergeConfig) -> MergeDriver {
+    let name = match attribute {
+        AttributeValue::Set => return MergeDriver::Text,
+        AttributeValue::Unset => return MergeDriver::Binary,
+        AttributeValue::Unspecified => match &config.default {
+            Some(name) => name,
+            None => return MergeDriver::Text,
+        },
+        AttributeValue::Value(name) => name,
+    };
+    if config.drivers.contains(name) {
+        return MergeDriver::Custom;
+    }
+    match name.as_slice() {
+        b"binary" => MergeDriver::Binary,
+        b"union" => MergeDriver::Union,
+        _ => MergeDriver::Text,
     }
 }
 
@@ -200,18 +215,15 @@ impl<'r> StartCheck<'r> {
             None => ScratchDir::create().map_err(|error| error.to_string())?,
         };
         let [base, local, remote] = sides;
-        let inputs = MergeInputs {
-            base,
-            local,
-            remote,
-        };
         let options = MergeFileOptions {
             marker_size,
             union,
             histogram,
         };
         self.merge_file_runs += 1;
-        let merged = self.repo.merge_file(&scratch.0, &inputs, &options);
+        let merged = self
+            .repo
+            .merge_file(&scratch.0, base, local, remote, &options);
         self.scratch = Some(scratch);
         merged.map_err(|error| error.to_string())
     }
@@ -296,7 +308,7 @@ impl ScratchDir {
         let process = std::process::id();
         for attempt in 0..SCRATCH_ATTEMPTS {
             let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
-            match fs::create_dir(&dir) {
+            match fs::DirBuilder::new().mode(SCRATCH_MODE).create(&dir) {
                 Ok(()) => return Ok(ScratchDir(dir)),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
@@ -312,5 +324,24 @@ impl Drop for ScratchDir {
             let dir = self.0.display();
             tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    const PERMISSION_BITS: u32 = 0o777;
+
+    #[test]
+    fn the_scratch_dir_is_readable_by_its_owner_only_and_removed_when_dropped() {
+        let scratch = ScratchDir::create().unwrap();
+        let dir = scratch.0.clone();
+        let mode = fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
+        drop(scratch);
+        assert!(!dir.exists());
     }
 }

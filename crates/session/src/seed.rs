@@ -1,12 +1,10 @@
 use std::ops::Range;
 
-use yamt_merge_core::{
-    BaseLine, Chunk, ChunkId, ChunkKind, LineMap, LineRange, LocalLine, RemoteLine, line_map,
-    word_changes,
-};
+use yamt_merge_core::{BaseLine, Chunk, ChunkId, ChunkKind, LineRange, word_changes};
 
 use crate::decode::{Eol, detect_eol};
-use crate::markers::{Block, Piece, parse, split_lines};
+use crate::locate::{Located, Maps, line_number, side_view};
+use crate::markers::{Piece, parse, split_lines};
 use crate::merge_data::{MergeChunk, MiddleLine, Texts};
 
 /// The middle pane's starting text built from a worktree file, and its open conflicts.
@@ -16,28 +14,6 @@ pub(crate) struct Seeded {
     pub(crate) chunks: Vec<MergeChunk>,
 }
 
-/// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`), and the
-/// line where each piece starts in it.
-struct SideView {
-    text: String,
-    piece_starts: Vec<u32>,
-}
-
-/// Where an open block or raw region sits in local and remote; `exact` when every line of both
-/// sections was found unchanged.
-struct Located {
-    local: Range<u32>,
-    remote: Range<u32>,
-    exact: bool,
-}
-
-struct Maps {
-    ours_to_local: LineMap,
-    theirs_to_remote: LineMap,
-    local_to_base: LineMap,
-    remote_to_base: LineMap,
-}
-
 /// The middle text as it is built, with each conflict's chunk and its lines in the middle.
 struct MiddleText<'a> {
     disk_lines: &'a [&'a str],
@@ -45,6 +21,8 @@ struct MiddleText<'a> {
     eol: Eol,
     text: String,
     line_count: u32,
+    /// Where the previous chunk's base lines end; the next chunk's start no earlier.
+    base_end: u32,
     chunks: Vec<Chunk>,
     ranges: Vec<LineRange<MiddleLine>>,
 }
@@ -54,18 +32,14 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
     let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
     let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
     let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
-    let maps = Maps {
-        ours_to_local: line_map(&ours.text, &texts.local.replace("\r\n", "\n")),
-        theirs_to_remote: line_map(&theirs.text, &texts.remote.replace("\r\n", "\n")),
-        local_to_base: line_map(&texts.local, &texts.base),
-        remote_to_base: line_map(&texts.remote, &texts.base),
-    };
+    let maps = Maps::new(&ours, &theirs, texts);
     let mut middle = MiddleText {
         disk_lines: &disk_lines,
         base_lines: texts.base.split_inclusive('\n').collect(),
         eol: detect_eol(disk),
         text: String::with_capacity(disk.len()),
         line_count: 0,
+        base_end: 0,
         chunks: Vec::new(),
         ranges: Vec::new(),
     };
@@ -86,80 +60,19 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
     middle.seeded(texts)
 }
 
-fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usize>) -> SideView {
-    let mut view = SideView {
-        text: String::new(),
-        piece_starts: Vec::with_capacity(pieces.len()),
-    };
-    let mut line_count = 0;
-    for piece in pieces {
-        view.piece_starts.push(line_count);
-        let included = match piece {
-            Piece::Settled(lines) => lines,
-            Piece::Block(block) => section(block),
-            Piece::Raw(_) => continue,
-        };
-        for line in lines.get(included.clone()).unwrap_or_default() {
-            match line.strip_suffix("\r\n") {
-                Some(content) => {
-                    view.text.push_str(content);
-                    view.text.push('\n');
-                }
-                None => view.text.push_str(line),
-            }
-            line_count += 1;
-        }
-    }
-    view
-}
-
-impl Maps {
-    fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
-        let ours = ours_start..ours_start + line_number(block.ours.len());
-        let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
-        match (
-            self.ours_to_local.exact(ours.clone()),
-            self.theirs_to_remote.exact(theirs.clone()),
-        ) {
-            (Some(local), Some(remote)) => Located {
-                local,
-                remote,
-                exact: true,
-            },
-            (None, _) | (_, None) => Located {
-                local: self.ours_to_local.covering(ours),
-                remote: self.theirs_to_remote.covering(theirs),
-                exact: false,
-            },
-        }
-    }
-
-    fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
-        Located {
-            local: self.ours_to_local.covering(ours_start..ours_start),
-            remote: self.theirs_to_remote.covering(theirs_start..theirs_start),
-            exact: false,
-        }
-    }
-
-    fn base(&self, located: &Located) -> Range<u32> {
-        let from_local = self.local_to_base.covering(located.local.clone());
-        let from_remote = self.remote_to_base.covering(located.remote.clone());
-        from_local.start.min(from_remote.start)..from_local.end.max(from_remote.end)
-    }
-}
-
 impl MiddleText<'_> {
     fn push_disk_lines(&mut self, lines: &Range<usize>) {
         for line in self.disk_lines.get(lines.clone()).unwrap_or_default() {
+            end_open_line(&mut self.text, self.eol);
             self.text.push_str(line);
             self.line_count += 1;
         }
     }
 
-    fn push_base_lines(&mut self, lines: &Range<u32>) {
-        let range = lines.start as usize..lines.end as usize;
+    fn push_base_lines(&mut self, lines: LineRange<BaseLine>) {
+        let range = lines.start.0 as usize..lines.end().0 as usize;
         for line in self.base_lines.get(range).unwrap_or_default() {
+            end_open_line(&mut self.text, self.eol);
             let bare_lf = line
                 .strip_suffix('\n')
                 .filter(|content| !content.ends_with('\r'));
@@ -174,10 +87,16 @@ impl MiddleText<'_> {
         }
     }
 
-    fn push_conflict(&mut self, located: &Located, base: Range<u32>, disk_lines: &Range<usize>) {
+    fn push_conflict(
+        &mut self,
+        located: &Located,
+        base: LineRange<BaseLine>,
+        disk_lines: &Range<usize>,
+    ) {
+        let base = self.after_previous_base(base);
         let start = self.line_count;
         if located.exact {
-            self.push_base_lines(&base);
+            self.push_base_lines(base);
         } else {
             self.push_disk_lines(disk_lines);
         }
@@ -188,19 +107,21 @@ impl MiddleText<'_> {
         self.chunks.push(Chunk {
             id: ChunkId(line_number(self.chunks.len())),
             kind: ChunkKind::Conflict,
-            base: LineRange {
-                start: BaseLine(base.start),
-                len: base.end - base.start,
-            },
-            local: LineRange {
-                start: LocalLine(located.local.start),
-                len: located.local.end - located.local.start,
-            },
-            remote: LineRange {
-                start: RemoteLine(located.remote.start),
-                len: located.remote.end - located.remote.start,
-            },
+            base,
+            local: located.local,
+            remote: located.remote,
         });
+    }
+
+    /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
+    fn after_previous_base(&mut self, base: LineRange<BaseLine>) -> LineRange<BaseLine> {
+        let start = base.start.0.max(self.base_end);
+        let after = LineRange {
+            start: BaseLine(start),
+            len: base.end().0.saturating_sub(start),
+        };
+        self.base_end = after.end().0;
+        after
     }
 
     fn seeded(self, texts: &Texts) -> Seeded {
@@ -221,8 +142,15 @@ impl MiddleText<'_> {
     }
 }
 
-fn line_number(count: usize) -> u32 {
-    u32::try_from(count).unwrap_or(u32::MAX)
+/// Ends a last line that has no line break (base's last line) before another line follows it.
+fn end_open_line(text: &mut String, eol: Eol) {
+    if text.is_empty() || text.ends_with('\n') {
+        return;
+    }
+    match eol {
+        Eol::CrLf => text.push_str("\r\n"),
+        Eol::Lf | Eol::Mixed => text.push('\n'),
+    }
 }
 
 #[cfg(test)]
@@ -265,20 +193,35 @@ mod tests {
         ranges.collect()
     }
 
+    /// The middle with every chunk replaced by its lines of `side`, as the window applies them.
+    fn with_applied(seeded: &Seeded, side: &str, lines_of: fn(&Chunk) -> (u32, u32)) -> String {
+        let mut middle: Vec<&str> = seeded.middle.split_inclusive('\n').collect();
+        let side: Vec<&str> = side.split_inclusive('\n').collect();
+        for chunk in seeded.chunks.iter().rev() {
+            let start = chunk.middle.start.0 as usize;
+            let replaced = start..start + chunk.middle.len as usize;
+            let (side_start, side_len) = lines_of(&chunk.chunk);
+            let side_lines = side_start as usize..(side_start + side_len) as usize;
+            middle.splice(replaced, side[side_lines].iter().copied());
+        }
+        middle.concat()
+    }
+
     fn with_local_applied(seeded: &Seeded, local: &str) -> String {
-        let middle: Vec<&str> = seeded.middle.split_inclusive('\n').collect();
-        let local: Vec<&str> = local.split_inclusive('\n').collect();
-        let [chunk] = seeded.chunks.as_slice() else {
-            panic!("expected one chunk, got {}", seeded.chunks.len());
-        };
-        let (start, len) = (chunk.middle.start.0 as usize, chunk.middle.len as usize);
-        let (local_start, local_len) = (
-            chunk.chunk.local.start.0 as usize,
-            chunk.chunk.local.len as usize,
-        );
-        let mut applied = middle[..start].concat();
-        applied += &local[local_start..local_start + local_len].concat();
-        applied + &middle[start + len..].concat()
+        with_applied(seeded, local, |chunk| {
+            (chunk.local.start.0, chunk.local.len)
+        })
+    }
+
+    fn with_remote_applied(seeded: &Seeded, remote: &str) -> String {
+        with_applied(seeded, remote, |chunk| {
+            (chunk.remote.start.0, chunk.remote.len)
+        })
+    }
+
+    fn base_ranges(seeded: &Seeded) -> Vec<(u32, u32)> {
+        let ranges = seeded.chunks.iter().map(|chunk| chunk.chunk.base);
+        ranges.map(|base| (base.start.0, base.len)).collect()
     }
 
     #[test]
@@ -357,15 +300,66 @@ mod tests {
         let texts = texts(
             "dup\nmid\nbase\nend\n",
             "dup\nmid\ndup\nend\n",
-            "dup\nmid\nother\nend\n",
+            "DUP\nmid\nother\nend\n",
         );
-        let disk = "dup\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
+        let disk = "DUP\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
 
         let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
 
-        assert_eq!(seeded.middle, "dup\nmid\nbase\nend\n");
+        assert_eq!(seeded.middle, "DUP\nmid\nbase\nend\n");
         assert_eq!(ranges(&seeded), [[(2, 1), (2, 1), (2, 1)]]);
+        assert_eq!(base_ranges(&seeded), [(2, 1)]);
+        assert_eq!(
+            with_local_applied(&seeded, &texts.local),
+            "DUP\nmid\ndup\nend\n"
+        );
+        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
+    }
+
+    #[test]
+    fn a_base_without_a_final_line_break_ends_its_last_line_before_the_settled_lines() {
+        let texts = texts(
+            "{\n  \"a\": 1\n}",
+            "{\n  \"a\": 1,\n  \"x\": 2\n}\n",
+            "{\n  \"a\": 1,\n  \"y\": 3\n}\n",
+        );
+        let disk =
+            "{\n  \"a\": 1,\n<<<<<<< ours\n  \"x\": 2\n=======\n  \"y\": 3\n>>>>>>> theirs\n}\n";
+
+        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+
+        assert_eq!(seeded.middle, "{\n  \"a\": 1,\n  \"a\": 1\n}\n}\n");
+        assert_eq!(ranges(&seeded), [[(2, 2), (2, 1), (2, 1)]]);
         assert_eq!(with_local_applied(&seeded, &texts.local), texts.local);
+        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
+    }
+
+    #[test]
+    fn two_blocks_git_split_around_shared_lines_get_disjoint_base_lines() {
+        let texts = texts(
+            "a\nX\nz\n",
+            "a\nL1\ns1\ns2\ns3\ns4\nL2\nz\n",
+            "a\nR1\ns1\ns2\ns3\ns4\nR2\nz\n",
+        );
+        let block = |ours: &str, theirs: &str| {
+            format!("<<<<<<< ours\n{ours}\n=======\n{theirs}\n>>>>>>> theirs\n")
+        };
+        let disk = format!(
+            "a\n{}s1\ns2\ns3\ns4\n{}z\n",
+            block("L1", "R1"),
+            block("L2", "R2")
+        );
+
+        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
+
+        assert_eq!(seeded.middle, "a\nX\ns1\ns2\ns3\ns4\nz\n");
+        assert_eq!(base_ranges(&seeded), [(1, 1), (2, 0)]);
+        assert_eq!(
+            ranges(&seeded),
+            [[(1, 1), (1, 1), (1, 1)], [(6, 0), (6, 1), (6, 1)]]
+        );
+        assert_eq!(with_local_applied(&seeded, &texts.local), texts.local);
+        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use yamt_gitio::Repo;
 use crate::decode::UnsupportedReason;
 use crate::disk::{
     DiskChange, DiskResult, DiskVersion, MarkerRule, OnDisk, Seen, Settlement, read_on_disk,
-    settlement, stage,
+    settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
 use crate::remote_name::RemoteName;
@@ -91,15 +91,12 @@ impl MergeSession {
 
     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
     pub fn refresh(&mut self) -> Result<FileList> {
-        let mut looked = Vec::with_capacity(self.files.len());
-        for file in &self.files {
+        let mut looked = Vec::new();
+        for (index, file) in self.files.iter().enumerate() {
             match file.look(&self.repo) {
-                Ok(change) => looked.push(change),
-                Err(error) => {
-                    let path = file.display_path();
-                    tracing::warn!(target: LOG_TARGET, event = "disk_unread", %path, %error, "the file is looked at again next time");
-                    looked.push(None);
-                }
+                Ok(Some(disk)) => looked.push((index, disk)),
+                Ok(None) => {}
+                Err(error) => warn_unread(&file.display_path(), &error),
             }
         }
         let disk_changes = self.settle(looked);
@@ -123,28 +120,28 @@ impl MergeSession {
         Ok(())
     }
 
-    /// Settles each `Some` read (one per file, in file order): one batch of `git add` and one of
+    /// Settles each read of the file at its index: one batch of `git add` and one of
     /// `update-index --force-remove`.
-    pub(crate) fn settle(&mut self, looked: Vec<Option<OnDisk>>) -> Vec<DiskChange> {
+    pub(crate) fn settle(&mut self, looked: Vec<(usize, OnDisk)>) -> Vec<DiskChange> {
         let mut adds: Vec<&Path> = Vec::new();
         let mut removes: Vec<&Path> = Vec::new();
-        let mut settlements = Vec::with_capacity(looked.len());
-        for (file, disk) in self.files.iter().zip(&looked) {
-            let found = disk
-                .as_ref()
-                .map(|disk| settlement(disk, file.rule, file.marker_size));
-            match &found {
-                Some(Settlement::Add) => adds.push(&file.path),
-                Some(Settlement::Remove) => removes.push(&file.path),
-                Some(Settlement::Leave { .. }) | None => {}
+        let mut decided = Vec::with_capacity(looked.len());
+        for (index, disk) in looked {
+            let Some(file) = self.files.get(index) else {
+                continue;
+            };
+            let found = settlement(&disk, file.rule, file.marker_size);
+            match found {
+                Settlement::Add => adds.push(&file.path),
+                Settlement::Remove => removes.push(&file.path),
+                Settlement::MarkersLeft { .. } | Settlement::LeaveAsIs => {}
             }
-            settlements.push(found);
+            decided.push((index, disk, found));
         }
         let staging = stage(&self.repo, &adds, &removes);
-        let mut changes = Vec::new();
-        let decided = looked.into_iter().zip(settlements);
-        for (file, (disk, found)) in self.files.iter_mut().zip(decided) {
-            if let (Some(disk), Some(found)) = (disk, found) {
+        let mut changes = Vec::with_capacity(decided.len());
+        for (index, disk, found) in decided {
+            if let Some(file) = self.files.get_mut(index) {
                 changes.push(file.settled_as(disk, staging.result(&found)));
             }
         }
@@ -170,14 +167,14 @@ impl MergeSession {
         let version = file.disk_version();
         let path = file.display_path();
         match &file.seen {
-            Seen::Disk(disk) => Ok(disk_merge_data(
+            Seen::ViewFromDisk(disk) => Ok(disk_merge_data(
                 &path,
                 texts,
                 disk,
                 file.marker_size,
                 version,
             )),
-            Seen::Stages(_) | Seen::GitOutput => Ok(merge_data(
+            Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
                 &path,
                 &texts.base,
                 &texts.local,
@@ -213,9 +210,20 @@ pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'
     files
         .iter_mut()
         .find(|file| file.path.to_string_lossy() == path)
-        .ok_or_else(|| Error::UnknownPath {
-            path: path.to_owned(),
-        })
+        .ok_or_else(|| unknown_path(path))
+}
+
+pub(crate) fn file_index(files: &[FileState], path: &str) -> Result<usize> {
+    files
+        .iter()
+        .position(|file| file.path.to_string_lossy() == path)
+        .ok_or_else(|| unknown_path(path))
+}
+
+fn unknown_path(path: &str) -> Error {
+    Error::UnknownPath {
+        path: path.to_owned(),
+    }
 }
 
 impl FileState {
@@ -264,7 +272,7 @@ impl FileState {
     }
 
     fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
-        self.seen = Seen::Disk(disk);
+        self.seen = Seen::ViewFromDisk(disk);
         self.settled = Some(Settled {
             version: DiskVersion(self.disk_version().0.saturating_add(1)),
             result: result.clone(),

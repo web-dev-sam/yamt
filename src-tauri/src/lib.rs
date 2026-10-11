@@ -6,6 +6,7 @@ mod commands;
 mod frontend_log;
 #[cfg(target_os = "linux")]
 mod graphics;
+mod ipc_error;
 mod outcome;
 mod window;
 

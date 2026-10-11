@@ -8,6 +8,7 @@ use specta::Type;
 use yamt_gitio::{Oid, Repo};
 
 use crate::markers::{open_regions, parse, split_lines};
+use crate::session::LOG_TARGET;
 use crate::{Error, Result};
 
 /// Counts the settles of one file's disk changes; a view is built from one version.
@@ -19,10 +20,12 @@ pub struct DiskVersion(pub u32);
 #[serde(tag = "kind")]
 pub enum DiskResult {
     Staged,
-    /// Not staged: the file still has this many open blocks and raw regions.
+    /// Not staged: the file still has this many open blocks and raw regions, at least one.
     MarkersLeft {
         conflicts: u32,
     },
+    /// Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out.
+    LeftAsIs,
     StageFailed {
         message: String,
     },
@@ -46,14 +49,11 @@ pub(crate) enum OnDisk {
     Other,
 }
 
-/// What yamt last saw at a path, and what the window's view of the file is built from.
 pub(crate) enum Seen {
-    /// The file differed from git's merge output at start; no read equals it.
+    /// The file differed from git's merge output at start, or could not be read then.
     GitOutput,
-    /// The view is yamt's merge of the stages.
-    Stages(OnDisk),
-    /// The view is built from this read (`Middle::Disk` or `Middle::DiskNotText`).
-    Disk(OnDisk),
+    ViewFromStages(OnDisk),
+    ViewFromDisk(OnDisk),
 }
 
 /// How a change to a file that is still present is settled.
@@ -70,7 +70,8 @@ pub(crate) enum MarkerRule {
 pub(crate) enum Settlement {
     Add,
     Remove,
-    Leave { conflicts: u32 },
+    MarkersLeft { conflicts: u32 },
+    LeaveAsIs,
 }
 
 /// The outcome of the two batched staging commands of one settle.
@@ -83,9 +84,13 @@ impl Seen {
     pub(crate) fn is(&self, disk: &OnDisk) -> bool {
         match self {
             Seen::GitOutput => false,
-            Seen::Stages(seen) | Seen::Disk(seen) => seen == disk,
+            Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
         }
     }
+}
+
+pub(crate) fn warn_unread(path: &str, error: &Error) {
+    tracing::warn!(target: LOG_TARGET, event = "disk_unread", %path, %error, "the file is looked at again next time");
 }
 
 pub(crate) fn read_on_disk(repo: &Repo, path: &Path, is_submodule: bool) -> Result<OnDisk> {
@@ -123,23 +128,19 @@ fn is_absent(error: &io::Error) -> bool {
 }
 
 pub(crate) fn settlement(disk: &OnDisk, rule: MarkerRule, marker_size: usize) -> Settlement {
-    let conflicts = || match disk {
-        OnDisk::File(bytes) => open_regions(&parse(&split_lines(bytes), marker_size)),
-        OnDisk::Missing | OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => 0,
+    let stage_any = match rule {
+        MarkerRule::NeverStage => return Settlement::LeaveAsIs,
+        MarkerRule::StageAny => true,
+        MarkerRule::StageWithoutMarkers => false,
     };
-    if rule == MarkerRule::NeverStage {
-        return Settlement::Leave {
-            conflicts: conflicts(),
-        };
-    }
     match disk {
         OnDisk::Missing | OnDisk::Other => Settlement::Remove,
-        OnDisk::Submodule(None) => Settlement::Leave { conflicts: 0 },
+        OnDisk::Submodule(None) => Settlement::LeaveAsIs,
         OnDisk::Link(_) | OnDisk::Submodule(Some(_)) => Settlement::Add,
-        OnDisk::File(_) if rule == MarkerRule::StageAny => Settlement::Add,
-        OnDisk::File(_) => match conflicts() {
+        OnDisk::File(_) if stage_any => Settlement::Add,
+        OnDisk::File(bytes) => match open_regions(&parse(&split_lines(bytes), marker_size)) {
             0 => Settlement::Add,
-            conflicts => Settlement::Leave { conflicts },
+            conflicts => Settlement::MarkersLeft { conflicts },
         },
     }
 }
@@ -170,9 +171,10 @@ impl Staging {
         match settlement {
             Settlement::Add => staged(&self.added),
             Settlement::Remove => staged(&self.removed),
-            Settlement::Leave { conflicts } => DiskResult::MarkersLeft {
+            Settlement::MarkersLeft { conflicts } => DiskResult::MarkersLeft {
                 conflicts: *conflicts,
             },
+            Settlement::LeaveAsIs => DiskResult::LeftAsIs,
         }
     }
 }

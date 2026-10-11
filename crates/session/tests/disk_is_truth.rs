@@ -7,8 +7,8 @@ use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
 };
 use yamt_session::{
-    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
-    WriteReply,
+    DiskChange, DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle,
+    NotText, Side, WriteReply,
 };
 
 const TEXT: &str = "f.txt";
@@ -280,16 +280,35 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
 }
 
 #[test]
-fn a_resolved_file_changed_again_is_staged_again_with_its_new_bytes() {
+fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missing_file() {
     let dir = merged();
     let mut session = opened(&dir);
-    session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
-    write(&dir, TEXT, USER_TEXT);
+    let outside = TempDir::new().unwrap();
+    let target = outside.path().join("target.txt");
+    fs::write(&target, USER_TEXT).unwrap();
+    let worktree_file = dir.path().join(TEXT);
+    fs::remove_file(&worktree_file).unwrap();
+    symlink(&target, &worktree_file).unwrap();
+    session.refresh().unwrap();
 
-    let list = session.refresh().unwrap();
+    let through_link = session.finish(TEXT, "merged\n", DiskVersion(1));
+    fs::remove_file(&worktree_file).unwrap();
+    fs::create_dir(&worktree_file).unwrap();
+    session.refresh().unwrap();
+    let into_directory = session.finish(TEXT, "merged\n", DiskVersion(2));
+    fs::remove_dir(&worktree_file).unwrap();
+    session.refresh().unwrap();
+    let created = session.finish(TEXT, "merged\n", DiskVersion(3)).unwrap();
 
-    assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
-    assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
+    for refused in [through_link, into_directory] {
+        assert!(
+            matches!(refused, Err(Error::NotAFile { .. })),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(fs::read(&target).unwrap(), USER_TEXT);
+    assert!(matches!(created, WriteReply::Written { .. }), "{created:?}");
+    assert_eq!(read(&dir, TEXT), b"merged\n");
 }
 
 #[test]

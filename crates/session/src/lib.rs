@@ -3,6 +3,7 @@
 
 mod decode;
 mod disk;
+mod locate;
 mod markers;
 mod merge_data;
 mod open;
@@ -42,6 +43,8 @@ pub enum Error {
         path: String,
         source: std::io::Error,
     },
+    #[error("cannot write {path}: it is not a regular file")]
+    NotAFile { path: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
