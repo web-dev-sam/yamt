@@ -1,0 +1,2398 @@
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index aba0280..414f671 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,10 +1,12 @@
+ //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads the merge heads,
+-//! the refs that point at them and the merge message, and re-runs git's merge of one file.
++//! the refs that point at them, the merge message and the merge driver config, and re-runs git's
++//! merge of one file.
+ #![forbid(unsafe_code)]
+ 
+ mod attributes;
+ mod blob;
+ mod entry;
++mod merge_config;
+ mod merge_file;
+ mod repo;
+ mod run;
+@@ -13,7 +15,8 @@ mod version;
+ pub use attributes::{AttributeValue, MergeAttributes};
+ pub use blob::BlobReader;
+ pub use entry::{Oid, Stage, StageEntry};
+-pub use merge_file::{MergeFileOptions, MergeInputs};
++pub use merge_config::MergeConfig;
++pub use merge_file::MergeFileOptions;
+ pub use repo::{CommitSummary, Repo};
+ pub use version::GitVersion;
+ 
+diff --git a/crates/gitio/src/merge_config.rs b/crates/gitio/src/merge_config.rs
+new file mode 100644
+index 0000000..253bb5a
+--- /dev/null
++++ b/crates/gitio/src/merge_config.rs
+@@ -0,0 +1,74 @@
++use std::process::ExitStatus;
++
++use crate::Result;
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run_accepting};
++
++const CONFIG: &str = "config";
++const MERGE_DRIVER_KEYS: &str = r"^merge\.(default|.+\.driver)$";
++const DEFAULT_KEY: &[u8] = b"merge.default";
++const DRIVER_KEY_PREFIX: &[u8] = b"merge.";
++const DRIVER_KEY_SUFFIX: &[u8] = b".driver";
++// git-config(1): `--get-regexp` exits with 1 when no key matches.
++const NO_MATCH_STATUS: i32 = 1;
++
++/// The config that picks a merge driver (gitattributes(5) "Defining a custom merge driver"), as
++/// git stores it.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct MergeConfig {
++    /// `merge.default`: the driver of a path whose `merge` attribute is unspecified.
++    pub default: Option<Vec<u8>>,
++    /// Every `<name>` that has a `merge.<name>.driver`.
++    pub drivers: Vec<Vec<u8>>,
++}
++
++impl Repo {
++    pub fn merge_config(&self) -> Result<MergeConfig> {
++        let args = [CONFIG, "-z", "--get-regexp", MERGE_DRIVER_KEYS];
++        let command = self.command(Access::Read, &args);
++        let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
++        Ok(parse_merge_config(&output))
++    }
++}
++
++fn is_found_or_no_match(status: ExitStatus) -> bool {
++    status.success() || status.code() == Some(NO_MATCH_STATUS)
++}
++
++// git-config(1) `-z`: each entry is `<key> NL <value> NUL`, or `<key> NUL` for a key without a
++// value; section and variable names are lowercase, the `<name>` subsection is kept as written.
++fn parse_merge_config(output: &[u8]) -> MergeConfig {
++    let mut config = MergeConfig::default();
++    for entry in output.split(|&byte| byte == b'\0') {
++        let mut parts = entry.splitn(2, |&byte| byte == b'\n');
++        let (Some(key), Some(value)) = (parts.next(), parts.next()) else {
++            continue;
++        };
++        if key == DEFAULT_KEY {
++            config.default = Some(value.to_vec());
++        } else if let Some(name) = key
++            .strip_prefix(DRIVER_KEY_PREFIX)
++            .and_then(|rest| rest.strip_suffix(DRIVER_KEY_SUFFIX))
++        {
++            config.drivers.push(name.to_vec());
++        }
++    }
++    config
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_last_default_wins_and_every_driver_name_is_kept_as_written() {
++        let output = b"merge.default\nunion\0merge.mergiraf.driver\nmergiraf merge %O %A %B\0\
++merge.default\nbinary\0merge.My.Tool.driver\nrun %A\0merge.valueless.driver\0";
++
++        let config = parse_merge_config(output);
++
++        assert_eq!(config.default, Some(b"binary".to_vec()));
++        assert_eq!(config.drivers, [b"mergiraf".to_vec(), b"My.Tool".to_vec()]);
++        assert_eq!(parse_merge_config(b""), MergeConfig::default());
++    }
++}
+diff --git a/crates/gitio/src/merge_file.rs b/crates/gitio/src/merge_file.rs
+index db8cdd2..0c7bc42 100644
+--- a/crates/gitio/src/merge_file.rs
++++ b/crates/gitio/src/merge_file.rs
+@@ -10,14 +10,6 @@ use crate::{Error, Result};
+ // conflicts otherwise (truncated to 127 if there are more than that many conflicts)."
+ const FIRST_ERROR_STATUS: i32 = 128;
+ 
+-/// The three versions one `git merge-file` run merges.
+-#[derive(Clone, Copy, Debug)]
+-pub struct MergeInputs<'a> {
+-    pub base: &'a [u8],
+-    pub local: &'a [u8],
+-    pub remote: &'a [u8],
+-}
+-
+ /// How `git merge-file` merges: marker length, `--union`, and `--diff-algorithm=histogram`.
+ #[derive(Clone, Copy, Debug)]
+ pub struct MergeFileOptions {
+@@ -27,17 +19,20 @@ pub struct MergeFileOptions {
+ }
+ 
+ impl Repo {
+-    /// git's merge of `inputs`, written with the labels `ours`, `base` and `theirs`; the three
+-    /// inputs are written to files in `scratch`, an existing directory the caller removes.
++    /// git's merge of `base`, `local` and `remote`, written with the labels `ours`, `base` and
++    /// `theirs`; the three inputs are written to files in `scratch`, an existing directory the
++    /// caller removes.
+     pub fn merge_file(
+         &self,
+         scratch: &Path,
+-        inputs: &MergeInputs<'_>,
++        base: &[u8],
++        local: &[u8],
++        remote: &[u8],
+         options: &MergeFileOptions,
+     ) -> Result<Vec<u8>> {
+-        let local = write_input(scratch, "local", inputs.local)?;
+-        let base = write_input(scratch, "base", inputs.base)?;
+-        let remote = write_input(scratch, "remote", inputs.remote)?;
++        let local = write_input(scratch, "local", local)?;
++        let base = write_input(scratch, "base", base)?;
++        let remote = write_input(scratch, "remote", remote)?;
+         let marker_size = format!("--marker-size={}", options.marker_size);
+         let mut args = vec!["merge-file", "-p", "-q", marker_size.as_str()];
+         if options.union {
+diff --git a/crates/gitio/tests/what_git_wrote.rs b/crates/gitio/tests/what_git_wrote.rs
+index c72fb73..8d0c11c 100644
+--- a/crates/gitio/tests/what_git_wrote.rs
++++ b/crates/gitio/tests/what_git_wrote.rs
+@@ -7,7 +7,7 @@ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo, conflict_repo_with, git_ok, hash_object,
+ };
+ use yamt_gitio::{
+-    AttributeValue, Error, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Repo,
++    AttributeValue, Error, GitVersion, MergeAttributes, MergeConfig, MergeFileOptions, Repo,
+ };
+ 
+ const FIRST: &str = "a.txt";
+@@ -111,12 +111,10 @@ fn hash_objects_cleans_each_file_through_autocrlf_like_git_add() {
+ 
+ fn merged(repo: &Repo, scratch: &Path, inputs: [&[u8]; 3], options: &MergeFileOptions) -> String {
+     let [base, local, remote] = inputs;
+-    let inputs = MergeInputs {
+-        base,
+-        local,
+-        remote,
+-    };
+-    text(repo.merge_file(scratch, &inputs, options).unwrap())
++    text(
++        repo.merge_file(scratch, base, local, remote, options)
++            .unwrap(),
++    )
+ }
+ 
+ const BASE: &[u8] = b"a\nb\nc\nd\ne\n";
+@@ -168,17 +166,15 @@ fn merge_file_honours_union_histogram_and_marker_size() {
+ fn merge_file_of_binary_input_is_a_git_failure_and_a_missing_scratch_dir_a_write_failure() {
+     let (_dir, repo) = two_conflicts(&Setup::default());
+     let scratch = TempDir::new().unwrap();
+-    let binary = MergeInputs {
+-        base: b"\0base",
+-        local: b"\0local",
+-        remote: b"\0remote",
+-    };
++    let [base, local, remote]: [&[u8]; 3] = [b"\0base", b"\0local", b"\0remote"];
+ 
+     let error = repo
+-        .merge_file(scratch.path(), &binary, &PLAIN)
++        .merge_file(scratch.path(), base, local, remote, &PLAIN)
+         .unwrap_err();
+     let gone = scratch.path().join("gone");
+-    let missing = repo.merge_file(&gone, &binary, &PLAIN).unwrap_err();
++    let missing = repo
++        .merge_file(&gone, base, local, remote, &PLAIN)
++        .unwrap_err();
+ 
+     assert!(
+         matches!(error, Error::GitFailed { status: Some(code), .. } if code >= 128),
+@@ -251,3 +247,49 @@ fn add_paths_and_remove_paths_stage_every_path_in_one_call() {
+     );
+     assert!(conflicts.path().join(SECOND).exists());
+ }
++
++#[test]
++fn merge_file_with_histogram_aligns_like_merge_ort_where_myers_does_not() {
++    let (_dir, repo) = two_conflicts(&Setup::default());
++    let scratch = TempDir::new().unwrap();
++    let triple: [&[u8]; 3] = [
++        b"{\na\n}\nx\nx\nb\n",
++        b"{\nx\nx\n}\nb\n",
++        b"a\n}\nx\nx\nb\n",
++    ];
++    let histogram = MergeFileOptions {
++        histogram: true,
++        ..PLAIN
++    };
++
++    let with_histogram = merged(&repo, scratch.path(), triple, &histogram);
++    let with_myers = merged(&repo, scratch.path(), triple, &PLAIN);
++
++    assert!(
++        with_histogram.ends_with("=======\na\n>>>>>>> theirs\n}\nb\n"),
++        "{with_histogram}"
++    );
++    assert!(
++        with_myers.ends_with("=======\na\n}\n>>>>>>> theirs\nx\nx\n}\nb\n"),
++        "{with_myers}"
++    );
++}
++
++#[test]
++fn merge_config_reads_the_default_driver_and_the_names_of_configured_drivers() {
++    let (dir, repo) = two_conflicts(&Setup::default());
++    let no_config = repo.merge_config().unwrap();
++    for (key, value) in [
++        ("merge.default", "binary"),
++        ("merge.mergiraf.driver", "mergiraf merge %O %A %B"),
++        ("merge.Named.Only.name", "a driver without a command"),
++    ] {
++        git_ok(dir.path(), &["config", key, value]).unwrap();
++    }
++
++    let config = repo.merge_config().unwrap();
++
++    assert_eq!(no_config, MergeConfig::default());
++    assert_eq!(config.default, Some(b"binary".to_vec()));
++    assert_eq!(config.drivers, [b"mergiraf".to_vec()]);
++}
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 41a4d74..be96cc4 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk (`disk.rs` `Seen`, read back after each own write); `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → the view becomes the disk), then re-reads `ls-files -u` (plan §2 #49); finish/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`. `markers.rs` reads git's markers from bytes, `seed.rs` builds the middle text and one conflict per open block from the disk, `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes). `remote_name.rs` names what is merged in, read once at `open`; a git failure there only drops the name (plan §2 #50). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs`.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish records the bytes it wrote, take/reset read the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish never writes through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in local, remote and base, `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `remote_name.rs` names what is merged in, read once at `open`; a git failure there only drops the name (plan §2 #50). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
+diff --git a/crates/session/src/disk.rs b/crates/session/src/disk.rs
+index d4e538f..fc34462 100644
+--- a/crates/session/src/disk.rs
++++ b/crates/session/src/disk.rs
+@@ -8,6 +8,7 @@ use specta::Type;
+ use yamt_gitio::{Oid, Repo};
+ 
+ use crate::markers::{open_regions, parse, split_lines};
++use crate::session::LOG_TARGET;
+ use crate::{Error, Result};
+ 
+ /// Counts the settles of one file's disk changes; a view is built from one version.
+@@ -19,10 +20,12 @@ pub struct DiskVersion(pub u32);
+ #[serde(tag = "kind")]
+ pub enum DiskResult {
+     Staged,
+-    /// Not staged: the file still has this many open blocks and raw regions.
++    /// Not staged: the file still has this many open blocks and raw regions, at least one.
+     MarkersLeft {
+         conflicts: u32,
+     },
++    /// Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out.
++    LeftAsIs,
+     StageFailed {
+         message: String,
+     },
+@@ -46,14 +49,11 @@ pub(crate) enum OnDisk {
+     Other,
+ }
+ 
+-/// What yamt last saw at a path, and what the window's view of the file is built from.
+ pub(crate) enum Seen {
+-    /// The file differed from git's merge output at start; no read equals it.
++    /// The file differed from git's merge output at start, or could not be read then.
+     GitOutput,
+-    /// The view is yamt's merge of the stages.
+-    Stages(OnDisk),
+-    /// The view is built from this read (`Middle::Disk` or `Middle::DiskNotText`).
+-    Disk(OnDisk),
++    ViewFromStages(OnDisk),
++    ViewFromDisk(OnDisk),
+ }
+ 
+ /// How a change to a file that is still present is settled.
+@@ -70,7 +70,8 @@ pub(crate) enum MarkerRule {
+ pub(crate) enum Settlement {
+     Add,
+     Remove,
+-    Leave { conflicts: u32 },
++    MarkersLeft { conflicts: u32 },
++    LeaveAsIs,
+ }
+ 
+ /// The outcome of the two batched staging commands of one settle.
+@@ -83,11 +84,15 @@ impl Seen {
+     pub(crate) fn is(&self, disk: &OnDisk) -> bool {
+         match self {
+             Seen::GitOutput => false,
+-            Seen::Stages(seen) | Seen::Disk(seen) => seen == disk,
++            Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
+         }
+     }
+ }
+ 
++pub(crate) fn warn_unread(path: &str, error: &Error) {
++    tracing::warn!(target: LOG_TARGET, event = "disk_unread", %path, %error, "the file is looked at again next time");
++}
++
+ pub(crate) fn read_on_disk(repo: &Repo, path: &Path, is_submodule: bool) -> Result<OnDisk> {
+     let full_path = repo.root().join(path);
+     let read_failed = |source| Error::ReadFailed {
+@@ -123,23 +128,19 @@ fn is_absent(error: &io::Error) -> bool {
+ }
+ 
+ pub(crate) fn settlement(disk: &OnDisk, rule: MarkerRule, marker_size: usize) -> Settlement {
+-    let conflicts = || match disk {
+-        OnDisk::File(bytes) => open_regions(&parse(&split_lines(bytes), marker_size)),
+-        OnDisk::Missing | OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => 0,
++    let stage_any = match rule {
++        MarkerRule::NeverStage => return Settlement::LeaveAsIs,
++        MarkerRule::StageAny => true,
++        MarkerRule::StageWithoutMarkers => false,
+     };
+-    if rule == MarkerRule::NeverStage {
+-        return Settlement::Leave {
+-            conflicts: conflicts(),
+-        };
+-    }
+     match disk {
+         OnDisk::Missing | OnDisk::Other => Settlement::Remove,
+-        OnDisk::Submodule(None) => Settlement::Leave { conflicts: 0 },
++        OnDisk::Submodule(None) => Settlement::LeaveAsIs,
+         OnDisk::Link(_) | OnDisk::Submodule(Some(_)) => Settlement::Add,
+-        OnDisk::File(_) if rule == MarkerRule::StageAny => Settlement::Add,
+-        OnDisk::File(_) => match conflicts() {
++        OnDisk::File(_) if stage_any => Settlement::Add,
++        OnDisk::File(bytes) => match open_regions(&parse(&split_lines(bytes), marker_size)) {
+             0 => Settlement::Add,
+-            conflicts => Settlement::Leave { conflicts },
++            conflicts => Settlement::MarkersLeft { conflicts },
+         },
+     }
+ }
+@@ -170,9 +171,10 @@ impl Staging {
+         match settlement {
+             Settlement::Add => staged(&self.added),
+             Settlement::Remove => staged(&self.removed),
+-            Settlement::Leave { conflicts } => DiskResult::MarkersLeft {
++            Settlement::MarkersLeft { conflicts } => DiskResult::MarkersLeft {
+                 conflicts: *conflicts,
+             },
++            Settlement::LeaveAsIs => DiskResult::LeftAsIs,
+         }
+     }
+ }
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index 4277f9b..dba671b 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -3,6 +3,7 @@
+ 
+ mod decode;
+ mod disk;
++mod locate;
+ mod markers;
+ mod merge_data;
+ mod open;
+@@ -42,6 +43,8 @@ pub enum Error {
+         path: String,
+         source: std::io::Error,
+     },
++    #[error("cannot write {path}: it is not a regular file")]
++    NotAFile { path: String },
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/session/src/locate.rs b/crates/session/src/locate.rs
+new file mode 100644
+index 0000000..0694fd1
+--- /dev/null
++++ b/crates/session/src/locate.rs
+@@ -0,0 +1,130 @@
++use std::ops::Range;
++
++use yamt_merge_core::{BaseLine, LineMap, LineRange, LocalLine, RemoteLine, line_map};
++
++use crate::markers::{Block, Piece};
++use crate::merge_data::Texts;
++
++/// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`), and the
++/// line where each piece starts in it.
++pub(crate) struct SideView {
++    pub(crate) text: String,
++    pub(crate) piece_starts: Vec<u32>,
++}
++
++/// Where an open block or raw region sits in local and remote; `exact` when every line of both
++/// sections was found unchanged.
++pub(crate) struct Located {
++    pub(crate) local: LineRange<LocalLine>,
++    pub(crate) remote: LineRange<RemoteLine>,
++    pub(crate) exact: bool,
++}
++
++/// Line maps from the ours and theirs views of the disk to local and remote, and from those to base.
++pub(crate) struct Maps {
++    ours_to_local: LineMap,
++    theirs_to_remote: LineMap,
++    local_to_base: LineMap,
++    remote_to_base: LineMap,
++}
++
++pub(crate) fn side_view(
++    lines: &[&str],
++    pieces: &[Piece],
++    section: fn(&Block) -> &Range<usize>,
++) -> SideView {
++    let mut view = SideView {
++        text: String::new(),
++        piece_starts: Vec::with_capacity(pieces.len()),
++    };
++    let mut line_count = 0;
++    for piece in pieces {
++        view.piece_starts.push(line_count);
++        let included = match piece {
++            Piece::Settled(lines) => lines,
++            Piece::Block(block) => section(block),
++            Piece::Raw(_) => continue,
++        };
++        for line in lines.get(included.clone()).unwrap_or_default() {
++            match line.strip_suffix("\r\n") {
++                Some(content) => {
++                    view.text.push_str(content);
++                    view.text.push('\n');
++                }
++                None => view.text.push_str(line),
++            }
++            line_count += 1;
++        }
++    }
++    view
++}
++
++impl Maps {
++    pub(crate) fn new(ours: &SideView, theirs: &SideView, texts: &Texts) -> Maps {
++        Maps {
++            ours_to_local: line_map(&ours.text, &texts.local.replace("\r\n", "\n")),
++            theirs_to_remote: line_map(&theirs.text, &texts.remote.replace("\r\n", "\n")),
++            local_to_base: line_map(&texts.local, &texts.base),
++            remote_to_base: line_map(&texts.remote, &texts.base),
++        }
++    }
++
++    pub(crate) fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
++        let ours = ours_start..ours_start + line_number(block.ours.len());
++        let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
++        match (
++            self.ours_to_local.exact(ours.clone()),
++            self.theirs_to_remote.exact(theirs.clone()),
++        ) {
++            (Some(local), Some(remote)) => Located {
++                local: local_lines(local),
++                remote: remote_lines(remote),
++                exact: true,
++            },
++            (None, _) | (_, None) => Located {
++                local: local_lines(self.ours_to_local.covering(ours)),
++                remote: remote_lines(self.theirs_to_remote.covering(theirs)),
++                exact: false,
++            },
++        }
++    }
++
++    pub(crate) fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
++        Located {
++            local: local_lines(self.ours_to_local.covering(ours_start..ours_start)),
++            remote: remote_lines(self.theirs_to_remote.covering(theirs_start..theirs_start)),
++            exact: false,
++        }
++    }
++
++    /// The base lines that the located local and remote lines cover.
++    pub(crate) fn base(&self, located: &Located) -> LineRange<BaseLine> {
++        let local = located.local.start.0..located.local.end().0;
++        let remote = located.remote.start.0..located.remote.end().0;
++        let from_local = self.local_to_base.covering(local);
++        let from_remote = self.remote_to_base.covering(remote);
++        let start = from_local.start.min(from_remote.start);
++        LineRange {
++            start: BaseLine(start),
++            len: from_local.end.max(from_remote.end) - start,
++        }
++    }
++}
++
++fn local_lines(lines: Range<u32>) -> LineRange<LocalLine> {
++    LineRange {
++        start: LocalLine(lines.start),
++        len: lines.end - lines.start,
++    }
++}
++
++fn remote_lines(lines: Range<u32>) -> LineRange<RemoteLine> {
++    LineRange {
++        start: RemoteLine(lines.start),
++        len: lines.end - lines.start,
++    }
++}
++
++pub(crate) fn line_number(count: usize) -> u32 {
++    u32::try_from(count).unwrap_or(u32::MAX)
++}
+diff --git a/crates/session/src/open.rs b/crates/session/src/open.rs
+index 54c79a5..0de5520 100644
+--- a/crates/session/src/open.rs
++++ b/crates/session/src/open.rs
+@@ -1,10 +1,10 @@
+ use std::path::{Path, PathBuf};
+ 
+-use yamt_gitio::{BlobReader, MergeAttributes, Repo, StageEntry};
++use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
+ 
+ use crate::Result;
+ use crate::decode::{UnsupportedReason, decode_sides};
+-use crate::disk::{MarkerRule, Seen, read_on_disk};
++use crate::disk::{MarkerRule, Seen, read_on_disk, warn_unread};
+ use crate::merge_data::Texts;
+ use crate::remote_name::read_remote_name;
+ use crate::session::{Content, FileState, FileStatus, MergeSession};
+@@ -30,7 +30,8 @@ impl MergeSession {
+         let groups = group_by_path(repo.unmerged()?);
+         let paths: Vec<&Path> = groups.iter().map(|(path, _)| path.as_path()).collect();
+         let attributes = repo.attributes(&paths)?;
+-        let files = open_files(&repo, groups, &attributes)?;
++        let config = repo.merge_config()?;
++        let files = open_files(&repo, groups, &attributes, &config)?;
+         let remote_name = read_remote_name(&repo);
+         Ok(MergeSession {
+             repo,
+@@ -44,13 +45,15 @@ fn open_files(
+     repo: &Repo,
+     groups: Vec<(PathBuf, CapturedStages)>,
+     attributes: &[MergeAttributes],
++    config: &MergeConfig,
+ ) -> Result<Vec<FileState>> {
+     let mut blobs = repo.blob_reader()?;
+     let mut check = StartCheck::new(repo);
+     let mut files = Vec::with_capacity(groups.len());
+     let mut looks = Vec::with_capacity(groups.len());
+     for ((path, stages), found) in groups.into_iter().zip(attributes) {
+-        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, found)?;
++        let attributes = Attributes::from_git(found, config);
++        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, &attributes)?;
+         files.push(file);
+         looks.push(look);
+     }
+@@ -71,11 +74,17 @@ fn open_file(
+     check: &mut StartCheck,
+     path: PathBuf,
+     stages: CapturedStages,
+-    found: &MergeAttributes,
++    attributes: &Attributes,
+ ) -> Result<(FileState, StartLook)> {
+-    let attributes = Attributes::from_git(found);
+     let stored = stored(blobs, &stages)?;
+-    let disk = read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE))?;
++    let disk = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
++        Ok(disk) => disk,
++        Err(error) => {
++            warn_unread(&path.to_string_lossy(), &error);
++            let file = file_state(path, stages, stored, attributes, Seen::GitOutput);
++            return Ok((file, StartLook::Changed));
++        }
++    };
+     let sides = match &stored {
+         Stored::Regular { sides, .. } => Some(sides),
+         Stored::Submodule | Stored::Symlink | Stored::BothDeleted => None,
+@@ -84,22 +93,33 @@ fn open_file(
+         path: &path,
+         stages: &stages,
+         sides,
+-        attributes: &attributes,
++        attributes,
+         disk: &disk,
+     };
+     let look = check.look(&start, blobs)?;
++    let seen = Seen::ViewFromStages(disk);
++    let file = file_state(path, stages, stored, attributes, seen);
++    Ok((file, look))
++}
++
++fn file_state(
++    path: PathBuf,
++    stages: CapturedStages,
++    stored: Stored,
++    attributes: &Attributes,
++    seen: Seen,
++) -> FileState {
+     let content = content(&path, stored);
+-    let file = FileState {
+-        rule: marker_rule(&content, &attributes),
++    FileState {
++        rule: marker_rule(&content, attributes),
+         path,
+         stages,
+         status: FileStatus::Unresolved,
+         content,
+         marker_size: attributes.marker_size,
+-        seen: Seen::Stages(disk),
++        seen,
+         settled: None,
+-    };
+-    Ok((file, look))
++    }
+ }
+ 
+ fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {
+diff --git a/crates/session/src/seed.rs b/crates/session/src/seed.rs
+index 42ccc7a..b22fcd4 100644
+--- a/crates/session/src/seed.rs
++++ b/crates/session/src/seed.rs
+@@ -1,12 +1,10 @@
+ use std::ops::Range;
+ 
+-use yamt_merge_core::{
+-    BaseLine, Chunk, ChunkId, ChunkKind, LineMap, LineRange, LocalLine, RemoteLine, line_map,
+-    word_changes,
+-};
++use yamt_merge_core::{BaseLine, Chunk, ChunkId, ChunkKind, LineRange, word_changes};
+ 
+ use crate::decode::{Eol, detect_eol};
+-use crate::markers::{Block, Piece, parse, split_lines};
++use crate::locate::{Located, Maps, line_number, side_view};
++use crate::markers::{Piece, parse, split_lines};
+ use crate::merge_data::{MergeChunk, MiddleLine, Texts};
+ 
+ /// The middle pane's starting text built from a worktree file, and its open conflicts.
+@@ -16,28 +14,6 @@ pub(crate) struct Seeded {
+     pub(crate) chunks: Vec<MergeChunk>,
+ }
+ 
+-/// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`), and the
+-/// line where each piece starts in it.
+-struct SideView {
+-    text: String,
+-    piece_starts: Vec<u32>,
+-}
+-
+-/// Where an open block or raw region sits in local and remote; `exact` when every line of both
+-/// sections was found unchanged.
+-struct Located {
+-    local: Range<u32>,
+-    remote: Range<u32>,
+-    exact: bool,
+-}
+-
+-struct Maps {
+-    ours_to_local: LineMap,
+-    theirs_to_remote: LineMap,
+-    local_to_base: LineMap,
+-    remote_to_base: LineMap,
+-}
+-
+ /// The middle text as it is built, with each conflict's chunk and its lines in the middle.
+ struct MiddleText<'a> {
+     disk_lines: &'a [&'a str],
+@@ -45,6 +21,8 @@ struct MiddleText<'a> {
+     eol: Eol,
+     text: String,
+     line_count: u32,
++    /// Where the previous chunk's base lines end; the next chunk's start no earlier.
++    base_end: u32,
+     chunks: Vec<Chunk>,
+     ranges: Vec<LineRange<MiddleLine>>,
+ }
+@@ -54,18 +32,14 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
+     let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
+     let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
+     let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
+-    let maps = Maps {
+-        ours_to_local: line_map(&ours.text, &texts.local.replace("\r\n", "\n")),
+-        theirs_to_remote: line_map(&theirs.text, &texts.remote.replace("\r\n", "\n")),
+-        local_to_base: line_map(&texts.local, &texts.base),
+-        remote_to_base: line_map(&texts.remote, &texts.base),
+-    };
++    let maps = Maps::new(&ours, &theirs, texts);
+     let mut middle = MiddleText {
+         disk_lines: &disk_lines,
+         base_lines: texts.base.split_inclusive('\n').collect(),
+         eol: detect_eol(disk),
+         text: String::with_capacity(disk.len()),
+         line_count: 0,
++        base_end: 0,
+         chunks: Vec::new(),
+         ranges: Vec::new(),
+     };
+@@ -86,80 +60,19 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
+     middle.seeded(texts)
+ }
+ 
+-fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usize>) -> SideView {
+-    let mut view = SideView {
+-        text: String::new(),
+-        piece_starts: Vec::with_capacity(pieces.len()),
+-    };
+-    let mut line_count = 0;
+-    for piece in pieces {
+-        view.piece_starts.push(line_count);
+-        let included = match piece {
+-            Piece::Settled(lines) => lines,
+-            Piece::Block(block) => section(block),
+-            Piece::Raw(_) => continue,
+-        };
+-        for line in lines.get(included.clone()).unwrap_or_default() {
+-            match line.strip_suffix("\r\n") {
+-                Some(content) => {
+-                    view.text.push_str(content);
+-                    view.text.push('\n');
+-                }
+-                None => view.text.push_str(line),
+-            }
+-            line_count += 1;
+-        }
+-    }
+-    view
+-}
+-
+-impl Maps {
+-    fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
+-        let ours = ours_start..ours_start + line_number(block.ours.len());
+-        let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
+-        match (
+-            self.ours_to_local.exact(ours.clone()),
+-            self.theirs_to_remote.exact(theirs.clone()),
+-        ) {
+-            (Some(local), Some(remote)) => Located {
+-                local,
+-                remote,
+-                exact: true,
+-            },
+-            (None, _) | (_, None) => Located {
+-                local: self.ours_to_local.covering(ours),
+-                remote: self.theirs_to_remote.covering(theirs),
+-                exact: false,
+-            },
+-        }
+-    }
+-
+-    fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
+-        Located {
+-            local: self.ours_to_local.covering(ours_start..ours_start),
+-            remote: self.theirs_to_remote.covering(theirs_start..theirs_start),
+-            exact: false,
+-        }
+-    }
+-
+-    fn base(&self, located: &Located) -> Range<u32> {
+-        let from_local = self.local_to_base.covering(located.local.clone());
+-        let from_remote = self.remote_to_base.covering(located.remote.clone());
+-        from_local.start.min(from_remote.start)..from_local.end.max(from_remote.end)
+-    }
+-}
+-
+ impl MiddleText<'_> {
+     fn push_disk_lines(&mut self, lines: &Range<usize>) {
+         for line in self.disk_lines.get(lines.clone()).unwrap_or_default() {
++            end_open_line(&mut self.text, self.eol);
+             self.text.push_str(line);
+             self.line_count += 1;
+         }
+     }
+ 
+-    fn push_base_lines(&mut self, lines: &Range<u32>) {
+-        let range = lines.start as usize..lines.end as usize;
++    fn push_base_lines(&mut self, lines: LineRange<BaseLine>) {
++        let range = lines.start.0 as usize..lines.end().0 as usize;
+         for line in self.base_lines.get(range).unwrap_or_default() {
++            end_open_line(&mut self.text, self.eol);
+             let bare_lf = line
+                 .strip_suffix('\n')
+                 .filter(|content| !content.ends_with('\r'));
+@@ -174,10 +87,16 @@ impl MiddleText<'_> {
+         }
+     }
+ 
+-    fn push_conflict(&mut self, located: &Located, base: Range<u32>, disk_lines: &Range<usize>) {
++    fn push_conflict(
++        &mut self,
++        located: &Located,
++        base: LineRange<BaseLine>,
++        disk_lines: &Range<usize>,
++    ) {
++        let base = self.after_previous_base(base);
+         let start = self.line_count;
+         if located.exact {
+-            self.push_base_lines(&base);
++            self.push_base_lines(base);
+         } else {
+             self.push_disk_lines(disk_lines);
+         }
+@@ -188,21 +107,23 @@ impl MiddleText<'_> {
+         self.chunks.push(Chunk {
+             id: ChunkId(line_number(self.chunks.len())),
+             kind: ChunkKind::Conflict,
+-            base: LineRange {
+-                start: BaseLine(base.start),
+-                len: base.end - base.start,
+-            },
+-            local: LineRange {
+-                start: LocalLine(located.local.start),
+-                len: located.local.end - located.local.start,
+-            },
+-            remote: LineRange {
+-                start: RemoteLine(located.remote.start),
+-                len: located.remote.end - located.remote.start,
+-            },
++            base,
++            local: located.local,
++            remote: located.remote,
+         });
+     }
+ 
++    /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
++    fn after_previous_base(&mut self, base: LineRange<BaseLine>) -> LineRange<BaseLine> {
++        let start = base.start.0.max(self.base_end);
++        let after = LineRange {
++            start: BaseLine(start),
++            len: base.end().0.saturating_sub(start),
++        };
++        self.base_end = after.end().0;
++        after
++    }
++
+     fn seeded(self, texts: &Texts) -> Seeded {
+         let words = word_changes(&texts.base, &texts.local, &texts.remote, &self.chunks);
+         let mut chunks = Vec::with_capacity(self.chunks.len());
+@@ -221,8 +142,15 @@ impl MiddleText<'_> {
+     }
+ }
+ 
+-fn line_number(count: usize) -> u32 {
+-    u32::try_from(count).unwrap_or(u32::MAX)
++/// Ends a last line that has no line break (base's last line) before another line follows it.
++fn end_open_line(text: &mut String, eol: Eol) {
++    if text.is_empty() || text.ends_with('\n') {
++        return;
++    }
++    match eol {
++        Eol::CrLf => text.push_str("\r\n"),
++        Eol::Lf | Eol::Mixed => text.push('\n'),
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -265,20 +193,35 @@ mod tests {
+         ranges.collect()
+     }
+ 
++    /// The middle with every chunk replaced by its lines of `side`, as the window applies them.
++    fn with_applied(seeded: &Seeded, side: &str, lines_of: fn(&Chunk) -> (u32, u32)) -> String {
++        let mut middle: Vec<&str> = seeded.middle.split_inclusive('\n').collect();
++        let side: Vec<&str> = side.split_inclusive('\n').collect();
++        for chunk in seeded.chunks.iter().rev() {
++            let start = chunk.middle.start.0 as usize;
++            let replaced = start..start + chunk.middle.len as usize;
++            let (side_start, side_len) = lines_of(&chunk.chunk);
++            let side_lines = side_start as usize..(side_start + side_len) as usize;
++            middle.splice(replaced, side[side_lines].iter().copied());
++        }
++        middle.concat()
++    }
++
+     fn with_local_applied(seeded: &Seeded, local: &str) -> String {
+-        let middle: Vec<&str> = seeded.middle.split_inclusive('\n').collect();
+-        let local: Vec<&str> = local.split_inclusive('\n').collect();
+-        let [chunk] = seeded.chunks.as_slice() else {
+-            panic!("expected one chunk, got {}", seeded.chunks.len());
+-        };
+-        let (start, len) = (chunk.middle.start.0 as usize, chunk.middle.len as usize);
+-        let (local_start, local_len) = (
+-            chunk.chunk.local.start.0 as usize,
+-            chunk.chunk.local.len as usize,
+-        );
+-        let mut applied = middle[..start].concat();
+-        applied += &local[local_start..local_start + local_len].concat();
+-        applied + &middle[start + len..].concat()
++        with_applied(seeded, local, |chunk| {
++            (chunk.local.start.0, chunk.local.len)
++        })
++    }
++
++    fn with_remote_applied(seeded: &Seeded, remote: &str) -> String {
++        with_applied(seeded, remote, |chunk| {
++            (chunk.remote.start.0, chunk.remote.len)
++        })
++    }
++
++    fn base_ranges(seeded: &Seeded) -> Vec<(u32, u32)> {
++        let ranges = seeded.chunks.iter().map(|chunk| chunk.chunk.base);
++        ranges.map(|base| (base.start.0, base.len)).collect()
+     }
+ 
+     #[test]
+@@ -357,15 +300,66 @@ mod tests {
+         let texts = texts(
+             "dup\nmid\nbase\nend\n",
+             "dup\nmid\ndup\nend\n",
+-            "dup\nmid\nother\nend\n",
++            "DUP\nmid\nother\nend\n",
+         );
+-        let disk = "dup\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
++        let disk = "DUP\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
+ 
+         let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+ 
+-        assert_eq!(seeded.middle, "dup\nmid\nbase\nend\n");
++        assert_eq!(seeded.middle, "DUP\nmid\nbase\nend\n");
+         assert_eq!(ranges(&seeded), [[(2, 1), (2, 1), (2, 1)]]);
++        assert_eq!(base_ranges(&seeded), [(2, 1)]);
++        assert_eq!(
++            with_local_applied(&seeded, &texts.local),
++            "DUP\nmid\ndup\nend\n"
++        );
++        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
++    }
++
++    #[test]
++    fn a_base_without_a_final_line_break_ends_its_last_line_before_the_settled_lines() {
++        let texts = texts(
++            "{\n  \"a\": 1\n}",
++            "{\n  \"a\": 1,\n  \"x\": 2\n}\n",
++            "{\n  \"a\": 1,\n  \"y\": 3\n}\n",
++        );
++        let disk =
++            "{\n  \"a\": 1,\n<<<<<<< ours\n  \"x\": 2\n=======\n  \"y\": 3\n>>>>>>> theirs\n}\n";
++
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++
++        assert_eq!(seeded.middle, "{\n  \"a\": 1,\n  \"a\": 1\n}\n}\n");
++        assert_eq!(ranges(&seeded), [[(2, 2), (2, 1), (2, 1)]]);
+         assert_eq!(with_local_applied(&seeded, &texts.local), texts.local);
++        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
++    }
++
++    #[test]
++    fn two_blocks_git_split_around_shared_lines_get_disjoint_base_lines() {
++        let texts = texts(
++            "a\nX\nz\n",
++            "a\nL1\ns1\ns2\ns3\ns4\nL2\nz\n",
++            "a\nR1\ns1\ns2\ns3\ns4\nR2\nz\n",
++        );
++        let block = |ours: &str, theirs: &str| {
++            format!("<<<<<<< ours\n{ours}\n=======\n{theirs}\n>>>>>>> theirs\n")
++        };
++        let disk = format!(
++            "a\n{}s1\ns2\ns3\ns4\n{}z\n",
++            block("L1", "R1"),
++            block("L2", "R2")
++        );
++
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
++
++        assert_eq!(seeded.middle, "a\nX\ns1\ns2\ns3\ns4\nz\n");
++        assert_eq!(base_ranges(&seeded), [(1, 1), (2, 0)]);
++        assert_eq!(
++            ranges(&seeded),
++            [[(1, 1), (1, 1), (1, 1)], [(6, 0), (6, 1), (6, 1)]]
++        );
++        assert_eq!(with_local_applied(&seeded, &texts.local), texts.local);
++        assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
+     }
+ 
+     #[test]
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 92f7c97..acde31b 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -7,7 +7,7 @@ use yamt_gitio::Repo;
+ use crate::decode::UnsupportedReason;
+ use crate::disk::{
+     DiskChange, DiskResult, DiskVersion, MarkerRule, OnDisk, Seen, Settlement, read_on_disk,
+-    settlement, stage,
++    settlement, stage, warn_unread,
+ };
+ use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+ use crate::remote_name::RemoteName;
+@@ -91,15 +91,12 @@ impl MergeSession {
+ 
+     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
+     pub fn refresh(&mut self) -> Result<FileList> {
+-        let mut looked = Vec::with_capacity(self.files.len());
+-        for file in &self.files {
++        let mut looked = Vec::new();
++        for (index, file) in self.files.iter().enumerate() {
+             match file.look(&self.repo) {
+-                Ok(change) => looked.push(change),
+-                Err(error) => {
+-                    let path = file.display_path();
+-                    tracing::warn!(target: LOG_TARGET, event = "disk_unread", %path, %error, "the file is looked at again next time");
+-                    looked.push(None);
+-                }
++                Ok(Some(disk)) => looked.push((index, disk)),
++                Ok(None) => {}
++                Err(error) => warn_unread(&file.display_path(), &error),
+             }
+         }
+         let disk_changes = self.settle(looked);
+@@ -123,28 +120,28 @@ impl MergeSession {
+         Ok(())
+     }
+ 
+-    /// Settles each `Some` read (one per file, in file order): one batch of `git add` and one of
++    /// Settles each read of the file at its index: one batch of `git add` and one of
+     /// `update-index --force-remove`.
+-    pub(crate) fn settle(&mut self, looked: Vec<Option<OnDisk>>) -> Vec<DiskChange> {
++    pub(crate) fn settle(&mut self, looked: Vec<(usize, OnDisk)>) -> Vec<DiskChange> {
+         let mut adds: Vec<&Path> = Vec::new();
+         let mut removes: Vec<&Path> = Vec::new();
+-        let mut settlements = Vec::with_capacity(looked.len());
+-        for (file, disk) in self.files.iter().zip(&looked) {
+-            let found = disk
+-                .as_ref()
+-                .map(|disk| settlement(disk, file.rule, file.marker_size));
+-            match &found {
+-                Some(Settlement::Add) => adds.push(&file.path),
+-                Some(Settlement::Remove) => removes.push(&file.path),
+-                Some(Settlement::Leave { .. }) | None => {}
++        let mut decided = Vec::with_capacity(looked.len());
++        for (index, disk) in looked {
++            let Some(file) = self.files.get(index) else {
++                continue;
++            };
++            let found = settlement(&disk, file.rule, file.marker_size);
++            match found {
++                Settlement::Add => adds.push(&file.path),
++                Settlement::Remove => removes.push(&file.path),
++                Settlement::MarkersLeft { .. } | Settlement::LeaveAsIs => {}
+             }
+-            settlements.push(found);
++            decided.push((index, disk, found));
+         }
+         let staging = stage(&self.repo, &adds, &removes);
+-        let mut changes = Vec::new();
+-        let decided = looked.into_iter().zip(settlements);
+-        for (file, (disk, found)) in self.files.iter_mut().zip(decided) {
+-            if let (Some(disk), Some(found)) = (disk, found) {
++        let mut changes = Vec::with_capacity(decided.len());
++        for (index, disk, found) in decided {
++            if let Some(file) = self.files.get_mut(index) {
+                 changes.push(file.settled_as(disk, staging.result(&found)));
+             }
+         }
+@@ -170,14 +167,14 @@ impl MergeSession {
+         let version = file.disk_version();
+         let path = file.display_path();
+         match &file.seen {
+-            Seen::Disk(disk) => Ok(disk_merge_data(
++            Seen::ViewFromDisk(disk) => Ok(disk_merge_data(
+                 &path,
+                 texts,
+                 disk,
+                 file.marker_size,
+                 version,
+             )),
+-            Seen::Stages(_) | Seen::GitOutput => Ok(merge_data(
++            Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
+                 &path,
+                 &texts.base,
+                 &texts.local,
+@@ -213,9 +210,20 @@ pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'
+     files
+         .iter_mut()
+         .find(|file| file.path.to_string_lossy() == path)
+-        .ok_or_else(|| Error::UnknownPath {
+-            path: path.to_owned(),
+-        })
++        .ok_or_else(|| unknown_path(path))
++}
++
++pub(crate) fn file_index(files: &[FileState], path: &str) -> Result<usize> {
++    files
++        .iter()
++        .position(|file| file.path.to_string_lossy() == path)
++        .ok_or_else(|| unknown_path(path))
++}
++
++fn unknown_path(path: &str) -> Error {
++    Error::UnknownPath {
++        path: path.to_owned(),
++    }
+ }
+ 
+ impl FileState {
+@@ -264,7 +272,7 @@ impl FileState {
+     }
+ 
+     fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
+-        self.seen = Seen::Disk(disk);
++        self.seen = Seen::ViewFromDisk(disk);
+         self.settled = Some(Settled {
+             version: DiskVersion(self.disk_version().0.saturating_add(1)),
+             result: result.clone(),
+diff --git a/crates/session/src/start.rs b/crates/session/src/start.rs
+index a2934cf..85325c6 100644
+--- a/crates/session/src/start.rs
++++ b/crates/session/src/start.rs
+@@ -1,11 +1,12 @@
+ use std::fs;
+ use std::io;
+ use std::os::unix::ffi::OsStrExt;
++use std::os::unix::fs::DirBuilderExt;
+ use std::path::{Path, PathBuf};
+ use std::time::Instant;
+ 
+ use yamt_gitio::{
+-    AttributeValue, BlobReader, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Oid,
++    AttributeValue, BlobReader, GitVersion, MergeAttributes, MergeConfig, MergeFileOptions, Oid,
+     Repo, StageEntry,
+ };
+ 
+@@ -24,6 +25,7 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
+     minor: 44,
+ };
+ const SCRATCH_ATTEMPTS: u32 = 1000;
++const SCRATCH_MODE: u32 = 0o700;
+ 
+ /// The gitattributes that decide what git wrote to a conflicted path.
+ pub(crate) struct Attributes {
+@@ -86,7 +88,7 @@ pub(crate) struct StartCheck<'r> {
+ struct ScratchDir(PathBuf);
+ 
+ impl Attributes {
+-    pub(crate) fn from_git(found: &MergeAttributes) -> Attributes {
++    pub(crate) fn from_git(found: &MergeAttributes, config: &MergeConfig) -> Attributes {
+         let marker_size = match &found.conflict_marker_size {
+             AttributeValue::Value(value) => std::str::from_utf8(value)
+                 .ok()
+@@ -97,16 +99,7 @@ impl Attributes {
+                 DEFAULT_MARKER_SIZE
+             }
+         };
+-        let driver = match &found.merge {
+-            AttributeValue::Unspecified | AttributeValue::Set => MergeDriver::Text,
+-            AttributeValue::Unset => MergeDriver::Binary,
+-            AttributeValue::Value(name) => match name.as_slice() {
+-                b"text" => MergeDriver::Text,
+-                b"union" => MergeDriver::Union,
+-                b"binary" => MergeDriver::Binary,
+-                _ => MergeDriver::Custom,
+-            },
+-        };
++        let driver = merge_driver(&found.merge, config);
+         let encoded = match &found.working_tree_encoding {
+             AttributeValue::Value(_) => true,
+             AttributeValue::Unspecified | AttributeValue::Unset | AttributeValue::Set => false,
+@@ -119,6 +112,28 @@ impl Attributes {
+     }
+ }
+ 
++// merge-ll.c `find_ll_merge_driver`: an unspecified attribute takes `merge.default`; a name is
++// looked up in the configured drivers first, then the built-in ones, "default to the 3-way".
++fn merge_driver(attribute: &AttributeValue, config: &MergeConfig) -> MergeDriver {
++    let name = match attribute {
++        AttributeValue::Set => return MergeDriver::Text,
++        AttributeValue::Unset => return MergeDriver::Binary,
++        AttributeValue::Unspecified => match &config.default {
++            Some(name) => name,
++            None => return MergeDriver::Text,
++        },
++        AttributeValue::Value(name) => name,
++    };
++    if config.drivers.contains(name) {
++        return MergeDriver::Custom;
++    }
++    match name.as_slice() {
++        b"binary" => MergeDriver::Binary,
++        b"union" => MergeDriver::Union,
++        _ => MergeDriver::Text,
++    }
++}
++
+ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
+     if file.attributes.encoded || file.stages.has_mode(SUBMODULE_MODE) {
+         return GitWrote::NotWritten;
+@@ -200,18 +215,15 @@ impl<'r> StartCheck<'r> {
+             None => ScratchDir::create().map_err(|error| error.to_string())?,
+         };
+         let [base, local, remote] = sides;
+-        let inputs = MergeInputs {
+-            base,
+-            local,
+-            remote,
+-        };
+         let options = MergeFileOptions {
+             marker_size,
+             union,
+             histogram,
+         };
+         self.merge_file_runs += 1;
+-        let merged = self.repo.merge_file(&scratch.0, &inputs, &options);
++        let merged = self
++            .repo
++            .merge_file(&scratch.0, base, local, remote, &options);
+         self.scratch = Some(scratch);
+         merged.map_err(|error| error.to_string())
+     }
+@@ -296,7 +308,7 @@ impl ScratchDir {
+         let process = std::process::id();
+         for attempt in 0..SCRATCH_ATTEMPTS {
+             let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
+-            match fs::create_dir(&dir) {
++            match fs::DirBuilder::new().mode(SCRATCH_MODE).create(&dir) {
+                 Ok(()) => return Ok(ScratchDir(dir)),
+                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                 Err(error) => return Err(error),
+@@ -314,3 +326,22 @@ impl Drop for ScratchDir {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use std::os::unix::fs::PermissionsExt;
++
++    use super::*;
++
++    const PERMISSION_BITS: u32 = 0o777;
++
++    #[test]
++    fn the_scratch_dir_is_readable_by_its_owner_only_and_removed_when_dropped() {
++        let scratch = ScratchDir::create().unwrap();
++        let dir = scratch.0.clone();
++        let mode = fs::metadata(&dir).unwrap().permissions().mode();
++        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
++        drop(scratch);
++        assert!(!dir.exists());
++    }
++}
+diff --git a/crates/session/src/writes.rs b/crates/session/src/writes.rs
+index 23462f8..9dc72e8 100644
+--- a/crates/session/src/writes.rs
++++ b/crates/session/src/writes.rs
+@@ -4,9 +4,9 @@ use std::path::Path;
+ 
+ use yamt_gitio::{Repo, StageEntry};
+ 
+-use crate::disk::{DiskChange, DiskVersion, OnDisk, Seen};
++use crate::disk::{DiskChange, DiskVersion, OnDisk, Seen, warn_unread};
+ use crate::session::{
+-    FileState, FileStatus, LOG_TARGET, MergeSession, Settled, WriteReply, find_file,
++    FileState, FileStatus, LOG_TARGET, MergeSession, Settled, WriteReply, file_index, find_file,
+ };
+ use crate::sides::{SUBMODULE_MODE, Side};
+ use crate::{Error, Result};
+@@ -30,7 +30,7 @@ impl MergeSession {
+         }
+         let file = find_file(&mut self.files, path)?;
+         let worktree_file = self.repo.root().join(&file.path);
+-        let before = worktree_bytes(&worktree_file, path)?;
++        let before = file_bytes_before_write(&self.repo, file)?;
+         write_worktree_file(&worktree_file, path, result.as_bytes())?;
+         if let Err(error) = self.repo.add_paths(&[file.path.as_path()]) {
+             let rollback = match before {
+@@ -43,10 +43,10 @@ impl MergeSession {
+             return Err(error.into());
+         }
+         file.status = FileStatus::Resolved;
+-        let read_back = file.read_disk(&self.repo)?;
++        let written = OnDisk::File(result.as_bytes().to_vec());
+         file.seen = match &file.seen {
+-            Seen::Disk(_) => Seen::Disk(read_back),
+-            Seen::Stages(_) | Seen::GitOutput => Seen::Stages(read_back),
++            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(written),
++            Seen::ViewFromStages(_) | Seen::GitOutput => Seen::ViewFromStages(written),
+         };
+         Ok(self.written_reply())
+     }
+@@ -81,7 +81,7 @@ impl MergeSession {
+             return Err(error);
+         }
+         file.status = FileStatus::Resolved;
+-        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
++        read_back(&self.repo, file);
+         Ok(self.written_reply())
+     }
+ 
+@@ -97,7 +97,7 @@ impl MergeSession {
+         if file.stages.can_rebuild_markers() {
+             self.repo.checkout_merge(&file.path)?;
+         }
+-        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
++        read_back(&self.repo, file);
+         Ok(self.written_reply())
+     }
+ 
+@@ -108,6 +108,7 @@ impl MergeSession {
+         path: &str,
+         disk_version: DiskVersion,
+     ) -> Result<Option<DiskChange>> {
++        let index = file_index(&self.files, path)?;
+         let file = find_file(&mut self.files, path)?;
+         if let Some(Settled { version, result }) = &file.settled
+             && *version != disk_version
+@@ -120,19 +121,7 @@ impl MergeSession {
+         let Some(disk) = file.look(&self.repo)? else {
+             return Ok(None);
+         };
+-        let mut disk = Some(disk);
+-        let looked: Vec<Option<OnDisk>> = self
+-            .files
+-            .iter()
+-            .map(|other| {
+-                if other.path.to_string_lossy() == path {
+-                    disk.take()
+-                } else {
+-                    None
+-                }
+-            })
+-            .collect();
+-        let change = self.settle(looked).pop();
++        let change = self.settle(vec![(index, disk)]).pop();
+         self.refresh_statuses()?;
+         Ok(change)
+     }
+@@ -171,11 +160,20 @@ fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
+     tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
+ }
+ 
+-fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
+-    match fs::read(worktree_file) {
+-        Ok(bytes) => Ok(Some(bytes)),
+-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+-        Err(source) => Err(write_failed(path, source)),
++fn file_bytes_before_write(repo: &Repo, file: &FileState) -> Result<Option<Vec<u8>>> {
++    match file.read_disk(repo)? {
++        OnDisk::File(bytes) => Ok(Some(bytes)),
++        OnDisk::Missing => Ok(None),
++        OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => Err(Error::NotAFile {
++            path: file.display_path(),
++        }),
++    }
++}
++
++fn read_back(repo: &Repo, file: &mut FileState) {
++    match file.read_disk(repo) {
++        Ok(disk) => file.seen = Seen::ViewFromStages(disk),
++        Err(error) => warn_unread(&file.display_path(), &error),
+     }
+ }
+ 
+diff --git a/crates/session/tests/describe.rs b/crates/session/tests/describe.rs
+new file mode 100644
+index 0000000..598208e
+--- /dev/null
++++ b/crates/session/tests/describe.rs
+@@ -0,0 +1,88 @@
++#![cfg(test)]
++
++use yamt_session::{MergeSession, SideContent, UnsupportedReason};
++
++mod every_kind;
++use every_kind::{
++    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
++    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, every_kind_of_conflict, file_against_link,
++};
++
++fn described_sides(session: &mut MergeSession, path: &str) -> (SideContent, SideContent) {
++    let sides = session.describe(path).unwrap();
++    assert_eq!(sides.path, path);
++    (sides.local, sides.remote)
++}
++
++#[test]
++fn describe_counts_the_lines_of_text_sides_and_names_a_deleted_side_missing() {
++    use SideContent::{Missing, Text};
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let mut described = |path| described_sides(&mut session, path);
++    assert_eq!(described(TEXT), (Text { lines: 3 }, Text { lines: 4 }));
++    assert_eq!(described(LOCAL_DELETED), (Missing, Text { lines: 2 }));
++    assert_eq!(described(REMOTE_DELETED), (Text { lines: 3 }, Missing));
++}
++
++#[test]
++fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
++    use SideContent::{Binary, Commit, Link, NonUtf8};
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let mut described = |path| described_sides(&mut session, path);
++    let link = |target: &str| Link {
++        target: target.to_owned(),
++    };
++    let commit = |id: &str| Commit { id: id.to_owned() };
++    assert_eq!(
++        described(BINARY),
++        (Binary { bytes: 6 }, Binary { bytes: 8 })
++    );
++    assert_eq!(
++        described(LATIN1),
++        (NonUtf8 { bytes: 6 }, NonUtf8 { bytes: 12 })
++    );
++    assert_eq!(
++        described(SYMLINK),
++        (link("local-target"), link("remote-target"))
++    );
++    assert_eq!(
++        described(SUBMODULE),
++        (commit(LOCAL_COMMIT), commit(REMOTE_COMMIT))
++    );
++}
++
++#[test]
++fn describe_reports_the_file_reason_and_none_for_a_text_file() {
++    let dir = every_kind_of_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let reasons = [
++        (TEXT, None),
++        (LOCAL_DELETED, None),
++        (REMOTE_DELETED, None),
++        (BINARY, Some(UnsupportedReason::Binary)),
++        (LATIN1, Some(UnsupportedReason::NonUtf8)),
++        (SYMLINK, Some(UnsupportedReason::Symlink)),
++        (SUBMODULE, Some(UnsupportedReason::Submodule)),
++    ];
++    for (path, reason) in reasons {
++        assert_eq!(session.describe(path).unwrap().reason, reason, "{path}");
++    }
++}
++
++#[test]
++fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
++    use SideContent::{Link, Missing, Text};
++    let dir = file_against_link();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let link = Link {
++        target: "docs/README.md".to_owned(),
++    };
++
++    assert_eq!(described_sides(&mut session, FILE_OR_LINK), (Missing, link));
++    let renamed = described_sides(&mut session, FILE_OR_LINK_RENAMED);
++    assert_eq!(renamed, (Text { lines: 2 }, Missing));
++    let reason = session.describe(FILE_OR_LINK).unwrap().reason;
++    assert_eq!(reason, Some(UnsupportedReason::Symlink));
++}
+diff --git a/crates/session/tests/disk_is_truth.rs b/crates/session/tests/disk_is_truth.rs
+index 9c80ea7..3e37c61 100644
+--- a/crates/session/tests/disk_is_truth.rs
++++ b/crates/session/tests/disk_is_truth.rs
+@@ -7,8 +7,8 @@ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
+ };
+ use yamt_session::{
+-    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
+-    WriteReply,
++    DiskChange, DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle,
++    NotText, Side, WriteReply,
+ };
+ 
+ const TEXT: &str = "f.txt";
+@@ -280,16 +280,35 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
+ }
+ 
+ #[test]
+-fn a_resolved_file_changed_again_is_staged_again_with_its_new_bytes() {
++fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missing_file() {
+     let dir = merged();
+     let mut session = opened(&dir);
+-    session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
+-    write(&dir, TEXT, USER_TEXT);
++    let outside = TempDir::new().unwrap();
++    let target = outside.path().join("target.txt");
++    fs::write(&target, USER_TEXT).unwrap();
++    let worktree_file = dir.path().join(TEXT);
++    fs::remove_file(&worktree_file).unwrap();
++    symlink(&target, &worktree_file).unwrap();
++    session.refresh().unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let through_link = session.finish(TEXT, "merged\n", DiskVersion(1));
++    fs::remove_file(&worktree_file).unwrap();
++    fs::create_dir(&worktree_file).unwrap();
++    session.refresh().unwrap();
++    let into_directory = session.finish(TEXT, "merged\n", DiskVersion(2));
++    fs::remove_dir(&worktree_file).unwrap();
++    session.refresh().unwrap();
++    let created = session.finish(TEXT, "merged\n", DiskVersion(3)).unwrap();
+ 
+-    assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
+-    assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
++    for refused in [through_link, into_directory] {
++        assert!(
++            matches!(refused, Err(Error::NotAFile { .. })),
++            "{refused:?}"
++        );
++    }
++    assert_eq!(fs::read(&target).unwrap(), USER_TEXT);
++    assert!(matches!(created, WriteReply::Written { .. }), "{created:?}");
++    assert_eq!(read(&dir, TEXT), b"merged\n");
+ }
+ 
+ #[test]
+diff --git a/crates/session/tests/every_kind/mod.rs b/crates/session/tests/every_kind/mod.rs
+new file mode 100644
+index 0000000..390b653
+--- /dev/null
++++ b/crates/session/tests/every_kind/mod.rs
+@@ -0,0 +1,124 @@
++//! A merge stopped on every kind of conflicted path, and a file against a link.
++
++use std::fs;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
++
++pub const TEXT: &str = "a_text.txt";
++pub const LOCAL_DELETED: &str = "b_local_deleted.txt";
++pub const REMOTE_DELETED: &str = "c_remote_deleted.txt";
++pub const BINARY: &str = "d_binary.bin";
++pub const LATIN1: &str = "e_latin1.txt";
++pub const SYMLINK: &str = "f_symlink";
++pub const SUBMODULE: &str = "g_submodule";
++
++pub const LOCAL_COMMIT: &str = "2222222222222222222222222222222222222222";
++pub const REMOTE_COMMIT: &str = "3333333333333333333333333333333333333333";
++
++pub const fn conflict(
++    path: &'static str,
++    kind: FileKind,
++    sides: [Option<&'static [u8]>; 3],
++) -> ConflictFile<'static> {
++    let [base, local, remote] = sides;
++    ConflictFile {
++        path,
++        kind,
++        base,
++        local,
++        remote,
++    }
++}
++
++const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
++    use FileKind::{Regular, Submodule, Symlink};
++    [
++        conflict(
++            TEXT,
++            Regular,
++            [
++                Some(b"one\ntwo\nthree\n"),
++                Some(b"one\nlocal\nthree\n"),
++                Some(b"one\nremote\nthree\nfour\n"),
++            ],
++        ),
++        conflict(
++            LOCAL_DELETED,
++            Regular,
++            [Some(b"kept\nbase\n"), None, Some(b"kept\nremote\n")],
++        ),
++        conflict(
++            REMOTE_DELETED,
++            Regular,
++            [Some(b"kept\nbase\n"), Some(b"kept\nlocal\nmore\n"), None],
++        ),
++        conflict(
++            BINARY,
++            Regular,
++            [Some(b"\0base"), Some(b"\0local"), Some(b"\0remote!")],
++        ),
++        conflict(
++            LATIN1,
++            Regular,
++            [
++                Some(b"caf\xe9\n"),
++                Some(b"caf\xe9!\n"),
++                Some(b"caf\xe9 remote\n"),
++            ],
++        ),
++        conflict(
++            SYMLINK,
++            Symlink,
++            [
++                Some(b"base-target"),
++                Some(b"local-target"),
++                Some(b"remote-target"),
++            ],
++        ),
++        conflict(
++            SUBMODULE,
++            Submodule,
++            [
++                Some(b"1111111111111111111111111111111111111111"),
++                Some(LOCAL_COMMIT.as_bytes()),
++                Some(REMOTE_COMMIT.as_bytes()),
++            ],
++        ),
++    ]
++};
++
++pub fn every_kind_of_conflict() -> TempDir {
++    conflict_repo(&EVERY_KIND_OF_CONFLICT).unwrap()
++}
++
++pub const FILE_OR_LINK: &str = "readme";
++pub const FILE_OR_LINK_RENAMED: &str = "readme~HEAD";
++
++// git's ort merge records a file against a symlink as two paths: "CONFLICT (distinct types): …
++// renamed one of them so each can be recorded somewhere" (observed on git 2.56).
++pub fn file_against_link() -> TempDir {
++    let dir = TempDir::new().unwrap();
++    let root = dir.path();
++    let commit = |message: &str| {
++        git_ok(root, &["add", "--all"]).unwrap();
++        git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++    };
++    git_ok(root, &["init", "--quiet"]).unwrap();
++    fs::write(root.join(FILE_OR_LINK), "base\n").unwrap();
++    commit("base");
++    git_ok(root, &["checkout", "--quiet", "-b", "local"]).unwrap();
++    fs::write(root.join(FILE_OR_LINK), "local\nfile\n").unwrap();
++    commit("local");
++    git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"]).unwrap();
++    fs::remove_file(root.join(FILE_OR_LINK)).unwrap();
++    std::os::unix::fs::symlink("docs/README.md", root.join(FILE_OR_LINK)).unwrap();
++    commit("remote");
++    git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
++    assert!(
++        !git(root, &["merge", "--quiet", "remote"])
++            .unwrap()
++            .status
++            .success()
++    );
++    dir
++}
+diff --git a/crates/session/tests/finish_and_reset.rs b/crates/session/tests/finish_and_reset.rs
+index d9e4e47..38decd3 100644
+--- a/crates/session/tests/finish_and_reset.rs
++++ b/crates/session/tests/finish_and_reset.rs
+@@ -2,8 +2,10 @@
+ 
+ use std::fs;
+ 
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+-use yamt_session::{DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok, hash_object};
++use yamt_session::{
++    DiskChange, DiskResult, DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason,
++};
+ 
+ const FILE: &str = "src/cart.ts";
+ const OTHER: &str = "src/other.ts";
+@@ -234,3 +236,23 @@ fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
+     assert_eq!(unmerged(&dir), before);
+     assert_eq!(status_of(&session, PATH), FileStatus::Unresolved);
+ }
++
++#[test]
++fn a_finished_file_changed_again_is_staged_again_with_its_new_bytes() {
++    let dir = two_file_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    session.finish(FILE, "merged\n", DiskVersion(0)).unwrap();
++    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    fs::write(dir.path().join(FILE), "user\n").unwrap();
++
++    let list = session.refresh().unwrap();
++
++    let staged = DiskChange {
++        path: FILE.to_owned(),
++        result: DiskResult::Staged,
++    };
++    assert_eq!(list.disk_changes, [staged]);
++    let oid = hash_object(dir.path(), b"user\n").unwrap();
++    let index = git_ok(dir.path(), &["ls-files", "-s", "--", FILE]).unwrap();
++    assert_eq!(index, format!("100644 {oid} 0\t{FILE}\n").as_bytes());
++}
+diff --git a/crates/session/tests/left_as_is.rs b/crates/session/tests/left_as_is.rs
+new file mode 100644
+index 0000000..849f048
+--- /dev/null
++++ b/crates/session/tests/left_as_is.rs
+@@ -0,0 +1,88 @@
++#![cfg(test)]
++
++use std::fs;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok};
++use yamt_session::{DiskChange, DiskResult, MergeSession};
++
++fn opened(dir: &TempDir) -> MergeSession {
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    session
++}
++
++fn left_as_is(path: &str) -> Vec<DiskChange> {
++    vec![DiskChange {
++        path: path.to_owned(),
++        result: DiskResult::LeftAsIs,
++    }]
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
++}
++
++fn utf16(text: &str) -> Vec<u8> {
++    let mut bytes = vec![0xFF, 0xFE];
++    for unit in text.encode_utf16() {
++        bytes.extend_from_slice(&unit.to_le_bytes());
++    }
++    bytes
++}
++
++#[test]
++fn a_working_tree_encoding_file_is_never_staged() {
++    const ENCODED: &str = "u.txt";
++    let sides = [
++        utf16("one\ntwo\n"),
++        utf16("one\nlocal\n"),
++        utf16("one\nremote\n"),
++    ];
++    let file = ConflictFile {
++        path: ENCODED,
++        kind: FileKind::Regular,
++        base: Some(&sides[0]),
++        local: Some(&sides[1]),
++        remote: Some(&sides[2]),
++    };
++    let setup = Setup {
++        attributes: Some("u.txt working-tree-encoding=UTF-16\n"),
++        ..Setup::default()
++    };
++    let dir = conflict_repo_with(&[file], &setup).unwrap();
++    let mut session = opened(&dir);
++    fs::write(dir.path().join(ENCODED), utf16("resolved\n")).unwrap();
++
++    let changed = session.refresh().unwrap();
++
++    assert_eq!(changed.disk_changes, left_as_is(ENCODED));
++    assert!(unmerged(&dir).contains(ENCODED));
++}
++
++#[test]
++fn a_submodule_no_longer_checked_out_is_left_as_is() {
++    const SUBMODULE: &str = "vendor/lib";
++    let file = ConflictFile {
++        path: SUBMODULE,
++        kind: FileKind::Submodule,
++        base: Some(b"1111111111111111111111111111111111111111"),
++        local: Some(b"2222222222222222222222222222222222222222"),
++        remote: Some(b"3333333333333333333333333333333333333333"),
++    };
++    let dir = conflict_repo_with(&[file], &Setup::default()).unwrap();
++    let submodule = dir.path().join(SUBMODULE);
++    git_ok(&submodule, &["init", "--quiet"]).unwrap();
++    git_ok(
++        &submodule,
++        &["commit", "--quiet", "--allow-empty", "-m", "c"],
++    )
++    .unwrap();
++    let mut session = opened(&dir);
++    let unmerged_before = unmerged(&dir);
++    fs::remove_dir_all(submodule.join(".git")).unwrap();
++
++    let changed = session.refresh().unwrap();
++
++    assert_eq!(changed.disk_changes, left_as_is(SUBMODULE));
++    assert_eq!(unmerged(&dir), unmerged_before);
++}
+diff --git a/crates/session/tests/start_from_disk.rs b/crates/session/tests/start_from_disk.rs
+index 72ffeaf..ab70ac1 100644
+--- a/crates/session/tests/start_from_disk.rs
++++ b/crates/session/tests/start_from_disk.rs
+@@ -1,11 +1,12 @@
+ #![cfg(test)]
+ 
+ use std::fs;
++use std::os::unix::fs::PermissionsExt;
+ 
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
+ };
+-use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
++use yamt_session::{DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle};
+ 
+ const TEXT: &str = "f.txt";
+ const DELETED: &str = "gone.txt";
+@@ -274,16 +275,22 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
+     assert_eq!(target.to_str(), Some("local-target"));
+ }
+ 
++// gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a
++// non-zero exit marks a conflict.
++const MARKER_WRITING_DRIVER: &str = "{ echo '<<<<<<< ours'; echo local; echo '======='; echo remote; echo '>>>>>>> theirs'; } > %A; exit 1";
++
+ #[test]
+-fn a_custom_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
+-    let dir = merged(&[], Some("f.txt merge=mergiraf\n"));
+-    assert!(read(&dir, TEXT).contains("<<<<<<<"));
++fn a_configured_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
++    let config = [("merge.mergiraf.driver", MARKER_WRITING_DRIVER)];
++    let dir = merged(&config, Some("f.txt merge=mergiraf\n"));
++    let driver_output = "<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\n";
++    assert_eq!(read(&dir, TEXT), driver_output);
+ 
+     let (mut session, list) = first_list(&dir);
+ 
+     assert_eq!(
+         changes(&list),
+-        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 1 })]
+     );
+     assert!(matches!(
+         session.load(TEXT).unwrap().middle,
+@@ -291,43 +298,60 @@ fn a_custom_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
+     ));
+ }
+ 
+-fn utf16(text: &str) -> Vec<u8> {
+-    let mut bytes = vec![0xFF, 0xFE];
+-    for unit in text.encode_utf16() {
+-        bytes.extend_from_slice(&unit.to_le_bytes());
+-    }
+-    bytes
++#[test]
++fn a_merge_driver_name_without_a_configured_driver_is_merged_as_text_and_untouched() {
++    let dir = merged(&[], Some("f.txt merge=lfs\n"));
++    assert!(read(&dir, TEXT).contains("<<<<<<<"));
++    assert_untouched(&dir);
+ }
+ 
+ #[test]
+-fn a_working_tree_encoding_file_is_never_staged() {
+-    const ENCODED: &str = "u.txt";
+-    let sides = [
+-        utf16("one\ntwo\n"),
+-        utf16("one\nlocal\n"),
+-        utf16("one\nremote\n"),
+-    ];
++fn merge_default_binary_keeps_ours_and_the_file_is_untouched() {
++    let dir = merged(&[("merge.default", "binary")], None);
++    assert_eq!(read(&dir, TEXT), OURS);
++    assert_untouched(&dir);
++}
++
++#[test]
++fn a_file_merge_ort_aligned_with_histogram_is_untouched() {
+     let file = ConflictFile {
+-        path: ENCODED,
++        path: TEXT,
+         kind: FileKind::Regular,
+-        base: Some(&sides[0]),
+-        local: Some(&sides[1]),
+-        remote: Some(&sides[2]),
++        base: Some(b"{\na\n}\nx\nx\nb\n"),
++        local: Some(b"{\nx\nx\n}\nb\n"),
++        remote: Some(b"a\n}\nx\nx\nb\n"),
+     };
+-    let setup = Setup {
+-        attributes: Some("u.txt working-tree-encoding=UTF-16\n"),
+-        ..Setup::default()
+-    };
+-    let dir = conflict_repo_with(&[file], &setup).unwrap();
+-    let (mut session, list) = first_list(&dir);
++    let dir = conflict_repo_with(&[file], &Setup::default()).unwrap();
++    let git_output = read(&dir, TEXT);
++    assert!(
++        git_output.ends_with("=======\na\n>>>>>>> remote\n}\nb\n"),
++        "{git_output}"
++    );
++
++    let (_, list) = first_list(&dir);
++
+     assert_eq!(list.disk_changes, []);
+-    write(&dir, ENCODED, &utf16("resolved\n"));
++}
++
++#[test]
++fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
++    const NO_ACCESS: u32 = 0o000;
++    const READ_WRITE: u32 = 0o644;
++    let dir = zdiff3();
++    let path = dir.path().join(TEXT);
++    fs::set_permissions(&path, fs::Permissions::from_mode(NO_ACCESS)).unwrap();
+ 
+-    let changed = session.refresh().unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
+ 
++    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    let finished = session.finish(TEXT, "merged\n", DiskVersion(0));
++    assert!(
++        matches!(finished, Err(Error::ReadFailed { .. })),
++        "{finished:?}"
++    );
++    fs::set_permissions(&path, fs::Permissions::from_mode(READ_WRITE)).unwrap();
+     assert_eq!(
+-        changes(&changed),
+-        [(ENCODED, &DiskResult::MarkersLeft { conflicts: 0 })]
++        changes(&session.refresh().unwrap()),
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
+     );
+-    assert!(unmerged(&dir).contains(ENCODED));
+ }
+diff --git a/crates/session/tests/describe_and_take.rs b/crates/session/tests/take.rs
+similarity index 51%
+rename from crates/session/tests/describe_and_take.rs
+rename to crates/session/tests/take.rs
+index 8c4103c..ff283ee 100644
+--- a/crates/session/tests/describe_and_take.rs
++++ b/crates/session/tests/take.rs
+@@ -3,130 +3,15 @@
+ use std::fs;
+ use std::path::Path;
+ 
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
+-use yamt_session::{
+-    DiskVersion, FileStatus, MergeSession, Side, SideContent, UnsupportedReason, WriteReply,
++use yamt_conflict_repo::{FileKind, TempDir, conflict_repo, git, git_ok};
++use yamt_session::{DiskVersion, FileStatus, MergeSession, Side, WriteReply};
++
++mod every_kind;
++use every_kind::{
++    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
++    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, conflict, every_kind_of_conflict, file_against_link,
+ };
+ 
+-const TEXT: &str = "a_text.txt";
+-const LOCAL_DELETED: &str = "b_local_deleted.txt";
+-const REMOTE_DELETED: &str = "c_remote_deleted.txt";
+-const BINARY: &str = "d_binary.bin";
+-const LATIN1: &str = "e_latin1.txt";
+-const SYMLINK: &str = "f_symlink";
+-const SUBMODULE: &str = "g_submodule";
+-
+-const LOCAL_COMMIT: &str = "2222222222222222222222222222222222222222";
+-const REMOTE_COMMIT: &str = "3333333333333333333333333333333333333333";
+-
+-const fn conflict(
+-    path: &'static str,
+-    kind: FileKind,
+-    sides: [Option<&'static [u8]>; 3],
+-) -> ConflictFile<'static> {
+-    let [base, local, remote] = sides;
+-    ConflictFile {
+-        path,
+-        kind,
+-        base,
+-        local,
+-        remote,
+-    }
+-}
+-
+-const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
+-    use FileKind::{Regular, Submodule, Symlink};
+-    [
+-        conflict(
+-            TEXT,
+-            Regular,
+-            [
+-                Some(b"one\ntwo\nthree\n"),
+-                Some(b"one\nlocal\nthree\n"),
+-                Some(b"one\nremote\nthree\nfour\n"),
+-            ],
+-        ),
+-        conflict(
+-            LOCAL_DELETED,
+-            Regular,
+-            [Some(b"kept\nbase\n"), None, Some(b"kept\nremote\n")],
+-        ),
+-        conflict(
+-            REMOTE_DELETED,
+-            Regular,
+-            [Some(b"kept\nbase\n"), Some(b"kept\nlocal\nmore\n"), None],
+-        ),
+-        conflict(
+-            BINARY,
+-            Regular,
+-            [Some(b"\0base"), Some(b"\0local"), Some(b"\0remote!")],
+-        ),
+-        conflict(
+-            LATIN1,
+-            Regular,
+-            [
+-                Some(b"caf\xe9\n"),
+-                Some(b"caf\xe9!\n"),
+-                Some(b"caf\xe9 remote\n"),
+-            ],
+-        ),
+-        conflict(
+-            SYMLINK,
+-            Symlink,
+-            [
+-                Some(b"base-target"),
+-                Some(b"local-target"),
+-                Some(b"remote-target"),
+-            ],
+-        ),
+-        conflict(
+-            SUBMODULE,
+-            Submodule,
+-            [
+-                Some(b"1111111111111111111111111111111111111111"),
+-                Some(LOCAL_COMMIT.as_bytes()),
+-                Some(REMOTE_COMMIT.as_bytes()),
+-            ],
+-        ),
+-    ]
+-};
+-
+-fn every_kind_of_conflict() -> TempDir {
+-    conflict_repo(&EVERY_KIND_OF_CONFLICT).unwrap()
+-}
+-
+-const FILE_OR_LINK: &str = "readme";
+-const FILE_OR_LINK_RENAMED: &str = "readme~HEAD";
+-
+-// git's ort merge records a file against a symlink as two paths: "CONFLICT (distinct types): …
+-// renamed one of them so each can be recorded somewhere" (observed on git 2.56).
+-fn file_against_link() -> TempDir {
+-    let dir = TempDir::new().unwrap();
+-    let root = dir.path();
+-    let commit = |message: &str| {
+-        git_ok(root, &["add", "--all"]).unwrap();
+-        git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
+-    };
+-    git_ok(root, &["init", "--quiet"]).unwrap();
+-    fs::write(root.join(FILE_OR_LINK), "base\n").unwrap();
+-    commit("base");
+-    git_ok(root, &["checkout", "--quiet", "-b", "local"]).unwrap();
+-    fs::write(root.join(FILE_OR_LINK), "local\nfile\n").unwrap();
+-    commit("local");
+-    git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"]).unwrap();
+-    fs::remove_file(root.join(FILE_OR_LINK)).unwrap();
+-    std::os::unix::fs::symlink("docs/README.md", root.join(FILE_OR_LINK)).unwrap();
+-    commit("remote");
+-    git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
+-    assert!(
+-        !git(root, &["merge", "--quiet", "remote"])
+-            .unwrap()
+-            .status
+-            .success()
+-    );
+-    dir
+-}
+-
+ fn unmerged(dir: &TempDir) -> String {
+     String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
+ }
+@@ -151,85 +36,6 @@ fn stage_zero_of(unmerged: &str, path: &str, side: Side) -> String {
+         .unwrap_or_default()
+ }
+ 
+-fn described_sides(session: &mut MergeSession, path: &str) -> (SideContent, SideContent) {
+-    let sides = session.describe(path).unwrap();
+-    assert_eq!(sides.path, path);
+-    (sides.local, sides.remote)
+-}
+-
+-#[test]
+-fn describe_counts_the_lines_of_text_sides_and_names_a_deleted_side_missing() {
+-    use SideContent::{Missing, Text};
+-    let dir = every_kind_of_conflict();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    let mut described = |path| described_sides(&mut session, path);
+-    assert_eq!(described(TEXT), (Text { lines: 3 }, Text { lines: 4 }));
+-    assert_eq!(described(LOCAL_DELETED), (Missing, Text { lines: 2 }));
+-    assert_eq!(described(REMOTE_DELETED), (Text { lines: 3 }, Missing));
+-}
+-
+-#[test]
+-fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
+-    use SideContent::{Binary, Commit, Link, NonUtf8};
+-    let dir = every_kind_of_conflict();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    let mut described = |path| described_sides(&mut session, path);
+-    let link = |target: &str| Link {
+-        target: target.to_owned(),
+-    };
+-    let commit = |id: &str| Commit { id: id.to_owned() };
+-    assert_eq!(
+-        described(BINARY),
+-        (Binary { bytes: 6 }, Binary { bytes: 8 })
+-    );
+-    assert_eq!(
+-        described(LATIN1),
+-        (NonUtf8 { bytes: 6 }, NonUtf8 { bytes: 12 })
+-    );
+-    assert_eq!(
+-        described(SYMLINK),
+-        (link("local-target"), link("remote-target"))
+-    );
+-    assert_eq!(
+-        described(SUBMODULE),
+-        (commit(LOCAL_COMMIT), commit(REMOTE_COMMIT))
+-    );
+-}
+-
+-#[test]
+-fn describe_reports_the_file_reason_and_none_for_a_text_file() {
+-    let dir = every_kind_of_conflict();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    let reasons = [
+-        (TEXT, None),
+-        (LOCAL_DELETED, None),
+-        (REMOTE_DELETED, None),
+-        (BINARY, Some(UnsupportedReason::Binary)),
+-        (LATIN1, Some(UnsupportedReason::NonUtf8)),
+-        (SYMLINK, Some(UnsupportedReason::Symlink)),
+-        (SUBMODULE, Some(UnsupportedReason::Submodule)),
+-    ];
+-    for (path, reason) in reasons {
+-        assert_eq!(session.describe(path).unwrap().reason, reason, "{path}");
+-    }
+-}
+-
+-#[test]
+-fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
+-    use SideContent::{Link, Missing, Text};
+-    let dir = file_against_link();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    let link = Link {
+-        target: "docs/README.md".to_owned(),
+-    };
+-
+-    assert_eq!(described_sides(&mut session, FILE_OR_LINK), (Missing, link));
+-    let renamed = described_sides(&mut session, FILE_OR_LINK_RENAMED);
+-    assert_eq!(renamed, (Text { lines: 2 }, Missing));
+-    let reason = session.describe(FILE_OR_LINK).unwrap().reason;
+-    assert_eq!(reason, Some(UnsupportedReason::Symlink));
+-}
+-
+ /// The merge as the window opens it: its first list settles what changed on disk before start.
+ fn opened(dir: &TempDir) -> (MergeSession, String) {
+     let before = unmerged(dir);
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index cffe04e..b11c917 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -2,52 +2,14 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::{Runtime, State};
+ use yamt_session::{
+-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side,
+-    UnsupportedReason, WriteReply,
++    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side, WriteReply,
+ };
+ 
+ use crate::frontend_log::LogEntry;
++use crate::ipc_error::IpcError;
+ 
+ pub(crate) type SessionState = Mutex<MergeSession>;
+ 
+-#[derive(Debug, serde::Serialize, specta::Type)]
+-#[serde(tag = "kind")]
+-pub enum IpcError {
+-    Git {
+-        message: String,
+-    },
+-    UnknownPath {
+-        path: String,
+-    },
+-    Unsupported {
+-        path: String,
+-        reason: UnsupportedReason,
+-    },
+-    WriteFailed {
+-        path: String,
+-        message: String,
+-    },
+-}
+-
+-impl From<yamt_session::Error> for IpcError {
+-    fn from(error: yamt_session::Error) -> IpcError {
+-        match error {
+-            yamt_session::Error::Git(source) => IpcError::Git {
+-                message: source.to_string(),
+-            },
+-            yamt_session::Error::UnknownPath { path } => IpcError::UnknownPath { path },
+-            yamt_session::Error::Unsupported { path, reason } => {
+-                IpcError::Unsupported { path, reason }
+-            }
+-            yamt_session::Error::WriteFailed { path, source }
+-            | yamt_session::Error::ReadFailed { path, source } => IpcError::WriteFailed {
+-                path,
+-                message: source.to_string(),
+-            },
+-        }
+-    }
+-}
+-
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+         list_files,
+@@ -371,48 +333,6 @@ mod tests {
+         );
+     }
+ 
+-    #[test]
+-    fn every_session_error_serialises_with_its_kind_and_fields() {
+-        let plain_dir = TempDir::new().unwrap();
+-        let Err(git_error) = MergeSession::open(plain_dir.path()) else {
+-            panic!("a plain directory opened as a merge");
+-        };
+-        let git_json = serde_json::to_value(IpcError::from(git_error)).unwrap();
+-        assert_eq!(git_json["kind"], "Git");
+-        assert!(
+-            git_json["message"]
+-                .as_str()
+-                .unwrap()
+-                .contains("not a git repository"),
+-            "{git_json}"
+-        );
+-
+-        let unsupported = yamt_session::Error::Unsupported {
+-            path: "logo.png".to_owned(),
+-            reason: UnsupportedReason::Binary,
+-        };
+-        assert_eq!(
+-            serde_json::to_value(IpcError::from(unsupported)).unwrap(),
+-            json!({ "kind": "Unsupported", "path": "logo.png", "reason": "Binary" })
+-        );
+-        let write_failed = yamt_session::Error::WriteFailed {
+-            path: "a.ts".to_owned(),
+-            source: std::io::Error::other("disk full"),
+-        };
+-        assert_eq!(
+-            serde_json::to_value(IpcError::from(write_failed)).unwrap(),
+-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
+-        );
+-        let read_failed = yamt_session::Error::ReadFailed {
+-            path: "a.ts".to_owned(),
+-            source: std::io::Error::other("permission denied"),
+-        };
+-        assert_eq!(
+-            serde_json::to_value(IpcError::from(read_failed)).unwrap(),
+-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "permission denied" })
+-        );
+-    }
+-
+     #[test]
+     fn log_emits_a_frontend_entry_to_tracing_and_rejects_an_unknown_level() {
+         let window = open_window();
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+new file mode 100644
+index 0000000..08c388c
+--- /dev/null
++++ b/src-tauri/src/ipc_error.rs
+@@ -0,0 +1,117 @@
++use yamt_session::UnsupportedReason;
++
++const NOT_A_FILE: &str = "it is not a regular file";
++
++#[derive(Debug, serde::Serialize, specta::Type)]
++#[serde(tag = "kind")]
++pub enum IpcError {
++    Git {
++        message: String,
++    },
++    UnknownPath {
++        path: String,
++    },
++    Unsupported {
++        path: String,
++        reason: UnsupportedReason,
++    },
++    WriteFailed {
++        path: String,
++        message: String,
++    },
++    ReadFailed {
++        path: String,
++        message: String,
++    },
++}
++
++impl From<yamt_session::Error> for IpcError {
++    fn from(error: yamt_session::Error) -> IpcError {
++        match error {
++            yamt_session::Error::Git(source) => IpcError::Git {
++                message: source.to_string(),
++            },
++            yamt_session::Error::UnknownPath { path } => IpcError::UnknownPath { path },
++            yamt_session::Error::Unsupported { path, reason } => {
++                IpcError::Unsupported { path, reason }
++            }
++            yamt_session::Error::WriteFailed { path, source } => IpcError::WriteFailed {
++                path,
++                message: source.to_string(),
++            },
++            yamt_session::Error::NotAFile { path } => IpcError::WriteFailed {
++                path,
++                message: NOT_A_FILE.to_owned(),
++            },
++            yamt_session::Error::ReadFailed { path, source } => IpcError::ReadFailed {
++                path,
++                message: source.to_string(),
++            },
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use serde_json::{Value, json};
++    use yamt_conflict_repo::TempDir;
++    use yamt_session::MergeSession;
++
++    use super::*;
++
++    fn ipc_json(error: yamt_session::Error) -> Value {
++        serde_json::to_value(IpcError::from(error)).unwrap()
++    }
++
++    #[test]
++    fn a_git_error_serialises_with_git_s_message() {
++        let plain_dir = TempDir::new().unwrap();
++        let Err(git_error) = MergeSession::open(plain_dir.path()) else {
++            panic!("a plain directory opened as a merge");
++        };
++        let git_json = ipc_json(git_error);
++        assert_eq!(git_json["kind"], "Git");
++        assert!(
++            git_json["message"]
++                .as_str()
++                .unwrap()
++                .contains("not a git repository"),
++            "{git_json}"
++        );
++    }
++
++    #[test]
++    fn every_other_session_error_serialises_with_its_kind_and_fields() {
++        let unsupported = yamt_session::Error::Unsupported {
++            path: "logo.png".to_owned(),
++            reason: UnsupportedReason::Binary,
++        };
++        assert_eq!(
++            ipc_json(unsupported),
++            json!({ "kind": "Unsupported", "path": "logo.png", "reason": "Binary" })
++        );
++        let write_failed = yamt_session::Error::WriteFailed {
++            path: "a.ts".to_owned(),
++            source: std::io::Error::other("disk full"),
++        };
++        assert_eq!(
++            ipc_json(write_failed),
++            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
++        );
++        let not_a_file = yamt_session::Error::NotAFile {
++            path: "a.ts".to_owned(),
++        };
++        assert_eq!(
++            ipc_json(not_a_file),
++            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "it is not a regular file" })
++        );
++        let read_failed = yamt_session::Error::ReadFailed {
++            path: "a.ts".to_owned(),
++            source: std::io::Error::other("permission denied"),
++        };
++        assert_eq!(
++            ipc_json(read_failed),
++            json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
++        );
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index bfb1994..729e793 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -6,6 +6,7 @@ mod commands;
+ mod frontend_log;
+ #[cfg(target_os = "linux")]
+ mod graphics;
++mod ipc_error;
+ mod outcome;
+ mod window;
+ 
