@@ -29,6 +29,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The file list keeps every file of the merge with git's view of its state (also after a `git add`
   elsewhere) and an icon for its type; drag its edge to resize it; work in an unfinished file is kept
   when you switch files, and files you are not looking at cost nothing while you scroll.
+- The file on disk is the truth: when a conflicted file changes outside yamt (before it starts, or
+  while you are in another window), a file with no conflict markers left, or deleted, is staged and
+  marked resolved; a file with markers left shows the disk text with only the conflicts still marked.
+  yamt never overwrites a change it has not shown: unsaved edits in that file are dropped, and a
+  notice names the file.
 - Scrolling keeps up with the screen on large files (thousands of lines, hundreds of changes).
 - Closing asks before throwing away unsaved work, and exits with 0 when every file is resolved and
   1 otherwise. A window whose page has stopped responding closes on the second close request.
