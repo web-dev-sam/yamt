@@ -17,9 +17,9 @@ The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
   - the full test suite passed (`just check`, exit 0, twice);
   - all 8 desktop steps passed on a copy of the Vue merge. The start-up check takes 64 ms for the
     7 files.
-- **Still open** (not blocking the release, by your call): mutation testing of the new code, and
-  one window check redone with real clicks. Both are in `handoff-verify-0.1.0.md`; run it after
-  publishing.
+- **Every automated check has since passed too**: mutation testing of the new code (the 4 GB cap
+  held; memory never below 9.3 GB) and the file-switch check with real clicks. What is left is your
+  own use of it: `handoff-verify-0.1.0.md`.
 - **Known follow-ups** that are not bugs are on the work board: rows 11, 11', 12, 12', 13'''.
 
 ## Steps
@@ -85,7 +85,7 @@ The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
 
 ## After publishing
 
-- Run `handoff-verify-0.1.0.md`; a problem found there goes into 0.1.1.
+- Do the two tries in `handoff-verify-0.1.0.md`; a problem found there goes into 0.1.1.
 - Board: rows 4 (macOS check, now on your Mac with the release build) and C' (a real merge of your
   own, side by side with WebStorm) are yours. The review of the project's rules (D'') and the v0
   write-up (`docs/walkthroughs/v0.md`) come after C'.
