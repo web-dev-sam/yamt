@@ -1,0 +1,757 @@
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 1ccd65a..0b0dd88 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -13,7 +13,6 @@ const {
+   files,
+   opened,
+   choices,
+-  taken,
+   active,
+   problem,
+   question,
+@@ -61,7 +60,6 @@ onMounted(() => {
+           v-for="sides in choices"
+           :key="sides.path"
+           :sides="sides"
+-          :taken="taken.get(sides.path) ?? null"
+           :shown="sides.path === active"
+         />
+       </div>
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index d763adf..6ec9e64 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -4,40 +4,41 @@ import { computed } from "vue";
+ import type { FileSides, Side } from "../ipc";
+ import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+ import { sideHeader } from "./sideHeaders";
++import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ 
+ type Column = {
+   readonly side: Side;
+   readonly header: string;
+   readonly headerTooltip: string;
+-  readonly column: string;
++  readonly gridColumn: string;
+   readonly sentence: string;
+   readonly tooltip: string | undefined;
+   readonly button: string;
+ };
+ 
+-const props = defineProps<{ sides: FileSides; taken: Side | null; shown: boolean }>();
++const props = defineProps<{ sides: FileSides; shown: boolean }>();
+ 
+-const SIDES: readonly Side[] = ["local", "remote"];
+ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
+ 
+-const { takeSide, reset, remote } = useAppStore();
++const { takeSide, reset, remoteName, taken } = useAppStore();
+ 
++const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
+ const columns = computed(() =>
+   SIDES.map((side): Column => {
+-    const header = sideHeader(side, remote.value);
++    const header = sideHeader(side, remoteName.value);
+     return {
+       side,
+       header: header.text,
+       headerTooltip: header.tooltip,
+-      column: GRID_COLUMN[side],
++      gridColumn: GRID_COLUMN[side],
+       sentence: sideSentence(props.sides[side]),
+       tooltip: sideTooltip(props.sides[side]),
+       button: sideButton(props.sides, side),
+     };
+   }),
+ );
+-const result = computed(() => resultLine(props.sides, props.taken));
++const result = computed(() => resultLine(props.sides, sideTaken.value));
+ </script>
+ 
+ <template>
+@@ -49,7 +50,7 @@ const result = computed(() => resultLine(props.sides, props.taken));
+       <template v-for="column in columns" :key="column.side">
+         <div
+           class="row-start-1 flex min-w-0 items-center border-b border-separator bg-window px-3 py-1.5"
+-          :class="column.column"
++          :class="column.gridColumn"
+         >
+           <h2 class="min-w-0 truncate text-fg-muted" :title="column.headerTooltip">
+             {{ column.header }}
+@@ -57,11 +58,11 @@ const result = computed(() => resultLine(props.sides, props.taken));
+         </div>
+         <div
+           class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-editor p-3"
+-          :class="column.column"
++          :class="column.gridColumn"
+         >
+           <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
+           <button
+-            v-if="taken === null"
++            v-if="sideTaken === null"
+             type="button"
+             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+             @click="takeSide(sides.path, column.side)"
+@@ -76,7 +77,7 @@ const result = computed(() => resultLine(props.sides, props.taken));
+         <h2 class="text-fg-muted">Result</h2>
+         <button
+           type="button"
+-          :disabled="taken === null"
++          :disabled="sideTaken === null"
+           class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+           @click="reset(sides.path)"
+         >
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 2cc6d78..9081ef4 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -3,23 +3,26 @@ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
+ 
+ import type { FileMergeData, Side } from "../ipc";
+ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP } from "./choiceText";
++import type { FileWork } from "./closeGuard";
++import { deletedSideView, keptToApply } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
+ import { sideHeader } from "./sideHeaders";
+-import { useAppStore, type FileWork } from "./store";
++import { SIDES } from "./sides";
++import { useAppStore } from "./store";
+ import { useMergeController } from "./useMergeController";
+ 
+ type Column = {
+   readonly side: Side;
+   readonly text: string;
+   readonly tooltip: string;
+-  readonly column: string;
++  readonly gridColumn: string;
+   readonly keep: boolean;
+   readonly deleted: boolean;
++  readonly delete: boolean;
+ };
+ 
+ const props = defineProps<{ data: FileMergeData; shown: boolean }>();
+ 
+-const SIDES: readonly Side[] = ["local", "remote"];
+ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
+ 
+ const left = useTemplateRef<HTMLDivElement>("left");
+@@ -29,41 +32,37 @@ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+ const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
+   useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
+-const { track, untrack, finish, reset, takeSide, taken, remote } = useAppStore();
++const { track, untrack, finish, reset, takeSide, taken, remoteName } = useAppStore();
+ const work: FileWork = { unsaved, markSaved };
+ if (props.data.deleted === null) {
+   track(props.data.path, work);
+ }
+ 
+-const sideTaken = computed(() => taken.value.get(props.data.path) ?? null);
+-const kept = computed(() => {
+-  const { deleted } = props.data;
+-  return deleted === null ? null : (SIDES.find((side) => side !== deleted) ?? null);
++const deletedView = computed(() => {
++  const { deleted, path } = props.data;
++  return deleted === null ? null : deletedSideView(deleted, taken.value.get(path) ?? null);
+ });
+-const deletedTaken = computed(
+-  () => sideTaken.value !== null && sideTaken.value === props.data.deleted,
+-);
+ const columns = computed(() =>
+   SIDES.map((side): Column => ({
+     side,
+-    ...sideHeader(side, remote.value),
+-    column: GRID_COLUMN[side],
+-    keep: side === kept.value && sideTaken.value === null,
++    ...sideHeader(side, remoteName.value),
++    gridColumn: GRID_COLUMN[side],
++    keep: deletedView.value?.keepIn === side,
+     deleted: side === props.data.deleted,
++    delete: deletedView.value?.deleteIn === side,
+   })),
+ );
+-const keptShown = computed(
+-  () => kept.value !== null && sideTaken.value === kept.value && summary.value !== null,
+-);
+-const resettable = computed(() =>
+-  props.data.deleted === null ? summary.value !== null : sideTaken.value !== null,
++const deletedShown = computed(() => deletedView.value?.middle === "deleted");
++const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
++const keptSideToApply = computed(() =>
++  deletedView.value === null ? null : keptToApply(deletedView.value, summary.value),
+ );
+ 
+ watch(
+-  keptShown,
+-  (shownNow) => {
+-    if (shownNow && kept.value !== null) {
+-      applyAllNonConflicting(kept.value);
++  keptSideToApply,
++  (side) => {
++    if (side !== null) {
++      applyAllNonConflicting(side);
+     }
+   },
+   { immediate: true },
+@@ -100,7 +99,7 @@ function markResolved(): void {
+         v-for="column in columns"
+         :key="column.side"
+         class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
+-        :class="column.column"
++        :class="column.gridColumn"
+       >
+         <h2 class="min-w-0 truncate text-fg-muted" :title="column.tooltip">{{ column.text }}</h2>
+         <button
+@@ -141,9 +140,9 @@ function markResolved(): void {
+       <div
+         ref="center"
+         class="col-start-3 row-start-2 min-h-0 min-w-0"
+-        :class="{ invisible: deletedTaken }"
++        :class="{ invisible: deletedShown }"
+       />
+-      <p v-if="deletedTaken" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
++      <p v-if="deletedShown" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
+       <svg
+         ref="rightStrip"
+         aria-hidden="true"
+@@ -158,11 +157,11 @@ function markResolved(): void {
+         <div
+           v-if="column.deleted"
+           class="row-start-2 flex min-w-0 flex-col items-start gap-3 p-3"
+-          :class="column.column"
++          :class="column.gridColumn"
+         >
+           <p>{{ DELETED_SENTENCE }}</p>
+           <button
+-            v-if="sideTaken === null"
++            v-if="column.delete"
+             type="button"
+             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+             @click="takeSide(data.path, column.side)"
+diff --git a/frontend/src/ui/choiceText.ts b/frontend/src/ui/choiceText.ts
+index 1a250b3..ea3542a 100644
+--- a/frontend/src/ui/choiceText.ts
++++ b/frontend/src/ui/choiceText.ts
+@@ -1,4 +1,5 @@
+ import type { FileSides, Side, SideContent } from "../ipc";
++import { otherSide } from "./sides";
+ 
+ const BYTES_PER_KB = 1024;
+ const SHORT_COMMIT_LENGTH = 7;
+@@ -55,8 +56,7 @@ export function sideButton(sides: FileSides, side: Side): string {
+   if (sides[side].kind === "Missing") {
+     return DELETE;
+   }
+-  const other = side === "local" ? "remote" : "local";
+-  if (sides[other].kind === "Missing") {
++  if (sides[otherSide(side)].kind === "Missing") {
+     return KEEP;
+   }
+   return side === "local" ? "Take left" : "Take right";
+diff --git a/frontend/src/ui/closeGuard.ts b/frontend/src/ui/closeGuard.ts
+new file mode 100644
+index 0000000..14652bc
+--- /dev/null
++++ b/frontend/src/ui/closeGuard.ts
+@@ -0,0 +1,58 @@
++import type { ShallowRef } from "vue";
++
++import { log, onWindowClose, type FileMergeData } from "../ipc";
++import type { Asking } from "./asking";
++import { unexpected } from "./problem";
++import { exitMustAsk } from "./question";
++
++export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
++
++export type CloseGuard = {
++  readonly track: (path: string, work: FileWork) => void;
++  readonly untrack: (path: string, work: FileWork) => void;
++  readonly markSaved: (path: string, text: string) => void;
++  readonly unsavedFiles: () => string[];
++  readonly mayClose: () => Promise<boolean>;
++  readonly watchWindowClose: () => Promise<void>;
++};
++
++export function createCloseGuard(
++  asking: Asking,
++  opened: Readonly<ShallowRef<readonly FileMergeData[]>>,
++): CloseGuard {
++  const work = new Map<string, FileWork>();
++
++  function unsavedFiles(): string[] {
++    return opened.value
++      .map((file) => file.path)
++      .filter((path) => work.get(path)?.unsaved() ?? false);
++  }
++
++  async function mayClose(): Promise<boolean> {
++    const files = unsavedFiles();
++    return exitMustAsk(files) ? asking.ask({ kind: "exit", files }) : true;
++  }
++
++  return {
++    track: (path, tracked) => {
++      work.set(path, tracked);
++    },
++    untrack: (path, tracked) => {
++      if (work.get(path) === tracked) {
++        work.delete(path);
++      }
++    },
++    markSaved: (path, text) => {
++      work.get(path)?.markSaved(text);
++    },
++    unsavedFiles,
++    mayClose,
++    watchWindowClose: async () => {
++      try {
++        await onWindowClose(mayClose);
++      } catch (error) {
++        log.error("store.close_guard_failed", { ...unexpected(error) });
++      }
++    },
++  };
++}
+diff --git a/frontend/src/ui/deletedSide.test.ts b/frontend/src/ui/deletedSide.test.ts
+new file mode 100644
+index 0000000..aa4ad67
+--- /dev/null
++++ b/frontend/src/ui/deletedSide.test.ts
+@@ -0,0 +1,53 @@
++import { expect, test } from "vitest";
++
++import type { Side } from "../ipc";
++import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
++
++test.each<[Side, Side | null, DeletedSideView]>([
++  [
++    "remote",
++    null,
++    { kept: "local", keepIn: "local", deleteIn: "remote", middle: "base", resettable: false },
++  ],
++  [
++    "remote",
++    "local",
++    { kept: "local", keepIn: null, deleteIn: null, middle: "kept", resettable: true },
++  ],
++  [
++    "remote",
++    "remote",
++    { kept: "local", keepIn: null, deleteIn: null, middle: "deleted", resettable: true },
++  ],
++  [
++    "local",
++    null,
++    { kept: "remote", keepIn: "remote", deleteIn: "local", middle: "base", resettable: false },
++  ],
++  [
++    "local",
++    "remote",
++    { kept: "remote", keepIn: null, deleteIn: null, middle: "kept", resettable: true },
++  ],
++  [
++    "local",
++    "local",
++    { kept: "remote", keepIn: null, deleteIn: null, middle: "deleted", resettable: true },
++  ],
++])("deleted on the %s side, %s taken", (deleted, taken, view) => {
++  expect(deletedSideView(deleted, taken)).toEqual(view);
++});
++
++test("the kept text is applied while the middle must show it and still has changes", () => {
++  const kept = deletedSideView("remote", "local");
++  expect(keptToApply(kept, { changes: 2, conflicts: 0 })).toBe("local");
++  expect(keptToApply(kept, { changes: 0, conflicts: 0 })).toBeNull();
++  expect(keptToApply(kept, null)).toBeNull();
++});
++
++test("nothing is applied before a take or after a Delete", () => {
++  const changes = { changes: 2, conflicts: 0 };
++  expect(keptToApply(deletedSideView("remote", null), changes)).toBeNull();
++  expect(keptToApply(deletedSideView("remote", "remote"), changes)).toBeNull();
++  expect(keptToApply(deletedSideView("local", "remote"), changes)).toBe("remote");
++});
+diff --git a/frontend/src/ui/deletedSide.ts b/frontend/src/ui/deletedSide.ts
+new file mode 100644
+index 0000000..6aedfe2
+--- /dev/null
++++ b/frontend/src/ui/deletedSide.ts
+@@ -0,0 +1,37 @@
++import type { Side } from "../ipc";
++import { otherSide } from "./sides";
++import type { MergeSummary } from "./useMergeController";
++
++type Middle = "base" | "kept" | "deleted";
++
++export type DeletedSideView = {
++  readonly kept: Side;
++  readonly keepIn: Side | null;
++  readonly deleteIn: Side | null;
++  readonly middle: Middle;
++  readonly resettable: boolean;
++};
++
++function middle(deleted: Side, taken: Side | null): Middle {
++  if (taken === null) {
++    return "base";
++  }
++  return taken === deleted ? "deleted" : "kept";
++}
++
++export function deletedSideView(deleted: Side, taken: Side | null): DeletedSideView {
++  const kept = otherSide(deleted);
++  const choosing = taken === null;
++  return {
++    kept,
++    keepIn: choosing ? kept : null,
++    deleteIn: choosing ? deleted : null,
++    middle: middle(deleted, taken),
++    resettable: !choosing,
++  };
++}
++
++export function keptToApply(view: DeletedSideView, summary: MergeSummary | null): Side | null {
++  const changesLeft = summary !== null && summary.changes > 0;
++  return view.middle === "kept" && changesLeft ? view.kept : null;
++}
+diff --git a/frontend/src/ui/sides.ts b/frontend/src/ui/sides.ts
+new file mode 100644
+index 0000000..d8c299a
+--- /dev/null
++++ b/frontend/src/ui/sides.ts
+@@ -0,0 +1,9 @@
++import type { Side } from "../ipc";
++
++export const SIDES: readonly Side[] = ["local", "remote"];
++
++const OTHER: Readonly<Record<Side, Side>> = { local: "remote", remote: "local" };
++
++export function otherSide(side: Side): Side {
++  return OTHER[side];
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 8b7dc27..ff3280d 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -9,7 +9,8 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+-import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
++import type { FileWork } from "./closeGuard";
++import { createAppStore, useAppStore, type AppStore } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -368,7 +369,8 @@ test("a finish of a file no longer shown does not switch files", async () => {
+   const { source, pending } = handSource([]);
+   const store = createAppStore({
+     ...source,
+-    finishFile: () => Promise.resolve(ok([resolvedEntry("a.ts"), entry("b.ts")])),
++    finishFile: () =>
++      Promise.resolve(ok([resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")])),
+   });
+   await openNow(store, pending, "a.ts");
+   await openNow(store, pending, "b.ts");
+@@ -376,7 +378,68 @@ test("a finish of a file no longer shown does not switch files", async () => {
+   await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT });
+ 
+   expect(store.active.value).toBe("b.ts");
+-  expect(pending).toHaveLength(2);
++  expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
++});
++
++const AFTER_ACTION_ON_A = [resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
++
++type Answer = (files: SourceResult<FileEntry[]>) => void;
++
++function answeredLater(answers: Answer[]): Promise<SourceResult<FileEntry[]>> {
++  return new Promise((resolve) => {
++    answers.push(resolve);
++  });
++}
++
++async function openWhileActing(
++  overrides: (answers: Answer[]) => Partial<ChunkSource>,
++  act: (store: AppStore) => Promise<void>,
++): Promise<{ store: AppStore; loads: string[]; acting: Promise<void> }> {
++  const answers: Answer[] = [];
++  const { source, pending } = handSource([]);
++  const store = createAppStore({ ...source, ...overrides(answers) });
++  await openNow(store, pending, "a.ts");
++  const acting = act(store);
++  const opening = store.open("b.ts");
++  await vi.waitFor(() => {
++    expect(answers).toHaveLength(1);
++  });
++  answers[0]?.(ok(AFTER_ACTION_ON_A));
++  await vi.waitFor(() => {
++    expect(store.files.value).toEqual(AFTER_ACTION_ON_A);
++  });
++  pending[1]?.resolve(ok(await dataFor("b.ts")));
++  await opening;
++  return { store, loads: pending.map((load) => load.path), acting };
++}
++
++test("a file the user opens while a finish runs wins over the next file, though still loading", async () => {
++  spyConsole();
++
++  const { store, loads, acting } = await openWhileActing(
++    (answers) => ({ finishFile: () => answeredLater(answers) }),
++    (shown) => shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT }),
++  );
++
++  expect(loads).toEqual(["a.ts", "b.ts"]);
++  expect(store.active.value).toBe("b.ts");
++  await acting;
++  expect(store.active.value).toBe("b.ts");
++});
++
++test("a file the user opens while a take runs wins over the next file, though still loading", async () => {
++  spyConsole();
++
++  const { store, loads, acting } = await openWhileActing(
++    (answers) => ({ takeSide: () => answeredLater(answers) }),
++    (shown) => shown.takeSide("a.ts", "local"),
++  );
++
++  expect(loads).toEqual(["a.ts", "b.ts"]);
++  expect(store.active.value).toBe("b.ts");
++  await acting;
++  expect(store.active.value).toBe("b.ts");
++  expect(store.taken.value).toEqual(new Map([["a.ts", "local"]]));
+ });
+ 
+ test("a finish with work left asks; Back writes nothing, Save writes the text", async () => {
+@@ -1107,7 +1170,7 @@ test("the remote name is asked for once; a failure leaves none and logs a warnin
+   });
+   await named.loadRemoteName();
+ 
+-  expect(named.remote.value).toEqual({ kind: "Branch", name: "minor" });
++  expect(named.remoteName.value).toEqual({ kind: "Branch", name: "minor" });
+ 
+   const failing = createAppStore({
+     ...source,
+@@ -1115,7 +1178,7 @@ test("the remote name is asked for once; a failure leaves none and logs a warnin
+   });
+   await expect(failing.loadRemoteName()).resolves.toBeUndefined();
+ 
+-  expect(failing.remote.value).toBeNull();
++  expect(failing.remoteName.value).toBeNull();
+   expect(failing.problem.value).toBeNull();
+   expect(warnings).toEqual([
+     '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index e876e2d..f9b505f 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -2,7 +2,6 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import {
+   log,
+-  onWindowClose,
+   type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
+@@ -11,13 +10,12 @@ import {
+   type Side,
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
++import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { nextUnresolved } from "./nextFile";
+ import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+-import { exitMustAsk, finishMustAsk, type Question } from "./question";
++import { finishMustAsk, type Question } from "./question";
+ import type { MergeSummary } from "./useMergeController";
+ 
+-export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
+-
+ type FinishRequest = {
+   readonly path: string;
+   readonly text: string;
+@@ -29,7 +27,7 @@ type Refs = {
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Side>>;
+-  readonly remote: ShallowRef<RemoteName | null>;
++  readonly remoteName: ShallowRef<RemoteName | null>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+ };
+@@ -37,11 +35,11 @@ type Refs = {
+ type State = Refs & {
+   readonly source: ChunkSource;
+   readonly asking: Asking;
+-  readonly work: Map<string, FileWork>;
+-  latestLoad: number;
++  readonly guard: CloseGuard;
++  latestOpen: number;
+ };
+ 
+-type Actions = {
++type Actions = Omit<CloseGuard, "markSaved"> & {
+   loadFiles(): Promise<void>;
+   refreshFiles(): Promise<void>;
+   loadRemoteName(): Promise<void>;
+@@ -51,11 +49,6 @@ type Actions = {
+   reset(path: string): Promise<void>;
+   dismissProblem(): void;
+   answer(yes: boolean): void;
+-  track(path: string, work: FileWork): void;
+-  untrack(path: string, work: FileWork): void;
+-  unsavedFiles(): string[];
+-  mayClose(): Promise<boolean>;
+-  watchWindowClose(): Promise<void>;
+ };
+ 
+ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+@@ -71,12 +64,13 @@ export function createAppStore(source: ChunkSource): AppStore {
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Side>>(new Map()),
+-    remote: shallowRef<RemoteName | null>(null),
++    remoteName: shallowRef<RemoteName | null>(null),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+   };
+   const asking = createAsking();
+-  const state: State = { ...refs, source, asking, work: new Map(), latestLoad: 0 };
++  const guard = createCloseGuard(asking, refs.opened);
++  const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
+   const { files } = refs;
+   store = {
+     ...refs,
+@@ -104,17 +98,11 @@ function actions(state: State): Actions {
+       state.problem.value = null;
+     },
+     answer: state.asking.answer,
+-    track: (path, work) => {
+-      state.work.set(path, work);
+-    },
+-    untrack: (path, work) => {
+-      if (state.work.get(path) === work) {
+-        state.work.delete(path);
+-      }
+-    },
+-    unsavedFiles: () => unsavedFiles(state),
+-    mayClose: () => mayClose(state),
+-    watchWindowClose: () => watchWindowClose(state),
++    track: state.guard.track,
++    untrack: state.guard.untrack,
++    unsavedFiles: state.guard.unsavedFiles,
++    mayClose: state.guard.mayClose,
++    watchWindowClose: state.guard.watchWindowClose,
+   };
+ }
+ 
+@@ -153,7 +141,7 @@ async function refreshFiles(state: State): Promise<readonly FileEntry[] | null>
+ 
+ async function loadRemoteName(state: State): Promise<void> {
+   try {
+-    state.remote.value = await state.source.remoteName();
++    state.remoteName.value = await state.source.remoteName();
+   } catch (error) {
+     log.warn("store.remote_name_failed", { ...unexpected(error) });
+   }
+@@ -170,16 +158,16 @@ async function open(state: State, path: string): Promise<void> {
+   if (path === state.active.value) {
+     return;
+   }
+-  state.latestLoad += 1;
++  state.latestOpen += 1;
+   state.active.value = path;
+   state.problem.value = null;
+ }
+ 
+ async function load(state: State, path: string): Promise<void> {
+-  state.latestLoad += 1;
+-  const ticket = state.latestLoad;
++  state.latestOpen += 1;
++  const ticket = state.latestOpen;
+   const view = await fetchView(state, path);
+-  const current = ticket === state.latestLoad;
++  const current = ticket === state.latestOpen;
+   if (!view.ok) {
+     const failure: Problem = { action: "open", path, cause: view.cause };
+     logProblem(failure);
+@@ -220,14 +208,16 @@ function putChoice(state: State, sides: FileSides): void {
+   state.choices.value = [...others, sides];
+ }
+ 
+-async function moveOn(state: State, path: string): Promise<void> {
+-  const next = state.active.value === path ? nextUnresolved(state.files.value, path) : null;
++async function moveOn(state: State, path: string, opensBefore: number): Promise<void> {
++  const untouched = state.active.value === path && state.latestOpen === opensBefore;
++  const next = untouched ? nextUnresolved(state.files.value, path) : null;
+   if (next !== null) {
+     await open(state, next);
+   }
+ }
+ 
+ async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
++  const opensBefore = state.latestOpen;
+   const unprocessed: Question = { kind: "unprocessed", summary };
+   if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
+     return;
+@@ -238,12 +228,13 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
+     return;
+   }
+   state.files.value = outcome.value;
+-  state.work.get(path)?.markSaved(text);
++  state.guard.markSaved(path, text);
+   state.problem.value = null;
+-  await moveOn(state, path);
++  await moveOn(state, path, opensBefore);
+ }
+ 
+ async function takeSide(state: State, path: string, side: Side): Promise<void> {
++  const opensBefore = state.latestOpen;
+   const outcome = await attempt(() => state.source.takeSide(path, side));
+   if (!outcome.ok) {
+     report(state, { action: "take", path, cause: outcome.cause });
+@@ -252,7 +243,7 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
+   state.files.value = outcome.value;
+   state.taken.value = new Map([...state.taken.value, [path, side]]);
+   clearProblemAbout(state, path);
+-  await moveOn(state, path);
++  await moveOn(state, path, opensBefore);
+ }
+ 
+ async function reset(state: State, path: string): Promise<void> {
+@@ -263,7 +254,7 @@ async function reset(state: State, path: string): Promise<void> {
+   }
+   state.files.value = files.value;
+   state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
+-  state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
++  state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
+   const view = await fetchView(state, path);
+   if (!view.ok) {
+     report(state, { action: "open", path, cause: view.cause });
+@@ -273,25 +264,6 @@ async function reset(state: State, path: string): Promise<void> {
+   clearProblemAbout(state, path);
+ }
+ 
+-function unsavedFiles(state: State): string[] {
+-  return state.opened.value
+-    .map((file) => file.path)
+-    .filter((path) => state.work.get(path)?.unsaved() ?? false);
+-}
+-
+-async function mayClose(state: State): Promise<boolean> {
+-  const files = unsavedFiles(state);
+-  return exitMustAsk(files) ? state.asking.ask({ kind: "exit", files }) : true;
+-}
+-
+-async function watchWindowClose(state: State): Promise<void> {
+-  try {
+-    await onWindowClose(() => mayClose(state));
+-  } catch (error) {
+-    log.error("store.close_guard_failed", { ...unexpected(error) });
+-  }
+-}
+-
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
