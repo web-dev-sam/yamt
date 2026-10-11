@@ -70,7 +70,7 @@ pub(crate) enum MarkerRule {
 pub(crate) enum Settlement {
     Add,
     Remove,
-    MarkersLeft { conflicts: u32 },
+    LeaveWithMarkers { conflicts: u32 },
     LeaveAsIs,
 }
 
@@ -140,7 +140,7 @@ pub(crate) fn settlement(disk: &OnDisk, rule: MarkerRule, marker_size: usize) ->
         OnDisk::File(_) if stage_any => Settlement::Add,
         OnDisk::File(bytes) => match open_regions(&parse(&split_lines(bytes), marker_size)) {
             0 => Settlement::Add,
-            conflicts => Settlement::MarkersLeft { conflicts },
+            conflicts => Settlement::LeaveWithMarkers { conflicts },
         },
     }
 }
@@ -171,7 +171,7 @@ impl Staging {
         match settlement {
             Settlement::Add => staged(&self.added),
             Settlement::Remove => staged(&self.removed),
-            Settlement::MarkersLeft { conflicts } => DiskResult::MarkersLeft {
+            Settlement::LeaveWithMarkers { conflicts } => DiskResult::MarkersLeft {
                 conflicts: *conflicts,
             },
             Settlement::LeaveAsIs => DiskResult::LeftAsIs,

@@ -35,14 +35,14 @@ pub(crate) struct Attributes {
     pub(crate) encoded: bool,
 }
 
-/// The `merge` attribute (gitattributes(5) "Built-in merge drivers").
+/// The driver git used, resolved from the attribute and the merge config (`merge_driver`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MergeDriver {
     Text,
     Union,
-    /// `-merge` or `merge=binary`: git keeps ours.
+    /// `-merge`, `merge=binary` or `merge.default=binary`: git keeps ours.
     Binary,
-    /// Any other driver: what it wrote cannot be known.
+    /// A `merge.<name>.driver` from the config: what it wrote cannot be known.
     Custom,
 }
 

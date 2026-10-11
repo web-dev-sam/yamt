@@ -134,7 +134,7 @@ impl MergeSession {
             match found {
                 Settlement::Add => adds.push(&file.path),
                 Settlement::Remove => removes.push(&file.path),
-                Settlement::MarkersLeft { .. } | Settlement::LeaveAsIs => {}
+                Settlement::LeaveWithMarkers { .. } | Settlement::LeaveAsIs => {}
             }
             decided.push((index, disk, found));
         }

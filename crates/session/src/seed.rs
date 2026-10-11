@@ -21,8 +21,7 @@ struct MiddleText<'a> {
     eol: Eol,
     text: String,
     line_count: u32,
-    /// Where the previous chunk's base lines end; the next chunk's start no earlier.
-    base_end: u32,
+    previous_base_end: u32,
     chunks: Vec<Chunk>,
     ranges: Vec<LineRange<MiddleLine>>,
 }
@@ -39,7 +38,7 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
         eol: detect_eol(disk),
         text: String::with_capacity(disk.len()),
         line_count: 0,
-        base_end: 0,
+        previous_base_end: 0,
         chunks: Vec::new(),
         ranges: Vec::new(),
     };
@@ -115,12 +114,12 @@ impl MiddleText<'_> {
 
     /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
     fn after_previous_base(&mut self, base: LineRange<BaseLine>) -> LineRange<BaseLine> {
-        let start = base.start.0.max(self.base_end);
+        let start = base.start.0.max(self.previous_base_end);
         let after = LineRange {
             start: BaseLine(start),
             len: base.end().0.saturating_sub(start),
         };
-        self.base_end = after.end().0;
+        self.previous_base_end = after.end().0;
         after
     }
 
@@ -300,18 +299,18 @@ mod tests {
         let texts = texts(
             "dup\nmid\nbase\nend\n",
             "dup\nmid\ndup\nend\n",
-            "DUP\nmid\nother\nend\n",
+            "DUP\nnew\nmid\nother\nend\n",
         );
-        let disk = "DUP\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
+        let disk = "DUP\nnew\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
 
         let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
 
-        assert_eq!(seeded.middle, "DUP\nmid\nbase\nend\n");
-        assert_eq!(ranges(&seeded), [[(2, 1), (2, 1), (2, 1)]]);
+        assert_eq!(seeded.middle, "DUP\nnew\nmid\nbase\nend\n");
+        assert_eq!(ranges(&seeded), [[(3, 1), (2, 1), (3, 1)]]);
         assert_eq!(base_ranges(&seeded), [(2, 1)]);
         assert_eq!(
             with_local_applied(&seeded, &texts.local),
-            "DUP\nmid\ndup\nend\n"
+            "DUP\nnew\nmid\ndup\nend\n"
         );
         assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
     }

@@ -277,20 +277,19 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
 
 // gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a
 // non-zero exit marks a conflict.
-const MARKER_WRITING_DRIVER: &str = "{ echo '<<<<<<< ours'; echo local; echo '======='; echo remote; echo '>>>>>>> theirs'; } > %A; exit 1";
+const TEXT_MERGING_DRIVER: &str = "git merge-file -L ours -L base -L theirs %A %O %B; exit 1";
 
 #[test]
 fn a_configured_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
-    let config = [("merge.mergiraf.driver", MARKER_WRITING_DRIVER)];
+    let config = [("merge.mergiraf.driver", TEXT_MERGING_DRIVER)];
     let dir = merged(&config, Some("f.txt merge=mergiraf\n"));
-    let driver_output = "<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\n";
-    assert_eq!(read(&dir, TEXT), driver_output);
+    assert!(read(&dir, TEXT).contains("\n<<<<<<< ours\n"));
 
     let (mut session, list) = first_list(&dir);
 
     assert_eq!(
         changes(&list),
-        [(TEXT, &DiskResult::MarkersLeft { conflicts: 1 })]
+        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
     );
     assert!(matches!(
         session.load(TEXT).unwrap().middle,

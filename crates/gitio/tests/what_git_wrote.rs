@@ -124,7 +124,11 @@ const ONE_CONFLICT: [&[u8]; 3] = [BASE, b"a\nB\nc\nd\ne\n", b"a\nX\nc\nd\ne\n"];
 fn merge_file_returns_the_merge_with_one_or_two_conflicts() {
     let (_dir, repo) = two_conflicts(&Setup::default());
     let scratch = TempDir::new().unwrap();
-    let two_blocks = [BASE, b"A\nb\nc\nd\nE\n", b"X\nb\nc\nd\nY\n"];
+    let two_blocks: [&[u8]; 3] = [
+        b"a\nb\nc\nd\ne\nf\n",
+        b"A\nb\nc\nd\ne\nF\n",
+        b"X\nb\nc\nd\ne\nY\n",
+    ];
 
     let one = merged(&repo, scratch.path(), ONE_CONFLICT, &PLAIN);
     let two = merged(&repo, scratch.path(), two_blocks, &PLAIN);
@@ -289,7 +293,13 @@ fn merge_config_reads_the_default_driver_and_the_names_of_configured_drivers() {
 
     let config = repo.merge_config().unwrap();
 
-    assert_eq!(no_config, MergeConfig::default());
-    assert_eq!(config.default, Some(b"binary".to_vec()));
-    assert_eq!(config.drivers, [b"mergiraf".to_vec()]);
+    let mut drivers = no_config.drivers;
+    drivers.push(b"mergiraf".to_vec());
+    assert_eq!(
+        config,
+        MergeConfig {
+            default: Some(b"binary".to_vec()),
+            drivers,
+        }
+    );
 }

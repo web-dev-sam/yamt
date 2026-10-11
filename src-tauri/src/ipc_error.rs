@@ -1,7 +1,5 @@
 use yamt_session::UnsupportedReason;
 
-const NOT_A_FILE: &str = "it is not a regular file";
-
 #[derive(Debug, serde::Serialize, specta::Type)]
 #[serde(tag = "kind")]
 pub enum IpcError {
@@ -18,6 +16,9 @@ pub enum IpcError {
     WriteFailed {
         path: String,
         message: String,
+    },
+    NotAFile {
+        path: String,
     },
     ReadFailed {
         path: String,
@@ -39,10 +40,7 @@ impl From<yamt_session::Error> for IpcError {
                 path,
                 message: source.to_string(),
             },
-            yamt_session::Error::NotAFile { path } => IpcError::WriteFailed {
-                path,
-                message: NOT_A_FILE.to_owned(),
-            },
+            yamt_session::Error::NotAFile { path } => IpcError::NotAFile { path },
             yamt_session::Error::ReadFailed { path, source } => IpcError::ReadFailed {
                 path,
                 message: source.to_string(),
@@ -103,7 +101,7 @@ mod tests {
         };
         assert_eq!(
             ipc_json(not_a_file),
-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "it is not a regular file" })
+            json!({ "kind": "NotAFile", "path": "a.ts" })
         );
         let read_failed = yamt_session::Error::ReadFailed {
             path: "a.ts".to_owned(),
