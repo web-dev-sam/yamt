@@ -1,1 +1,6 @@
-{}
+{
+  "V0ScrollSmooth": {
+    "owned": ["frontend/src/editor/**", "frontend/src/ui/**"],
+    "readonly": ["frontend/src/ipc/**", "docs/**", ".omp/run/scroll-timing.py"]
+  }
+}
