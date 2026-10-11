@@ -1,0 +1,32 @@
+title
+=======
+<<<<<<< HEAD
+one
+TWO
+shared-a
+three-ours
+shared-b
+||||||| 8409db1
+one
+two
+three
+=======
+ONE
+two
+shared-a
+three-theirs
+shared-b
+>>>>>>> theirs
+four
+five
+six
+seven
+<<<<<<< HEAD
+eight-ours
+||||||| 8409db1
+eight
+=======
+eight-theirs
+>>>>>>> theirs
+nine
+ten

@@ -1,0 +1,25 @@
+title
+=======
+<<<<<<< HEAD
+one
+TWO
+shared-a
+three-ours
+=======
+ONE
+two
+shared-a
+three-theirs
+>>>>>>> theirs
+shared-b
+four
+five
+six
+seven
+<<<<<<< HEAD
+eight-ours
+=======
+eight-theirs
+>>>>>>> theirs
+nine
+ten
