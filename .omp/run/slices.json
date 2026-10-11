@@ -1,1 +1,11 @@
-{}
+{
+  "V0DiskTruthRust": {
+    "owned": [
+      "crates/**",
+      "src-tauri/**",
+      "frontend/fixtures/golden/**",
+      "frontend/fixtures/showcase/**"
+    ],
+    "readonly": ["frontend/src/**", "docs/**", ".omp/**", "tests/golden/**"]
+  }
+}
