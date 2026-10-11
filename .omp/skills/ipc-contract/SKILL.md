@@ -23,8 +23,9 @@ from them and committed.
 - [IPC3] Rust newtypes (`BaseLine`, `LocalLine`, `RemoteLine`, `ChunkId`) arrive as `number`;
   `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is BaseLine`), never `as` (TS4).
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
-  (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`); never a
-  string. The frontend `switch`es on `kind` exhaustively.
+  (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`; #53:
+  `NotAFile { path }`, `ReadFailed { path, message }`); never a string. The frontend `switch`es on
+  `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `FileList.disk_changes`), never an error.
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
   method, map the error. No logic in `src-tauri`.
 - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
@@ -33,12 +34,12 @@ from them and committed.
 ## Commands (v0)
 
 ```
-list_files()                      -> Result<Vec<FileEntry>>   re-reads `git ls-files -u`: marks are git's view, plan §2 #49
-load_file(path)                   -> FileMergeData   `deleted: Side | null` (deleted-on-one-side text file; that side's text = base), #47
-finish_file(path, text: String)   -> Vec<FileEntry>
-reset_file(path)                  -> Vec<FileEntry>
-describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit)
-take_side(path, side: Side)       -> Vec<FileEntry>   resolve with one side (deleted side = git rm), plan §2 #36
+list_files()                      -> FileList { files, disk_changes }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53
+load_file(path)                   -> FileMergeData   `middle: Stages{text} | Disk{text} | DiskNotText{found}`, chunks with their middle range and words, `disk_version`; `deleted: Side | null` (#47)
+finish_file(path, text, disk_version)   -> WriteReply   Written{files} | ChangedOnDisk{files, change} (old version or unseen disk change: nothing written, #53)
+reset_file(path, disk_version)    -> WriteReply
+describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit), `disk_version`
+take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
 remote_name()                     -> Option<RemoteName>   Branch{name} | Commit{short_id, subject, message}, read once at open, #50
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 ```

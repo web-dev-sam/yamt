@@ -224,12 +224,19 @@ impl Repo {
     pub fn blob_reader(&self) -> Result<BlobReader>;              // cat-file --batch, long-lived
     pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()>; // update-index -z --index-info
     pub fn checkout_merge(&self, path: &Path) -> Result<()>;      // checkout -m -- <path>
-    pub fn add(&self, path: &Path) -> Result<()>;                 // add -- <path>
+    pub fn add_paths(&self, paths: &[&Path]) -> Result<()>;       // add -- <paths> (one call for a batch)
     pub fn resolve_with(&self, entry: &StageEntry) -> Result<()>; // update-index --index-info: one stage-0 record replaces every stage
-    pub fn remove_from_index(&self, path: &Path) -> Result<()>;   // update-index --force-remove -- <path>
+    pub fn remove_paths(&self, paths: &[&Path]) -> Result<()>;    // update-index --force-remove -- <paths>
     pub fn checkout_from_index(&self, path: &Path) -> Result<()>; // checkout-index -u --force -- <path> (links, exec bit, filters, fresh stat)
     pub fn index_records(&self, path: &Path) -> Result<Vec<u8>>;  // ls-files -s -z -- <path>: opaque snapshot before a take
     pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()>; // puts that snapshot back (or --force-remove when empty)
+    // what git wrote at start (plan §2 #53)
+    pub fn version(&self) -> Result<GitVersion>;                  // `git version` (Apple and Windows suffixes parsed)
+    pub fn attributes(&self, paths: &[&Path]) -> Result<Vec<MergeAttributes>>; // check-attr -z --stdin conflict-marker-size merge working-tree-encoding
+    pub fn merge_config(&self) -> Result<MergeConfig>;            // config -z --get-regexp: merge.default + configured merge.<name>.driver names
+    pub fn hash_objects(&self, paths: &[&Path]) -> Result<Vec<Oid>>; // hash-object --stdin-paths (clean filters per path)
+    pub fn merge_file(&self, scratch: &Path, base: &[u8], local: &[u8], remote: &[u8], options: &MergeFileOptions) -> Result<Vec<u8>>; // merge-file -p; exit 0..127 = conflict count
+    pub fn submodule_head(&self, path: &Path) -> Result<Option<Oid>>; // rev-parse HEAD inside a checked-out submodule
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
@@ -244,7 +251,7 @@ impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ### 3.3 `session` — the state machine
 
 ```rust
-pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages + decoded content */ }
+pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages, decoded content, `seen` (what the disk looked like), `settled` (last disk result + version) */ }
 
 pub enum Eol { Lf, CrLf, Mixed }
 pub enum FileStatus { Unresolved, Resolved }
@@ -252,18 +259,26 @@ pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDele
 
 // DTOs (serde::Serialize + specta::Type), see §4
 pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
-pub struct FileMergeData { pub path: String, pub base: String /* "" for add/add */, pub local: String,
-                           pub remote: String, pub eol: Eol, pub chunks: Vec<Chunk>,
-                           pub word_changes: Vec<WordChanges> /* one per chunk, same order */ }
+pub struct MiddleLine(pub u32);   // a line of the middle pane's starting text
+pub struct DiskVersion(pub u32);  // bumped by each settle of the file (plan §2 #53)
+pub enum Middle { Stages { text: String } /* base; "" for add/add */, Disk { text: String }, DiskNotText { found: NotText } }
+pub struct MergeChunk { pub chunk: Chunk, pub middle: LineRange<MiddleLine>, pub words: WordChanges }
+pub struct FileMergeData { pub path: String, pub middle: Middle, pub local: String, pub remote: String,
+                           pub deleted: Option<Side>, pub eol: Eol, pub chunks: Vec<MergeChunk>, pub disk_version: DiskVersion }
+pub enum DiskResult { Staged, MarkersLeft { conflicts: u32 }, LeftAsIs, StageFailed { message: String } }
+pub struct DiskChange { pub path: String, pub result: DiskResult }
+pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange> }
+pub enum WriteReply { Written { files: Vec<FileEntry> }, ChangedOnDisk { files: Vec<FileEntry>, change: DiskChange } }
 
 impl MergeSession {
-    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages and decodes its blobs now
+    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages, decodes its blobs, reads the disk, compares it with what git wrote
+    pub fn refresh(&mut self) -> Result<FileList>;                   // looks at every file, settles disk changes (stage or reopen), then re-reads `ls-files -u`
     pub fn files(&self) -> Vec<FileEntry>;
-    pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // decoded texts + compute_chunks
-    pub fn finish(&mut self, path: &str, result: &str) -> Result<()>; // write worktree, git add, Resolved; on a failed add the worktree is put back
+    pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // from the stages (base + compute_chunks), or from the disk (one Conflict per open block)
+    pub fn finish(&mut self, path: &str, result: &str, v: DiskVersion) -> Result<WriteReply>; // look first; write worktree, git add, Resolved; on a failed add the worktree is put back
     pub fn describe(&mut self, path: &str) -> Result<FileSides>;     // per side: Missing | Text{lines} | Binary/NonUtf8/TooLarge{bytes} | Link{target} | Commit{id}
-    pub fn take(&mut self, path: &str, side: Side) -> Result<()>;    // resolve with one side (plan §2 #36): stage 0 first, then worktree; deleted side = git rm
-    pub fn reset(&mut self, path: &str) -> Result<()>;               // restore_stages (+ checkout -m when both sides exist), Unresolved
+    pub fn take(&mut self, path: &str, side: Side, v: DiskVersion) -> Result<WriteReply>; // look first; resolve with one side (plan §2 #36): stage 0 first, then worktree; deleted side = git rm
+    pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages (+ checkout -m when both sides exist), Unresolved
     pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
 }
@@ -271,14 +286,16 @@ impl MergeSession {
 
 Edge cases owned here (plan §6 → code):
 
-| case                                                           | handling                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                                                                                                                                                     |
-| no stage 2 or 3 (delete/modify)                                | kept side and base text → loads with `FileMergeData.deleted` (that side's text = base, every chunk one-sided; the window shows the kept side read-only with Keep / Delete, plan §2 #47); otherwise `unsupported: LocalDeleted / RemoteDeleted` and the two-button choice. `take`: the kept side's stage 0 + `checkout-index`, or `--force-remove` + delete (#36) |
-| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; the window shows each side's size and offers take left / take right (`take`, same result as `git checkout --ours/--theirs` + add), plan §2 #36                                                                                                                                                                                  |
-| line endings                                                   | `Eol` detected on the first of base, local, remote that contains a line break (none → `Lf`): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning                                                                                          |
-| `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                                                                                                                                                              |
-| file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                                                                                                                                                             |
+| case                                                           | handling                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                                                                                                                                                                                 |
+| no stage 2 or 3 (delete/modify)                                | kept side and base text → loads with `FileMergeData.deleted` (that side's text = base, every chunk one-sided; the window shows the kept side read-only with Keep / Delete, plan §2 #47); otherwise `unsupported: LocalDeleted / RemoteDeleted` and the two-button choice. `take`: the kept side's stage 0 + `checkout-index`, or `--force-remove` + delete (#36)                             |
+| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; the window shows each side's size and offers take left / take right (`take`, same result as `git checkout --ours/--theirs` + add), plan §2 #36                                                                                                                                                                                                              |
+| line endings                                                   | `Eol` detected on the first of base, local, remote that contains a line break (none → `Lf`): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning                                                                                                                      |
+| `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                                                                                                                                                                                          |
+| file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                                                                                                                                                                                         |
+| a conflicted file changed on disk (plan §2 #52/#53)            | `refresh()` and each write look at the disk; no marker lines, not text, or gone → staged in one batch; markers left → the view is the disk, one `Conflict` per open block (`markers.rs`, `locate.rs`, `seed.rs`); a write with an old `DiskVersion` or after an unseen change writes nothing and replies `ChangedOnDisk`; `finish` never writes through a link or into a folder (`NotAFile`) |
+| a file already changed before start                            | `start.rs`: two-sided text is compared with `git merge-file` of the stages (ours/theirs views, any conflict style), other kinds with the stage git leaves through `hash-object`; the merge driver is resolved as git does (attribute, `merge.default`, configured drivers); a differing file starts as `GitOutput` and the first `refresh()` settles it                                      |
 
 ### 3.4 `cli`
 
@@ -303,16 +320,19 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 ### 3.5 `src-tauri`
 
 - One `tauri::State<Mutex<MergeSession>>`.
-- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<Vec<FileEntry>>`
-  (re-reads git's unmerged entries, so the marks are git's view, plan §2 #49),
-  `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a deleted-on-one-side text
-  file, whose text is base, #47), `finish_file(path, text) -> Vec<FileEntry>`,
-  `reset_file(path) -> Vec<FileEntry>`, `describe_file(path) -> FileSides`,
-  `take_side(path, side) -> Vec<FileEntry>` (plan §2 #36), `remote_name() -> Option<RemoteName>`
-  (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`: the app
-  stays open after the last file (#37); the exit status at close uses git's view (#49).
-- Errors: one `#[serde(tag = "kind")] enum IpcError` (`Git`, `UnknownPath`, `Unsupported`,
-  `WriteFailed`) mirrored into TS; no stringly errors.
+- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
+  (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
+  §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
+  deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
+  `finish_file(path, text, disk_version) -> WriteReply`, `reset_file(path, disk_version) -> WriteReply`,
+  `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
+  `ChangedOnDisk` when the disk changed first or the version is old, #53), `remote_name() ->
+  Option<RemoteName>` (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`:
+  the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
+  so it settles disk changes and uses git's view (#49).
+- Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
+  `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`) mirrored into TS; no stringly errors. A disk
+  change is never an error.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
@@ -650,7 +670,7 @@ The file itself is the reference; this is its shape (verified at commit `588abc9
 check:          fmt-check clippy test deny bindings-check web-lint web-typecheck web-test web-unused arch-check golden sfc-order hooks-test
 fmt-check:      pnpm -C frontend fmt:check && cargo fmt --all --check
 clippy:         cargo clippy --workspace --all-targets -- -D warnings
-test:           cargo nextest run --workspace
+test:           {{ hermetic_git }} cargo nextest run --workspace   (no user/system git config, RK19)
 deny:           cargo deny check --warn unmaintained
 bindings:       cargo run -p yamt-app --bin export-bindings
 bindings-check: export to target/ and `diff -u` against the committed frontend/src/ipc/bindings.ts

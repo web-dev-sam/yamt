@@ -1,5 +1,8 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Git without the user's or system config (RK19): yamt reads it, the test repositories are merged without it.
+hermetic_git := "env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=/nonexistent"
+
 check: fmt-check clippy test deny bindings-check fixtures-check web-lint web-typecheck web-test web-unused arch-check map-check golden sfc-order hooks-test
 
 fmt-check: (frontend "fmt:check")
@@ -8,10 +11,9 @@ fmt-check: (frontend "fmt:check")
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# yamt reads the user's git config (merge drivers, attributes); the test repositories are merged
-# without it (RK19), so the tests run without it too.
+# Rust tests, without the user's git config (RK19).
 test:
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=/nonexistent cargo nextest run --workspace
+    {{ hermetic_git }} cargo nextest run --workspace
 
 deny:
     cargo deny check --warn unmaintained
@@ -107,12 +109,11 @@ golden-repo case dir:
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail
-    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=/nonexistent
     mkdir -p target/mutants
     git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
     if [ -s target/mutants/rust.diff ]; then
         status=0
-        cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
+        {{ hermetic_git }} cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
         if [ "$status" -ne 0 ] && [ "$status" -ne 2 ] && [ "$status" -ne 3 ]; then exit "$status"; fi
     else
         echo "mutants: no Rust changes since {{ base }}"

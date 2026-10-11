@@ -47,7 +47,7 @@ observed: chunk table with kinds and ranges; compare against `expected.json` by 
 **gitio / session**
 
 ```
-cargo nextest run -p yamt-gitio -p yamt-session
+just test                    # or: {{ hermetic_git }} prefix from the justfile + cargo nextest run -p yamt-gitio -p yamt-session (RK19)
 ```
 
 observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the output.

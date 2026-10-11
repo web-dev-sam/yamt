@@ -4,12 +4,12 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	listFiles: () => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("list_files")),
+	listFiles: () => typedError<FileList, IpcError>(__TAURI_INVOKE("list_files")),
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
-	finishFile: (path: string, text: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("finish_file", { path, text })),
-	resetFile: (path: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("reset_file", { path })),
+	finishFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("finish_file", { path, text, diskVersion })),
+	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
-	takeSide: (path: string, side: Side) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("take_side", { path, side })),
+	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
 	remoteName: () => __TAURI_INVOKE<{ kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | null>("remote_name"),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 };
@@ -46,6 +46,21 @@ export type ChunkKind =
 /**  Local and remote changed these base lines differently. */
 "Conflict";
 
+export type DiskChange = {
+	path: string,
+	result: DiskResult,
+};
+
+/**  What yamt did with a file that changed on disk. */
+export type DiskResult = { kind: "Staged" } | 
+/**  Not staged: the file still has this many open blocks and raw regions, at least one. */
+{ kind: "MarkersLeft"; conflicts: number } | 
+/**  Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out. */
+{ kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
+
+/**  Counts the settles of one file's disk changes; a view is built from one version. */
+export type DiskVersion = number;
+
 export type Eol = "Lf" | "CrLf" | "Mixed";
 
 export type FileEntry = {
@@ -54,15 +69,21 @@ export type FileEntry = {
 	unsupported: UnsupportedReason | null,
 };
 
+/**  The files as git sees them, and the disk changes settled while looking. */
+export type FileList = {
+	files: FileEntry[],
+	disk_changes: DiskChange[],
+};
+
 export type FileMergeData = {
 	path: string,
-	base: string,
+	middle: Middle,
 	local: string,
 	remote: string,
 	deleted: Side | null,
 	eol: Eol,
-	chunks: Chunk[],
-	word_changes: WordChanges[],
+	chunks: MergeChunk[],
+	disk_version: DiskVersion,
 };
 
 export type FileSides = {
@@ -70,6 +91,7 @@ export type FileSides = {
 	reason: UnsupportedReason | null,
 	local: SideContent,
 	remote: SideContent,
+	disk_version: DiskVersion,
 };
 
 export type FileStatus = "Unresolved" | "Resolved";
@@ -98,7 +120,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string };
 
 /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
 export type LineRange<L> = {
@@ -120,6 +142,21 @@ export type LogEntry = {
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogValue = string | number | null | boolean;
+
+export type MergeChunk = {
+	chunk: Chunk,
+	middle: LineRange<MiddleLine>,
+	words: WordChanges,
+};
+
+/**  Where the middle pane starts: yamt's merge of the stages (base), or the file as found on disk. */
+export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };
+
+/**  0-based line of the middle pane's starting text. */
+export type MiddleLine = number;
+
+/**  Why the file on disk cannot be shown as the middle text. */
+export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
@@ -153,6 +190,9 @@ export type WordChanges = {
 	/**  Remote compared with base. */
 	remote: SideWordChanges<RemoteLine>,
 };
+
+/**  What a write did: written, or nothing written because the file changed on disk first. */
+export type WriteReply = { kind: "Written"; files: FileEntry[] } | { kind: "ChangedOnDisk"; files: FileEntry[]; change: DiskChange };
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
