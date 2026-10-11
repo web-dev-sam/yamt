@@ -178,14 +178,18 @@ test("each command's error arrives as the failure, unchanged", async () => {
   const source = createTauriSource();
 
   expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
-  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
-    ok: false,
-    failure: notAFile,
-  });
-  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
-    ok: false,
-    failure: readFailed,
-  });
+  expect(await source.finishFile({ path: "src/a.ts", text: "text", diskVersion: version })).toEqual(
+    {
+      ok: false,
+      failure: notAFile,
+    },
+  );
+  expect(await source.finishFile({ path: "src/a.ts", text: "text", diskVersion: version })).toEqual(
+    {
+      ok: false,
+      failure: readFailed,
+    },
+  );
   expect(await source.resetFile("x.ts", version)).toEqual({ ok: false, failure: unknown });
   expect(await source.describeFile("x.ts")).toEqual({ ok: false, failure: unknown });
   expect(await source.takeSide("logo.bin", "local", version)).toEqual({
@@ -200,7 +204,9 @@ test("finishFile and resetFile send their arguments with the disk version and re
   commands.resetFile.mockResolvedValue({ status: "ok", data: WRITTEN });
   const source = createTauriSource();
 
-  expect(await source.finishFile("src/a.ts", "merged\r\n", version)).toEqual({
+  expect(
+    await source.finishFile({ path: "src/a.ts", text: "merged\r\n", diskVersion: version }),
+  ).toEqual({
     ok: true,
     value: CHANGED,
   });
@@ -250,9 +256,9 @@ test("a string error from Tauri's IPC layer rejects the call with that message",
   const version = await versionOfLoaded();
   commands.finishFile.mockResolvedValue({ status: "error", error: "finish_file not allowed" });
 
-  await expect(createTauriSource().finishFile("src/a.ts", "text", version)).rejects.toThrow(
-    new Error("finish_file not allowed"),
-  );
+  await expect(
+    createTauriSource().finishFile({ path: "src/a.ts", text: "text", diskVersion: version }),
+  ).rejects.toThrow(new Error("finish_file not allowed"));
 });
 
 test("a string error from describeFile or takeSide rejects the call with that message", async () => {

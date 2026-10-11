@@ -32,10 +32,10 @@ const CONFLICT_MIDDLE_LINES: Lines = { first: 129, last: 138 };
 const CONFLICT_RIGHT_LINES: Lines = { first: 141, last: 154 };
 
 async function synthetic(
-  texts: { base: string; local: string; remote: string },
-  chunks: readonly { kind: Chunk["kind"]; base: Range; local: Range; remote: Range }[],
+  texts: { middle: string; local: string; remote: string },
+  chunks: readonly { kind: Chunk["kind"]; middle: Range; local: Range; remote: Range }[],
 ): Promise<FileMergeData> {
-  const { base: middleText, ...sides } = texts;
+  const { middle: middleText, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
@@ -43,8 +43,8 @@ async function synthetic(
     ...sides,
     eol: "Lf",
     disk_version: 0,
-    chunks: chunks.map(({ kind, base, local, remote }, id) => {
-      const middle = { start: base[0], len: base[1] };
+    chunks: chunks.map(({ kind, middle: [start, len], local, remote }, id) => {
+      const middle = { start, len };
       return {
         chunk: {
           id,
@@ -261,9 +261,9 @@ test("» then « on a conflict appends; the right arrow offers that only while t
 });
 
 test("applying a side of a conflict whose other side deleted the block resolves it whole", async () => {
-  const texts = { base: "a\nb\nc\n", local: "a\nc\n", remote: "a\nB\nc\n" };
+  const texts = { middle: "a\nb\nc\n", local: "a\nc\n", remote: "a\nB\nc\n" };
   const start = open(
-    await synthetic(texts, [{ kind: "Conflict", base: [1, 1], local: [1, 0], remote: [1, 1] }]),
+    await synthetic(texts, [{ kind: "Conflict", middle: [1, 1], local: [1, 0], remote: [1, 1] }]),
   );
 
   const applied = click(start, 0, { kind: "apply", side: "remote" });
@@ -277,9 +277,9 @@ test("applying a side of a conflict whose other side deleted the block resolves 
 
 test("× and apply on a block that is not a conflict resolve the whole block", async () => {
   const magic = await magicKeys();
-  const texts = { base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n" };
+  const texts = { middle: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n" };
   const same = open(
-    await synthetic(texts, [{ kind: "BothSame", base: [1, 1], local: [1, 1], remote: [1, 1] }]),
+    await synthetic(texts, [{ kind: "BothSame", middle: [1, 1], local: [1, 1], remote: [1, 1] }]),
   );
 
   const oneSided = click(magic, LOCAL_ONLY, { kind: "ignore", side: "local" });
@@ -323,15 +323,15 @@ test("deleting a whole open or half-applied conflict in the middle pane ignores 
 
 test("a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step", async () => {
   const texts = {
-    base: "a\nb\nc\nd\ne\nf\ng\n",
+    middle: "a\nb\nc\nd\ne\nf\ng\n",
     local: "a\nB\nc\nL\ne\nX\ng\n",
     remote: "a\nb\nc\nR\ne\ng\n",
   };
   const start = open(
     await synthetic(texts, [
-      { kind: "LocalOnly", base: [1, 1], local: [1, 1], remote: [1, 1] },
-      { kind: "Conflict", base: [3, 1], local: [3, 1], remote: [3, 1] },
-      { kind: "Conflict", base: [5, 1], local: [5, 1], remote: [5, 0] },
+      { kind: "LocalOnly", middle: [1, 1], local: [1, 1], remote: [1, 1] },
+      { kind: "Conflict", middle: [3, 1], local: [3, 1], remote: [3, 1] },
+      { kind: "Conflict", middle: [5, 1], local: [5, 1], remote: [5, 0] },
     ]),
   );
   const rightApplied = click(start, 1, { kind: "apply", side: "remote" });
@@ -363,9 +363,9 @@ test("a drag over several icons applies or ignores them as clicking each top to 
 
 test("touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves", async () => {
   const start = open(
-    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc" }, [
-      { kind: "LocalOnly", base: [1, 1], local: [1, 1], remote: [1, 1] },
-      { kind: "LocalOnly", base: [2, 1], local: [2, 0], remote: [2, 1] },
+    await synthetic({ middle: "a\nb\nc", local: "a\nB", remote: "a\nb\nc" }, [
+      { kind: "LocalOnly", middle: [1, 1], local: [1, 1], remote: [1, 1] },
+      { kind: "LocalOnly", middle: [2, 1], local: [2, 0], remote: [2, 1] },
     ]),
   );
   const ids = [0, 1];

@@ -38,16 +38,20 @@ function host<T>(present: boolean): ShallowRef<T | null> {
 
 function mount(
   data: ShallowRef<FileMergeData | null>,
-  present = true,
+  { present = true, readOnly = shallowRef(false) } = {},
 ): { scope: EffectScope; handle: MergeHandle } {
   const scope = effectScope();
   const handle = scope.run(() =>
-    useMergeController(data, {
-      left: host(present),
-      center: host(present),
-      right: host(present),
-      strips: [host(present), host(present)],
-    }),
+    useMergeController(
+      data,
+      {
+        left: host(present),
+        center: host(present),
+        right: host(present),
+        strips: [host(present), host(present)],
+      },
+      readOnly,
+    ),
   );
   if (handle === undefined) {
     throw new Error("the scope did not run");
@@ -59,13 +63,13 @@ async function fileData(text: string): Promise<FileMergeData> {
   return { ...(await loadFixture("vueuse-use-magic-keys.ts")), middle: { kind: "Disk", text } };
 }
 
-test("unsaved: false when built, true after an edit, false after markSaved, false after new data", async () => {
-  const data = shallowRef<FileMergeData | null>(await fileData("loaded\n"));
+test("unsaved: false when built, true after an edit, false after markSaved, false after the file changed on disk", async () => {
+  const data = shallowRef<FileMergeData | null>(await fileData("git's merge\n"));
   const { scope, handle } = mount(data);
   await nextTick();
 
   expect(editor.state.built).toBe(1);
-  expect(handle.resultText()).toBe("loaded\n");
+  expect(handle.resultText()).toBe("git's merge\n");
   expect(handle.unsaved()).toBe(false);
 
   editor.state.text = "edited\n";
@@ -74,18 +78,19 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
   handle.markSaved("edited\n");
   expect(handle.unsaved()).toBe(false);
 
-  editor.state.text = "edited again\n";
+  editor.state.text = "typed in yamt\n";
   expect(handle.unsaved()).toBe(true);
 
-  data.value = await fileData("reloaded\n");
+  data.value = await fileData("changed on disk\n");
   await nextTick();
 
   expect(editor.state).toEqual({
-    text: "reloaded\n",
+    text: "changed on disk\n",
     built: 2,
     destroyed: 1,
     readOnly: [false, false],
   });
+  expect(handle.resultText()).toBe("changed on disk\n");
   expect(handle.unsaved()).toBe(false);
 
   scope.stop();
@@ -93,24 +98,11 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
   expect(editor.state.destroyed).toBe(2);
 });
 
-test("after a data swap, unsaved() is false even when the old controller had edits", async () => {
-  const data = shallowRef<FileMergeData | null>(await fileData("git's merge\n"));
-  const { handle } = mount(data);
-  await nextTick();
-  editor.state.text = "typed in yamt\n";
-  expect(handle.unsaved()).toBe(true);
-
-  data.value = await fileData("changed on disk\n");
-  await nextTick();
-
-  expect(editor.state.built).toBe(2);
-  expect(handle.resultText()).toBe("changed on disk\n");
-  expect(handle.unsaved()).toBe(false);
-});
-
 test("without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored", async () => {
   const empty = mount(shallowRef<FileMergeData | null>(null));
-  const hostless = mount(shallowRef<FileMergeData | null>(await fileData("loaded\n")), false);
+  const hostless = mount(shallowRef<FileMergeData | null>(await fileData("loaded\n")), {
+    present: false,
+  });
   await nextTick();
 
   for (const { handle } of [empty, hostless]) {
@@ -122,15 +114,14 @@ test("without data or hosts there is no editor: no text, nothing unsaved, markSa
   expect(editor.state.built).toBe(0);
 });
 
-test("a file deleted on one side gets a read-only editor", async () => {
-  const data = shallowRef<FileMergeData | null>({ ...(await fileData("b\n")), deleted: "remote" });
-  mount(data);
+test("the editor is read-only as the view says, and is rebuilt when that changes", async () => {
+  const readOnly = shallowRef(true);
+  mount(shallowRef<FileMergeData | null>(await fileData("b\n")), { readOnly });
   await nextTick();
 
-  data.value = { ...(await fileData("b\n")), deleted: "local" };
-  await nextTick();
-  data.value = await fileData("b\n");
+  readOnly.value = false;
   await nextTick();
 
-  expect(editor.state.readOnly).toEqual([true, true, false]);
+  expect(editor.state.readOnly).toEqual([true, false]);
+  expect(editor.state.built).toBe(2);
 });

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import X from "~icons/lucide/x";
 
-import { noticeText, type Notice } from "./noticeText";
+import { noticeCloseLabel, noticeText, type Notice } from "./noticeText";
 
 const props = defineProps<{ notices: readonly Notice[] }>();
 const emit = defineEmits<{ close: [path: string] }>();
@@ -11,7 +11,7 @@ const rows = computed(() =>
   props.notices.map((notice) => ({
     path: notice.path,
     text: noticeText(notice),
-    closeLabel: `Close the notice about ${notice.path}`,
+    closeLabel: noticeCloseLabel(notice.path),
   })),
 );
 </script>

@@ -65,7 +65,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
             v-if="sideTaken === null"
             type="button"
             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
-            @click="takeSide(sides.path, column.side)"
+            @click="takeSide(sides.path, column.side, sides.diskVersion)"
           >
             {{ column.button }}
           </button>
@@ -79,7 +79,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
           type="button"
           :disabled="sideTaken === null"
           class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-          @click="reset(sides.path)"
+          @click="reset(sides.path, sides.diskVersion)"
         >
           Reset
         </button>

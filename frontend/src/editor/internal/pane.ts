@@ -170,15 +170,8 @@ export function paneText(state: EditorState): string {
 export type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: string };
 
 export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
-  switch (middle.kind) {
-    case "Stages":
-    case "Disk":
-      return { kind: readOnly ? "readOnlyCenter" : "center", doc: middle.text };
-    case "DiskNotText":
-      return { kind: "readOnlyCenter", doc: "" };
-    default: {
-      const _exhaustive: never = middle;
-      return _exhaustive;
-    }
-  }
+  return {
+    kind: readOnly ? "readOnlyCenter" : "center",
+    doc: middle.kind === "DiskNotText" ? "" : middle.text,
+  };
 }

@@ -46,15 +46,15 @@ function runsOf(state: EditorState): string[] {
 }
 
 async function synthetic(
-  texts: { base: string; local: string; remote: string },
+  texts: { middle: string; local: string; remote: string },
   chunks: readonly {
     kind: Chunk["kind"];
-    base: [start: number, len: number];
+    middle: [start: number, len: number];
     local: [start: number, len: number];
     remote: [start: number, len: number];
   }[],
 ): Promise<FileMergeData> {
-  const { base: middleText, ...sides } = texts;
+  const { middle: middleText, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
@@ -62,8 +62,8 @@ async function synthetic(
     ...sides,
     eol: "Lf",
     disk_version: 0,
-    chunks: chunks.map(({ kind, base, local, remote }, id) => {
-      const middle = { start: base[0], len: base[1] };
+    chunks: chunks.map(({ kind, middle: [start, len], local, remote }, id) => {
+      const middle = { start, len };
       return {
         chunk: {
           id,
@@ -161,8 +161,8 @@ test("center colours follow their text when a line is typed above them", async (
 });
 
 test("an empty range at the end of an unterminated last line is drawn below that line", async () => {
-  const data = await synthetic({ base: "a\nb", local: "a\nb\nc", remote: "a\nb" }, [
-    { kind: "LocalOnly", base: [2, 0], local: [2, 1], remote: [2, 0] },
+  const data = await synthetic({ middle: "a\nb", local: "a\nb\nc", remote: "a\nb" }, [
+    { kind: "LocalOnly", middle: [2, 0], local: [2, 1], remote: [2, 0] },
   ]);
   const field = chunkField(data.chunks);
 
@@ -175,9 +175,9 @@ test("an empty range at the end of an unterminated last line is drawn below that
 });
 
 test("a marker on another chunk's band line keeps its own tone class", async () => {
-  const data = await synthetic({ base: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
-    { kind: "Conflict", base: [0, 1], local: [0, 1], remote: [0, 1] },
-    { kind: "LocalOnly", base: [1, 0], local: [1, 1], remote: [1, 0] },
+  const data = await synthetic({ middle: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
+    { kind: "Conflict", middle: [0, 1], local: [0, 1], remote: [0, 1] },
+    { kind: "LocalOnly", middle: [1, 0], local: [1, 1], remote: [1, 0] },
   ]);
   const field = chunkField(data.chunks);
   const state = EditorState.create({
@@ -194,9 +194,9 @@ test("a marker on another chunk's band line keeps its own tone class", async () 
 });
 
 test("a line break pasted at the end of a band line stops at the marker that follows it", async () => {
-  const data = await synthetic({ base: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
-    { kind: "Conflict", base: [0, 1], local: [0, 1], remote: [0, 1] },
-    { kind: "LocalOnly", base: [1, 0], local: [1, 1], remote: [1, 0] },
+  const data = await synthetic({ middle: "a\nb\n", local: "a\nx\nb\n", remote: "y\nb\n" }, [
+    { kind: "Conflict", middle: [0, 1], local: [0, 1], remote: [0, 1] },
+    { kind: "LocalOnly", middle: [1, 0], local: [1, 1], remote: [1, 0] },
   ]);
   const field = chunkField(data.chunks);
   const joined = EditorState.create({
@@ -251,8 +251,8 @@ test("random edits keep center ranges sorted, disjoint, inside the document, and
 });
 
 test("a RemoteOnly deletion: center band and right marker are deleted, left is bare", async () => {
-  const data = await synthetic({ base: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
-    { kind: "RemoteOnly", base: [0, 2], local: [0, 2], remote: [0, 0] },
+  const data = await synthetic({ middle: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
+    { kind: "RemoteOnly", middle: [0, 2], local: [0, 2], remote: [0, 0] },
   ]);
   const field = chunkField(data.chunks);
 

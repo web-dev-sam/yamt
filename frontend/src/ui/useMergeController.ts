@@ -43,6 +43,7 @@ type HostElements = readonly [
 
 function createController(
   data: FileMergeData | null,
+  readOnly: boolean,
   [left, center, right, leftStrip, rightStrip]: HostElements,
 ): MergeController | null {
   if (
@@ -58,13 +59,14 @@ function createController(
   return new MergeController(
     data,
     { left, center, right, strips: [leftStrip, rightStrip] },
-    { readOnly: data.deleted !== null },
+    { readOnly },
   );
 }
 
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: Hosts,
+  readOnly: MaybeRefOrGetter<boolean>,
 ): MergeHandle {
   const summary = shallowRef<MergeSummary | null>(null);
   let loaded: Loaded | null = null;
@@ -76,10 +78,10 @@ export function useMergeController(
   }
 
   watch(
-    [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
-    ([current, ...elements]) => {
+    [toRef(data), toRef(readOnly), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+    ([current, currentReadOnly, ...elements]) => {
       destroyController();
-      const controller = createController(current, elements);
+      const controller = createController(current, currentReadOnly, elements);
       controller?.onSummaryChange((next) => {
         summary.value = next;
       });

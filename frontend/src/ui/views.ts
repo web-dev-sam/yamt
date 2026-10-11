@@ -1,13 +1,6 @@
 import type { ShallowRef } from "vue";
 
-import {
-  log,
-  type ChunkSource,
-  type DiskVersion,
-  type FileEntry,
-  type FileMergeData,
-  type FileSides,
-} from "../ipc";
+import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
 import { attempt, logProblem, type Outcome, type Problem } from "./problem";
 
 export type Shown = {
@@ -25,17 +18,9 @@ export function isShown(shown: Shown, path: string): boolean {
   );
 }
 
-export function shownVersion(shown: Shown, path: string): DiskVersion | null {
+export function takesASide(shown: Shown, path: string): boolean {
   return (
-    shown.opened.value.find((file) => file.path === path)?.diskVersion ??
-    shown.choices.value.find((sides) => sides.path === path)?.diskVersion ??
-    null
-  );
-}
-
-export function showsChoice(shown: Shown, path: string): boolean {
-  return (
-    shown.choices.value.some((sides) => sides.path === path) ||
+    shown.files.value.some((file) => file.path === path && file.unsupported !== null) ||
     shown.opened.value.some((file) => file.path === path && file.deleted !== null)
   );
 }

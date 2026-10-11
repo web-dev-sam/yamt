@@ -42,3 +42,7 @@ function outcome(result: DiskResult): string {
 export function noticeText(notice: Notice): string {
   return `${opening(notice)} — ${outcome(notice.result)}`;
 }
+
+export function noticeCloseLabel(path: string): string {
+  return `Close the notice about ${path}`;
+}

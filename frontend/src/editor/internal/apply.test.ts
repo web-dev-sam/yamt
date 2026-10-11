@@ -25,24 +25,24 @@ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
 
 async function synthetic(
-  texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
+  texts: { middle: string; local: string; remote: string; eol: FileMergeData["eol"] },
   chunks: readonly {
     kind: Chunk["kind"];
-    base: [number, number];
+    middle: [number, number];
     side: [number, number];
     remote?: [number, number];
   }[],
 ): Promise<FileMergeData> {
-  const { base, ...sides } = texts;
+  const { middle: text, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    middle: { kind: "Stages", text: base },
+    middle: { kind: "Stages", text },
     ...sides,
     disk_version: 0,
     chunks: chunks.map((chunk, id) => {
       const [remoteStart, remoteLen] = chunk.remote ?? chunk.side;
-      const middle = { start: chunk.base[0], len: chunk.base[1] };
+      const middle = { start: chunk.middle[0], len: chunk.middle[1] };
       return {
         chunk: {
           id,
@@ -198,7 +198,7 @@ test("apply local: the change gets the left text, resolves, and loses colour and
   expect(applyOne(start, chunkAt(start, 0), "remote")).toEqual([]);
 });
 
-test("apply remote inserts the right lines at an empty base range", async () => {
+test("apply remote inserts the right lines at an empty middle range", async () => {
   const start = await magicKeys();
 
   const applied = run(start, applyOne(start, chunkAt(start, 3), "remote"));
@@ -288,8 +288,8 @@ test("undo after ignore brings the change back; redo ignores it again", async ()
 test("undo and redo after an arrow or × show that change, not the old cursor at line 1", async () => {
   const start = await magicKeys();
   const same = open(
-    await synthetic({ base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" }, [
-      { kind: "BothSame", base: [1, 1], side: [1, 1] },
+    await synthetic({ middle: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" }, [
+      { kind: "BothSame", middle: [1, 1], side: [1, 1] },
     ]),
   );
   const cases: readonly { merge: ApplyTarget; id: number; act: Act }[] = [
@@ -405,8 +405,8 @@ test("bulk apply from the left resolves every LocalOnly change; one undo restore
 
 test("a BothSame change resolves from either arrow and from either bulk apply", async () => {
   const merge = open(
-    await synthetic({ base: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" }, [
-      { kind: "BothSame", base: [1, 1], side: [1, 1] },
+    await synthetic({ middle: "a\nb\nc\n", local: "a\nB\nc\n", remote: "a\nB\nc\n", eol: "Lf" }, [
+      { kind: "BothSame", middle: [1, 1], side: [1, 1] },
     ]),
   );
   const same = chunkAt(merge, 0);
@@ -448,9 +448,9 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
 
 test("bulk apply over touching spans whose last deletes an unterminated final line equals clicking each", async () => {
   const start = open(
-    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc", eol: "Lf" }, [
-      { kind: "LocalOnly", base: [1, 1], side: [1, 1], remote: [1, 1] },
-      { kind: "LocalOnly", base: [2, 1], side: [2, 0], remote: [2, 1] },
+    await synthetic({ middle: "a\nb\nc", local: "a\nB", remote: "a\nb\nc", eol: "Lf" }, [
+      { kind: "LocalOnly", middle: [1, 1], side: [1, 1], remote: [1, 1] },
+      { kind: "LocalOnly", middle: [2, 1], side: [2, 0], remote: [2, 1] },
     ]),
   );
   function spans(merge: ApplyTarget): [number, number][] {
@@ -493,8 +493,13 @@ test("deleting all of a change's lines in the middle pane ignores it", async () 
 test("resultText of a CRLF file keeps CRLF after an apply", async () => {
   const merge = open(
     await synthetic(
-      { base: "a\r\nb\r\nc\r\n", local: "a\r\nB\r\nc\r\n", remote: "a\r\nb\r\nc\r\n", eol: "CrLf" },
-      [{ kind: "LocalOnly", base: [1, 1], side: [1, 1] }],
+      {
+        middle: "a\r\nb\r\nc\r\n",
+        local: "a\r\nB\r\nc\r\n",
+        remote: "a\r\nb\r\nc\r\n",
+        eol: "CrLf",
+      },
+      [{ kind: "LocalOnly", middle: [1, 1], side: [1, 1] }],
     ),
   );
 
@@ -506,10 +511,15 @@ test("resultText of a CRLF file keeps CRLF after an apply", async () => {
 test("a conflict applied from both sides after its separator line is deleted pushes the next change", async () => {
   const merge = open(
     await synthetic(
-      { base: "a\nc\nx\nd\nz\n", local: "a\nL\nx\nD\nz\n", remote: "a\nR\nx\nd\nz\n", eol: "Lf" },
+      {
+        middle: "a\nc\nx\nd\nz\n",
+        local: "a\nL\nx\nD\nz\n",
+        remote: "a\nR\nx\nd\nz\n",
+        eol: "Lf",
+      },
       [
-        { kind: "Conflict", base: [1, 1], side: [1, 1] },
-        { kind: "LocalOnly", base: [3, 1], side: [3, 1] },
+        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
+        { kind: "LocalOnly", middle: [3, 1], side: [3, 1] },
       ],
     ),
   );
@@ -531,19 +541,21 @@ test("a conflict applied from both sides after its separator line is deleted pus
 
 test("a change on an unterminated last line keeps the file without a final line break", async () => {
   const cases = [
-    { base: "a\nb", local: "a\nB", chunk: { base: [1, 1], side: [1, 1] }, result: "a\nB" },
-    { base: "a\nb", local: "a", chunk: { base: [1, 1], side: [1, 0] }, result: "a" },
-    { base: "a", local: "a\nb", chunk: { base: [1, 0], side: [1, 1] }, result: "a\nb" },
+    { middle: "a\nb", local: "a\nB", chunk: { middle: [1, 1], side: [1, 1] }, result: "a\nB" },
+    { middle: "a\nb", local: "a", chunk: { middle: [1, 1], side: [1, 0] }, result: "a" },
+    { middle: "a", local: "a\nb", chunk: { middle: [1, 0], side: [1, 1] }, result: "a\nb" },
   ] satisfies {
-    base: string;
+    middle: string;
     local: string;
-    chunk: { base: [number, number]; side: [number, number] };
+    chunk: { middle: [number, number]; side: [number, number] };
     result: string;
   }[];
 
-  for (const { base, local, chunk, result } of cases) {
+  for (const { middle, local, chunk, result } of cases) {
     const merge = open(
-      await synthetic({ base, local, remote: base, eol: "Lf" }, [{ kind: "LocalOnly", ...chunk }]),
+      await synthetic({ middle, local, remote: middle, eol: "Lf" }, [
+        { kind: "LocalOnly", ...chunk },
+      ]),
     );
     const applied = run(merge, applyOne(merge, chunkAt(merge, 0), "local"));
     expect(applied.state.sliceDoc()).toBe(result);
@@ -674,7 +686,7 @@ const ONE_BLOCK_LEFT = [
 ];
 
 test.each<FileMergeData["eol"]>(["Lf", "CrLf"])(
-  "a disk-seeded block takes ours exactly as the hand resolution, and undo brings base back (%s)",
+  "a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (%s)",
   async (eol) => {
     const merge = open(
       await diskSeeded({ middle: ONE_BLOCK_LEFT, base: [2, 3], at: [2, 3], side: [2, 4], eol }),
@@ -708,7 +720,7 @@ test("a chunk spans its middle range, not where its base range would put it", as
   );
 });
 
-test("a middle that is not text on disk is empty and read-only", async () => {
+test("a middle that is not text on disk is an empty document", async () => {
   const data = await diskSeeded({ middle: [], base: [0, 0], at: [0, 0], side: [0, 0], eol: "Lf" });
   const notText: FileMergeData = {
     ...data,
@@ -716,9 +728,62 @@ test("a middle that is not text on disk is empty and read-only", async () => {
     chunks: [],
   };
 
-  expect(centerPane(notText.middle, false)).toEqual({ kind: "readOnlyCenter", doc: "" });
-  expect(open(notText).state.readOnly).toBe(true);
-  expect(open(notText).state.sliceDoc()).toBe("");
+  expect(centerPane(notText.middle, true)).toEqual({ kind: "readOnlyCenter", doc: "" });
+  expect(open(notText, true).state.sliceDoc()).toBe("");
   expect(centerPane(data.middle, false).kind).toBe("center");
   expect(centerPane(data.middle, true).kind).toBe("readOnlyCenter");
+});
+
+const SHARED = Array.from({ length: 19 }, (_, line) => `shared-${line}`);
+
+function addedConflict(
+  id: number,
+  ranges: { middle: [number, number]; local: [number, number]; remote: [number, number] },
+): unknown {
+  return {
+    chunk: {
+      id,
+      kind: "Conflict",
+      base: { start: 0, len: 0 },
+      local: range(ranges.local),
+      remote: range(ranges.remote),
+    },
+    middle: range(ranges.middle),
+    words: {
+      chunk: id,
+      local: { changed: [], removed_at: [] },
+      remote: { changed: [], removed_at: [] },
+    },
+  };
+}
+
+test("an add/add file reopened from the disk: a one-sided apply stays a conflict until the other side is settled", async () => {
+  const record = {
+    path: "added.ts",
+    deleted: null,
+    middle: { kind: "Disk", text: lines([...SHARED, "}"], "Lf") },
+    local: lines(["L0", "L1", ...SHARED, "L2", "L3", "L4", "L5", "}"], "Lf"),
+    remote: lines(["R0", "R1", "R2", "R3", "R4", ...SHARED, "R5", "R6", "R7", "}"], "Lf"),
+    eol: "Lf",
+    disk_version: 1,
+    chunks: [
+      addedConflict(0, { middle: [0, 0], local: [0, 2], remote: [0, 5] }),
+      addedConflict(1, { middle: [19, 0], local: [21, 4], remote: [24, 3] }),
+    ],
+  };
+  const merge = open(await loadFixture("added.ts", { "added.json": record }));
+
+  const local = run(merge, applyOne(merge, chunkAt(merge, 0), "local"));
+  const ignored = run(local, ignoreOne(local, chunkAt(local, 0), "remote"));
+  const lower = run(ignored, applyOne(ignored, chunkAt(ignored, 1), "local"));
+  const both = run(lower, applyOne(lower, chunkAt(lower, 1), "remote"));
+
+  expect(paneText(local.state)).toBe(lines(["L0", "L1", ...SHARED, "}"], "Lf"));
+  expect(statuses(local)).toEqual(["applied pending", "pending pending"]);
+  expect(summarize(local.state.field(local.field))).toEqual({ changes: 0, conflicts: 2 });
+  expect(summarize(ignored.state.field(ignored.field))).toEqual({ changes: 0, conflicts: 1 });
+  expect(paneText(both.state)).toBe(
+    lines(["L0", "L1", ...SHARED, "L2", "L3", "L4", "L5", "R5", "R6", "R7", "}"], "Lf"),
+  );
+  expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
 });

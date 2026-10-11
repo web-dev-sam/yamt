@@ -1,4 +1,4 @@
-import type { Side } from "../ipc";
+import type { FileMergeData, Side } from "../ipc";
 import { otherSide, type Taken } from "./sides";
 import type { MergeSummary } from "./useMergeController";
 
@@ -19,7 +19,11 @@ function middle(deleted: Side, taken: Taken | null): Middle {
   return taken.side === deleted ? "deleted" : "kept";
 }
 
-export function deletedSideView(deleted: Side, taken: Taken | null): DeletedSideView {
+export function deletedSideView(
+  deleted: Side,
+  taken: Taken | null,
+  loaded: FileMergeData["middle"]["kind"],
+): DeletedSideView {
   const kept = otherSide(deleted);
   const choosing = taken === null || taken.by === "disk";
   return {
@@ -27,7 +31,7 @@ export function deletedSideView(deleted: Side, taken: Taken | null): DeletedSide
     keepIn: choosing ? kept : null,
     deleteIn: choosing ? deleted : null,
     middle: middle(deleted, taken),
-    resettable: taken !== null,
+    resettable: taken !== null || loaded !== "Stages",
   };
 }
 

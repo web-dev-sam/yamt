@@ -197,7 +197,7 @@ export function createFixtureSource(
       const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
-    async finishFile(path, text) {
+    async finishFile({ path, text }) {
       return updateKnown(records, path, () => {
         records.finished.add(path);
         log.info("fixture.finish", { path, text });

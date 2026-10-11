@@ -76,7 +76,7 @@ function run(command: StateCommand, current: Center): Center {
   return next;
 }
 
-test("a real fixture's chunks start at line starts; an empty base range is a point", async () => {
+test("a real fixture's chunks start at line starts; an empty middle range is a point", async () => {
   const data = await loadFixture("vite-modulepreload-polyfill.ts");
   const { state, field } = center(data);
   const doc = state.doc;

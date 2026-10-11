@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { DiskResult } from "../ipc";
-import { noticeText, type Notice } from "./noticeText";
+import { noticeCloseLabel, noticeText, type Notice } from "./noticeText";
 
 const PATH = "src/a.ts";
 
@@ -28,4 +28,8 @@ test.each(
   ),
 )("%j reads %j", (fields, text) => {
   expect(noticeText({ path: PATH, ...fields })).toBe(text);
+});
+
+test("the close button names the file its notice is about", () => {
+  expect(noticeCloseLabel(PATH)).toBe("Close the notice about src/a.ts");
 });

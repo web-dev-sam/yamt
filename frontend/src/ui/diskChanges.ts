@@ -4,7 +4,7 @@ import { log, type DiskChange } from "../ipc";
 import type { CloseGuard } from "./closeGuard";
 import type { Notice } from "./noticeText";
 import type { Taken } from "./sides";
-import { isShown, reload, showsChoice, type Shown } from "./views";
+import { isShown, reload, takesASide, type Shown } from "./views";
 
 export type DiskChangeTarget = Shown & {
   readonly notices: ShallowRef<readonly Notice[]>;
@@ -43,7 +43,7 @@ export async function applyDiskChanges(
   const taken = new Map(target.taken.value);
   for (const [path, result] of byPath) {
     taken.delete(path);
-    if (result.kind === "Staged" && showsChoice(target, path)) {
+    if (result.kind === "Staged" && takesASide(target, path)) {
       taken.set(path, { by: "disk" });
     }
   }

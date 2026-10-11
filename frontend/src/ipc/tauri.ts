@@ -30,7 +30,7 @@ export function createTauriSource(): ChunkSource {
       const result = toResult(await commands.loadFile(path));
       return result.ok ? { ok: true, value: toDomain(result.value) } : result;
     },
-    async finishFile(path, text, diskVersion) {
+    async finishFile({ path, text, diskVersion }) {
       return toResult(await commands.finishFile(path, text, diskVersion));
     },
     async resetFile(path, diskVersion) {

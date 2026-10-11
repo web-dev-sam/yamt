@@ -14,6 +14,7 @@ import {
   type SourceResult,
   type WriteReply,
 } from "../ipc";
+import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
 import { createAppStore, useAppStore, type AppStore } from "./store";
 
@@ -362,7 +363,7 @@ test("a finish with nothing left sends the text without asking, saves it, and op
   const sent: [string, string, DiskVersion][] = [];
   const listed = [entry("0.ts"), resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
   const { store, pending } = await openedStore({
-    finishFile: (path, text, diskVersion) => {
+    finishFile: ({ path, text, diskVersion }) => {
       sent.push([path, text, diskVersion]);
       return Promise.resolve(written(listed));
     },
@@ -431,7 +432,7 @@ function answeredLater(answers: Answer[]): Promise<SourceResult<WriteReply>> {
 async function openWhileActing(
   overrides: (answers: Answer[]) => Partial<ChunkSource>,
   act: (store: AppStore) => Promise<void>,
-): Promise<{ store: AppStore; loads: string[]; acting: Promise<void> }> {
+): Promise<{ store: AppStore; pending: PendingLoad[]; acting: Promise<void> }> {
   const answers: Answer[] = [];
   const { source, pending } = handSource([]);
   const store = createAppStore({ ...source, ...overrides(answers) });
@@ -447,19 +448,19 @@ async function openWhileActing(
   });
   pending[1]?.resolve(ok(await dataFor("b.ts")));
   await opening;
-  return { store, loads: pending.map((load) => load.path), acting };
+  return { store, pending, acting };
 }
 
 test("a file the user opens while a finish runs wins over the next file, though still loading", async () => {
   spyConsole();
 
-  const { store, loads, acting } = await openWhileActing(
+  const { store, pending, acting } = await openWhileActing(
     (answers) => ({ finishFile: () => answeredLater(answers) }),
     (shown) =>
       shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: VERSION_0 }),
   );
 
-  expect(loads).toEqual(["a.ts", "b.ts"]);
+  expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
   expect(store.active.value).toBe("b.ts");
   await acting;
   expect(store.active.value).toBe("b.ts");
@@ -468,13 +469,14 @@ test("a file the user opens while a finish runs wins over the next file, though 
 test("a file the user opens while a take runs wins over the next file, though still loading", async () => {
   spyConsole();
 
-  const { store, loads, acting } = await openWhileActing(
+  const { store, pending, acting } = await openWhileActing(
     (answers) => ({ takeSide: () => answeredLater(answers) }),
-    (shown) => shown.takeSide("a.ts", "local"),
+    (shown) => shown.takeSide("a.ts", "local", VERSION_0),
   );
 
-  expect(loads).toEqual(["a.ts", "b.ts"]);
+  expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
   expect(store.active.value).toBe("b.ts");
+  pending[2]?.resolve(ok(await dataFor("a.ts")));
   await acting;
   expect(store.active.value).toBe("b.ts");
   expect(store.taken.value).toEqual(new Map([["a.ts", { by: "side", side: "local" }]]));
@@ -484,7 +486,7 @@ test("a finish with work left asks; Back writes nothing, Save writes the text", 
   spyConsole();
   const sent: string[] = [];
   const { store } = await openedStore({
-    finishFile: (_path, text) => {
+    finishFile: ({ text }) => {
       sent.push(text);
       return Promise.resolve(written([resolvedEntry("a.ts")]));
     },
@@ -660,7 +662,7 @@ test("reset of A replaces only A in place with a new object and keeps B opened",
   const [shownA, shownB] = store.opened.value;
   const a = await dataFor("a.ts");
 
-  const resetting = store.reset("a.ts");
+  const resetting = store.reset("a.ts", VERSION_0);
   await vi.waitFor(() => {
     expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
   });
@@ -685,7 +687,7 @@ test("a failed reset keeps the current file and names the path", async () => {
   });
   const shown = store.opened.value;
 
-  await store.reset("a.ts");
+  await store.reset("a.ts", VERSION_0);
 
   expect(pending).toHaveLength(1);
   expect(store.opened.value).toBe(shown);
@@ -703,7 +705,7 @@ test("a failed reload after a reset keeps A's old view and reports it as a faile
   });
   const shown = store.opened.value;
 
-  const resetting = store.reset("a.ts");
+  const resetting = store.reset("a.ts", VERSION_0);
   await vi.waitFor(() => {
     expect(pending).toHaveLength(2);
   });
@@ -735,7 +737,7 @@ test("reset A, open B, open A, then the reset resolves: A shows its fresh view",
   const b = await dataFor("b.ts");
   const fresh = await dataFor("a.ts");
 
-  const resetting = store.reset("a.ts");
+  const resetting = store.reset("a.ts", VERSION_0);
   const openB = store.open("b.ts");
   pending[1]?.resolve(ok(b));
   await openB;
@@ -769,7 +771,7 @@ test("a later open wins over a reset that resolves last; the reset file is repla
   const b = await dataFor("b.ts");
   const fresh = await dataFor("a.ts");
 
-  const resetting = store.reset("a.ts");
+  const resetting = store.reset("a.ts", VERSION_0);
   const openB = store.open("b.ts");
   pending[1]?.resolve(ok(b));
   await openB;
@@ -798,7 +800,7 @@ test("a reset landing in the background keeps another file's problem; a problem 
     finishFile: () => Promise.resolve({ ok: false, failure: git }),
   });
 
-  const resetting = store.reset("a.ts");
+  const resetting = store.reset("a.ts", VERSION_0);
   const failed = store.open("gone.ts");
   pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
   await failed;
@@ -814,7 +816,7 @@ test("a reset landing in the background keeps another file's problem; a problem 
 
   await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
-  const again = store.reset("a.ts");
+  const again = store.reset("a.ts", VERSION_0);
   resets[1]?.(written([entry("a.ts")]));
   await vi.waitFor(() => {
     expect(pending).toHaveLength(4);
@@ -954,10 +956,10 @@ test("taking a side updates the list, marks only that file taken, and clears a p
       );
     },
   });
-  await store.takeSide(LOGO, "remote");
+  await store.takeSide(LOGO, "remote", LOGO_SIDES.diskVersion);
   expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: git });
 
-  await store.takeSide(LOGO, "remote");
+  await store.takeSide(LOGO, "remote", LOGO_SIDES.diskVersion);
 
   expect(takes).toEqual([`${LOGO} remote`, `${LOGO} remote`]);
   expect(store.files.value).toEqual([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]);
@@ -980,7 +982,7 @@ test("a take keeps a problem about another file", async () => {
   const gone = store.problem.value;
   expect(gone).toEqual({ action: "open", path: "gone.ts", cause: unknown });
 
-  await store.takeSide(LOGO, "remote");
+  await store.takeSide(LOGO, "remote", LOGO_SIDES.diskVersion);
 
   expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "remote" }]]));
   expect(store.problem.value).toBe(gone);
@@ -997,7 +999,7 @@ test("a failed take keeps the list and the choice and names the file", async () 
   await store.loadFiles();
   const files = store.files.value;
 
-  await store.takeSide(LOGO, "local");
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
 
   expect(store.files.value).toBe(files);
   expect(store.choices.value).toEqual([LOGO_SIDES]);
@@ -1042,7 +1044,7 @@ async function takenChoice(): Promise<{
   const opening = store.open(REMOVED);
   describes[1]?.(ok(REMOVED_SIDES));
   await opening;
-  await store.takeSide(LOGO, "local");
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
   return { store, calls, describes, removed: store.choices.value[1] };
 }
 
@@ -1051,7 +1053,7 @@ test("reset of a taken choice forgets only its side at once and describes the fi
   const { store, calls, describes, removed } = await takenChoice();
   const fresh: FileSides = { ...LOGO_SIDES, local: { kind: "Binary", bytes: 13 } };
 
-  const resetting = store.reset(LOGO);
+  const resetting = store.reset(LOGO, LOGO_SIDES.diskVersion);
   await vi.waitFor(() => {
     expect(describes).toHaveLength(3);
   });
@@ -1080,7 +1082,7 @@ test("a failed describe after a reset is a failed open; opening the file again d
   const { store, describes, removed } = await takenChoice();
   const unknown: SourceFailure = { kind: "UnknownPath", path: LOGO };
 
-  const resetting = store.reset(LOGO);
+  const resetting = store.reset(LOGO, LOGO_SIDES.diskVersion);
   await vi.waitFor(() => {
     expect(describes).toHaveLength(3);
   });
@@ -1107,7 +1109,7 @@ test("choices count toward everything resolved", async () => {
   await store.loadFiles();
   expect(store.allResolved.value).toBe(false);
 
-  await store.takeSide(LOGO, "remote");
+  await store.takeSide(LOGO, "remote", LOGO_SIDES.diskVersion);
 
   expect(store.allResolved.value).toBe(true);
 });
@@ -1120,7 +1122,7 @@ test("a take on the shown file opens the next unresolved file, wrapping to the t
   await store.loadFiles();
   await store.open(LOGO);
 
-  await store.takeSide(LOGO, "local");
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
 
   expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
   expect(store.active.value).toBe("a.ts");
@@ -1129,25 +1131,27 @@ test("a take on the shown file opens the next unresolved file, wrapping to the t
 
 const REMOVED_TEXT = "docs/removed-text.md";
 
-test("a deleted-side text file keeps the side taken next to the choices' until its reset", async () => {
+test("a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each", async () => {
   spyConsole();
   const { source, calls } = choiceSource({}, [entry(REMOVED_TEXT)]);
   const store = createAppStore(source);
   await store.loadFiles();
   const [shown] = store.opened.value;
 
-  await store.takeSide(REMOVED_TEXT, "remote");
+  await store.takeSide(REMOVED_TEXT, "remote", VERSION_0);
 
   expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, { by: "side", side: "remote" }]]));
   expect(store.choices.value).toEqual([]);
   expect(store.opened.value).toEqual([shown]);
+  expect(store.opened.value[0]).not.toBe(shown);
   expect(store.active.value).toBe(REMOVED_TEXT);
 
-  await store.reset(REMOVED_TEXT);
+  await store.reset(REMOVED_TEXT, VERSION_0);
 
   expect(calls).toEqual([
     `loadFile ${REMOVED_TEXT}`,
     `takeSide ${REMOVED_TEXT} remote`,
+    `loadFile ${REMOVED_TEXT}`,
     `resetFile ${REMOVED_TEXT}`,
     `loadFile ${REMOVED_TEXT}`,
   ]);
@@ -1270,7 +1274,7 @@ test.each([true, false])(
     const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
     const store = createAppStore(source);
     await store.loadFiles();
-    await store.takeSide("a.ts", "local");
+    await store.takeSide("a.ts", "local", VERSION_0);
     const [shown] = store.opened.value;
     const view = rebuildingView(store, "a.ts");
     if (edited) {
@@ -1281,7 +1285,7 @@ test.each([true, false])(
 
     await store.refreshFiles();
 
-    expect(calls.filter((call) => call === "loadFile a.ts")).toHaveLength(2);
+    expect(calls.filter((call) => call === "loadFile a.ts")).toHaveLength(3);
     expect(store.opened.value).toHaveLength(1);
     expect(store.opened.value[0]).not.toBe(shown);
     expect(store.notices.value).toEqual([
@@ -1378,7 +1382,7 @@ test("a choice or a deleted-side file staged from the disk is taken by the disk 
   const store = createAppStore(source);
   await store.loadFiles();
   await store.open(LOGO);
-  await store.takeSide(LOGO, "local");
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
   listed = listing(files, [
     { path: LOGO, result: STAGED },
     { path: REMOVED_TEXT, result: STAGED },
@@ -1393,6 +1397,34 @@ test("a choice or a deleted-side file staged from the disk is taken by the disk 
     ]),
   );
   expect(calls.slice(-2).toSorted()).toEqual([`describeFile ${LOGO}`, `loadFile ${REMOVED_TEXT}`]);
+});
+
+test("a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled", async () => {
+  spyConsole();
+  const { source, calls } = choiceSource({
+    listFiles: () =>
+      Promise.resolve(
+        listing(
+          [entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }],
+          [{ path: LOGO, result: STAGED }],
+        ),
+      ),
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+
+  await store.open(LOGO);
+
+  const [sides] = store.choices.value;
+  const taken = store.taken.value.get(LOGO) ?? null;
+  expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`]);
+  expect(taken).toEqual({ by: "disk" });
+  expect(sides === undefined ? null : resultLine(sides, taken)).toBe(
+    "Changed on disk — staged as it is.",
+  );
+  expect(store.notices.value).toEqual([
+    { path: LOGO, result: STAGED, editsDropped: false, when: "start" },
+  ]);
 });
 
 test("a change git could not stage is a warning notice, not a problem", async () => {
@@ -1463,7 +1495,9 @@ test.each(["take", "reset"] as const)(
     const store = createAppStore(source);
     await store.loadFiles();
 
-    await (action === "take" ? store.takeSide("a.ts", "remote") : store.reset("a.ts"));
+    await (action === "take"
+      ? store.takeSide("a.ts", "remote", VERSION_0)
+      : store.reset("a.ts", VERSION_0));
 
     expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
     expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
@@ -1481,8 +1515,7 @@ test("each write sends the disk version of the view it acts on", async () => {
   const files = [entry("a.ts"), LOGO_ENTRY];
   const { source } = choiceSource(
     {
-      loadFile: async (path) => ok({ ...(await dataFor(path)), diskVersion: seven }),
-      finishFile: (path, _text, diskVersion) => {
+      finishFile: ({ path, diskVersion }) => {
         sent.push(`finish ${path} ${diskVersion}`);
         return Promise.resolve(written(files));
       },
@@ -1502,16 +1535,10 @@ test("each write sends the disk version of the view it acts on", async () => {
   await store.open(LOGO);
 
   await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: seven });
-  await store.takeSide("a.ts", "local");
-  await store.reset(LOGO);
-  await store.takeSide("nope.ts", "local");
+  await store.takeSide("a.ts", "local", seven);
+  await store.reset(LOGO, LOGO_SIDES.diskVersion);
 
   expect(sent).toEqual(["finish a.ts 7", "take a.ts local 7", `reset ${LOGO} 4`]);
-  expect(store.problem.value).toEqual({
-    action: "take",
-    path: "nope.ts",
-    cause: { kind: "Unexpected", message: "nope.ts is not shown" },
-  });
 });
 
 test("a take on a deleted-side file shown from the disk shows yamt's view again", async () => {
@@ -1530,7 +1557,7 @@ test("a take on a deleted-side file shown from the disk shows yamt's view again"
   await store.loadFiles();
   middle = { kind: "Stages", text: "kept\n" };
 
-  await store.takeSide(REMOVED_TEXT, "local");
+  await store.takeSide(REMOVED_TEXT, "local", VERSION_0);
 
   expect(calls).toEqual([
     `loadFile ${REMOVED_TEXT}`,

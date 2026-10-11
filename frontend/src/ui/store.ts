@@ -16,17 +16,14 @@ import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { applyDiskChanges } from "./diskChanges";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+import { attempt, logProblem, unexpected, type Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import type { Taken } from "./sides";
 import type { MergeSummary } from "./useMergeController";
-import { fetchView, isShown, reload, shownVersion } from "./views";
+import { fetchView, isShown, reload } from "./views";
 
-type FinishRequest = {
-  readonly path: string;
-  readonly text: string;
+type FinishRequest = Parameters<ChunkSource["finishFile"]>[0] & {
   readonly summary: MergeSummary;
-  readonly diskVersion: DiskVersion;
 };
 
 type Refs = {
@@ -53,8 +50,8 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
   loadRemoteName(): Promise<void>;
   open(path: string): Promise<void>;
   finish(request: FinishRequest): Promise<void>;
-  takeSide(path: string, side: Side): Promise<void>;
-  reset(path: string): Promise<void>;
+  takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
+  reset(path: string, diskVersion: DiskVersion): Promise<void>;
   dismissProblem(): void;
   dismissNotice(path: string): void;
   answer(yes: boolean): void;
@@ -102,8 +99,8 @@ function actions(state: State): Actions {
     loadRemoteName: () => loadRemoteName(state),
     open: (path) => open(state, path),
     finish: (request) => finish(state, request),
-    takeSide: (path, side) => takeSide(state, path, side),
-    reset: (path) => reset(state, path),
+    takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
+    reset: (path, diskVersion) => reset(state, path, diskVersion),
     dismissProblem: () => {
       state.problem.value = null;
     },
@@ -211,10 +208,6 @@ async function changedOnDisk(state: State, path: string, change: DiskChange): Pr
   await applyDiskChanges(state, [change], "running");
 }
 
-function notShown(path: string): Outcome<never> {
-  return { ok: false, cause: { kind: "Unexpected", message: `${path} is not shown` } };
-}
-
 async function finish(
   state: State,
   { path, text, summary, diskVersion }: FinishRequest,
@@ -224,7 +217,7 @@ async function finish(
   if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
     return;
   }
-  const outcome = await attempt(() => state.source.finishFile(path, text, diskVersion));
+  const outcome = await attempt(() => state.source.finishFile({ path, text, diskVersion }));
   if (!outcome.ok) {
     report(state, { action: "finish", path, cause: outcome.cause });
     return;
@@ -240,13 +233,14 @@ async function finish(
   await moveOn(state, path, opensBefore);
 }
 
-async function takeSide(state: State, path: string, side: Side): Promise<void> {
+async function takeSide(
+  state: State,
+  path: string,
+  side: Side,
+  diskVersion: DiskVersion,
+): Promise<void> {
   const opensBefore = state.latestOpen;
-  const diskVersion = shownVersion(state, path);
-  const outcome =
-    diskVersion === null
-      ? notShown(path)
-      : await attempt(() => state.source.takeSide(path, side, diskVersion));
+  const outcome = await attempt(() => state.source.takeSide(path, side, diskVersion));
   if (!outcome.ok) {
     report(state, { action: "take", path, cause: outcome.cause });
     return;
@@ -259,21 +253,14 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
   }
   state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
   clearProblemAbout(state, path);
-  const fromDisk = state.opened.value.some(
-    (file) => file.path === path && file.middle.kind !== "Stages",
-  );
-  if (fromDisk) {
+  if (state.opened.value.some((file) => file.path === path)) {
     await reload(state, path);
   }
   await moveOn(state, path, opensBefore);
 }
 
-async function reset(state: State, path: string): Promise<void> {
-  const diskVersion = shownVersion(state, path);
-  const outcome =
-    diskVersion === null
-      ? notShown(path)
-      : await attempt(() => state.source.resetFile(path, diskVersion));
+async function reset(state: State, path: string, diskVersion: DiskVersion): Promise<void> {
+  const outcome = await attempt(() => state.source.resetFile(path, diskVersion));
   if (!outcome.ok) {
     report(state, { action: "reset", path, cause: outcome.cause });
     return;

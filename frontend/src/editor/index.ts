@@ -23,13 +23,8 @@ import { findSpace, showFindSpace } from "./internal/find";
 import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { languageOf } from "./internal/language";
 import { applyOnModClick } from "./internal/modClick";
-import {
-  centerPane,
-  createPane,
-  languageCompartment,
-  paneText,
-  type CenterPane,
-} from "./internal/pane";
+import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
+import type { CenterPane } from "./internal/pane";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
@@ -48,8 +43,13 @@ export type MergeHosts = {
 
 export type MergeOptions = { readonly readOnly: boolean };
 
+type ViewSources = {
+  data: FileMergeData;
+  center: CenterPane;
+  hosts: MergeHosts;
+  language: Language | null;
+};
 type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
-type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
 
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
@@ -66,11 +66,11 @@ export class MergeController {
 
   constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions) {
     const description = languageOf(data.path);
-    const center = centerPane(data.middle, options?.readOnly ?? false);
     this.#field = chunkField(data.chunks);
-    this.#readOnly = center.kind === "readOnlyCenter";
+    this.#readOnly = options?.readOnly ?? false;
+    const center = centerPane(data.middle, this.#readOnly);
     const language = description?.support?.language ?? null;
-    this.#views = this.#createViews({ data, hosts, language }, center);
+    this.#views = this.#createViews({ data, center, hosts, language });
     this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
     this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
     this.#drag = new IconDrag(hosts.strips, {
@@ -121,7 +121,7 @@ export class MergeController {
     }
   });
 
-  #createViews({ data, hosts, language }: ViewSources, centerSource: CenterPane): PaneViews {
+  #createViews({ data, center: centerSource, hosts, language }: ViewSources): PaneViews {
     const field = this.#field;
     const statusSync = EditorView.updateListener.of((update) => {
       this.#statusesChanged(update);

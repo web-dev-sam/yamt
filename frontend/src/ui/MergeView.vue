@@ -31,7 +31,11 @@ const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
 const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
-  useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
+  useMergeController(
+    () => props.data,
+    { left, center, right, strips: [leftStrip, rightStrip] },
+    () => !isEditable(props.data),
+  );
 const { track, untrack, finish, reset, takeSide, taken, remoteName } = useAppStore();
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {
@@ -39,8 +43,10 @@ if (props.data.deleted === null) {
 }
 
 const deletedView = computed(() => {
-  const { deleted, path } = props.data;
-  return deleted === null ? null : deletedSideView(deleted, taken.value.get(path) ?? null);
+  const { deleted, path, middle } = props.data;
+  return deleted === null
+    ? null
+    : deletedSideView(deleted, taken.value.get(path) ?? null, middle.kind);
 });
 const columns = computed(() =>
   SIDES.map((side): Column => ({
@@ -59,7 +65,7 @@ const centerLine = computed(() => {
   }
   return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
 });
-const editable = computed(() => props.data.deleted === null && centerLine.value === null);
+const editable = computed(() => isEditable(props.data));
 const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
 const keptSideToApply = computed(() =>
   deletedView.value === null ? null : keptToApply(deletedView.value, summary.value),
@@ -78,6 +84,10 @@ watch(
 onUnmounted(() => {
   untrack(props.data.path, work);
 });
+
+function isEditable({ deleted, middle }: FileMergeData): boolean {
+  return deleted === null && middle.kind !== "DiskNotText";
+}
 
 function markResolved(): void {
   const text = resultText();
@@ -121,7 +131,7 @@ function markResolved(): void {
           v-if="column.keep"
           type="button"
           class="shrink-0 rounded border border-control-border px-3.5 py-0.5 hover:bg-hover"
-          @click="takeSide(data.path, column.side)"
+          @click="takeSide(data.path, column.side, data.diskVersion)"
         >
           {{ KEEP }}
         </button>
@@ -135,7 +145,7 @@ function markResolved(): void {
           type="button"
           :disabled="!resettable"
           class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-          @click="reset(data.path)"
+          @click="reset(data.path, data.diskVersion)"
         >
           Reset
         </button>
@@ -176,7 +186,7 @@ function markResolved(): void {
             v-if="column.delete"
             type="button"
             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
-            @click="takeSide(data.path, column.side)"
+            @click="takeSide(data.path, column.side, data.diskVersion)"
           >
             {{ DELETE }}
           </button>

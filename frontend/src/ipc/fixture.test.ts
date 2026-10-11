@@ -470,7 +470,9 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
 
   expect(await source.loadFile("nope.ts")).toEqual(failure);
-  expect(await source.finishFile("nope.ts", "x", version)).toEqual(failure);
+  expect(await source.finishFile({ path: "nope.ts", text: "x", diskVersion: version })).toEqual(
+    failure,
+  );
   expect(await source.resetFile("nope.ts", version)).toEqual(failure);
   expect(await source.describeFile("nope.ts")).toEqual(failure);
   expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
@@ -487,7 +489,11 @@ test("finish marks the file resolved and logs its text once; reset returns it un
   const source = createFixtureSource(log, files);
   const version = await versionOf("a.ts", files);
 
-  const finished = await source.finishFile("a.ts", "merged\n", version);
+  const finished = await source.finishFile({
+    path: "a.ts",
+    text: "merged\n",
+    diskVersion: version,
+  });
 
   expect(finished).toEqual({
     ok: true,
