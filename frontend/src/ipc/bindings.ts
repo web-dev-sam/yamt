@@ -4,12 +4,13 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	listFiles: () => __TAURI_INVOKE<FileEntry[]>("list_files"),
+	listFiles: () => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("list_files")),
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
 	finishFile: (path: string, text: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("finish_file", { path, text })),
 	resetFile: (path: string) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("reset_file", { path })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("take_side", { path, side })),
+	remoteName: () => __TAURI_INVOKE<{ kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | null>("remote_name"),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 };
 
@@ -58,6 +59,7 @@ export type FileMergeData = {
 	base: string,
 	local: string,
 	remote: string,
+	deleted: Side | null,
 	eol: Eol,
 	chunks: Chunk[],
 	word_changes: WordChanges[],
@@ -121,6 +123,9 @@ export type LogValue = string | number | null | boolean;
 
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
+
+/**  What is merged in: the one branch at `MERGE_HEAD`, else the commit being merged or replayed. */
+export type RemoteName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
 
 export type Side = "local" | "remote";
 

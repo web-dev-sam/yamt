@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use specta::Type;
-use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
+use yamt_gitio::{BlobReader, Repo, StageEntry};
 use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
 
 use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
+use crate::remote_name::{RemoteName, remote_name};
 use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
+use crate::stages::{CapturedStages, group_by_path};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
@@ -30,6 +32,7 @@ pub struct FileMergeData {
     pub base: String,
     pub local: String,
     pub remote: String,
+    pub deleted: Option<Side>,
     pub eol: Eol,
     pub chunks: Vec<Chunk>,
     pub word_changes: Vec<WordChanges>,
@@ -44,17 +47,19 @@ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMerg
         base: base.to_owned(),
         local: local.to_owned(),
         remote: remote.to_owned(),
+        deleted: None,
         eol: detect_eol(eol_source),
         word_changes: word_changes(base, local, remote, &chunks),
         chunks,
     }
 }
 
-const LOG_TARGET: &str = "session";
+pub(crate) const LOG_TARGET: &str = "session";
 
 pub struct MergeSession {
     repo: Repo,
     files: Vec<FileState>,
+    remote_name: Option<RemoteName>,
 }
 
 struct FileState {
@@ -62,13 +67,6 @@ struct FileState {
     stages: CapturedStages,
     status: FileStatus,
     content: Content,
-}
-
-#[derive(Default)]
-struct CapturedStages {
-    base: Option<StageEntry>,
-    local: Option<StageEntry>,
-    remote: Option<StageEntry>,
 }
 
 enum Content {
@@ -80,6 +78,7 @@ struct Texts {
     base: String,
     local: String,
     remote: String,
+    deleted: Option<Side>,
 }
 
 enum IndexBefore {
@@ -101,12 +100,35 @@ impl MergeSession {
                 content,
             });
         }
-        Ok(MergeSession { repo, files })
+        let remote_name = remote_name(&repo);
+        Ok(MergeSession {
+            repo,
+            files,
+            remote_name,
+        })
     }
 
     #[must_use]
     pub fn root(&self) -> &Path {
         self.repo.root()
+    }
+
+    #[must_use]
+    pub fn remote_name(&self) -> Option<RemoteName> {
+        self.remote_name.clone()
+    }
+
+    pub fn refresh_statuses(&mut self) -> Result<()> {
+        let unmerged = self.repo.unmerged()?;
+        for file in &mut self.files {
+            let is_unmerged = unmerged.iter().any(|entry| entry.path == file.path);
+            file.status = if is_unmerged {
+                FileStatus::Unresolved
+            } else {
+                FileStatus::Resolved
+            };
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -125,12 +147,16 @@ impl MergeSession {
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
         let file = find_file(&mut self.files, path)?;
         let texts = file.require_text()?;
-        Ok(merge_data(
+        let data = merge_data(
             &file.display_path(),
             &texts.base,
             &texts.local,
             &texts.remote,
-        ))
+        );
+        Ok(FileMergeData {
+            deleted: texts.deleted,
+            ..data
+        })
     }
 
     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
@@ -286,62 +312,6 @@ impl FileState {
     }
 }
 
-impl CapturedStages {
-    fn side(&self, side: Side) -> Option<&StageEntry> {
-        match side {
-            Side::Local => self.local.as_ref(),
-            Side::Remote => self.remote.as_ref(),
-        }
-    }
-
-    fn insert(&mut self, entry: StageEntry) {
-        match entry.stage {
-            Stage::Base => self.base = Some(entry),
-            Stage::Local => self.local = Some(entry),
-            Stage::Remote => self.remote = Some(entry),
-        }
-    }
-
-    fn can_rebuild_markers(&self) -> bool {
-        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
-        let has_both_sides = self.local.is_some() && self.remote.is_some();
-        // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
-        has_both_sides && !self.has_mode(SUBMODULE_MODE)
-    }
-
-    fn has_mode(&self, mode: u32) -> bool {
-        [&self.base, &self.local, &self.remote]
-            .into_iter()
-            .flatten()
-            .any(|entry| entry.mode == mode)
-    }
-
-    fn entries(&self) -> Vec<StageEntry> {
-        [&self.base, &self.local, &self.remote]
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect()
-    }
-}
-
-fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
-    let mut groups: Vec<(PathBuf, CapturedStages)> = Vec::new();
-    for entry in entries {
-        if let Some((path, stages)) = groups.last_mut()
-            && *path == entry.path
-        {
-            stages.insert(entry);
-        } else {
-            let mut stages = CapturedStages::default();
-            let path = entry.path.clone();
-            stages.insert(entry);
-            groups.push((path, stages));
-        }
-    }
-    groups
-}
-
 fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) -> Result<Content> {
     if path.to_str().is_none() {
         return Ok(Content::Unsupported(UnsupportedReason::NonUtf8));
@@ -352,23 +322,42 @@ fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) ->
     if stages.has_mode(SYMLINK_MODE) {
         return Ok(Content::Unsupported(UnsupportedReason::Symlink));
     }
-    let Some(local) = &stages.local else {
-        return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted));
+    let deleted = match (&stages.local, &stages.remote) {
+        (Some(_), Some(_)) => None,
+        (None, Some(_)) => Some(Side::Local),
+        (Some(_), None) => Some(Side::Remote),
+        (None, None) => return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted)),
     };
-    let Some(remote) = &stages.remote else {
-        return Ok(Content::Unsupported(UnsupportedReason::RemoteDeleted));
-    };
-    let base = match &stages.base {
-        Some(entry) => blobs.read(&entry.oid)?,
-        None => Vec::new(),
-    };
-    let sides = [base, blobs.read(&local.oid)?, blobs.read(&remote.oid)?];
-    match decode_sides(sides) {
+    let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
+    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
+    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
+    match decode_sides([base, local, remote]) {
         Ok([base, local, remote]) => Ok(Content::Text(Texts {
             base,
             local,
             remote,
+            deleted,
         })),
-        Err(reason) => Ok(Content::Unsupported(reason)),
+        Err(reason) => Ok(Content::Unsupported(
+            deleted_reason(deleted).unwrap_or(reason),
+        )),
     }
+}
+
+fn stage_bytes(
+    blobs: &mut BlobReader,
+    entry: Option<&StageEntry>,
+    missing: &[u8],
+) -> Result<Vec<u8>> {
+    match entry {
+        Some(entry) => Ok(blobs.read(&entry.oid)?),
+        None => Ok(missing.to_vec()),
+    }
+}
+
+fn deleted_reason(deleted: Option<Side>) -> Option<UnsupportedReason> {
+    deleted.map(|side| match side {
+        Side::Local => UnsupportedReason::LocalDeleted,
+        Side::Remote => UnsupportedReason::RemoteDeleted,
+    })
 }

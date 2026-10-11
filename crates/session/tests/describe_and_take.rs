@@ -200,8 +200,8 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     let reasons = [
         (TEXT, None),
-        (LOCAL_DELETED, Some(UnsupportedReason::LocalDeleted)),
-        (REMOTE_DELETED, Some(UnsupportedReason::RemoteDeleted)),
+        (LOCAL_DELETED, None),
+        (REMOTE_DELETED, None),
         (BINARY, Some(UnsupportedReason::Binary)),
         (LATIN1, Some(UnsupportedReason::NonUtf8)),
         (SYMLINK, Some(UnsupportedReason::Symlink)),

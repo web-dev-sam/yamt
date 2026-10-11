@@ -114,8 +114,8 @@ fn open_lists_each_conflicted_file_once_in_git_order_with_its_unsupported_reason
     let expected = [
         (MODIFY_TS, None),
         (ADD_ADD, None),
-        (LOCAL_DELETED, Some(UnsupportedReason::LocalDeleted)),
-        (REMOTE_DELETED, Some(UnsupportedReason::RemoteDeleted)),
+        (LOCAL_DELETED, None),
+        (REMOTE_DELETED, None),
         (BINARY, Some(UnsupportedReason::Binary)),
         (LATIN1, Some(UnsupportedReason::NonUtf8)),
         (CRLF, None),
@@ -146,6 +146,7 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
         [base, local, remote]
     );
     assert_eq!(data.eol, Eol::Lf);
+    assert_eq!(data.deleted, None);
     assert_eq!(
         data.chunks,
         compute_chunks(base, local, remote, &Options::default())
@@ -172,13 +173,11 @@ fn load_add_add_has_empty_base_and_one_conflict_chunk() {
 }
 
 #[test]
-fn load_refuses_deleted_binary_and_non_utf8_files_with_their_reason() {
+fn load_refuses_binary_and_non_utf8_files_with_their_reason() {
     let dir = every_kind_of_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
 
     let cases = [
-        (LOCAL_DELETED, UnsupportedReason::LocalDeleted),
-        (REMOTE_DELETED, UnsupportedReason::RemoteDeleted),
         (BINARY, UnsupportedReason::Binary),
         (LATIN1, UnsupportedReason::NonUtf8),
     ];

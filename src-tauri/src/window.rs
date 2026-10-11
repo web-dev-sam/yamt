@@ -42,7 +42,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
-    Ok(ending_on_close(&lock(&handle.state::<SessionState>())))
+    Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
 }
 
 fn window_title(root: &Path) -> String {

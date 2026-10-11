@@ -33,12 +33,13 @@ from them and committed.
 ## Commands (v0)
 
 ```
-list_files()                      -> Vec<FileEntry>
-load_file(path)                   -> FileMergeData
+list_files()                      -> Result<Vec<FileEntry>>   re-reads `git ls-files -u`: marks are git's view, plan §2 #49
+load_file(path)                   -> FileMergeData   `deleted: Side | null` (deleted-on-one-side text file; that side's text = base), #47
 finish_file(path, text: String)   -> Vec<FileEntry>
 reset_file(path)                  -> Vec<FileEntry>
 describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit)
 take_side(path, side: Side)       -> Vec<FileEntry>   resolve with one side (deleted side = git rm), plan §2 #36
+remote_name()                     -> Option<RemoteName>   Branch{name} | Commit{short_id, subject, message}, read once at open, #50
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 ```
 

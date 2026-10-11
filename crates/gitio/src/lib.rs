@@ -8,7 +8,7 @@ mod run;
 
 pub use blob::BlobReader;
 pub use entry::{Oid, Stage, StageEntry};
-pub use repo::Repo;
+pub use repo::{CommitSummary, Repo};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

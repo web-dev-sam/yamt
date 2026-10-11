@@ -1,7 +1,9 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
-use yamt_session::{FileEntry, FileMergeData, FileSides, MergeSession, Side, UnsupportedReason};
+use yamt_session::{
+    FileEntry, FileMergeData, FileSides, MergeSession, RemoteName, Side, UnsupportedReason,
+};
 
 use crate::frontend_log::LogEntry;
 
@@ -52,6 +54,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         reset_file,
         describe_file,
         take_side,
+        remote_name,
         log,
     ])
 }
@@ -72,8 +75,17 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn list_files(state: State<'_, SessionState>) -> Vec<FileEntry> {
-    lock(&state).files()
+fn list_files(state: State<'_, SessionState>) -> Result<Vec<FileEntry>, IpcError> {
+    let mut session = lock(&state);
+    session.refresh_statuses()?;
+    Ok(session.files())
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn remote_name(state: State<'_, SessionState>) -> Option<RemoteName> {
+    lock(&state).remote_name()
 }
 
 #[tauri::command]
@@ -211,7 +223,7 @@ mod tests {
         }
 
         fn exit_on_close(&self) -> Exit {
-            ending_on_close(&lock(&self.app.state::<SessionState>())).exit
+            ending_on_close(&mut lock(&self.app.state::<SessionState>())).exit
         }
 
         fn unmerged(&self) -> String {
@@ -230,13 +242,25 @@ mod tests {
     }
 
     #[test]
-    fn list_files_returns_every_conflicted_file() {
+    fn list_files_returns_every_conflicted_file_as_git_sees_it() {
         let window = open_window();
         let unresolved = "Unresolved";
         assert_eq!(
             window.invoke("list_files", json!({})),
             Ok(entries([unresolved, unresolved, unresolved]))
         );
+        git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
+        assert_eq!(
+            window.invoke("list_files", json!({})),
+            Ok(entries([unresolved, "Resolved", unresolved]))
+        );
+    }
+
+    #[test]
+    fn remote_name_names_the_merged_branch() {
+        let window = open_window();
+        let branch = json!({ "kind": "Branch", "name": "remote" });
+        assert_eq!(window.invoke("remote_name", json!({})), Ok(branch));
     }
 
     #[test]

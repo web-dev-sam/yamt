@@ -303,11 +303,14 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 ### 3.5 `src-tauri`
 
 - One `tauri::State<Mutex<MergeSession>>`.
-- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Vec<FileEntry>`,
-  `load_file(path) -> FileMergeData`, `finish_file(path, text) -> Vec<FileEntry>`,
+- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<Vec<FileEntry>>`
+  (re-reads git's unmerged entries, so the marks are git's view, plan §2 #49),
+  `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a deleted-on-one-side text
+  file, whose text is base, #47), `finish_file(path, text) -> Vec<FileEntry>`,
   `reset_file(path) -> Vec<FileEntry>`, `describe_file(path) -> FileSides`,
-  `take_side(path, side) -> Vec<FileEntry>` (plan §2 #36), `log(entry)`. No `quit_if_done`: the app
-  stays open after the last file (#37).
+  `take_side(path, side) -> Vec<FileEntry>` (plan §2 #36), `remote_name() -> Option<RemoteName>`
+  (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`: the app
+  stays open after the last file (#37); the exit status at close uses git's view (#49).
 - Errors: one `#[serde(tag = "kind")] enum IpcError` (`Git`, `UnknownPath`, `Unsupported`,
   `WriteFailed`) mirrored into TS; no stringly errors.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;

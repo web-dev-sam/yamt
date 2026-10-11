@@ -112,6 +112,16 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
 
 /// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
 pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
+    let dir = diverged_repo(files)?;
+    let merge = git(dir.path(), &["merge", "--quiet", "remote"])?;
+    if merge.status.success() {
+        return Err(Error::MergeDidNotConflict);
+    }
+    Ok(dir)
+}
+
+/// A repo on branch `local` with commits `base` (branch `main`), `local` and `remote` (branch `remote`), not merged.
+pub fn diverged_repo(files: &[ConflictFile]) -> Result<TempDir> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     git_ok(root, &["init", "--quiet"])?;
@@ -122,10 +132,6 @@ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
     git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"])?;
     commit_side(root, files, |file| file.remote, "remote")?;
     git_ok(root, &["checkout", "--quiet", "local"])?;
-    let merge = git(root, &["merge", "--quiet", "remote"])?;
-    if merge.status.success() {
-        return Err(Error::MergeDidNotConflict);
-    }
     Ok(dir)
 }
 

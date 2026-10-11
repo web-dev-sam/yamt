@@ -2,10 +2,13 @@
 #![forbid(unsafe_code)]
 
 mod decode;
+mod remote_name;
 mod session;
 mod sides;
+mod stages;
 
 pub use decode::{Eol, UnsupportedReason};
+pub use remote_name::RemoteName;
 pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession, merge_data};
 pub use sides::{FileSides, Side, SideContent};
 

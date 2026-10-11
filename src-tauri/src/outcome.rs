@@ -48,7 +48,10 @@ pub(crate) fn startup(repo: &Path) -> Startup {
     }
 }
 
-pub(crate) fn ending_on_close(session: &MergeSession) -> Ending {
+pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
+    if let Err(error) = session.refresh_statuses() {
+        tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+    }
     let unresolved = session.remaining();
     if unresolved == 0 {
         return Ending {
@@ -70,6 +73,7 @@ mod tests {
     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 
     use super::*;
+    use crate::frontend_log::tests::logged;
 
     fn text_conflict(path: &str) -> ConflictFile<'_> {
         ConflictFile {
@@ -137,7 +141,7 @@ mod tests {
         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
         let mut session = MergeSession::open(repo.path()).unwrap();
         assert_eq!(
-            ending_on_close(&session),
+            ending_on_close(&mut session),
             Ending {
                 exit: Exit::Unresolved,
                 message: Some("2 of 2 files still unresolved".to_owned()),
@@ -145,17 +149,54 @@ mod tests {
         );
         session.finish("a.ts", "done\n").unwrap();
         assert_eq!(
-            ending_on_close(&session).message.as_deref(),
+            ending_on_close(&mut session).message.as_deref(),
             Some("1 of 2 files still unresolved")
         );
         session.finish("b.ts", "done\n").unwrap();
         assert_eq!(
-            ending_on_close(&session),
+            ending_on_close(&mut session),
             Ending {
                 exit: Exit::Success,
                 message: None,
             }
         );
         assert_eq!((Exit::Success as u8, Exit::Unresolved as u8), (0, 1));
+    }
+
+    #[test]
+    fn closing_counts_the_files_git_still_has_unmerged() {
+        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+        let mut session = MergeSession::open(repo.path()).unwrap();
+        git_ok(repo.path(), &["add", "a.ts"]).unwrap();
+        assert_eq!(
+            ending_on_close(&mut session),
+            Ending {
+                exit: Exit::Unresolved,
+                message: Some("1 of 2 files still unresolved".to_owned()),
+            }
+        );
+        git_ok(repo.path(), &["add", "b.ts"]).unwrap();
+        assert_eq!(ending_on_close(&mut session).exit, Exit::Success);
+        git_ok(repo.path(), &["checkout", "-m", "b.ts"]).unwrap();
+        assert_eq!(ending_on_close(&mut session).exit, Exit::Unresolved);
+    }
+
+    #[test]
+    fn closing_with_a_broken_index_uses_the_session_statuses_and_warns() {
+        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+        let mut session = MergeSession::open(repo.path()).unwrap();
+        session.finish("a.ts", "done\n").unwrap();
+        std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
+
+        let (ending, logged) = logged(|| ending_on_close(&mut session));
+
+        assert_eq!(
+            ending.message.as_deref(),
+            Some("1 of 2 files still unresolved")
+        );
+        assert!(
+            logged.contains("WARN") && logged.contains("git could not list the unmerged files"),
+            "{logged}"
+        );
     }
 }
