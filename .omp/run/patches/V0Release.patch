@@ -1,0 +1,614 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+new file mode 100644
+index 0000000..f596765
+--- /dev/null
++++ b/.github/workflows/release.yml
+@@ -0,0 +1,74 @@
++name: release
++
++on:
++  push:
++    tags:
++      - "v*"
++
++permissions:
++  contents: write
++
++jobs:
++  draft-release:
++    runs-on: ubuntu-22.04
++    outputs:
++      id: ${{ steps.draft.outputs.id }}
++    steps:
++      - id: draft
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
++            -f tag_name="$GITHUB_REF_NAME" -f name="$GITHUB_REF_NAME" -F draft=true --jq .id)
++          echo "id=$id" >> "$GITHUB_OUTPUT"
++
++  build:
++    needs: draft-release
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          - runner: ubuntu-22.04
++            args: ""
++          - runner: macos-14
++            args: --target universal-apple-darwin
++    runs-on: ${{ matrix.runner }}
++    steps:
++      - uses: actions/checkout@v7.0.1
++
++      - name: Linux system packages
++        if: runner.os == 'Linux'
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
++
++      - name: Rust toolchain from rust-toolchain.toml
++        run: |
++          rustup toolchain install
++          rustup show active-toolchain
++
++      - name: macOS targets for the universal build
++        if: runner.os == 'macOS'
++        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
++
++      - name: Tauri CLI
++        run: cargo install tauri-cli --version 2.12.1 --locked
++
++      - uses: actions/setup-node@v7.1.0
++        with:
++          node-version: 24
++
++      - uses: pnpm/action-setup@v6.1.0
++        with:
++          version: 12.0.0
++
++      - name: Frontend packages
++        run: pnpm -C frontend install --frozen-lockfile
++
++      - uses: tauri-apps/tauri-action@v1.0.0
++        env:
++          GITHUB_TOKEN: ${{ github.token }}
++        with:
++          releaseId: ${{ needs.draft-release.outputs.id }}
++          tauriScript: cargo tauri
++          args: ${{ matrix.args }}
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000..be96ca7
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,30 @@
++# Changelog
++
++All notable changes to yamt are documented in this file.
++
++The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
++adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
++
++## [0.1.0] - unreleased
++
++### Added
++
++- `yamt` (or `yamt --repo <path>`) opens every conflicted file of a stopped `git merge`, `rebase` or
++  `cherry-pick` in one window; with nothing to merge it says so and exits without a window.
++- Three panes per file: your side on the left, theirs on the right, the result in the middle,
++  starting from the common base; bands connect each change to its place in the result.
++- Per change: an arrow applies it, a × ignores it; changed words are marked inside changed lines.
++- Toolbar: apply all non-conflicting changes from the left or the right, undo, redo, and a count of
++  what is left in the file.
++- The result pane is an editor with syntax colours, Tab / Shift+Tab indent and outdent, undo and redo.
++- **Mark resolved** writes the result and stages the file; **Reset file** brings the conflict back.
++- Files the editor cannot show (binary, deleted on one side, symlinks, submodules) get a choice
++  between the two sides.
++- The file list keeps every file of the merge with its state and an icon for its type; work in an
++  unfinished file is kept when you switch files.
++- Closing asks before throwing away unsaved work, and exits with 0 when every file is resolved and
++  1 otherwise. A window whose page has stopped responding closes on the second close request.
++- On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
++- Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
++
++[0.1.0]: ../../releases/tag/v0.1.0
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000..169d369
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Samuel Braun
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..f8b282d
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,67 @@
++# yamt
++
++yamt is a three-way merge window like the one in JetBrains IDEs, for git conflicts. It takes over
++the whole merge at once: every conflicted file is in one window, your side on the left, theirs on the
++right, the result in the middle.
++
++![yamt resolving a conflict](docs/screenshot.png)
++
++## Install
++
++Download from the [releases page](../../releases):
++
++- **Linux**: the `.AppImage` (make it executable, then run it) or the `.deb`
++  (`sudo apt install ./yamt_0.1.0_amd64.deb`). If AppImageLauncher is installed, it asks once
++  whether to integrate the AppImage before yamt starts.
++- **Arch Linux**: the AppImage, or build from source (below).
++- **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time
++  right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`.
++
++## Use
++
++When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `yamt` in the
++repository (or `yamt --repo <path>` from anywhere).
++
++- The file list on the left shows every conflicted file; click one to open it.
++- Each change has an arrow that applies it to the result and a × that ignores it. The toolbar applies
++  all non-conflicting changes from the left or from the right in one click.
++- The result pane is a normal editor: type, Tab / Shift+Tab indent and outdent, undo and redo.
++- **Mark resolved** writes the result and stages the file. **Reset file** brings the conflict back
++  as git left it.
++- Files the editor cannot show (binary, deleted on one side, symlinks, submodules) get a choice
++  instead: two buttons, one sentence per side.
++- Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can
++  tell. Then continue as usual (`git commit`, `git rebase --continue`, …).
++
++A git alias makes it feel built in:
++
++```sh
++git config --global alias.resolve '!yamt'
++git resolve
++```
++
++`git mergetool` is not the way to start yamt: it runs the tool once per file, while yamt handles all
++files in one window.
++
++## Build from source
++
++You need the Rust toolchain from `rust-toolchain.toml` (installed by
++[rustup](https://rustup.rs) on the first `cargo` call), [pnpm](https://pnpm.io), and on Linux
++webkit2gtk-4.1 (Arch: `webkit2gtk-4.1`; Debian/Ubuntu: `libwebkit2gtk-4.1-dev`).
++
++```sh
++cargo install tauri-cli --version 2.12.1
++pnpm -C frontend install
++cargo tauri build
++```
++
++The bundles land in `target/release/bundle/`.
++
++## NVIDIA on Linux
++
++WebKitGTK's DMABUF renderer crashes on some NVIDIA setups. yamt switches it off by itself when the
++NVIDIA driver is loaded; a value you set for `WEBKIT_DISABLE_DMABUF_RENDERER` wins.
++
++## License
++
++MIT, see [LICENSE](LICENSE). Bundled third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+diff --git a/THIRD_PARTY_NOTICES.md b/THIRD_PARTY_NOTICES.md
+new file mode 100644
+index 0000000..2505c36
+--- /dev/null
++++ b/THIRD_PARTY_NOTICES.md
+@@ -0,0 +1,150 @@
++# Third-party notices
++
++yamt is MIT-licensed ([LICENSE](LICENSE)). The app bundles the software below under its own license.
++
++## How this list was made
++
++- **Rust crates**: generated by `cargo deny --manifest-path src-tauri/Cargo.toml --exclude-dev --target <target> list`
++  (the app's crate graph including build-time crates, without dev-dependencies). A crate under a
++  choice of licenses (`MIT OR Apache-2.0`) is counted once per license.
++
++  | license                        | Linux x86_64 (286 crates)                                                    | macOS aarch64 (244 crates) |
++  | ------------------------------ | ---------------------------------------------------------------------------- | -------------------------- |
++  | MIT                            | 254                                                                          | 213                        |
++  | Apache-2.0                     | 164                                                                          | 155                        |
++  | Apache-2.0 WITH LLVM-exception | 1 (`target-lexicon`, build-time)                                             | 0                          |
++  | Unicode-3.0                    | 19                                                                           | 19                         |
++  | Zlib                           | 5                                                                            | 11                         |
++  | MPL-2.0                        | 5 (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) | 5 (same)                   |
++  | Unlicense                      | 5 (`aho-corasick`, `byteorder`, `memchr`, `same-file`, `walkdir`)            | 5 (same)                   |
++  | BSD-3-Clause                   | 4 (`alloc-no-stdlib`, `alloc-stdlib`, `brotli`, `brotli-decompressor`)       | 4 (same)                   |
++  | BSD-2-Clause                   | 1 (`Inflector`)                                                              | 1 (same)                   |
++  | 0BSD                           | 1 (`adler2`)                                                                 | 1 (same)                   |
++  | CC0-1.0, MIT-0                 | 1 (`dunce`)                                                                  | 1 (same)                   |
++
++  The MPL-2.0 crates are used unmodified; their source is on [crates.io](https://crates.io).
++  Each crate's license text ships in its source package.
++
++- **JavaScript packages**: generated by `pnpm -C frontend licenses list --prod` (81 packages: MIT 76,
++  OFL-1.1 1, Apache-2.0 OR MIT 1, BSD-2-Clause 1, BSD-3-Clause 1, ISC 1). The list includes Vue's
++  compiler packages, which the build uses but the app does not carry.
++- **Icons**: hand-checked. Lucide and vscode-icons are build-time packages (`@iconify-json/*`); the
++  build copies the SVGs the app uses into its code, so `--prod` does not list them. License and
++  holder come from each package's `info.json`.
++- **System libraries in the AppImage**: hand-checked. The Linux AppImage carries the GTK and
++  WebKitGTK libraries of the build machine (LGPL-2.1-or-later and BSD-style licenses; source from
++  [webkitgtk.org](https://webkitgtk.org) and [gtk.org](https://www.gtk.org)). The `.deb` and the
++  macOS app use the system's copies instead.
++
++## Main components
++
++| component                                                                                           | used for                               | license                                                                                            |
++| --------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
++| [Tauri](https://tauri.app) 2.12.1 (`tauri`, `wry`, `tao`, `@tauri-apps/api`)                        | the desktop shell                      | MIT or Apache-2.0                                                                                  |
++| [Vue](https://vuejs.org) 3.5                                                                        | the window's chrome                    | MIT                                                                                                |
++| [CodeMirror](https://codemirror.net) 6 and Lezer                                                    | the three editor panes, syntax colours | MIT                                                                                                |
++| [VueUse](https://vueuse.org)                                                                        | Vue helpers                            | MIT                                                                                                |
++| [Valibot](https://valibot.dev)                                                                      | data checks                            | MIT                                                                                                |
++| [Lucide](https://lucide.dev) icons                                                                  | toolbar, arrow and mark icons          | ISC, Lucide Contributors ([license](https://github.com/lucide-icons/lucide/blob/main/LICENSE))     |
++| [vscode-icons](https://github.com/vscode-icons/vscode-icons)                                        | file-type icons                        | MIT, Roberto Huertas ([license](https://github.com/vscode-icons/vscode-icons/blob/master/LICENSE)) |
++| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) via `@fontsource/jetbrains-mono` 5.3.0 | the editor font                        | OFL-1.1, notice below                                                                              |
++
++## JetBrains Mono
++
++The notice shipped in `@fontsource/jetbrains-mono` 5.3.0, verbatim:
++
++```text
++Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) JetBrainsMono-Italic[wght].ttf: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
++
++This Font Software is licensed under the SIL Open Font License, Version 1.1.
++This license is copied below, and is also available with a FAQ at:
++http://scripts.sil.org/OFL
++
++
++-----------------------------------------------------------
++SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
++-----------------------------------------------------------
++
++PREAMBLE
++The goals of the Open Font License (OFL) are to stimulate worldwide
++development of collaborative font projects, to support the font creation
++efforts of academic and linguistic communities, and to provide a free and
++open framework in which fonts may be shared and improved in partnership
++with others.
++
++The OFL allows the licensed fonts to be used, studied, modified and
++redistributed freely as long as they are not sold by themselves. The
++fonts, including any derivative works, can be bundled, embedded,
++redistributed and/or sold with any software provided that any reserved
++names are not used by derivative works. The fonts and derivatives,
++however, cannot be released under any other type of license. The
++requirement for fonts to remain under this license does not apply
++to any document created using the fonts or their derivatives.
++
++DEFINITIONS
++"Font Software" refers to the set of files released by the Copyright
++Holder(s) under this license and clearly marked as such. This may
++include source files, build scripts and documentation.
++
++"Reserved Font Name" refers to any names specified as such after the
++copyright statement(s).
++
++"Original Version" refers to the collection of Font Software components as
++distributed by the Copyright Holder(s).
++
++"Modified Version" refers to any derivative made by adding to, deleting,
++or substituting -- in part or in whole -- any of the components of the
++Original Version, by changing formats or by porting the Font Software to a
++new environment.
++
++"Author" refers to any designer, engineer, programmer, technical
++writer or other person who contributed to the Font Software.
++
++PERMISSION & CONDITIONS
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of the Font Software, to use, study, copy, merge, embed, modify,
++redistribute, and sell modified and unmodified copies of the Font
++Software, subject to the following conditions:
++
++1) Neither the Font Software nor any of its individual components,
++in Original or Modified Versions, may be sold by itself.
++
++2) Original or Modified Versions of the Font Software may be bundled,
++redistributed and/or sold with any software, provided that each copy
++contains the above copyright notice and this license. These can be
++included either as stand-alone text files, human-readable headers or
++in the appropriate machine-readable metadata fields within text or
++binary files as long as those fields can be easily viewed by the user.
++
++3) No Modified Version of the Font Software may use the Reserved Font
++Name(s) unless explicit written permission is granted by the corresponding
++Copyright Holder. This restriction only applies to the primary font name as
++presented to the users.
++
++4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
++Software shall not be used to promote, endorse or advertise any
++Modified Version, except to acknowledge the contribution(s) of the
++Copyright Holder(s) and the Author(s) or with their explicit written
++permission.
++
++5) The Font Software, modified or unmodified, in part or in whole,
++must be distributed entirely under this license, and must not be
++distributed under any other license. The requirement for fonts to
++remain under this license does not apply to any document created
++using the Font Software.
++
++TERMINATION
++This license becomes null and void if any of the above conditions are
++not met.
++
++DISCLAIMER
++THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
++OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
++COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
++DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
++OTHER DEALINGS IN THE FONT SOFTWARE.
++```
+diff --git a/src-tauri/src/appimage.rs b/src-tauri/src/appimage.rs
+new file mode 100644
+index 0000000..66389c8
+--- /dev/null
++++ b/src-tauri/src/appimage.rs
+@@ -0,0 +1,63 @@
++use std::ffi::OsString;
++use std::path::PathBuf;
++
++// The AppImage's AppRun changes into `$APPDIR/usr` and must stay there: linuxdeploy rewrites
++// WebKitGTK's helper paths relative to it (`././/lib/webkit2gtk-4.1/WebKitNetworkProcess`). The
++// AppImage runtime keeps the directory it was started in as `OWD` (AppImageKit `runtime.c`).
++const APPIMAGE_VAR: &str = "APPIMAGE";
++const START_DIR_VAR: &str = "OWD";
++
++pub(crate) fn repo_from_start_dir(repo: PathBuf) -> PathBuf {
++    resolved(
++        repo,
++        std::env::var_os(APPIMAGE_VAR),
++        std::env::var_os(START_DIR_VAR),
++    )
++}
++
++fn resolved(repo: PathBuf, appimage: Option<OsString>, start: Option<OsString>) -> PathBuf {
++    match appimage.and(start) {
++        Some(start) if repo.is_relative() => PathBuf::from(start).join(repo),
++        Some(_) | None => repo,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const APPIMAGE: &str = "/home/u/yamt.AppImage";
++    const START: &str = "/tmp/repo";
++
++    #[test]
++    fn an_appimage_resolves_a_relative_repo_from_where_it_was_started() {
++        assert_eq!(
++            resolved(".".into(), Some(APPIMAGE.into()), Some(START.into())),
++            PathBuf::from("/tmp/repo/.")
++        );
++        assert_eq!(
++            resolved("sub".into(), Some(APPIMAGE.into()), Some(START.into())),
++            PathBuf::from("/tmp/repo/sub")
++        );
++    }
++
++    #[test]
++    fn an_absolute_repo_stays() {
++        assert_eq!(
++            resolved("/srv/r".into(), Some(APPIMAGE.into()), Some(START.into())),
++            PathBuf::from("/srv/r")
++        );
++    }
++
++    #[test]
++    fn without_both_variables_the_repo_stays() {
++        assert_eq!(
++            resolved(".".into(), None, Some(START.into())),
++            PathBuf::from(".")
++        );
++        assert_eq!(
++            resolved(".".into(), Some(APPIMAGE.into()), None),
++            PathBuf::from(".")
++        );
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 6d78574..bfb1994 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,5 +1,6 @@
+ //! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
+ 
++mod appimage;
+ mod args;
+ mod commands;
+ mod frontend_log;
+@@ -34,7 +35,7 @@ pub fn run() -> ExitCode {
+             println!("yamt {}", env!("CARGO_PKG_VERSION"));
+             ExitCode::SUCCESS
+         }
+-        Ok(Invocation::Merge { repo }) => merge(&repo).report(),
++        Ok(Invocation::Merge { repo }) => merge(&appimage::repo_from_start_dir(repo)).report(),
+         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
+     }
+ }
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 49859c3..d2939ca 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -1,7 +1,11 @@
+ use std::path::Path;
++use std::sync::mpsc::{self, Receiver, Sender};
++use std::time::{Duration, Instant};
+ 
+ use tauri::window::Color;
+-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
++use tauri::{
++    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
++};
+ use yamt_session::MergeSession;
+ 
+ use crate::commands::{SessionState, lock, with_session};
+@@ -14,6 +18,8 @@ const MIN_WIDTH: f64 = 900.0;
+ const MIN_HEIGHT: f64 = 600.0;
+ // `--color-window` in frontend/src/style.css.
+ const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
++const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
++const PAGE_PING: &str = "true";
+ 
+ pub(crate) fn run(session: MergeSession) -> Ending {
+     let title = window_title(session.root());
+@@ -32,7 +38,8 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+         .background_color(BACKGROUND)
+         .build()?;
+     let handle = app.handle().clone();
+-    app.run_return(|_, _| {});
++    let mut close_watch = CloseWatch::new();
++    app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+     Ok(ending_on_close(&lock(&handle.state::<SessionState>())))
+ }
+ 
+@@ -41,6 +48,61 @@ fn window_title(root: &Path) -> String {
+     format!("{} — yamt", folder.to_string_lossy())
+ }
+ 
++// Tauri holds a native close while the page listens for close requests (tauri 2.12
++// manager/window.rs `on_window_event`), so a gone page would keep the window open forever.
++struct CloseWatch {
++    unanswered_since: Option<Instant>,
++    answer_sender: Sender<()>,
++    answers: Receiver<()>,
++}
++
++impl CloseWatch {
++    fn new() -> CloseWatch {
++        let (answer_sender, answers) = mpsc::channel();
++        CloseWatch {
++            unanswered_since: None,
++            answer_sender,
++            answers,
++        }
++    }
++
++    fn on_run_event(&mut self, app: &AppHandle, event: &RunEvent) {
++        if let RunEvent::WindowEvent {
++            label,
++            event: WindowEvent::CloseRequested { .. },
++            ..
++        } = event
++            && let Some(window) = app.get_webview_window(label)
++            && let Err(error) = self.on_close_request(&window)
++        {
++            tracing::warn!(%error, "close request not handled");
++        }
++    }
++
++    fn on_close_request(&mut self, window: &WebviewWindow) -> tauri::Result<()> {
++        if self.is_page_gone(Instant::now()) {
++            tracing::warn!("closing without the page: it did not answer the last close request");
++            return window.destroy();
++        }
++        let answer_sender = self.answer_sender.clone();
++        // wry passes "" to the callback when the script cannot run (wry 0.57 webkitgtk `eval`).
++        window.eval_with_callback(PAGE_PING, move |result| {
++            if !result.is_empty() {
++                answer_sender.send(()).ok();
++            }
++        })
++    }
++
++    fn is_page_gone(&mut self, request_at: Instant) -> bool {
++        if self.answers.try_iter().count() > 0 {
++            self.unanswered_since = None;
++        }
++        self.unanswered_since
++            .replace(request_at)
++            .is_some_and(|since| request_at.duration_since(since) <= UNANSWERED_CLOSE_TIMEOUT)
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -53,4 +115,35 @@ mod tests {
+         );
+         assert_eq!(window_title(Path::new("/")), "/ — yamt");
+     }
++
++    #[test]
++    fn a_second_close_soon_after_an_unanswered_one_finds_the_page_gone() {
++        let asked = Instant::now();
++        let mut watch = CloseWatch::new();
++        assert!(!watch.is_page_gone(asked));
++        assert!(watch.is_page_gone(asked + Duration::from_secs(1)));
++
++        let mut watch = CloseWatch::new();
++        assert!(!watch.is_page_gone(asked));
++        assert!(watch.is_page_gone(asked + UNANSWERED_CLOSE_TIMEOUT));
++    }
++
++    #[test]
++    fn a_late_second_close_asks_the_page_again() {
++        let asked = Instant::now();
++        let mut watch = CloseWatch::new();
++        assert!(!watch.is_page_gone(asked));
++        let late = asked + UNANSWERED_CLOSE_TIMEOUT + Duration::from_millis(1);
++        assert!(!watch.is_page_gone(late));
++        assert!(watch.is_page_gone(late + Duration::from_secs(1)));
++    }
++
++    #[test]
++    fn an_answered_close_request_never_finds_the_page_gone() {
++        let asked = Instant::now();
++        let mut watch = CloseWatch::new();
++        assert!(!watch.is_page_gone(asked));
++        watch.answer_sender.send(()).unwrap();
++        assert!(!watch.is_page_gone(asked + Duration::from_secs(1)));
++    }
+ }
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 3746694..1807e67 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -17,7 +17,13 @@
+     }
+   },
+   "bundle": {
+-    "active": false,
++    "active": true,
++    "targets": ["appimage", "deb", "app", "dmg"],
++    "category": "DeveloperTool",
++    "shortDescription": "Three-way merge window for every conflicted file of a git merge",
++    "longDescription": "yamt opens all conflicted files of a stopped git merge, rebase or cherry-pick in one window: your side on the left, theirs on the right, the result in the middle, with arrows to apply each change. Marking a file resolved stages it.",
++    "license": "MIT",
++    "copyright": "Copyright (c) 2026 Samuel Braun",
+     "icon": [
+       "icons/32x32.png",
+       "icons/128x128.png",
