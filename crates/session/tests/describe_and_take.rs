@@ -4,7 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
-use yamt_session::{FileStatus, MergeSession, Side, SideContent, UnsupportedReason};
+use yamt_session::{
+    DiskVersion, FileStatus, MergeSession, Side, SideContent, UnsupportedReason, WriteReply,
+};
 
 const TEXT: &str = "a_text.txt";
 const LOCAL_DELETED: &str = "b_local_deleted.txt";
@@ -228,25 +230,48 @@ fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
     assert_eq!(reason, Some(UnsupportedReason::Symlink));
 }
 
-fn assert_take_resolves_to_that_side(dir: &TempDir, path: &str, side: Side) {
-    let mut session = MergeSession::open(dir.path()).unwrap();
+/// The merge as the window opens it: its first list settles what changed on disk before start.
+fn opened(dir: &TempDir) -> (MergeSession, String) {
     let before = unmerged(dir);
-    let remaining = session.remaining();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    session.refresh().unwrap();
+    (session, before)
+}
 
-    session.take(path, side).unwrap();
+fn unmerged_path_count(dir: &TempDir) -> usize {
+    let args = ["diff", "--name-only", "--diff-filter=U"];
+    String::from_utf8(git_ok(dir.path(), &args).unwrap())
+        .unwrap()
+        .lines()
+        .count()
+}
 
-    let tab_path = format!("\t{path}");
-    let still_unmerged = unmerged(dir).lines().any(|line| line.ends_with(&tab_path));
-    assert!(!still_unmerged, "{}", unmerged(dir));
-    assert_eq!(staged(dir, path), stage_zero_of(&before, path, side));
-    assert_eq!(status_of(&session, path), FileStatus::Resolved);
-    assert_eq!(session.remaining(), remaining - 1);
+fn assert_take_resolves_to_that_side(
+    dir: &TempDir,
+    session: &mut MergeSession,
+    before: &str,
+    path: &str,
+    side: Side,
+) {
+    let version = session.describe(path).unwrap().disk_version;
+
+    let reply = session.take(path, side, version).unwrap();
+
+    assert!(matches!(reply, WriteReply::Written { .. }), "{reply:?}");
+    assert_eq!(staged(dir, path), stage_zero_of(before, path, side));
+    assert_eq!(status_of(session, path), FileStatus::Resolved);
+    assert_eq!(session.remaining(), unmerged_path_count(dir));
 }
 
 fn taken(path: &str, side: Side) -> TempDir {
     let dir = every_kind_of_conflict();
-    assert_take_resolves_to_that_side(&dir, path, side);
+    taken_in(&dir, path, side);
     dir
+}
+
+fn taken_in(dir: &TempDir, path: &str, side: Side) {
+    let (mut session, before) = opened(dir);
+    assert_take_resolves_to_that_side(dir, &mut session, &before, path, side);
 }
 
 #[test]
@@ -281,8 +306,10 @@ fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
     let dir = file_against_link();
     fs::remove_file(dir.path().join(FILE_OR_LINK)).unwrap();
     fs::remove_file(dir.path().join(FILE_OR_LINK_RENAMED)).unwrap();
-    assert_take_resolves_to_that_side(&dir, FILE_OR_LINK, Side::Remote);
-    assert_take_resolves_to_that_side(&dir, FILE_OR_LINK_RENAMED, Side::Local);
+    let (mut session, before) = opened(&dir);
+    assert_take_resolves_to_that_side(&dir, &mut session, &before, FILE_OR_LINK, Side::Remote);
+    let renamed = FILE_OR_LINK_RENAMED;
+    assert_take_resolves_to_that_side(&dir, &mut session, &before, renamed, Side::Local);
     assert_eq!(
         fs::read_link(dir.path().join(FILE_OR_LINK)).unwrap(),
         Path::new("docs/README.md")
@@ -306,7 +333,7 @@ fn take_of_the_deleting_side_removes_index_entry_and_worktree_file() {
 fn take_of_the_deleting_side_accepts_a_worktree_file_already_gone() {
     let dir = every_kind_of_conflict();
     fs::remove_file(dir.path().join(LOCAL_DELETED)).unwrap();
-    assert_take_resolves_to_that_side(&dir, LOCAL_DELETED, Side::Local);
+    taken_in(&dir, LOCAL_DELETED, Side::Local);
     assert_eq!(staged(&dir, LOCAL_DELETED), "");
 }
 
@@ -325,7 +352,7 @@ fn take_of_the_deleting_side_of_a_submodule_unstages_it_and_leaves_its_directory
     .unwrap();
     fs::create_dir_all(dir.path().join(DELETED_SUBMODULE)).unwrap();
 
-    assert_take_resolves_to_that_side(&dir, DELETED_SUBMODULE, Side::Remote);
+    taken_in(&dir, DELETED_SUBMODULE, Side::Remote);
 
     assert_eq!(staged(&dir, DELETED_SUBMODULE), "");
     assert!(dir.path().join(DELETED_SUBMODULE).is_dir());
@@ -339,7 +366,7 @@ fn take_of_the_kept_side_of_a_deleted_file_restores_it() {
     ] {
         let dir = every_kind_of_conflict();
         fs::remove_file(dir.path().join(path)).unwrap();
-        assert_take_resolves_to_that_side(&dir, path, side);
+        taken_in(&dir, path, side);
         assert_eq!(fs::read(dir.path().join(path)).unwrap(), bytes);
     }
 }
@@ -349,7 +376,7 @@ fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_worktree_alone() 
     for (side, commit) in [(Side::Local, LOCAL_COMMIT), (Side::Remote, REMOTE_COMMIT)] {
         let dir = every_kind_of_conflict();
         fs::remove_dir(dir.path().join(SUBMODULE)).unwrap();
-        assert_take_resolves_to_that_side(&dir, SUBMODULE, side);
+        taken_in(&dir, SUBMODULE, side);
         assert_eq!(
             staged(&dir, SUBMODULE),
             format!("160000 {commit} 0\t{SUBMODULE}\n")
@@ -373,13 +400,13 @@ fn reset_after_take_brings_back_the_stages_of_every_kind() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = unmerged(&dir);
     for (path, side) in kinds {
-        session.take(path, side).unwrap();
+        session.take(path, side, DiskVersion(0)).unwrap();
     }
     assert_eq!(unmerged(&dir), "");
     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
 
     for (path, _) in kinds {
-        session.reset(path).unwrap();
+        session.reset(path, DiskVersion(0)).unwrap();
     }
 
     assert_eq!(unmerged(&dir), before);

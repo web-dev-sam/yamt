@@ -1,0 +1,31 @@
+title
+=======
+<<<<<<<<<<<< HEAD
+one
+TWO
+shared-a
+three-ours
+|||||||||||| e87a625
+one
+two
+three
+============
+ONE
+two
+shared-a
+three-theirs
+>>>>>>>>>>>> theirs
+shared-b
+four
+five
+six
+seven
+<<<<<<<<<<<< HEAD
+eight-ours
+|||||||||||| e87a625
+eight
+============
+eight-theirs
+>>>>>>>>>>>> theirs
+nine
+ten

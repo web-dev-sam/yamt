@@ -14,6 +14,7 @@ use crate::{Error, Result, StageEntry};
 const ANY_EXECUTE_BIT: u32 = 0o111;
 const REV_PARSE: &str = "rev-parse";
 const LOG: &str = "log";
+const HASH_OBJECT: &str = "hash-object";
 const MERGE_MSG: &str = "MERGE_MSG";
 const UNRESOLVED_NAME_STATUS: i32 = 1;
 const NON_SYMBOLIC_SHORT_NAME: &str =
@@ -129,7 +130,7 @@ impl Repo {
     // git-update-index(1) "USING --INDEX-INFO" reads the records `ls-files --stage` prints.
     pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()> {
         if records.is_empty() {
-            return self.remove_from_index(path);
+            return self.remove_paths(&[path]);
         }
         let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
         run(command, Some(records), GIT_TIMEOUT)?;
@@ -153,9 +154,10 @@ impl Repo {
         Ok(())
     }
 
-    pub fn add(&self, path: &Path) -> Result<()> {
+    /// Stages each path as it is in the worktree: `git add -- <paths>`.
+    pub fn add_paths(&self, paths: &[&Path]) -> Result<()> {
         let mut command = self.command(Access::Write, &["add", "--"]);
-        command.arg(path);
+        command.args(paths);
         run(command, None, GIT_TIMEOUT)?;
         Ok(())
     }
@@ -170,11 +172,52 @@ impl Repo {
         Ok(())
     }
 
-    pub fn remove_from_index(&self, path: &Path) -> Result<()> {
+    /// Removes every index entry of each path: `git update-index --force-remove -- <paths>`.
+    pub fn remove_paths(&self, paths: &[&Path]) -> Result<()> {
         let mut command = self.command(Access::Write, &["update-index", "--force-remove", "--"]);
-        command.arg(path);
+        command.args(paths);
         run(command, None, GIT_TIMEOUT)?;
         Ok(())
+    }
+
+    /// The blob id each worktree file would get when staged, through the path's filters; one per path.
+    pub fn hash_objects(&self, paths: &[&Path]) -> Result<Vec<Oid>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = Vec::new();
+        for path in paths {
+            input.extend_from_slice(path.as_os_str().as_bytes());
+            input.push(b'\n');
+        }
+        let command = self.command(Access::Read, &[HASH_OBJECT, "--stdin-paths"]);
+        let output = run(command, Some(input), GIT_TIMEOUT)?;
+        let text = String::from_utf8_lossy(&output);
+        let oids: Vec<Oid> = text.lines().map(Oid::parse).collect::<Result<_>>()?;
+        if oids.len() != paths.len() {
+            return Err(Error::UnexpectedOutput {
+                command: HASH_OBJECT,
+                output: text.into_owned(),
+            });
+        }
+        Ok(oids)
+    }
+
+    /// The commit checked out in the submodule at `path`; `None` when it is not checked out.
+    pub fn submodule_head(&self, path: &Path) -> Result<Option<Oid>> {
+        let submodule = self.root.join(path);
+        if fs::symlink_metadata(submodule.join(".git")).is_err() {
+            return Ok(None);
+        }
+        let args = [REV_PARSE, "--verify", "--quiet", "HEAD"];
+        let command = git_command(&self.git, &submodule, Access::Read, &args);
+        let output = match run(command, None, GIT_TIMEOUT) {
+            Ok(output) => output,
+            Err(error) if is_unresolved_name(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let line = without_final_newline(output)?;
+        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
     }
 
     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
@@ -184,7 +227,7 @@ impl Repo {
         Ok(())
     }
 
-    fn command(&self, access: Access, args: &[&str]) -> Command {
+    pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
         git_command(&self.git, &self.root, access, args)
     }
 }

@@ -3,7 +3,7 @@
 use std::fs;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
-use yamt_session::{Eol, Error, FileStatus, MergeSession, UnsupportedReason};
+use yamt_session::{DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason};
 
 const FILE: &str = "src/cart.ts";
 const OTHER: &str = "src/other.ts";
@@ -56,7 +56,9 @@ fn assert_finish_with_local_round_trips_bytes(sides: [&[u8]; 3], expected_eol: E
     let data = session.load(PATH).unwrap();
     assert_eq!(data.eol, expected_eol);
 
-    session.finish(PATH, &data.local).unwrap();
+    session
+        .finish(PATH, &data.local, data.disk_version)
+        .unwrap();
 
     let worktree = fs::read(dir.path().join(PATH)).unwrap();
     assert_eq!(worktree, sides[1]);
@@ -97,7 +99,7 @@ fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     assert_eq!(session.remaining(), 2);
 
-    session.finish(FILE, RESULT).unwrap();
+    session.finish(FILE, RESULT, DiskVersion(0)).unwrap();
 
     assert!(!unmerged(&dir).contains(FILE));
     assert!(unmerged(&dir).contains(OTHER));
@@ -107,7 +109,7 @@ fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
 }
 
 fn finish_and_drop_resolve_undo(dir: &TempDir, session: &mut MergeSession, path: &str) {
-    session.finish(path, "resolved\n").unwrap();
+    session.finish(path, "resolved\n", DiskVersion(0)).unwrap();
     // `git add` leaves a resolve-undo record that `checkout -m` alone would use to bring the
     // conflict back (git-ls-files(1) --resolve-undo); without it only the captured stages can.
     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
@@ -127,7 +129,7 @@ fn reset_after_finish_restores_git_stages_and_conflict_markers() {
     let before_finish = unmerged(&dir);
     finish_and_drop_resolve_undo(&dir, &mut session, FILE);
 
-    session.reset(FILE).unwrap();
+    session.reset(FILE, DiskVersion(0)).unwrap();
 
     assert_conflict_is_back(&dir, &session, FILE, &before_finish);
     assert_eq!(session.remaining(), 2);
@@ -148,7 +150,7 @@ fn reset_after_finish_restores_an_add_add_conflict() {
     let before_finish = unmerged(&dir);
     finish_and_drop_resolve_undo(&dir, &mut session, PATH);
 
-    session.reset(PATH).unwrap();
+    session.reset(PATH, DiskVersion(0)).unwrap();
 
     assert_conflict_is_back(&dir, &session, PATH, &before_finish);
 }
@@ -159,7 +161,7 @@ fn reset_of_a_file_never_finished_keeps_its_stages_and_markers() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = unmerged(&dir);
 
-    session.reset(FILE).unwrap();
+    session.reset(FILE, DiskVersion(0)).unwrap();
 
     assert_conflict_is_back(&dir, &session, FILE, &before);
     assert_eq!(session.remaining(), 2);
@@ -173,8 +175,10 @@ fn unknown_path_is_rejected_by_load_finish_and_reset() {
 
     let errors = [
         session.load(UNKNOWN).unwrap_err(),
-        session.finish(UNKNOWN, "text\n").unwrap_err(),
-        session.reset(UNKNOWN).unwrap_err(),
+        session
+            .finish(UNKNOWN, "text\n", DiskVersion(0))
+            .unwrap_err(),
+        session.reset(UNKNOWN, DiskVersion(0)).unwrap_err(),
     ];
 
     for error in errors {
@@ -193,7 +197,7 @@ fn finish_refuses_an_unsupported_file_and_leaves_the_worktree_alone() {
     let worktree_before = fs::read(dir.path().join(PATH)).unwrap();
     let mut session = MergeSession::open(dir.path()).unwrap();
 
-    let error = session.finish(PATH, "text\n").unwrap_err();
+    let error = session.finish(PATH, "text\n", DiskVersion(0)).unwrap_err();
 
     assert!(
         matches!(
@@ -225,7 +229,7 @@ fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
     git_ok(dir.path(), &["add", "--", PATH]).unwrap();
     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
 
-    session.reset(PATH).unwrap();
+    session.reset(PATH, DiskVersion(0)).unwrap();
 
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status_of(&session, PATH), FileStatus::Unresolved);

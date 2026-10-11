@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
-use yamt_session::{Error, FileStatus, MergeSession, Side};
+use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Side, WriteReply};
 
 const TEXT: &str = "src/cart.ts";
 const BINARY: &str = "assets/logo.bin";
@@ -70,7 +70,7 @@ fn assert_nothing_changed(
     assert_eq!(status_of(session, path), FileStatus::Unresolved);
 }
 
-fn assert_git_error(result: Result<(), Error>) {
+fn assert_git_error(result: Result<WriteReply, Error>) {
     let error = result.unwrap_err();
     assert!(matches!(error, Error::Git(_)), "{error:?}");
 }
@@ -82,11 +82,13 @@ fn finish_with_a_held_index_lock_puts_the_worktree_file_back_and_stays_unresolve
     let before = (unmerged(&dir), worktree(&dir, TEXT));
     let lock = index_lock(&dir);
 
-    assert_git_error(session.finish(TEXT, "one\nmerged\n"));
+    assert_git_error(session.finish(TEXT, "one\nmerged\n", DiskVersion(0)));
 
     assert_nothing_changed(&dir, &session, TEXT, &before);
     fs::remove_file(lock).unwrap();
-    session.finish(TEXT, "one\nmerged\n").unwrap();
+    session
+        .finish(TEXT, "one\nmerged\n", DiskVersion(0))
+        .unwrap();
     assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
 }
 
@@ -95,12 +97,16 @@ fn finish_with_a_held_index_lock_leaves_a_deleted_worktree_file_absent() {
     let dir = mixed_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
     fs::remove_file(dir.path().join(TEXT)).unwrap();
-    let before = (unmerged(&dir), None);
+    let deleted = session.refresh().unwrap().disk_changes.remove(0).result;
+    assert_eq!(deleted, DiskResult::Staged);
+    let staged_before = staged(&dir, TEXT);
     let _lock = index_lock(&dir);
 
-    assert_git_error(session.finish(TEXT, "one\nmerged\n"));
+    assert_git_error(session.finish(TEXT, "one\nmerged\n", DiskVersion(1)));
 
-    assert_nothing_changed(&dir, &session, TEXT, &before);
+    assert_eq!(worktree(&dir, TEXT), None);
+    assert_eq!(staged(&dir, TEXT), staged_before);
+    assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
 }
 
 #[test]
@@ -111,7 +117,7 @@ fn take_with_a_held_index_lock_changes_nothing() {
 
     for (path, side) in [(BINARY, Side::Remote), (DELETED, Side::Local)] {
         let before = (unmerged(&dir), worktree(&dir, path));
-        assert_git_error(session.take(path, side));
+        assert_git_error(session.take(path, side, DiskVersion(0)));
         assert_nothing_changed(&dir, &session, path, &before);
     }
 }
@@ -129,8 +135,8 @@ fn take_whose_worktree_write_fails_puts_the_conflict_back() {
     let deleted_before = (unmerged(&dir), worktree(&dir, DELETED));
     set_assets_mode(&dir, READ_ONLY_DIR);
 
-    let binary = session.take(BINARY, Side::Remote);
-    let deleted = session.take(DELETED, Side::Local);
+    let binary = session.take(BINARY, Side::Remote, DiskVersion(0));
+    let deleted = session.take(DELETED, Side::Local, DiskVersion(0));
 
     set_assets_mode(&dir, WRITABLE_DIR);
     assert_git_error(binary);
@@ -150,15 +156,15 @@ fn staged(dir: &TempDir, path: &str) -> String {
 fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
     let dir = mixed_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
-    session.take(BINARY, Side::Local).unwrap();
-    session.take(DELETED, Side::Local).unwrap();
+    session.take(BINARY, Side::Local, DiskVersion(0)).unwrap();
+    session.take(DELETED, Side::Local, DiskVersion(0)).unwrap();
     let before = |path| (staged(&dir, path), worktree(&dir, path));
     let (binary_before, deleted_before) = (before(BINARY), before(DELETED));
     assert_eq!(deleted_before, (String::new(), None));
     set_assets_mode(&dir, READ_ONLY_DIR);
 
-    let binary = session.take(BINARY, Side::Remote);
-    let deleted = session.take(DELETED, Side::Remote);
+    let binary = session.take(BINARY, Side::Remote, DiskVersion(0));
+    let deleted = session.take(DELETED, Side::Remote, DiskVersion(0));
 
     set_assets_mode(&dir, WRITABLE_DIR);
     assert_git_error(binary);

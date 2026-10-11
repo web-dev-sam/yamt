@@ -1,377 +1,433 @@
 {
   "path": "vueuse-use-magic-keys.ts",
-  "base": "import type { ComputedRef } from 'vue-demi'\nimport { computed, reactive, ref, unref } from 'vue-demi'\nimport type { MaybeRef } from '@vueuse/shared'\nimport { noop } from '@vueuse/shared'\nimport { useEventListener } from '../useEventListener'\nimport { defaultWindow } from '../_configurable'\nimport { DefaultMagicKeysAliasMap } from './aliasMap'\n\nexport interface UseMagicKeysOptions<Reactive extends Boolean> {\n  /**\n   * Returns a reactive object instead of an object of refs\n   *\n   * @default false\n   */\n  reactive?: Reactive\n\n  /**\n   * Target for listening events\n   *\n   * @default window\n   */\n  target?: MaybeRef<EventTarget>\n\n  /**\n   * Alias map for keys, all the keys should be lowercase\n   * { target: keycode }\n   *\n   * @example { ctrl: \"control\" }\n   * @default <predefined-map>\n   */\n  aliasMap?: Record<string, string>\n\n  /**\n   * Register passive listener\n   *\n   * @default true\n   */\n  passive?: boolean\n\n  /**\n   * Custom event handler for keydown/keyup event.\n   * Useful when you want to apply custom logic.\n   *\n   * When using `e.preventDefault()`, you will need to pass `passive: false` to useMagicKeys().\n   */\n  onEventFired?: (e: KeyboardEvent) => void | boolean\n}\n\nexport interface MagicKeysInternal {\n  /**\n   * A Set of currently pressed keys,\n   * Stores raw keyCodes.\n   *\n   * @see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/keyCode\n   */\n  current: Set<string>\n}\n\nexport type MagicKeys<Reactive extends Boolean> =\n  Readonly<\n  Omit<Reactive extends true\n    ? Record<string, boolean>\n    : Record<string, ComputedRef<boolean>>,\n  keyof MagicKeysInternal>\n  & MagicKeysInternal\n  >\n\n/**\n * Reactive keys pressed state, with magical keys combination support.\n *\n * @see https://vueuse.org/useMagicKeys\n */\nexport function useMagicKeys(options?: UseMagicKeysOptions<false>): MagicKeys<false>\nexport function useMagicKeys(options: UseMagicKeysOptions<true>): MagicKeys<true>\nexport function useMagicKeys(options: UseMagicKeysOptions<boolean> = {}): any {\n  const {\n    reactive: useReactive = false,\n    target = defaultWindow,\n    aliasMap = DefaultMagicKeysAliasMap,\n    passive = true,\n    onEventFired = noop,\n  } = options\n  const current = reactive(new Set<string>())\n  const obj = { toJSON() { return {} }, current }\n  const refs: Record<string, any> = useReactive ? reactive(obj) : obj\n  const metaDeps = new Set<string>()\n\n  function setRefs(key: string, value: boolean) {\n    if (key in refs) {\n      if (useReactive)\n        refs[key] = value\n      else\n        refs[key].value = value\n    }\n  }\n\n  function updateRefs(e: KeyboardEvent, value: boolean) {\n    const key = e.key?.toLowerCase()\n    const code = e.code?.toLowerCase()\n    const values = [code, key].filter(Boolean)\n\n    // current set\n    if (code) {\n      if (value)\n        current.add(e.code)\n      else\n        current.delete(e.code)\n    }\n\n    for (const key of values)\n      setRefs(key, value)\n\n    // #1312\n    // In macOS, keys won't trigger \"keyup\" event when Meta key is released\n    // We track it's combination and relese manually\n    if (key === 'meta' && !value) {\n      // Meta key released\n      metaDeps.forEach((key) => {\n        current.delete(key)\n        setRefs(key, false)\n      })\n      metaDeps.clear()\n    }\n    else if (typeof e.getModifierState === 'function' && e.getModifierState('Meta') && value) {\n      [...current, ...values].forEach(key => metaDeps.add(key))\n    }\n  }\n\n  if (target) {\n    useEventListener(target, 'keydown', (e: KeyboardEvent) => {\n      updateRefs(e, true)\n      return onEventFired(e)\n    }, { passive })\n    useEventListener(target, 'keyup', (e: KeyboardEvent) => {\n      updateRefs(e, false)\n      return onEventFired(e)\n    }, { passive })\n  }\n\n  const proxy = new Proxy(\n    refs,\n    {\n      get(target, prop, rec) {\n        if (typeof prop !== 'string')\n          return Reflect.get(target, prop, rec)\n\n        prop = prop.toLowerCase()\n        // alias\n        if (prop in aliasMap)\n          prop = aliasMap[prop]\n        // create new tracking\n        if (!(prop in refs)) {\n          if (/[+_-]/.test(prop)) {\n            const keys = prop.split(/[+_-]/g).map(i => i.trim())\n            refs[prop] = computed(() => keys.every(key => unref(proxy[key])))\n          }\n          else {\n            refs[prop] = ref(false)\n          }\n        }\n        const r = Reflect.get(target, prop, rec)\n        return useReactive ? unref(r) : r\n      },\n    },\n  )\n\n  return proxy as any\n}\n\nexport { DefaultMagicKeysAliasMap } from './aliasMap'\n",
+  "middle": {
+    "kind": "Stages",
+    "text": "import type { ComputedRef } from 'vue-demi'\nimport { computed, reactive, ref, unref } from 'vue-demi'\nimport type { MaybeRef } from '@vueuse/shared'\nimport { noop } from '@vueuse/shared'\nimport { useEventListener } from '../useEventListener'\nimport { defaultWindow } from '../_configurable'\nimport { DefaultMagicKeysAliasMap } from './aliasMap'\n\nexport interface UseMagicKeysOptions<Reactive extends Boolean> {\n  /**\n   * Returns a reactive object instead of an object of refs\n   *\n   * @default false\n   */\n  reactive?: Reactive\n\n  /**\n   * Target for listening events\n   *\n   * @default window\n   */\n  target?: MaybeRef<EventTarget>\n\n  /**\n   * Alias map for keys, all the keys should be lowercase\n   * { target: keycode }\n   *\n   * @example { ctrl: \"control\" }\n   * @default <predefined-map>\n   */\n  aliasMap?: Record<string, string>\n\n  /**\n   * Register passive listener\n   *\n   * @default true\n   */\n  passive?: boolean\n\n  /**\n   * Custom event handler for keydown/keyup event.\n   * Useful when you want to apply custom logic.\n   *\n   * When using `e.preventDefault()`, you will need to pass `passive: false` to useMagicKeys().\n   */\n  onEventFired?: (e: KeyboardEvent) => void | boolean\n}\n\nexport interface MagicKeysInternal {\n  /**\n   * A Set of currently pressed keys,\n   * Stores raw keyCodes.\n   *\n   * @see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/keyCode\n   */\n  current: Set<string>\n}\n\nexport type MagicKeys<Reactive extends Boolean> =\n  Readonly<\n  Omit<Reactive extends true\n    ? Record<string, boolean>\n    : Record<string, ComputedRef<boolean>>,\n  keyof MagicKeysInternal>\n  & MagicKeysInternal\n  >\n\n/**\n * Reactive keys pressed state, with magical keys combination support.\n *\n * @see https://vueuse.org/useMagicKeys\n */\nexport function useMagicKeys(options?: UseMagicKeysOptions<false>): MagicKeys<false>\nexport function useMagicKeys(options: UseMagicKeysOptions<true>): MagicKeys<true>\nexport function useMagicKeys(options: UseMagicKeysOptions<boolean> = {}): any {\n  const {\n    reactive: useReactive = false,\n    target = defaultWindow,\n    aliasMap = DefaultMagicKeysAliasMap,\n    passive = true,\n    onEventFired = noop,\n  } = options\n  const current = reactive(new Set<string>())\n  const obj = { toJSON() { return {} }, current }\n  const refs: Record<string, any> = useReactive ? reactive(obj) : obj\n  const metaDeps = new Set<string>()\n\n  function setRefs(key: string, value: boolean) {\n    if (key in refs) {\n      if (useReactive)\n        refs[key] = value\n      else\n        refs[key].value = value\n    }\n  }\n\n  function updateRefs(e: KeyboardEvent, value: boolean) {\n    const key = e.key?.toLowerCase()\n    const code = e.code?.toLowerCase()\n    const values = [code, key].filter(Boolean)\n\n    // current set\n    if (code) {\n      if (value)\n        current.add(e.code)\n      else\n        current.delete(e.code)\n    }\n\n    for (const key of values)\n      setRefs(key, value)\n\n    // #1312\n    // In macOS, keys won't trigger \"keyup\" event when Meta key is released\n    // We track it's combination and relese manually\n    if (key === 'meta' && !value) {\n      // Meta key released\n      metaDeps.forEach((key) => {\n        current.delete(key)\n        setRefs(key, false)\n      })\n      metaDeps.clear()\n    }\n    else if (typeof e.getModifierState === 'function' && e.getModifierState('Meta') && value) {\n      [...current, ...values].forEach(key => metaDeps.add(key))\n    }\n  }\n\n  if (target) {\n    useEventListener(target, 'keydown', (e: KeyboardEvent) => {\n      updateRefs(e, true)\n      return onEventFired(e)\n    }, { passive })\n    useEventListener(target, 'keyup', (e: KeyboardEvent) => {\n      updateRefs(e, false)\n      return onEventFired(e)\n    }, { passive })\n  }\n\n  const proxy = new Proxy(\n    refs,\n    {\n      get(target, prop, rec) {\n        if (typeof prop !== 'string')\n          return Reflect.get(target, prop, rec)\n\n        prop = prop.toLowerCase()\n        // alias\n        if (prop in aliasMap)\n          prop = aliasMap[prop]\n        // create new tracking\n        if (!(prop in refs)) {\n          if (/[+_-]/.test(prop)) {\n            const keys = prop.split(/[+_-]/g).map(i => i.trim())\n            refs[prop] = computed(() => keys.every(key => unref(proxy[key])))\n          }\n          else {\n            refs[prop] = ref(false)\n          }\n        }\n        const r = Reflect.get(target, prop, rec)\n        return useReactive ? unref(r) : r\n      },\n    },\n  )\n\n  return proxy as any\n}\n\nexport { DefaultMagicKeysAliasMap } from './aliasMap'\n"
+  },
   "local": "import type { ComputedRef } from 'vue-demi'\nimport { computed, reactive, ref, unref } from 'vue-demi'\nimport type { MaybeComputedRef } from '@vueuse/shared'\nimport { noop } from '@vueuse/shared'\nimport { useEventListener } from '../useEventListener'\nimport { defaultWindow } from '../_configurable'\nimport { DefaultMagicKeysAliasMap } from './aliasMap'\n\nexport interface UseMagicKeysOptions<Reactive extends Boolean> {\n  /**\n   * Returns a reactive object instead of an object of refs\n   *\n   * @default false\n   */\n  reactive?: Reactive\n\n  /**\n   * Target for listening events\n   *\n   * @default window\n   */\n  target?: MaybeComputedRef<EventTarget>\n\n  /**\n   * Alias map for keys, all the keys should be lowercase\n   * { target: keycode }\n   *\n   * @example { ctrl: \"control\" }\n   * @default <predefined-map>\n   */\n  aliasMap?: Record<string, string>\n\n  /**\n   * Register passive listener\n   *\n   * @default true\n   */\n  passive?: boolean\n\n  /**\n   * Custom event handler for keydown/keyup event.\n   * Useful when you want to apply custom logic.\n   *\n   * When using `e.preventDefault()`, you will need to pass `passive: false` to useMagicKeys().\n   */\n  onEventFired?: (e: KeyboardEvent) => void | boolean\n}\n\nexport interface MagicKeysInternal {\n  /**\n   * A Set of currently pressed keys,\n   * Stores raw keyCodes.\n   *\n   * @see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key\n   */\n  current: Set<string>\n}\n\nexport type MagicKeys<Reactive extends Boolean> =\n  Readonly<\n  Omit<Reactive extends true\n    ? Record<string, boolean>\n    : Record<string, ComputedRef<boolean>>,\n  keyof MagicKeysInternal>\n  & MagicKeysInternal\n  >\n\n/**\n * Reactive keys pressed state, with magical keys combination support.\n *\n * @see https://vueuse.org/useMagicKeys\n */\nexport function useMagicKeys(options?: UseMagicKeysOptions<false>): MagicKeys<false>\nexport function useMagicKeys(options: UseMagicKeysOptions<true>): MagicKeys<true>\nexport function useMagicKeys(options: UseMagicKeysOptions<boolean> = {}): any {\n  const {\n    reactive: useReactive = false,\n    target = defaultWindow,\n    aliasMap = DefaultMagicKeysAliasMap,\n    passive = true,\n    onEventFired = noop,\n  } = options\n  const current = reactive(new Set<string>())\n  const obj = { toJSON() { return {} }, current }\n  const refs: Record<string, any> = useReactive ? reactive(obj) : obj\n  const metaDeps = new Set<string>()\n\n  function setRefs(key: string, value: boolean) {\n    if (key in refs) {\n      if (useReactive)\n        refs[key] = value\n      else\n        refs[key].value = value\n    }\n  }\n\n  function updateRefs(e: KeyboardEvent, value: boolean) {\n    const key = e.key?.toLowerCase()\n    const code = e.code?.toLowerCase()\n    const values = [code, key].filter(Boolean)\n\n    // current set\n    if (key) {\n      if (value)\n        current.add(key)\n      else\n        current.delete(key)\n    }\n\n    for (const key of values)\n      setRefs(key, value)\n\n    // #1312\n    // In macOS, keys won't trigger \"keyup\" event when Meta key is released\n    // We track it's combination and release manually\n    if (key === 'meta' && !value) {\n      // Meta key released\n      metaDeps.forEach((key) => {\n        current.delete(key)\n        setRefs(key, false)\n      })\n      metaDeps.clear()\n    }\n    else if (typeof e.getModifierState === 'function' && e.getModifierState('Meta') && value) {\n      [...current, ...values].forEach(key => metaDeps.add(key))\n    }\n  }\n\n  useEventListener(target, 'keydown', (e: KeyboardEvent) => {\n    updateRefs(e, true)\n    return onEventFired(e)\n  }, { passive })\n  useEventListener(target, 'keyup', (e: KeyboardEvent) => {\n    updateRefs(e, false)\n    return onEventFired(e)\n  }, { passive })\n\n  const proxy = new Proxy(\n    refs,\n    {\n      get(target, prop, rec) {\n        if (typeof prop !== 'string')\n          return Reflect.get(target, prop, rec)\n\n        prop = prop.toLowerCase()\n        // alias\n        if (prop in aliasMap)\n          prop = aliasMap[prop]\n        // create new tracking\n        if (!(prop in refs)) {\n          if (/[+_-]/.test(prop)) {\n            const keys = prop.split(/[+_-]/g).map(i => i.trim())\n            refs[prop] = computed(() => keys.every(key => unref(proxy[key])))\n          }\n          else {\n            refs[prop] = ref(false)\n          }\n        }\n        const r = Reflect.get(target, prop, rec)\n        return useReactive ? unref(r) : r\n      },\n    },\n  )\n\n  return proxy as any\n}\n\nexport { DefaultMagicKeysAliasMap } from './aliasMap'\n",
   "remote": "import type { ComputedRef } from 'vue-demi'\nimport { computed, reactive, ref, unref } from 'vue-demi'\nimport type { MaybeRef } from '@vueuse/shared'\nimport { noop } from '@vueuse/shared'\nimport { useEventListener } from '../useEventListener'\nimport { defaultWindow } from '../_configurable'\nimport { DefaultMagicKeysAliasMap } from './aliasMap'\n\nexport interface UseMagicKeysOptions<Reactive extends Boolean> {\n  /**\n   * Returns a reactive object instead of an object of refs\n   *\n   * @default false\n   */\n  reactive?: Reactive\n\n  /**\n   * Target for listening events\n   *\n   * @default window\n   */\n  target?: MaybeRef<EventTarget>\n\n  /**\n   * Alias map for keys, all the keys should be lowercase\n   * { target: keycode }\n   *\n   * @example { ctrl: \"control\" }\n   * @default <predefined-map>\n   */\n  aliasMap?: Record<string, string>\n\n  /**\n   * Register passive listener\n   *\n   * @default true\n   */\n  passive?: boolean\n\n  /**\n   * Custom event handler for keydown/keyup event.\n   * Useful when you want to apply custom logic.\n   *\n   * When using `e.preventDefault()`, you will need to pass `passive: false` to useMagicKeys().\n   */\n  onEventFired?: (e: KeyboardEvent) => void | boolean\n}\n\nexport interface MagicKeysInternal {\n  /**\n   * A Set of currently pressed keys,\n   * Stores raw keyCodes.\n   *\n   * @see https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/keyCode\n   */\n  current: Set<string>\n}\n\nexport type MagicKeys<Reactive extends Boolean> =\n  Readonly<\n  Omit<Reactive extends true\n    ? Record<string, boolean>\n    : Record<string, ComputedRef<boolean>>,\n  keyof MagicKeysInternal>\n  & MagicKeysInternal\n  >\n\n/**\n * Reactive keys pressed state, with magical keys combination support.\n *\n * @see https://vueuse.org/useMagicKeys\n */\nexport function useMagicKeys(options?: UseMagicKeysOptions<false>): MagicKeys<false>\nexport function useMagicKeys(options: UseMagicKeysOptions<true>): MagicKeys<true>\nexport function useMagicKeys(options: UseMagicKeysOptions<boolean> = {}): any {\n  const {\n    reactive: useReactive = false,\n    target = defaultWindow,\n    aliasMap = DefaultMagicKeysAliasMap,\n    passive = true,\n    onEventFired = noop,\n  } = options\n  const current = reactive(new Set<string>())\n  const obj = { toJSON() { return {} }, current }\n  const refs: Record<string, any> = useReactive ? reactive(obj) : obj\n  const metaDeps = new Set<string>()\n  const usedKeys = new Set<string>()\n\n  function setRefs(key: string, value: boolean) {\n    if (key in refs) {\n      if (useReactive)\n        refs[key] = value\n      else\n        refs[key].value = value\n    }\n  }\n\n  function reset() {\n    for (const key of usedKeys) {\n      if (useReactive)\n        refs[key] = false\n      else\n        refs[key].value = false\n    }\n  }\n\n  function updateRefs(e: KeyboardEvent, value: boolean) {\n    const key = e.key?.toLowerCase()\n    const code = e.code?.toLowerCase()\n    const values = [code, key].filter(Boolean)\n\n    // current set\n    if (code) {\n      if (value)\n        current.add(e.code)\n      else\n        current.delete(e.code)\n    }\n\n    for (const key of values) {\n      usedKeys.add(key)\n      setRefs(key, value)\n    }\n\n    // #1312\n    // In macOS, keys won't trigger \"keyup\" event when Meta key is released\n    // We track it's combination and relese manually\n    if (key === 'meta' && !value) {\n      // Meta key released\n      metaDeps.forEach((key) => {\n        current.delete(key)\n        setRefs(key, false)\n      })\n      metaDeps.clear()\n    }\n    else if (typeof e.getModifierState === 'function' && e.getModifierState('Meta') && value) {\n      [...current, ...values].forEach(key => metaDeps.add(key))\n    }\n  }\n\n  if (target) {\n    useEventListener(target, 'keydown', (e: KeyboardEvent) => {\n      updateRefs(e, true)\n      return onEventFired(e)\n    }, { passive })\n    useEventListener(target, 'keyup', (e: KeyboardEvent) => {\n      updateRefs(e, false)\n      return onEventFired(e)\n    }, { passive })\n\n    // #1350\n    useEventListener('blur', reset, { passive: true })\n    useEventListener('focus', reset, { passive: true })\n  }\n\n  const proxy = new Proxy(\n    refs,\n    {\n      get(target, prop, rec) {\n        if (typeof prop !== 'string')\n          return Reflect.get(target, prop, rec)\n\n        prop = prop.toLowerCase()\n        // alias\n        if (prop in aliasMap)\n          prop = aliasMap[prop]\n        // create new tracking\n        if (!(prop in refs)) {\n          if (/[+_-]/.test(prop)) {\n            const keys = prop.split(/[+_-]/g).map(i => i.trim())\n            refs[prop] = computed(() => keys.every(key => unref(proxy[key])))\n          }\n          else {\n            refs[prop] = ref(false)\n          }\n        }\n        const r = Reflect.get(target, prop, rec)\n        return useReactive ? unref(r) : r\n      },\n    },\n  )\n\n  return proxy as any\n}\n\nexport { DefaultMagicKeysAliasMap } from './aliasMap'\n",
   "deleted": null,
   "eol": "Lf",
   "chunks": [
     {
-      "id": 0,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 0,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 2,
+          "len": 1
+        },
+        "local": {
+          "start": 2,
+          "len": 1
+        },
+        "remote": {
+          "start": 2,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 2,
         "len": 1
       },
-      "local": {
-        "start": 2,
-        "len": 1
-      },
-      "remote": {
-        "start": 2,
-        "len": 1
+      "words": {
+        "chunk": 0,
+        "local": {
+          "changed": [
+            {
+              "line": 2,
+              "start": 14,
+              "len": 16
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 1,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 1,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 21,
+          "len": 1
+        },
+        "local": {
+          "start": 21,
+          "len": 1
+        },
+        "remote": {
+          "start": 21,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 21,
         "len": 1
       },
-      "local": {
-        "start": 21,
-        "len": 1
-      },
-      "remote": {
-        "start": 21,
-        "len": 1
+      "words": {
+        "chunk": 1,
+        "local": {
+          "changed": [
+            {
+              "line": 21,
+              "start": 11,
+              "len": 16
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 2,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 2,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 53,
+          "len": 1
+        },
+        "local": {
+          "start": 53,
+          "len": 1
+        },
+        "remote": {
+          "start": 53,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 53,
         "len": 1
       },
-      "local": {
-        "start": 53,
-        "len": 1
-      },
-      "remote": {
-        "start": 53,
-        "len": 1
+      "words": {
+        "chunk": 2,
+        "local": {
+          "changed": [
+            {
+              "line": 53,
+              "start": 73,
+              "len": 3
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 3,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 3,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 86,
+          "len": 0
+        },
+        "local": {
+          "start": 86,
+          "len": 0
+        },
+        "remote": {
+          "start": 86,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 86,
         "len": 0
       },
-      "local": {
-        "start": 86,
-        "len": 0
-      },
-      "remote": {
-        "start": 86,
-        "len": 1
+      "words": {
+        "chunk": 3,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 4,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 4,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 96,
+          "len": 0
+        },
+        "local": {
+          "start": 96,
+          "len": 0
+        },
+        "remote": {
+          "start": 97,
+          "len": 9
+        }
+      },
+      "middle": {
         "start": 96,
         "len": 0
       },
-      "local": {
-        "start": 96,
-        "len": 0
-      },
-      "remote": {
-        "start": 97,
-        "len": 9
+      "words": {
+        "chunk": 4,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 5,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 5,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 102,
+          "len": 5
+        },
+        "local": {
+          "start": 102,
+          "len": 5
+        },
+        "remote": {
+          "start": 112,
+          "len": 5
+        }
+      },
+      "middle": {
         "start": 102,
         "len": 5
       },
-      "local": {
-        "start": 102,
-        "len": 5
-      },
-      "remote": {
-        "start": 112,
-        "len": 5
+      "words": {
+        "chunk": 5,
+        "local": {
+          "changed": [
+            {
+              "line": 102,
+              "start": 8,
+              "len": 3
+            },
+            {
+              "line": 104,
+              "start": 20,
+              "len": 3
+            },
+            {
+              "line": 106,
+              "start": 23,
+              "len": 3
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 6,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 6,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 109,
+          "len": 2
+        },
+        "local": {
+          "start": 109,
+          "len": 2
+        },
+        "remote": {
+          "start": 119,
+          "len": 4
+        }
+      },
+      "middle": {
         "start": 109,
         "len": 2
       },
-      "local": {
-        "start": 109,
-        "len": 2
-      },
-      "remote": {
-        "start": 119,
-        "len": 4
+      "words": {
+        "chunk": 6,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 119,
+              "start": 29,
+              "len": 2
+            },
+            {
+              "line": 120,
+              "start": 0,
+              "len": 23
+            },
+            {
+              "line": 122,
+              "start": 0,
+              "len": 5
+            }
+          ],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 7,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 7,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 114,
+          "len": 1
+        },
+        "local": {
+          "start": 114,
+          "len": 1
+        },
+        "remote": {
+          "start": 126,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 114,
         "len": 1
       },
-      "local": {
-        "start": 114,
-        "len": 1
-      },
-      "remote": {
-        "start": 126,
-        "len": 1
+      "words": {
+        "chunk": 7,
+        "local": {
+          "changed": [
+            {
+              "line": 114,
+              "start": 37,
+              "len": 7
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 8,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 8,
+        "kind": "Conflict",
+        "base": {
+          "start": 128,
+          "len": 10
+        },
+        "local": {
+          "start": 128,
+          "len": 8
+        },
+        "remote": {
+          "start": 140,
+          "len": 14
+        }
+      },
+      "middle": {
         "start": 128,
         "len": 10
       },
-      "local": {
-        "start": 128,
-        "len": 8
-      },
-      "remote": {
-        "start": 140,
-        "len": 14
+      "words": {
+        "chunk": 8,
+        "local": {
+          "changed": [
+            {
+              "line": 128,
+              "start": 0,
+              "len": 2
+            },
+            {
+              "line": 129,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 130,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 131,
+              "start": 0,
+              "len": 2
+            },
+            {
+              "line": 132,
+              "start": 0,
+              "len": 2
+            },
+            {
+              "line": 133,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 134,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 135,
+              "start": 0,
+              "len": 2
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 128,
+              "column": 0
+            },
+            {
+              "line": 135,
+              "column": 17
+            }
+          ]
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 150,
+              "start": 0,
+              "len": 12
+            },
+            {
+              "line": 151,
+              "start": 0,
+              "len": 54
+            },
+            {
+              "line": 152,
+              "start": 0,
+              "len": 55
+            }
+          ],
+          "removed_at": []
+        }
       }
     }
   ],
-  "word_changes": [
-    {
-      "chunk": 0,
-      "local": {
-        "changed": [
-          {
-            "line": 2,
-            "start": 14,
-            "len": 16
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 1,
-      "local": {
-        "changed": [
-          {
-            "line": 21,
-            "start": 11,
-            "len": 16
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 2,
-      "local": {
-        "changed": [
-          {
-            "line": 53,
-            "start": 73,
-            "len": 3
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 3,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 4,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 5,
-      "local": {
-        "changed": [
-          {
-            "line": 102,
-            "start": 8,
-            "len": 3
-          },
-          {
-            "line": 104,
-            "start": 20,
-            "len": 3
-          },
-          {
-            "line": 106,
-            "start": 23,
-            "len": 3
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 6,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 119,
-            "start": 29,
-            "len": 2
-          },
-          {
-            "line": 120,
-            "start": 0,
-            "len": 23
-          },
-          {
-            "line": 122,
-            "start": 0,
-            "len": 5
-          }
-        ],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 7,
-      "local": {
-        "changed": [
-          {
-            "line": 114,
-            "start": 37,
-            "len": 7
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 8,
-      "local": {
-        "changed": [
-          {
-            "line": 128,
-            "start": 0,
-            "len": 2
-          },
-          {
-            "line": 129,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 130,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 131,
-            "start": 0,
-            "len": 2
-          },
-          {
-            "line": 132,
-            "start": 0,
-            "len": 2
-          },
-          {
-            "line": 133,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 134,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 135,
-            "start": 0,
-            "len": 2
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 128,
-            "column": 0
-          },
-          {
-            "line": 135,
-            "column": 17
-          }
-        ]
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 150,
-            "start": 0,
-            "len": 12
-          },
-          {
-            "line": 151,
-            "start": 0,
-            "len": 54
-          },
-          {
-            "line": 152,
-            "start": 0,
-            "len": 55
-          }
-        ],
-        "removed_at": []
-      }
-    }
-  ]
+  "disk_version": 0
 }

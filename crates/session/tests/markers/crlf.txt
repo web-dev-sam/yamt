@@ -1,0 +1,31 @@
+title
+=======
+<<<<<<< HEAD
+one
+TWO
+shared-a
+three-ours
+||||||| 8956f4f
+one
+two
+three
+=======
+ONE
+two
+shared-a
+three-theirs
+>>>>>>> theirs
+shared-b
+four
+five
+six
+seven
+<<<<<<< HEAD
+eight-ours
+||||||| 8956f4f
+eight
+=======
+eight-theirs
+>>>>>>> theirs
+nine
+ten

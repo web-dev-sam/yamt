@@ -1,1517 +1,1549 @@
 {
   "path": "nuxt-island-test.ts",
-  "base": "import { describe, expect, it, vi } from 'vitest'\nimport { h } from 'vue'\nimport { mountSuspended } from 'nuxt-vitest/utils'\nimport { createServerComponent } from '../../packages/nuxt/src/components/runtime/server-component'\nimport { createSimpleRemoteIslandProvider } from '../fixtures/remote-provider'\nimport NuxtIsland from '../../packages/nuxt/src/app/components/nuxt-island'\n\nvi.mock('#build/nuxt.config.mjs', async (original) => {\n  return {\n    // @ts-expect-error virtual file\n    ...(await original()),\n    remoteComponentIslands: true\n  }\n})\n\nvi.mock('vue', async (original) => {\n  const vue = await original<typeof import('vue')>()\n  return {\n    ...vue,\n    h: vi.fn(vue.h)\n  }\n})\n\ndescribe('runtime server component', () => {\n  it('expect no data-v- attrbutes #23051', () => {\n    // @ts-expect-error mock\n    vi.mocked(h).mockImplementation(() => null)\n\n    // @ts-expect-error test setup\n    createServerComponent('DummyName').setup!({\n      lazy: false\n    }, {\n      attrs: {\n        'data-v-123': '',\n        test: 1\n      },\n      slots: {},\n      emit: vi.fn(),\n      expose: vi.fn()\n    })()\n\n    expect(h).toHaveBeenCalledOnce()\n    if (!vi.mocked(h).mock.lastCall) { throw new Error('no last call') }\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toBeTypeOf('object')\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toMatchInlineSnapshot(`\n      {\n        \"data-v-123\": \"\",\n        \"test\": 1,\n      }\n    `)\n    vi.mocked(h).mockRestore()\n  })\n\n  it('expect remote island to be rendered', async () => {\n    const server = createSimpleRemoteIslandProvider()\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'Test',\n        source: 'http://localhost:3001'\n      }\n    })\n\n    expect(wrapper.html()).toMatchInlineSnapshot('\"<div>hello world from another server</div>\"')\n\n    await server.close()\n  })\n})\n",
+  "middle": {
+    "kind": "Stages",
+    "text": "import { describe, expect, it, vi } from 'vitest'\nimport { h } from 'vue'\nimport { mountSuspended } from 'nuxt-vitest/utils'\nimport { createServerComponent } from '../../packages/nuxt/src/components/runtime/server-component'\nimport { createSimpleRemoteIslandProvider } from '../fixtures/remote-provider'\nimport NuxtIsland from '../../packages/nuxt/src/app/components/nuxt-island'\n\nvi.mock('#build/nuxt.config.mjs', async (original) => {\n  return {\n    // @ts-expect-error virtual file\n    ...(await original()),\n    remoteComponentIslands: true\n  }\n})\n\nvi.mock('vue', async (original) => {\n  const vue = await original<typeof import('vue')>()\n  return {\n    ...vue,\n    h: vi.fn(vue.h)\n  }\n})\n\ndescribe('runtime server component', () => {\n  it('expect no data-v- attrbutes #23051', () => {\n    // @ts-expect-error mock\n    vi.mocked(h).mockImplementation(() => null)\n\n    // @ts-expect-error test setup\n    createServerComponent('DummyName').setup!({\n      lazy: false\n    }, {\n      attrs: {\n        'data-v-123': '',\n        test: 1\n      },\n      slots: {},\n      emit: vi.fn(),\n      expose: vi.fn()\n    })()\n\n    expect(h).toHaveBeenCalledOnce()\n    if (!vi.mocked(h).mock.lastCall) { throw new Error('no last call') }\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toBeTypeOf('object')\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toMatchInlineSnapshot(`\n      {\n        \"data-v-123\": \"\",\n        \"test\": 1,\n      }\n    `)\n    vi.mocked(h).mockRestore()\n  })\n\n  it('expect remote island to be rendered', async () => {\n    const server = createSimpleRemoteIslandProvider()\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'Test',\n        source: 'http://localhost:3001'\n      }\n    })\n\n    expect(wrapper.html()).toMatchInlineSnapshot('\"<div>hello world from another server</div>\"')\n\n    await server.close()\n  })\n})\n"
+  },
   "local": "import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'\nimport { h } from 'vue'\nimport { mountSuspended } from 'nuxt-vitest/utils'\nimport { flushPromises } from '@vue/test-utils'\nimport { createServerComponent } from '../../packages/nuxt/src/components/runtime/server-component'\nimport { createSimpleRemoteIslandProvider } from '../fixtures/remote-provider'\nimport NuxtIsland from '../../packages/nuxt/src/app/components/nuxt-island'\nimport { useNuxtApp } from '../../packages/nuxt/src/app'\n\nvi.mock('#build/nuxt.config.mjs', async (original) => {\n  return {\n    // @ts-expect-error virtual file\n    ...(await original()),\n    remoteComponentIslands: true\n  }\n})\n\nvi.mock('vue', async (original) => {\n  const vue = await original<typeof import('vue')>()\n  return {\n    ...vue,\n    h: vi.fn(vue.h)\n  }\n})\n\nbeforeEach(() => {\n  vi.mocked(h).mockClear()\n})\n\ndescribe('runtime server component', () => {\n  it('expect no data-v- attrbutes #23051', () => {\n    // @ts-expect-error mock\n    vi.mocked(h).mockImplementation(() => null)\n\n    // @ts-expect-error test setup\n    createServerComponent('DummyName').setup!({\n      lazy: false\n    }, {\n      attrs: {\n        'data-v-123': '',\n        test: 1\n      },\n      slots: {},\n      emit: vi.fn(),\n      expose: vi.fn()\n    })()\n\n    expect(h).toHaveBeenCalledOnce()\n    if (!vi.mocked(h).mock.lastCall) { throw new Error('no last call') }\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toBeTypeOf('object')\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toMatchInlineSnapshot(`\n      {\n        \"data-v-123\": \"\",\n        \"test\": 1,\n      }\n    `)\n    vi.mocked(h).mockRestore()\n  })\n\n  it('expect remote island to be rendered', async () => {\n    const server = createSimpleRemoteIslandProvider()\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'Test',\n        source: 'http://localhost:3001'\n      }\n    })\n\n    expect(wrapper.html()).toMatchInlineSnapshot('\"<div>hello world from another server</div>\"')\n\n    await server.close()\n  })\n\n\n  describe('Cache control', () => {\n    beforeEach(() => {\n      let count = 0\n      const ogFetch = fetch\n      const stubFetch = vi.fn((...args: Parameters<typeof fetch>) => {\n        const [url] = args\n\n        if (typeof url === 'string' && url.startsWith('/__nuxt_island')) {\n          count++\n          return {\n            id: '123',\n            html: `<div>${count}</div>`,\n            state: {},\n            head: {\n              link: [],\n              style: []\n            },\n            json() {\n              return this\n            }\n          }\n        }\n        return ogFetch(...args)\n      })\n      vi.stubGlobal('fetch', stubFetch)\n\n      useNuxtApp().payload.data = {}\n    })\n\n    afterEach(() => {\n      vi.mocked(fetch).mockRestore()\n    })\n\n    it('expect to not use cached payload', async () => {\n      const wrapper = await mountSuspended(\n        createServerComponent('CacheTest'), {\n        props: {\n          useCache: false,\n          props: {\n            test: 1\n          }\n        }\n      })\n\n      expect(fetch).toHaveBeenCalledOnce()\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>1</div>\"')\n      await wrapper.setProps({\n        useCache: false,\n        props: {\n          test: 2\n        }\n      })\n\n      await flushPromises()\n      expect(fetch).toHaveBeenCalledTimes(2)\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>2</div>\"')\n      await wrapper.setProps({\n        useCache: false,\n        props: {\n          test: 1\n        }\n      })\n      await flushPromises()\n      // NuxtIsland should fetch again, because the cache is not used\n      expect(fetch).toHaveBeenCalledTimes(3)\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>3</div>\"')\n    })\n\n    it('expect to use cached payload', async () => {\n      const wrapper = await mountSuspended(\n        createServerComponent('CacheTest'), {\n        props: {\n          useCache: true,\n          props: {\n            test: 1\n          }\n        }\n      })\n\n      expect(fetch).toHaveBeenCalledOnce()\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>1</div>\"')\n      await wrapper.setProps({\n        useCache: true,\n        props: {\n          test: 2\n        }\n      })\n\n      await flushPromises()\n      expect(fetch).toHaveBeenCalledTimes(2)\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>2</div>\"')\n      await wrapper.setProps({\n        useCache: true,\n        props: {\n          test: 2\n        }\n      })\n      await flushPromises()\n      // should not fetch the component, because the cache is used\n      expect(fetch).toHaveBeenCalledTimes(2)\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>2</div>\"')\n    })\n\n    it('expect server component to set the response into the payload', async () => {\n      const wrapper = await mountSuspended(\n        createServerComponent('CacheTest'), {\n        props: {\n          useCache: false,\n          setCache: true,\n          props: {\n            test: 1\n          }\n        }\n      })\n\n      expect(fetch).toHaveBeenCalledOnce()\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>1</div>\"')\n \n      expect(Object.keys(useNuxtApp().payload.data).length).toBe(1)\n    })\n\n    it('expect server component to NOT set the response into the payload', async () => {\n      const wrapper = await mountSuspended(\n        createServerComponent('CacheTest'), {\n        props: {\n          useCache: false,\n          setCache: false,\n          props: {\n            test: 1\n          }\n        }\n      })\n\n      expect(fetch).toHaveBeenCalledOnce()\n      expect(wrapper.html()).toMatchInlineSnapshot('\"<div>1</div>\"')\n      expect(Object.keys(useNuxtApp().payload.data).length).toBe(0) \n    })\n  })\n})\n",
   "remote": "import { beforeEach } from 'node:test'\nimport { describe, expect, it, vi } from 'vitest'\nimport { h, nextTick } from 'vue'\nimport { mountSuspended } from '@nuxt/test-utils/runtime'\nimport { createServerComponent } from '../../packages/nuxt/src/components/runtime/server-component'\nimport { createSimpleRemoteIslandProvider } from '../fixtures/remote-provider'\nimport NuxtIsland from '../../packages/nuxt/src/app/components/nuxt-island'\n\nvi.mock('#build/nuxt.config.mjs', async (original) => {\n  return {\n    // @ts-expect-error virtual file\n    ...(await original()),\n    remoteComponentIslands: true,\n    selectiveClient: true\n  }\n})\n\nvi.mock('vue', async (original) => {\n  const vue = await original<typeof import('vue')>()\n  return {\n    ...vue,\n    h: vi.fn(vue.h)\n  }\n})\n\nconst consoleError = vi.spyOn(console, 'error')\nconst consoleWarn = vi.spyOn(console, 'warn')\n\nfunction expectNoConsoleIssue() {\n  expect(consoleError).not.toHaveBeenCalled()\n  expect(consoleWarn).not.toHaveBeenCalled()\n}\n\nbeforeEach(() => {\n  consoleError.mockClear()\n  consoleWarn.mockClear()\n})\n\ndescribe('runtime server component', () => {\n  it('expect no data-v- attrbutes #23051', () => {\n    // @ts-expect-error mock\n    vi.mocked(h).mockImplementation(() => null)\n\n    // @ts-expect-error test setup\n    createServerComponent('DummyName').setup!({\n      lazy: false\n    }, {\n      attrs: {\n        'data-v-123': '',\n        test: 1\n      },\n      slots: {},\n      emit: vi.fn(),\n      expose: vi.fn()\n    })()\n\n    expect(h).toHaveBeenCalledOnce()\n    if (!vi.mocked(h).mock.lastCall) { throw new Error('no last call') }\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toBeTypeOf('object')\n    expect(vi.mocked(h).mock.lastCall![1]?.props).toMatchInlineSnapshot(`\n      {\n        \"data-v-123\": \"\",\n        \"test\": 1,\n      }\n    `)\n    vi.mocked(h).mockRestore()\n  })\n\n  it('expect remote island to be rendered', async () => {\n    const server = createSimpleRemoteIslandProvider()\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'Test',\n        source: 'http://localhost:3001'\n      }\n    })\n\n    expect(wrapper.html()).toMatchInlineSnapshot('\"<div>hello world from another server</div>\"')\n\n    await server.close()\n  })\n\n  it('force refresh', async () => {\n    let count = 0\n    const stubFetch = vi.fn(() => {\n      count++\n      return {\n        id: '123',\n        html: `<div>${count}</div>`,\n        state: {},\n        head: {\n          link: [],\n          style: []\n        },\n        json() {\n          return this\n        }\n      }\n    })\n    vi.stubGlobal('fetch', stubFetch)\n\n    const component = await mountSuspended(createServerComponent('dummyName'))\n    expect(fetch).toHaveBeenCalledOnce()\n\n    expect(component.html()).toBe('<div>1</div>')\n\n    await component.vm.$.exposed!.refresh()\n    expect(fetch).toHaveBeenCalledTimes(2)\n    await nextTick()\n    expect(component.html()).toBe('<div>2</div>')\n    vi.mocked(fetch).mockReset()\n  })\n})\n\n\ndescribe('client components', () => {\n\n  it('expect swapping nuxt-client should not trigger errors #25289', async () => {\n    const mockPath = '/nuxt-client.js'\n    const componentId = 'Client-12345'\n\n    vi.doMock(mockPath, () => ({\n      default: {\n        name: 'ClientComponent',\n        setup() {\n          return () => h('div', 'client component')\n        }\n      }\n    }))\n\n    const stubFetch = vi.fn(() => {\n      return {\n        id: '123',\n        html: `<div data-island-uid>hello<div data-island-uid data-island-component=\"${componentId}\"></div></div>`,\n        state: {},\n        head: {\n          link: [],\n          style: []\n        },\n        components: {\n          [componentId]: {\n            html: '<div>fallback</div>',\n            props: {},\n            chunk: mockPath\n          }\n        },\n        json() {\n          return this\n        }\n      }\n    })\n\n    vi.stubGlobal('fetch', stubFetch)\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'NuxtClient',\n        props: {\n          force: true\n        }\n      },\n      attachTo: 'body'\n    })\n\n    expect(fetch).toHaveBeenCalledOnce()\n\n    expect(wrapper.html()).toMatchInlineSnapshot(`\n      \"<div data-island-uid=\"3\">hello<div data-island-uid=\"3\" data-island-component=\"Client-12345\">\n          <div>client component</div>\n        </div>\n      </div>\n      <!--teleport start-->\n      <!--teleport end-->\"\n    `)\n\n    // @ts-expect-error mock\n    vi.mocked(fetch).mockImplementation(() => ({\n      id: '123',\n      html: `<div data-island-uid>hello<div><div>fallback</div></div></div>`,\n      state: {},\n      head: {\n        link: [],\n        style: []\n      },\n      components: {},\n      json() {\n        return this\n      }\n    }))\n\n    await wrapper.vm.$.exposed!.refresh()\n    await nextTick()\n    expect(wrapper.html()).toMatchInlineSnapshot( `\n      \"<div data-island-uid=\"3\">hello<div>\n          <div>fallback</div>\n        </div>\n      </div>\"\n    `)\n\n    vi.mocked(fetch).mockReset()\n    expectNoConsoleIssue()\n  })\n\n    \n  it('should not replace nested client components data-island-uid', async () => {\n    const componentId = 'Client-12345'\n \n    const stubFetch = vi.fn(() => {\n      return {\n        id: '1234',\n        html: `<div data-island-uid>hello<div data-island-uid=\"not-to-be-replaced\" data-island-component=\"${componentId}\"></div></div>`,\n        state: {},\n        head: {\n          link: [],\n          style: []\n        },\n        json() {\n          return this\n        }\n      }\n    })\n\n    vi.stubGlobal('fetch', stubFetch)\n\n    const wrapper = await mountSuspended(NuxtIsland, {\n      props: {\n        name: 'WithNestedClient',\n        props: {\n          force: true\n        }\n      },\n      attachTo: 'body'\n    })\n\n    expect(fetch).toHaveBeenCalledOnce()\n    expect(wrapper.html()).toContain('data-island-uid=\"not-to-be-replaced\"')\n    vi.mocked(fetch).mockReset()\n    expectNoConsoleIssue()\n  })\n})",
   "deleted": null,
   "eol": "Lf",
   "chunks": [
     {
-      "id": 0,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 0,
+        "kind": "Conflict",
+        "base": {
+          "start": 0,
+          "len": 3
+        },
+        "local": {
+          "start": 0,
+          "len": 4
+        },
+        "remote": {
+          "start": 0,
+          "len": 4
+        }
+      },
+      "middle": {
         "start": 0,
         "len": 3
       },
-      "local": {
-        "start": 0,
-        "len": 4
-      },
-      "remote": {
-        "start": 0,
-        "len": 4
+      "words": {
+        "chunk": 0,
+        "local": {
+          "changed": [
+            {
+              "line": 0,
+              "start": 9,
+              "len": 23
+            },
+            {
+              "line": 3,
+              "start": 0,
+              "len": 47
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 0,
+              "start": 0,
+              "len": 38
+            },
+            {
+              "line": 2,
+              "start": 10,
+              "len": 10
+            },
+            {
+              "line": 3,
+              "start": 32,
+              "len": 1
+            },
+            {
+              "line": 3,
+              "start": 38,
+              "len": 5
+            },
+            {
+              "line": 3,
+              "start": 48,
+              "len": 8
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 3,
+              "column": 37
+            }
+          ]
+        }
       }
     },
     {
-      "id": 1,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 1,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 6,
+          "len": 0
+        },
+        "local": {
+          "start": 7,
+          "len": 1
+        },
+        "remote": {
+          "start": 7,
+          "len": 0
+        }
+      },
+      "middle": {
         "start": 6,
         "len": 0
       },
-      "local": {
-        "start": 7,
-        "len": 1
-      },
-      "remote": {
-        "start": 7,
-        "len": 0
+      "words": {
+        "chunk": 1,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 2,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 2,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 11,
+          "len": 1
+        },
+        "local": {
+          "start": 13,
+          "len": 1
+        },
+        "remote": {
+          "start": 12,
+          "len": 2
+        }
+      },
+      "middle": {
         "start": 11,
         "len": 1
       },
-      "local": {
-        "start": 13,
-        "len": 1
-      },
-      "remote": {
-        "start": 12,
-        "len": 2
+      "words": {
+        "chunk": 2,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 12,
+              "start": 32,
+              "len": 1
+            },
+            {
+              "line": 13,
+              "start": 0,
+              "len": 25
+            }
+          ],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 3,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 3,
+        "kind": "Conflict",
+        "base": {
+          "start": 23,
+          "len": 0
+        },
+        "local": {
+          "start": 25,
+          "len": 4
+        },
+        "remote": {
+          "start": 25,
+          "len": 13
+        }
+      },
+      "middle": {
         "start": 23,
         "len": 0
       },
-      "local": {
-        "start": 25,
-        "len": 4
-      },
-      "remote": {
-        "start": 25,
-        "len": 13
+      "words": {
+        "chunk": 3,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 4,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 4,
+        "kind": "Conflict",
+        "base": {
+          "start": 67,
+          "len": 1
+        },
+        "local": {
+          "start": 73,
+          "len": 141
+        },
+        "remote": {
+          "start": 82,
+          "len": 159
+        }
+      },
+      "middle": {
         "start": 67,
         "len": 1
       },
-      "local": {
-        "start": 73,
-        "len": 141
-      },
-      "remote": {
-        "start": 82,
-        "len": 159
+      "words": {
+        "chunk": 4,
+        "local": {
+          "changed": [
+            {
+              "line": 75,
+              "start": 0,
+              "len": 35
+            },
+            {
+              "line": 76,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 77,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 78,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 79,
+              "start": 0,
+              "len": 70
+            },
+            {
+              "line": 80,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 82,
+              "start": 0,
+              "len": 74
+            },
+            {
+              "line": 83,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 84,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 85,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 86,
+              "start": 0,
+              "len": 40
+            },
+            {
+              "line": 87,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 88,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 89,
+              "start": 0,
+              "len": 23
+            },
+            {
+              "line": 90,
+              "start": 0,
+              "len": 23
+            },
+            {
+              "line": 91,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 92,
+              "start": 0,
+              "len": 20
+            },
+            {
+              "line": 93,
+              "start": 0,
+              "len": 25
+            },
+            {
+              "line": 94,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 95,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 96,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 97,
+              "start": 0,
+              "len": 31
+            },
+            {
+              "line": 98,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 99,
+              "start": 0,
+              "len": 39
+            },
+            {
+              "line": 101,
+              "start": 0,
+              "len": 36
+            },
+            {
+              "line": 102,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 104,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 105,
+              "start": 0,
+              "len": 36
+            },
+            {
+              "line": 106,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 108,
+              "start": 0,
+              "len": 56
+            },
+            {
+              "line": 109,
+              "start": 0,
+              "len": 43
+            },
+            {
+              "line": 110,
+              "start": 0,
+              "len": 45
+            },
+            {
+              "line": 111,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 112,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 113,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 114,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 115,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 116,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 117,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 119,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 120,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 121,
+              "start": 0,
+              "len": 30
+            },
+            {
+              "line": 122,
+              "start": 0,
+              "len": 24
+            },
+            {
+              "line": 123,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 124,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 125,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 126,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 128,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 129,
+              "start": 0,
+              "len": 44
+            },
+            {
+              "line": 130,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 131,
+              "start": 0,
+              "len": 30
+            },
+            {
+              "line": 132,
+              "start": 0,
+              "len": 24
+            },
+            {
+              "line": 133,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 134,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 135,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 136,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 137,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 138,
+              "start": 0,
+              "len": 69
+            },
+            {
+              "line": 139,
+              "start": 0,
+              "len": 44
+            },
+            {
+              "line": 140,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 141,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 143,
+              "start": 0,
+              "len": 52
+            },
+            {
+              "line": 144,
+              "start": 0,
+              "len": 43
+            },
+            {
+              "line": 145,
+              "start": 0,
+              "len": 45
+            },
+            {
+              "line": 146,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 147,
+              "start": 0,
+              "len": 25
+            },
+            {
+              "line": 148,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 149,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 150,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 151,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 152,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 154,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 155,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 156,
+              "start": 0,
+              "len": 30
+            },
+            {
+              "line": 157,
+              "start": 0,
+              "len": 23
+            },
+            {
+              "line": 158,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 159,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 160,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 161,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 163,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 164,
+              "start": 0,
+              "len": 44
+            },
+            {
+              "line": 165,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 166,
+              "start": 0,
+              "len": 30
+            },
+            {
+              "line": 167,
+              "start": 0,
+              "len": 23
+            },
+            {
+              "line": 168,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 169,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 170,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 171,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 172,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 173,
+              "start": 0,
+              "len": 66
+            },
+            {
+              "line": 174,
+              "start": 0,
+              "len": 44
+            },
+            {
+              "line": 175,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 176,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 178,
+              "start": 0,
+              "len": 84
+            },
+            {
+              "line": 179,
+              "start": 0,
+              "len": 43
+            },
+            {
+              "line": 180,
+              "start": 0,
+              "len": 45
+            },
+            {
+              "line": 181,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 182,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 183,
+              "start": 0,
+              "len": 25
+            },
+            {
+              "line": 184,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 185,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 186,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 187,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 188,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 190,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 191,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 192,
+              "start": 0,
+              "len": 1
+            },
+            {
+              "line": 193,
+              "start": 0,
+              "len": 67
+            },
+            {
+              "line": 194,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 196,
+              "start": 0,
+              "len": 88
+            },
+            {
+              "line": 197,
+              "start": 0,
+              "len": 43
+            },
+            {
+              "line": 198,
+              "start": 0,
+              "len": 45
+            },
+            {
+              "line": 199,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 200,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 201,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 202,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 203,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 204,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 205,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 206,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 208,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 209,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 210,
+              "start": 0,
+              "len": 68
+            },
+            {
+              "line": 211,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 212,
+              "start": 0,
+              "len": 4
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 83,
+              "start": 0,
+              "len": 35
+            },
+            {
+              "line": 84,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 85,
+              "start": 0,
+              "len": 35
+            },
+            {
+              "line": 86,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 87,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 88,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 89,
+              "start": 0,
+              "len": 36
+            },
+            {
+              "line": 90,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 91,
+              "start": 0,
+              "len": 15
+            },
+            {
+              "line": 92,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 93,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 94,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 95,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 96,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 97,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 98,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 99,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 100,
+              "start": 0,
+              "len": 37
+            },
+            {
+              "line": 102,
+              "start": 0,
+              "len": 78
+            },
+            {
+              "line": 103,
+              "start": 0,
+              "len": 40
+            },
+            {
+              "line": 105,
+              "start": 0,
+              "len": 49
+            },
+            {
+              "line": 107,
+              "start": 0,
+              "len": 43
+            },
+            {
+              "line": 108,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 109,
+              "start": 0,
+              "len": 20
+            },
+            {
+              "line": 110,
+              "start": 0,
+              "len": 49
+            },
+            {
+              "line": 111,
+              "start": 0,
+              "len": 32
+            },
+            {
+              "line": 112,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 113,
+              "start": 0,
+              "len": 2
+            },
+            {
+              "line": 116,
+              "start": 0,
+              "len": 37
+            },
+            {
+              "line": 118,
+              "start": 0,
+              "len": 82
+            },
+            {
+              "line": 119,
+              "start": 0,
+              "len": 38
+            },
+            {
+              "line": 120,
+              "start": 0,
+              "len": 38
+            },
+            {
+              "line": 122,
+              "start": 0,
+              "len": 32
+            },
+            {
+              "line": 123,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 124,
+              "start": 0,
+              "len": 32
+            },
+            {
+              "line": 125,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 126,
+              "start": 0,
+              "len": 51
+            },
+            {
+              "line": 127,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 128,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 129,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 131,
+              "start": 0,
+              "len": 35
+            },
+            {
+              "line": 132,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 133,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 134,
+              "start": 0,
+              "len": 115
+            },
+            {
+              "line": 135,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 136,
+              "start": 0,
+              "len": 15
+            },
+            {
+              "line": 137,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 138,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 139,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 140,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 141,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 142,
+              "start": 0,
+              "len": 40
+            },
+            {
+              "line": 143,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 144,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 145,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 146,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 147,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 148,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 149,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 150,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 151,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 153,
+              "start": 0,
+              "len": 37
+            },
+            {
+              "line": 155,
+              "start": 0,
+              "len": 54
+            },
+            {
+              "line": 156,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 157,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 158,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 159,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 160,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 161,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 162,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 163,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 165,
+              "start": 0,
+              "len": 40
+            },
+            {
+              "line": 167,
+              "start": 0,
+              "len": 50
+            },
+            {
+              "line": 168,
+              "start": 0,
+              "len": 99
+            },
+            {
+              "line": 169,
+              "start": 0,
+              "len": 37
+            },
+            {
+              "line": 170,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 171,
+              "start": 0,
+              "len": 12
+            },
+            {
+              "line": 172,
+              "start": 0,
+              "len": 27
+            },
+            {
+              "line": 173,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 174,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 176,
+              "start": 0,
+              "len": 28
+            },
+            {
+              "line": 177,
+              "start": 0,
+              "len": 48
+            },
+            {
+              "line": 178,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 179,
+              "start": 0,
+              "len": 77
+            },
+            {
+              "line": 180,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 181,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 182,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 183,
+              "start": 0,
+              "len": 17
+            },
+            {
+              "line": 184,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 185,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 186,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 187,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 188,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 189,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 191,
+              "start": 0,
+              "len": 41
+            },
+            {
+              "line": 192,
+              "start": 0,
+              "len": 20
+            },
+            {
+              "line": 193,
+              "start": 0,
+              "len": 51
+            },
+            {
+              "line": 194,
+              "start": 0,
+              "len": 42
+            },
+            {
+              "line": 195,
+              "start": 0,
+              "len": 29
+            },
+            {
+              "line": 196,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 197,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 198,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 200,
+              "start": 0,
+              "len": 32
+            },
+            {
+              "line": 201,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 202,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 204,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 205,
+              "start": 0,
+              "len": 81
+            },
+            {
+              "line": 206,
+              "start": 0,
+              "len": 38
+            },
+            {
+              "line": 207,
+              "start": 0,
+              "len": 1
+            },
+            {
+              "line": 208,
+              "start": 0,
+              "len": 35
+            },
+            {
+              "line": 209,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 210,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 211,
+              "start": 0,
+              "len": 136
+            },
+            {
+              "line": 212,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 213,
+              "start": 0,
+              "len": 15
+            },
+            {
+              "line": 214,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 215,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 216,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 217,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 218,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 219,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 220,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 221,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 223,
+              "start": 0,
+              "len": 37
+            },
+            {
+              "line": 225,
+              "start": 0,
+              "len": 54
+            },
+            {
+              "line": 226,
+              "start": 0,
+              "len": 14
+            },
+            {
+              "line": 227,
+              "start": 0,
+              "len": 33
+            },
+            {
+              "line": 228,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 229,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 230,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 231,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 232,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 233,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 235,
+              "start": 0,
+              "len": 40
+            },
+            {
+              "line": 236,
+              "start": 0,
+              "len": 76
+            },
+            {
+              "line": 237,
+              "start": 0,
+              "len": 32
+            },
+            {
+              "line": 238,
+              "start": 0,
+              "len": 26
+            },
+            {
+              "line": 239,
+              "start": 0,
+              "len": 4
+            }
+          ],
+          "removed_at": []
+        }
       }
     }
   ],
-  "word_changes": [
-    {
-      "chunk": 0,
-      "local": {
-        "changed": [
-          {
-            "line": 0,
-            "start": 9,
-            "len": 23
-          },
-          {
-            "line": 3,
-            "start": 0,
-            "len": 47
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 0,
-            "start": 0,
-            "len": 38
-          },
-          {
-            "line": 2,
-            "start": 10,
-            "len": 10
-          },
-          {
-            "line": 3,
-            "start": 32,
-            "len": 1
-          },
-          {
-            "line": 3,
-            "start": 38,
-            "len": 5
-          },
-          {
-            "line": 3,
-            "start": 48,
-            "len": 8
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 3,
-            "column": 37
-          }
-        ]
-      }
-    },
-    {
-      "chunk": 1,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 2,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 12,
-            "start": 32,
-            "len": 1
-          },
-          {
-            "line": 13,
-            "start": 0,
-            "len": 25
-          }
-        ],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 3,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 4,
-      "local": {
-        "changed": [
-          {
-            "line": 75,
-            "start": 0,
-            "len": 35
-          },
-          {
-            "line": 76,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 77,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 78,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 79,
-            "start": 0,
-            "len": 70
-          },
-          {
-            "line": 80,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 82,
-            "start": 0,
-            "len": 74
-          },
-          {
-            "line": 83,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 84,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 85,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 86,
-            "start": 0,
-            "len": 40
-          },
-          {
-            "line": 87,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 88,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 89,
-            "start": 0,
-            "len": 23
-          },
-          {
-            "line": 90,
-            "start": 0,
-            "len": 23
-          },
-          {
-            "line": 91,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 92,
-            "start": 0,
-            "len": 20
-          },
-          {
-            "line": 93,
-            "start": 0,
-            "len": 25
-          },
-          {
-            "line": 94,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 95,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 96,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 97,
-            "start": 0,
-            "len": 31
-          },
-          {
-            "line": 98,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 99,
-            "start": 0,
-            "len": 39
-          },
-          {
-            "line": 101,
-            "start": 0,
-            "len": 36
-          },
-          {
-            "line": 102,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 104,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 105,
-            "start": 0,
-            "len": 36
-          },
-          {
-            "line": 106,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 108,
-            "start": 0,
-            "len": 56
-          },
-          {
-            "line": 109,
-            "start": 0,
-            "len": 43
-          },
-          {
-            "line": 110,
-            "start": 0,
-            "len": 45
-          },
-          {
-            "line": 111,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 112,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 113,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 114,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 115,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 116,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 117,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 119,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 120,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 121,
-            "start": 0,
-            "len": 30
-          },
-          {
-            "line": 122,
-            "start": 0,
-            "len": 24
-          },
-          {
-            "line": 123,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 124,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 125,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 126,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 128,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 129,
-            "start": 0,
-            "len": 44
-          },
-          {
-            "line": 130,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 131,
-            "start": 0,
-            "len": 30
-          },
-          {
-            "line": 132,
-            "start": 0,
-            "len": 24
-          },
-          {
-            "line": 133,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 134,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 135,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 136,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 137,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 138,
-            "start": 0,
-            "len": 69
-          },
-          {
-            "line": 139,
-            "start": 0,
-            "len": 44
-          },
-          {
-            "line": 140,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 141,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 143,
-            "start": 0,
-            "len": 52
-          },
-          {
-            "line": 144,
-            "start": 0,
-            "len": 43
-          },
-          {
-            "line": 145,
-            "start": 0,
-            "len": 45
-          },
-          {
-            "line": 146,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 147,
-            "start": 0,
-            "len": 25
-          },
-          {
-            "line": 148,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 149,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 150,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 151,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 152,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 154,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 155,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 156,
-            "start": 0,
-            "len": 30
-          },
-          {
-            "line": 157,
-            "start": 0,
-            "len": 23
-          },
-          {
-            "line": 158,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 159,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 160,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 161,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 163,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 164,
-            "start": 0,
-            "len": 44
-          },
-          {
-            "line": 165,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 166,
-            "start": 0,
-            "len": 30
-          },
-          {
-            "line": 167,
-            "start": 0,
-            "len": 23
-          },
-          {
-            "line": 168,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 169,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 170,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 171,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 172,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 173,
-            "start": 0,
-            "len": 66
-          },
-          {
-            "line": 174,
-            "start": 0,
-            "len": 44
-          },
-          {
-            "line": 175,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 176,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 178,
-            "start": 0,
-            "len": 84
-          },
-          {
-            "line": 179,
-            "start": 0,
-            "len": 43
-          },
-          {
-            "line": 180,
-            "start": 0,
-            "len": 45
-          },
-          {
-            "line": 181,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 182,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 183,
-            "start": 0,
-            "len": 25
-          },
-          {
-            "line": 184,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 185,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 186,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 187,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 188,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 190,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 191,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 192,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 193,
-            "start": 0,
-            "len": 67
-          },
-          {
-            "line": 194,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 196,
-            "start": 0,
-            "len": 88
-          },
-          {
-            "line": 197,
-            "start": 0,
-            "len": 43
-          },
-          {
-            "line": 198,
-            "start": 0,
-            "len": 45
-          },
-          {
-            "line": 199,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 200,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 201,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 202,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 203,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 204,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 205,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 206,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 208,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 209,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 210,
-            "start": 0,
-            "len": 68
-          },
-          {
-            "line": 211,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 212,
-            "start": 0,
-            "len": 4
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 83,
-            "start": 0,
-            "len": 35
-          },
-          {
-            "line": 84,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 85,
-            "start": 0,
-            "len": 35
-          },
-          {
-            "line": 86,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 87,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 88,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 89,
-            "start": 0,
-            "len": 36
-          },
-          {
-            "line": 90,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 91,
-            "start": 0,
-            "len": 15
-          },
-          {
-            "line": 92,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 93,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 94,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 95,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 96,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 97,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 98,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 99,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 100,
-            "start": 0,
-            "len": 37
-          },
-          {
-            "line": 102,
-            "start": 0,
-            "len": 78
-          },
-          {
-            "line": 103,
-            "start": 0,
-            "len": 40
-          },
-          {
-            "line": 105,
-            "start": 0,
-            "len": 49
-          },
-          {
-            "line": 107,
-            "start": 0,
-            "len": 43
-          },
-          {
-            "line": 108,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 109,
-            "start": 0,
-            "len": 20
-          },
-          {
-            "line": 110,
-            "start": 0,
-            "len": 49
-          },
-          {
-            "line": 111,
-            "start": 0,
-            "len": 32
-          },
-          {
-            "line": 112,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 113,
-            "start": 0,
-            "len": 2
-          },
-          {
-            "line": 116,
-            "start": 0,
-            "len": 37
-          },
-          {
-            "line": 118,
-            "start": 0,
-            "len": 82
-          },
-          {
-            "line": 119,
-            "start": 0,
-            "len": 38
-          },
-          {
-            "line": 120,
-            "start": 0,
-            "len": 38
-          },
-          {
-            "line": 122,
-            "start": 0,
-            "len": 32
-          },
-          {
-            "line": 123,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 124,
-            "start": 0,
-            "len": 32
-          },
-          {
-            "line": 125,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 126,
-            "start": 0,
-            "len": 51
-          },
-          {
-            "line": 127,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 128,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 129,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 131,
-            "start": 0,
-            "len": 35
-          },
-          {
-            "line": 132,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 133,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 134,
-            "start": 0,
-            "len": 115
-          },
-          {
-            "line": 135,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 136,
-            "start": 0,
-            "len": 15
-          },
-          {
-            "line": 137,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 138,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 139,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 140,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 141,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 142,
-            "start": 0,
-            "len": 40
-          },
-          {
-            "line": 143,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 144,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 145,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 146,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 147,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 148,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 149,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 150,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 151,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 153,
-            "start": 0,
-            "len": 37
-          },
-          {
-            "line": 155,
-            "start": 0,
-            "len": 54
-          },
-          {
-            "line": 156,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 157,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 158,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 159,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 160,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 161,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 162,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 163,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 165,
-            "start": 0,
-            "len": 40
-          },
-          {
-            "line": 167,
-            "start": 0,
-            "len": 50
-          },
-          {
-            "line": 168,
-            "start": 0,
-            "len": 99
-          },
-          {
-            "line": 169,
-            "start": 0,
-            "len": 37
-          },
-          {
-            "line": 170,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 171,
-            "start": 0,
-            "len": 12
-          },
-          {
-            "line": 172,
-            "start": 0,
-            "len": 27
-          },
-          {
-            "line": 173,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 174,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 176,
-            "start": 0,
-            "len": 28
-          },
-          {
-            "line": 177,
-            "start": 0,
-            "len": 48
-          },
-          {
-            "line": 178,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 179,
-            "start": 0,
-            "len": 77
-          },
-          {
-            "line": 180,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 181,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 182,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 183,
-            "start": 0,
-            "len": 17
-          },
-          {
-            "line": 184,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 185,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 186,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 187,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 188,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 189,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 191,
-            "start": 0,
-            "len": 41
-          },
-          {
-            "line": 192,
-            "start": 0,
-            "len": 20
-          },
-          {
-            "line": 193,
-            "start": 0,
-            "len": 51
-          },
-          {
-            "line": 194,
-            "start": 0,
-            "len": 42
-          },
-          {
-            "line": 195,
-            "start": 0,
-            "len": 29
-          },
-          {
-            "line": 196,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 197,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 198,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 200,
-            "start": 0,
-            "len": 32
-          },
-          {
-            "line": 201,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 202,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 204,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 205,
-            "start": 0,
-            "len": 81
-          },
-          {
-            "line": 206,
-            "start": 0,
-            "len": 38
-          },
-          {
-            "line": 207,
-            "start": 0,
-            "len": 1
-          },
-          {
-            "line": 208,
-            "start": 0,
-            "len": 35
-          },
-          {
-            "line": 209,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 210,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 211,
-            "start": 0,
-            "len": 136
-          },
-          {
-            "line": 212,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 213,
-            "start": 0,
-            "len": 15
-          },
-          {
-            "line": 214,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 215,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 216,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 217,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 218,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 219,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 220,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 221,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 223,
-            "start": 0,
-            "len": 37
-          },
-          {
-            "line": 225,
-            "start": 0,
-            "len": 54
-          },
-          {
-            "line": 226,
-            "start": 0,
-            "len": 14
-          },
-          {
-            "line": 227,
-            "start": 0,
-            "len": 33
-          },
-          {
-            "line": 228,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 229,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 230,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 231,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 232,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 233,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 235,
-            "start": 0,
-            "len": 40
-          },
-          {
-            "line": 236,
-            "start": 0,
-            "len": 76
-          },
-          {
-            "line": 237,
-            "start": 0,
-            "len": 32
-          },
-          {
-            "line": 238,
-            "start": 0,
-            "len": 26
-          },
-          {
-            "line": 239,
-            "start": 0,
-            "len": 4
-          }
-        ],
-        "removed_at": []
-      }
-    }
-  ]
+  "disk_version": 0
 }

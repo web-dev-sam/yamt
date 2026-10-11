@@ -1,15 +1,21 @@
-//! Git subprocess layer: reads and writes index stages and blobs as bytes, and reads the merge
-//! heads, the refs that point at them and the merge message.
+//! Git subprocess layer: reads and writes index stages and blobs as bytes, reads the merge heads,
+//! the refs that point at them and the merge message, and re-runs git's merge of one file.
 #![forbid(unsafe_code)]
 
+mod attributes;
 mod blob;
 mod entry;
+mod merge_file;
 mod repo;
 mod run;
+mod version;
 
+pub use attributes::{AttributeValue, MergeAttributes};
 pub use blob::BlobReader;
 pub use entry::{Oid, Stage, StageEntry};
+pub use merge_file::{MergeFileOptions, MergeInputs};
 pub use repo::{CommitSummary, Repo};
+pub use version::GitVersion;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -35,6 +41,11 @@ pub enum Error {
     },
     #[error("cannot read {}: {source}", path.display())]
     ReadFailed {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    #[error("cannot write {}: {source}", path.display())]
+    WriteFailed {
         path: std::path::PathBuf,
         source: std::io::Error,
     },

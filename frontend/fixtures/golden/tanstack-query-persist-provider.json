@@ -1,238 +1,264 @@
 {
   "path": "tanstack-query-persist-provider.tsx",
-  "base": "'use client'\nimport * as React from 'react'\n\nimport { persistQueryClient } from '@tanstack/query-persist-client-core'\nimport { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query'\nimport type { PersistQueryClientOptions } from '@tanstack/query-persist-client-core'\nimport type { QueryClientProviderProps } from '@tanstack/react-query'\n\nexport type PersistQueryClientProviderProps = QueryClientProviderProps & {\n  persistOptions: Omit<PersistQueryClientOptions, 'queryClient'>\n  onSuccess?: () => void\n}\n\nexport const PersistQueryClientProvider = ({\n  client,\n  children,\n  persistOptions,\n  onSuccess,\n  ...props\n}: PersistQueryClientProviderProps): JSX.Element => {\n  const [isRestoring, setIsRestoring] = React.useState(true)\n  const refs = React.useRef({ persistOptions, onSuccess })\n  const didRestore = React.useRef(false)\n\n  React.useEffect(() => {\n    refs.current = { persistOptions, onSuccess }\n  })\n\n  React.useEffect(() => {\n    if (!didRestore.current) {\n      didRestore.current = true\n      setIsRestoring(true)\n      const [unsubscribe, promise] = persistQueryClient({\n        ...refs.current.persistOptions,\n        queryClient: client,\n      })\n\n      promise.then(() => {\n        refs.current.onSuccess?.()\n        setIsRestoring(false)\n      })\n\n      return () => {\n        unsubscribe()\n      }\n    }\n    return undefined\n  }, [client])\n\n  return (\n    <QueryClientProvider client={client} {...props}>\n      <IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>\n    </QueryClientProvider>\n  )\n}\n",
+  "middle": {
+    "kind": "Stages",
+    "text": "'use client'\nimport * as React from 'react'\n\nimport { persistQueryClient } from '@tanstack/query-persist-client-core'\nimport { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query'\nimport type { PersistQueryClientOptions } from '@tanstack/query-persist-client-core'\nimport type { QueryClientProviderProps } from '@tanstack/react-query'\n\nexport type PersistQueryClientProviderProps = QueryClientProviderProps & {\n  persistOptions: Omit<PersistQueryClientOptions, 'queryClient'>\n  onSuccess?: () => void\n}\n\nexport const PersistQueryClientProvider = ({\n  client,\n  children,\n  persistOptions,\n  onSuccess,\n  ...props\n}: PersistQueryClientProviderProps): JSX.Element => {\n  const [isRestoring, setIsRestoring] = React.useState(true)\n  const refs = React.useRef({ persistOptions, onSuccess })\n  const didRestore = React.useRef(false)\n\n  React.useEffect(() => {\n    refs.current = { persistOptions, onSuccess }\n  })\n\n  React.useEffect(() => {\n    if (!didRestore.current) {\n      didRestore.current = true\n      setIsRestoring(true)\n      const [unsubscribe, promise] = persistQueryClient({\n        ...refs.current.persistOptions,\n        queryClient: client,\n      })\n\n      promise.then(() => {\n        refs.current.onSuccess?.()\n        setIsRestoring(false)\n      })\n\n      return () => {\n        unsubscribe()\n      }\n    }\n    return undefined\n  }, [client])\n\n  return (\n    <QueryClientProvider client={client} {...props}>\n      <IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>\n    </QueryClientProvider>\n  )\n}\n"
+  },
   "local": "'use client'\nimport * as React from 'react'\n\nimport { persistQueryClient } from '@tanstack/query-persist-client-core'\nimport { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query'\nimport type { PersistQueryClientOptions } from '@tanstack/query-persist-client-core'\nimport type { QueryClientProviderProps } from '@tanstack/react-query'\n\nexport type PersistQueryClientProviderProps = QueryClientProviderProps & {\n  persistOptions: Omit<PersistQueryClientOptions, 'queryClient'>\n  onSuccess?: () => Promise<unknown> | unknown\n}\n\nexport const PersistQueryClientProvider = ({\n  client,\n  children,\n  persistOptions,\n  onSuccess,\n  ...props\n}: PersistQueryClientProviderProps): JSX.Element => {\n  const [isRestoring, setIsRestoring] = React.useState(true)\n  const refs = React.useRef({ persistOptions, onSuccess })\n  const didRestore = React.useRef(false)\n\n  React.useEffect(() => {\n    refs.current = { persistOptions, onSuccess }\n  })\n\n  React.useEffect(() => {\n    if (!didRestore.current) {\n      didRestore.current = true\n      setIsRestoring(true)\n      const [unsubscribe, promise] = persistQueryClient({\n        ...refs.current.persistOptions,\n        queryClient: client,\n      })\n\n      promise.then(async () => {\n        try {\n          await refs.current.onSuccess?.()\n        } finally {\n          setIsRestoring(false)\n        }\n      })\n\n      return () => {\n        unsubscribe()\n      }\n    }\n    return undefined\n  }, [client])\n\n  return (\n    <QueryClientProvider client={client} {...props}>\n      <IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>\n    </QueryClientProvider>\n  )\n}\n",
   "remote": "'use client'\nimport * as React from 'react'\n\nimport {\n  persistQueryClientRestore,\n  persistQueryClientSubscribe,\n} from '@tanstack/query-persist-client-core'\nimport { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query'\nimport type { PersistQueryClientOptions } from '@tanstack/query-persist-client-core'\nimport type { QueryClientProviderProps } from '@tanstack/react-query'\n\nexport type PersistQueryClientProviderProps = QueryClientProviderProps & {\n  persistOptions: Omit<PersistQueryClientOptions, 'queryClient'>\n  onSuccess?: () => void\n}\n\nexport const PersistQueryClientProvider = ({\n  client,\n  children,\n  persistOptions,\n  onSuccess,\n  ...props\n}: PersistQueryClientProviderProps): JSX.Element => {\n  const [isRestoring, setIsRestoring] = React.useState(true)\n  const refs = React.useRef({ persistOptions, onSuccess })\n  const didRestore = React.useRef(false)\n\n  React.useEffect(() => {\n    refs.current = { persistOptions, onSuccess }\n  })\n\n  React.useEffect(() => {\n    const options = {\n      ...refs.current.persistOptions,\n      queryClient: client,\n    }\n    if (!didRestore.current) {\n      didRestore.current = true\n      setIsRestoring(true)\n      persistQueryClientRestore(options).then(async () => {\n        try {\n          await refs.current.onSuccess?.()\n        } finally {\n          setIsRestoring(false)\n        }\n      })\n    }\n    return isRestoring ? undefined : persistQueryClientSubscribe(options)\n  }, [client, isRestoring])\n\n  return (\n    <QueryClientProvider client={client} {...props}>\n      <IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>\n    </QueryClientProvider>\n  )\n}\n",
   "deleted": null,
   "eol": "Lf",
   "chunks": [
     {
-      "id": 0,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 0,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 3,
+          "len": 1
+        },
+        "local": {
+          "start": 3,
+          "len": 1
+        },
+        "remote": {
+          "start": 3,
+          "len": 4
+        }
+      },
+      "middle": {
         "start": 3,
         "len": 1
       },
-      "local": {
-        "start": 3,
-        "len": 1
-      },
-      "remote": {
-        "start": 3,
-        "len": 4
+      "words": {
+        "chunk": 0,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 3,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 4,
+              "start": 0,
+              "len": 28
+            },
+            {
+              "line": 5,
+              "start": 0,
+              "len": 30
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 6,
+              "column": 0
+            }
+          ]
+        }
       }
     },
     {
-      "id": 1,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 1,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 10,
+          "len": 1
+        },
+        "local": {
+          "start": 10,
+          "len": 1
+        },
+        "remote": {
+          "start": 13,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 10,
         "len": 1
       },
-      "local": {
-        "start": 10,
-        "len": 1
-      },
-      "remote": {
-        "start": 13,
-        "len": 1
+      "words": {
+        "chunk": 1,
+        "local": {
+          "changed": [
+            {
+              "line": 10,
+              "start": 0,
+              "len": 46
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 2,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 2,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 29,
+          "len": 0
+        },
+        "local": {
+          "start": 29,
+          "len": 0
+        },
+        "remote": {
+          "start": 32,
+          "len": 4
+        }
+      },
+      "middle": {
         "start": 29,
         "len": 0
       },
-      "local": {
-        "start": 29,
-        "len": 0
-      },
-      "remote": {
-        "start": 32,
-        "len": 4
+      "words": {
+        "chunk": 2,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 3,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 3,
+        "kind": "Conflict",
+        "base": {
+          "start": 32,
+          "len": 16
+        },
+        "local": {
+          "start": 32,
+          "len": 19
+        },
+        "remote": {
+          "start": 39,
+          "len": 10
+        }
+      },
+      "middle": {
         "start": 32,
         "len": 16
       },
-      "local": {
-        "start": 32,
-        "len": 19
-      },
-      "remote": {
-        "start": 39,
-        "len": 10
+      "words": {
+        "chunk": 3,
+        "local": {
+          "changed": [
+            {
+              "line": 37,
+              "start": 19,
+              "len": 6
+            },
+            {
+              "line": 38,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 39,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 40,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 41,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 42,
+              "start": 0,
+              "len": 9
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 39,
+              "start": 0,
+              "len": 59
+            },
+            {
+              "line": 40,
+              "start": 0,
+              "len": 13
+            },
+            {
+              "line": 41,
+              "start": 0,
+              "len": 16
+            },
+            {
+              "line": 42,
+              "start": 0,
+              "len": 19
+            },
+            {
+              "line": 43,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 44,
+              "start": 0,
+              "len": 9
+            },
+            {
+              "line": 46,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 47,
+              "start": 11,
+              "len": 14
+            },
+            {
+              "line": 47,
+              "start": 34,
+              "len": 39
+            },
+            {
+              "line": 48,
+              "start": 12,
+              "len": 13
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 46,
+              "column": 0
+            },
+            {
+              "line": 47,
+              "column": 0
+            }
+          ]
+        }
       }
     }
   ],
-  "word_changes": [
-    {
-      "chunk": 0,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 3,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 4,
-            "start": 0,
-            "len": 28
-          },
-          {
-            "line": 5,
-            "start": 0,
-            "len": 30
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 6,
-            "column": 0
-          }
-        ]
-      }
-    },
-    {
-      "chunk": 1,
-      "local": {
-        "changed": [
-          {
-            "line": 10,
-            "start": 0,
-            "len": 46
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 2,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 3,
-      "local": {
-        "changed": [
-          {
-            "line": 37,
-            "start": 19,
-            "len": 6
-          },
-          {
-            "line": 38,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 39,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 40,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 41,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 42,
-            "start": 0,
-            "len": 9
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 39,
-            "start": 0,
-            "len": 59
-          },
-          {
-            "line": 40,
-            "start": 0,
-            "len": 13
-          },
-          {
-            "line": 41,
-            "start": 0,
-            "len": 16
-          },
-          {
-            "line": 42,
-            "start": 0,
-            "len": 19
-          },
-          {
-            "line": 43,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 44,
-            "start": 0,
-            "len": 9
-          },
-          {
-            "line": 46,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 47,
-            "start": 11,
-            "len": 14
-          },
-          {
-            "line": 47,
-            "start": 34,
-            "len": 39
-          },
-          {
-            "line": 48,
-            "start": 12,
-            "len": 13
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 46,
-            "column": 0
-          },
-          {
-            "line": 47,
-            "column": 0
-          }
-        ]
-      }
-    }
-  ]
+  "disk_version": 0
 }

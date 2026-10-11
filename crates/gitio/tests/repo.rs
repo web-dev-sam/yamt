@@ -119,7 +119,7 @@ fn assert_add_then_restore_round_trips(base: Option<&[u8]>, path: &str) {
     let captured = repo.unmerged().unwrap();
     assert!(captured.iter().all(|entry| entry.path == Path::new(path)));
 
-    repo.add(Path::new(path)).unwrap();
+    repo.add_paths(&[Path::new(path)]).unwrap();
     assert_eq!(repo.unmerged().unwrap(), []);
     repo.restore_stages(&captured).unwrap();
 
@@ -157,7 +157,7 @@ fn checkout_merge_after_restore_rewrites_conflict_markers() {
     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let captured = repo.unmerged().unwrap();
-    repo.add(Path::new(FILE)).unwrap();
+    repo.add_paths(&[Path::new(FILE)]).unwrap();
     repo.restore_stages(&captured).unwrap();
     fs::write(dir.path().join(FILE), "resolved\n").unwrap();
 
@@ -198,13 +198,13 @@ fn require_conflict_markers(dir: &TempDir) {
 }
 
 #[test]
-fn remove_from_index_drops_every_stage_and_leaves_the_worktree_file() {
+fn remove_paths_drops_every_stage_and_leaves_the_worktree_file() {
     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     require_conflict_markers(&dir);
     let before = worktree(&dir);
 
-    repo.remove_from_index(Path::new(FILE)).unwrap();
+    repo.remove_paths(&[Path::new(FILE)]).unwrap();
 
     assert_eq!(staged(&dir), "");
     assert_eq!(worktree(&dir), before);
@@ -234,7 +234,7 @@ fn restore_index_records_without_records_removes_the_path_again() {
     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
     let remote = repo.unmerged().unwrap().remove(2);
-    repo.remove_from_index(Path::new(FILE)).unwrap();
+    repo.remove_paths(&[Path::new(FILE)]).unwrap();
     let records = repo.index_records(Path::new(FILE)).unwrap();
     assert_eq!(records, b"");
     repo.resolve_with(&remote).unwrap();

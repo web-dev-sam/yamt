@@ -255,26 +255,21 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
     assert_eq!(output.code, 0, "{}", output.stderr);
     let data: Value = serde_json::from_str(&output.stdout).unwrap();
     assert_eq!(data["path"], "cart.ts");
-    assert_eq!(data["base"], BASE);
+    assert_eq!(data["middle"], json!({ "kind": "Stages", "text": BASE }));
     assert_eq!(data["local"], LOCAL);
     assert_eq!(data["remote"], REMOTE);
     assert_eq!(data["eol"], "Lf");
+    assert_eq!(data["disk_version"], 0);
     let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
-    assert_eq!(data["chunks"], classified);
-    let word_chunks: Vec<&Value> = data["word_changes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|words| &words["chunk"])
-        .collect();
-    let chunk_ids: Vec<&Value> = classified
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|chunk| &chunk["id"])
-        .collect();
-    assert_eq!(chunk_ids.len(), 3);
-    assert_eq!(word_chunks, chunk_ids);
+    let chunks = data["chunks"].as_array().unwrap();
+    let merge_chunks: Vec<&Value> = chunks.iter().map(|chunk| &chunk["chunk"]).collect();
+    let classified = classified.as_array().unwrap();
+    assert_eq!(merge_chunks, classified.iter().collect::<Vec<_>>());
+    assert_eq!(chunks.len(), 3);
+    for chunk in chunks {
+        assert_eq!(chunk["words"]["chunk"], chunk["chunk"]["id"]);
+        assert_eq!(chunk["middle"], chunk["chunk"]["base"]);
+    }
 }
 
 #[test]

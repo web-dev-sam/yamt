@@ -26,6 +26,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 const SUBMODULE_MODE: &str = "160000";
+const GITATTRIBUTES: &str = ".gitattributes";
 const HASH_OBJECT_ARGS: [&str; 2] = ["hash-object", "--stdin"];
 
 /// One path in the scripted merge; `None` means the file does not exist on that side.
@@ -110,10 +111,30 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
     Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
 }
 
+/// What a test sets before the merge runs: repository config (also in force for the merge, so it
+/// wins over the fixture's own `core.autocrlf=false`) and a `.gitattributes` committed with base.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Setup<'a> {
+    pub config: &'a [(&'a str, &'a str)],
+    pub attributes: Option<&'a str>,
+}
+
 /// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
 pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
-    let dir = diverged_repo(files)?;
-    let merge = git(dir.path(), &["merge", "--quiet", "remote"])?;
+    conflict_repo_with(files, &Setup::default())
+}
+
+/// `conflict_repo`, with `setup` applied before the merge.
+pub fn conflict_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> {
+    let dir = diverged_repo_with(files, setup)?;
+    let mut merge_args: Vec<String> = Vec::new();
+    for (key, value) in setup.config {
+        git_ok(dir.path(), &["config", key, value])?;
+        merge_args.extend(["-c".to_owned(), format!("{key}={value}")]);
+    }
+    merge_args.extend(["merge", "--quiet", "remote"].map(str::to_owned));
+    let merge_args: Vec<&str> = merge_args.iter().map(String::as_str).collect();
+    let merge = git(dir.path(), &merge_args)?;
     if merge.status.success() {
         return Err(Error::MergeDidNotConflict);
     }
@@ -122,10 +143,18 @@ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
 
 /// A repo on branch `local` with commits `base` (branch `main`), `local` and `remote` (branch `remote`), not merged.
 pub fn diverged_repo(files: &[ConflictFile]) -> Result<TempDir> {
+    diverged_repo_with(files, &Setup::default())
+}
+
+fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     git_ok(root, &["init", "--quiet"])?;
     git_ok(root, &["config", "core.autocrlf", "false"])?;
+    if let Some(attributes) = setup.attributes {
+        fs::write(root.join(GITATTRIBUTES), attributes)?;
+        git_ok(root, &["add", "--", GITATTRIBUTES])?;
+    }
     commit_side(root, files, |file| file.base, "base")?;
     git_ok(root, &["checkout", "--quiet", "-b", "local"])?;
     commit_side(root, files, |file| file.local, "local")?;

@@ -4,7 +4,9 @@ use std::fs;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_merge_core::ChunkKind;
-use yamt_session::{Eol, Error, FileStatus, MergeSession, Side, UnsupportedReason};
+use yamt_session::{
+    DiskVersion, Eol, Error, FileStatus, MergeSession, Middle, Side, UnsupportedReason,
+};
 
 const LOCAL_DELETED: &str = "a_local_deleted.ts";
 const REMOTE_DELETED: &str = "b_remote_deleted.ts";
@@ -79,13 +81,16 @@ fn a_text_file_deleted_on_one_side_loads_with_base_as_the_deleted_side() {
         let data = session.load(path).unwrap();
 
         assert_eq!(data.deleted, Some(side), "{path}");
-        assert_eq!(data.base, base);
+        let base_text = Middle::Stages {
+            text: base.to_owned(),
+        };
+        assert_eq!(data.middle, base_text);
         let (deleted_text, kept_text) = match side {
             Side::Local => (&data.local, &data.remote),
             Side::Remote => (&data.remote, &data.local),
         };
         assert_eq!((deleted_text.as_str(), kept_text.as_str()), (base, kept));
-        let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
+        let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.chunk.kind).collect();
         let one_sided = kinds.iter().all(|kind| *kind == kept_side_change);
         assert!(!kinds.is_empty() && one_sided, "{path}: {kinds:?}");
     }
@@ -141,12 +146,12 @@ fn keep_or_delete_then_reset_brings_the_stages_back_and_leaves_the_worktree() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = unmerged(&dir);
     for side in [Side::Remote, Side::Local] {
-        session.take(LOCAL_DELETED, side).unwrap();
+        session.take(LOCAL_DELETED, side, DiskVersion(0)).unwrap();
         let worktree_after_take = fs::read(dir.path().join(LOCAL_DELETED)).ok();
         assert!(!unmerged(&dir).contains(LOCAL_DELETED), "{side:?}");
         git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
 
-        session.reset(LOCAL_DELETED).unwrap();
+        session.reset(LOCAL_DELETED, DiskVersion(0)).unwrap();
 
         assert_eq!(unmerged(&dir), before, "{side:?}");
         let worktree = fs::read(dir.path().join(LOCAL_DELETED)).ok();
@@ -160,8 +165,12 @@ fn keep_writes_and_stages_the_kept_side_and_delete_removes_the_file() {
     let dir = deleted_on_one_side();
     let mut session = MergeSession::open(dir.path()).unwrap();
 
-    session.take(LOCAL_DELETED, Side::Remote).unwrap();
-    session.take(REMOTE_DELETED, Side::Remote).unwrap();
+    session
+        .take(LOCAL_DELETED, Side::Remote, DiskVersion(0))
+        .unwrap();
+    session
+        .take(REMOTE_DELETED, Side::Remote, DiskVersion(0))
+        .unwrap();
 
     assert_eq!(fs::read(dir.path().join(LOCAL_DELETED)).unwrap(), KEPT);
     let staged = git_ok(dir.path(), &["ls-files", "-s", "--", LOCAL_DELETED]).unwrap();
@@ -176,7 +185,9 @@ fn finish_of_a_deleted_on_one_side_file_writes_and_stages_the_result() {
     let dir = deleted_on_one_side();
     let mut session = MergeSession::open(dir.path()).unwrap();
 
-    session.finish(REMOTE_DELETED, "merged\n").unwrap();
+    session
+        .finish(REMOTE_DELETED, "merged\n", DiskVersion(0))
+        .unwrap();
 
     assert_eq!(
         fs::read(dir.path().join(REMOTE_DELETED)).unwrap(),

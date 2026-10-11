@@ -50,6 +50,15 @@ pub(crate) fn argv(command: &Command) -> Vec<String> {
 }
 
 pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Vec<u8>> {
+    run_accepting(command, stdin, timeout, |status| status.success())
+}
+
+pub(crate) fn run_accepting(
+    command: Command,
+    stdin: Option<Vec<u8>>,
+    timeout: Duration,
+    accepts: fn(ExitStatus) -> bool,
+) -> Result<Vec<u8>> {
     let args = argv(&command);
     tracing::debug!(?args, "running git");
     let deadline = Instant::now() + timeout;
@@ -72,7 +81,7 @@ pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -
             });
         }
     };
-    if !status.success() {
+    if !accepts(status) {
         return Err(Error::GitFailed {
             args,
             status: status.code(),

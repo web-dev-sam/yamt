@@ -2,7 +2,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
 use yamt_session::{
-    FileEntry, FileMergeData, FileSides, MergeSession, RemoteName, Side, UnsupportedReason,
+    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side,
+    UnsupportedReason, WriteReply,
 };
 
 use crate::frontend_log::LogEntry;
@@ -38,7 +39,8 @@ impl From<yamt_session::Error> for IpcError {
             yamt_session::Error::Unsupported { path, reason } => {
                 IpcError::Unsupported { path, reason }
             }
-            yamt_session::Error::WriteFailed { path, source } => IpcError::WriteFailed {
+            yamt_session::Error::WriteFailed { path, source }
+            | yamt_session::Error::ReadFailed { path, source } => IpcError::WriteFailed {
                 path,
                 message: source.to_string(),
             },
@@ -75,10 +77,8 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn list_files(state: State<'_, SessionState>) -> Result<Vec<FileEntry>, IpcError> {
-    let mut session = lock(&state);
-    session.refresh_statuses()?;
-    Ok(session.files())
+fn list_files(state: State<'_, SessionState>) -> Result<FileList, IpcError> {
+    Ok(lock(&state).refresh()?)
 }
 
 #[tauri::command]
@@ -102,19 +102,20 @@ fn finish_file(
     state: State<'_, SessionState>,
     path: &str,
     text: &str,
-) -> Result<Vec<FileEntry>, IpcError> {
-    let mut session = lock(&state);
-    session.finish(path, text)?;
-    Ok(session.files())
+    disk_version: DiskVersion,
+) -> Result<WriteReply, IpcError> {
+    Ok(lock(&state).finish(path, text, disk_version)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn reset_file(state: State<'_, SessionState>, path: &str) -> Result<Vec<FileEntry>, IpcError> {
-    let mut session = lock(&state);
-    session.reset(path)?;
-    Ok(session.files())
+fn reset_file(
+    state: State<'_, SessionState>,
+    path: &str,
+    disk_version: DiskVersion,
+) -> Result<WriteReply, IpcError> {
+    Ok(lock(&state).reset(path, disk_version)?)
 }
 
 #[tauri::command]
@@ -131,10 +132,9 @@ fn take_side(
     state: State<'_, SessionState>,
     path: &str,
     side: Side,
-) -> Result<Vec<FileEntry>, IpcError> {
-    let mut session = lock(&state);
-    session.take(path, side)?;
-    Ok(session.files())
+    disk_version: DiskVersion,
+) -> Result<WriteReply, IpcError> {
+    Ok(lock(&state).take(path, side, disk_version)?)
 }
 
 #[tauri::command]
@@ -241,18 +241,46 @@ mod tests {
         Value::Array(entries)
     }
 
+    fn written(statuses: [&str; 3]) -> Value {
+        json!({ "kind": "Written", "files": entries(statuses) })
+    }
+
     #[test]
-    fn list_files_returns_every_conflicted_file_as_git_sees_it() {
+    fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
         let window = open_window();
         let unresolved = "Unresolved";
+        let listed = |statuses| json!({ "files": entries(statuses), "disk_changes": [] });
         assert_eq!(
             window.invoke("list_files", json!({})),
-            Ok(entries([unresolved, unresolved, unresolved]))
+            Ok(listed([unresolved, unresolved, unresolved]))
         );
         git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
         assert_eq!(
             window.invoke("list_files", json!({})),
-            Ok(entries([unresolved, "Resolved", unresolved]))
+            Ok(listed([unresolved, "Resolved", unresolved]))
+        );
+    }
+
+    #[test]
+    fn list_files_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
+        let window = open_window();
+        fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
+        let staged = json!({ "path": "view.vue", "result": { "kind": "Staged" } });
+        let after = entries(["Unresolved", "Unresolved", "Resolved"]);
+
+        let listed = window.invoke("list_files", json!({}));
+        let args = json!({ "path": "view.vue", "text": "mine\n", "diskVersion": 0 });
+        let finished = window.invoke("finish_file", args);
+
+        assert_eq!(
+            listed,
+            Ok(json!({ "files": after, "disk_changes": [staged] }))
+        );
+        let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
+        assert_eq!(finished, Ok(changed));
+        assert_eq!(
+            fs::read(window.repo.path().join("view.vue")).unwrap(),
+            b"<d/>\n"
         );
     }
 
@@ -267,8 +295,9 @@ mod tests {
     fn finish_file_writes_crlf_text_verbatim_and_stages_it_while_others_stay_open() {
         let window = open_window();
         let text = "a\r\nmerged\r\n";
-        let files = window.invoke("finish_file", json!({ "path": CRLF_PATH, "text": text }));
-        assert_eq!(files, Ok(entries(["Unresolved", "Resolved", "Unresolved"])));
+        let args = json!({ "path": CRLF_PATH, "text": text, "diskVersion": 0 });
+        let files = window.invoke("finish_file", args);
+        assert_eq!(files, Ok(written(["Unresolved", "Resolved", "Unresolved"])));
         assert_eq!(
             fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
             text.as_bytes()
@@ -287,15 +316,18 @@ mod tests {
         let unmerged_before = window.unmerged();
         for path in ["added.ts", CRLF_PATH, "view.vue"] {
             window
-                .invoke("finish_file", json!({ "path": path, "text": "done\n" }))
+                .invoke(
+                    "finish_file",
+                    json!({ "path": path, "text": "done\n", "diskVersion": 0 }),
+                )
                 .unwrap();
         }
         assert_eq!(window.unmerged(), "");
         assert_eq!(window.exit_on_close(), Exit::Success);
 
-        let files = window.invoke("reset_file", json!({ "path": CRLF_PATH }));
+        let files = window.invoke("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 }));
 
-        assert_eq!(files, Ok(entries(["Resolved", "Unresolved", "Resolved"])));
+        assert_eq!(files, Ok(written(["Resolved", "Unresolved", "Resolved"])));
         let crlf_stages: Vec<&str> = unmerged_before
             .lines()
             .filter(|line| line.ends_with(CRLF_PATH))
@@ -313,13 +345,16 @@ mod tests {
         let path = json!({ "path": LOGO });
         let local = json!({ "kind": "Binary", "bytes": 6 });
         let remote = json!({ "kind": "Binary", "bytes": 7 });
-        let sides = json!({ "path": LOGO, "reason": "Binary", "local": local, "remote": remote });
+        let sides = json!({
+            "path": LOGO, "reason": "Binary", "local": local, "remote": remote, "disk_version": 0
+        });
         assert_eq!(window.invoke("describe_file", path), Ok(sides));
 
-        let files = window.invoke("take_side", json!({ "path": LOGO, "side": "remote" }));
+        let args = json!({ "path": LOGO, "side": "remote", "diskVersion": 0 });
+        let files = window.invoke("take_side", args);
 
         let resolved = json!({ "path": LOGO, "status": "Resolved", "unsupported": "Binary" });
-        assert_eq!(files, Ok(json!([resolved])));
+        assert_eq!(files, Ok(json!({ "kind": "Written", "files": [resolved] })));
         assert_eq!(
             fs::read(window.repo.path().join(LOGO)).unwrap(),
             b"\0remote"
@@ -367,6 +402,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(IpcError::from(write_failed)).unwrap(),
             json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
+        );
+        let read_failed = yamt_session::Error::ReadFailed {
+            path: "a.ts".to_owned(),
+            source: std::io::Error::other("permission denied"),
+        };
+        assert_eq!(
+            serde_json::to_value(IpcError::from(read_failed)).unwrap(),
+            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "permission denied" })
         );
     }
 

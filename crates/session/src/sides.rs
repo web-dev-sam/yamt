@@ -4,6 +4,7 @@ use yamt_gitio::{BlobReader, StageEntry};
 
 use crate::Result;
 use crate::decode::{MAX_TEXT_BYTES, UnsupportedReason, is_binary};
+use crate::disk::DiskVersion;
 
 pub(crate) const SYMLINK_MODE: u32 = 0o120_000;
 pub(crate) const SUBMODULE_MODE: u32 = 0o160_000;
@@ -50,6 +51,7 @@ pub struct FileSides {
     pub reason: Option<UnsupportedReason>,
     pub local: SideContent,
     pub remote: SideContent,
+    pub disk_version: DiskVersion,
 }
 
 pub(crate) fn side_content(

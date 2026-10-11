@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use yamt_merge_core::Chunk;
 use yamt_session::{FileStatus, MergeSession, UnsupportedReason};
 
 use crate::classify::kind_summary;
@@ -11,7 +12,7 @@ pub(crate) fn scan(repo: &Path) -> Result<()> {
     for entry in session.files() {
         let detail = match entry.unsupported {
             Some(reason) => format!("unsupported {}", reason_name(reason)),
-            None => kind_summary(&session.load(&entry.path)?.chunks),
+            None => chunk_summary(&mut session, &entry.path)?,
         };
         report.push(format!(
             "{} {} {detail}",
@@ -21,6 +22,12 @@ pub(crate) fn scan(repo: &Path) -> Result<()> {
     }
     report.push(format!("remaining: {}", session.remaining()));
     print_lines(&report)
+}
+
+fn chunk_summary(session: &mut MergeSession, path: &str) -> Result<String> {
+    let data = session.load(path)?;
+    let chunks: Vec<Chunk> = data.chunks.iter().map(|merge| merge.chunk).collect();
+    Ok(kind_summary(&chunks))
 }
 
 fn status_name(status: FileStatus) -> &'static str {

@@ -2,7 +2,10 @@
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_merge_core::{ChunkKind, Options, compute_chunks, word_changes};
-use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
+use yamt_session::{
+    DiskVersion, Eol, Error, FileEntry, FileStatus, MergeSession, Middle, MiddleLine,
+    UnsupportedReason,
+};
 
 const MODIFY_TS: &str = "a_modify.ts";
 const ADD_ADD: &str = "b_added.txt";
@@ -141,23 +144,23 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
 
     let [base, local, remote] = MODIFY_SIDES;
     assert_eq!(data.path, MODIFY_TS);
-    assert_eq!(
-        [&data.base, &data.local, &data.remote],
-        [base, local, remote]
-    );
+    assert_eq!([&data.local, &data.remote], [local, remote]);
+    let base_text = Middle::Stages {
+        text: base.to_owned(),
+    };
+    assert_eq!(data.middle, base_text);
     assert_eq!(data.eol, Eol::Lf);
     assert_eq!(data.deleted, None);
-    assert_eq!(
-        data.chunks,
-        compute_chunks(base, local, remote, &Options::default())
-    );
-    assert_eq!(
-        data.word_changes,
-        word_changes(base, local, remote, &data.chunks)
-    );
-    let word_chunks: Vec<_> = data.word_changes.iter().map(|words| words.chunk).collect();
-    let chunk_ids: Vec<_> = data.chunks.iter().map(|chunk| chunk.id).collect();
-    assert_eq!(word_chunks, chunk_ids);
+    assert_eq!(data.disk_version, DiskVersion(0));
+    let chunks = compute_chunks(base, local, remote, &Options::default());
+    let words = word_changes(base, local, remote, &chunks);
+    assert_eq!(data.chunks.len(), chunks.len());
+    for ((found, chunk), words) in data.chunks.iter().zip(&chunks).zip(&words) {
+        assert_eq!(found.chunk, *chunk);
+        assert_eq!(found.words, *words);
+        assert_eq!(found.middle.start, MiddleLine(chunk.base.start.0));
+        assert_eq!(found.middle.len, chunk.base.len);
+    }
 }
 
 #[test]
@@ -167,8 +170,13 @@ fn load_add_add_has_empty_base_and_one_conflict_chunk() {
 
     let data = session.load(ADD_ADD).unwrap();
 
-    assert_eq!(data.base, "");
-    let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
+    assert_eq!(
+        data.middle,
+        Middle::Stages {
+            text: String::new()
+        }
+    );
+    let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.chunk.kind).collect();
     assert_eq!(kinds, [ChunkKind::Conflict]);
 }
 
@@ -226,7 +234,12 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
 
     let data = session.load(PATH).unwrap();
 
-    assert_eq!(data.base, "");
+    assert_eq!(
+        data.middle,
+        Middle::Stages {
+            text: String::new()
+        }
+    );
     assert_eq!(data.eol, Eol::CrLf);
 }
 
@@ -276,7 +289,7 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
         (SYMLINK, UnsupportedReason::Symlink),
     ] {
         assert_eq!(unsupported_error(&mut session, path), reason);
-        let error = session.finish(path, "text\n").unwrap_err();
+        let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
         assert!(
             matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
             "{error:?}"
@@ -291,7 +304,7 @@ fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
 
-    session.reset(SUBMODULE).unwrap();
+    session.reset(SUBMODULE, DiskVersion(0)).unwrap();
 
     assert_eq!(git_ok(dir.path(), &["ls-files", "-u"]).unwrap(), before);
     let files = session.files();

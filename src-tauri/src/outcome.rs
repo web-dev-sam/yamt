@@ -49,7 +49,7 @@ pub(crate) fn startup(repo: &Path) -> Startup {
 }
 
 pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
-    if let Err(error) = session.refresh_statuses() {
+    if let Err(error) = session.refresh() {
         tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
     }
     let unresolved = session.remaining();
@@ -71,6 +71,7 @@ pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
 #[cfg(test)]
 mod tests {
     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+    use yamt_session::DiskVersion;
 
     use super::*;
     use crate::frontend_log::tests::logged;
@@ -147,12 +148,12 @@ mod tests {
                 message: Some("2 of 2 files still unresolved".to_owned()),
             }
         );
-        session.finish("a.ts", "done\n").unwrap();
+        session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
         assert_eq!(
             ending_on_close(&mut session).message.as_deref(),
             Some("1 of 2 files still unresolved")
         );
-        session.finish("b.ts", "done\n").unwrap();
+        session.finish("b.ts", "done\n", DiskVersion(0)).unwrap();
         assert_eq!(
             ending_on_close(&mut session),
             Ending {
@@ -182,10 +183,32 @@ mod tests {
     }
 
     #[test]
+    fn closing_stages_a_file_regenerated_on_disk_and_keeps_one_with_markers_unresolved() {
+        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+        let mut session = MergeSession::open(repo.path()).unwrap();
+        std::fs::write(repo.path().join("a.ts"), "regenerated\n").unwrap();
+        let with_markers = "<<<<<<< ours\nlocal\n=======\nremote, edited\n>>>>>>> theirs\n";
+        std::fs::write(repo.path().join("b.ts"), with_markers).unwrap();
+
+        let ending = ending_on_close(&mut session);
+
+        assert_eq!(
+            ending.message.as_deref(),
+            Some("1 of 2 files still unresolved")
+        );
+        let unmerged = git_ok(repo.path(), &["ls-files", "-u"]).unwrap();
+        let unmerged = String::from_utf8(unmerged).unwrap();
+        assert!(
+            !unmerged.contains("a.ts") && unmerged.contains("b.ts"),
+            "{unmerged}"
+        );
+    }
+
+    #[test]
     fn closing_with_a_broken_index_uses_the_session_statuses_and_warns() {
         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
         let mut session = MergeSession::open(repo.path()).unwrap();
-        session.finish("a.ts", "done\n").unwrap();
+        session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
         std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
 
         let (ending, logged) = logged(|| ending_on_close(&mut session));

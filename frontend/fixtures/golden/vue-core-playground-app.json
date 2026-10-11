@@ -1,334 +1,378 @@
 {
   "path": "vue-core-playground-app.vue",
-  "base": "<script setup lang=\"ts\">\nimport Header from './Header.vue'\nimport { Repl, useStore, SFCOptions, useVueImportMap } from '@vue/repl'\nimport Monaco from '@vue/repl/monaco-editor'\nimport { ref, watchEffect, onMounted, computed, watch } from 'vue'\n\nconst replRef = ref<InstanceType<typeof Repl>>()\n\nconst setVH = () => {\n  document.documentElement.style.setProperty('--vh', window.innerHeight + `px`)\n}\nwindow.addEventListener('resize', setVH)\nsetVH()\n\nconst useSSRMode = ref(false)\n\nconst AUTO_SAVE_STORAGE_KEY = 'vue-sfc-playground-auto-save'\nconst initAutoSave: boolean = JSON.parse(\n  localStorage.getItem(AUTO_SAVE_STORAGE_KEY) ?? 'true',\n)\nconst autoSave = ref(initAutoSave)\n\nconst { productionMode, vueVersion, importMap } = useVueImportMap({\n  runtimeDev: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.js`\n    : `${location.origin}/src/vue-dev-proxy`,\n  runtimeProd: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.prod.js`\n    : `${location.origin}/src/vue-dev-proxy-prod`,\n  serverRenderer: import.meta.env.PROD\n    ? `${location.origin}/server-renderer.esm-browser.js`\n    : `${location.origin}/src/vue-server-renderer-dev-proxy`,\n})\n\nlet hash = location.hash.slice(1)\nif (hash.startsWith('__DEV__')) {\n  hash = hash.slice(7)\n  productionMode.value = false\n}\nif (hash.startsWith('__PROD__')) {\n  hash = hash.slice(8)\n  productionMode.value = true\n}\nif (hash.startsWith('__SSR__')) {\n  hash = hash.slice(7)\n  useSSRMode.value = true\n}\n\n// enable experimental features\nconst sfcOptions = computed((): SFCOptions => ({\n  script: {\n    inlineTemplate: productionMode.value,\n    isProd: productionMode.value,\n    propsDestructure: true,\n  },\n  style: {\n    isProd: productionMode.value,\n  },\n  template: {\n    isProd: productionMode.value,\n    compilerOptions: {\n      isCustomElement: (tag: string) =>\n        tag === 'mjx-container' || tag.startsWith('custom-'),\n    },\n  },\n}))\n\nconst store = useStore(\n  {\n    builtinImportMap: importMap,\n    vueVersion,\n    sfcOptions,\n  },\n  hash,\n)\n// @ts-expect-error\nglobalThis.store = store\n\n// persist state\nwatchEffect(() => {\n  const newHash = store\n    .serialize()\n    .replace(/^#/, useSSRMode.value ? `#__SSR__` : `#`)\n    .replace(/^#/, productionMode.value ? `#__PROD__` : `#`)\n  history.replaceState({}, '', newHash)\n})\n\nfunction toggleProdMode() {\n  productionMode.value = !productionMode.value\n}\n\nfunction toggleSSR() {\n  useSSRMode.value = !useSSRMode.value\n}\n\nfunction toggleAutoSave() {\n  autoSave.value = !autoSave.value\n  localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(autoSave.value))\n}\n\nfunction reloadPage() {\n  replRef.value?.reload()\n}\n\nconst theme = ref<'dark' | 'light'>('dark')\nfunction toggleTheme(isDark: boolean) {\n  theme.value = isDark ? 'dark' : 'light'\n}\nonMounted(() => {\n  const cls = document.documentElement.classList\n  toggleTheme(cls.contains('dark'))\n\n  // @ts-expect-error process shim for old versions of @vue/compiler-sfc dependency\n  window.process = { env: {} }\n})\n\nconst isVaporSupported = ref(false)\nwatch(\n  () => store.vueVersion,\n  (version, oldVersion) => {\n    const [major, minor] = (version || store.compiler.version)\n      .split('.')\n      .map((v: string) => parseInt(v, 10))\n    isVaporSupported.value = major > 3 || (major === 3 && minor >= 6)\n    if (oldVersion) reloadPage()\n  },\n  { immediate: true, flush: 'pre' },\n)\n\nconst previewOptions = computed(() => ({\n  customCode: {\n    importCode: `import { initCustomFormatter${isVaporSupported.value ? ', vaporInteropPlugin' : ''} } from 'vue'`,\n    useCode: `\n      ${isVaporSupported.value ? 'app.use(vaporInteropPlugin)' : ''}\n      if (window.devtoolsFormatters) {\n        const index = window.devtoolsFormatters.findIndex((v) => v.__vue_custom_formatter)\n        window.devtoolsFormatters.splice(index, 1)\n        initCustomFormatter()\n      } else {\n        initCustomFormatter()\n      }`,\n  },\n}))\n</script>\n\n<template>\n  <Header\n    :store=\"store\"\n    :prod=\"productionMode\"\n    :ssr=\"useSSRMode\"\n    :autoSave=\"autoSave\"\n    :theme=\"theme\"\n    @toggle-theme=\"toggleTheme\"\n    @toggle-prod=\"toggleProdMode\"\n    @toggle-ssr=\"toggleSSR\"\n    @toggle-autosave=\"toggleAutoSave\"\n    @reload-page=\"reloadPage\"\n  />\n  <Repl\n    ref=\"replRef\"\n    :theme=\"theme\"\n    :editor=\"Monaco\"\n    @keydown.ctrl.s.prevent\n    @keydown.meta.s.prevent\n    :ssr=\"useSSRMode\"\n    :model-value=\"autoSave\"\n    :editorOptions=\"{ autoSaveText: false }\"\n    :store=\"store\"\n    :showCompileOutput=\"true\"\n    :showSsrOutput=\"useSSRMode\"\n    :showOpenSourceMap=\"true\"\n    :autoResize=\"true\"\n    :clearConsole=\"false\"\n    :preview-options=\"previewOptions\"\n  />\n</template>\n\n<style>\n.dark {\n  color-scheme: dark;\n}\n\nbody {\n  font-size: 13px;\n  font-family:\n    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,\n    Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;\n  margin: 0;\n  --base: #444;\n  --nav-height: 50px;\n}\n\n.vue-repl {\n  height: calc(var(--vh) - var(--nav-height)) !important;\n}\n\nbutton {\n  border: none;\n  outline: none;\n  cursor: pointer;\n  margin: 0;\n  background-color: transparent;\n}\n</style>\n",
+  "middle": {
+    "kind": "Stages",
+    "text": "<script setup lang=\"ts\">\nimport Header from './Header.vue'\nimport { Repl, useStore, SFCOptions, useVueImportMap } from '@vue/repl'\nimport Monaco from '@vue/repl/monaco-editor'\nimport { ref, watchEffect, onMounted, computed, watch } from 'vue'\n\nconst replRef = ref<InstanceType<typeof Repl>>()\n\nconst setVH = () => {\n  document.documentElement.style.setProperty('--vh', window.innerHeight + `px`)\n}\nwindow.addEventListener('resize', setVH)\nsetVH()\n\nconst useSSRMode = ref(false)\n\nconst AUTO_SAVE_STORAGE_KEY = 'vue-sfc-playground-auto-save'\nconst initAutoSave: boolean = JSON.parse(\n  localStorage.getItem(AUTO_SAVE_STORAGE_KEY) ?? 'true',\n)\nconst autoSave = ref(initAutoSave)\n\nconst { productionMode, vueVersion, importMap } = useVueImportMap({\n  runtimeDev: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.js`\n    : `${location.origin}/src/vue-dev-proxy`,\n  runtimeProd: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.prod.js`\n    : `${location.origin}/src/vue-dev-proxy-prod`,\n  serverRenderer: import.meta.env.PROD\n    ? `${location.origin}/server-renderer.esm-browser.js`\n    : `${location.origin}/src/vue-server-renderer-dev-proxy`,\n})\n\nlet hash = location.hash.slice(1)\nif (hash.startsWith('__DEV__')) {\n  hash = hash.slice(7)\n  productionMode.value = false\n}\nif (hash.startsWith('__PROD__')) {\n  hash = hash.slice(8)\n  productionMode.value = true\n}\nif (hash.startsWith('__SSR__')) {\n  hash = hash.slice(7)\n  useSSRMode.value = true\n}\n\n// enable experimental features\nconst sfcOptions = computed((): SFCOptions => ({\n  script: {\n    inlineTemplate: productionMode.value,\n    isProd: productionMode.value,\n    propsDestructure: true,\n  },\n  style: {\n    isProd: productionMode.value,\n  },\n  template: {\n    isProd: productionMode.value,\n    compilerOptions: {\n      isCustomElement: (tag: string) =>\n        tag === 'mjx-container' || tag.startsWith('custom-'),\n    },\n  },\n}))\n\nconst store = useStore(\n  {\n    builtinImportMap: importMap,\n    vueVersion,\n    sfcOptions,\n  },\n  hash,\n)\n// @ts-expect-error\nglobalThis.store = store\n\n// persist state\nwatchEffect(() => {\n  const newHash = store\n    .serialize()\n    .replace(/^#/, useSSRMode.value ? `#__SSR__` : `#`)\n    .replace(/^#/, productionMode.value ? `#__PROD__` : `#`)\n  history.replaceState({}, '', newHash)\n})\n\nfunction toggleProdMode() {\n  productionMode.value = !productionMode.value\n}\n\nfunction toggleSSR() {\n  useSSRMode.value = !useSSRMode.value\n}\n\nfunction toggleAutoSave() {\n  autoSave.value = !autoSave.value\n  localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(autoSave.value))\n}\n\nfunction reloadPage() {\n  replRef.value?.reload()\n}\n\nconst theme = ref<'dark' | 'light'>('dark')\nfunction toggleTheme(isDark: boolean) {\n  theme.value = isDark ? 'dark' : 'light'\n}\nonMounted(() => {\n  const cls = document.documentElement.classList\n  toggleTheme(cls.contains('dark'))\n\n  // @ts-expect-error process shim for old versions of @vue/compiler-sfc dependency\n  window.process = { env: {} }\n})\n\nconst isVaporSupported = ref(false)\nwatch(\n  () => store.vueVersion,\n  (version, oldVersion) => {\n    const [major, minor] = (version || store.compiler.version)\n      .split('.')\n      .map((v: string) => parseInt(v, 10))\n    isVaporSupported.value = major > 3 || (major === 3 && minor >= 6)\n    if (oldVersion) reloadPage()\n  },\n  { immediate: true, flush: 'pre' },\n)\n\nconst previewOptions = computed(() => ({\n  customCode: {\n    importCode: `import { initCustomFormatter${isVaporSupported.value ? ', vaporInteropPlugin' : ''} } from 'vue'`,\n    useCode: `\n      ${isVaporSupported.value ? 'app.use(vaporInteropPlugin)' : ''}\n      if (window.devtoolsFormatters) {\n        const index = window.devtoolsFormatters.findIndex((v) => v.__vue_custom_formatter)\n        window.devtoolsFormatters.splice(index, 1)\n        initCustomFormatter()\n      } else {\n        initCustomFormatter()\n      }`,\n  },\n}))\n</script>\n\n<template>\n  <Header\n    :store=\"store\"\n    :prod=\"productionMode\"\n    :ssr=\"useSSRMode\"\n    :autoSave=\"autoSave\"\n    :theme=\"theme\"\n    @toggle-theme=\"toggleTheme\"\n    @toggle-prod=\"toggleProdMode\"\n    @toggle-ssr=\"toggleSSR\"\n    @toggle-autosave=\"toggleAutoSave\"\n    @reload-page=\"reloadPage\"\n  />\n  <Repl\n    ref=\"replRef\"\n    :theme=\"theme\"\n    :editor=\"Monaco\"\n    @keydown.ctrl.s.prevent\n    @keydown.meta.s.prevent\n    :ssr=\"useSSRMode\"\n    :model-value=\"autoSave\"\n    :editorOptions=\"{ autoSaveText: false }\"\n    :store=\"store\"\n    :showCompileOutput=\"true\"\n    :showSsrOutput=\"useSSRMode\"\n    :showOpenSourceMap=\"true\"\n    :autoResize=\"true\"\n    :clearConsole=\"false\"\n    :preview-options=\"previewOptions\"\n  />\n</template>\n\n<style>\n.dark {\n  color-scheme: dark;\n}\n\nbody {\n  font-size: 13px;\n  font-family:\n    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,\n    Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;\n  margin: 0;\n  --base: #444;\n  --nav-height: 50px;\n}\n\n.vue-repl {\n  height: calc(var(--vh) - var(--nav-height)) !important;\n}\n\nbutton {\n  border: none;\n  outline: none;\n  cursor: pointer;\n  margin: 0;\n  background-color: transparent;\n}\n</style>\n"
+  },
   "local": "<script setup lang=\"ts\">\nimport Header from './Header.vue'\nimport {\n  Repl,\n  type SFCOptions,\n  useStore,\n  useVueImportMap,\n  StoreState,\n} from '@vue/repl'\nimport Monaco from '@vue/repl/monaco-editor'\nimport { ref, watchEffect, onMounted, computed, watch } from 'vue'\n\nconst replRef = ref<InstanceType<typeof Repl>>()\n\nconst setVH = () => {\n  document.documentElement.style.setProperty('--vh', window.innerHeight + `px`)\n}\nwindow.addEventListener('resize', setVH)\nsetVH()\n\nconst useSSRMode = ref(false)\n\nconst AUTO_SAVE_STORAGE_KEY = 'vue-sfc-playground-auto-save'\nconst initAutoSave: boolean = JSON.parse(\n  localStorage.getItem(AUTO_SAVE_STORAGE_KEY) ?? 'true',\n)\nconst autoSave = ref(initAutoSave)\n\nconst { vueVersion, productionMode, importMap } = useVueImportMap({\n  runtimeDev: () => {\n    return import.meta.env.PROD\n      ? `${location.origin}/vue.runtime-with-vapor.esm-browser.js`\n      : `${location.origin}/src/vue-dev-proxy`\n  },\n  runtimeProd: () => {\n    return import.meta.env.PROD\n      ? `${location.origin}/vue.runtime-with-vapor.esm-browser.prod.js`\n      : `${location.origin}/src/vue-dev-proxy-prod`\n  },\n  serverRenderer: import.meta.env.PROD\n    ? `${location.origin}/server-renderer.esm-browser.js`\n    : `${location.origin}/src/vue-server-renderer-dev-proxy`,\n})\n\nlet hash = location.hash.slice(1)\nif (hash.startsWith('__DEV__')) {\n  hash = hash.slice(7)\n  productionMode.value = false\n}\nif (hash.startsWith('__PROD__')) {\n  hash = hash.slice(8)\n  productionMode.value = true\n}\nif (hash.startsWith('__SSR__')) {\n  hash = hash.slice(7)\n  useSSRMode.value = true\n}\n\nconst files: StoreState['files'] = ref(Object.create(null))\n\n// enable experimental features\nconst sfcOptions = computed((): SFCOptions => ({\n  script: {\n    inlineTemplate: productionMode.value,\n    isProd: productionMode.value,\n    propsDestructure: true,\n    // vapor: useVaporMode.value,\n  },\n  style: {\n    isProd: productionMode.value,\n  },\n  template: {\n    // vapor: useVaporMode.value,\n    isProd: productionMode.value,\n    compilerOptions: {\n      isCustomElement: (tag: string) =>\n        tag === 'mjx-container' || tag.startsWith('custom-'),\n    },\n  },\n}))\n\nconst store = useStore(\n  {\n    files,\n    vueVersion,\n    builtinImportMap: importMap,\n    sfcOptions,\n  },\n  hash,\n)\n// @ts-expect-error\nglobalThis.store = store\n\n// persist state\nwatchEffect(() => {\n  const newHash = store\n    .serialize()\n    .replace(/^#/, useSSRMode.value ? `#__SSR__` : `#`)\n    .replace(/^#/, productionMode.value ? `#__PROD__` : `#`)\n  history.replaceState({}, '', newHash)\n})\n\nfunction toggleProdMode() {\n  productionMode.value = !productionMode.value\n}\n\nfunction toggleSSR() {\n  useSSRMode.value = !useSSRMode.value\n}\n\nfunction toggleAutoSave() {\n  autoSave.value = !autoSave.value\n  localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(autoSave.value))\n}\n\nfunction reloadPage() {\n  replRef.value?.reload()\n}\n\nconst theme = ref<'dark' | 'light'>('dark')\nfunction toggleTheme(isDark: boolean) {\n  theme.value = isDark ? 'dark' : 'light'\n}\nonMounted(() => {\n  const cls = document.documentElement.classList\n  toggleTheme(cls.contains('dark'))\n\n  // @ts-expect-error process shim for old versions of @vue/compiler-sfc dependency\n  window.process = { env: {} }\n})\n\nconst isVaporSupported = ref(false)\nwatch(\n  () => store.vueVersion,\n  (version, oldVersion) => {\n    const [major, minor] = (version || store.compiler.version)\n      .split('.')\n      .map((v: string) => parseInt(v, 10))\n    isVaporSupported.value = major > 3 || (major === 3 && minor >= 6)\n    if (oldVersion) reloadPage()\n  },\n  { immediate: true, flush: 'pre' },\n)\n\nconst previewOptions = computed(() => ({\n  customCode: {\n    importCode: `import { initCustomFormatter${isVaporSupported.value ? ', vaporInteropPlugin' : ''} } from 'vue'`,\n    useCode: `\n      ${isVaporSupported.value ? 'app.use(vaporInteropPlugin)' : ''}\n      if (window.devtoolsFormatters) {\n        const index = window.devtoolsFormatters.findIndex((v) => v.__vue_custom_formatter)\n        window.devtoolsFormatters.splice(index, 1)\n        initCustomFormatter()\n      } else {\n        initCustomFormatter()\n      }`,\n  },\n}))\n</script>\n\n<template>\n  <Header\n    :store=\"store\"\n    :prod=\"productionMode\"\n    :ssr=\"useSSRMode\"\n    :autoSave=\"autoSave\"\n    :theme=\"theme\"\n    @toggle-theme=\"toggleTheme\"\n    @toggle-prod=\"toggleProdMode\"\n    @toggle-ssr=\"toggleSSR\"\n    @toggle-autosave=\"toggleAutoSave\"\n    @reload-page=\"reloadPage\"\n  />\n  <Repl\n    ref=\"replRef\"\n    :theme=\"theme\"\n    :editor=\"Monaco\"\n    @keydown.ctrl.s.prevent\n    @keydown.meta.s.prevent\n    :ssr=\"useSSRMode\"\n    :model-value=\"autoSave\"\n    :editorOptions=\"{ autoSaveText: false }\"\n    :store=\"store\"\n    :showCompileOutput=\"true\"\n    :showSsrOutput=\"useSSRMode\"\n    :showOpenSourceMap=\"true\"\n    :autoResize=\"true\"\n    :clearConsole=\"false\"\n    :preview-options=\"previewOptions\"\n  />\n</template>\n\n<style>\n.dark {\n  color-scheme: dark;\n}\n\nbody {\n  font-size: 13px;\n  font-family:\n    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,\n    Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;\n  margin: 0;\n  --base: #444;\n  --nav-height: 50px;\n}\n\n.vue-repl {\n  height: calc(var(--vh) - var(--nav-height)) !important;\n}\n\nbutton {\n  border: none;\n  outline: none;\n  cursor: pointer;\n  margin: 0;\n  background-color: transparent;\n}\n</style>\n",
   "remote": "<script setup lang=\"ts\">\nimport Header from './Header.vue'\nimport { Repl, useStore, SFCOptions, useVueImportMap } from '@vue/repl'\nimport Monaco from '@vue/repl/monaco-editor'\nimport { ref, watchEffect, onMounted, computed, watch } from 'vue'\n\nconst replRef = ref<InstanceType<typeof Repl>>()\n\nconst setVH = () => {\n  document.documentElement.style.setProperty('--vh', window.innerHeight + `px`)\n}\nwindow.addEventListener('resize', setVH)\nsetVH()\n\nconst useSSRMode = ref(false)\n\nconst DEFAULT_TYPESCRIPT_VERSION = '6.0.3'\n\nconst AUTO_SAVE_STORAGE_KEY = 'vue-sfc-playground-auto-save'\nconst initAutoSave: boolean = JSON.parse(\n  localStorage.getItem(AUTO_SAVE_STORAGE_KEY) ?? 'true',\n)\nconst autoSave = ref(initAutoSave)\n\nconst { productionMode, vueVersion, importMap } = useVueImportMap({\n  runtimeDev: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.js`\n    : `${location.origin}/src/vue-dev-proxy`,\n  runtimeProd: import.meta.env.PROD\n    ? `${location.origin}/vue.runtime.esm-browser.prod.js`\n    : `${location.origin}/src/vue-dev-proxy-prod`,\n  serverRenderer: import.meta.env.PROD\n    ? `${location.origin}/server-renderer.esm-browser.js`\n    : `${location.origin}/src/vue-server-renderer-dev-proxy`,\n})\n\nlet hash = location.hash.slice(1)\nif (hash.startsWith('__DEV__')) {\n  hash = hash.slice(7)\n  productionMode.value = false\n}\nif (hash.startsWith('__PROD__')) {\n  hash = hash.slice(8)\n  productionMode.value = true\n}\nif (hash.startsWith('__SSR__')) {\n  hash = hash.slice(7)\n  useSSRMode.value = true\n}\n\n// enable experimental features\nconst sfcOptions = computed((): SFCOptions => ({\n  script: {\n    inlineTemplate: productionMode.value,\n    isProd: productionMode.value,\n    propsDestructure: true,\n  },\n  style: {\n    isProd: productionMode.value,\n  },\n  template: {\n    isProd: productionMode.value,\n    compilerOptions: {\n      isCustomElement: (tag: string) =>\n        tag === 'mjx-container' || tag.startsWith('custom-'),\n    },\n  },\n}))\n\nconst store = useStore(\n  {\n    builtinImportMap: importMap,\n    vueVersion,\n    typescriptVersion: ref(DEFAULT_TYPESCRIPT_VERSION),\n    sfcOptions,\n  },\n  hash,\n)\n// @ts-expect-error\nglobalThis.store = store\n\n// persist state\nwatchEffect(() => {\n  const newHash = store\n    .serialize()\n    .replace(/^#/, useSSRMode.value ? `#__SSR__` : `#`)\n    .replace(/^#/, productionMode.value ? `#__PROD__` : `#`)\n  history.replaceState({}, '', newHash)\n})\n\nfunction toggleProdMode() {\n  productionMode.value = !productionMode.value\n}\n\nfunction toggleSSR() {\n  useSSRMode.value = !useSSRMode.value\n}\n\nfunction toggleAutoSave() {\n  autoSave.value = !autoSave.value\n  localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(autoSave.value))\n}\n\nfunction reloadPage() {\n  replRef.value?.reload()\n}\n\nconst theme = ref<'dark' | 'light'>('dark')\nfunction toggleTheme(isDark: boolean) {\n  theme.value = isDark ? 'dark' : 'light'\n}\nonMounted(() => {\n  const cls = document.documentElement.classList\n  toggleTheme(cls.contains('dark'))\n\n  // @ts-expect-error process shim for old versions of @vue/compiler-sfc dependency\n  window.process = { env: {} }\n})\n\nconst isVaporSupported = ref(false)\nwatch(\n  () => store.vueVersion,\n  (version, oldVersion) => {\n    const [major, minor] = (version || store.compiler.version)\n      .split('.')\n      .map((v: string) => parseInt(v, 10))\n    isVaporSupported.value = major > 3 || (major === 3 && minor >= 6)\n    if (oldVersion) reloadPage()\n  },\n  { immediate: true, flush: 'pre' },\n)\n\nconst previewOptions = computed(() => ({\n  customCode: {\n    importCode: `import { initCustomFormatter${isVaporSupported.value ? ', vaporInteropPlugin' : ''} } from 'vue'`,\n    useCode: `\n      ${isVaporSupported.value ? 'app.use(vaporInteropPlugin)' : ''}\n      if (window.devtoolsFormatters) {\n        const index = window.devtoolsFormatters.findIndex((v) => v.__vue_custom_formatter)\n        window.devtoolsFormatters.splice(index, 1)\n        initCustomFormatter()\n      } else {\n        initCustomFormatter()\n      }`,\n  },\n}))\n</script>\n\n<template>\n  <Header\n    :store=\"store\"\n    :prod=\"productionMode\"\n    :ssr=\"useSSRMode\"\n    :autoSave=\"autoSave\"\n    :theme=\"theme\"\n    @toggle-theme=\"toggleTheme\"\n    @toggle-prod=\"toggleProdMode\"\n    @toggle-ssr=\"toggleSSR\"\n    @toggle-autosave=\"toggleAutoSave\"\n    @reload-page=\"reloadPage\"\n  />\n  <Repl\n    ref=\"replRef\"\n    :theme=\"theme\"\n    :editor=\"Monaco\"\n    @keydown.ctrl.s.prevent\n    @keydown.meta.s.prevent\n    :ssr=\"useSSRMode\"\n    :model-value=\"autoSave\"\n    :editorOptions=\"{ autoSaveText: false }\"\n    :store=\"store\"\n    :showCompileOutput=\"true\"\n    :showSsrOutput=\"useSSRMode\"\n    :showOpenSourceMap=\"true\"\n    :autoResize=\"true\"\n    :clearConsole=\"false\"\n    :preview-options=\"previewOptions\"\n  />\n</template>\n\n<style>\n.dark {\n  color-scheme: dark;\n}\n\nbody {\n  font-size: 13px;\n  font-family:\n    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,\n    Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;\n  margin: 0;\n  --base: #444;\n  --nav-height: 50px;\n}\n\n.vue-repl {\n  height: calc(var(--vh) - var(--nav-height)) !important;\n}\n\nbutton {\n  border: none;\n  outline: none;\n  cursor: pointer;\n  margin: 0;\n  background-color: transparent;\n}\n</style>\n",
   "deleted": null,
   "eol": "Lf",
   "chunks": [
     {
-      "id": 0,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 0,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 2,
+          "len": 1
+        },
+        "local": {
+          "start": 2,
+          "len": 7
+        },
+        "remote": {
+          "start": 2,
+          "len": 1
+        }
+      },
+      "middle": {
         "start": 2,
         "len": 1
       },
-      "local": {
-        "start": 2,
-        "len": 7
-      },
-      "remote": {
-        "start": 2,
-        "len": 1
+      "words": {
+        "chunk": 0,
+        "local": {
+          "changed": [
+            {
+              "line": 2,
+              "start": 0,
+              "len": 8
+            },
+            {
+              "line": 3,
+              "start": 0,
+              "len": 7
+            },
+            {
+              "line": 4,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 5,
+              "start": 0,
+              "len": 11
+            },
+            {
+              "line": 6,
+              "start": 0,
+              "len": 18
+            },
+            {
+              "line": 7,
+              "start": 0,
+              "len": 13
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 8,
+              "column": 0
+            }
+          ]
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 1,
-      "kind": "RemoteOnly",
-      "base": {
+      "chunk": {
+        "id": 1,
+        "kind": "RemoteOnly",
+        "base": {
+          "start": 16,
+          "len": 0
+        },
+        "local": {
+          "start": 22,
+          "len": 0
+        },
+        "remote": {
+          "start": 16,
+          "len": 2
+        }
+      },
+      "middle": {
         "start": 16,
         "len": 0
       },
-      "local": {
-        "start": 22,
-        "len": 0
-      },
-      "remote": {
-        "start": 16,
-        "len": 2
+      "words": {
+        "chunk": 1,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 2,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 2,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 22,
+          "len": 7
+        },
+        "local": {
+          "start": 28,
+          "len": 11
+        },
+        "remote": {
+          "start": 24,
+          "len": 7
+        }
+      },
+      "middle": {
         "start": 22,
         "len": 7
       },
-      "local": {
-        "start": 28,
-        "len": 11
-      },
-      "remote": {
-        "start": 24,
-        "len": 7
+      "words": {
+        "chunk": 2,
+        "local": {
+          "changed": [
+            {
+              "line": 28,
+              "start": 8,
+              "len": 10
+            },
+            {
+              "line": 28,
+              "start": 20,
+              "len": 14
+            },
+            {
+              "line": 29,
+              "start": 0,
+              "len": 21
+            },
+            {
+              "line": 30,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 31,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 31,
+              "start": 39,
+              "len": 11
+            },
+            {
+              "line": 32,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 33,
+              "start": 0,
+              "len": 4
+            },
+            {
+              "line": 34,
+              "start": 0,
+              "len": 22
+            },
+            {
+              "line": 35,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 36,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 36,
+              "start": 39,
+              "len": 11
+            },
+            {
+              "line": 37,
+              "start": 0,
+              "len": 6
+            },
+            {
+              "line": 38,
+              "start": 0,
+              "len": 4
+            }
+          ],
+          "removed_at": [
+            {
+              "line": 32,
+              "column": 46
+            },
+            {
+              "line": 37,
+              "column": 51
+            }
+          ]
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 3,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 3,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 48,
+          "len": 0
+        },
+        "local": {
+          "start": 58,
+          "len": 2
+        },
+        "remote": {
+          "start": 50,
+          "len": 0
+        }
+      },
+      "middle": {
         "start": 48,
         "len": 0
       },
-      "local": {
-        "start": 58,
-        "len": 2
-      },
-      "remote": {
-        "start": 50,
-        "len": 0
+      "words": {
+        "chunk": 3,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 4,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 4,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 54,
+          "len": 0
+        },
+        "local": {
+          "start": 66,
+          "len": 1
+        },
+        "remote": {
+          "start": 56,
+          "len": 0
+        }
+      },
+      "middle": {
         "start": 54,
         "len": 0
       },
-      "local": {
-        "start": 66,
-        "len": 1
-      },
-      "remote": {
-        "start": 56,
-        "len": 0
+      "words": {
+        "chunk": 4,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 5,
-      "kind": "LocalOnly",
-      "base": {
+      "chunk": {
+        "id": 5,
+        "kind": "LocalOnly",
+        "base": {
+          "start": 59,
+          "len": 0
+        },
+        "local": {
+          "start": 72,
+          "len": 1
+        },
+        "remote": {
+          "start": 61,
+          "len": 0
+        }
+      },
+      "middle": {
         "start": 59,
         "len": 0
       },
-      "local": {
-        "start": 72,
-        "len": 1
-      },
-      "remote": {
-        "start": 61,
-        "len": 0
+      "words": {
+        "chunk": 5,
+        "local": {
+          "changed": [],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [],
+          "removed_at": []
+        }
       }
     },
     {
-      "id": 6,
-      "kind": "Conflict",
-      "base": {
+      "chunk": {
+        "id": 6,
+        "kind": "Conflict",
+        "base": {
+          "start": 69,
+          "len": 2
+        },
+        "local": {
+          "start": 83,
+          "len": 3
+        },
+        "remote": {
+          "start": 71,
+          "len": 3
+        }
+      },
+      "middle": {
         "start": 69,
         "len": 2
       },
-      "local": {
-        "start": 83,
-        "len": 3
-      },
-      "remote": {
-        "start": 71,
-        "len": 3
+      "words": {
+        "chunk": 6,
+        "local": {
+          "changed": [
+            {
+              "line": 83,
+              "start": 0,
+              "len": 10
+            },
+            {
+              "line": 85,
+              "start": 0,
+              "len": 32
+            }
+          ],
+          "removed_at": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 73,
+              "start": 0,
+              "len": 55
+            }
+          ],
+          "removed_at": []
+        }
       }
     }
   ],
-  "word_changes": [
-    {
-      "chunk": 0,
-      "local": {
-        "changed": [
-          {
-            "line": 2,
-            "start": 0,
-            "len": 8
-          },
-          {
-            "line": 3,
-            "start": 0,
-            "len": 7
-          },
-          {
-            "line": 4,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 5,
-            "start": 0,
-            "len": 11
-          },
-          {
-            "line": 6,
-            "start": 0,
-            "len": 18
-          },
-          {
-            "line": 7,
-            "start": 0,
-            "len": 13
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 8,
-            "column": 0
-          }
-        ]
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 1,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 2,
-      "local": {
-        "changed": [
-          {
-            "line": 28,
-            "start": 8,
-            "len": 10
-          },
-          {
-            "line": 28,
-            "start": 20,
-            "len": 14
-          },
-          {
-            "line": 29,
-            "start": 0,
-            "len": 21
-          },
-          {
-            "line": 30,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 31,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 31,
-            "start": 39,
-            "len": 11
-          },
-          {
-            "line": 32,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 33,
-            "start": 0,
-            "len": 4
-          },
-          {
-            "line": 34,
-            "start": 0,
-            "len": 22
-          },
-          {
-            "line": 35,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 36,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 36,
-            "start": 39,
-            "len": 11
-          },
-          {
-            "line": 37,
-            "start": 0,
-            "len": 6
-          },
-          {
-            "line": 38,
-            "start": 0,
-            "len": 4
-          }
-        ],
-        "removed_at": [
-          {
-            "line": 32,
-            "column": 46
-          },
-          {
-            "line": 37,
-            "column": 51
-          }
-        ]
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 3,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 4,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 5,
-      "local": {
-        "changed": [],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [],
-        "removed_at": []
-      }
-    },
-    {
-      "chunk": 6,
-      "local": {
-        "changed": [
-          {
-            "line": 83,
-            "start": 0,
-            "len": 10
-          },
-          {
-            "line": 85,
-            "start": 0,
-            "len": 32
-          }
-        ],
-        "removed_at": []
-      },
-      "remote": {
-        "changed": [
-          {
-            "line": 73,
-            "start": 0,
-            "len": 55
-          }
-        ],
-        "removed_at": []
-      }
-    }
-  ]
+  "disk_version": 0
 }

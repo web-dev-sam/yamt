@@ -1,0 +1,69 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
+
+use crate::repo::Repo;
+use crate::run::{Access, GIT_TIMEOUT, run_accepting};
+use crate::{Error, Result};
+
+// git-merge-file(1): "The exit value of this program is negative on error, and the number of
+// conflicts otherwise (truncated to 127 if there are more than that many conflicts)."
+const FIRST_ERROR_STATUS: i32 = 128;
+
+/// The three versions one `git merge-file` run merges.
+#[derive(Clone, Copy, Debug)]
+pub struct MergeInputs<'a> {
+    pub base: &'a [u8],
+    pub local: &'a [u8],
+    pub remote: &'a [u8],
+}
+
+/// How `git merge-file` merges: marker length, `--union`, and `--diff-algorithm=histogram`.
+#[derive(Clone, Copy, Debug)]
+pub struct MergeFileOptions {
+    pub marker_size: usize,
+    pub union: bool,
+    pub histogram: bool,
+}
+
+impl Repo {
+    /// git's merge of `inputs`, written with the labels `ours`, `base` and `theirs`; the three
+    /// inputs are written to files in `scratch`, an existing directory the caller removes.
+    pub fn merge_file(
+        &self,
+        scratch: &Path,
+        inputs: &MergeInputs<'_>,
+        options: &MergeFileOptions,
+    ) -> Result<Vec<u8>> {
+        let local = write_input(scratch, "local", inputs.local)?;
+        let base = write_input(scratch, "base", inputs.base)?;
+        let remote = write_input(scratch, "remote", inputs.remote)?;
+        let marker_size = format!("--marker-size={}", options.marker_size);
+        let mut args = vec!["merge-file", "-p", "-q", marker_size.as_str()];
+        if options.union {
+            args.push("--union");
+        }
+        if options.histogram {
+            args.push("--diff-algorithm=histogram");
+        }
+        args.extend(["-L", "ours", "-L", "base", "-L", "theirs", "--"]);
+        let mut command = self.command(Access::Read, &args);
+        command.args([&local, &base, &remote]);
+        run_accepting(command, None, GIT_TIMEOUT, is_conflict_count)
+    }
+}
+
+fn is_conflict_count(status: ExitStatus) -> bool {
+    status
+        .code()
+        .is_some_and(|code| (0..FIRST_ERROR_STATUS).contains(&code))
+}
+
+fn write_input(scratch: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let path = scratch.join(name);
+    fs::write(&path, bytes).map_err(|source| Error::WriteFailed {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(path)
+}
