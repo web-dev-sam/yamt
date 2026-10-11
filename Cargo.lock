@@ -4658,6 +4658,7 @@ dependencies = [
  "serde",
  "specta",
  "thiserror 2.0.21",
+ "tracing",
  "yamt-conflict-repo",
  "yamt-gitio",
  "yamt-merge-core",

@@ -225,6 +225,9 @@ impl Repo {
     pub fn restore_stages(&self, entries: &[StageEntry]) -> Result<()>; // update-index -z --index-info
     pub fn checkout_merge(&self, path: &Path) -> Result<()>;      // checkout -m -- <path>
     pub fn add(&self, path: &Path) -> Result<()>;                 // add -- <path>
+    pub fn resolve_with(&self, entry: &StageEntry) -> Result<()>; // update-index --index-info: one stage-0 record replaces every stage
+    pub fn remove_from_index(&self, path: &Path) -> Result<()>;   // update-index --force-remove -- <path>
+    pub fn checkout_from_index(&self, path: &Path) -> Result<()>; // checkout-index --force -- <path> (links, exec bit, filters)
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
@@ -255,8 +258,11 @@ impl MergeSession {
     pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages and decodes its blobs now
     pub fn files(&self) -> Vec<FileEntry>;
     pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // decoded texts + compute_chunks
-    pub fn finish(&mut self, path: &str, result: &str) -> Result<()>; // write worktree bytes as given, git add, Resolved
+    pub fn finish(&mut self, path: &str, result: &str) -> Result<()>; // write worktree, git add, Resolved; on a failed add the worktree is put back
+    pub fn describe(&mut self, path: &str) -> Result<FileSides>;     // per side: Missing | Text{lines} | Binary/NonUtf8/TooLarge{bytes} | Link{target} | Commit{id}
+    pub fn take(&mut self, path: &str, side: Side) -> Result<()>;    // resolve with one side (plan §2 #36): stage 0 first, then worktree; deleted side = git rm
     pub fn reset(&mut self, path: &str) -> Result<()>;               // restore_stages (+ checkout -m when both sides exist), Unresolved
+    pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
 }
 ```
@@ -266,8 +272,8 @@ Edge cases owned here (plan §6 → code):
 | case                                                           | handling                                                                                                                                                                                                                    |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                |
-| no stage 2 or 3 (delete/modify)                                | `unsupported: LocalDeleted / RemoteDeleted` in v0; UI offers "keep file" / "delete file" via `git add`/`git rm` — **v0.1, not v0**                                                                                          |
-| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; UI shows reason, offers "take local" / "take remote" (`git checkout --ours/--theirs` + add) — **v0.1**                                                                                     |
+| no stage 2 or 3 (delete/modify)                                | `unsupported: LocalDeleted / RemoteDeleted`; the window offers keep / delete (`take`: the kept side's stage 0 + `checkout-index`, or `--force-remove` + delete), plan §2 #36                                                |
+| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; the window shows each side's size and offers take left / take right (`take`, same result as `git checkout --ours/--theirs` + add), plan §2 #36                                             |
 | line endings                                                   | `Eol` detected on base (or local if base empty): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning |
 | `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                         |
 | file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                        |
@@ -297,8 +303,9 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 - One `tauri::State<Mutex<MergeSession>>`.
 - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Vec<FileEntry>`,
   `load_file(path) -> FileMergeData`, `finish_file(path, text) -> Vec<FileEntry>`,
-  `reset_file(path) -> Vec<FileEntry>`, `log(entry)`. No `quit_if_done`: the app stays open after
-  the last file (#37).
+  `reset_file(path) -> Vec<FileEntry>`, `describe_file(path) -> FileSides`,
+  `take_side(path, side) -> Vec<FileEntry>` (plan §2 #36), `log(entry)`. No `quit_if_done`: the app
+  stays open after the last file (#37).
 - Errors: one `#[serde(tag = "kind")] enum IpcError` (`Git`, `UnknownPath`, `Unsupported`,
   `WriteFailed`) mirrored into TS; no stringly errors.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;

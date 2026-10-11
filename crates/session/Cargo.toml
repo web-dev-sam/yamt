@@ -10,6 +10,7 @@ yamt-gitio.workspace = true
 serde.workspace = true
 specta.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 yamt-conflict-repo.workspace = true
