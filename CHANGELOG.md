@@ -28,7 +28,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   choice between the two sides.
 - The file list keeps every file of the merge with git's view of its state (also after a `git add`
   elsewhere) and an icon for its type; drag its edge to resize it; work in an unfinished file is kept
-  when you switch files.
+  when you switch files, and files you are not looking at cost nothing while you scroll.
+- Scrolling keeps up with the screen on large files (thousands of lines, hundreds of changes).
 - Closing asks before throwing away unsaved work, and exits with 0 when every file is resolved and
   1 otherwise. A window whose page has stopped responding closes on the second close request.
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
