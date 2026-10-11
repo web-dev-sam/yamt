@@ -1,0 +1,3998 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index df541a8..e5c0821 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -23,7 +23,13 @@ import { findSpace, showFindSpace } from "./internal/find";
+ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
+ import { languageOf } from "./internal/language";
+ import { applyOnModClick } from "./internal/modClick";
+-import { createPane, languageCompartment, paneText } from "./internal/pane";
++import {
++  centerPane,
++  createPane,
++  languageCompartment,
++  paneText,
++  type CenterPane,
++} from "./internal/pane";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+@@ -42,8 +48,8 @@ export type MergeHosts = {
+ 
+ export type MergeOptions = { readonly readOnly: boolean };
+ 
+-type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
+ type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
++type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
+ 
+ export class MergeController {
+   readonly #field: StateField<readonly ChunkSpan[]>;
+@@ -60,13 +66,11 @@ export class MergeController {
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions) {
+     const description = languageOf(data.path);
++    const center = centerPane(data.middle, options?.readOnly ?? false);
+     this.#field = chunkField(data.chunks);
+-    this.#readOnly = options?.readOnly ?? false;
+-    this.#views = this.#createViews({
+-      data,
+-      hosts,
+-      language: description?.support?.language ?? null,
+-    });
++    this.#readOnly = center.kind === "readOnlyCenter";
++    const language = description?.support?.language ?? null;
++    this.#views = this.#createViews({ data, hosts, language }, center);
+     this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
+     this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
+     this.#drag = new IconDrag(hosts.strips, {
+@@ -117,7 +121,7 @@ export class MergeController {
+     }
+   });
+ 
+-  #createViews({ data, hosts, language }: ViewSources): PaneViews {
++  #createViews({ data, hosts, language }: ViewSources, centerSource: CenterPane): PaneViews {
+     const field = this.#field;
+     const statusSync = EditorView.updateListener.of((update) => {
+       this.#statusesChanged(update);
+@@ -125,8 +129,7 @@ export class MergeController {
+     const shared = { eol: data.eol, language };
+     const center = createPane({
+       ...shared,
+-      kind: this.#readOnly ? "readOnlyCenter" : "center",
+-      doc: data.base,
++      ...centerSource,
+       parent: hosts.center,
+       extensions: [field, centerDecorations(field), this.#repaint, statusSync],
+     });
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 8275a59..e7bfbd6 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -16,7 +16,7 @@ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations } from "./decorations";
+ import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+-import { paneState, paneText } from "./pane";
++import { centerPane, paneState, paneText } from "./pane";
+ import type { Side } from "./side";
+ import { summarize } from "./status";
+ 
+@@ -33,37 +33,43 @@ async function synthetic(
+     remote?: [number, number];
+   }[],
+ ): Promise<FileMergeData> {
++  const { base, ...sides } = texts;
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    ...texts,
++    middle: { kind: "Stages", text: base },
++    ...sides,
++    disk_version: 0,
+     chunks: chunks.map((chunk, id) => {
+       const [remoteStart, remoteLen] = chunk.remote ?? chunk.side;
++      const middle = { start: chunk.base[0], len: chunk.base[1] };
+       return {
+-        id,
+-        kind: chunk.kind,
+-        base: { start: chunk.base[0], len: chunk.base[1] },
+-        local: { start: chunk.side[0], len: chunk.side[1] },
+-        remote: { start: remoteStart, len: remoteLen },
++        chunk: {
++          id,
++          kind: chunk.kind,
++          base: middle,
++          local: { start: chunk.side[0], len: chunk.side[1] },
++          remote: { start: remoteStart, len: remoteLen },
++        },
++        middle,
++        words: {
++          chunk: id,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
+       };
+     }),
+-    word_changes: chunks.map((_chunk, id) => ({
+-      chunk: id,
+-      local: { changed: [], removed_at: [] },
+-      remote: { changed: [], removed_at: [] },
+-    })),
+   };
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+-function open(data: FileMergeData, kind: "center" | "readOnlyCenter" = "center"): ApplyTarget {
++function open(data: FileMergeData, readOnly = false): ApplyTarget {
+   const field = chunkField(data.chunks);
+   const pane = { eol: data.eol, language: null };
+   return {
+     state: paneState({
+       ...pane,
+-      kind,
+-      doc: data.base,
++      ...centerPane(data.middle, readOnly),
+       extensions: [field, centerDecorations(field)],
+     }),
+     field,
+@@ -545,7 +551,7 @@ test("a change on an unterminated last line keeps the file without a final line
+ });
+ 
+ test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it", async () => {
+-  const merge = open(await loadFixture(MAGIC_KEYS), "readOnlyCenter");
++  const merge = open(await loadFixture(MAGIC_KEYS), true);
+   function refused(target: ApplyTarget, edit: StateCommand): boolean {
+     let dispatched = false;
+     const ran = edit({
+@@ -570,3 +576,149 @@ test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still chan
+   expect(refused(bulk, undo)).toBe(true);
+   expect(refused(open(await loadFixture(MAGIC_KEYS)), insertNewlineAndIndent)).toBe(false);
+ });
++
++const WORKED_OURS = [
++  "title",
++  "=======",
++  "one",
++  "TWO",
++  "shared-a",
++  "three-ours",
++  "shared-b",
++  "four",
++  "five",
++  "six",
++  "seven",
++  "eight-ours",
++  "nine",
++  "ten",
++];
++const WORKED_THEIRS = [
++  "title",
++  "=======",
++  "ONE",
++  "two",
++  "shared-a",
++  "three-theirs",
++  "shared-b",
++  "four",
++  "five",
++  "six",
++  "seven",
++  "eight-theirs",
++  "nine",
++  "ten",
++];
++
++type Seeded = {
++  readonly middle: readonly string[];
++  readonly base: [number, number];
++  readonly at: [number, number];
++  readonly side: [number, number];
++  readonly eol: FileMergeData["eol"];
++};
++
++function lines(texts: readonly string[], eol: FileMergeData["eol"]): string {
++  const separator = eol === "CrLf" ? "\r\n" : "\n";
++  return texts.map((text) => `${text}${separator}`).join("");
++}
++
++function range([start, len]: [number, number]): { start: number; len: number } {
++  return { start, len };
++}
++
++async function diskSeeded({ middle, base, at, side, eol }: Seeded): Promise<FileMergeData> {
++  const record = {
++    path: "worked.txt",
++    deleted: null,
++    middle: { kind: "Disk", text: lines(middle, eol) },
++    local: lines(WORKED_OURS, eol),
++    remote: lines(WORKED_THEIRS, eol),
++    eol,
++    disk_version: 1,
++    chunks: [
++      {
++        chunk: {
++          id: 0,
++          kind: "Conflict",
++          base: range(base),
++          local: range(side),
++          remote: range(side),
++        },
++        middle: range(at),
++        words: {
++          chunk: 0,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
++      },
++    ],
++  };
++  return loadFixture("worked.txt", { "worked.json": record });
++}
++
++const ONE_BLOCK_LEFT = [
++  "title",
++  "=======",
++  "one",
++  "two",
++  "three",
++  "shared-b",
++  "four",
++  "five",
++  "six",
++  "seven",
++  "eight-theirs",
++  "nine",
++  "ten",
++];
++
++test.each<FileMergeData["eol"]>(["Lf", "CrLf"])(
++  "a disk-seeded block takes ours exactly as the hand resolution, and undo brings base back (%s)",
++  async (eol) => {
++    const merge = open(
++      await diskSeeded({ middle: ONE_BLOCK_LEFT, base: [2, 3], at: [2, 3], side: [2, 4], eol }),
++    );
++
++    const applied = run(merge, applyOne(merge, chunkAt(merge, 0), "local"));
++    const undone = command(applied, undo);
++
++    expect(paneText(merge.state)).toBe(lines(ONE_BLOCK_LEFT, eol));
++    expect(paneText(applied.state)).toBe(
++      lines([...WORKED_OURS.slice(0, -3), "eight-theirs", "nine", "ten"], eol),
++    );
++    expect(statuses(applied)).toEqual(["applied pending"]);
++    expect(paneText(undone.state)).toBe(lines(ONE_BLOCK_LEFT, eol));
++    expect(centerText(undone, 0)).toBe(lines(["one", "two", "three"], eol));
++  },
++);
++
++test("a chunk spans its middle range, not where its base range would put it", async () => {
++  const middle = [...WORKED_OURS.slice(0, -3), "eight", "nine", "ten"];
++  const merge = open(
++    await diskSeeded({ middle, base: [9, 1], at: [11, 1], side: [11, 1], eol: "Lf" }),
++  );
++
++  expect(centerText(merge, 0)).toBe("eight\n");
++
++  const applied = run(merge, applyOne(merge, chunkAt(merge, 0), "remote"));
++
++  expect(paneText(applied.state)).toBe(
++    lines([...middle.slice(0, -3), "eight-theirs", "nine", "ten"], "Lf"),
++  );
++});
++
++test("a middle that is not text on disk is empty and read-only", async () => {
++  const data = await diskSeeded({ middle: [], base: [0, 0], at: [0, 0], side: [0, 0], eol: "Lf" });
++  const notText: FileMergeData = {
++    ...data,
++    middle: { kind: "DiskNotText", found: "Binary" },
++    chunks: [],
++  };
++
++  expect(centerPane(notText.middle, false)).toEqual({ kind: "readOnlyCenter", doc: "" });
++  expect(open(notText).state.readOnly).toBe(true);
++  expect(open(notText).state.sliceDoc()).toBe("");
++  expect(centerPane(data.middle, false).kind).toBe("center");
++  expect(centerPane(data.middle, true).kind).toBe("readOnlyCenter");
++});
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index 82b9f68..785c9fd 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -4,33 +4,38 @@ import { expect, test } from "vitest";
+ 
+ import { loadFixture, type FileMergeData } from "../../ipc";
+ import { chunkField, type ChunkSpan } from "./chunkField";
++import { centerPane } from "./pane";
+ 
+ type Center = { state: EditorState; field: StateField<readonly ChunkSpan[]> };
+ 
+ const MAPPED_BASE = "zero\none\ntwo\nthree\nfour\n";
+ 
+ async function synthetic(
+-  base: string,
++  middle: string,
+   ranges: readonly { start: number; len: number }[],
+ ): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    base,
++    middle: { kind: "Disk", text: middle },
+     local: "",
+     remote: "",
+     eol: "Lf",
+-    chunks: ranges.map((base, id) => ({
+-      id,
+-      kind: "Conflict",
+-      base,
+-      local: { start: 0, len: 1 },
+-      remote: { start: 0, len: 1 },
+-    })),
+-    word_changes: ranges.map((_range, id) => ({
+-      chunk: id,
+-      local: { changed: [], removed_at: [] },
+-      remote: { changed: [], removed_at: [] },
++    disk_version: 0,
++    chunks: ranges.map((range, id) => ({
++      chunk: {
++        id,
++        kind: "Conflict",
++        base: { start: 0, len: 1 },
++        local: { start: 0, len: 1 },
++        remote: { start: 0, len: 1 },
++      },
++      middle: range,
++      words: {
++        chunk: id,
++        local: { changed: [], removed_at: [] },
++        remote: { changed: [], removed_at: [] },
++      },
+     })),
+   };
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+@@ -38,7 +43,8 @@ async function synthetic(
+ 
+ function center(data: FileMergeData): Center {
+   const field = chunkField(data.chunks);
+-  const state = EditorState.create({ doc: data.base, extensions: [history(), field] });
++  const doc = centerPane(data.middle, false).doc;
++  const state = EditorState.create({ doc, extensions: [history(), field] });
+   return { state, field };
+ }
+ 
+diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
+index 3769fd1..e7a7c56 100644
+--- a/frontend/src/editor/internal/chunkField.ts
++++ b/frontend/src/editor/internal/chunkField.ts
+@@ -102,7 +102,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+   return StateField.define<readonly ChunkSpan[]>({
+     create: (state) =>
+       chunks.map((chunk) => {
+-        const { from, to } = lineSpan(state.doc, chunk.base);
++        const { from, to } = lineSpan(state.doc, chunk.middle);
+         return {
+           chunk,
+           tone: chunkTone(chunk, "center"),
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index f1e8615..f55d188 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
+ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
++import { centerPane } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import { PENDING, type ChunkState } from "./status";
+@@ -53,27 +54,40 @@ async function synthetic(
+     remote: [start: number, len: number];
+   }[],
+ ): Promise<FileMergeData> {
++  const { base: middleText, ...sides } = texts;
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    ...texts,
++    middle: { kind: "Stages", text: middleText },
++    ...sides,
+     eol: "Lf",
+-    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
+-      id,
+-      kind,
+-      base: { start: base[0], len: base[1] },
+-      local: { start: local[0], len: local[1] },
+-      remote: { start: remote[0], len: remote[1] },
+-    })),
+-    word_changes: chunks.map((_chunk, id) => ({
+-      chunk: id,
+-      local: { changed: [], removed_at: [] },
+-      remote: { changed: [], removed_at: [] },
+-    })),
++    disk_version: 0,
++    chunks: chunks.map(({ kind, base, local, remote }, id) => {
++      const middle = { start: base[0], len: base[1] };
++      return {
++        chunk: {
++          id,
++          kind,
++          base: middle,
++          local: { start: local[0], len: local[1] },
++          remote: { start: remote[0], len: remote[1] },
++        },
++        middle,
++        words: {
++          chunk: id,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
++      };
++    }),
+   };
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
++function middleOf(data: FileMergeData): string {
++  return centerPane(data.middle, false).doc;
++}
++
+ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+@@ -92,7 +106,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
+     "120-123 chunk-modified chunk-band",
+     "141-154 chunk-conflict chunk-band",
+   ]);
+-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
++  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+     "3 chunk-modified chunk-band",
+     "22 chunk-modified chunk-band",
+     "54 chunk-modified chunk-band",
+@@ -134,7 +148,7 @@ test("center colours follow their text when a line is typed above them", async (
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+   const state = EditorState.create({
+-    doc: data.base,
++    doc: middleOf(data),
+     extensions: [field, centerDecorations(field)],
+   });
+ 
+@@ -152,7 +166,7 @@ test("an empty range at the end of an unterminated last line is drawn below that
+   ]);
+   const field = chunkField(data.chunks);
+ 
+-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
++  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+     "2 chunk-marker-inserted chunk-point-below",
+   ]);
+   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
+@@ -167,7 +181,7 @@ test("a marker on another chunk's band line keeps its own tone class", async ()
+   ]);
+   const field = chunkField(data.chunks);
+   const state = EditorState.create({
+-    doc: data.base,
++    doc: middleOf(data),
+     extensions: [field, centerDecorations(field)],
+   });
+ 
+@@ -186,7 +200,7 @@ test("a line break pasted at the end of a band line stops at the marker that fol
+   ]);
+   const field = chunkField(data.chunks);
+   const joined = EditorState.create({
+-    doc: data.base,
++    doc: middleOf(data),
+     extensions: [field, centerDecorations(field)],
+   }).update({ changes: { from: 1, to: 2 } }).state;
+ 
+@@ -205,7 +219,10 @@ test("a line break pasted at the end of a band line stops at the marker that fol
+ test("random edits keep center ranges sorted, disjoint, inside the document, and drawable", async () => {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+-  let state = EditorState.create({ doc: data.base, extensions: [field, centerDecorations(field)] });
++  let state = EditorState.create({
++    doc: middleOf(data),
++    extensions: [field, centerDecorations(field)],
++  });
+   let seed = 7;
+   function random(below: number): number {
+     seed = (seed * 48_271) % 2_147_483_647;
+@@ -239,7 +256,7 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
+   ]);
+   const field = chunkField(data.chunks);
+ 
+-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
++  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+     "1-2 chunk-deleted chunk-band",
+   ]);
+   expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+index 3c8c716..64efd1a 100644
+--- a/frontend/src/editor/internal/gap.test.ts
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -23,8 +23,8 @@ function rowOf(chunk: Chunk, status: ChunkStatus): ChunkRow {
+       bottom: (chunk.local.start + chunk.local.len) * LINE_PX,
+     },
+     center: {
+-      top: chunk.base.start * LINE_PX,
+-      bottom: (chunk.base.start + chunk.base.len) * LINE_PX,
++      top: chunk.middle.start * LINE_PX,
++      bottom: (chunk.middle.start + chunk.middle.len) * LINE_PX,
+     },
+     right: {
+       top: chunk.remote.start * LINE_PX,
+@@ -49,35 +49,43 @@ async function conflictBand(
+   return bandPaints({ rows, side }, shifts, STRIP).find(({ chunk }) => chunk.id === CONFLICT_ID)?.d;
+ }
+ 
++function noWords(chunk: number): Record<string, unknown> {
++  return { chunk, local: { changed: [], removed_at: [] }, remote: { changed: [], removed_at: [] } };
++}
++
+ async function oneLineDeletedOnEachSide(): Promise<readonly Chunk[]> {
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    base: "a\nb\nc\n",
++    middle: { kind: "Stages", text: "a\nb\nc\n" },
+     local: "b\nc\n",
+     remote: "a\nb\n",
+     eol: "Lf",
++    disk_version: 0,
+     chunks: [
+       {
+-        id: 0,
+-        kind: "LocalOnly",
+-        base: { start: 0, len: 1 },
+-        local: { start: 0, len: 0 },
+-        remote: { start: 0, len: 1 },
++        chunk: {
++          id: 0,
++          kind: "LocalOnly",
++          base: { start: 0, len: 1 },
++          local: { start: 0, len: 0 },
++          remote: { start: 0, len: 1 },
++        },
++        middle: { start: 0, len: 1 },
++        words: noWords(0),
+       },
+       {
+-        id: 1,
+-        kind: "RemoteOnly",
+-        base: { start: 2, len: 1 },
+-        local: { start: 1, len: 1 },
+-        remote: { start: 2, len: 0 },
++        chunk: {
++          id: 1,
++          kind: "RemoteOnly",
++          base: { start: 2, len: 1 },
++          local: { start: 1, len: 1 },
++          remote: { start: 2, len: 0 },
++        },
++        middle: { start: 2, len: 1 },
++        words: noWords(1),
+       },
+     ],
+-    word_changes: [0, 1].map((chunk) => ({
+-      chunk,
+-      local: { changed: [], removed_at: [] },
+-      remote: { changed: [], removed_at: [] },
+-    })),
+   };
+   const data = await loadFixture("synthetic.ts", { "synthetic.json": record });
+   return data.chunks;
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
+index 2a71472..d91d352 100644
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
+@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
+ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
+ import { rangeSpan, rowsChanged } from "./geometry";
++import { centerPane } from "./pane";
+ import { statusAfterIgnore } from "./status";
+ 
+ const LINE_PX = 20;
+@@ -49,7 +50,10 @@ test("an empty document has one point at the top", () => {
+ test("chunk rows go stale on a status change, an edit or new measurements, not on a cursor move", async () => {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+-  const state = EditorState.create({ doc: data.base, extensions: field });
++  const state = EditorState.create({
++    doc: centerPane(data.middle, false).doc,
++    extensions: field,
++  });
+   const [first] = state.field(field);
+   if (first === undefined) {
+     throw new Error("fixture lost its chunks");
+diff --git a/frontend/src/editor/internal/lineSpan.ts b/frontend/src/editor/internal/lineSpan.ts
+index ff097eb..cf0bd80 100644
+--- a/frontend/src/editor/internal/lineSpan.ts
++++ b/frontend/src/editor/internal/lineSpan.ts
+@@ -4,7 +4,7 @@ import type { Chunk } from "../../ipc";
+ 
+ export function lineSpan(
+   doc: Text,
+-  range: Chunk["base"] | Chunk["local"] | Chunk["remote"],
++  range: Chunk["middle"] | Chunk["local"] | Chunk["remote"],
+ ): { from: number; to: number } {
+   const end = range.start + range.len;
+   return {
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index f083ce5..78cb404 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -9,7 +9,7 @@ import { loadFixture } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { sideDecorations } from "./decorations";
+ import { languageOf } from "./language";
+-import { languageCompartment, paletteHighlight, paneState } from "./pane";
++import { centerPane, languageCompartment, paletteHighlight, paneState } from "./pane";
+ import { sideStatusField } from "./sideStatus";
+ 
+ const PARSE_BUDGET_MS = 5000;
+@@ -120,16 +120,20 @@ async function tintedLeft(): Promise<EditorState> {
+     "selection.json": {
+       path: "selection.ts",
+       deleted: null,
+-      base: "const a = old;\n",
++      middle: { kind: "Stages", text: "const a = old;\n" },
+       local: "const a = mine;\n",
+       remote: "const a = theirs;\n",
+       eol: "Lf",
+-      chunks: [{ id: 0, kind: "Conflict", base: line, local: line, remote: line }],
+-      word_changes: [
++      disk_version: 0,
++      chunks: [
+         {
+-          chunk: 0,
+-          local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
+-          remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
++          chunk: { id: 0, kind: "Conflict", base: line, local: line, remote: line },
++          middle: line,
++          words: {
++            chunk: 0,
++            local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
++            remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
++          },
+         },
+       ],
+     },
+@@ -184,8 +188,7 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
+   const data = await loadFixture("vue-core-playground-app.vue");
+   const field = chunkField(data.chunks);
+   const plain = paneState({
+-    kind: "center",
+-    doc: data.base,
++    ...centerPane(data.middle, false),
+     eol: data.eol,
+     language: null,
+     extensions: [field],
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index e38a220..85dbfb2 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -166,3 +166,19 @@ export function createPane(
+ export function paneText(state: EditorState): string {
+   return state.sliceDoc();
+ }
++
++export type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: string };
++
++export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
++  switch (middle.kind) {
++    case "Stages":
++    case "Disk":
++      return { kind: readOnly ? "readOnlyCenter" : "center", doc: middle.text };
++    case "DiskNotText":
++      return { kind: "readOnlyCenter", doc: "" };
++    default: {
++      const _exhaustive: never = middle;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index b449e91..f7c4240 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -9,7 +9,7 @@ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+ import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+-import { paneState } from "./pane";
++import { centerPane, paneState } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
+@@ -35,23 +35,32 @@ async function synthetic(
+   texts: { base: string; local: string; remote: string },
+   chunks: readonly { kind: Chunk["kind"]; base: Range; local: Range; remote: Range }[],
+ ): Promise<FileMergeData> {
++  const { base: middleText, ...sides } = texts;
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    ...texts,
++    middle: { kind: "Stages", text: middleText },
++    ...sides,
+     eol: "Lf",
+-    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
+-      id,
+-      kind,
+-      base: { start: base[0], len: base[1] },
+-      local: { start: local[0], len: local[1] },
+-      remote: { start: remote[0], len: remote[1] },
+-    })),
+-    word_changes: chunks.map((_chunk, id) => ({
+-      chunk: id,
+-      local: { changed: [], removed_at: [] },
+-      remote: { changed: [], removed_at: [] },
+-    })),
++    disk_version: 0,
++    chunks: chunks.map(({ kind, base, local, remote }, id) => {
++      const middle = { start: base[0], len: base[1] };
++      return {
++        chunk: {
++          id,
++          kind,
++          base: middle,
++          local: { start: local[0], len: local[1] },
++          remote: { start: remote[0], len: remote[1] },
++        },
++        middle,
++        words: {
++          chunk: id,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
++      };
++    }),
+   };
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+@@ -61,8 +70,7 @@ function open(data: FileMergeData): Merge {
+   const pane = { eol: data.eol, language: null };
+   const center = paneState({
+     ...pane,
+-    kind: "center",
+-    doc: data.base,
++    ...centerPane(data.middle, false),
+     extensions: [field, centerDecorations(field)],
+   });
+   const statuses = sideStatusField(
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index bf5b744..3c8b4b6 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -5,29 +5,31 @@ import { chunkTone } from "./tone";
+ 
+ async function chunkWith(
+   kind: Chunk["kind"],
+-  lens: { base: number; local: number; remote: number },
++  lens: { middle: number; local: number; remote: number },
+ ): Promise<Chunk> {
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    base: "",
++    middle: { kind: "Stages", text: "" },
+     local: "",
+     remote: "",
+     eol: "Lf",
++    disk_version: 0,
+     chunks: [
+       {
+-        id: 0,
+-        kind,
+-        base: { start: 0, len: lens.base },
+-        local: { start: 0, len: lens.local },
+-        remote: { start: 0, len: lens.remote },
+-      },
+-    ],
+-    word_changes: [
+-      {
+-        chunk: 0,
+-        local: { changed: [], removed_at: [] },
+-        remote: { changed: [], removed_at: [] },
++        chunk: {
++          id: 0,
++          kind,
++          base: { start: 0, len: 1 },
++          local: { start: 0, len: lens.local },
++          remote: { start: 0, len: lens.remote },
++        },
++        middle: { start: 0, len: lens.middle },
++        words: {
++          chunk: 0,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
+       },
+     ],
+   };
+@@ -39,41 +41,41 @@ async function chunkWith(
+   return chunk;
+ }
+ 
+-test("a side that adds lines where base has none is inserted", async () => {
+-  const chunk = await chunkWith("LocalOnly", { base: 0, local: 3, remote: 0 });
++test("a side that adds lines where the middle has none is inserted, whatever base held", async () => {
++  const chunk = await chunkWith("LocalOnly", { middle: 0, local: 3, remote: 0 });
+ 
+   expect(chunkTone(chunk, "local")).toBe("inserted");
+ });
+ 
+-test("a side that removes base lines is deleted", async () => {
+-  const chunk = await chunkWith("RemoteOnly", { base: 2, local: 2, remote: 0 });
++test("a side that removes middle lines is deleted", async () => {
++  const chunk = await chunkWith("RemoteOnly", { middle: 2, local: 2, remote: 0 });
+ 
+   expect(chunkTone(chunk, "remote")).toBe("deleted");
+ });
+ 
+-test("a side that replaces base lines is modified", async () => {
+-  const chunk = await chunkWith("LocalOnly", { base: 2, local: 1, remote: 2 });
++test("a side that replaces middle lines is modified", async () => {
++  const chunk = await chunkWith("LocalOnly", { middle: 2, local: 1, remote: 2 });
+ 
+   expect(chunkTone(chunk, "local")).toBe("modified");
+ });
+ 
+ test("BothSame takes its tone from the side's own range on each side", async () => {
+-  const chunk = await chunkWith("BothSame", { base: 4, local: 3, remote: 3 });
++  const chunk = await chunkWith("BothSame", { middle: 4, local: 3, remote: 3 });
+ 
+   expect(chunkTone(chunk, "local")).toBe("modified");
+   expect(chunkTone(chunk, "remote")).toBe("modified");
+ });
+ 
+ test("a conflict is conflict on both sides, even where one side is empty", async () => {
+-  const chunk = await chunkWith("Conflict", { base: 2, local: 0, remote: 5 });
++  const chunk = await chunkWith("Conflict", { middle: 2, local: 0, remote: 5 });
+ 
+   expect(chunkTone(chunk, "local")).toBe("conflict");
+   expect(chunkTone(chunk, "remote")).toBe("conflict");
+ });
+ 
+ test("the center takes its tone from remote for RemoteOnly and from local otherwise", async () => {
+-  const remoteOnly = await chunkWith("RemoteOnly", { base: 2, local: 2, remote: 0 });
+-  const localOnly = await chunkWith("LocalOnly", { base: 2, local: 0, remote: 2 });
++  const remoteOnly = await chunkWith("RemoteOnly", { middle: 2, local: 2, remote: 0 });
++  const localOnly = await chunkWith("LocalOnly", { middle: 2, local: 0, remote: 2 });
+ 
+   expect(chunkTone(remoteOnly, "center")).toBe("deleted");
+   expect(chunkTone(localOnly, "center")).toBe("deleted");
+diff --git a/frontend/src/editor/internal/tone.ts b/frontend/src/editor/internal/tone.ts
+index b606819..a9340b8 100644
+--- a/frontend/src/editor/internal/tone.ts
++++ b/frontend/src/editor/internal/tone.ts
+@@ -14,7 +14,7 @@ export function chunkTone(chunk: Chunk, pane: Side | "center"): Tone {
+   if (chunk.kind === "Conflict") {
+     return "conflict";
+   }
+-  if (chunk.base.len === 0) {
++  if (chunk.middle.len === 0) {
+     return "inserted";
+   }
+   if (chunk[sideOf(chunk, pane)].len === 0) {
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index 8583df4..207157d 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -7,7 +7,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { actionSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+-import { paneState } from "./pane";
++import { centerPane, paneState } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import type { ChunkState } from "./status";
+@@ -39,31 +39,55 @@ function words(ranges: readonly Columns[], points: readonly Point[]): object {
+   };
+ }
+ 
++function merged({
++  id,
++  kind,
++  line,
++  words: chunkWords,
++}: {
++  id: number;
++  kind: Chunk["kind"];
++  line: number;
++  words: object;
++}): object {
++  return {
++    chunk: { id, kind, base: block(line), local: block(line), remote: block(line) },
++    middle: block(line),
++    words: { chunk: id, ...chunkWords },
++  };
++}
++
+ async function synthetic(): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
+     deleted: null,
+-    base: texts("old", "1"),
++    middle: { kind: "Stages", text: texts("old", "1") },
+     local: texts("mine", "2"),
+     remote: texts("theirs", "1"),
+     eol: "CrLf",
++    disk_version: 0,
+     chunks: [
+-      { id: CONFLICT, kind: "Conflict", base: block(1), local: block(1), remote: block(1) },
+-      { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
+-    ],
+-    word_changes: [
+-      {
+-        chunk: CONFLICT,
+-        local: words(
+-          [[1, 11, 4]],
+-          [
+-            [1, 0],
+-            [1, 16],
+-          ],
+-        ),
+-        remote: words([[1, 11, 6]], [[1, 8]]),
+-      },
+-      { chunk: MODIFIED, local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
++      merged({
++        id: CONFLICT,
++        kind: "Conflict",
++        line: 1,
++        words: {
++          local: words(
++            [[1, 11, 4]],
++            [
++              [1, 0],
++              [1, 16],
++            ],
++          ),
++          remote: words([[1, 11, 6]], [[1, 8]]),
++        },
++      }),
++      merged({
++        id: MODIFIED,
++        kind: "LocalOnly",
++        line: 2,
++        words: { local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
++      }),
+     ],
+   };
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+@@ -88,8 +112,7 @@ function open(data: FileMergeData): Merge {
+   const center = paneState({
+     eol: data.eol,
+     language: null,
+-    kind: "center",
+-    doc: data.base,
++    ...centerPane(data.middle, false),
+     extensions: [field, centerDecorations(field)],
+   });
+   const statuses = sideStatusField(
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index b2dcf1a..b09c7eb 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,11 +1,24 @@
+-import type { FileEntry, FileMergeData, FileSides, RemoteName, Side, SourceResult } from "./domain";
++import type {
++  DiskVersion,
++  FileList,
++  FileMergeData,
++  FileSides,
++  RemoteName,
++  Side,
++  SourceResult,
++  WriteReply,
++} from "./domain";
+ 
+ export interface ChunkSource {
+-  listFiles(): Promise<SourceResult<FileEntry[]>>;
++  listFiles(): Promise<SourceResult<FileList>>;
+   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+-  finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
+-  resetFile(path: string): Promise<SourceResult<FileEntry[]>>;
++  finishFile(
++    path: string,
++    text: string,
++    diskVersion: DiskVersion,
++  ): Promise<SourceResult<WriteReply>>;
++  resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+-  takeSide(path: string, side: Side): Promise<SourceResult<FileEntry[]>>;
++  takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   remoteName(): Promise<RemoteName | null>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index d3be9e4..07afb7a 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -1,6 +1,7 @@
+ import type * as Generated from "./bindings";
+ 
+-type BaseLine = number & { readonly __brand: "BaseLine" };
++type MiddleLine = number & { readonly __brand: "MiddleLine" };
++export type DiskVersion = number & { readonly __brand: "DiskVersion" };
+ type LocalLine = number & { readonly __brand: "LocalLine" };
+ type RemoteLine = number & { readonly __brand: "RemoteLine" };
+ type ChunkId = number & { readonly __brand: "ChunkId" };
+@@ -16,7 +17,7 @@ type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideW
+ export type Chunk = {
+   readonly id: ChunkId;
+   readonly kind: Generated.ChunkKind;
+-  readonly base: LineRange<BaseLine>;
++  readonly middle: LineRange<MiddleLine>;
+   readonly local: LineRange<LocalLine>;
+   readonly remote: LineRange<RemoteLine>;
+   readonly words: ChunkWords;
+@@ -24,7 +25,9 @@ export type Chunk = {
+ 
+ export type FileEntry = Generated.FileEntry;
+ 
+-export type FileSides = Generated.FileSides;
++export type FileSides = Omit<Generated.FileSides, "disk_version"> & {
++  readonly diskVersion: DiskVersion;
++};
+ 
+ export type SideContent = Generated.SideContent;
+ 
+@@ -32,14 +35,28 @@ export type Side = Generated.Side;
+ 
+ export type RemoteName = Generated.RemoteName;
+ 
++export type NotText = Generated.NotText;
++
++export type DiskResult = Generated.DiskResult;
++
++export type DiskChange = Generated.DiskChange;
++
++export type WriteReply = Generated.WriteReply;
++
++export type FileList = {
++  readonly files: readonly FileEntry[];
++  readonly diskChanges: readonly DiskChange[];
++};
++
+ export type FileMergeData = {
+   readonly path: string;
+-  readonly base: string;
++  readonly middle: Generated.Middle;
+   readonly local: string;
+   readonly remote: string;
+   readonly deleted: Side | null;
+   readonly eol: Generated.Eol;
+   readonly chunks: readonly Chunk[];
++  readonly diskVersion: DiskVersion;
+ };
+ 
+ export type SourceFailure = Generated.IpcError;
+@@ -52,7 +69,11 @@ function isNonNegativeInteger(n: number): boolean {
+   return Number.isSafeInteger(n) && n >= 0;
+ }
+ 
+-function isBaseLine(n: number): n is BaseLine {
++function isMiddleLine(n: number): n is MiddleLine {
++  return isNonNegativeInteger(n);
++}
++
++function isDiskVersion(n: number): n is DiskVersion {
+   return isNonNegativeInteger(n);
+ }
+ 
+@@ -169,52 +190,48 @@ function toRange<L extends number>({
+   return { start, len };
+ }
+ 
+-function toChunk({
+-  chunk,
+-  words,
+-  index,
+-}: {
+-  chunk: Generated.Chunk;
+-  words: Generated.WordChanges;
+-  index: number;
+-}): Chunk {
++function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
+   const field = `chunks[${index}]`;
++  const { chunk } = merged;
+   const { id } = chunk;
+   if (!isChunkId(id)) {
+-    throw invalid(`${field}.id`, id);
++    throw invalid(`${field}.chunk.id`, id);
+   }
+   return {
+     id,
+     kind: chunk.kind,
+-    base: toRange({ range: chunk.base, isLine: isBaseLine, field: `${field}.base` }),
+-    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.local` }),
+-    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.remote` }),
+-    words: toWords({ words, chunkId: id, field: `word_changes[${index}]` }),
++    middle: toRange({ range: merged.middle, isLine: isMiddleLine, field: `${field}.middle` }),
++    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.chunk.local` }),
++    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.chunk.remote` }),
++    words: toWords({ words: merged.words, chunkId: id, field: `${field}.words` }),
+   };
+ }
+ 
+-function toChunks(dto: Generated.FileMergeData): Chunk[] {
+-  const misaligned = `word_changes must have one entry per chunk (${dto.chunks.length}), got ${dto.word_changes.length}`;
+-  if (dto.word_changes.length > dto.chunks.length) {
+-    throw new Error(misaligned);
++function toDiskVersion(n: number, field: string): DiskVersion {
++  if (!isDiskVersion(n)) {
++    throw invalid(field, n);
+   }
+-  return dto.chunks.map((chunk, index) => {
+-    const words = dto.word_changes[index];
+-    if (words === undefined) {
+-      throw new Error(misaligned);
+-    }
+-    return toChunk({ chunk, words, index });
+-  });
++  return n;
+ }
+ 
+ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+   return {
+     path: dto.path,
+-    base: dto.base,
++    middle: dto.middle,
+     local: dto.local,
+     remote: dto.remote,
+     deleted: dto.deleted,
+     eol: dto.eol,
+-    chunks: toChunks(dto),
++    chunks: dto.chunks.map(toChunk),
++    diskVersion: toDiskVersion(dto.disk_version, "disk_version"),
+   };
+ }
++
++export function toSides(dto: Generated.FileSides): FileSides {
++  const { disk_version: diskVersion, ...sides } = dto;
++  return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
++}
++
++export function toFileList(dto: Generated.FileList): FileList {
++  return { files: dto.files, diskChanges: dto.disk_changes };
++}
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index 519aca5..8b141db 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -1,7 +1,7 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { Side, SourceResult } from "./domain";
++import type { DiskVersion, FileList, Side, SourceResult } from "./domain";
+ import { createFixtureSource, loadFixture } from "./fixture";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+@@ -28,14 +28,27 @@ function valueOf<T>(result: SourceResult<T>): T {
+   return result.value;
+ }
+ 
++async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
++  return valueOf(await createFixtureSource(log, files).listFiles());
++}
++
++async function versionOf(
++  path: string,
++  files: Readonly<Record<string, unknown>>,
++): Promise<DiskVersion> {
++  return (await loadFixture(path, files)).diskVersion;
++}
++
+ const CHUNK = {
+   id: 0,
+   kind: "Conflict",
+-  base: { start: 0, len: 0 },
++  base: { start: 5, len: 0 },
+   local: { start: 0, len: 1 },
+   remote: { start: 0, len: 1 },
+ };
+ 
++const MIDDLE_RANGE = { start: 0, len: 0 };
++
+ const WORDS = {
+   local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [{ line: 0, column: 1 }] },
+   remote: { changed: [{ line: 0, start: 1, len: 1 }], removed_at: [] },
+@@ -46,32 +59,51 @@ const DOMAIN_WORDS = {
+   remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
+ };
+ 
+-function record(
+-  path: string,
+-  chunk: Record<string, unknown> = {},
+-  words: Record<string, unknown> = {},
+-): Record<string, unknown> {
++type Overrides = {
++  readonly chunk?: Record<string, unknown>;
++  readonly words?: Record<string, unknown>;
++  readonly merged?: Record<string, unknown>;
++};
++
++function record(path: string, overrides: Overrides = {}): Record<string, unknown> {
+   return {
+     path,
+-    base: "b\n",
++    middle: { kind: "Stages", text: "b\n" },
+     local: "l\n",
+     remote: "r\n",
+     deleted: null,
+     eol: "Lf",
+-    chunks: [{ ...CHUNK, ...chunk }],
+-    word_changes: [{ chunk: 0, ...WORDS, ...words }],
++    disk_version: 0,
++    chunks: [
++      {
++        chunk: { ...CHUNK, ...overrides.chunk },
++        middle: MIDDLE_RANGE,
++        words: { chunk: 0, ...WORDS, ...overrides.words },
++        ...overrides.merged,
++      },
++    ],
+   };
+ }
+ 
+ function loaded(path: string): Record<string, unknown> {
+   return {
+     path,
+-    base: "b\n",
++    middle: { kind: "Stages", text: "b\n" },
+     local: "l\n",
+     remote: "r\n",
+     deleted: null,
+     eol: "Lf",
+-    chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
++    diskVersion: 0,
++    chunks: [
++      {
++        id: 0,
++        kind: "Conflict",
++        middle: MIDDLE_RANGE,
++        local: CHUNK.local,
++        remote: CHUNK.remote,
++        words: DOMAIN_WORDS,
++      },
++    ],
+   };
+ }
+ 
+@@ -79,14 +111,20 @@ function without(json: Record<string, unknown>, field: string): Record<string, u
+   return Object.fromEntries(Object.entries(json).filter(([key]) => key !== field));
+ }
+ 
++function withoutMiddleRange(path: string): Record<string, unknown> {
++  const { chunks: _chunks, ...rest } = record(path);
++  return {
++    ...rest,
++    chunks: [{ chunk: CHUNK, words: { chunk: 0, ...WORDS } }],
++  };
++}
++
+ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+ 
+-test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
+-  const source = createFixtureSource(quietLog().log);
+-
+-  const files = valueOf(await source.listFiles());
++test("the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes", async () => {
++  const { files, diskChanges } = await listed(quietLog().log);
+ 
+   expect(files.map((file) => file.path)).toEqual([
+     "language-tools-script-setup.ts",
+@@ -104,9 +142,10 @@ test("the committed fixtures list 11 files, sorted by path, all unresolved", asy
+   for (const file of files) {
+     expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
+   }
++  expect(diskChanges).toEqual([]);
+ });
+ 
+-test("each committed fixture loads with its JSON's chunk count", async () => {
++test("each committed fixture loads with its JSON's chunk count, its stages middle and version 0", async () => {
+   const source = createFixtureSource(quietLog().log);
+   const committed = Object.values(COMMITTED);
+   expect(committed).toHaveLength(11);
+@@ -114,6 +153,8 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
+     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
+     const data = valueOf(await source.loadFile(path));
+     expect(data.chunks).toHaveLength(chunks.length);
++    expect(data.middle.kind).toBe("Stages");
++    expect(data.diskVersion).toBe(0);
+   }
+ });
+ 
+@@ -125,10 +166,11 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
+   expect(data.chunks[8]).toMatchObject({
+     id: 8,
+     kind: "Conflict",
+-    base: { start: 128, len: 10 },
++    middle: { start: 128, len: 10 },
+     local: { start: 128, len: 8 },
+     remote: { start: 140, len: 14 },
+   });
++  expect(data.chunks[8]).not.toHaveProperty("base");
+   expect(data.local.split("\n")[128]).toBe(
+     "  useEventListener(target, 'keydown', (e: KeyboardEvent) => {",
+   );
+@@ -154,18 +196,40 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
+ });
+ 
+ test("in-memory records are listed sorted by path and keep every field", async () => {
+-  const source = createFixtureSource(quietLog().log, {
++  const files = {
+     "z.json": record("z.ts"),
+     "a.json": { ...record("a.ts"), eol: "CrLf" },
+-  });
++  };
++  const source = createFixtureSource(quietLog().log, files);
+ 
+-  expect(valueOf(await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
++  expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
++    "a.ts",
++    "z.ts",
++  ]);
+   expect(await source.loadFile("a.ts")).toEqual({
+     ok: true,
+     value: { ...loaded("a.ts"), eol: "CrLf" },
+   });
+ });
+ 
++test("a middle from the disk, or not text on disk, and its disk version arrive as they are", async () => {
++  const files = {
++    "d.json": { ...record("d.ts"), middle: { kind: "Disk", text: "d\n" }, disk_version: 3 },
++    "n.json": { ...record("n.ts"), middle: { kind: "DiskNotText", found: "Link" }, chunks: [] },
++  };
++  const source = createFixtureSource(quietLog().log, files);
++
++  expect(valueOf(await source.loadFile("d.ts"))).toMatchObject({
++    middle: { kind: "Disk", text: "d\n" },
++    diskVersion: 3,
++  });
++  expect(valueOf(await source.loadFile("n.ts"))).toMatchObject({
++    middle: { kind: "DiskNotText", found: "Link" },
++    chunks: [],
++  });
++  expect(valueOf(await source.describeFile("d.ts")).diskVersion).toBe(3);
++});
++
+ test.each<Side>(["local", "remote"])(
+   "a record deleted on the %s side keeps that side",
+   async (deleted) => {
+@@ -184,7 +248,7 @@ test("the fixture source names nothing merged in", async () => {
+ test.each([
+   [
+     "an unknown chunk kind",
+-    record("x.ts", { kind: "Mystery" }),
++    record("x.ts", { chunk: { kind: "Mystery" } }),
+     "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
+   ],
+   ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
+@@ -195,27 +259,46 @@ test.each([
+   ],
+   ["missing deleted", without(record("x.ts"), "deleted"), 'Invalid key: Expected "deleted"'],
+   ["missing chunks", without(record("x.ts"), "chunks"), 'Invalid key: Expected "chunks"'],
++  ["missing middle", without(record("x.ts"), "middle"), 'Invalid key: Expected "middle"'],
+   [
+-    "missing word_changes",
+-    without(record("x.ts"), "word_changes"),
+-    'Invalid key: Expected "word_changes"',
++    "missing disk_version",
++    without(record("x.ts"), "disk_version"),
++    'Invalid key: Expected "disk_version"',
++  ],
++  ["a missing middle range", withoutMiddleRange("x.ts"), "chunks.0.middle"],
++  ["an unknown middle kind", { ...record("x.ts"), middle: { kind: "Base", text: "" } }, "middle"],
++  [
++    "an unknown not-text reason",
++    { ...record("x.ts"), middle: { kind: "DiskNotText", found: "Fifo" } },
++    "expected one of Deleted, Binary, NonUtf8, TooLarge, Link, Directory",
+   ],
+   [
+     "a string word column",
+-    record("x.ts", {}, { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } }),
+-    "word_changes.0.local.changed.0.start",
++    record("x.ts", {
++      words: { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } },
++    }),
++    "chunks.0.words.local.changed.0.start",
+   ],
+   [
+     "a string point column",
+-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } }),
+-    "word_changes.0.remote.removed_at.0.column",
++    record("x.ts", { words: { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } } }),
++    "chunks.0.words.remote.removed_at.0.column",
+   ],
+   [
+     "the old flat word shape",
+-    record("x.ts", {}, { local: [], base: [], remote: [] }),
+-    "word_changes.0.local",
++    record("x.ts", { words: { local: [], base: [], remote: [] } }),
++    "chunks.0.words.local",
++  ],
++  [
++    "a string line",
++    record("x.ts", { chunk: { local: { start: "1", len: 1 } } }),
++    "chunks.0.chunk.local.start",
++  ],
++  [
++    "a string middle line",
++    record("x.ts", { merged: { middle: { start: "1", len: 1 } } }),
++    "chunks.0.middle.start",
+   ],
+-  ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
+ ])("a record with %s is rejected naming the file", (_case, json, detail) => {
+   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+     /^fixture bad\.json: /,
+@@ -224,64 +307,94 @@ test.each([
+ });
+ 
+ test.each([
+-  ["a negative base line", { base: { start: -1, len: 0 } }, "chunks[0].base.start", -1],
+-  ["a negative local line", { local: { start: -1, len: 1 } }, "chunks[0].local.start", -1],
+-  ["a negative remote line", { remote: { start: -2, len: 1 } }, "chunks[0].remote.start", -2],
+-  ["a non-integer local line", { local: { start: 0.5, len: 1 } }, "chunks[0].local.start", 0.5],
++  [
++    "a negative middle line",
++    { merged: { middle: { start: -1, len: 0 } } },
++    "chunks[0].middle.start",
++    -1,
++  ],
++  [
++    "a negative middle len",
++    { merged: { middle: { start: 0, len: -1 } } },
++    "chunks[0].middle.len",
++    -1,
++  ],
++  [
++    "a negative local line",
++    { chunk: { local: { start: -1, len: 1 } } },
++    "chunks[0].chunk.local.start",
++    -1,
++  ],
++  [
++    "a negative remote line",
++    { chunk: { remote: { start: -2, len: 1 } } },
++    "chunks[0].chunk.remote.start",
++    -2,
++  ],
++  [
++    "a non-integer local line",
++    { chunk: { local: { start: 0.5, len: 1 } } },
++    "chunks[0].chunk.local.start",
++    0.5,
++  ],
+   [
+     "an unsafe remote line",
+-    { remote: { start: 2 ** 53, len: 1 } },
+-    "chunks[0].remote.start",
++    { chunk: { remote: { start: 2 ** 53, len: 1 } } },
++    "chunks[0].chunk.remote.start",
+     2 ** 53,
+   ],
+-  ["a non-integer len", { base: { start: 0, len: 1.5 } }, "chunks[0].base.len", 1.5],
+-  ["a negative len", { remote: { start: 0, len: -1 } }, "chunks[0].remote.len", -1],
+-  ["a negative chunk id", { id: -1 }, "chunks[0].id", -1],
+-  ["a non-integer chunk id", { id: 0.25 }, "chunks[0].id", 0.25],
+-])("a record with %s is rejected naming the file and field", (_case, chunk, field, value) => {
+-  expect(() => createFixtureSource(quietLog().log, { "bad.json": record("x.ts", chunk) })).toThrow(
+-    `fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`,
+-  );
++  [
++    "a non-integer len",
++    { merged: { middle: { start: 0, len: 1.5 } } },
++    "chunks[0].middle.len",
++    1.5,
++  ],
++  [
++    "a negative len",
++    { chunk: { remote: { start: 0, len: -1 } } },
++    "chunks[0].chunk.remote.len",
++    -1,
++  ],
++  ["a negative chunk id", { chunk: { id: -1 } }, "chunks[0].chunk.id", -1],
++  ["a non-integer chunk id", { chunk: { id: 0.25 } }, "chunks[0].chunk.id", 0.25],
++])("a record with %s is rejected naming the file and field", (_case, overrides, field, value) => {
++  expect(() =>
++    createFixtureSource(quietLog().log, { "bad.json": record("x.ts", overrides) }),
++  ).toThrow(`fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`);
++});
++
++test.each([-1, 0.5, 2 ** 53])("a record with disk version %s is rejected", (version) => {
++  expect(() =>
++    createFixtureSource(quietLog().log, {
++      "bad.json": { ...record("x.ts"), disk_version: version },
++    }),
++  ).toThrow(`fixture bad.json: disk_version must be a non-negative safe integer, got ${version}`);
+ });
+ 
+ test.each([
+   [
+-    "fewer word_changes than chunks",
+-    { ...record("x.ts"), word_changes: [] },
+-    "word_changes must have one entry per chunk (1), got 0",
+-  ],
+-  [
+-    "more word_changes than chunks",
+-    {
+-      ...record("x.ts"),
+-      word_changes: [
+-        { chunk: 0, ...WORDS },
+-        { chunk: 1, ...WORDS },
+-      ],
+-    },
+-    "word_changes must have one entry per chunk (1), got 2",
+-  ],
+-  [
+-    "word_changes of another chunk",
+-    record("x.ts", {}, { chunk: 1 }),
+-    "word_changes[0].chunk must be 0, got 1",
++    "words of another chunk",
++    record("x.ts", { words: { chunk: 1 } }),
++    "chunks[0].words.chunk must be 0, got 1",
+   ],
+   [
+     "a negative word line",
+-    record("x.ts", {}, { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } }),
+-    "word_changes[0].local.changed[0].line must be a non-negative safe integer, got -1",
++    record("x.ts", {
++      words: { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } },
++    }),
++    "chunks[0].words.local.changed[0].line must be a non-negative safe integer, got -1",
+   ],
+   [
+     "a non-integer remote word line",
+-    record("x.ts", {}, { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } }),
+-    "word_changes[0].remote.changed[0].line must be a non-negative safe integer, got 0.5",
++    record("x.ts", {
++      words: { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } },
++    }),
++    "chunks[0].words.remote.changed[0].line must be a non-negative safe integer, got 0.5",
+   ],
+   [
+     "a negative word column",
+-    record(
+-      "x.ts",
+-      {},
+-      {
++    record("x.ts", {
++      words: {
+         remote: {
+           changed: [
+             { line: 0, start: 1, len: 1 },
+@@ -290,30 +403,34 @@ test.each([
+           removed_at: [],
+         },
+       },
+-    ),
+-    "word_changes[0].remote.changed[1].start must be a non-negative safe integer, got -1",
++    }),
++    "chunks[0].words.remote.changed[1].start must be a non-negative safe integer, got -1",
+   ],
+   [
+     "an empty word range",
+-    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } }),
+-    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0",
++    record("x.ts", {
++      words: { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } },
++    }),
++    "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0",
+   ],
+   [
+     "a fractional word length",
+-    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } }),
+-    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0.5",
++    record("x.ts", {
++      words: { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } },
++    }),
++    "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0.5",
+   ],
+   [
+     "a negative point line",
+-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } }),
+-    "word_changes[0].remote.removed_at[0].line must be a non-negative safe integer, got -1",
++    record("x.ts", {
++      words: { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } },
++    }),
++    "chunks[0].words.remote.removed_at[0].line must be a non-negative safe integer, got -1",
+   ],
+   [
+     "a negative point column",
+-    record(
+-      "x.ts",
+-      {},
+-      {
++    record("x.ts", {
++      words: {
+         local: {
+           changed: [],
+           removed_at: [
+@@ -322,20 +439,24 @@ test.each([
+           ],
+         },
+       },
+-    ),
+-    "word_changes[0].local.removed_at[1].column must be a non-negative safe integer, got -1",
++    }),
++    "chunks[0].words.local.removed_at[1].column must be a non-negative safe integer, got -1",
+   ],
+   [
+     "a fractional point column",
+-    record("x.ts", {}, { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } }),
+-    "word_changes[0].local.removed_at[0].column must be a non-negative safe integer, got 0.5",
++    record("x.ts", {
++      words: { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } },
++    }),
++    "chunks[0].words.local.removed_at[0].column must be a non-negative safe integer, got 0.5",
+   ],
+   [
+     "an unsafe point column",
+-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } }),
+-    `word_changes[0].remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
++    record("x.ts", {
++      words: { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } },
++    }),
++    `chunks[0].words.remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
+   ],
+-])("a record with %s is rejected naming its word_changes entry", (_case, json, message) => {
++])("a record with %s is rejected naming its words", (_case, json, message) => {
+   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+     `fixture bad.json: ${message}`,
+   );
+@@ -343,32 +464,40 @@ test.each([
+ 
+ test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
+   const { log, entries } = quietLog();
+-  const source = createFixtureSource(log, { "a.json": record("a.ts") });
++  const files = { "a.json": record("a.ts") };
++  const source = createFixtureSource(log, files);
++  const version = await versionOf("a.ts", files);
+   const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
+ 
+   expect(await source.loadFile("nope.ts")).toEqual(failure);
+-  expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
+-  expect(await source.resetFile("nope.ts")).toEqual(failure);
++  expect(await source.finishFile("nope.ts", "x", version)).toEqual(failure);
++  expect(await source.resetFile("nope.ts", version)).toEqual(failure);
+   expect(await source.describeFile("nope.ts")).toEqual(failure);
+-  expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
+-  expect(valueOf(await source.listFiles())).toEqual([
+-    { path: "a.ts", status: "Unresolved", unsupported: null },
+-  ]);
++  expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
++  expect(valueOf(await source.listFiles())).toEqual({
++    files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
++    diskChanges: [],
++  });
+   expect(entries).toEqual([]);
+ });
+ 
+ test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
+   const { log, entries } = quietLog();
+-  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
++  const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
++  const source = createFixtureSource(log, files);
++  const version = await versionOf("a.ts", files);
+ 
+-  const finished = await source.finishFile("a.ts", "merged\n");
++  const finished = await source.finishFile("a.ts", "merged\n", version);
+ 
+   expect(finished).toEqual({
+     ok: true,
+-    value: [
+-      { path: "a.ts", status: "Resolved", unsupported: null },
+-      { path: "b.ts", status: "Unresolved", unsupported: null },
+-    ],
++    value: {
++      kind: "Written",
++      files: [
++        { path: "a.ts", status: "Resolved", unsupported: null },
++        { path: "b.ts", status: "Unresolved", unsupported: null },
++      ],
++    },
+   });
+   expect(entries).toEqual([
+     { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
+@@ -378,30 +507,38 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+     { path: "a.ts", status: "Unresolved", unsupported: null },
+     { path: "b.ts", status: "Unresolved", unsupported: null },
+   ];
+-  expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
+-  expect(valueOf(await source.listFiles())).toEqual(unresolved);
++  expect(await source.resetFile("a.ts", version)).toEqual({
++    ok: true,
++    value: { kind: "Written", files: unresolved },
++  });
++  expect(valueOf(await source.listFiles())).toEqual({ files: unresolved, diskChanges: [] });
+   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
+   expect(entries).toHaveLength(1);
+ });
+ 
+ test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
+   const { log, entries } = quietLog();
+-  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
++  const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
++  const source = createFixtureSource(log, files);
++  const version = await versionOf("b.ts", files);
+ 
+-  expect(await source.takeSide("b.ts", "remote")).toEqual({
++  expect(await source.takeSide("b.ts", "remote", version)).toEqual({
+     ok: true,
+-    value: [
+-      { path: "a.ts", status: "Unresolved", unsupported: null },
+-      { path: "b.ts", status: "Resolved", unsupported: null },
+-    ],
++    value: {
++      kind: "Written",
++      files: [
++        { path: "a.ts", status: "Unresolved", unsupported: null },
++        { path: "b.ts", status: "Resolved", unsupported: null },
++      ],
++    },
+   });
+   expect(entries).toEqual([
+     { level: "info", event: "fixture.take", fields: { path: "b.ts", side: "remote" } },
+   ]);
+ 
+-  await source.resetFile("b.ts");
++  await source.resetFile("b.ts", version);
+ 
+-  expect(valueOf(await source.listFiles()).map((file) => file.status)).toEqual([
++  expect(valueOf(await source.listFiles()).files.map((file) => file.status)).toEqual([
+     "Unresolved",
+     "Unresolved",
+   ]);
+@@ -425,6 +562,7 @@ test.each([
+       reason: null,
+       local: { kind: "Text", lines },
+       remote: { kind: "Text", lines: 1 },
++      diskVersion: 0,
+     },
+   });
+ });
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index c6205a0..5faef9d 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -9,6 +9,7 @@ import {
+   type FileSides,
+   type SideContent,
+   type SourceResult,
++  type WriteReply,
+ } from "./domain";
+ import type { Log } from "./log";
+ 
+@@ -37,6 +38,15 @@ const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixe
+ 
+ const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
+ 
++const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {
++  Deleted: true,
++  Binary: true,
++  NonUtf8: true,
++  TooLarge: true,
++  Link: true,
++  Directory: true,
++};
++
+ function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
+   return v.custom<T>(
+     (input) => typeof input === "string" && Object.hasOwn(members, input),
+@@ -79,15 +89,27 @@ const WORD_CHANGES = v.object({
+   remote: SIDE_WORD_CHANGES,
+ } satisfies SchemaOf<Generated.WordChanges>);
+ 
++const MERGE_CHUNK = v.object({
++  chunk: CHUNK,
++  middle: LINE_RANGE,
++  words: WORD_CHANGES,
++} satisfies SchemaOf<Generated.MergeChunk>);
++
++const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", [
++  v.object({ kind: v.literal("Stages"), text: v.string() }),
++  v.object({ kind: v.literal("Disk"), text: v.string() }),
++  v.object({ kind: v.literal("DiskNotText"), found: memberOf(NOT_TEXT) }),
++]);
++
+ const FILE_MERGE_DATA = v.object({
+   path: v.string(),
+-  base: v.string(),
++  middle: MIDDLE,
+   local: v.string(),
+   remote: v.string(),
+   deleted: v.nullable(memberOf(SIDES)),
+   eol: memberOf(EOLS),
+-  chunks: v.array(CHUNK),
+-  word_changes: v.array(WORD_CHANGES),
++  chunks: v.array(MERGE_CHUNK),
++  disk_version: v.number(),
+ } satisfies SchemaOf<Generated.FileMergeData>);
+ 
+ function parseFixture(file: string, json: unknown): FileMergeData {
+@@ -124,7 +146,13 @@ function describeRecord(path: string, data: FileMergeData | undefined): SourceRe
+   if (data === undefined) {
+     return unknownPath(path);
+   }
+-  const sides = { path, reason: null, local: textSide(data.local), remote: textSide(data.remote) };
++  const sides = {
++    path,
++    reason: null,
++    local: textSide(data.local),
++    remote: textSide(data.remote),
++    diskVersion: data.diskVersion,
++  };
+   return { ok: true, value: sides };
+ }
+ 
+@@ -136,16 +164,12 @@ function entries({ fixtures, finished }: Records): FileEntry[] {
+   }));
+ }
+ 
+-function updateKnown(
+-  records: Records,
+-  path: string,
+-  update: () => void,
+-): SourceResult<FileEntry[]> {
++function updateKnown(records: Records, path: string, update: () => void): SourceResult<WriteReply> {
+   if (!records.fixtures.has(path)) {
+     return unknownPath(path);
+   }
+   update();
+-  return { ok: true, value: entries(records) };
++  return { ok: true, value: { kind: "Written", files: entries(records) } };
+ }
+ 
+ export async function loadFixture(
+@@ -167,7 +191,7 @@ export function createFixtureSource(
+ 
+   return {
+     async listFiles() {
+-      return { ok: true, value: entries(records) };
++      return { ok: true, value: { files: entries(records), diskChanges: [] } };
+     },
+     async loadFile(path) {
+       const data = records.fixtures.get(path);
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 2c80031..e8122de 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -5,14 +5,20 @@ import { guardWindowClose } from "./window";
+ export type { ChunkSource } from "./ChunkSource";
+ export type {
+   Chunk,
++  DiskChange,
++  DiskResult,
++  DiskVersion,
+   FileEntry,
++  FileList,
+   FileMergeData,
+   FileSides,
++  NotText,
+   RemoteName,
+   Side,
+   SideContent,
+   SourceFailure,
+   SourceResult,
++  WriteReply,
+ } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createTauriSource } from "./tauri";
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index e95d66f..e30dd33 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -1,6 +1,7 @@
+ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
++import type { DiskVersion } from "./domain";
+ import { createTauriSource, forwardLog } from "./tauri";
+ 
+ const commands = vi.hoisted(() => ({
+@@ -20,17 +21,21 @@ const LINE = { start: 0, len: 1 };
+ 
+ const DTO: Generated.FileMergeData = {
+   path: "src/a.ts",
+-  base: "b\n",
++  middle: { kind: "Disk", text: "m\n" },
+   local: "l\n",
+   remote: "r\n",
+   deleted: "local",
+   eol: "CrLf",
+-  chunks: [{ id: 0, kind: "Conflict", base: LINE, local: LINE, remote: LINE }],
+-  word_changes: [
++  disk_version: 2,
++  chunks: [
+     {
+-      chunk: 0,
+-      local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
+-      remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
++      chunk: { id: 0, kind: "Conflict", base: { start: 3, len: 2 }, local: LINE, remote: LINE },
++      middle: LINE,
++      words: {
++        chunk: 0,
++        local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
++        remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
++      },
+     },
+   ],
+ };
+@@ -40,17 +45,41 @@ const ENTRIES: Generated.FileEntry[] = [
+   { path: "logo.bin", status: "Unresolved", unsupported: "Binary" },
+ ];
+ 
++const CHANGE: Generated.DiskChange = {
++  path: "src/a.ts",
++  result: { kind: "MarkersLeft", conflicts: 2 },
++};
++
++const WRITTEN: Generated.WriteReply = { kind: "Written", files: ENTRIES };
++
++const CHANGED: Generated.WriteReply = { kind: "ChangedOnDisk", files: ENTRIES, change: CHANGE };
++
++async function versionOfLoaded(): Promise<DiskVersion> {
++  commands.loadFile.mockResolvedValueOnce({ status: "ok", data: DTO });
++  const loaded = await createTauriSource().loadFile("src/a.ts");
++  if (!loaded.ok) {
++    throw new Error("expected the DTO to load");
++  }
++  return loaded.value.diskVersion;
++}
++
+ beforeEach(() => {
+   vi.resetAllMocks();
+ });
+ 
+-test("listFiles returns the app's entries and its failure unchanged", async () => {
++test("listFiles returns the app's entries and disk changes, and its failure unchanged", async () => {
+   const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
+-  commands.listFiles.mockResolvedValueOnce({ status: "ok", data: ENTRIES });
++  commands.listFiles.mockResolvedValueOnce({
++    status: "ok",
++    data: { files: ENTRIES, disk_changes: [CHANGE] },
++  });
+   commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
+   const source = createTauriSource();
+ 
+-  expect(await source.listFiles()).toEqual({ ok: true, value: ENTRIES });
++  expect(await source.listFiles()).toEqual({
++    ok: true,
++    value: { files: ENTRIES, diskChanges: [CHANGE] },
++  });
+   expect(await source.listFiles()).toEqual({ ok: false, failure: git });
+ });
+ 
+@@ -77,7 +106,7 @@ test("remoteName returns the app's answer", async () => {
+   expect(await source.remoteName()).toBeNull();
+ });
+ 
+-test("loadFile turns the app's data into domain data", async () => {
++test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
+   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
+ 
+   const result = await createTauriSource().loadFile("src/a.ts");
+@@ -87,16 +116,17 @@ test("loadFile turns the app's data into domain data", async () => {
+     ok: true,
+     value: {
+       path: "src/a.ts",
+-      base: "b\n",
++      middle: { kind: "Disk", text: "m\n" },
+       local: "l\n",
+       remote: "r\n",
+       deleted: "local",
+       eol: "CrLf",
++      diskVersion: 2,
+       chunks: [
+         {
+           id: 0,
+           kind: "Conflict",
+-          base: LINE,
++          middle: LINE,
+           local: LINE,
+           remote: LINE,
+           words: {
+@@ -109,7 +139,23 @@ test("loadFile turns the app's data into domain data", async () => {
+   });
+ });
+ 
++test("loadFile rejects data whose chunk has a negative middle line, naming the field", async () => {
++  const [merged] = DTO.chunks;
++  if (merged === undefined) {
++    throw new Error("the DTO lost its chunk");
++  }
++  commands.loadFile.mockResolvedValue({
++    status: "ok",
++    data: { ...DTO, chunks: [{ ...merged, middle: { start: -1, len: 1 } }] },
++  });
++
++  await expect(createTauriSource().loadFile("src/a.ts")).rejects.toThrow(
++    "chunks[0].middle.start must be a non-negative safe integer, got -1",
++  );
++});
++
+ test("each command's error arrives as the failure, unchanged", async () => {
++  const version = await versionOfLoaded();
+   const unsupported: Generated.IpcError = {
+     kind: "Unsupported",
+     path: "logo.bin",
+@@ -117,46 +163,81 @@ test("each command's error arrives as the failure, unchanged", async () => {
+   };
+   const git: Generated.IpcError = { kind: "Git", message: "git add failed" };
+   const unknown: Generated.IpcError = { kind: "UnknownPath", path: "x.ts" };
++  const notAFile: Generated.IpcError = { kind: "NotAFile", path: "src/a.ts" };
++  const readFailed: Generated.IpcError = {
++    kind: "ReadFailed",
++    path: "src/a.ts",
++    message: "permission denied",
++  };
+   commands.loadFile.mockResolvedValue({ status: "error", error: unsupported });
+-  commands.finishFile.mockResolvedValue({ status: "error", error: git });
++  commands.finishFile.mockResolvedValueOnce({ status: "error", error: notAFile });
++  commands.finishFile.mockResolvedValueOnce({ status: "error", error: readFailed });
+   commands.resetFile.mockResolvedValue({ status: "error", error: unknown });
+   commands.describeFile.mockResolvedValue({ status: "error", error: unknown });
+   commands.takeSide.mockResolvedValue({ status: "error", error: git });
+   const source = createTauriSource();
+ 
+   expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
+-  expect(await source.finishFile("src/a.ts", "text")).toEqual({ ok: false, failure: git });
+-  expect(await source.resetFile("x.ts")).toEqual({ ok: false, failure: unknown });
++  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
++    ok: false,
++    failure: notAFile,
++  });
++  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
++    ok: false,
++    failure: readFailed,
++  });
++  expect(await source.resetFile("x.ts", version)).toEqual({ ok: false, failure: unknown });
+   expect(await source.describeFile("x.ts")).toEqual({ ok: false, failure: unknown });
+-  expect(await source.takeSide("logo.bin", "local")).toEqual({ ok: false, failure: git });
++  expect(await source.takeSide("logo.bin", "local", version)).toEqual({
++    ok: false,
++    failure: git,
++  });
+ });
+ 
+-test("finishFile and resetFile send their arguments and return the app's list", async () => {
+-  commands.finishFile.mockResolvedValue({ status: "ok", data: ENTRIES });
+-  commands.resetFile.mockResolvedValue({ status: "ok", data: ENTRIES });
++test("finishFile and resetFile send their arguments with the disk version and return the reply", async () => {
++  const version = await versionOfLoaded();
++  commands.finishFile.mockResolvedValue({ status: "ok", data: CHANGED });
++  commands.resetFile.mockResolvedValue({ status: "ok", data: WRITTEN });
+   const source = createTauriSource();
+ 
+-  expect(await source.finishFile("src/a.ts", "merged\r\n")).toEqual({ ok: true, value: ENTRIES });
+-  expect(await source.resetFile("src/a.ts")).toEqual({ ok: true, value: ENTRIES });
+-  expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n");
+-  expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts");
++  expect(await source.finishFile("src/a.ts", "merged\r\n", version)).toEqual({
++    ok: true,
++    value: CHANGED,
++  });
++  expect(await source.resetFile("src/a.ts", version)).toEqual({ ok: true, value: WRITTEN });
++  expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n", 2);
++  expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts", 2);
+ });
+ 
+ test("describeFile and takeSide send their arguments and return the app's answer", async () => {
++  const version = await versionOfLoaded();
+   const sides: Generated.FileSides = {
+     path: "logo.bin",
+     reason: "Binary",
+     local: { kind: "Binary", bytes: 12 },
+     remote: { kind: "Missing" },
++    disk_version: 4,
+   };
+   commands.describeFile.mockResolvedValue({ status: "ok", data: sides });
+-  commands.takeSide.mockResolvedValue({ status: "ok", data: ENTRIES });
++  commands.takeSide.mockResolvedValue({ status: "ok", data: WRITTEN });
+   const source = createTauriSource();
+ 
+-  expect(await source.describeFile("logo.bin")).toEqual({ ok: true, value: sides });
+-  expect(await source.takeSide("logo.bin", "remote")).toEqual({ ok: true, value: ENTRIES });
++  expect(await source.describeFile("logo.bin")).toEqual({
++    ok: true,
++    value: {
++      path: "logo.bin",
++      reason: "Binary",
++      local: { kind: "Binary", bytes: 12 },
++      remote: { kind: "Missing" },
++      diskVersion: 4,
++    },
++  });
++  expect(await source.takeSide("logo.bin", "remote", version)).toEqual({
++    ok: true,
++    value: WRITTEN,
++  });
+   expect(commands.describeFile).toHaveBeenCalledWith("logo.bin");
+-  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote");
++  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote", 2);
+ });
+ 
+ test("a rejected command rejects the call", async () => {
+@@ -166,14 +247,16 @@ test("a rejected command rejects the call", async () => {
+ });
+ 
+ test("a string error from Tauri's IPC layer rejects the call with that message", async () => {
++  const version = await versionOfLoaded();
+   commands.finishFile.mockResolvedValue({ status: "error", error: "finish_file not allowed" });
+ 
+-  await expect(createTauriSource().finishFile("src/a.ts", "text")).rejects.toThrow(
++  await expect(createTauriSource().finishFile("src/a.ts", "text", version)).rejects.toThrow(
+     new Error("finish_file not allowed"),
+   );
+ });
+ 
+ test("a string error from describeFile or takeSide rejects the call with that message", async () => {
++  const version = await versionOfLoaded();
+   commands.describeFile.mockResolvedValue({ status: "error", error: "describe_file not allowed" });
+   commands.takeSide.mockResolvedValue({ status: "error", error: "take_side not allowed" });
+   const source = createTauriSource();
+@@ -181,15 +264,18 @@ test("a string error from describeFile or takeSide rejects the call with that me
+   await expect(source.describeFile("logo.bin")).rejects.toThrow(
+     new Error("describe_file not allowed"),
+   );
+-  await expect(source.takeSide("logo.bin", "local")).rejects.toThrow(
++  await expect(source.takeSide("logo.bin", "local", version)).rejects.toThrow(
+     new Error("take_side not allowed"),
+   );
+ });
+ 
+ test.each([null, 404])("a %s error from Tauri's IPC layer rejects the call", async (error) => {
++  const version = await versionOfLoaded();
+   commands.resetFile.mockResolvedValue({ status: "error", error });
+ 
+-  await expect(createTauriSource().resetFile("src/a.ts")).rejects.toThrow(new Error(String(error)));
++  await expect(createTauriSource().resetFile("src/a.ts", version)).rejects.toThrow(
++    new Error(String(error)),
++  );
+ });
+ 
+ test("the forward stringifies non-finite numbers and keeps every other value", async () => {
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 27724a3..1132ba9 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -1,6 +1,6 @@
+ import { commands, type LogValue } from "./bindings";
+ import type { ChunkSource } from "./ChunkSource";
+-import { toDomain, type SourceFailure, type SourceResult } from "./domain";
++import { toDomain, toFileList, toSides, type SourceFailure, type SourceResult } from "./domain";
+ import type { LogEntry } from "./log";
+ 
+ // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
+@@ -23,23 +23,25 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+ export function createTauriSource(): ChunkSource {
+   return {
+     async listFiles() {
+-      return toResult(await commands.listFiles());
++      const result = toResult(await commands.listFiles());
++      return result.ok ? { ok: true, value: toFileList(result.value) } : result;
+     },
+     async loadFile(path) {
+       const result = toResult(await commands.loadFile(path));
+       return result.ok ? { ok: true, value: toDomain(result.value) } : result;
+     },
+-    async finishFile(path, text) {
+-      return toResult(await commands.finishFile(path, text));
++    async finishFile(path, text, diskVersion) {
++      return toResult(await commands.finishFile(path, text, diskVersion));
+     },
+-    async resetFile(path) {
+-      return toResult(await commands.resetFile(path));
++    async resetFile(path, diskVersion) {
++      return toResult(await commands.resetFile(path, diskVersion));
+     },
+     async describeFile(path) {
+-      return toResult(await commands.describeFile(path));
++      const result = toResult(await commands.describeFile(path));
++      return result.ok ? { ok: true, value: toSides(result.value) } : result;
+     },
+-    async takeSide(path, side) {
+-      return toResult(await commands.takeSide(path, side));
++    async takeSide(path, side, diskVersion) {
++      return toResult(await commands.takeSide(path, side, diskVersion));
+     },
+     remoteName() {
+       return commands.remoteName();
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index dec3b16..d18eaa1 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -26,6 +26,8 @@
+   --color-problem-border: #5e3838;
+   --color-success: #253627;
+   --color-success-border: #375239;
++  --color-info: #25324d;
++  --color-info-border: #35538f;
+   --color-search-match: #2d543f;
+ 
+   --color-syntax-keyword: #cf8e6d;
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 0b0dd88..4e86329 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -5,6 +5,7 @@ import { onMounted, watch } from "vue";
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
++import NoticeBar from "./NoticeBar.vue";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import { useAppStore } from "./store";
+@@ -15,11 +16,13 @@ const {
+   choices,
+   active,
+   problem,
++  notices,
+   question,
+   allResolved,
+   open,
+   refreshFiles,
+   dismissProblem,
++  dismissNotice,
+   answer,
+   watchWindowClose,
+ } = useAppStore();
+@@ -41,6 +44,7 @@ onMounted(() => {
+   <div class="flex h-full">
+     <FileList :files="files" :active="active" @select="open" />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
++      <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+       <p
+         v-else-if="allResolved"
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 9a89d80..d61f8f5 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -2,7 +2,7 @@
+ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
+ 
+ import type { FileMergeData, Side } from "../ipc";
+-import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP } from "./choiceText";
++import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./choiceText";
+ import type { FileWork } from "./closeGuard";
+ import { deletedSideView, keptToApply } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
+@@ -52,7 +52,14 @@ const columns = computed(() =>
+     delete: deletedView.value?.deleteIn === side,
+   })),
+ );
+-const deletedShown = computed(() => deletedView.value?.middle === "deleted");
++const centerLine = computed(() => {
++  const { middle } = props.data;
++  if (deletedView.value?.middle === "deleted") {
++    return DELETED_LINE;
++  }
++  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
++});
++const editable = computed(() => props.data.deleted === null && centerLine.value === null);
+ const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
+ const keptSideToApply = computed(() =>
+   deletedView.value === null ? null : keptToApply(deletedView.value, summary.value),
+@@ -75,7 +82,12 @@ onUnmounted(() => {
+ function markResolved(): void {
+   const text = resultText();
+   if (text !== null && summary.value !== null) {
+-    void finish({ path: props.data.path, text, summary: summary.value });
++    void finish({
++      path: props.data.path,
++      text,
++      summary: summary.value,
++      diskVersion: props.data.diskVersion,
++    });
+   }
+ }
+ </script>
+@@ -86,7 +98,7 @@ function markResolved(): void {
+     :class="{ 'invisible [content-visibility:hidden]': !shown }"
+   >
+     <MergeToolbar
+-      v-if="data.deleted === null"
++      v-if="editable"
+       :summary="summary"
+       @apply-left="applyAllNonConflicting('local')"
+       @apply-right="applyAllNonConflicting('remote')"
+@@ -142,9 +154,9 @@ function markResolved(): void {
+       <div
+         ref="center"
+         class="col-start-3 row-start-2 min-h-0 min-w-0"
+-        :class="{ invisible: deletedShown }"
++        :class="{ invisible: centerLine !== null }"
+       />
+-      <p v-if="deletedShown" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
++      <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
+       <div class="col-start-4 row-start-2 min-h-0 border-x border-separator will-change-transform">
+         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
+       </div>
+diff --git a/frontend/src/ui/NoticeBar.vue b/frontend/src/ui/NoticeBar.vue
+new file mode 100644
+index 0000000..7cf92c6
+--- /dev/null
++++ b/frontend/src/ui/NoticeBar.vue
+@@ -0,0 +1,34 @@
++<script setup lang="ts">
++import { computed } from "vue";
++import X from "~icons/lucide/x";
++
++import { noticeText, type Notice } from "./noticeText";
++
++const props = defineProps<{ notices: readonly Notice[] }>();
++const emit = defineEmits<{ close: [path: string] }>();
++
++const rows = computed(() =>
++  props.notices.map((notice) => ({
++    path: notice.path,
++    text: noticeText(notice),
++    closeLabel: `Close the notice about ${notice.path}`,
++  })),
++);
++</script>
++
++<template>
++  <ul role="status" class="shrink-0 border-b border-info-border bg-info text-fg">
++    <li v-for="row in rows" :key="row.path" class="flex items-start gap-2 px-3 py-2">
++      <p class="min-w-0 flex-1 wrap-break-word">{{ row.text }}</p>
++      <button
++        type="button"
++        title="Close"
++        :aria-label="row.closeLabel"
++        class="rounded p-0.5 hover:bg-info-border"
++        @click="emit('close', row.path)"
++      >
++        <X class="size-4" aria-hidden="true" />
++      </button>
++    </li>
++  </ul>
++</template>
+diff --git a/frontend/src/ui/choiceText.test.ts b/frontend/src/ui/choiceText.test.ts
+index f73ebc7..52a57cb 100644
+--- a/frontend/src/ui/choiceText.test.ts
++++ b/frontend/src/ui/choiceText.test.ts
+@@ -1,14 +1,15 @@
+ import { expect, test } from "vitest";
+ 
+-import type { FileSides, SideContent } from "../ipc";
+-import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { loadFixture, type FileSides, type NotText, type SideContent } from "../ipc";
++import { notTextLine, resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+ 
+ const COMMIT = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
+ const MISSING: SideContent = { kind: "Missing" };
+ const BINARY: SideContent = { kind: "Binary", bytes: 12_697 };
++const { diskVersion } = await loadFixture("word-marks.ts");
+ 
+ function sides(local: SideContent, remote: SideContent): FileSides {
+-  return { path: "logo.bin", reason: "Binary", local, remote };
++  return { path: "logo.bin", reason: "Binary", local, remote, diskVersion };
+ }
+ 
+ test.each<[SideContent, string]>([
+@@ -67,10 +68,23 @@ test("after a choice the Result column names the side taken, or the deletion", (
+   const both = sides(BINARY, { kind: "Text", lines: 2 });
+   const deletedRemotely = sides(BINARY, MISSING);
+ 
+-  expect(resultLine(both, "local")).toBe("Resolved with the left version.");
+-  expect(resultLine(both, "remote")).toBe("Resolved with the right version.");
+-  expect(resultLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
+-  expect(resultLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
++  expect(resultLine(both, { by: "side", side: "local" })).toBe("Resolved with the left version.");
++  expect(resultLine(both, { by: "side", side: "remote" })).toBe("Resolved with the right version.");
++  expect(resultLine(deletedRemotely, { by: "side", side: "remote" })).toBe(
++    "Resolved by deleting the file.",
++  );
++  expect(resultLine(deletedRemotely, { by: "side", side: "local" })).toBe(
++    "Resolved with the left version.",
++  );
++});
++
++test("a file the disk resolved says so in the Result column, whatever its sides", () => {
++  expect(resultLine(sides(BINARY, MISSING), { by: "disk" })).toBe(
++    "Changed on disk — staged as it is.",
++  );
++  expect(resultLine(sides(BINARY, BINARY), { by: "disk" })).toBe(
++    "Changed on disk — staged as it is.",
++  );
+ });
+ 
+ test("before a choice the Result column says what there is to choose", () => {
+@@ -80,3 +94,14 @@ test("before a choice the Result column says what there is to choose", () => {
+   expect(resultLine(sides(BINARY, MISSING), null)).toBe("Keep the file or delete it.");
+   expect(resultLine(sides(MISSING, BINARY), null)).toBe("Keep the file or delete it.");
+ });
++
++test.each<[NotText, string]>([
++  ["Deleted", "Deleted on disk — staged as deleted."],
++  ["Binary", "Not shown: the file on disk is binary — staged as it is."],
++  ["NonUtf8", "Not shown: the file on disk is not UTF-8 — staged as it is."],
++  ["TooLarge", "Not shown: the file on disk is too large — staged as it is."],
++  ["Link", "A link on disk now — staged as it is."],
++  ["Directory", "A folder on disk now — staged as deleted."],
++])("a middle that is %s on disk reads %j", (found, line) => {
++  expect(notTextLine(found)).toBe(line);
++});
+diff --git a/frontend/src/ui/choiceText.ts b/frontend/src/ui/choiceText.ts
+index ea3542a..ea4e4a4 100644
+--- a/frontend/src/ui/choiceText.ts
++++ b/frontend/src/ui/choiceText.ts
+@@ -1,5 +1,5 @@
+-import type { FileSides, Side, SideContent } from "../ipc";
+-import { otherSide } from "./sides";
++import type { FileSides, NotText, Side, SideContent } from "../ipc";
++import { otherSide, type Taken } from "./sides";
+ 
+ const BYTES_PER_KB = 1024;
+ const SHORT_COMMIT_LENGTH = 7;
+@@ -62,14 +62,19 @@ export function sideButton(sides: FileSides, side: Side): string {
+   return side === "local" ? "Take left" : "Take right";
+ }
+ 
+-function resolvedLine(sides: FileSides, taken: Side): string {
+-  if (sides[taken].kind === "Missing") {
++function resolvedLine(sides: FileSides, taken: Taken): string {
++  if (taken.by === "disk") {
++    return "Changed on disk — staged as it is.";
++  }
++  if (sides[taken.side].kind === "Missing") {
+     return DELETED_LINE;
+   }
+-  return taken === "local" ? "Resolved with the left version." : "Resolved with the right version.";
++  return taken.side === "local"
++    ? "Resolved with the left version."
++    : "Resolved with the right version.";
+ }
+ 
+-export function resultLine(sides: FileSides, taken: Side | null): string {
++export function resultLine(sides: FileSides, taken: Taken | null): string {
+   if (taken !== null) {
+     return resolvedLine(sides, taken);
+   }
+@@ -77,3 +82,24 @@ export function resultLine(sides: FileSides, taken: Side | null): string {
+     ? "Keep the file or delete it."
+     : "Take the left or the right version.";
+ }
++
++export function notTextLine(found: NotText): string {
++  switch (found) {
++    case "Deleted":
++      return "Deleted on disk — staged as deleted.";
++    case "Binary":
++      return "Not shown: the file on disk is binary — staged as it is.";
++    case "NonUtf8":
++      return "Not shown: the file on disk is not UTF-8 — staged as it is.";
++    case "TooLarge":
++      return "Not shown: the file on disk is too large — staged as it is.";
++    case "Link":
++      return "A link on disk now — staged as it is.";
++    case "Directory":
++      return "A folder on disk now — staged as deleted.";
++    default: {
++      const _exhaustive: never = found;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/deletedSide.test.ts b/frontend/src/ui/deletedSide.test.ts
+index aa4ad67..4699499 100644
+--- a/frontend/src/ui/deletedSide.test.ts
++++ b/frontend/src/ui/deletedSide.test.ts
+@@ -2,52 +2,68 @@ import { expect, test } from "vitest";
+ 
+ import type { Side } from "../ipc";
+ import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
++import type { Taken } from "./sides";
+ 
+-test.each<[Side, Side | null, DeletedSideView]>([
++const LOCAL: Taken = { by: "side", side: "local" };
++const REMOTE: Taken = { by: "side", side: "remote" };
++const DISK: Taken = { by: "disk" };
++
++test.each<[Side, Taken | null, DeletedSideView]>([
+   [
+     "remote",
+     null,
+-    { kept: "local", keepIn: "local", deleteIn: "remote", middle: "base", resettable: false },
++    { kept: "local", keepIn: "local", deleteIn: "remote", middle: "loaded", resettable: false },
+   ],
+   [
+     "remote",
+-    "local",
++    LOCAL,
+     { kept: "local", keepIn: null, deleteIn: null, middle: "kept", resettable: true },
+   ],
+   [
+     "remote",
+-    "remote",
++    REMOTE,
+     { kept: "local", keepIn: null, deleteIn: null, middle: "deleted", resettable: true },
+   ],
++  [
++    "remote",
++    DISK,
++    { kept: "local", keepIn: "local", deleteIn: "remote", middle: "loaded", resettable: true },
++  ],
+   [
+     "local",
+     null,
+-    { kept: "remote", keepIn: "remote", deleteIn: "local", middle: "base", resettable: false },
++    { kept: "remote", keepIn: "remote", deleteIn: "local", middle: "loaded", resettable: false },
+   ],
+   [
+     "local",
+-    "remote",
++    REMOTE,
+     { kept: "remote", keepIn: null, deleteIn: null, middle: "kept", resettable: true },
+   ],
+   [
+     "local",
+-    "local",
++    LOCAL,
+     { kept: "remote", keepIn: null, deleteIn: null, middle: "deleted", resettable: true },
+   ],
+-])("deleted on the %s side, %s taken", (deleted, taken, view) => {
++  [
++    "local",
++    DISK,
++    { kept: "remote", keepIn: "remote", deleteIn: "local", middle: "loaded", resettable: true },
++  ],
++])("deleted on the %s side, %j taken", (deleted, taken, view) => {
+   expect(deletedSideView(deleted, taken)).toEqual(view);
+ });
+ 
+ test("the kept text is applied while the middle must show it and still has changes", () => {
+-  const kept = deletedSideView("remote", "local");
++  const kept = deletedSideView("remote", LOCAL);
+   expect(keptToApply(kept, { changes: 2, conflicts: 0 })).toBe("local");
+   expect(keptToApply(kept, { changes: 0, conflicts: 0 })).toBeNull();
+   expect(keptToApply(kept, null)).toBeNull();
+ });
+ 
+-test("nothing is applied before a take or after a Delete", () => {
++test("nothing is applied before a take, after a Delete, or after the disk resolved the file", () => {
+   const changes = { changes: 2, conflicts: 0 };
+   expect(keptToApply(deletedSideView("remote", null), changes)).toBeNull();
+-  expect(keptToApply(deletedSideView("remote", "remote"), changes)).toBeNull();
+-  expect(keptToApply(deletedSideView("local", "remote"), changes)).toBe("remote");
++  expect(keptToApply(deletedSideView("remote", REMOTE), changes)).toBeNull();
++  expect(keptToApply(deletedSideView("remote", DISK), changes)).toBeNull();
++  expect(keptToApply(deletedSideView("local", REMOTE), changes)).toBe("remote");
+ });
+diff --git a/frontend/src/ui/deletedSide.ts b/frontend/src/ui/deletedSide.ts
+index 6aedfe2..791ef5f 100644
+--- a/frontend/src/ui/deletedSide.ts
++++ b/frontend/src/ui/deletedSide.ts
+@@ -1,8 +1,8 @@
+ import type { Side } from "../ipc";
+-import { otherSide } from "./sides";
++import { otherSide, type Taken } from "./sides";
+ import type { MergeSummary } from "./useMergeController";
+ 
+-type Middle = "base" | "kept" | "deleted";
++type Middle = "loaded" | "kept" | "deleted";
+ 
+ export type DeletedSideView = {
+   readonly kept: Side;
+@@ -12,22 +12,22 @@ export type DeletedSideView = {
+   readonly resettable: boolean;
+ };
+ 
+-function middle(deleted: Side, taken: Side | null): Middle {
+-  if (taken === null) {
+-    return "base";
++function middle(deleted: Side, taken: Taken | null): Middle {
++  if (taken === null || taken.by === "disk") {
++    return "loaded";
+   }
+-  return taken === deleted ? "deleted" : "kept";
++  return taken.side === deleted ? "deleted" : "kept";
+ }
+ 
+-export function deletedSideView(deleted: Side, taken: Side | null): DeletedSideView {
++export function deletedSideView(deleted: Side, taken: Taken | null): DeletedSideView {
+   const kept = otherSide(deleted);
+-  const choosing = taken === null;
++  const choosing = taken === null || taken.by === "disk";
+   return {
+     kept,
+     keepIn: choosing ? kept : null,
+     deleteIn: choosing ? deleted : null,
+     middle: middle(deleted, taken),
+-    resettable: !choosing,
++    resettable: taken !== null,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+new file mode 100644
+index 0000000..698aeb2
+--- /dev/null
++++ b/frontend/src/ui/diskChanges.ts
+@@ -0,0 +1,53 @@
++import type { ShallowRef } from "vue";
++
++import { log, type DiskChange } from "../ipc";
++import type { CloseGuard } from "./closeGuard";
++import type { Notice } from "./noticeText";
++import type { Taken } from "./sides";
++import { isShown, reload, showsChoice, type Shown } from "./views";
++
++export type DiskChangeTarget = Shown & {
++  readonly notices: ShallowRef<readonly Notice[]>;
++  readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
++  readonly guard: Pick<CloseGuard, "unsavedFiles">;
++};
++
++function logNotice({ path, result, editsDropped, when }: Notice): void {
++  const { kind, ...details } = result;
++  const fields = { path, result: kind, ...details, editsDropped, when };
++  if (kind === "StageFailed") {
++    log.warn("file.disk_changed", fields);
++  } else {
++    log.info("file.disk_changed", fields);
++  }
++}
++
++export async function applyDiskChanges(
++  target: DiskChangeTarget,
++  changes: readonly DiskChange[],
++  when: Notice["when"],
++): Promise<void> {
++  const unsaved = target.guard.unsavedFiles();
++  const byPath = new Map(changes.map((change) => [change.path, change.result]));
++  const notices = [...byPath].map(([path, result]): Notice => ({
++    path,
++    result,
++    editsDropped: unsaved.includes(path),
++    when,
++  }));
++  notices.forEach(logNotice);
++  target.notices.value = [
++    ...target.notices.value.filter((notice) => !byPath.has(notice.path)),
++    ...notices,
++  ];
++  const taken = new Map(target.taken.value);
++  for (const [path, result] of byPath) {
++    taken.delete(path);
++    if (result.kind === "Staged" && showsChoice(target, path)) {
++      taken.set(path, { by: "disk" });
++    }
++  }
++  target.taken.value = taken;
++  const shown = [...byPath.keys()].filter((path) => isShown(target, path));
++  await Promise.all(shown.map((path) => reload(target, path)));
++}
+diff --git a/frontend/src/ui/noticeText.test.ts b/frontend/src/ui/noticeText.test.ts
+new file mode 100644
+index 0000000..ccc268b
+--- /dev/null
++++ b/frontend/src/ui/noticeText.test.ts
+@@ -0,0 +1,31 @@
++import { expect, test } from "vitest";
++
++import type { DiskResult } from "../ipc";
++import { noticeText, type Notice } from "./noticeText";
++
++const PATH = "src/a.ts";
++
++const OPENINGS: readonly [Pick<Notice, "editsDropped" | "when">, string][] = [
++  [
++    { when: "running", editsDropped: true },
++    `${PATH} changed on disk; your edits in yamt were dropped`,
++  ],
++  [{ when: "running", editsDropped: false }, `${PATH} changed on disk`],
++  [{ when: "start", editsDropped: false }, `${PATH} differs on disk from git's merge`],
++];
++
++const TAILS: readonly [DiskResult, string][] = [
++  [{ kind: "Staged" }, "staged as resolved"],
++  [{ kind: "MarkersLeft", conflicts: 1 }, "1 conflict left"],
++  [{ kind: "MarkersLeft", conflicts: 3 }, "3 conflicts left"],
++  [{ kind: "LeftAsIs" }, "left unstaged"],
++  [{ kind: "StageFailed", message: "index.lock exists\n" }, "staging failed: index.lock exists"],
++];
++
++test.each(
++  OPENINGS.flatMap(([opening, sentence]) =>
++    TAILS.map(([result, tail]) => [{ ...opening, result }, `${sentence} — ${tail}`] as const),
++  ),
++)("%j reads %j", (fields, text) => {
++  expect(noticeText({ path: PATH, ...fields })).toBe(text);
++});
+diff --git a/frontend/src/ui/noticeText.ts b/frontend/src/ui/noticeText.ts
+new file mode 100644
+index 0000000..224e662
+--- /dev/null
++++ b/frontend/src/ui/noticeText.ts
+@@ -0,0 +1,44 @@
++import type { DiskResult } from "../ipc";
++
++export type Notice = {
++  readonly path: string;
++  readonly result: DiskResult;
++  readonly editsDropped: boolean;
++  readonly when: "start" | "running";
++};
++
++function opening({ path, editsDropped, when }: Notice): string {
++  switch (when) {
++    case "start":
++      return `${path} differs on disk from git's merge`;
++    case "running":
++      return editsDropped
++        ? `${path} changed on disk; your edits in yamt were dropped`
++        : `${path} changed on disk`;
++    default: {
++      const _exhaustive: never = when;
++      return _exhaustive;
++    }
++  }
++}
++
++function outcome(result: DiskResult): string {
++  switch (result.kind) {
++    case "Staged":
++      return "staged as resolved";
++    case "MarkersLeft":
++      return result.conflicts === 1 ? "1 conflict left" : `${result.conflicts} conflicts left`;
++    case "LeftAsIs":
++      return "left unstaged";
++    case "StageFailed":
++      return `staging failed: ${result.message.trim()}`;
++    default: {
++      const _exhaustive: never = result;
++      return _exhaustive;
++    }
++  }
++}
++
++export function noticeText(notice: Notice): string {
++  return `${opening(notice)} — ${outcome(notice.result)}`;
++}
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 361fc69..fabdef5 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -54,6 +54,26 @@ test("WriteFailed names the path and the system's message", () => {
+   expect(text).toContain("disk full");
+ });
+ 
++test("NotAFile says nothing was written because the path is not a regular file", () => {
++  const text = problemText(onFinish({ kind: "NotAFile", path: PATH }));
++
++  expect(text).toBe(
++    `Could not mark ${PATH} as resolved: ${PATH} is not a regular file on disk; nothing was written`,
++  );
++});
++
++test("ReadFailed names the path and the system's message", () => {
++  const text = problemText({
++    action: "take",
++    path: PATH,
++    cause: { kind: "ReadFailed", path: PATH, message: "permission denied\n" },
++  });
++
++  expect(text).toBe(
++    `Could not resolve ${PATH} with one side: reading ${PATH} failed: permission denied`,
++  );
++});
++
+ test.each([
+   ["Binary", "it is a binary file"],
+   ["NonUtf8", "it is not UTF-8 text"],
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 990edfc..5de3c19 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -55,6 +55,10 @@ export function problemText(problem: Problem): string {
+       return `${cause.path} cannot be shown in the editor: ${unsupportedBecause(cause.reason)}.`;
+     case "WriteFailed":
+       return `${attempted(problem)}: writing ${cause.path} failed: ${cause.message.trim()}`;
++    case "NotAFile":
++      return `${attempted(problem)}: ${cause.path} is not a regular file on disk; nothing was written`;
++    case "ReadFailed":
++      return `${attempted(problem)}: reading ${cause.path} failed: ${cause.message.trim()}`;
+     case "Unexpected":
+       return `${attempted(problem)}: ${cause.message.trim()}`;
+     default: {
+diff --git a/frontend/src/ui/sides.ts b/frontend/src/ui/sides.ts
+index d8c299a..678d8b9 100644
+--- a/frontend/src/ui/sides.ts
++++ b/frontend/src/ui/sides.ts
+@@ -2,6 +2,8 @@ import type { Side } from "../ipc";
+ 
+ export const SIDES: readonly Side[] = ["local", "remote"];
+ 
++export type Taken = { readonly by: "side"; readonly side: Side } | { readonly by: "disk" };
++
+ const OTHER: Readonly<Record<Side, Side>> = { local: "remote", remote: "local" };
+ 
+ export function otherSide(side: Side): Side {
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index ff3280d..3794508 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -3,11 +3,16 @@ import { afterEach, expect, test, vi } from "vitest";
+ import {
+   loadFixture,
+   type ChunkSource,
++  type DiskChange,
++  type DiskResult,
++  type DiskVersion,
+   type FileEntry,
++  type FileList,
+   type FileMergeData,
+   type FileSides,
+   type SourceFailure,
+   type SourceResult,
++  type WriteReply,
+ } from "../ipc";
+ import type { FileWork } from "./closeGuard";
+ import { createAppStore, useAppStore, type AppStore } from "./store";
+@@ -39,6 +44,33 @@ function ok<T>(value: T): SourceResult<T> {
+   return { ok: true, value };
+ }
+ 
++function listing(
++  files: readonly FileEntry[],
++  diskChanges: readonly DiskChange[] = [],
++): SourceResult<FileList> {
++  return ok({ files, diskChanges });
++}
++
++function written(files: FileEntry[]): SourceResult<WriteReply> {
++  return ok({ kind: "Written", files });
++}
++
++async function versioned(diskVersion: number): Promise<DiskVersion> {
++  const record = {
++    path: "v.ts",
++    middle: { kind: "Stages", text: "" },
++    local: "",
++    remote: "",
++    deleted: null,
++    eol: "Lf",
++    chunks: [],
++    disk_version: diskVersion,
++  };
++  return (await loadFixture("v.ts", { "v.json": record })).diskVersion;
++}
++
++const VERSION_0 = await versioned(0);
++
+ async function dataFor(path: string): Promise<FileMergeData> {
+   return { ...(await loadFixture(MAGIC_KEYS)), path };
+ }
+@@ -46,7 +78,7 @@ async function dataFor(path: string): Promise<FileMergeData> {
+ function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
+   const pending: PendingLoad[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(ok(files)),
++    listFiles: () => Promise.resolve(listing(files)),
+     loadFile: (path) =>
+       new Promise((resolve, reject) => {
+         pending.push({ path, resolve, reject });
+@@ -327,12 +359,12 @@ test("a rejected load is an Unexpected problem and keeps the previous file", asy
+ 
+ test("a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file", async () => {
+   spyConsole();
+-  const sent: [string, string][] = [];
++  const sent: [string, string, DiskVersion][] = [];
+   const listed = [entry("0.ts"), resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
+   const { store, pending } = await openedStore({
+-    finishFile: (path, text) => {
+-      sent.push([path, text]);
+-      return Promise.resolve(ok(listed));
++    finishFile: (path, text, diskVersion) => {
++      sent.push([path, text, diskVersion]);
++      return Promise.resolve(written(listed));
+     },
+   });
+   const view = fakeView(store, "a.ts", "loaded\n");
+@@ -343,7 +375,12 @@ test("a finish with nothing left sends the text without asking, saves it, and op
+   view.text = "merged\r\n";
+   expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ 
+-  const finishing = store.finish({ path: "a.ts", text: "merged\r\n", summary: NOTHING_LEFT });
++  const finishing = store.finish({
++    path: "a.ts",
++    text: "merged\r\n",
++    summary: NOTHING_LEFT,
++    diskVersion: VERSION_0,
++  });
+   await vi.waitFor(() => {
+     expect(pending.map((load) => load.path)).toEqual(["a.ts", "gone.ts", "c.ts"]);
+   });
+@@ -351,7 +388,7 @@ test("a finish with nothing left sends the text without asking, saves it, and op
+   await finishing;
+ 
+   expect(store.question.value).toBeNull();
+-  expect(sent).toEqual([["a.ts", "merged\r\n"]]);
++  expect(sent).toEqual([["a.ts", "merged\r\n", 0]]);
+   expect(store.files.value).toEqual(listed);
+   expect(store.opened.value[0]).toBe(shownA);
+   expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
+@@ -370,12 +407,12 @@ test("a finish of a file no longer shown does not switch files", async () => {
+   const store = createAppStore({
+     ...source,
+     finishFile: () =>
+-      Promise.resolve(ok([resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")])),
++      Promise.resolve(written([resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")])),
+   });
+   await openNow(store, pending, "a.ts");
+   await openNow(store, pending, "b.ts");
+ 
+-  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT });
++  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+ 
+   expect(store.active.value).toBe("b.ts");
+   expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
+@@ -383,9 +420,9 @@ test("a finish of a file no longer shown does not switch files", async () => {
+ 
+ const AFTER_ACTION_ON_A = [resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
+ 
+-type Answer = (files: SourceResult<FileEntry[]>) => void;
++type Answer = (reply: SourceResult<WriteReply>) => void;
+ 
+-function answeredLater(answers: Answer[]): Promise<SourceResult<FileEntry[]>> {
++function answeredLater(answers: Answer[]): Promise<SourceResult<WriteReply>> {
+   return new Promise((resolve) => {
+     answers.push(resolve);
+   });
+@@ -404,7 +441,7 @@ async function openWhileActing(
+   await vi.waitFor(() => {
+     expect(answers).toHaveLength(1);
+   });
+-  answers[0]?.(ok(AFTER_ACTION_ON_A));
++  answers[0]?.(written(AFTER_ACTION_ON_A));
+   await vi.waitFor(() => {
+     expect(store.files.value).toEqual(AFTER_ACTION_ON_A);
+   });
+@@ -418,7 +455,8 @@ test("a file the user opens while a finish runs wins over the next file, though
+ 
+   const { store, loads, acting } = await openWhileActing(
+     (answers) => ({ finishFile: () => answeredLater(answers) }),
+-    (shown) => shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT }),
++    (shown) =>
++      shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: VERSION_0 }),
+   );
+ 
+   expect(loads).toEqual(["a.ts", "b.ts"]);
+@@ -439,7 +477,7 @@ test("a file the user opens while a take runs wins over the next file, though st
+   expect(store.active.value).toBe("b.ts");
+   await acting;
+   expect(store.active.value).toBe("b.ts");
+-  expect(store.taken.value).toEqual(new Map([["a.ts", "local"]]));
++  expect(store.taken.value).toEqual(new Map([["a.ts", { by: "side", side: "local" }]]));
+ });
+ 
+ test("a finish with work left asks; Back writes nothing, Save writes the text", async () => {
+@@ -448,12 +486,12 @@ test("a finish with work left asks; Back writes nothing, Save writes the text",
+   const { store } = await openedStore({
+     finishFile: (_path, text) => {
+       sent.push(text);
+-      return Promise.resolve(ok([resolvedEntry("a.ts")]));
++      return Promise.resolve(written([resolvedEntry("a.ts")]));
+     },
+   });
+   const summary = { conflicts: 1, changes: 2 };
+ 
+-  const back = store.finish({ path: "a.ts", text: "first", summary });
++  const back = store.finish({ path: "a.ts", text: "first", summary, diskVersion: VERSION_0 });
+   expect(store.question.value).toEqual({ kind: "unprocessed", summary });
+   store.answer(false);
+   await back;
+@@ -461,7 +499,7 @@ test("a finish with work left asks; Back writes nothing, Save writes the text",
+   expect(store.question.value).toBeNull();
+   expect(sent).toEqual([]);
+ 
+-  const save = store.finish({ path: "a.ts", text: "second", summary });
++  const save = store.finish({ path: "a.ts", text: "second", summary, diskVersion: VERSION_0 });
+   store.answer(true);
+   await save;
+ 
+@@ -474,7 +512,7 @@ test("a failed finish keeps the file shown, the list unresolved and the old save
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
+   const { store, pending, a } = await openedStore({
+-    listFiles: () => Promise.resolve(ok([entry("a.ts"), entry("b.ts")])),
++    listFiles: () => Promise.resolve(listing([entry("a.ts"), entry("b.ts")])),
+     finishFile: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const view = fakeView(store, "a.ts", "loaded\n");
+@@ -484,7 +522,7 @@ test("a failed finish keeps the file shown, the list unresolved and the old save
+   const shown = store.opened.value;
+   view.text = "text";
+ 
+-  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT });
++  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+ 
+   expect(store.files.value).toBe(before);
+   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
+@@ -511,7 +549,7 @@ test("a rejected finish is an Unexpected problem", async () => {
+   });
+ 
+   await expect(
+-    store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT }),
++    store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 }),
+   ).resolves.toBeUndefined();
+ 
+   expect(store.problem.value).toEqual({
+@@ -526,7 +564,7 @@ test("the unsaved list names exactly the opened files whose text differs from lo
+   const { source, pending } = handSource([]);
+   const store = createAppStore({
+     ...source,
+-    finishFile: () => Promise.resolve(ok([])),
++    finishFile: () => Promise.resolve(written([])),
+   });
+   for (const path of ["a.ts", "b.ts", "c.ts", "d.ts"]) {
+     await openNow(store, pending, path);
+@@ -539,9 +577,19 @@ test("the unsaved list names exactly the opened files whose text differs from lo
+   notOpened.text = "z edited\n";
+   a.text = "a edited\n";
+   c.text = "c finished\n";
+-  await store.finish({ path: "c.ts", text: "c finished\n", summary: NOTHING_LEFT });
++  await store.finish({
++    path: "c.ts",
++    text: "c finished\n",
++    summary: NOTHING_LEFT,
++    diskVersion: VERSION_0,
++  });
+   d.text = "d finished\n";
+-  await store.finish({ path: "d.ts", text: "d finished\n", summary: NOTHING_LEFT });
++  await store.finish({
++    path: "d.ts",
++    text: "d finished\n",
++    summary: NOTHING_LEFT,
++    diskVersion: VERSION_0,
++  });
+   d.text = "d\n";
+ 
+   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
+@@ -578,7 +626,7 @@ test("everything is resolved only when every listed file is", async () => {
+   const { source, pending } = handSource([resolvedEntry("a.ts"), entry("b.ts")]);
+   const store = createAppStore({
+     ...source,
+-    finishFile: () => Promise.resolve(ok([resolvedEntry("a.ts"), resolvedEntry("b.ts")])),
++    finishFile: () => Promise.resolve(written([resolvedEntry("a.ts"), resolvedEntry("b.ts")])),
+   });
+   expect(store.allResolved.value).toBe(false);
+ 
+@@ -590,7 +638,7 @@ test("everything is resolved only when every listed file is", async () => {
+   await loading;
+   expect(store.allResolved.value).toBe(false);
+ 
+-  await store.finish({ path: "b.ts", text: "b", summary: NOTHING_LEFT });
++  await store.finish({ path: "b.ts", text: "b", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+ 
+   expect(store.allResolved.value).toBe(true);
+ });
+@@ -603,7 +651,7 @@ test("reset of A replaces only A in place with a new object and keeps B opened",
+     ...source,
+     resetFile: (path) => {
+       reset.push(path);
+-      return Promise.resolve(ok([entry("a.ts"), entry("b.ts")]));
++      return Promise.resolve(written([entry("a.ts"), entry("b.ts")]));
+     },
+   });
+   await openNow(store, pending, "a.ts");
+@@ -651,7 +699,7 @@ test("a failed reset keeps the current file and names the path", async () => {
+ test("a failed reload after a reset keeps A's old view and reports it as a failed open", async () => {
+   const lines = spyConsole();
+   const { store, pending } = await openedStore({
+-    resetFile: () => Promise.resolve(ok([entry("a.ts")])),
++    resetFile: () => Promise.resolve(written([entry("a.ts")])),
+   });
+   const shown = store.opened.value;
+ 
+@@ -677,7 +725,7 @@ test("a failed reload after a reset keeps A's old view and reports it as a faile
+ 
+ test("reset A, open B, open A, then the reset resolves: A shows its fresh view", async () => {
+   spyConsole();
+-  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
++  const resets: ((result: SourceResult<WriteReply>) => void)[] = [];
+   const { store, pending, a } = await openedStore({
+     resetFile: () =>
+       new Promise((resolve) => {
+@@ -692,7 +740,7 @@ test("reset A, open B, open A, then the reset resolves: A shows its fresh view",
+   pending[1]?.resolve(ok(b));
+   await openB;
+   await store.open("a.ts");
+-  resets[0]?.(ok([entry("a.ts"), entry("b.ts")]));
++  resets[0]?.(written([entry("a.ts"), entry("b.ts")]));
+   await vi.waitFor(() => {
+     expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
+   });
+@@ -711,7 +759,7 @@ test("reset A, open B, open A, then the reset resolves: A shows its fresh view",
+ 
+ test("a later open wins over a reset that resolves last; the reset file is replaced in place", async () => {
+   spyConsole();
+-  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
++  const resets: ((result: SourceResult<WriteReply>) => void)[] = [];
+   const { store, pending, a } = await openedStore({
+     resetFile: () =>
+       new Promise((resolve) => {
+@@ -725,7 +773,7 @@ test("a later open wins over a reset that resolves last; the reset file is repla
+   const openB = store.open("b.ts");
+   pending[1]?.resolve(ok(b));
+   await openB;
+-  resets[0]?.(ok([entry("a.ts")]));
++  resets[0]?.(written([entry("a.ts")]));
+   await vi.waitFor(() => {
+     expect(pending).toHaveLength(3);
+   });
+@@ -740,7 +788,7 @@ test("a later open wins over a reset that resolves last; the reset file is repla
+ 
+ test("a reset landing in the background keeps another file's problem; a problem about its own file is cleared", async () => {
+   spyConsole();
+-  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
++  const resets: ((result: SourceResult<WriteReply>) => void)[] = [];
+   const git: SourceFailure = { kind: "Git", message: "index.lock exists" };
+   const { store, pending } = await openedStore({
+     resetFile: () =>
+@@ -755,7 +803,7 @@ test("a reset landing in the background keeps another file's problem; a problem
+   pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
+   await failed;
+   const gone = store.problem.value;
+-  resets[0]?.(ok([entry("a.ts")]));
++  resets[0]?.(written([entry("a.ts")]));
+   await vi.waitFor(() => {
+     expect(pending).toHaveLength(3);
+   });
+@@ -764,10 +812,10 @@ test("a reset landing in the background keeps another file's problem; a problem
+ 
+   expect(store.problem.value).toBe(gone);
+ 
+-  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT });
++  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
+   const again = store.reset("a.ts");
+-  resets[1]?.(ok([entry("a.ts")]));
++  resets[1]?.(written([entry("a.ts")]));
+   await vi.waitFor(() => {
+     expect(pending).toHaveLength(4);
+   });
+@@ -786,12 +834,14 @@ const LOGO_SIDES: FileSides = {
+   reason: "Binary",
+   local: { kind: "Binary", bytes: 11 },
+   remote: { kind: "Binary", bytes: 12 },
++  diskVersion: await versioned(4),
+ };
+ const REMOVED_SIDES: FileSides = {
+   path: REMOVED,
+   reason: "RemoteDeleted",
+   local: { kind: "Text", lines: 3 },
+   remote: { kind: "Missing" },
++  diskVersion: await versioned(5),
+ };
+ 
+ function choiceSource(
+@@ -800,7 +850,7 @@ function choiceSource(
+ ): { source: ChunkSource; calls: string[] } {
+   const calls: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(ok(files)),
++    listFiles: () => Promise.resolve(listing(files)),
+     loadFile: async (path) => {
+       calls.push(`loadFile ${path}`);
+       return ok(await dataFor(path));
+@@ -808,7 +858,7 @@ function choiceSource(
+     finishFile: () => Promise.reject(new Error("not used")),
+     resetFile: (path) => {
+       calls.push(`resetFile ${path}`);
+-      return Promise.resolve(ok(files));
++      return Promise.resolve(written(files));
+     },
+     describeFile: (path) => {
+       calls.push(`describeFile ${path}`);
+@@ -819,7 +869,7 @@ function choiceSource(
+       const taken = files.map((file): FileEntry =>
+         file.path === path ? { ...file, status: "Resolved" } : file,
+       );
+-      return Promise.resolve(ok(taken));
++      return Promise.resolve(written(taken));
+     },
+     remoteName: () => Promise.resolve(null),
+     ...overrides,
+@@ -830,7 +880,7 @@ function choiceSource(
+ test("a list of files the editor cannot show opens the first one's choice and loads nothing", async () => {
+   spyConsole();
+   const { source, calls } = choiceSource({
+-    listFiles: () => Promise.resolve(ok([LOGO_ENTRY, REMOVED_ENTRY])),
++    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+   });
+   const store = createAppStore(source);
+ 
+@@ -900,7 +950,7 @@ test("taking a side updates the list, marks only that file taken, and clears a p
+       return Promise.resolve(
+         takes.length === 1
+           ? { ok: false, failure: git }
+-          : ok([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]),
++          : written([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]),
+       );
+     },
+   });
+@@ -912,7 +962,7 @@ test("taking a side updates the list, marks only that file taken, and clears a p
+   expect(takes).toEqual([`${LOGO} remote`, `${LOGO} remote`]);
+   expect(store.files.value).toEqual([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]);
+   expect(store.choices.value).toEqual([LOGO_SIDES, REMOVED_SIDES]);
+-  expect(store.taken.value).toEqual(new Map([[LOGO, "remote"]]));
++  expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "remote" }]]));
+   expect(store.choices.value[1]).toBe(removed);
+   expect(store.problem.value).toBeNull();
+ });
+@@ -932,7 +982,7 @@ test("a take keeps a problem about another file", async () => {
+ 
+   await store.takeSide(LOGO, "remote");
+ 
+-  expect(store.taken.value).toEqual(new Map([[LOGO, "remote"]]));
++  expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "remote" }]]));
+   expect(store.problem.value).toBe(gone);
+ });
+ 
+@@ -940,7 +990,7 @@ test("a failed take keeps the list and the choice and names the file", async ()
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git rm failed" };
+   const { source } = choiceSource({
+-    listFiles: () => Promise.resolve(ok([LOGO_ENTRY, REMOVED_ENTRY])),
++    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+     takeSide: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const store = createAppStore(source);
+@@ -1074,7 +1124,7 @@ test("a take on the shown file opens the next unresolved file, wrapping to the t
+ 
+   expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
+   expect(store.active.value).toBe("a.ts");
+-  expect(store.taken.value).toEqual(new Map([[LOGO, "local"]]));
++  expect(store.taken.value).toEqual(new Map([[LOGO, { by: "side", side: "local" }]]));
+ });
+ 
+ const REMOVED_TEXT = "docs/removed-text.md";
+@@ -1088,7 +1138,7 @@ test("a deleted-side text file keeps the side taken next to the choices' until i
+ 
+   await store.takeSide(REMOVED_TEXT, "remote");
+ 
+-  expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, "remote"]]));
++  expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, { by: "side", side: "remote" }]]));
+   expect(store.choices.value).toEqual([]);
+   expect(store.opened.value).toEqual([shown]);
+   expect(store.active.value).toBe(REMOVED_TEXT);
+@@ -1109,7 +1159,7 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
+   spyConsole();
+   let listed = [entry("a.ts"), entry("b.ts"), LOGO_ENTRY];
+   const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
+-  const { source } = choiceSource({ listFiles: () => Promise.resolve(ok(listed)) });
++  const { source } = choiceSource({ listFiles: () => Promise.resolve(listing(listed)) });
+   const store = createAppStore({
+     ...source,
+     loadFile: async (path) =>
+@@ -1134,7 +1184,7 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
+ test("a failed refresh is a list problem and keeps the marks; the next good one clears only that", async () => {
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git ls-files failed" };
+-  let answer: SourceResult<FileEntry[]> = ok([entry("a.ts")]);
++  let answer: SourceResult<FileList> = listing([entry("a.ts")]);
+   const { source, pending } = handSource([]);
+   const store = createAppStore({ ...source, listFiles: () => Promise.resolve(answer) });
+   await openNow(store, pending, "a.ts");
+@@ -1150,7 +1200,7 @@ test("a failed refresh is a list problem and keeps the marks; the next good one
+     '[error] store.list_failed {kind: "Git", message: "git ls-files failed"}',
+   ]);
+ 
+-  answer = ok([resolvedEntry("a.ts")]);
++  answer = listing([resolvedEntry("a.ts")]);
+   await store.refreshFiles();
+ 
+   expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
+@@ -1184,3 +1234,309 @@ test("the remote name is asked for once; a failure leaves none and logs a warnin
+     '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',
+   ]);
+ });
++
++const STAGED: DiskResult = { kind: "Staged" };
++const TWO_LEFT: DiskResult = { kind: "MarkersLeft", conflicts: 2 };
++
++function rebuildingView(store: AppStore, path: string): FakeView {
++  let built = store.opened.value.find((file) => file.path === path);
++  const view: FakeView = {
++    text: "loaded\n",
++    saved: "loaded\n",
++    work: {
++      unsaved: () => {
++        const current = store.opened.value.find((file) => file.path === path);
++        if (current !== built) {
++          built = current;
++          view.text = "reloaded\n";
++          view.saved = "reloaded\n";
++        }
++        return view.text !== view.saved;
++      },
++      markSaved: (text) => {
++        view.saved = text;
++      },
++    },
++  };
++  store.track(path, view.work);
++  return view;
++}
++
++test.each([true, false])(
++  "a running change to an opened file rebuilds it and drops its side taken (edits: %s)",
++  async (edited) => {
++    const lines = spyConsole();
++    let listed = listing([entry("a.ts"), LOGO_ENTRY]);
++    const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++    const store = createAppStore(source);
++    await store.loadFiles();
++    await store.takeSide("a.ts", "local");
++    const [shown] = store.opened.value;
++    const view = rebuildingView(store, "a.ts");
++    if (edited) {
++      view.text = "typed\n";
++    }
++    expect(store.unsavedFiles()).toEqual(edited ? ["a.ts"] : []);
++    listed = listing([entry("a.ts"), LOGO_ENTRY], [{ path: "a.ts", result: TWO_LEFT }]);
++
++    await store.refreshFiles();
++
++    expect(calls.filter((call) => call === "loadFile a.ts")).toHaveLength(2);
++    expect(store.opened.value).toHaveLength(1);
++    expect(store.opened.value[0]).not.toBe(shown);
++    expect(store.notices.value).toEqual([
++      { path: "a.ts", result: TWO_LEFT, editsDropped: edited, when: "running" },
++    ]);
++    expect(store.taken.value).toEqual(new Map());
++    expect(store.unsavedFiles()).toEqual([]);
++    expect(lines.info).toContain(
++      `[info] file.disk_changed {path: "a.ts", result: "MarkersLeft", conflicts: 2, editsDropped: ${edited}, when: "running"}`,
++    );
++  },
++);
++
++test("a change to a file that is not shown gives only its notice and its mark", async () => {
++  spyConsole();
++  let listed = listing([entry("a.ts"), entry("b.ts")]);
++  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  const shown = store.opened.value;
++  listed = listing([entry("a.ts"), resolvedEntry("b.ts")], [{ path: "b.ts", result: STAGED }]);
++
++  await store.refreshFiles();
++
++  expect(calls).toEqual(["loadFile a.ts"]);
++  expect(store.files.value).toEqual([entry("a.ts"), resolvedEntry("b.ts")]);
++  expect(store.opened.value).toBe(shown);
++  expect(store.choices.value).toEqual([]);
++  expect(store.taken.value).toEqual(new Map());
++  expect(store.notices.value).toEqual([
++    { path: "b.ts", result: STAGED, editsDropped: false, when: "running" },
++  ]);
++  expect(store.problem.value).toBeNull();
++});
++
++test("changes reported by the first list are start notices; the file then opens from the disk", async () => {
++  spyConsole();
++  const { source, calls } = choiceSource({
++    listFiles: () =>
++      Promise.resolve(listing([entry("a.ts")], [{ path: "a.ts", result: TWO_LEFT }])),
++  });
++  const store = createAppStore(source);
++
++  await store.loadFiles();
++
++  expect(calls).toEqual(["loadFile a.ts"]);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.notices.value).toEqual([
++    { path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "start" },
++  ]);
++});
++
++test("a newer change replaces the notice for its path; dismissNotice removes just one", async () => {
++  spyConsole();
++  const files = [entry("a.ts"), entry("b.ts"), entry("c.ts")];
++  const oneLeft: DiskResult = { kind: "MarkersLeft", conflicts: 1 };
++  let listed = listing(files, [
++    { path: "b.ts", result: TWO_LEFT },
++    { path: "c.ts", result: STAGED },
++  ]);
++  const { source } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  listed = listing(files, [{ path: "b.ts", result: oneLeft }]);
++
++  await store.refreshFiles();
++
++  expect(store.notices.value).toEqual([
++    { path: "c.ts", result: STAGED, editsDropped: false, when: "start" },
++    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
++  ]);
++
++  store.dismissNotice("c.ts");
++
++  expect(store.notices.value).toEqual([
++    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
++  ]);
++});
++
++test("a choice or a deleted-side file staged from the disk is taken by the disk and shown again", async () => {
++  spyConsole();
++  const files = [LOGO_ENTRY, entry(REMOVED_TEXT)];
++  let listed = listing(files);
++  const { source, calls } = choiceSource(
++    {
++      listFiles: () => Promise.resolve(listed),
++      loadFile: async (path) => {
++        calls.push(`loadFile ${path}`);
++        return ok({ ...(await dataFor(path)), deleted: "remote" });
++      },
++    },
++    files,
++  );
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open(LOGO);
++  await store.takeSide(LOGO, "local");
++  listed = listing(files, [
++    { path: LOGO, result: STAGED },
++    { path: REMOVED_TEXT, result: STAGED },
++  ]);
++
++  await store.refreshFiles();
++
++  expect(store.taken.value).toEqual(
++    new Map([
++      [LOGO, { by: "disk" }],
++      [REMOVED_TEXT, { by: "disk" }],
++    ]),
++  );
++  expect(calls.slice(-2).toSorted()).toEqual([`describeFile ${LOGO}`, `loadFile ${REMOVED_TEXT}`]);
++});
++
++test("a change git could not stage is a warning notice, not a problem", async () => {
++  const warnings: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    warnings.push(line);
++  });
++  spyConsole();
++  const failed: DiskResult = { kind: "StageFailed", message: "index.lock exists" };
++  const { source } = choiceSource({
++    listFiles: () =>
++      Promise.resolve(listing([entry("a.ts"), entry("b.ts")], [{ path: "b.ts", result: failed }])),
++  });
++  const store = createAppStore(source);
++
++  await store.loadFiles();
++
++  expect(store.problem.value).toBeNull();
++  expect(store.notices.value).toEqual([
++    { path: "b.ts", result: failed, editsDropped: false, when: "start" },
++  ]);
++  expect(warnings).toEqual([
++    '[warn] file.disk_changed {path: "b.ts", result: "StageFailed", message: "index.lock exists", editsDropped: false, when: "start"}',
++  ]);
++});
++
++test("a finish refused because the file changed on disk saves nothing, stays, and shows the disk view", async () => {
++  spyConsole();
++  const files = [entry("a.ts"), entry("b.ts")];
++  const change: DiskChange = { path: "a.ts", result: TWO_LEFT };
++  const { source, calls } = choiceSource(
++    { finishFile: () => Promise.resolve(ok({ kind: "ChangedOnDisk", files, change })) },
++    files,
++  );
++  const store = createAppStore(source);
++  await store.loadFiles();
++  const [shown] = store.opened.value;
++  const view = fakeView(store, "a.ts", "loaded\n");
++  view.text = "merged\n";
++
++  await store.finish({
++    path: "a.ts",
++    text: "merged\n",
++    summary: NOTHING_LEFT,
++    diskVersion: VERSION_0,
++  });
++
++  expect(view.saved).toBe("loaded\n");
++  expect(store.active.value).toBe("a.ts");
++  expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
++  expect(store.opened.value[0]).not.toBe(shown);
++  expect(store.notices.value).toEqual([
++    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
++  ]);
++  expect(store.problem.value).toBeNull();
++});
++
++test.each(["take", "reset"] as const)(
++  "a %s refused because the file changed on disk shows the change and the disk view",
++  async (action) => {
++    spyConsole();
++    const files = [entry("a.ts")];
++    const change: DiskChange = { path: "a.ts", result: STAGED };
++    function changed(): Promise<SourceResult<WriteReply>> {
++      return Promise.resolve(ok({ kind: "ChangedOnDisk", files: [resolvedEntry("a.ts")], change }));
++    }
++    const { source, calls } = choiceSource({ takeSide: changed, resetFile: changed }, files);
++    const store = createAppStore(source);
++    await store.loadFiles();
++
++    await (action === "take" ? store.takeSide("a.ts", "remote") : store.reset("a.ts"));
++
++    expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
++    expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
++    expect(store.taken.value).toEqual(new Map());
++    expect(store.notices.value).toEqual([
++      { path: "a.ts", result: STAGED, editsDropped: false, when: "running" },
++    ]);
++  },
++);
++
++test("each write sends the disk version of the view it acts on", async () => {
++  spyConsole();
++  const seven = await versioned(7);
++  const sent: string[] = [];
++  const files = [entry("a.ts"), LOGO_ENTRY];
++  const { source } = choiceSource(
++    {
++      loadFile: async (path) => ok({ ...(await dataFor(path)), diskVersion: seven }),
++      finishFile: (path, _text, diskVersion) => {
++        sent.push(`finish ${path} ${diskVersion}`);
++        return Promise.resolve(written(files));
++      },
++      takeSide: (path, side, diskVersion) => {
++        sent.push(`take ${path} ${side} ${diskVersion}`);
++        return Promise.resolve(written(files));
++      },
++      resetFile: (path, diskVersion) => {
++        sent.push(`reset ${path} ${diskVersion}`);
++        return Promise.resolve(written(files));
++      },
++    },
++    files,
++  );
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open(LOGO);
++
++  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: seven });
++  await store.takeSide("a.ts", "local");
++  await store.reset(LOGO);
++  await store.takeSide("nope.ts", "local");
++
++  expect(sent).toEqual(["finish a.ts 7", "take a.ts local 7", `reset ${LOGO} 4`]);
++  expect(store.problem.value).toEqual({
++    action: "take",
++    path: "nope.ts",
++    cause: { kind: "Unexpected", message: "nope.ts is not shown" },
++  });
++});
++
++test("a take on a deleted-side file shown from the disk shows yamt's view again", async () => {
++  spyConsole();
++  let middle: FileMergeData["middle"] = { kind: "DiskNotText", found: "Deleted" };
++  const { source, calls } = choiceSource(
++    {
++      loadFile: async (path) => {
++        calls.push(`loadFile ${path}`);
++        return ok({ ...(await dataFor(path)), deleted: "remote", middle });
++      },
++    },
++    [entry(REMOVED_TEXT)],
++  );
++  const store = createAppStore(source);
++  await store.loadFiles();
++  middle = { kind: "Stages", text: "kept\n" };
++
++  await store.takeSide(REMOVED_TEXT, "local");
++
++  expect(calls).toEqual([
++    `loadFile ${REMOVED_TEXT}`,
++    `takeSide ${REMOVED_TEXT} local`,
++    `loadFile ${REMOVED_TEXT}`,
++  ]);
++  expect(store.opened.value[0]?.middle).toEqual({ kind: "Stages", text: "kept\n" });
++  expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, { by: "side", side: "local" }]]));
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index f9b505f..c673397 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -3,6 +3,8 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ import {
+   log,
+   type ChunkSource,
++  type DiskChange,
++  type DiskVersion,
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
+@@ -11,22 +13,28 @@ import {
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
++import { applyDiskChanges } from "./diskChanges";
+ import { nextUnresolved } from "./nextFile";
++import type { Notice } from "./noticeText";
+ import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
++import type { Taken } from "./sides";
+ import type { MergeSummary } from "./useMergeController";
++import { fetchView, isShown, reload, shownVersion } from "./views";
+ 
+ type FinishRequest = {
+   readonly path: string;
+   readonly text: string;
+   readonly summary: MergeSummary;
++  readonly diskVersion: DiskVersion;
+ };
+ 
+ type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+-  readonly taken: ShallowRef<ReadonlyMap<string, Side>>;
++  readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
++  readonly notices: ShallowRef<readonly Notice[]>;
+   readonly remoteName: ShallowRef<RemoteName | null>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+@@ -48,6 +56,7 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
+   takeSide(path: string, side: Side): Promise<void>;
+   reset(path: string): Promise<void>;
+   dismissProblem(): void;
++  dismissNotice(path: string): void;
+   answer(yes: boolean): void;
+ };
+ 
+@@ -63,7 +72,8 @@ export function createAppStore(source: ChunkSource): AppStore {
+     files: shallowRef<readonly FileEntry[]>([]),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+-    taken: shallowRef<ReadonlyMap<string, Side>>(new Map()),
++    taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
++    notices: shallowRef<readonly Notice[]>([]),
+     remoteName: shallowRef<RemoteName | null>(null),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+@@ -87,7 +97,7 @@ function actions(state: State): Actions {
+   return {
+     loadFiles: () => loadFiles(state),
+     refreshFiles: async () => {
+-      await refreshFiles(state);
++      await refreshFiles(state, "running");
+     },
+     loadRemoteName: () => loadRemoteName(state),
+     open: (path) => open(state, path),
+@@ -97,6 +107,9 @@ function actions(state: State): Actions {
+     dismissProblem: () => {
+       state.problem.value = null;
+     },
++    dismissNotice: (path) => {
++      state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
++    },
+     answer: state.asking.answer,
+     track: state.guard.track,
+     untrack: state.guard.untrack,
+@@ -119,24 +132,29 @@ function clearProblemAbout(state: State, path: string): void {
+ }
+ 
+ async function loadFiles(state: State): Promise<void> {
+-  const listed = await refreshFiles(state);
++  const listed = await refreshFiles(state, "start");
+   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
+   if (first !== undefined) {
+     await open(state, first.path);
+   }
+ }
+ 
+-async function refreshFiles(state: State): Promise<readonly FileEntry[] | null> {
++async function refreshFiles(
++  state: State,
++  when: Notice["when"],
++): Promise<readonly FileEntry[] | null> {
+   const listed = await attempt(() => state.source.listFiles());
+   if (!listed.ok) {
+     report(state, { action: "list", cause: listed.cause });
+     return null;
+   }
+-  state.files.value = listed.value;
++  const { files, diskChanges } = listed.value;
++  state.files.value = files;
+   if (state.problem.value?.action === "list") {
+     state.problem.value = null;
+   }
+-  return listed.value;
++  await applyDiskChanges(state, diskChanges, when);
++  return files;
+ }
+ 
+ async function loadRemoteName(state: State): Promise<void> {
+@@ -148,10 +166,7 @@ async function loadRemoteName(state: State): Promise<void> {
+ }
+ 
+ async function open(state: State, path: string): Promise<void> {
+-  const shown =
+-    state.opened.value.some((file) => file.path === path) ||
+-    state.choices.value.some((sides) => sides.path === path);
+-  if (!shown) {
++  if (!isShown(state, path)) {
+     await load(state, path);
+     return;
+   }
+@@ -183,31 +198,6 @@ async function load(state: State, path: string): Promise<void> {
+   }
+ }
+ 
+-async function fetchView(state: State, path: string): Promise<Outcome<() => void>> {
+-  const listed = state.files.value.find((file) => file.path === path);
+-  if ((listed?.unsupported ?? null) !== null) {
+-    const sides = await attempt(() => state.source.describeFile(path));
+-    return sides.ok ? { ok: true, value: () => putChoice(state, sides.value) } : sides;
+-  }
+-  const data = await attempt(() => state.source.loadFile(path));
+-  return data.ok ? { ok: true, value: () => putOpened(state, data.value) } : data;
+-}
+-
+-function putOpened(state: State, data: FileMergeData): void {
+-  // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
+-  const loaded = { ...data };
+-  const opened = state.opened.value;
+-  state.opened.value = opened.some((file) => file.path === data.path)
+-    ? opened.map((file) => (file.path === data.path ? loaded : file))
+-    : [...opened, loaded];
+-  log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
+-}
+-
+-function putChoice(state: State, sides: FileSides): void {
+-  const others = state.choices.value.filter((shown) => shown.path !== sides.path);
+-  state.choices.value = [...others, sides];
+-}
+-
+ async function moveOn(state: State, path: string, opensBefore: number): Promise<void> {
+   const untouched = state.active.value === path && state.latestOpen === opensBefore;
+   const next = untouched ? nextUnresolved(state.files.value, path) : null;
+@@ -216,18 +206,35 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
+   }
+ }
+ 
+-async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
++async function changedOnDisk(state: State, path: string, change: DiskChange): Promise<void> {
++  clearProblemAbout(state, path);
++  await applyDiskChanges(state, [change], "running");
++}
++
++function notShown(path: string): Outcome<never> {
++  return { ok: false, cause: { kind: "Unexpected", message: `${path} is not shown` } };
++}
++
++async function finish(
++  state: State,
++  { path, text, summary, diskVersion }: FinishRequest,
++): Promise<void> {
+   const opensBefore = state.latestOpen;
+   const unprocessed: Question = { kind: "unprocessed", summary };
+   if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
+     return;
+   }
+-  const outcome = await attempt(() => state.source.finishFile(path, text));
++  const outcome = await attempt(() => state.source.finishFile(path, text, diskVersion));
+   if (!outcome.ok) {
+     report(state, { action: "finish", path, cause: outcome.cause });
+     return;
+   }
+-  state.files.value = outcome.value;
++  const reply = outcome.value;
++  state.files.value = reply.files;
++  if (reply.kind === "ChangedOnDisk") {
++    await changedOnDisk(state, path, reply.change);
++    return;
++  }
+   state.guard.markSaved(path, text);
+   state.problem.value = null;
+   await moveOn(state, path, opensBefore);
+@@ -235,33 +242,53 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
+ 
+ async function takeSide(state: State, path: string, side: Side): Promise<void> {
+   const opensBefore = state.latestOpen;
+-  const outcome = await attempt(() => state.source.takeSide(path, side));
++  const diskVersion = shownVersion(state, path);
++  const outcome =
++    diskVersion === null
++      ? notShown(path)
++      : await attempt(() => state.source.takeSide(path, side, diskVersion));
+   if (!outcome.ok) {
+     report(state, { action: "take", path, cause: outcome.cause });
+     return;
+   }
+-  state.files.value = outcome.value;
+-  state.taken.value = new Map([...state.taken.value, [path, side]]);
++  const reply = outcome.value;
++  state.files.value = reply.files;
++  if (reply.kind === "ChangedOnDisk") {
++    await changedOnDisk(state, path, reply.change);
++    return;
++  }
++  state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
+   clearProblemAbout(state, path);
++  const fromDisk = state.opened.value.some(
++    (file) => file.path === path && file.middle.kind !== "Stages",
++  );
++  if (fromDisk) {
++    await reload(state, path);
++  }
+   await moveOn(state, path, opensBefore);
+ }
+ 
+ async function reset(state: State, path: string): Promise<void> {
+-  const files = await attempt(() => state.source.resetFile(path));
+-  if (!files.ok) {
+-    report(state, { action: "reset", path, cause: files.cause });
++  const diskVersion = shownVersion(state, path);
++  const outcome =
++    diskVersion === null
++      ? notShown(path)
++      : await attempt(() => state.source.resetFile(path, diskVersion));
++  if (!outcome.ok) {
++    report(state, { action: "reset", path, cause: outcome.cause });
++    return;
++  }
++  const reply = outcome.value;
++  state.files.value = reply.files;
++  if (reply.kind === "ChangedOnDisk") {
++    await changedOnDisk(state, path, reply.change);
+     return;
+   }
+-  state.files.value = files.value;
+   state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
+   state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
+-  const view = await fetchView(state, path);
+-  if (!view.ok) {
+-    report(state, { action: "open", path, cause: view.cause });
+-    return;
++  if (await reload(state, path)) {
++    clearProblemAbout(state, path);
+   }
+-  view.value();
+-  clearProblemAbout(state, path);
+ }
+ 
+ export function useAppStore(): AppStore {
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index ed680ae..8802785 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -8,7 +8,7 @@ const editor = vi.hoisted(() => {
+   const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
+   class MergeController {
+     constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
+-      state.text = data.base;
++      state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
+       state.built += 1;
+       state.readOnly.push(options.readOnly);
+     }
+@@ -55,8 +55,8 @@ function mount(
+   return { scope, handle };
+ }
+ 
+-async function fileData(base: string): Promise<FileMergeData> {
+-  return { ...(await loadFixture("vueuse-use-magic-keys.ts")), base };
++async function fileData(text: string): Promise<FileMergeData> {
++  return { ...(await loadFixture("vueuse-use-magic-keys.ts")), middle: { kind: "Disk", text } };
+ }
+ 
+ test("unsaved: false when built, true after an edit, false after markSaved, false after new data", async () => {
+@@ -93,6 +93,21 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
+   expect(editor.state.destroyed).toBe(2);
+ });
+ 
++test("after a data swap, unsaved() is false even when the old controller had edits", async () => {
++  const data = shallowRef<FileMergeData | null>(await fileData("git's merge\n"));
++  const { handle } = mount(data);
++  await nextTick();
++  editor.state.text = "typed in yamt\n";
++  expect(handle.unsaved()).toBe(true);
++
++  data.value = await fileData("changed on disk\n");
++  await nextTick();
++
++  expect(editor.state.built).toBe(2);
++  expect(handle.resultText()).toBe("changed on disk\n");
++  expect(handle.unsaved()).toBe(false);
++});
++
+ test("without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored", async () => {
+   const empty = mount(shallowRef<FileMergeData | null>(null));
+   const hostless = mount(shallowRef<FileMergeData | null>(await fileData("loaded\n")), false);
+diff --git a/frontend/src/ui/views.ts b/frontend/src/ui/views.ts
+new file mode 100644
+index 0000000..7cb019e
+--- /dev/null
++++ b/frontend/src/ui/views.ts
+@@ -0,0 +1,78 @@
++import type { ShallowRef } from "vue";
++
++import {
++  log,
++  type ChunkSource,
++  type DiskVersion,
++  type FileEntry,
++  type FileMergeData,
++  type FileSides,
++} from "../ipc";
++import { attempt, logProblem, type Outcome, type Problem } from "./problem";
++
++export type Shown = {
++  readonly source: ChunkSource;
++  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
++  readonly opened: ShallowRef<readonly FileMergeData[]>;
++  readonly choices: ShallowRef<readonly FileSides[]>;
++  readonly problem: ShallowRef<Problem | null>;
++};
++
++export function isShown(shown: Shown, path: string): boolean {
++  return (
++    shown.opened.value.some((file) => file.path === path) ||
++    shown.choices.value.some((sides) => sides.path === path)
++  );
++}
++
++export function shownVersion(shown: Shown, path: string): DiskVersion | null {
++  return (
++    shown.opened.value.find((file) => file.path === path)?.diskVersion ??
++    shown.choices.value.find((sides) => sides.path === path)?.diskVersion ??
++    null
++  );
++}
++
++export function showsChoice(shown: Shown, path: string): boolean {
++  return (
++    shown.choices.value.some((sides) => sides.path === path) ||
++    shown.opened.value.some((file) => file.path === path && file.deleted !== null)
++  );
++}
++
++function putOpened(shown: Shown, data: FileMergeData): void {
++  // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
++  const loaded = { ...data };
++  const opened = shown.opened.value;
++  shown.opened.value = opened.some((file) => file.path === data.path)
++    ? opened.map((file) => (file.path === data.path ? loaded : file))
++    : [...opened, loaded];
++  log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
++}
++
++function putChoice(shown: Shown, sides: FileSides): void {
++  const others = shown.choices.value.filter((choice) => choice.path !== sides.path);
++  shown.choices.value = [...others, sides];
++}
++
++export async function fetchView(shown: Shown, path: string): Promise<Outcome<() => void>> {
++  const listed = shown.files.value.find((file) => file.path === path);
++  if ((listed?.unsupported ?? null) !== null) {
++    const sides = await attempt(() => shown.source.describeFile(path));
++    return sides.ok ? { ok: true, value: () => putChoice(shown, sides.value) } : sides;
++  }
++  const data = await attempt(() => shown.source.loadFile(path));
++  return data.ok ? { ok: true, value: () => putOpened(shown, data.value) } : data;
++}
++
++export async function reload(shown: Shown, path: string): Promise<boolean> {
++  const view = await fetchView(shown, path);
++  if (!view.ok) {
++    const failure: Problem = { action: "open", path, cause: view.cause };
++    logProblem(failure);
++    shown.problem.value = failure;
++    return false;
++  }
++  view.value();
++  return true;
++}
