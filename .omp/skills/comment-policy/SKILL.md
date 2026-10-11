@@ -15,7 +15,8 @@ default and measured each milestone (`skill://guardrail-evolution` step 4).
   (`git checkout -m` regenerates markers only while the index is unmerged — git-checkout(1)),
   a WebKit quirk (link to the Tauri/WebKit issue), a CodeMirror API subtlety (`mapPos` side
   semantics, link to the docs). One to three lines (`apply.ts` `recordSelection`: the history
-  internals plus their source), placed at the statement that depends on it.
+  internals plus their source), placed at the statement that depends on it. `// SAFETY:` above the one
+  `unsafe` block (required by `undocumented_unsafe_blocks`), arguing from the caller order (`graphics.rs`).
 - [CP2] A `///` one-liner on a public item, stating what it is: required on `merge-core` (`missing_docs`; a
   field or variant whose name says it all may restate it); elsewhere only if the reviewer test fails.
 - [CP3] A `//!` crate-level line in `lib.rs` naming the crate's single responsibility.
@@ -37,10 +38,3 @@ Delete the comment mentally. Is anything lost that a rename, an extracted functi
 stronger type could not restore? If no → `should` finding with the fix being the rename or
 extraction, not "remove comment". If yes and it has no reference → `should` finding "add
 the source".
-
-## Measurement
-
-The curator counts comments added per milestone, classifies each as information-carrying
-or narrating, and proposes tightening (promote to a grep-based L1 check on `//` outside
-tests) or loosening (named exceptions) with examples from the actual code. Until then this
-is L0.

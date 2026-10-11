@@ -30,6 +30,9 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
   wave's patches; not in `check`). It mutates the wave's changed Rust lines (cargo-mutants) and
   changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS); reports in
   `target/`. Each surviving mutant goes into `smoke[]` as `file:line mutation`; `editor/` is not mutated.
+  Drop a survivor only as (a) equivalent: no observable difference, with the reason; (b) gate-covered: another
+  `just check` recipe kills it, which you name; (c) wiring: framework registration or a log call with no decision of its
+  own, observed in the smoke, which you name. A guard, boundary, constant, filter or branch is a real gap → finding for the owning row.
 
 ## Smoke recipes (pick the one for the layer; paste `observed`)
 
@@ -52,7 +55,7 @@ observed: test names from the risk register (RK1, RK2, RK5, RK15, RK17) in the o
 **frontend, fixture mode**
 
 ```
-pnpm -C frontend dev --port <own port>   # M1 has one source (fixtures); no VITE_CHUNK_SOURCE switch until 2.1
+pnpm -C frontend dev --port <own port>
 just webdriver <own port>                # test windows on the Samsung screen (scripts/test-screen.sh place); private display without one
 # session capabilities: browserName "MiniBrowser",
 #   webkitgtk:browserOptions { binary: "/usr/lib/webkitgtk-6.0/MiniBrowser", args: ["--automation"] }
@@ -64,9 +67,10 @@ just test-window-check                   # optional: lists where each test windo
   window on another screen is not a failure (owner 2026-10-10: "atm not important spawn wherever").
   `just test-window-check` is optional, useful to see where a window went. Set the window size with
   WebDriver `setWindowRect`. When done, stop the driver, the dev server and the app you started.
+- [VF9] Screenshots come only from the WebDriver session (page) or the private display; never a desktop capture (hook `bash-guard.ts`).
 
 observed: three panes, bands between them, apply a change via its arrow, undo, bulk apply;
-console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path.
+console shows `[info] file.loaded {…}` from `log.ts`; no errors. Screenshot path (VF9).
 
 **editor layout tests (WebKit)**
 
@@ -83,7 +87,7 @@ the probe did not run, which is reported, not hidden.
 ```
 scripts/conflict-repo.sh /tmp/yamt-test-merge   # 7 conflicts: 3 goldens, CRLF, add/add, binary, deleted on one side
 scripts/test-screen.sh place                    # re-points the KWin rules; exits non-zero without a Samsung screen
-just dev-app --repo /tmp/yamt-test-merge        # = cargo tauri dev -- -- --repo …; the app disables DMABUF on NVIDIA itself (plan §2 #43)
+just app --repo /tmp/yamt-test-merge            # debug build with the embedded frontend: no dev port, production CSP (#293, #405)
 ```
 
 The smoke repository's folder contains `yamt-test` and the window title is `<repository folder> — yamt`
@@ -93,6 +97,14 @@ own `yamt` windows are not moved (VF8).
 observed: sidebar lists the 7 files; finish one ⇒ `git -C /tmp/yamt-test-merge ls-files -u` no longer
 lists it; reset it ⇒ listed again with three stages and markers in the worktree; close ⇒ exit 1 and
 `yamt: n of m files still unresolved` while any file is open.
+
+- [VF10] **release / install**: a slice that changes the README's install steps runs them as a new user before review. observed:
+  every command's exit status and the window title; the macOS lines cannot run here and stay with the reviewer.
+
+```
+h=$(mktemp -d); env -i HOME=$h PATH=/usr/bin:/bin bash -euxc '<every Linux install block, in README order>'
+cd /tmp/yamt-test-merge && env -i HOME=$h PATH=/usr/bin:/bin bash -lc yamt
+```
 
 ## Output schema
 

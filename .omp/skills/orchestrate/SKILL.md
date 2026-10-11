@@ -66,8 +66,8 @@ default `task` agent is disabled), brief as `task`, background as `context`, `so
 
 ## 4. Collect
 
-Read each output. `deviations_from_brief` → accept (update `SLICES.md`/brief) or reject
-(rework). Apply needed shared-file edits now, then `just bindings`; patches never carry generated files.
+Read each output. `deviations_from_brief` → accept (update `SLICES.md`/brief) or reject (rework). Apply needed shared-file
+edits now, then `just bindings` (and `just third-party-licenses` when a dependency changed); patches never carry generated files.
 
 ## 5. Review
 
@@ -85,7 +85,7 @@ Third failure → ── **Gate B** (escalate to the human with the findings). �
 
 After the wave's patches are applied: spawn `verifier` once with read-only recipes (VF6) and
 `just mutants <base>` (VF7). `gate: fail` → rework the owning slice (step 6), never a new slice;
-each surviving mutant → an SP5 finding for its slice (drop equivalents with a reason). Evidence → board.
+each surviving mutant → an SP5 finding for its slice (drop per VF7). Evidence → board.
 
 ## 8. Commit
 
@@ -114,7 +114,7 @@ the human approves; the curator applies, appends the changelog, bumps the verifi
 - [OR6] You never run `just check` as proof; the verifier does. Single commands to understand a failure are fine.
 - [OR7] A `scout` is allowed for mapping unknown code; its output is context, not a plan.
 - [OR8] If the board and the tree disagree, the tree wins; fix the board, note it as a finding.
-- [OR9] Session handoff is the board + findings log + GUARDRAILS changelog; never rely on
-  chat memory. Update the board before yielding to the human.
+- [OR9] Handoff = board + findings log + GUARDRAILS changelog, never chat memory; update the board before yielding. A handoff note is
+  a checkpoint, not a stop: keep executing the board until the owner says stop or the context is nearly full (owner, #352/#356).
 - [OR10] At most `MAX_PARALLEL_AGENTS` agents at once; never reviewers while an implementer
   or the verifier runs. Detector: hook `task-fanout.ts` (per call, `agent://all`); across calls, you.

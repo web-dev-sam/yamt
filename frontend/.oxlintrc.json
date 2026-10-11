@@ -40,7 +40,7 @@
             "message": "bindings.ts is visible only inside src/ipc/ (IPC2); import domain types from ipc/index.ts."
           },
           {
-            "group": ["**/internal", "**/internal/*"],
+            "group": ["**/internal", "**/internal/**"],
             "message": "No module imports another module's internal/ (PM5)."
           }
         ]
@@ -61,7 +61,7 @@
           {
             "patterns": [
               {
-                "group": ["../**/internal", "../**/internal/*"],
+                "group": ["../**/internal", "../**/internal/**"],
                 "message": "No module imports another module's internal/ (PM5)."
               }
             ]
@@ -97,7 +97,7 @@
           {
             "patterns": [
               {
-                "group": ["@codemirror/*"],
+                "group": ["@codemirror/**"],
                 "message": "ui/ never imports CodeMirror (PM2); go through editor/index.ts."
               },
               {
@@ -105,7 +105,7 @@
                 "message": "ui/ never imports Tauri (PM2); only src/ipc/ talks to the app."
               },
               {
-                "group": ["../editor/internal/*", "**/internal", "**/internal/*"],
+                "group": ["../editor/internal/**", "**/internal", "**/internal/**"],
                 "message": "No module imports another module's internal/ (PM5)."
               },
               {
@@ -146,7 +146,7 @@
                 "message": "editor/, model/, connectors/ are framework-free (PM3)."
               },
               {
-                "group": ["../**/internal", "../**/internal/*"],
+                "group": ["../**/internal", "../**/internal/**"],
                 "message": "No module imports another module's internal/ (PM5)."
               },
               {

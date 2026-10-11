@@ -81,6 +81,11 @@ test-window-check:
 dev-app *args:
     cargo tauri dev -- -- {{ args }}
 
+# Desktop app as a debug build with the window's pages built in: no dev port, the published app's
+# security settings (`just app --repo /tmp/yamt-test-merge`).
+app *args:
+    cargo tauri build --debug --no-bundle && target/debug/yamt {{ args }}
+
 smoke-cli:
     cargo run --quiet -p yamt-cli -- classify frontend/fixtures/sample/{base,local,remote}.ts.txt
 

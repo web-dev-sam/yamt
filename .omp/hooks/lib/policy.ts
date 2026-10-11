@@ -104,11 +104,33 @@ function mainCheckoutPath(cwd: string): string {
       ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-prefix"],
       { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).split("\n");
+    if (gitDir === undefined || commonDir === undefined) return cwd;
     // Only a linked worktree's git dir differs from the common dir it shares (git-worktree(1)).
-    if (gitDir === undefined || commonDir === undefined || gitDir === commonDir) return cwd;
-    return resolve(dirname(commonDir), prefix ?? "");
+    if (gitDir !== commonDir) return resolve(dirname(commonDir), prefix ?? "");
+    const source = sharedCloneSource(gitDir);
+    return source === undefined ? cwd : resolve(source, prefix ?? "");
   } catch {
     return cwd;
+  }
+}
+
+// A `git clone --shared` lists the source's object store in `objects/info/alternates` (gitrepository-layout(5)).
+function sharedCloneSource(gitDir: string): string | undefined {
+  try {
+    const lines = readFileSync(resolve(gitDir, "objects/info/alternates"), "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const [objects] = lines;
+    if (
+      lines.length !== 1 ||
+      objects === undefined ||
+      !isAbsolute(objects) ||
+      !objects.endsWith("/.git/objects")
+    )
+      return undefined;
+    return dirname(dirname(objects));
+  } catch {
+    return undefined;
   }
 }
 
@@ -147,14 +169,16 @@ const REDIRECT_TARGET =
 
 const CD_TARGET = /\bcd\s+["']?([^\s;&|"']+)/g;
 
-export function writeTargetsFromCommand(command: string): string[] {
+export function writeTargetsFromCommand(command: string, baseDir: string): string[] {
   const cds = [...command.matchAll(CD_TARGET)];
   const targets: string[] = [];
   for (const m of command.matchAll(REDIRECT_TARGET)) {
     const t = m[1];
     if (t === undefined || t === "/dev/null" || t.startsWith("&")) continue;
-    const dir = cds.findLast((cd) => cd.index < m.index)?.[1];
-    targets.push(dir !== undefined && isAbsolute(dir) && !isAbsolute(t) ? resolve(dir, t) : t);
+    const dir = cds
+      .filter((cd) => cd.index < m.index)
+      .reduce((base, cd) => resolve(base, cd[1] ?? "."), baseDir);
+    targets.push(resolve(dir, t));
   }
   return targets;
 }

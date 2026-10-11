@@ -66,7 +66,9 @@ The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic
 `clippy::wildcard_enum_match_arm = deny`, `clippy::too_many_lines = warn` (40),
 `unsafe_code = deny` + `clippy::undocumented_unsafe_blocks = deny`; every library crate `#![forbid(unsafe_code)]`; the
 one exception is the NVIDIA guard in `src-tauri/src/graphics.rs` (plan §2 #43, arch-check); `missing_docs = warn` on `merge-core` only.
-`#[allow]` requires a one-line reason and is a `should` finding by default.
+No `#[allow]`; `#[expect(…, reason)]` only (clippy `allow_attributes*`).
+
+- [RS17] env reads are `disallowed_methods`; each carries `#[expect(…, reason)]` naming the inherited-value case and its test.
 
 ## References (read on demand, `references/rust-skills/<rule>.md`)
 

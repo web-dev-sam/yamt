@@ -113,6 +113,25 @@ test("bash-guard: git and destructive commands", async () => {
   await assertVerdict(h, bash("rm -rf target/debug"), IMPLEMENTER, false);
 });
 
+test("bash-guard: desktop screenshots are blocked; page and private-display captures pass", async () => {
+  const h = toolCallHandler(bashGuard);
+  const cases: Array<[string, boolean]> = [
+    ["spectacle -b -n -a -o /tmp/shot.png", true],
+    ["grim /tmp/shot.png", true],
+    [
+      "qdbus org.kde.KWin /org/kde/KWin/ScreenShot2 org.kde.KWin.ScreenShot2.CaptureActiveWindow",
+      true,
+    ],
+    ["import -window root /tmp/shot.png", true],
+    ["import -display :99 -window root /tmp/shot.png", false],
+    ["curl -s http://127.0.0.1:4444/session/abc/screenshot", false],
+  ];
+  for (const [command, blocked] of cases) {
+    await assertVerdict(h, bash(command), IMPLEMENTER, blocked);
+    await assertVerdict(h, bash(command), MAIN, blocked);
+  }
+});
+
 test("bash-guard: reviewers never run whole-workspace toolchains", async () => {
   const h = toolCallHandler(bashGuard);
   const cases: Array<[string, boolean]> = [
@@ -275,6 +294,40 @@ test("policy: hooks in a linked worktree read the main checkout's uncommitted re
   }
 });
 
+test("policy: hooks in a `git clone --shared` read the source checkout's uncommitted registry", async () => {
+  const main = mkdtempSync(resolve(tmpdir(), "yamt-main-"));
+  const cloneParent = mkdtempSync(resolve(tmpdir(), "yamt-clone-"));
+  const clone = resolve(cloneParent, "m");
+  const git = (...args: string[]): string =>
+    execFileSync(
+      "git",
+      ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
+      { cwd: main, encoding: "utf8" },
+    );
+  try {
+    git("init", "--quiet");
+    mkdirSync(resolve(main, ".omp/run"), { recursive: true });
+    const registry = resolve(main, ".omp/run/slices.json");
+    writeFileSync(registry, JSON.stringify({ B: { owned: ["b/**"] } }));
+    git("add", ".omp/run/slices.json");
+    git("commit", "--quiet", "-m", "registry");
+    git("clone", "--quiet", "--shared", main, clone);
+    writeFileSync(registry, JSON.stringify({ A: { owned: ["a/**"] } }));
+
+    assert.deepEqual(readSliceRegistry(clone), { A: { owned: ["a/**"] } });
+    await assertVerdict(
+      toolCallHandler(taskFanout),
+      { toolName: "task", input: { tasks: [{ name: "A", agent: "web-impl", isolated: true }] } },
+      MAIN,
+      false,
+      clone,
+    );
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(cloneParent, { recursive: true, force: true });
+  }
+});
+
 test("ownership: arrows are not redirects; targets after `cd <dir>` resolve against it", async () => {
   const h = toolCallHandler(ownership);
   const cases: Array<[string, boolean]> = [
@@ -284,6 +337,38 @@ test("ownership: arrows are not redirects; targets after `cd <dir>` resolve agai
   ];
   for (const [command, blocked] of cases)
     await assertVerdict(h, bash(command), UNREGISTERED, blocked, FIXTURE_REPO);
+});
+
+test("ownership: redirects resolve against the tool cwd and every earlier relative or absolute `cd`", async () => {
+  const h = toolCallHandler(ownership);
+  await assertVerdict(
+    h,
+    bash("cd frontend && printf x > src/editor/p.ts"),
+    MAIN,
+    true,
+    FIXTURE_REPO,
+  );
+  await assertVerdict(
+    h,
+    { toolName: "bash", input: { command: "printf x > src/editor/p.ts", cwd: "frontend" } },
+    MAIN,
+    true,
+    FIXTURE_REPO,
+  );
+  await assertVerdict(
+    h,
+    bash("cd crates/merge-core && printf x > src/lib.rs"),
+    IMPLEMENTER,
+    false,
+    FIXTURE_REPO,
+  );
+  await assertVerdict(
+    h,
+    bash("cd crates && cd gitio && printf x > src/lib.rs"),
+    IMPLEMENTER,
+    true,
+    FIXTURE_REPO,
+  );
 });
 
 test("task-fanout: broadcasts are blocked for everyone, named messages pass", async () => {

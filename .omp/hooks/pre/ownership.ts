@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+
 import {
   type AgentIdentity,
   escapesRepo,
@@ -26,7 +27,10 @@ export default function ownership(pi: ExtensionAPI): void {
     if (EDITING_TOOLS[event.toolName]) {
       targets = pathsFromToolInput(event.toolName, input);
     } else if (event.toolName === "bash" && typeof input.command === "string") {
-      targets = writeTargetsFromCommand(input.command);
+      targets = writeTargetsFromCommand(
+        input.command,
+        resolve(ctx.cwd, typeof input.cwd === "string" ? input.cwd : "."),
+      );
     } else {
       return;
     }
@@ -34,12 +38,16 @@ export default function ownership(pi: ExtensionAPI): void {
 
     const scratch = tmpdir();
     const relTargets = targets
-      .filter((t) => !/^[a-z][a-z0-9+.-]*:\/\//.test(t) && !resolve(ctx.cwd, t).startsWith(`${scratch}/`))
+      .filter(
+        (t) => !/^[a-z][a-z0-9+.-]*:\/\//.test(t) && !resolve(ctx.cwd, t).startsWith(`${scratch}/`),
+      )
       .map((t) => toRepoRelative(t, ctx.cwd));
     if (relTargets.length === 0) return;
 
     if (agent.kind === "main") {
-      const hit = relTargets.find((p) => matchesAny(p, PRODUCT_CODE_ROOTS) && !matchesAny(p, ORCHESTRATOR_EDITABLE));
+      const hit = relTargets.find(
+        (p) => matchesAny(p, PRODUCT_CODE_ROOTS) && !matchesAny(p, ORCHESTRATOR_EDITABLE),
+      );
       if (hit === undefined) return;
       return {
         block: true,
