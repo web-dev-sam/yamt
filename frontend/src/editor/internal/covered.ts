@@ -6,7 +6,7 @@ import type { Side } from "./side";
 
 export const showCovered = StateEffect.define<ChunkAction | null>();
 
-const coveredField = StateField.define<ChunkAction | null>({
+export const coveredField = StateField.define<ChunkAction | null>({
   create: () => null,
   update(covered, tr) {
     const shown = tr.effects.findLast((effect) => effect.is(showCovered));

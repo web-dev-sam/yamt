@@ -1,4 +1,5 @@
 import {
+  ChangeSet,
   EditorSelection,
   Text,
   Transaction,
@@ -59,6 +60,24 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
   return wholeLines(target.state.doc, { from, to: span.to }, lines);
 }
 
+function chainedChanges(target: ApplyTarget, spans: readonly ChunkSpan[], side: Side): ChangeSet {
+  let state = target.state;
+  let changes = ChangeSet.empty(state.doc.length);
+  for (const { chunk } of spans) {
+    const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
+    if (span === undefined) {
+      throw new Error(`chunk ${chunk.id} is not in the chunk field`);
+    }
+    const click = state.update({
+      changes: applyChange({ ...target, state }, span, side),
+      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(chunk, span.status, side) }),
+    });
+    changes = changes.compose(click.changes);
+    state = click.state;
+  }
+  return changes;
+}
+
 function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
   const ids = new Set(chunks.map((chunk) => chunk.id));
   return target.state
@@ -112,9 +131,10 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
   if (last === undefined) {
     return [];
   }
-  const changes = target.state.changes(
-    action.kind === "apply" ? spans.map((span) => applyChange(target, span, action.side)) : [],
-  );
+  const changes =
+    action.kind === "apply"
+      ? chainedChanges(target, spans, action.side)
+      : ChangeSet.empty(target.state.doc.length);
   return [
     moveCursor(last.from),
     {
@@ -143,7 +163,7 @@ export function bulkApplySteps({
   if (spans.length === 0) {
     return [];
   }
-  const changes = target.state.changes(spans.map((span) => applyChange(target, span, side)));
+  const changes = chainedChanges(target, spans, side);
   const action = {
     changes,
     effects: spans.map((span) =>

@@ -15,7 +15,7 @@ import {
   type VisibleLines,
 } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
-import { coveredDecorations, sameCovered, showCovered } from "./internal/covered";
+import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
 import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
@@ -50,7 +50,6 @@ export class MergeController {
   readonly #strips: MergeHosts["strips"];
   readonly #scroll: ScrollSync;
   readonly #drag: IconDrag;
-  #covered: ChunkAction | null = null;
   #frameId: number | null = null;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
@@ -210,10 +209,9 @@ export class MergeController {
   }
 
   #showCovered(covered: ChunkAction | null): void {
-    if (sameCovered(covered, this.#covered)) {
+    if (sameCovered(covered, this.#views.left.state.field(coveredField))) {
       return;
     }
-    this.#covered = covered;
     this.#views.left.dispatch({ effects: showCovered.of(covered) });
     this.#views.right.dispatch({ effects: showCovered.of(covered) });
   }

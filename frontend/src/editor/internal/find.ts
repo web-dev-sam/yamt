@@ -51,6 +51,14 @@ export function findLabel(state: EditorState, query: SearchQuery): string {
   return found.length === 1 ? "1 result" : `${found.length} results`;
 }
 
+export function labelOutdated(before: EditorState, after: EditorState): boolean {
+  return (
+    before.doc !== after.doc ||
+    !before.selection.eq(after.selection) ||
+    !getSearchQuery(before).eq(getSearchQuery(after))
+  );
+}
+
 function matchFrom(found: readonly Match[], pos: number): Match | undefined {
   return found.find((match) => match.from >= pos) ?? found[0];
 }
@@ -112,13 +120,21 @@ function closeFind(view: EditorView): boolean {
   return true;
 }
 
-function iconButton(markup: string, title: string, run: () => void): HTMLButtonElement {
+function iconButton({
+  icon,
+  title,
+  run,
+}: {
+  readonly icon: string;
+  readonly title: string;
+  readonly run: () => void;
+}): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "find-button";
   button.title = title;
   button.setAttribute("aria-label", title);
-  button.innerHTML = markup;
+  button.innerHTML = icon;
   button.addEventListener("mousedown", (event) => {
     event.preventDefault();
   });
@@ -143,6 +159,8 @@ class FindPanel implements Panel {
     this.#field.type = "text";
     this.#field.placeholder = "Find";
     this.#field.spellcheck = false;
+    // Mod-f on an open bar refocuses the element carrying this attribute
+    // (@codemirror/search openSearchPanel → getSearchInput).
     this.#field.setAttribute("main-field", "true");
     this.#field.setAttribute("aria-label", "Find");
     this.#field.value = getSearchQuery(view.state).search;
@@ -155,9 +173,17 @@ class FindPanel implements Panel {
       icon,
       this.#field,
       this.#count,
-      iconButton(arrowUpIcon, "Previous Occurrence (Shift+Enter)", () => findPrevious(view)),
-      iconButton(arrowDownIcon, "Next Occurrence (Enter)", () => findNext(view)),
-      iconButton(xIcon, "Close (Escape)", () => closeFind(view)),
+      iconButton({
+        icon: arrowUpIcon,
+        title: "Previous Occurrence (Shift+Enter)",
+        run: () => findPrevious(view),
+      }),
+      iconButton({
+        icon: arrowDownIcon,
+        title: "Next Occurrence (Enter)",
+        run: () => findNext(view),
+      }),
+      iconButton({ icon: xIcon, title: "Close (Escape)", run: () => closeFind(view) }),
     );
   }
 
@@ -168,11 +194,10 @@ class FindPanel implements Panel {
 
   update(update: ViewUpdate): void {
     const query = getSearchQuery(update.state);
-    const queryChanged = !query.eq(getSearchQuery(update.startState));
-    if (queryChanged && query.search !== this.#field.value) {
+    if (!query.eq(getSearchQuery(update.startState)) && query.search !== this.#field.value) {
       this.#field.value = query.search;
     }
-    if (queryChanged || update.docChanged || update.selectionSet) {
+    if (labelOutdated(update.startState, update.state)) {
       this.#count.textContent = findLabel(update.state, query);
     }
   }
@@ -197,7 +222,7 @@ class FindPanel implements Panel {
 }
 
 export const find = [
-  search({ top: true, literal: true, createPanel: (view) => new FindPanel(view) }),
+  search({ literal: true, createPanel: (view) => new FindPanel(view) }),
   keymap.of([
     { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
     {

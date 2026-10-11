@@ -21,8 +21,8 @@ export type IconPress = {
 };
 
 type OnPress = (press: IconPress, event: PointerEvent) => void;
-type Icons = { readonly covered: ChunkAction | null; readonly onPress: OnPress };
-export type StripPaint = { readonly covered: ChunkAction | null; readonly onPress: OnPress | null };
+type StripPaint = { readonly covered: ChunkAction | null; readonly onPress: OnPress | null };
+type Icons = StripPaint & { readonly onPress: OnPress };
 type ToneBand = Band & { readonly tone: Tone };
 type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
 type ArrowPane = {

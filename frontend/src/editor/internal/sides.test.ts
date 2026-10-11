@@ -154,6 +154,11 @@ function sideText(merge: Merge, id: number, side: Side): string {
   return doc.sliceString(from, to);
 }
 
+function spanRange(merge: Merge, id: number): [from: number, to: number] {
+  const { from, to } = spanAt(merge, id);
+  return [from, to];
+}
+
 function decoratedLines(state: EditorState): number[] {
   const lines = new Set<number>();
   for (const source of state.facet(EditorView.decorations)) {
@@ -331,6 +336,9 @@ test("a drag over several icons applies or ignores them as clicking each top to 
     const clicked = clicks(rightApplied, ids, how);
 
     expect(dragged.center.sliceDoc()).toBe(clicked.center.sliceDoc());
+    expect(ids.map((id) => spanRange(dragged, id))).toEqual(
+      ids.map((id) => spanRange(clicked, id)),
+    );
     expect(ids.map((id) => status(dragged, id))).toEqual(ids.map((id) => status(clicked, id)));
     expect(decoratedLines(dragged.left)).toEqual(decoratedLines(clicked.left));
     expect(dragged.center.selection.main.head).toBe(clicked.center.selection.main.head);
@@ -342,4 +350,25 @@ test("a drag over several icons applies or ignores them as clicking each top to 
     "applied applied",
     "applied ignored",
   ]);
+});
+
+test("touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves", async () => {
+  const start = open(
+    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc" }, [
+      { kind: "LocalOnly", base: [1, 1], local: [1, 1], remote: [1, 1] },
+      { kind: "LocalOnly", base: [2, 1], local: [2, 0], remote: [2, 1] },
+    ]),
+  );
+  const ids = [0, 1];
+  const how: Click = { kind: "apply", side: "local" };
+
+  const dragged = act(start, ids, how);
+  const clicked = clicks(start, ids, how);
+
+  expect(spanRange(start, 0)[1]).toBe(spanRange(start, 1)[0]);
+  expect(clicked.center.sliceDoc()).toBe("a\nB");
+  expect(dragged.center.sliceDoc()).toBe("a\nB");
+  expect(ids.map((id) => spanRange(dragged, id))).toEqual(ids.map((id) => spanRange(clicked, id)));
+  expect(ids.map((id) => status(dragged, id))).toEqual(ids.map((id) => status(clicked, id)));
+  expectOneUndoStep(start, dragged);
 });

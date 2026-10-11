@@ -1,0 +1,397 @@
+diff --git a/crates/cli/src/fixture.rs b/crates/cli/src/fixture.rs
+index 9999015..ff66754 100644
+--- a/crates/cli/src/fixture.rs
++++ b/crates/cli/src/fixture.rs
+@@ -8,6 +8,6 @@ use crate::{Result, print};
+ pub(crate) fn fixture(case_dir: &Path) -> Result<()> {
+     let case = Case::load(case_dir)?;
+     let path = format!("{}.{}", case.name, case.extension);
+-    let data = merge_data(&path, &case.base, &case.local, &case.remote);
++    let data = merge_data(&path, &case.base, &case.local, &case.remote, None);
+     print(&(serde_json::to_string_pretty(&data)? + "\n"))
+ }
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 411ee7d..790fa24 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,4 +1,5 @@
+-//! Git subprocess layer: reads and writes index stages and blobs as bytes.
++//! Git subprocess layer: reads and writes index stages and blobs as bytes, and reads the merge
++//! heads, the refs that point at them and the merge message.
+ #![forbid(unsafe_code)]
+ 
+ mod blob;
+@@ -32,6 +33,12 @@ pub enum Error {
+         command: &'static str,
+         output: String,
+     },
++    #[error("cannot read {}: {source}", path.display())]
++    ReadFailed {
++        path: std::path::PathBuf,
++        #[source]
++        source: std::io::Error,
++    },
+     #[error("i/o error while running git: {0}")]
+     Io(#[from] std::io::Error),
+ }
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index db67047..ae7eed7 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -16,7 +16,8 @@ const REV_PARSE: &str = "rev-parse";
+ const LOG: &str = "log";
+ const MERGE_MSG: &str = "MERGE_MSG";
+ const UNRESOLVED_NAME_STATUS: i32 = 1;
+-const NON_SYMBOLIC_SHORT_NAME: &str = "--format=%(if)%(symref)%(then)%(else)%(refname:short)%(end)";
++const NON_SYMBOLIC_SHORT_NAME: &str =
++    "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+ const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
+ const COMMIT_SUMMARY_FIELDS: usize = 3;
+ 
+@@ -85,10 +86,11 @@ impl Repo {
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
+         let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+-        match fs::read(self.root.join(OsStr::from_bytes(&git_path))) {
++        let path = self.root.join(OsStr::from_bytes(&git_path));
++        match fs::read(&path) {
+             Ok(message) => Ok(Some(message)),
+             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+-            Err(source) => Err(source.into()),
++            Err(source) => Err(Error::ReadFailed { path, source }),
+         }
+     }
+ 
+diff --git a/crates/gitio/tests/merge_heads.rs b/crates/gitio/tests/merge_heads.rs
+index 644a0b6..d4caa25 100644
+--- a/crates/gitio/tests/merge_heads.rs
++++ b/crates/gitio/tests/merge_heads.rs
+@@ -1,5 +1,6 @@
+ #![cfg(test)]
+ 
++use std::fs;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{
+@@ -7,6 +8,7 @@ use yamt_conflict_repo::{
+ };
+ use yamt_gitio::{CommitSummary, Error, Oid, Repo};
+ 
++const MIN_SHORT_ID: usize = 7;
+ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     path: "cart.ts",
+     kind: FileKind::Regular,
+@@ -60,6 +62,7 @@ fn branches_at_lists_local_and_remote_tracking_branches_but_not_symbolic_refs()
+     git_ok(root, &["branch", "also", "remote"]).unwrap();
+     git_ok(root, &["update-ref", "refs/remotes/origin/main", "remote"]).unwrap();
+     git_ok(root, &["update-ref", "refs/tags/v1", "remote"]).unwrap();
++    git_ok(root, &["tag", "remote", "remote"]).unwrap();
+     git_ok(
+         root,
+         &[
+@@ -91,6 +94,21 @@ fn merge_message_reads_merge_msg_and_is_none_outside_a_merge() {
+     assert_eq!(repo.merge_message().unwrap(), None);
+ }
+ 
++#[test]
++fn merge_message_that_cannot_be_read_is_a_read_failure_naming_the_file() {
++    let (_dir, repo) = merging();
++    let merge_msg = repo.root().join(".git/MERGE_MSG");
++    fs::remove_file(&merge_msg).unwrap();
++    fs::create_dir(&merge_msg).unwrap();
++
++    let error = repo.merge_message().unwrap_err();
++
++    assert!(
++        matches!(&error, Error::ReadFailed { path, .. } if *path == merge_msg),
++        "{error:?}"
++    );
++}
++
+ #[test]
+ fn merge_message_of_a_linked_worktree_is_read_from_its_own_git_dir() {
+     let dir = diverged_repo(&FILES).unwrap();
+@@ -136,8 +154,13 @@ fn commit_summary_gives_the_short_id_subject_and_raw_message() {
+ 
+     let summary = repo.commit_summary(&oid_of(root, "HEAD")).unwrap();
+ 
++    let full_id = stdout_line(root, &["rev-parse", "HEAD"]).into_bytes();
++    assert!(
++        summary.short_id.len() >= MIN_SHORT_ID && full_id.starts_with(&summary.short_id),
++        "{summary:?}"
++    );
+     let expected = CommitSummary {
+-        short_id: stdout_line(root, &["rev-parse", "--short", "HEAD"]).into_bytes(),
++        short_id: summary.short_id.clone(),
+         subject: b"subject".to_vec(),
+         message: b"subject\n\nbody\n\n".to_vec(),
+     };
+diff --git a/crates/session/src/remote_name.rs b/crates/session/src/remote_name.rs
+index e31a2dd..7aab889 100644
+--- a/crates/session/src/remote_name.rs
++++ b/crates/session/src/remote_name.rs
+@@ -23,7 +23,7 @@ pub enum RemoteName {
+     },
+ }
+ 
+-pub(crate) fn remote_name(repo: &Repo) -> Option<RemoteName> {
++pub(crate) fn read_remote_name(repo: &Repo) -> Option<RemoteName> {
+     match merged_in(repo) {
+         Ok(name) => name,
+         Err(error) => {
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 0b455fa..0719ba7 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -8,7 +8,7 @@ use yamt_gitio::{BlobReader, Repo, StageEntry};
+ use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
+ 
+ use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
+-use crate::remote_name::{RemoteName, remote_name};
++use crate::remote_name::{RemoteName, read_remote_name};
+ use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
+ use crate::stages::{CapturedStages, group_by_path};
+ use crate::{Error, Result};
+@@ -39,15 +39,24 @@ pub struct FileMergeData {
+ }
+ 
+ #[must_use]
+-pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMergeData {
+-    let eol_source = if base.is_empty() { local } else { base };
++pub fn merge_data(
++    path: &str,
++    base: &str,
++    local: &str,
++    remote: &str,
++    deleted: Option<Side>,
++) -> FileMergeData {
++    let eol_source = [base, local, remote]
++        .into_iter()
++        .find(|text| !text.is_empty())
++        .unwrap_or_default();
+     let chunks = compute_chunks(base, local, remote, &Options::default());
+     FileMergeData {
+         path: path.to_owned(),
+         base: base.to_owned(),
+         local: local.to_owned(),
+         remote: remote.to_owned(),
+-        deleted: None,
++        deleted,
+         eol: detect_eol(eol_source),
+         word_changes: word_changes(base, local, remote, &chunks),
+         chunks,
+@@ -100,7 +109,7 @@ impl MergeSession {
+                 content,
+             });
+         }
+-        let remote_name = remote_name(&repo);
++        let remote_name = read_remote_name(&repo);
+         Ok(MergeSession {
+             repo,
+             files,
+@@ -147,16 +156,13 @@ impl MergeSession {
+     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
+         let file = find_file(&mut self.files, path)?;
+         let texts = file.require_text()?;
+-        let data = merge_data(
++        Ok(merge_data(
+             &file.display_path(),
+             &texts.base,
+             &texts.local,
+             &texts.remote,
+-        );
+-        Ok(FileMergeData {
+-            deleted: texts.deleted,
+-            ..data
+-        })
++            texts.deleted,
++        ))
+     }
+ 
+     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
+diff --git a/crates/session/tests/deleted_side.rs b/crates/session/tests/deleted_side.rs
+index 7f14fb7..b4832b0 100644
+--- a/crates/session/tests/deleted_side.rs
++++ b/crates/session/tests/deleted_side.rs
+@@ -4,7 +4,7 @@ use std::fs;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_merge_core::ChunkKind;
+-use yamt_session::{Error, FileStatus, MergeSession, Side, UnsupportedReason};
++use yamt_session::{Eol, Error, FileStatus, MergeSession, Side, UnsupportedReason};
+ 
+ const LOCAL_DELETED: &str = "a_local_deleted.ts";
+ const REMOTE_DELETED: &str = "b_remote_deleted.ts";
+@@ -12,6 +12,7 @@ const KEPT_BINARY: &str = "c_kept_binary.bin";
+ const BASE_BINARY: &str = "d_base_binary.txt";
+ const KEPT_LATIN1: &str = "e_kept_latin1.txt";
+ const KEPT_LINK: &str = "f_kept_link";
++const EMPTY_BASE_CRLF: &str = "g_empty_base_crlf.ts";
+ const BASE: &[u8] = b"one\ntwo\nthree\nfour\n";
+ const KEPT: &[u8] = b"one\nTWO\nthree\nfour\nfive\n";
+ 
+@@ -31,7 +32,7 @@ const fn deleted(
+     }
+ }
+ 
+-const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 6] = {
++const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
+     use FileKind::{Regular, Symlink};
+     [
+         deleted(LOCAL_DELETED, Regular, BASE, None, Some(KEPT)),
+@@ -46,6 +47,13 @@ const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 6] = {
+             Some(b"kept-target"),
+             None,
+         ),
++        deleted(
++            EMPTY_BASE_CRLF,
++            Regular,
++            b"",
++            None,
++            Some(b"kept\r\nlines\r\n"),
++        ),
+     ]
+ };
+ 
+@@ -83,6 +91,17 @@ fn a_text_file_deleted_on_one_side_loads_with_base_as_the_deleted_side() {
+     }
+ }
+ 
++#[test]
++fn a_deleted_file_with_an_empty_base_takes_its_line_endings_from_the_kept_side() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let data = session.load(EMPTY_BASE_CRLF).unwrap();
++
++    assert_eq!(data.deleted, Some(Side::Local));
++    assert_eq!(data.eol, Eol::CrLf);
++}
++
+ #[test]
+ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason() {
+     let dir = deleted_on_one_side();
+@@ -99,6 +118,7 @@ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason(
+         (BASE_BINARY, Some(UnsupportedReason::LocalDeleted)),
+         (KEPT_LATIN1, Some(UnsupportedReason::LocalDeleted)),
+         (KEPT_LINK, Some(UnsupportedReason::Symlink)),
++        (EMPTY_BASE_CRLF, None),
+     ]
+     .map(|(path, reason)| (path.to_owned(), reason));
+     assert_eq!(listed, expected);
+diff --git a/crates/session/tests/remote_name.rs b/crates/session/tests/remote_name.rs
+index 52031b8..cb6cccc 100644
+--- a/crates/session/tests/remote_name.rs
++++ b/crates/session/tests/remote_name.rs
+@@ -1,14 +1,13 @@
+ #![cfg(test)]
+ 
+ use std::fs;
+-use std::os::unix::fs::PermissionsExt;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
+ use yamt_session::{MergeSession, RemoteName};
+ 
+ const FILE: &str = "cart.ts";
+-const UNREADABLE: u32 = 0o000;
++const MIN_SHORT_ID: usize = 7;
+ 
+ fn diverged() -> TempDir {
+     diverged_repo(&[ConflictFile {
+@@ -41,12 +40,22 @@ fn branch(name: &str) -> RemoteName {
+     }
+ }
+ 
+-fn commit(root: &Path, revision: &str, subject: &str, message: &str) -> RemoteName {
+-    RemoteName::Commit {
+-        short_id: stdout_line(root, &["rev-parse", "--short", revision]),
++fn assert_names_commit(root: &Path, revision: &str, subject: &str, message: &str) {
++    let name = remote_name_of(root);
++    let full_id = stdout_line(root, &["rev-parse", revision]);
++    let Some(RemoteName::Commit { short_id, .. }) = &name else {
++        panic!("not a commit: {name:?}");
++    };
++    assert!(
++        short_id.len() >= MIN_SHORT_ID && full_id.starts_with(short_id.as_str()),
++        "{short_id} is not a short form of {full_id}"
++    );
++    let expected = RemoteName::Commit {
++        short_id: short_id.clone(),
+         subject: subject.to_owned(),
+         message: message.to_owned(),
+-    }
++    };
++    assert_eq!(name, Some(expected));
+ }
+ 
+ #[test]
+@@ -72,13 +81,12 @@ fn merging_a_commit_no_branch_points_at_names_the_commit() {
+     git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
+     require_conflict(root, &["merge", &detached]);
+ 
+-    let expected = commit(
++    assert_names_commit(
+         root,
+         &detached,
+         "detached subject",
+         "detached subject\n\ndetached body",
+     );
+-    assert_eq!(remote_name_of(root), Some(expected));
+ }
+ 
+ #[test]
+@@ -108,10 +116,7 @@ fn two_branches_and_a_merge_message_naming_neither_give_the_commit() {
+     let remote = stdout_line(root, &["rev-parse", "remote"]);
+     require_conflict(root, &["merge", &remote]);
+ 
+-    assert_eq!(
+-        remote_name_of(root),
+-        Some(commit(root, "remote", "remote", "remote"))
+-    );
++    assert_names_commit(root, "remote", "remote", "remote");
+ }
+ 
+ #[test]
+@@ -121,7 +126,8 @@ fn an_unreadable_merge_message_drops_the_name() {
+     git_ok(root, &["branch", "also", "remote"]).unwrap();
+     require_conflict(root, &["merge", "remote"]);
+     let merge_msg = root.join(".git/MERGE_MSG");
+-    fs::set_permissions(&merge_msg, fs::Permissions::from_mode(UNREADABLE)).unwrap();
++    fs::remove_file(&merge_msg).unwrap();
++    fs::create_dir(&merge_msg).unwrap();
+ 
+     assert_eq!(remote_name_of(root), None);
+ }
+@@ -129,24 +135,20 @@ fn an_unreadable_merge_message_drops_the_name() {
+ #[test]
+ fn a_cherry_pick_names_the_picked_commit() {
+     let dir = diverged();
+-    require_conflict(dir.path(), &["cherry-pick", "remote"]);
++    let root = dir.path();
++    require_conflict(root, &["cherry-pick", "remote"]);
+ 
+-    assert_eq!(
+-        remote_name_of(dir.path()),
+-        Some(commit(dir.path(), "remote", "remote", "remote"))
+-    );
++    assert_names_commit(root, "remote", "remote", "remote");
+ }
+ 
+ #[test]
+ fn a_rebase_names_the_replayed_commit() {
+     let dir = diverged();
+-    let local = stdout_line(dir.path(), &["rev-parse", "local"]);
+-    require_conflict(dir.path(), &["rebase", "remote"]);
++    let root = dir.path();
++    let local = stdout_line(root, &["rev-parse", "local"]);
++    require_conflict(root, &["rebase", "remote"]);
+ 
+-    assert_eq!(
+-        remote_name_of(dir.path()),
+-        Some(commit(dir.path(), &local, "local", "local"))
+-    );
++    assert_names_commit(root, &local, "local", "local");
+ }
+ 
+ #[test]

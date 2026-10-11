@@ -1,8 +1,8 @@
-import { SearchQuery } from "@codemirror/search";
+import { search, SearchQuery, setSearchQuery } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { findLabel, stepMatch } from "./find";
+import { findLabel, labelOutdated, stepMatch } from "./find";
 
 const DOC = "foo bar\nFoo baz\nqux FOO\n";
 const FIRST = { from: 0, to: 3 };
@@ -47,10 +47,22 @@ test("a selection on a match shows its place; next from the last wraps to the fi
   expect(findLabel(step(selected({ from: 0, to: 0 }), "next"), query("foo"))).toBe("1 of 3");
 });
 
-test("the count follows edits", () => {
-  const state = selected(FIRST);
+test("the count is recomputed after a document, selection or query change and only then", () => {
+  const state = EditorState.create({
+    doc: DOC,
+    selection: EditorSelection.single(FIRST.from, FIRST.to),
+    extensions: search({ literal: true }),
+  });
+  const transactions = {
+    edit: state.update({ changes: { from: DOC.length, insert: "foo\n" } }),
+    select: state.update({ selection: EditorSelection.single(LAST.from, LAST.to) }),
+    query: state.update({ effects: setSearchQuery.of(query("bar")) }),
+    none: state.update({}),
+  };
 
-  const edited = state.update({ changes: { from: DOC.length, insert: "foo\n" } }).state;
-
-  expect(findLabel(edited, query("foo"))).toBe("1 of 4");
+  expect(labelOutdated(state, transactions.edit.state)).toBe(true);
+  expect(labelOutdated(state, transactions.select.state)).toBe(true);
+  expect(labelOutdated(state, transactions.query.state)).toBe(true);
+  expect(labelOutdated(state, transactions.none.state)).toBe(false);
+  expect(findLabel(transactions.edit.state, query("foo"))).toBe("1 of 4");
 });
