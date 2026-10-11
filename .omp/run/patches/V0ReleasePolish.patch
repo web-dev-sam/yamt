@@ -1,0 +1,56 @@
+diff --git a/README.md b/README.md
+index 492a6ac..a7e8cdc 100644
+--- a/README.md
++++ b/README.md
+@@ -11,19 +11,21 @@ right, the result in the middle.
+ Download from the [releases page](../../releases):
+ 
+ - **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
+-  puts `yamt` on your PATH. For the AppImage, copy it there yourself:
++  puts `yamt` on your PATH. For the AppImage, put it there yourself.
++
++  Without AppImageLauncher:
+ 
+   ```sh
+   install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt
+   ```
+ 
+-  AppImageLauncher stops a copy outside its folder with a dialog; with AppImageLauncher, let it
+-  integrate the AppImage instead (it moves the file to `~/Applications` and adds a hash to the
+-  name) and link the moved file:
++  With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the
++  AppImage (it moves the file to `~/Applications` and adds a hash to the name) and link the moved
++  file:
+ 
+   ```sh
+   ail-cli integrate yamt_0.1.0_amd64.AppImage
+-  mkdir -p ~/.local/bin && ln -s ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
++  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
+   ```
+ 
+ - **Arch Linux**: the AppImage, or build from source (below).
+diff --git a/scripts/third-party-licenses.sh b/scripts/third-party-licenses.sh
+index 5b52218..a9703d8 100755
+--- a/scripts/third-party-licenses.sh
++++ b/scripts/third-party-licenses.sh
+@@ -251,6 +251,7 @@ generate() {
+         icon_entries
+         ubuntu_section
+     } >"$tmp"
++    chmod 644 "$tmp"
+     mv "$tmp" "$out"
+     echo "third-party-licenses: $(grep -c . <<<"$rust_rows") Rust crates, $(grep -c . <<<"$js_rows") JS packages," \
+         "${#icon_sets[@]} icon sets -> ${out#"$root"/} ($(wc -c <"$out") bytes)"
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index e2ccd86..62199b9 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -145,6 +145,8 @@ mod tests {
+     fn only_the_ping_answer_counts_as_answered() {
+         assert!(answered("true"));
+         assert!(!answered(""));
++        assert!(!answered("false"));
++        assert!(!answered("null"));
+     }
+ 
+     fn second_request_after(delay: Duration) -> CloseRequest {
