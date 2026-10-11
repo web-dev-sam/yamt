@@ -1,0 +1,101 @@
+{
+  "title": "yamt",
+  "logo": { "src": "src-tauri/icons/icon.svg", "width": 150 },
+  "tagline": "A three-way merge window like the one in JetBrains IDEs, for every git conflict at once. 🔀",
+  "why": [
+    "PhpStorm's three-pane merge window is the only merge tool I find usable. VS Code's merge editor, its extensions and the TUI mergetools all felt unintuitive.",
+    "They all start from the `<<<<<<<` conflict markers. Once git has collapsed a merge into markers the base is gone, so you can see _that_ two sides differ but not _what each side changed_. yamt never parses a conflict marker: it reads the base, your side and theirs from git's index and diffs them itself.",
+    "`git mergetool` opens one file at a time, and real merges touch many files. yamt takes over the whole merge: every conflicted file in one window, your side on the left, theirs on the right, the result in the middle."
+  ],
+  "sections": [
+    {
+      "title": "How it looks",
+      "images": ["docs/screenshot.png"]
+    },
+    {
+      "title": "Install",
+      "body": [
+        "Download from the [releases page](../../releases):",
+        "",
+        "- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)",
+        "  puts `yamt` on your PATH. For the AppImage, put it there yourself.",
+        "",
+        "  Without AppImageLauncher:",
+        "",
+        "  ```sh",
+        "  install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt",
+        "  ```",
+        "",
+        "  With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the",
+        "  AppImage (it moves the file to `~/Applications` and adds a hash to the name) and link the moved",
+        "  file:",
+        "",
+        "  ```sh",
+        "  ail-cli integrate yamt_0.1.0_amd64.AppImage",
+        "  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt",
+        "  ```",
+        "",
+        "  If `yamt` is then not found, `~/.local/bin` is not on your PATH: add",
+        "  `export PATH=\"$HOME/.local/bin:$PATH\"` to your shell's start-up file (`~/.bashrc`, `~/.zshrc`).",
+        "",
+        "- **Arch Linux**: the AppImage, or build from source (below).",
+        "- **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time",
+        "  right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`. Then put",
+        "  `yamt` on your PATH:",
+        "",
+        "  ```sh",
+        "  sudo mkdir -p /usr/local/bin && sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt",
+        "  ```"
+      ]
+    },
+    {
+      "title": "Use",
+      "body": [
+        "When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `yamt` in the repository (or `yamt --repo <path>` from anywhere). yamt starts from a terminal inside a repository; double-clicking it in a file manager or Finder shows nothing.",
+        ""
+      ],
+      "bullets": [
+        "The file list on the left shows every conflicted file with git's view of it (resolved or not, also when you run `git add` elsewhere); click one to open it. Drag its edge to make it wider.",
+        "The right pane's header names what you are merging in: the branch, or the commit and its subject.",
+        "Each change has an arrow that applies it to the result and a × that ignores it; press one and drag up or down to apply or ignore several at once (one undo step). Ctrl+click (Cmd+click on macOS) a highlighted change applies it. The toolbar applies all non-conflicting changes from the left or from the right in one click.",
+        "The result pane is a normal editor: type, Tab / Shift+Tab indent and outdent, undo and redo. Ctrl+F (Cmd+F) finds text in whichever pane you clicked.",
+        "**Mark resolved** writes the result, stages the file and opens the next unresolved one. It turns blue once nothing is left to process. **Reset**, next to \"Result\", brings the conflict back as git left it.",
+        "A file deleted on one side and changed on the other shows the changed side with its changes, and two buttons: **Keep** and **Delete**. Other files the editor cannot show (binary, symlinks, submodules) get a choice between the two sides.",
+        "Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can tell. Then continue as usual (`git commit`, `git rebase --continue`, …)."
+      ]
+    },
+    {
+      "title": "Make it feel built in",
+      "body": [
+        "```sh",
+        "git config --global alias.resolve '!yamt'",
+        "git resolve",
+        "```",
+        "",
+        "`git mergetool` is not the way to start yamt: it runs the tool once per file, while yamt handles all files in one window."
+      ]
+    },
+    {
+      "title": "Build from source",
+      "body": [
+        "You need the Rust toolchain from `rust-toolchain.toml` (installed by [rustup](https://rustup.rs) on the first `cargo` call), [pnpm](https://pnpm.io), and on Linux webkit2gtk-4.1 (Arch: `webkit2gtk-4.1`; Debian/Ubuntu: `libwebkit2gtk-4.1-dev`).",
+        "",
+        "```sh",
+        "cargo install tauri-cli --version 2.12.1",
+        "pnpm -C frontend install",
+        "cargo tauri build",
+        "```",
+        "",
+        "The bundles land in `target/release/bundle/`."
+      ]
+    },
+    {
+      "title": "NVIDIA on Linux",
+      "body": "WebKitGTK's DMABUF renderer crashes on some NVIDIA setups. yamt switches it off by itself when the NVIDIA driver is loaded; a value you set for `WEBKIT_DISABLE_DMABUF_RENDERER` wins."
+    },
+    {
+      "title": "License",
+      "body": "MIT, see [LICENSE](LICENSE). Bundled third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (summary) and [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) (every copyright line and licence text; also inside each download)."
+    }
+  ]
+}
