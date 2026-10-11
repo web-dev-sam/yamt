@@ -46,8 +46,9 @@ frontend/src/editor CodeMirror 6 integration; public surface = MergeController(F
 frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
-                    useMergeController (only ../editor importer), store.ts singleton; ProblemBar + problemText.ts (failures in words, 2.1);
-                    QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`)
+                    useMergeController (only ../editor importer), store.ts singleton; problem.ts (Problem types, attempt) + ProblemBar + problemText.ts (failures in words, 2.1);
+                    QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`);
+                    ChoiceView + choiceText.ts (two-button choice for files the editor cannot show: sentences, labels, resolved line, plan §2 #36)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), creates the store, loads the file list, mounts App
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself

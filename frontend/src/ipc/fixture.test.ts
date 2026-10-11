@@ -326,6 +326,8 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   expect(await source.loadFile("nope.ts")).toEqual(failure);
   expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
   expect(await source.resetFile("nope.ts")).toEqual(failure);
+  expect(await source.describeFile("nope.ts")).toEqual(failure);
+  expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
   expect(await source.listFiles()).toEqual([
     { path: "a.ts", status: "Unresolved", unsupported: null },
   ]);
@@ -357,6 +359,51 @@ test("finish marks the file resolved and logs its text once; reset returns it un
   expect(await source.listFiles()).toEqual(unresolved);
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
+});
+
+test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
+  const { log, entries } = quietLog();
+  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
+
+  expect(await source.takeSide("b.ts", "remote")).toEqual({
+    ok: true,
+    value: [
+      { path: "a.ts", status: "Unresolved", unsupported: null },
+      { path: "b.ts", status: "Resolved", unsupported: null },
+    ],
+  });
+  expect(entries).toEqual([
+    { level: "info", event: "fixture.take", fields: { path: "b.ts", side: "remote" } },
+  ]);
+
+  await source.resetFile("b.ts");
+
+  expect((await source.listFiles()).map((file) => file.status)).toEqual([
+    "Unresolved",
+    "Unresolved",
+  ]);
+});
+
+test.each([
+  ["", 0],
+  ["one", 1],
+  ["one\n", 1],
+  ["one\ntwo", 2],
+  ["one\r\ntwo\r\n", 2],
+  ["one\n\n", 2],
+])("describeFile counts %j as %i lines, like the app", async (local, lines) => {
+  const { log } = quietLog();
+  const source = createFixtureSource(log, { "a.json": { ...record("a.ts"), local } });
+
+  expect(await source.describeFile("a.ts")).toEqual({
+    ok: true,
+    value: {
+      path: "a.ts",
+      reason: null,
+      local: { kind: "Text", lines },
+      remote: { kind: "Text", lines: 1 },
+    },
+  });
 });
 
 test("loadFixture reads a committed or an in-memory record and rejects an unknown path", async () => {

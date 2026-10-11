@@ -21,7 +21,7 @@ type Hosts = {
   readonly strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
 };
 
-type MergeHandle = {
+export type MergeHandle = {
   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
   applyAllNonConflicting(side: Side): void;
   undo(): void;

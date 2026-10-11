@@ -2,10 +2,22 @@ import * as v from "valibot";
 
 import type * as Generated from "./bindings";
 import type { ChunkSource } from "./ChunkSource";
-import { toDomain, type FileEntry, type FileMergeData, type SourceResult } from "./domain";
+import {
+  toDomain,
+  type FileEntry,
+  type FileMergeData,
+  type FileSides,
+  type SideContent,
+  type SourceResult,
+} from "./domain";
 import type { Log } from "./log";
 
 type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+
+type Records = {
+  readonly fixtures: ReadonlyMap<string, FileMergeData>;
+  readonly finished: Map<string, string>;
+};
 
 // Stryker disable all: Vite needs import.meta.glob arguments as literals
 const FIXTURE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
@@ -99,6 +111,41 @@ function unknownPath(path: string): SourceResult<never> {
   return { ok: false, failure: { kind: "UnknownPath", path } };
 }
 
+// The app counts lines with Rust's `str::lines`, which does not count an empty last line.
+function textSide(text: string): SideContent {
+  const breaks = text.split("\n").length - 1;
+  return { kind: "Text", lines: text === "" || text.endsWith("\n") ? breaks : breaks + 1 };
+}
+
+function describeRecord(path: string, data: FileMergeData | undefined): SourceResult<FileSides> {
+  if (data === undefined) {
+    return unknownPath(path);
+  }
+  const sides = { path, reason: null, local: textSide(data.local), remote: textSide(data.remote) };
+  return { ok: true, value: sides };
+}
+
+function entries({ fixtures, finished }: Records): FileEntry[] {
+  return [...fixtures.keys()].map((path): FileEntry => ({
+    path,
+    status: finished.has(path) ? "Resolved" : "Unresolved",
+    unsupported: null,
+  }));
+}
+
+function changed(
+  records: Records,
+  path: string,
+  change: (data: FileMergeData) => void,
+): SourceResult<FileEntry[]> {
+  const data = records.fixtures.get(path);
+  if (data === undefined) {
+    return unknownPath(path);
+  }
+  change(data);
+  return { ok: true, value: entries(records) };
+}
+
 export async function loadFixture(
   path: string,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
@@ -114,39 +161,35 @@ export function createFixtureSource(
   log: Log,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
 ): ChunkSource {
-  const fixtures = parseFixtures(files);
-  const finished = new Map<string, string>();
-
-  function entries(): FileEntry[] {
-    return [...fixtures.keys()].map((path): FileEntry => ({
-      path,
-      status: finished.has(path) ? "Resolved" : "Unresolved",
-      unsupported: null,
-    }));
-  }
+  const records: Records = { fixtures: parseFixtures(files), finished: new Map() };
 
   return {
     async listFiles() {
-      return entries();
+      return entries(records);
     },
     async loadFile(path) {
-      const data = fixtures.get(path);
+      const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
     async finishFile(path, text) {
-      if (!fixtures.has(path)) {
-        return unknownPath(path);
-      }
-      finished.set(path, text);
-      log.info("fixture.finish", { path, text });
-      return { ok: true, value: entries() };
+      return changed(records, path, () => {
+        records.finished.set(path, text);
+        log.info("fixture.finish", { path, text });
+      });
     },
     async resetFile(path) {
-      if (!fixtures.has(path)) {
-        return unknownPath(path);
-      }
-      finished.delete(path);
-      return { ok: true, value: entries() };
+      return changed(records, path, () => {
+        records.finished.delete(path);
+      });
+    },
+    async describeFile(path) {
+      return describeRecord(path, records.fixtures.get(path));
+    },
+    async takeSide(path, side) {
+      return changed(records, path, (data) => {
+        records.finished.set(path, data[side]);
+        log.info("fixture.take", { path, side });
+      });
     },
   };
 }

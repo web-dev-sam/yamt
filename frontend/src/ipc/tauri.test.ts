@@ -8,6 +8,8 @@ const commands = vi.hoisted(() => ({
   loadFile: vi.fn(),
   finishFile: vi.fn(),
   resetFile: vi.fn(),
+  describeFile: vi.fn(),
+  takeSide: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -88,11 +90,15 @@ test("each command's error arrives as the failure, unchanged", async () => {
   commands.loadFile.mockResolvedValue({ status: "error", error: unsupported });
   commands.finishFile.mockResolvedValue({ status: "error", error: git });
   commands.resetFile.mockResolvedValue({ status: "error", error: unknown });
+  commands.describeFile.mockResolvedValue({ status: "error", error: unknown });
+  commands.takeSide.mockResolvedValue({ status: "error", error: git });
   const source = createTauriSource();
 
   expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
   expect(await source.finishFile("src/a.ts", "text")).toEqual({ ok: false, failure: git });
   expect(await source.resetFile("x.ts")).toEqual({ ok: false, failure: unknown });
+  expect(await source.describeFile("x.ts")).toEqual({ ok: false, failure: unknown });
+  expect(await source.takeSide("logo.bin", "local")).toEqual({ ok: false, failure: git });
 });
 
 test("finishFile and resetFile send their arguments and return the app's list", async () => {
@@ -106,6 +112,23 @@ test("finishFile and resetFile send their arguments and return the app's list", 
   expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts");
 });
 
+test("describeFile and takeSide send their arguments and return the app's answer", async () => {
+  const sides: Generated.FileSides = {
+    path: "logo.bin",
+    reason: "Binary",
+    local: { kind: "Binary", bytes: 12 },
+    remote: { kind: "Missing" },
+  };
+  commands.describeFile.mockResolvedValue({ status: "ok", data: sides });
+  commands.takeSide.mockResolvedValue({ status: "ok", data: ENTRIES });
+  const source = createTauriSource();
+
+  expect(await source.describeFile("logo.bin")).toEqual({ ok: true, value: sides });
+  expect(await source.takeSide("logo.bin", "remote")).toEqual({ ok: true, value: ENTRIES });
+  expect(commands.describeFile).toHaveBeenCalledWith("logo.bin");
+  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote");
+});
+
 test("a rejected command rejects the call", async () => {
   commands.loadFile.mockRejectedValue(new Error("ipc down"));
 
@@ -117,6 +140,19 @@ test("a string error from Tauri's IPC layer rejects the call with that message",
 
   await expect(createTauriSource().finishFile("src/a.ts", "text")).rejects.toThrow(
     new Error("finish_file not allowed"),
+  );
+});
+
+test("a string error from describeFile or takeSide rejects the call with that message", async () => {
+  commands.describeFile.mockResolvedValue({ status: "error", error: "describe_file not allowed" });
+  commands.takeSide.mockResolvedValue({ status: "error", error: "take_side not allowed" });
+  const source = createTauriSource();
+
+  await expect(source.describeFile("logo.bin")).rejects.toThrow(
+    new Error("describe_file not allowed"),
+  );
+  await expect(source.takeSide("logo.bin", "local")).rejects.toThrow(
+    new Error("take_side not allowed"),
   );
 });
 

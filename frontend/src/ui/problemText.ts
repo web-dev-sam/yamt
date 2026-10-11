@@ -1,4 +1,4 @@
-import type { Problem, ProblemCause } from "./store";
+import type { Problem, ProblemCause } from "./problem";
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
@@ -10,6 +10,8 @@ function attempted(problem: Problem): string {
       return `Could not open ${problem.path}`;
     case "finish":
       return `Could not mark ${problem.path} as resolved`;
+    case "take":
+      return `Could not resolve ${problem.path} with one side`;
     case "reset":
       return `Could not reset ${problem.path}`;
     default: {

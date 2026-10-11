@@ -24,6 +24,12 @@ export type Chunk = {
 
 export type FileEntry = Generated.FileEntry;
 
+export type FileSides = Generated.FileSides;
+
+export type SideContent = Generated.SideContent;
+
+export type Side = Generated.Side;
+
 export type FileMergeData = {
   readonly path: string;
   readonly base: string;

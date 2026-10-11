@@ -7,20 +7,37 @@ import Docker from "~icons/vscode-icons/file-type-docker";
 import Git from "~icons/vscode-icons/file-type-git";
 import Jenkins from "~icons/vscode-icons/file-type-jenkins";
 import Json from "~icons/vscode-icons/file-type-json";
+import Meson from "~icons/vscode-icons/file-type-meson";
 import Npm from "~icons/vscode-icons/file-type-npm";
 import ReactTs from "~icons/vscode-icons/file-type-reactts";
 import TypeScript from "~icons/vscode-icons/file-type-typescript";
 import TypeScriptDef from "~icons/vscode-icons/file-type-typescriptdef";
 import Vue from "~icons/vscode-icons/file-type-vue";
 
-import { fileIcon } from "./fileIcon";
+import { fileIcon, ICON_ROWS } from "./fileIcon";
+
+function repeatedKeys(rows: (typeof ICON_ROWS)["byName"]): string[] {
+  const keys = rows.flatMap(([, rowKeys]) => rowKeys);
+  return keys.filter((key, index) => keys.indexOf(key) !== index);
+}
 
 describe("fileIcon", () => {
   it("prefers the file name over the extension", () => {
     expect(fileIcon("package.json")).toBe(Npm);
     expect(fileIcon("data.json")).toBe(Json);
+    expect(fileIcon("meson.build")).toBe(Meson);
+    expect(fileIcon("meson.build")).not.toBe(Bazel);
+    expect(fileIcon("rules.build")).toBe(Bazel);
+  });
+
+  it("knows literal file names without an extension", () => {
     expect(fileIcon("BUILD")).toBe(Bazel);
     expect(fileIcon("Jenkinsfile")).toBe(Jenkins);
+  });
+
+  it("names every key once across the name rows and once across the extension rows", () => {
+    expect(repeatedKeys(ICON_ROWS.byName)).toEqual([]);
+    expect(repeatedKeys(ICON_ROWS.byExtension)).toEqual([]);
   });
 
   it("prefers the longer extension over its suffix", () => {

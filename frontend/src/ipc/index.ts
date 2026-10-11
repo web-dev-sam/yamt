@@ -3,7 +3,16 @@ import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
 export type { ChunkSource } from "./ChunkSource";
-export type { Chunk, FileEntry, FileMergeData, SourceFailure, SourceResult } from "./domain";
+export type {
+  Chunk,
+  FileEntry,
+  FileMergeData,
+  FileSides,
+  Side,
+  SideContent,
+  SourceFailure,
+  SourceResult,
+} from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createTauriSource } from "./tauri";
 

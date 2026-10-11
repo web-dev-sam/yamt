@@ -2,8 +2,8 @@
 import { computed } from "vue";
 import X from "~icons/lucide/x";
 
+import type { Problem } from "./problem";
 import { problemText } from "./problemText";
-import type { Problem } from "./store";
 
 const props = defineProps<{ problem: Problem }>();
 const emit = defineEmits<{ close: [] }>();

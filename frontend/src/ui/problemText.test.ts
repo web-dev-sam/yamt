@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 
 import type { SourceFailure } from "../ipc";
+import type { Problem, ProblemCause } from "./problem";
 import { problemText } from "./problemText";
-import type { Problem, ProblemCause } from "./store";
 
 const PATH = "src/a.ts";
 
@@ -13,6 +13,7 @@ function onFinish(cause: ProblemCause): Problem {
 test.each([
   ["open", `Could not open ${PATH}`],
   ["finish", `Could not mark ${PATH} as resolved`],
+  ["take", `Could not resolve ${PATH} with one side`],
   ["reset", `Could not reset ${PATH}`],
 ] as const)("a failed %s names the file and what failed", (action, words) => {
   const text = problemText({ action, path: PATH, cause: { kind: "Unexpected", message: "boom" } });

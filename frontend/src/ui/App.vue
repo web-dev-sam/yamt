@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 
+import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
 import ProblemBar from "./ProblemBar.vue";
@@ -10,6 +11,7 @@ import { useAppStore } from "./store";
 const {
   files,
   opened,
+  choices,
   active,
   problem,
   question,
@@ -43,6 +45,12 @@ onMounted(() => {
           :key="file.path"
           :data="file"
           :shown="file.path === active"
+        />
+        <ChoiceView
+          v-for="choice in choices"
+          :key="choice.sides.path"
+          :choice="choice"
+          :shown="choice.sides.path === active"
         />
       </div>
     </div>
