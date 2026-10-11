@@ -34,6 +34,40 @@
       "options": {
         "statusbar": { "label": "$(git-merge)" }
       }
+    },
+    {
+      "label": "merge: new conflict project",
+      "detail": "Replace /tmp/yamt-conflict-project with a fresh repo in the middle of a merge: 7 conflicted files (text, CRLF, both added, binary, deleted on one side).",
+      "type": "shell",
+      "command": "rm -rf /tmp/yamt-conflict-project && scripts/conflict-repo.sh /tmp/yamt-conflict-project",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "always" },
+      "options": {
+        "statusbar": { "label": "$(new-folder) conflict" }
+      }
+    },
+    {
+      "label": "merge: open in WebStorm",
+      "detail": "Open /tmp/yamt-conflict-project in WebStorm (made first if missing); then Git → Resolve Conflicts.",
+      "type": "shell",
+      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "silent" },
+      "options": {
+        "env": { "PATH": "${env:HOME}/.local/bin:${env:PATH}" },
+        "statusbar": { "label": "$(link-external) WebStorm" }
+      }
+    },
+    {
+      "label": "merge: open in yamt",
+      "detail": "Build yamt (debug, pages built in) and open it on /tmp/yamt-conflict-project (made first if missing). The terminal shows yamt's exit status when you close it.",
+      "type": "shell",
+      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" },
+      "options": {
+        "statusbar": { "label": "$(link-external) yamt" }
+      }
     }
   ],
   "inputs": [
