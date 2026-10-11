@@ -1,7 +1,7 @@
-diff --git i/frontend/src/editor/index.ts w/frontend/src/editor/index.ts
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
 index bed864d..df541a8 100644
---- i/frontend/src/editor/index.ts
-+++ w/frontend/src/editor/index.ts
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
 @@ -24,7 +24,7 @@ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./interna
  import { languageOf } from "./internal/language";
  import { applyOnModClick } from "./internal/modClick";
@@ -73,10 +73,10 @@ index bed864d..df541a8 100644
        const press = this.#drag.press;
        const covered = press === null ? null : coveredAction(press, rows, this.#views);
        this.#showCovered(covered);
-diff --git i/frontend/src/editor/internal/apply.test.ts w/frontend/src/editor/internal/apply.test.ts
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
 index 8adcfcc..8275a59 100644
---- i/frontend/src/editor/internal/apply.test.ts
-+++ w/frontend/src/editor/internal/apply.test.ts
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
 @@ -14,7 +14,7 @@ import {
  } from "./apply";
  import { chunkField, type ChunkSpan } from "./chunkField";
@@ -86,10 +86,10 @@ index 8adcfcc..8275a59 100644
  import { lineSpan } from "./lineSpan";
  import { paneState, paneText } from "./pane";
  import type { Side } from "./side";
-diff --git i/frontend/src/editor/internal/drag.test.ts w/frontend/src/editor/internal/drag.test.ts
+diff --git a/frontend/src/editor/internal/drag.test.ts b/frontend/src/editor/internal/drag.test.ts
 index 431d376..cd76e73 100644
---- i/frontend/src/editor/internal/drag.test.ts
-+++ w/frontend/src/editor/internal/drag.test.ts
+--- a/frontend/src/editor/internal/drag.test.ts
++++ b/frontend/src/editor/internal/drag.test.ts
 @@ -2,7 +2,8 @@ import { expect, test } from "vitest";
  
  import { loadFixture, type Chunk } from "../../ipc";
@@ -100,10 +100,10 @@ index 431d376..cd76e73 100644
  import type { Side } from "./side";
  import { PENDING, type ChunkStatus } from "./status";
  
-diff --git i/frontend/src/editor/internal/drag.ts w/frontend/src/editor/internal/drag.ts
+diff --git a/frontend/src/editor/internal/drag.ts b/frontend/src/editor/internal/drag.ts
 index ac24705..fcff999 100644
---- i/frontend/src/editor/internal/drag.ts
-+++ w/frontend/src/editor/internal/drag.ts
+--- a/frontend/src/editor/internal/drag.ts
++++ b/frontend/src/editor/internal/drag.ts
 @@ -1,6 +1,7 @@
  import type { Chunk } from "../../ipc";
  import type { ChunkAction } from "./apply";
@@ -113,10 +113,145 @@ index ac24705..fcff999 100644
  import type { IconPress } from "./strips";
  
  type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
-diff --git i/frontend/src/editor/internal/geometry.test.ts w/frontend/src/editor/internal/geometry.test.ts
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+new file mode 100644
+index 0000000..90c048e
+--- /dev/null
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -0,0 +1,78 @@
++import { expect, test } from "vitest";
++
++import { bandPath } from "../../connectors";
++import { loadFixture } from "../../ipc";
++import { bandPaints, crossesStrip } from "./gap";
++import type { ChunkRow } from "./geometry";
++import type { Side } from "./side";
++import { PENDING } from "./status";
++
++const LINE_PX = 20;
++const STRIP_PX = 600;
++const STRIP = { width: 40, height: 1000 };
++const CONFLICT_ID = 8;
++
++async function magicRows(): Promise<ChunkRow[]> {
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
++  return data.chunks.map((chunk) => ({
++    chunk,
++    status: PENDING,
++    left: {
++      top: chunk.local.start * LINE_PX,
++      bottom: (chunk.local.start + chunk.local.len) * LINE_PX,
++    },
++    center: {
++      top: chunk.base.start * LINE_PX,
++      bottom: (chunk.base.start + chunk.base.len) * LINE_PX,
++    },
++    right: {
++      top: chunk.remote.start * LINE_PX,
++      bottom: (chunk.remote.start + chunk.remote.len) * LINE_PX,
++    },
++  }));
++}
++
++async function conflictBand(
++  side: Side,
++  shifts: { readonly left: number; readonly right: number },
++): Promise<string | undefined> {
++  const rows = await magicRows();
++  return bandPaints({ rows, side }, shifts, STRIP).find(({ chunk }) => chunk.id === CONFLICT_ID)?.d;
++}
++
++test("a shape is drawn while any part of it touches the strip, edges included", () => {
++  expect(crossesStrip(-LINE_PX, 0, STRIP_PX)).toBe(true);
++  expect(crossesStrip(STRIP_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
++  expect(crossesStrip(-LINE_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
++  expect(crossesStrip(LINE_PX, LINE_PX, STRIP_PX)).toBe(true);
++});
++
++test("a shape wholly above or below the strip is left out", () => {
++  expect(crossesStrip(-LINE_PX - 1, -1, STRIP_PX)).toBe(false);
++  expect(crossesStrip(STRIP_PX + 1, STRIP_PX + LINE_PX, STRIP_PX)).toBe(false);
++});
++
++test("each strip joins its own pane pair, each edge moved by its own pane's shift", async () => {
++  const shifts = { left: -2000, right: -2100 };
++
++  expect(await conflictBand("local", shifts)).toBe(
++    bandPath({ left: { top: 560, bottom: 720 }, right: { top: 460, bottom: 660 } }, STRIP.width),
++  );
++  expect(await conflictBand("remote", shifts)).toBe(
++    bandPath({ left: { top: 560, bottom: 760 }, right: { top: 700, bottom: 980 } }, STRIP.width),
++  );
++});
++
++test("a band is kept while one edge is still in the strip and the other has left it", async () => {
++  expect(await conflictBand("local", { left: -2721, right: -2560 })).toBe(
++    bandPath({ left: { top: -161, bottom: -1 }, right: { top: 0, bottom: 200 } }, STRIP.width),
++  );
++  expect(await conflictBand("local", { left: -1570, right: -1559 })).toBe(
++    bandPath({ left: { top: 990, bottom: 1150 }, right: { top: 1001, bottom: 1201 } }, STRIP.width),
++  );
++});
++
++test("a band 1 px above or below the strip on both edges is dropped", async () => {
++  expect(await conflictBand("local", { left: -2721, right: -2761 })).toBeUndefined();
++  expect(await conflictBand("local", { left: -1559, right: -1559 })).toBeUndefined();
++});
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+new file mode 100644
+index 0000000..e7e8766
+--- /dev/null
++++ b/frontend/src/editor/internal/gap.ts
+@@ -0,0 +1,45 @@
++import { bandPath } from "../../connectors";
++import type { Chunk } from "../../ipc";
++import type { ChunkRow } from "./geometry";
++import type { Side } from "./side";
++import { applyMode, isSideOpen, type ApplyMode } from "./status";
++import { chunkTone, type Tone } from "./tone";
++
++export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
++export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
++
++export function crossesStrip(top: number, bottom: number, height: number): boolean {
++  return top <= height && bottom >= 0;
++}
++
++export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
++  return rows
++    .filter((row) => isSideOpen(row.chunk, row.status, side))
++    .map((row) => ({
++      top: (side === "local" ? row.left : row.right).top,
++      chunk: row.chunk,
++      mode: applyMode(row.status, side),
++    }));
++}
++
++export function bandPaints(
++  { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
++  shifts: { readonly left: number; readonly right: number },
++  size: { readonly width: number; readonly height: number },
++): BandPaint[] {
++  const paints = [];
++  for (const row of rows) {
++    if (isSideOpen(row.chunk, row.status, side)) {
++      const left = side === "local" ? row.left : row.center;
++      const right = side === "local" ? row.center : row.right;
++      const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
++      const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
++      const top = Math.min(onLeft.top, onRight.top);
++      if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
++        const d = bandPath({ left: onLeft, right: onRight }, size.width);
++        paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
++      }
++    }
++  }
++  return paints;
++}
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
 index 3da2067..2a71472 100644
---- i/frontend/src/editor/internal/geometry.test.ts
-+++ w/frontend/src/editor/internal/geometry.test.ts
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
 @@ -3,11 +3,10 @@ import { expect, test } from "vitest";
  
  import { loadFixture } from "../../ipc";
@@ -146,10 +281,10 @@ index 3da2067..2a71472 100644
 -  expect(crossesStrip(-LINE_PX - 1, -1, STRIP_PX)).toBe(false);
 -  expect(crossesStrip(STRIP_PX + 1, STRIP_PX + LINE_PX, STRIP_PX)).toBe(false);
 -});
-diff --git i/frontend/src/editor/internal/geometry.ts w/frontend/src/editor/internal/geometry.ts
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
 index 2f32af6..197c06b 100644
---- i/frontend/src/editor/internal/geometry.ts
-+++ w/frontend/src/editor/internal/geometry.ts
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
 @@ -1,19 +1,14 @@
  import type { StateField, Text } from "@codemirror/state";
  import type { EditorView, ViewUpdate } from "@codemirror/view";
@@ -212,10 +347,10 @@ index 2f32af6..197c06b 100644
 -  }
 -  return paints;
 -}
-diff --git i/frontend/src/editor/internal/scrollSync.ts w/frontend/src/editor/internal/scrollSync.ts
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
 index 8a888cb..0b3493b 100644
---- i/frontend/src/editor/internal/scrollSync.ts
-+++ w/frontend/src/editor/internal/scrollSync.ts
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
 @@ -47,7 +47,7 @@ function contentEnd(view: EditorView): number {
    return view.lineBlockAt(view.state.doc.length).bottom;
  }
@@ -266,10 +401,10 @@ index 8a888cb..0b3493b 100644
    destroy(): void {
      this.#listeners.abort();
      if (this.#clearEchoes !== null) {
-diff --git i/frontend/src/editor/internal/sides.test.ts w/frontend/src/editor/internal/sides.test.ts
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
 index e5b5556..b449e91 100644
---- i/frontend/src/editor/internal/sides.test.ts
-+++ w/frontend/src/editor/internal/sides.test.ts
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
 @@ -7,7 +7,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
  import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
  import { chunkField, type ChunkSpan } from "./chunkField";
@@ -279,10 +414,10 @@ index e5b5556..b449e91 100644
  import { lineSpan } from "./lineSpan";
  import { paneState } from "./pane";
  import type { Side } from "./side";
-diff --git i/frontend/src/editor/internal/strips.ts w/frontend/src/editor/internal/strips.ts
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
 index e1ef1fd..0255a22 100644
---- i/frontend/src/editor/internal/strips.ts
-+++ w/frontend/src/editor/internal/strips.ts
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
 @@ -8,15 +8,8 @@ import xIcon from "~icons/lucide/x?raw";
  
  import type { Chunk } from "../../ipc";
@@ -474,10 +609,10 @@ index e1ef1fd..0255a22 100644
        for (const [button, press] of row.buttons) {
          button.classList.toggle("chunk-action-covered", isCovered(covered, press));
        }
-diff --git i/frontend/src/ui/MergeView.vue w/frontend/src/ui/MergeView.vue
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
 index 75d7324..9a89d80 100644
---- i/frontend/src/ui/MergeView.vue
-+++ w/frontend/src/ui/MergeView.vue
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
 @@ -135,7 +135,7 @@ function markResolved(): void {
          class="col-start-1 row-start-2 min-h-0 min-w-0"
          :class="{ invisible: data.deleted === 'local' }"
