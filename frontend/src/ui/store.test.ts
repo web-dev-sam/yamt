@@ -9,7 +9,8 @@ import {
   type SourceFailure,
   type SourceResult,
 } from "../ipc";
-import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
+import type { FileWork } from "./closeGuard";
+import { createAppStore, useAppStore, type AppStore } from "./store";
 
 type PendingLoad = {
   readonly path: string;
@@ -368,7 +369,8 @@ test("a finish of a file no longer shown does not switch files", async () => {
   const { source, pending } = handSource([]);
   const store = createAppStore({
     ...source,
-    finishFile: () => Promise.resolve(ok([resolvedEntry("a.ts"), entry("b.ts")])),
+    finishFile: () =>
+      Promise.resolve(ok([resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")])),
   });
   await openNow(store, pending, "a.ts");
   await openNow(store, pending, "b.ts");
@@ -376,7 +378,68 @@ test("a finish of a file no longer shown does not switch files", async () => {
   await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT });
 
   expect(store.active.value).toBe("b.ts");
-  expect(pending).toHaveLength(2);
+  expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
+});
+
+const AFTER_ACTION_ON_A = [resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
+
+type Answer = (files: SourceResult<FileEntry[]>) => void;
+
+function answeredLater(answers: Answer[]): Promise<SourceResult<FileEntry[]>> {
+  return new Promise((resolve) => {
+    answers.push(resolve);
+  });
+}
+
+async function openWhileActing(
+  overrides: (answers: Answer[]) => Partial<ChunkSource>,
+  act: (store: AppStore) => Promise<void>,
+): Promise<{ store: AppStore; loads: string[]; acting: Promise<void> }> {
+  const answers: Answer[] = [];
+  const { source, pending } = handSource([]);
+  const store = createAppStore({ ...source, ...overrides(answers) });
+  await openNow(store, pending, "a.ts");
+  const acting = act(store);
+  const opening = store.open("b.ts");
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+  answers[0]?.(ok(AFTER_ACTION_ON_A));
+  await vi.waitFor(() => {
+    expect(store.files.value).toEqual(AFTER_ACTION_ON_A);
+  });
+  pending[1]?.resolve(ok(await dataFor("b.ts")));
+  await opening;
+  return { store, loads: pending.map((load) => load.path), acting };
+}
+
+test("a file the user opens while a finish runs wins over the next file, though still loading", async () => {
+  spyConsole();
+
+  const { store, loads, acting } = await openWhileActing(
+    (answers) => ({ finishFile: () => answeredLater(answers) }),
+    (shown) => shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT }),
+  );
+
+  expect(loads).toEqual(["a.ts", "b.ts"]);
+  expect(store.active.value).toBe("b.ts");
+  await acting;
+  expect(store.active.value).toBe("b.ts");
+});
+
+test("a file the user opens while a take runs wins over the next file, though still loading", async () => {
+  spyConsole();
+
+  const { store, loads, acting } = await openWhileActing(
+    (answers) => ({ takeSide: () => answeredLater(answers) }),
+    (shown) => shown.takeSide("a.ts", "local"),
+  );
+
+  expect(loads).toEqual(["a.ts", "b.ts"]);
+  expect(store.active.value).toBe("b.ts");
+  await acting;
+  expect(store.active.value).toBe("b.ts");
+  expect(store.taken.value).toEqual(new Map([["a.ts", "local"]]));
 });
 
 test("a finish with work left asks; Back writes nothing, Save writes the text", async () => {
@@ -1107,7 +1170,7 @@ test("the remote name is asked for once; a failure leaves none and logs a warnin
   });
   await named.loadRemoteName();
 
-  expect(named.remote.value).toEqual({ kind: "Branch", name: "minor" });
+  expect(named.remoteName.value).toEqual({ kind: "Branch", name: "minor" });
 
   const failing = createAppStore({
     ...source,
@@ -1115,7 +1178,7 @@ test("the remote name is asked for once; a failure leaves none and logs a warnin
   });
   await expect(failing.loadRemoteName()).resolves.toBeUndefined();
 
-  expect(failing.remote.value).toBeNull();
+  expect(failing.remoteName.value).toBeNull();
   expect(failing.problem.value).toBeNull();
   expect(warnings).toEqual([
     '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',

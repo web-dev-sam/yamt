@@ -1,4 +1,5 @@
 import type { FileSides, Side, SideContent } from "../ipc";
+import { otherSide } from "./sides";
 
 const BYTES_PER_KB = 1024;
 const SHORT_COMMIT_LENGTH = 7;
@@ -55,8 +56,7 @@ export function sideButton(sides: FileSides, side: Side): string {
   if (sides[side].kind === "Missing") {
     return DELETE;
   }
-  const other = side === "local" ? "remote" : "local";
-  if (sides[other].kind === "Missing") {
+  if (sides[otherSide(side)].kind === "Missing") {
     return KEEP;
   }
   return side === "local" ? "Take left" : "Take right";

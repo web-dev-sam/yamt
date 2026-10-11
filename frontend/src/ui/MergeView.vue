@@ -3,23 +3,26 @@ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 
 import type { FileMergeData, Side } from "../ipc";
 import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP } from "./choiceText";
+import type { FileWork } from "./closeGuard";
+import { deletedSideView, keptToApply } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
 import { sideHeader } from "./sideHeaders";
-import { useAppStore, type FileWork } from "./store";
+import { SIDES } from "./sides";
+import { useAppStore } from "./store";
 import { useMergeController } from "./useMergeController";
 
 type Column = {
   readonly side: Side;
   readonly text: string;
   readonly tooltip: string;
-  readonly column: string;
+  readonly gridColumn: string;
   readonly keep: boolean;
   readonly deleted: boolean;
+  readonly delete: boolean;
 };
 
 const props = defineProps<{ data: FileMergeData; shown: boolean }>();
 
-const SIDES: readonly Side[] = ["local", "remote"];
 const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
 
 const left = useTemplateRef<HTMLDivElement>("left");
@@ -29,41 +32,37 @@ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
 const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
   useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
-const { track, untrack, finish, reset, takeSide, taken, remote } = useAppStore();
+const { track, untrack, finish, reset, takeSide, taken, remoteName } = useAppStore();
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {
   track(props.data.path, work);
 }
 
-const sideTaken = computed(() => taken.value.get(props.data.path) ?? null);
-const kept = computed(() => {
-  const { deleted } = props.data;
-  return deleted === null ? null : (SIDES.find((side) => side !== deleted) ?? null);
+const deletedView = computed(() => {
+  const { deleted, path } = props.data;
+  return deleted === null ? null : deletedSideView(deleted, taken.value.get(path) ?? null);
 });
-const deletedTaken = computed(
-  () => sideTaken.value !== null && sideTaken.value === props.data.deleted,
-);
 const columns = computed(() =>
   SIDES.map((side): Column => ({
     side,
-    ...sideHeader(side, remote.value),
-    column: GRID_COLUMN[side],
-    keep: side === kept.value && sideTaken.value === null,
+    ...sideHeader(side, remoteName.value),
+    gridColumn: GRID_COLUMN[side],
+    keep: deletedView.value?.keepIn === side,
     deleted: side === props.data.deleted,
+    delete: deletedView.value?.deleteIn === side,
   })),
 );
-const keptShown = computed(
-  () => kept.value !== null && sideTaken.value === kept.value && summary.value !== null,
-);
-const resettable = computed(() =>
-  props.data.deleted === null ? summary.value !== null : sideTaken.value !== null,
+const deletedShown = computed(() => deletedView.value?.middle === "deleted");
+const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
+const keptSideToApply = computed(() =>
+  deletedView.value === null ? null : keptToApply(deletedView.value, summary.value),
 );
 
 watch(
-  keptShown,
-  (shownNow) => {
-    if (shownNow && kept.value !== null) {
-      applyAllNonConflicting(kept.value);
+  keptSideToApply,
+  (side) => {
+    if (side !== null) {
+      applyAllNonConflicting(side);
     }
   },
   { immediate: true },
@@ -100,7 +99,7 @@ function markResolved(): void {
         v-for="column in columns"
         :key="column.side"
         class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
-        :class="column.column"
+        :class="column.gridColumn"
       >
         <h2 class="min-w-0 truncate text-fg-muted" :title="column.tooltip">{{ column.text }}</h2>
         <button
@@ -141,9 +140,9 @@ function markResolved(): void {
       <div
         ref="center"
         class="col-start-3 row-start-2 min-h-0 min-w-0"
-        :class="{ invisible: deletedTaken }"
+        :class="{ invisible: deletedShown }"
       />
-      <p v-if="deletedTaken" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
+      <p v-if="deletedShown" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
       <svg
         ref="rightStrip"
         aria-hidden="true"
@@ -158,11 +157,11 @@ function markResolved(): void {
         <div
           v-if="column.deleted"
           class="row-start-2 flex min-w-0 flex-col items-start gap-3 p-3"
-          :class="column.column"
+          :class="column.gridColumn"
         >
           <p>{{ DELETED_SENTENCE }}</p>
           <button
-            v-if="sideTaken === null"
+            v-if="column.delete"
             type="button"
             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
             @click="takeSide(data.path, column.side)"

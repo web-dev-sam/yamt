@@ -4,40 +4,41 @@ import { computed } from "vue";
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
 import { sideHeader } from "./sideHeaders";
+import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 
 type Column = {
   readonly side: Side;
   readonly header: string;
   readonly headerTooltip: string;
-  readonly column: string;
+  readonly gridColumn: string;
   readonly sentence: string;
   readonly tooltip: string | undefined;
   readonly button: string;
 };
 
-const props = defineProps<{ sides: FileSides; taken: Side | null; shown: boolean }>();
+const props = defineProps<{ sides: FileSides; shown: boolean }>();
 
-const SIDES: readonly Side[] = ["local", "remote"];
 const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
 
-const { takeSide, reset, remote } = useAppStore();
+const { takeSide, reset, remoteName, taken } = useAppStore();
 
+const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
 const columns = computed(() =>
   SIDES.map((side): Column => {
-    const header = sideHeader(side, remote.value);
+    const header = sideHeader(side, remoteName.value);
     return {
       side,
       header: header.text,
       headerTooltip: header.tooltip,
-      column: GRID_COLUMN[side],
+      gridColumn: GRID_COLUMN[side],
       sentence: sideSentence(props.sides[side]),
       tooltip: sideTooltip(props.sides[side]),
       button: sideButton(props.sides, side),
     };
   }),
 );
-const result = computed(() => resultLine(props.sides, props.taken));
+const result = computed(() => resultLine(props.sides, sideTaken.value));
 </script>
 
 <template>
@@ -49,7 +50,7 @@ const result = computed(() => resultLine(props.sides, props.taken));
       <template v-for="column in columns" :key="column.side">
         <div
           class="row-start-1 flex min-w-0 items-center border-b border-separator bg-window px-3 py-1.5"
-          :class="column.column"
+          :class="column.gridColumn"
         >
           <h2 class="min-w-0 truncate text-fg-muted" :title="column.headerTooltip">
             {{ column.header }}
@@ -57,11 +58,11 @@ const result = computed(() => resultLine(props.sides, props.taken));
         </div>
         <div
           class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-editor p-3"
-          :class="column.column"
+          :class="column.gridColumn"
         >
           <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
           <button
-            v-if="taken === null"
+            v-if="sideTaken === null"
             type="button"
             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
             @click="takeSide(sides.path, column.side)"
@@ -76,7 +77,7 @@ const result = computed(() => resultLine(props.sides, props.taken));
         <h2 class="text-fg-muted">Result</h2>
         <button
           type="button"
-          :disabled="taken === null"
+          :disabled="sideTaken === null"
           class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
           @click="reset(sides.path)"
         >

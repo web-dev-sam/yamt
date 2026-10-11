@@ -13,7 +13,6 @@ const {
   files,
   opened,
   choices,
-  taken,
   active,
   problem,
   question,
@@ -61,7 +60,6 @@ onMounted(() => {
           v-for="sides in choices"
           :key="sides.path"
           :sides="sides"
-          :taken="taken.get(sides.path) ?? null"
           :shown="sides.path === active"
         />
       </div>

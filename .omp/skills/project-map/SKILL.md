@@ -51,7 +51,8 @@ frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via 
                     useMergeController (only ../editor importer), store.ts singleton; problem.ts (Problem types, attempt) + ProblemBar + problemText.ts (failures in words, 2.1);
                     QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`);
                     ChoiceView + choiceText.ts (two-button choice for files the editor cannot show, with a Result column; also the deleted-side view's words: sentences, labels, Result lines, plan §2 #36, #47);
-                    sideHeaders.ts (`sideHeader(side, remote)`: "Local (yours)" / "Remote (theirs): <name>", plan §2 #50); nextFile.ts (`nextUnresolved`, #48); asking.ts (one question at a time, owned by the store)
+                    sideHeaders.ts (`sideHeader(side, remote)`: "Local (yours)" / "Remote (theirs): <name>", plan §2 #50); nextFile.ts (`nextUnresolved`, #48); asking.ts (one question at a time, owned by the store);
+                    closeGuard.ts (unsaved work per opened file and the window-close question, held by the store); sides.ts (`otherSide`); deletedSide.ts (`deletedSideView`: what the deleted-side view shows, #47)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), creates the store, loads the file list, mounts App
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself
