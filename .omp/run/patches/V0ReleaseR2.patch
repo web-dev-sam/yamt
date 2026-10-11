@@ -1,0 +1,463 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 5c83305..0fbaab0 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -65,6 +65,14 @@ jobs:
+       - name: Frontend packages
+         run: pnpm -C frontend install --frozen-lockfile
+ 
++      - name: THIRD_PARTY_LICENSES.txt is current
++        run: |
++          scripts/third-party-licenses.sh
++          if ! git diff --exit-code THIRD_PARTY_LICENSES.txt; then
++            echo "::error file=THIRD_PARTY_LICENSES.txt::stale: run 'just third-party-licenses' and commit the result"
++            exit 1
++          fi
++
+       - name: Ubuntu library versions for the AppImage's licence file
+         if: runner.os == 'Linux'
+         run: scripts/third-party-licenses.sh ubuntu-versions
+diff --git a/README.md b/README.md
+index 85cc708..492a6ac 100644
+--- a/README.md
++++ b/README.md
+@@ -12,12 +12,28 @@ Download from the [releases page](../../releases):
+ 
+ - **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
+   puts `yamt` on your PATH. For the AppImage, copy it there yourself:
+-  `install -m755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt`. If AppImageLauncher is installed, it
+-  asks once whether to integrate the AppImage before yamt starts.
++
++  ```sh
++  install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt
++  ```
++
++  AppImageLauncher stops a copy outside its folder with a dialog; with AppImageLauncher, let it
++  integrate the AppImage instead (it moves the file to `~/Applications` and adds a hash to the
++  name) and link the moved file:
++
++  ```sh
++  ail-cli integrate yamt_0.1.0_amd64.AppImage
++  mkdir -p ~/.local/bin && ln -s ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
++  ```
++
+ - **Arch Linux**: the AppImage, or build from source (below).
+ - **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time
+   right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`. Then put
+-  `yamt` on your PATH: `sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt`.
++  `yamt` on your PATH:
++
++  ```sh
++  sudo mkdir -p /usr/local/bin && sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt
++  ```
+ 
+ ## Use
+ 
+diff --git a/THIRD_PARTY_NOTICES.md b/THIRD_PARTY_NOTICES.md
+index f45ba1b..1fefcb6 100644
+--- a/THIRD_PARTY_NOTICES.md
++++ b/THIRD_PARTY_NOTICES.md
+@@ -6,23 +6,25 @@ ships inside the AppImage, the `.deb` and the macOS app next to `LICENSE`.
+ 
+ ## How the full text is made
+ 
+-`scripts/third-party-licenses.sh` writes `THIRD_PARTY_LICENSES.txt`:
++`scripts/third-party-licenses.sh` (`just third-party-licenses`) writes `THIRD_PARTY_LICENSES.txt`; the
++release jobs regenerate it and fail when the committed copy is out of date.
+ 
+-- **Rust crates** (332): every crate the app builds on Linux x86_64 and macOS (`cargo metadata`, normal and
+-  build dependencies, no dev-dependencies), quoted from the license files in each crate. Where a crate
+-  offers MIT as one choice, only its MIT text is quoted. A crate that ships no license file (for example
+-  the `objc2` and `specta` families) gets the standard text of its declared license with the holder from
+-  its `Cargo.toml`. The MPL-2.0 crates (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`,
+-  `selectors`) are used unmodified; their source is on [crates.io](https://crates.io).
+-- **JavaScript packages** (81): `pnpm -C frontend licenses list --prod`, quoted from each package's license
++- **Rust crates**: every crate the app builds on Linux x86_64 and macOS (`cargo metadata`, normal and
++  build dependencies, no dev-dependencies), quoted from the license files in each crate. When a crate
++  offers MIT as one choice and ships an MIT file, its other license files are left out. A crate that
++  ships no license file (for example the `objc2` and `specta` families) gets the standard text of its
++  declared license with the holder from its `Cargo.toml`. The MPL-2.0 crates (`cssparser`,
++  `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) are used unmodified; their source is on
++  [crates.io](https://crates.io).
++- **JavaScript packages**: `pnpm -C frontend licenses list --prod`, quoted from each package's license
+   file. The list includes Vue's compiler packages, which the build uses but the app does not carry.
+ - **Icons**: hand-checked. Lucide (ISC, Lucide Contributors; some icons derived from Feather, MIT, Cole
+   Bemis) and vscode-icons (MIT, Roberto Huertas) are build-time packages (`@iconify-json/*`); the build
+   copies the SVGs the app uses into its code. Holder and license come from each package's `info.json`.
+ - **System libraries in the AppImage**: the Linux AppImage carries the GTK and WebKitGTK libraries of the
+   Ubuntu 22.04 build machine (LGPL-2.1-or-later and other licenses). The full-text file names their Ubuntu
+-  source packages; the release job appends the installed versions and the LGPL texts before bundling. The
+-  `.deb` and the macOS app use the system's copies instead.
++  source packages; the release job appends the installed versions and the GNU LGPL and GPL texts before
++  bundling. The `.deb` and the macOS app use the system's copies instead.
+ 
+ If a package has neither a license file nor a license the script knows, the script stops and names it.
+ 
+diff --git a/docs/slices/briefs/v0-verify.md b/docs/slices/briefs/v0-verify.md
+new file mode 100644
+index 0000000..0b5f876
+--- /dev/null
++++ b/docs/slices/briefs/v0-verify.md
+@@ -0,0 +1,38 @@
++# v0 — one verification run over everything since M1
++
++Base: `030d2ff` (last verified state, end of M1). Everything after it is v0: 2.0 desktop shell, 2.X
++git cross-check, 2.1 window reads git, 2.K keep work per file, 2.F file icons, 2.C choose a side
++(Rust), 2.C' choice panel, 2.R release. None of it has been through `just check` yet.
++
++## Recipes (read-only; fix nothing)
++
++1. `just check` — the whole gate. Paste each step's tail and the exit status.
++2. `just mutants 030d2ff` — cargo-mutants on Rust lines changed since the base, Stryker on the
++   changed TypeScript. For every surviving mutant: file:line, the mutation, and whether it is
++   equivalent (with the reason) or a real gap; name the owning piece of work from the board
++   (`docs/slices/SLICES.md`, v0 table). Timeouts listed separately.
++3. Desktop smoke through tauri-driver (recipe in `skill://verification` and below) on
++   `scripts/conflict-repo.sh /tmp/yamt-verify-v0`:
++   - Port 5173 free; `VITE_CHUNK_SOURCE=tauri pnpm -C frontend dev --port 5173 --strictPort`;
++     `cargo build -p yamt-app`; `~/.cargo/bin/tauri-driver --port <p> --native-port <p2>`; session
++     capabilities `{"tauri:options":{"application":"<repo>/target/debug/yamt","args":["--repo","/tmp/yamt-verify-v0"]}}`.
++   - Resolve every file: text conflicts in the editor (apply sides, Mark resolved); the binary file
++     with "Take left" or "Take right"; the file deleted on one side with "Keep" or "Delete".
++   - Reset one resolved text file → its conflict is back (3 stages, markers); resolve it again.
++   - Afterwards: `git -C /tmp/yamt-verify-v0 status --porcelain` shows no unmerged paths; one
++     written text file equals what the middle pane showed (CRLF kept on the CRLF file).
++   - Close the window with a KWin script calling `closeWindow()` (WebDriver's close leaves the app
++     running without a page) → exit status 0.
++   - A second run on a fresh repo: quit with files unresolved → exit status 1 and those files still
++     unmerged as git left them.
++4. Release build: `cargo tauri build` → paste the AppImage and `.deb` paths and sizes; both contain
++   `LICENSE` and `THIRD_PARTY_LICENSES.txt`. `APPIMAGELAUNCHER_DISABLE=1` AppImage started with no
++   arguments from inside a fresh `scripts/conflict-repo.sh` repo lists the 7 files. `grep` the built
++   frontend (`frontend/dist`) for a fixture-only name (e.g. `nuxt-island-test`) → 0 hits.
++
++Screenshots, if any, target the yamt window only — never "the active window". Stop every process
++you started; remove the scratch repositories.
++
++## Report
++
++Output schema, every field; `gate: pass|fail` with the failing step named. Evidence goes verbatim.
+diff --git a/scripts/third-party-licenses.sh b/scripts/third-party-licenses.sh
+index 62814ea..5b52218 100755
+--- a/scripts/third-party-licenses.sh
++++ b/scripts/third-party-licenses.sh
+@@ -7,9 +7,11 @@
+ # A package without licence files gets the standard text of its declared licence with the holder from its
+ # metadata; when the script has no text for that licence it stops, naming the package.
+ # With `ubuntu-versions` (the Linux release job on Ubuntu 22.04, before bundling): appends the installed
+-# versions of the Ubuntu source packages listed for the AppImage, and the LGPL texts from
+-# /usr/share/common-licenses.
++# versions of the Ubuntu source packages listed for the AppImage, and the GNU GPL and LGPL texts from
++# /usr/share/common-licenses (LGPLv3 §4(b) requires the GPL next to it).
++# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's.
+ set -euo pipefail
++export LC_ALL=C
+ 
+ root="$(cd "$(dirname "$0")/.." && pwd)"
+ out="$root/THIRD_PARTY_LICENSES.txt"
+@@ -21,7 +23,7 @@ ubuntu_lgpl_sources=(
+     libproxy libgcrypt20 gnutls28 nettle libtasn1-6 libidn2 libunistring avahi colord libthai libdatrie
+     librsvg systemd util-linux libseccomp hyphen elfutils
+ )
+-lgpl_texts=(LGPL-2 LGPL-2.1 LGPL-3)
++gnu_licences=(GPL-3 LGPL-2 LGPL-2.1 LGPL-3)
+ field=$'\x1f'
+ 
+ # The crates reachable from the app over normal and build dependencies, outside the workspace.
+@@ -89,12 +91,12 @@ licence_files() {
+ 
+ # Prints the MPL-2.0 text shipped by the first crate licensed under exactly MPL-2.0.
+ mpl_text() {
+-    local name version licence dir rest files
++    local name version licence dir rest files file
+     while IFS=$field read -r name version licence dir rest; do
+         [ "$licence" = MPL-2.0 ] || continue
+         files=$(licence_files "$dir" "$licence")
+         if [ -n "$files" ]; then
+-            xargs -d '\n' cat <<<"$files"
++            while read -r file; do cat "$file"; done <<<"$files"
+             return
+         fi
+     done <<<"$rust_rows"
+@@ -254,8 +256,17 @@ generate() {
+         "${#icon_sets[@]} icon sets -> ${out#"$root"/} ($(wc -c <"$out") bytes)"
+ }
+ 
++# Prints the GNU licence texts the AppImage's LGPL libraries need, from Ubuntu's common-licenses.
++gnu_licence_texts() {
++    local licence
++    for licence in "${gnu_licences[@]}"; do
++        printf '\n---- %s ----\n\n' "$licence"
++        cat "/usr/share/common-licenses/$licence"
++    done
++}
++
+ append_ubuntu_versions() {
+-    local installed source lines text
++    local installed source lines
+     [ -f "$out" ] || die "missing $out"
+     installed=$(dpkg-query -W -f='${source:Package} ${source:Version}\n' | sort -u)
+     {
+@@ -265,10 +276,7 @@ append_ubuntu_versions() {
+             [ -n "$lines" ] || die "Ubuntu source package $source is not installed"
+             echo "$lines"
+         done
+-        for text in "${lgpl_texts[@]}"; do
+-            printf '\n---- %s ----\n\n' "$text"
+-            cat "/usr/share/common-licenses/$text"
+-        done
++        gnu_licence_texts
+     } >>"$out"
+     echo "third-party-licenses: appended ${#ubuntu_lgpl_sources[@]} Ubuntu source packages to ${out#"$root"/}"
+ }
+diff --git a/src-tauri/src/appimage.rs b/src-tauri/src/appimage.rs
+index b320a10..9086189 100644
+--- a/src-tauri/src/appimage.rs
++++ b/src-tauri/src/appimage.rs
+@@ -13,12 +13,19 @@ const START_DIR_VAR: &str = "OWD";
+ pub(crate) fn repo_from_start_dir(repo: PathBuf) -> PathBuf {
+     let inside_appimage = is_inside_appimage(
+         std::env::var_os(APPIMAGE_VAR).is_some(),
+-        std::env::var_os(APPDIR_VAR).map(PathBuf::from),
++        std::env::var_os(APPDIR_VAR).map(resolved_appdir),
+         std::env::current_exe().ok(),
+     );
+     resolved(repo, inside_appimage, std::env::var_os(START_DIR_VAR))
+ }
+ 
++// The runtime builds APPDIR from `$TMPDIR` as given (AppImageKit `runtime.c`), while Linux's
++// `current_exe` is the kernel-resolved `/proc/self/exe`; a symlinked TMPDIR must not hide the match.
++fn resolved_appdir(appdir: OsString) -> PathBuf {
++    let appdir = PathBuf::from(appdir);
++    appdir.canonicalize().unwrap_or(appdir)
++}
++
+ fn is_inside_appimage(appimage_set: bool, appdir: Option<PathBuf>, exe: Option<PathBuf>) -> bool {
+     let (Some(appdir), Some(exe)) = (appdir, exe) else {
+         return false;
+@@ -74,11 +81,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn an_empty_or_relative_start_dir_is_ignored() {
+-        assert_eq!(
+-            resolved(".".into(), true, Some("".into())),
+-            PathBuf::from(".")
+-        );
++    fn a_relative_start_dir_is_ignored() {
+         assert_eq!(
+             resolved(".".into(), true, Some("tmp/repo".into())),
+             PathBuf::from(".")
+@@ -110,4 +113,13 @@ mod tests {
+             PathBuf::from(".")
+         );
+     }
++
++    #[test]
++    fn appdir_is_resolved_when_it_exists_and_kept_as_given_otherwise() {
++        assert_eq!(resolved_appdir("/usr/..".into()), PathBuf::from("/"));
++        assert_eq!(
++            resolved_appdir(APPDIR.into()),
++            PathBuf::from("/tmp/.mount_yamtAbC")
++        );
++    }
+ }
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 63da73d..e2ccd86 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -21,6 +21,7 @@ const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
+ const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
+ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+ const PAGE_PING: &str = "true";
++const PAGE_ANSWER: &str = "true";
+ 
+ pub(crate) fn run(session: MergeSession) -> Ending {
+     let title = window_title(session.root());
+@@ -57,6 +58,12 @@ struct CloseWatch {
+     answers: Receiver<()>,
+ }
+ 
++#[derive(Debug, PartialEq, Eq)]
++enum CloseRequest {
++    PageGone,
++    AskPage,
++}
++
+ impl CloseWatch {
+     fn new() -> CloseWatch {
+         let (answer_sender, answers) = mpsc::channel();
+@@ -81,44 +88,44 @@ impl CloseWatch {
+     }
+ 
+     fn on_close_request(&mut self, window: &WebviewWindow) -> tauri::Result<()> {
+-        if self.record_close_request(Instant::now()) {
+-            tracing::warn!("closing without the page: it did not answer the last close request");
+-            return window.destroy();
+-        }
+-        let answer_sender = self.answer_sender.clone();
+-        window.eval_with_callback(PAGE_PING, move |result| {
+-            if answered(&result) {
+-                answer_sender.send(()).ok();
++        match self.record_close_request(Instant::now()) {
++            CloseRequest::PageGone => {
++                tracing::warn!(
++                    "closing without the page: it did not answer the last close request"
++                );
++                window.destroy()
+             }
+-        })
++            CloseRequest::AskPage => {
++                let answer_sender = self.answer_sender.clone();
++                window.eval_with_callback(PAGE_PING, move |result| {
++                    if answered(&result) {
++                        answer_sender.send(()).ok();
++                    }
++                })
++            }
++        }
+     }
+ 
+-    fn record_close_request(&mut self, at: Instant) -> bool {
++    fn record_close_request(&mut self, at: Instant) -> CloseRequest {
+         if self.answers.try_iter().count() > 0 {
+             self.unanswered_since = None;
+         }
+-        let gone = page_gone(self.unanswered_since, at);
+-        let within_grace = self
+-            .unanswered_since
+-            .is_some_and(|since| at.duration_since(since) < UNANSWERED_CLOSE_GRACE);
+-        if !within_grace {
+-            self.unanswered_since = Some(at);
++        let unanswered_for = self.unanswered_since.map(|since| at.duration_since(since));
++        match unanswered_for {
++            Some(age) if age < UNANSWERED_CLOSE_GRACE => CloseRequest::AskPage,
++            Some(age) if age <= UNANSWERED_CLOSE_TIMEOUT => CloseRequest::PageGone,
++            Some(_) | None => {
++                self.unanswered_since = Some(at);
++                CloseRequest::AskPage
++            }
+         }
+-        gone
+     }
+ }
+ 
+-fn page_gone(unanswered_since: Option<Instant>, request_at: Instant) -> bool {
+-    unanswered_since.is_some_and(|since| {
+-        let unanswered_for = request_at.duration_since(since);
+-        (UNANSWERED_CLOSE_GRACE..=UNANSWERED_CLOSE_TIMEOUT).contains(&unanswered_for)
+-    })
+-}
+-
+ // wry 0.57 passes "" to the callback when the script cannot run: webkitgtk/mod.rs:799-805
+ // (`unwrap_or_default`), wkwebview/mod.rs:740-754 (a null value); otherwise the result as JSON.
+ fn answered(result: &str) -> bool {
+-    result == PAGE_PING
++    result == PAGE_ANSWER
+ }
+ 
+ #[cfg(test)]
+@@ -136,53 +143,84 @@ mod tests {
+ 
+     #[test]
+     fn only_the_ping_answer_counts_as_answered() {
+-        assert!(answered(PAGE_PING));
++        assert!(answered("true"));
+         assert!(!answered(""));
+     }
+ 
++    fn second_request_after(delay: Duration) -> CloseRequest {
++        let asked = Instant::now();
++        let mut watch = CloseWatch::new();
++        assert_eq!(watch.record_close_request(asked), CloseRequest::AskPage);
++        watch.record_close_request(asked + delay)
++    }
++
+     #[test]
+-    fn a_close_without_an_earlier_unanswered_one_never_finds_the_page_gone() {
+-        assert!(!page_gone(None, Instant::now()));
++    fn a_close_without_an_earlier_unanswered_one_asks_the_page() {
++        let mut watch = CloseWatch::new();
++        assert_eq!(
++            watch.record_close_request(Instant::now()),
++            CloseRequest::AskPage
++        );
+     }
+ 
+     #[test]
+     fn the_page_is_gone_only_between_grace_and_timeout_after_the_unanswered_request() {
+-        let asked = Instant::now();
+         let millisecond = Duration::from_millis(1);
+-        let gone_after = |delay: Duration| page_gone(Some(asked), asked + delay);
+-        assert!(!gone_after(
+-            UNANSWERED_CLOSE_GRACE.saturating_sub(millisecond)
+-        ));
+-        assert!(gone_after(UNANSWERED_CLOSE_GRACE));
+-        assert!(gone_after(UNANSWERED_CLOSE_TIMEOUT));
+-        assert!(!gone_after(UNANSWERED_CLOSE_TIMEOUT + millisecond));
++        assert_eq!(
++            second_request_after(UNANSWERED_CLOSE_GRACE.saturating_sub(millisecond)),
++            CloseRequest::AskPage
++        );
++        assert_eq!(
++            second_request_after(UNANSWERED_CLOSE_GRACE),
++            CloseRequest::PageGone
++        );
++        assert_eq!(
++            second_request_after(UNANSWERED_CLOSE_TIMEOUT),
++            CloseRequest::PageGone
++        );
++        assert_eq!(
++            second_request_after(UNANSWERED_CLOSE_TIMEOUT + millisecond),
++            CloseRequest::AskPage
++        );
+     }
+ 
+     #[test]
+     fn a_double_click_inside_the_grace_keeps_counting_from_the_first_request() {
+         let asked = Instant::now();
+         let mut watch = CloseWatch::new();
+-        assert!(!watch.record_close_request(asked));
+-        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE / 2));
+-        assert!(watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
++        watch.record_close_request(asked);
++        assert_eq!(
++            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE / 2),
++            CloseRequest::AskPage
++        );
++        assert_eq!(
++            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE),
++            CloseRequest::PageGone
++        );
+     }
+ 
+     #[test]
+     fn a_late_second_close_asks_the_page_again() {
+         let asked = Instant::now();
+         let mut watch = CloseWatch::new();
+-        assert!(!watch.record_close_request(asked));
++        watch.record_close_request(asked);
+         let late = asked + UNANSWERED_CLOSE_TIMEOUT + Duration::from_millis(1);
+-        assert!(!watch.record_close_request(late));
+-        assert!(watch.record_close_request(late + UNANSWERED_CLOSE_GRACE));
++        assert_eq!(watch.record_close_request(late), CloseRequest::AskPage);
++        assert_eq!(
++            watch.record_close_request(late + UNANSWERED_CLOSE_GRACE),
++            CloseRequest::PageGone
++        );
+     }
+ 
+     #[test]
+     fn an_answered_close_request_never_finds_the_page_gone() {
+         let asked = Instant::now();
+         let mut watch = CloseWatch::new();
+-        assert!(!watch.record_close_request(asked));
++        watch.record_close_request(asked);
+         watch.answer_sender.send(()).unwrap();
+-        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
++        assert_eq!(
++            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE),
++            CloseRequest::AskPage
++        );
+     }
+ }
