@@ -84,19 +84,20 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 ## State ownership (vision 2)
 
-| state                                | owner                                                                                                                                                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)      | CodeMirror `EditorState`                                                                                                                                          |
-| chunk current positions (center)     | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
-| chunk apply status                   | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
-| left/right decorations               | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
-| scroll positions                     | DOM, driven by `editor/scrollSync`                                                                                                                                |
-| connector geometry                   | derived per frame, never stored                                                                                                                                   |
-| file list, opened files, active file | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`         |
-| saved baseline per opened file       | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                   |
-| failure shown in the window          | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
-| summary counts of the open file      | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
-| captured index stages (for reset)    | `session::FileState.stages`, captured at `open()`                                                                                                                 |
+| state                                                              | owner                                                                                                                                                             |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)                                    | CodeMirror `EditorState`                                                                                                                                          |
+| chunk current positions (center)                                   | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
+| chunk apply status                                                 | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
+| left/right decorations                                             | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
+| scroll positions                                                   | DOM, driven by `editor/scrollSync`                                                                                                                                |
+| connector geometry                                                 | derived per frame, never stored                                                                                                                                   |
+| file list, opened files, active file                               | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`         |
+| saved baseline per opened file                                     | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                   |
+| choice per file the editor cannot show (its sides, the side taken) | `choices` shallowRef in `ui/store.ts`: set by describe, `taken` set by `takeSide`, dropped and described again by reset; Rust's index is the truth for "resolved" |
+| failure shown in the window                                        | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
+| summary counts of the open file                                    | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
+| captured index stages (for reset)                                  | `session::FileState.stages`, captured at `open()`                                                                                                                 |
 
 Vue state never holds an `EditorView`, a position, or document text.
 

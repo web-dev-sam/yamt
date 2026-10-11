@@ -369,6 +369,8 @@ export interface ChunkSource {
   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
   finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
   resetFile(path: string): Promise<SourceResult<FileEntry[]>>; // the window reloads the file
+  describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show
+  takeSide(path: string, side: Side): Promise<SourceResult<FileEntry[]>>; // stage one side as the result
 }
 ```
 
@@ -396,6 +398,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | connector geometry                                                                                  | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
 | file list, opened files, active file, the shown failure                                             | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`                        | chrome only                                                                                                                         |
 | saved baseline per opened file (loaded text, then the last text marked resolved)                    | non-reactive `let` in `useMergeController`, set when the controller is built, replaced by `markSaved` after a successful finish                                             | one place decides "unsaved work" (plan §2 #37)                                                                                      |
+| choice per file the editor cannot show (its sides, the side taken)                                  | `choices` shallowRef in `ui/store.ts`: set by describe, `taken` set by `takeSide`, dropped and described again by reset                                                     | the index decides "resolved"; `taken` only picks the view's line (plan §2 #36)                                                      |
 | summary counts of the open file                                                                     | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                              | per controller                                                                                                                      |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
@@ -474,15 +477,19 @@ Components: `App.vue`, `FileList.vue` (file list, resolved mark, vscode-icons), 
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
 data object changes and destroys it with the component), `MergeToolbar.vue` (bulk apply
 left/right, undo/redo, counts, finish, reset — `MergeView` calls the store's `finish`/`reset`),
-`ProblemBar.vue` (failures, words from `problemText.ts`), `QuestionDialog.vue` ("Unprocessed
-Changes" / "Cancel File Merge", words and decisions in `question.ts`). Names are multi-word (the
-Vue linter's `multi-word-component-names`; `App` exempt).
+`ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary and `attempt` in
+`problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
+decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
+one sentence per side from `choiceText.ts`, plan §2 #36). Names are multi-word (the Vue linter's
+`multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
 `createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file list,
-the opened files (each loaded once per session; reset replaces it in place), the active path, the
-problem and the open question; actions: load the list, open (a later open wins; re-clicking the
-shown file does nothing), finish (asks when work is left), reset, the window-close check.
+the opened files (each loaded once per session; reset replaces it in place), the choices (one per
+opened file the editor cannot show), the active path, the problem and the open question; actions:
+load the list, open (a later open wins; re-clicking the shown file does nothing; a file the editor
+cannot show is described instead of loaded), finish (asks when work is left), take a side, reset,
+the window-close check.
 
 The Vue↔editor seam is one adaptable composable:
 
