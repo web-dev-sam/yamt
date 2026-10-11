@@ -302,6 +302,30 @@ index 4f93554..e8b1313 100644
    const cursor = bulkCursorTarget(target.state, visible);
    if (cursor === null) {
      return [action, recordSelection(target.state.selection.map(changes))];
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index 75dce2f..82b9f68 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -15,6 +15,7 @@ async function synthetic(
+ ): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
++    deleted: null,
+     base,
+     local: "",
+     remote: "",
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index 12bf805..f1e8615 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -55,6 +55,7 @@ async function synthetic(
+ ): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
++    deleted: null,
+     ...texts,
+     eol: "Lf",
+     chunks: chunks.map(({ kind, base, local, remote }, id) => ({
 diff --git a/frontend/src/editor/internal/find.test.ts b/frontend/src/editor/internal/find.test.ts
 index 6a085b9..87babc6 100644
 --- a/frontend/src/editor/internal/find.test.ts
@@ -402,6 +426,18 @@ index d4a2716..68a1f57 100644
    search({ literal: true, createPanel: (view) => new FindPanel(view) }),
    keymap.of([
      { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index 09950b6..f083ce5 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -119,6 +119,7 @@ async function tintedLeft(): Promise<EditorState> {
+   const data = await loadFixture("selection.ts", {
+     "selection.json": {
+       path: "selection.ts",
++      deleted: null,
+       base: "const a = old;\n",
+       local: "const a = mine;\n",
+       remote: "const a = theirs;\n",
 diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
 index ac7584c..e38a220 100644
 --- a/frontend/src/editor/internal/pane.ts
@@ -422,3 +458,39 @@ index ac7584c..e38a220 100644
      ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
      ".cm-searchMatch.cm-searchMatch-selected": {
        backgroundColor: "var(--color-selection)",
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index 0211b70..23a3460 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -37,6 +37,7 @@ async function synthetic(
+ ): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
++    deleted: null,
+     ...texts,
+     eol: "Lf",
+     chunks: chunks.map(({ kind, base, local, remote }, id) => ({
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index d6046d5..bf5b744 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -9,6 +9,7 @@ async function chunkWith(
+ ): Promise<Chunk> {
+   const record = {
+     path: "synthetic.ts",
++    deleted: null,
+     base: "",
+     local: "",
+     remote: "",
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index eff7dff..8583df4 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -42,6 +42,7 @@ function words(ranges: readonly Columns[], points: readonly Point[]): object {
+ async function synthetic(): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
++    deleted: null,
+     base: texts("old", "1"),
+     local: texts("mine", "2"),
+     remote: texts("theirs", "1"),
