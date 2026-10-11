@@ -112,12 +112,13 @@ golden-repo case dir:
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail
-    # /tmp is RAM on this machine; cargo-mutants copies and builds the tree in TMPDIR (#574).
-    mkdir -p target/mutants target/mutants-tmp
+    # cargo-mutants copies and builds the tree in TMPDIR, and the tests make temp repos there: on disk (/tmp is RAM
+    # here) and outside any git work tree (tests need a plain directory) (#574, #578).
+    mkdir -p target/mutants /var/tmp/yamt-mutants
     git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
     if [ -s target/mutants/rust.diff ]; then
         status=0
-        TMPDIR="$PWD/target/mutants-tmp" {{ hermetic_git }} {{ capped_tests }} cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
+        TMPDIR=/var/tmp/yamt-mutants {{ hermetic_git }} {{ capped_tests }} cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
         if [ "$status" -ne 0 ] && [ "$status" -ne 2 ] && [ "$status" -ne 3 ]; then exit "$status"; fi
     else
         echo "mutants: no Rust changes since {{ base }}"
