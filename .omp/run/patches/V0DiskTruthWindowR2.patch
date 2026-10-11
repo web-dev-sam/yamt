@@ -1,0 +1,147 @@
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 4f465cb..b3f05ce 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -10,6 +10,7 @@ import { sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { useMergeController } from "./useMergeController";
++import { isEditable } from "./views";
+ 
+ type Column = {
+   readonly side: Side;
+@@ -85,10 +86,6 @@ onUnmounted(() => {
+   untrack(props.data.path, work);
+ });
+ 
+-function isEditable({ deleted, middle }: FileMergeData): boolean {
+-  return deleted === null && middle.kind !== "DiskNotText";
+-}
+-
+ function markResolved(): void {
+   const text = resultText();
+   if (text !== null && summary.value !== null) {
+diff --git a/frontend/src/ui/deletedSide.test.ts b/frontend/src/ui/deletedSide.test.ts
+index a8b4269..c83dcbc 100644
+--- a/frontend/src/ui/deletedSide.test.ts
++++ b/frontend/src/ui/deletedSide.test.ts
+@@ -55,8 +55,8 @@ test.each<[Side, Taken | null, DeletedSideView]>([
+ 
+ test.each<FileMergeData["middle"]["kind"]>(["Disk", "DiskNotText"])(
+   "a middle loaded from the disk (%s) can be reset before any take",
+-  (loaded) => {
+-    expect(deletedSideView("remote", null, loaded)).toEqual({
++  (middleKind) => {
++    expect(deletedSideView("remote", null, middleKind)).toEqual({
+       kept: "local",
+       keepIn: "local",
+       deleteIn: "remote",
+@@ -77,6 +77,6 @@ test("nothing is applied before a take, after a Delete, or after the disk resolv
+   const changes = { changes: 2, conflicts: 0 };
+   expect(keptToApply(deletedSideView("remote", null, "Stages"), changes)).toBeNull();
+   expect(keptToApply(deletedSideView("remote", REMOTE, "Stages"), changes)).toBeNull();
+-  expect(keptToApply(deletedSideView("remote", DISK, "Disk"), changes)).toBeNull();
++  expect(keptToApply(deletedSideView("remote", null, "Disk"), changes)).toBeNull();
+   expect(keptToApply(deletedSideView("local", REMOTE, "Stages"), changes)).toBe("remote");
+ });
+diff --git a/frontend/src/ui/deletedSide.ts b/frontend/src/ui/deletedSide.ts
+index f5d622b..a99c417 100644
+--- a/frontend/src/ui/deletedSide.ts
++++ b/frontend/src/ui/deletedSide.ts
+@@ -22,7 +22,7 @@ function middle(deleted: Side, taken: Taken | null): Middle {
+ export function deletedSideView(
+   deleted: Side,
+   taken: Taken | null,
+-  loaded: FileMergeData["middle"]["kind"],
++  middleKind: FileMergeData["middle"]["kind"],
+ ): DeletedSideView {
+   const kept = otherSide(deleted);
+   const choosing = taken === null || taken.by === "disk";
+@@ -31,7 +31,7 @@ export function deletedSideView(
+     keepIn: choosing ? kept : null,
+     deleteIn: choosing ? deleted : null,
+     middle: middle(deleted, taken),
+-    resettable: taken !== null || loaded !== "Stages",
++    resettable: taken !== null || middleKind !== "Stages",
+   };
+ }
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index e0884e8..0bc5583 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -1365,7 +1365,7 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
+   ]);
+ });
+ 
+-test("a choice or a deleted-side file staged from the disk is taken by the disk and shown again", async () => {
++test("a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again", async () => {
+   spyConsole();
+   const files = [LOGO_ENTRY, entry(REMOVED_TEXT)];
+   let listed = listing(files);
+@@ -1390,12 +1390,7 @@ test("a choice or a deleted-side file staged from the disk is taken by the disk
+ 
+   await store.refreshFiles();
+ 
+-  expect(store.taken.value).toEqual(
+-    new Map([
+-      [LOGO, { by: "disk" }],
+-      [REMOVED_TEXT, { by: "disk" }],
+-    ]),
+-  );
++  expect(store.taken.value).toEqual(new Map([[LOGO, { by: "disk" }]]));
+   expect(calls.slice(-2).toSorted()).toEqual([`describeFile ${LOGO}`, `loadFile ${REMOVED_TEXT}`]);
+ });
+ 
+@@ -1508,7 +1503,7 @@ test.each(["take", "reset"] as const)(
+   },
+ );
+ 
+-test("each write sends the disk version of the view it acts on", async () => {
++test("finish, take and reset forward the disk version they are given", async () => {
+   spyConsole();
+   const seven = await versioned(7);
+   const sent: string[] = [];
+diff --git a/frontend/src/ui/views.test.ts b/frontend/src/ui/views.test.ts
+new file mode 100644
+index 0000000..9a99fa2
+--- /dev/null
++++ b/frontend/src/ui/views.test.ts
+@@ -0,0 +1,17 @@
++import { expect, test } from "vitest";
++
++import { loadFixture, type FileMergeData, type Side } from "../ipc";
++import { isEditable } from "./views";
++
++const DATA = await loadFixture("vueuse-use-magic-keys.ts");
++
++test.each<[Side | null, FileMergeData["middle"], boolean]>([
++  [null, { kind: "Stages", text: "m\n" }, true],
++  [null, { kind: "Disk", text: "m\n" }, true],
++  [null, { kind: "DiskNotText", found: "Binary" }, false],
++  ["remote", { kind: "Stages", text: "m\n" }, false],
++  ["local", { kind: "Disk", text: "m\n" }, false],
++  ["remote", { kind: "DiskNotText", found: "Deleted" }, false],
++])("deleted on side %s with a %j middle is editable: %s", (deleted, middle, editable) => {
++  expect(isEditable({ ...DATA, deleted, middle })).toBe(editable);
++});
+diff --git a/frontend/src/ui/views.ts b/frontend/src/ui/views.ts
+index f76e120..dc9f9ad 100644
+--- a/frontend/src/ui/views.ts
++++ b/frontend/src/ui/views.ts
+@@ -19,10 +19,11 @@ export function isShown(shown: Shown, path: string): boolean {
+ }
+ 
+ export function takesASide(shown: Shown, path: string): boolean {
+-  return (
+-    shown.files.value.some((file) => file.path === path && file.unsupported !== null) ||
+-    shown.opened.value.some((file) => file.path === path && file.deleted !== null)
+-  );
++  return shown.files.value.some((file) => file.path === path && file.unsupported !== null);
++}
++
++export function isEditable({ deleted, middle }: FileMergeData): boolean {
++  return deleted === null && middle.kind !== "DiskNotText";
+ }
+ 
+ function putOpened(shown: Shown, data: FileMergeData): void {
