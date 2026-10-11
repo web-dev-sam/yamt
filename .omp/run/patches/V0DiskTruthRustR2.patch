@@ -1,0 +1,241 @@
+diff --git a/crates/gitio/tests/what_git_wrote.rs b/crates/gitio/tests/what_git_wrote.rs
+index 8d0c11c..be0ca84 100644
+--- a/crates/gitio/tests/what_git_wrote.rs
++++ b/crates/gitio/tests/what_git_wrote.rs
+@@ -124,7 +124,11 @@ const ONE_CONFLICT: [&[u8]; 3] = [BASE, b"a\nB\nc\nd\ne\n", b"a\nX\nc\nd\ne\n"];
+ fn merge_file_returns_the_merge_with_one_or_two_conflicts() {
+     let (_dir, repo) = two_conflicts(&Setup::default());
+     let scratch = TempDir::new().unwrap();
+-    let two_blocks = [BASE, b"A\nb\nc\nd\nE\n", b"X\nb\nc\nd\nY\n"];
++    let two_blocks: [&[u8]; 3] = [
++        b"a\nb\nc\nd\ne\nf\n",
++        b"A\nb\nc\nd\ne\nF\n",
++        b"X\nb\nc\nd\ne\nY\n",
++    ];
+ 
+     let one = merged(&repo, scratch.path(), ONE_CONFLICT, &PLAIN);
+     let two = merged(&repo, scratch.path(), two_blocks, &PLAIN);
+@@ -289,7 +293,13 @@ fn merge_config_reads_the_default_driver_and_the_names_of_configured_drivers() {
+ 
+     let config = repo.merge_config().unwrap();
+ 
+-    assert_eq!(no_config, MergeConfig::default());
+-    assert_eq!(config.default, Some(b"binary".to_vec()));
+-    assert_eq!(config.drivers, [b"mergiraf".to_vec()]);
++    let mut drivers = no_config.drivers;
++    drivers.push(b"mergiraf".to_vec());
++    assert_eq!(
++        config,
++        MergeConfig {
++            default: Some(b"binary".to_vec()),
++            drivers,
++        }
++    );
+ }
+diff --git a/crates/session/src/disk.rs b/crates/session/src/disk.rs
+index fc34462..02faa0c 100644
+--- a/crates/session/src/disk.rs
++++ b/crates/session/src/disk.rs
+@@ -70,7 +70,7 @@ pub(crate) enum MarkerRule {
+ pub(crate) enum Settlement {
+     Add,
+     Remove,
+-    MarkersLeft { conflicts: u32 },
++    LeaveWithMarkers { conflicts: u32 },
+     LeaveAsIs,
+ }
+ 
+@@ -140,7 +140,7 @@ pub(crate) fn settlement(disk: &OnDisk, rule: MarkerRule, marker_size: usize) ->
+         OnDisk::File(_) if stage_any => Settlement::Add,
+         OnDisk::File(bytes) => match open_regions(&parse(&split_lines(bytes), marker_size)) {
+             0 => Settlement::Add,
+-            conflicts => Settlement::MarkersLeft { conflicts },
++            conflicts => Settlement::LeaveWithMarkers { conflicts },
+         },
+     }
+ }
+@@ -171,7 +171,7 @@ impl Staging {
+         match settlement {
+             Settlement::Add => staged(&self.added),
+             Settlement::Remove => staged(&self.removed),
+-            Settlement::MarkersLeft { conflicts } => DiskResult::MarkersLeft {
++            Settlement::LeaveWithMarkers { conflicts } => DiskResult::MarkersLeft {
+                 conflicts: *conflicts,
+             },
+             Settlement::LeaveAsIs => DiskResult::LeftAsIs,
+diff --git a/crates/session/src/seed.rs b/crates/session/src/seed.rs
+index b22fcd4..89e5dc1 100644
+--- a/crates/session/src/seed.rs
++++ b/crates/session/src/seed.rs
+@@ -21,8 +21,7 @@ struct MiddleText<'a> {
+     eol: Eol,
+     text: String,
+     line_count: u32,
+-    /// Where the previous chunk's base lines end; the next chunk's start no earlier.
+-    base_end: u32,
++    previous_base_end: u32,
+     chunks: Vec<Chunk>,
+     ranges: Vec<LineRange<MiddleLine>>,
+ }
+@@ -39,7 +38,7 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
+         eol: detect_eol(disk),
+         text: String::with_capacity(disk.len()),
+         line_count: 0,
+-        base_end: 0,
++        previous_base_end: 0,
+         chunks: Vec::new(),
+         ranges: Vec::new(),
+     };
+@@ -115,12 +114,12 @@ impl MiddleText<'_> {
+ 
+     /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
+     fn after_previous_base(&mut self, base: LineRange<BaseLine>) -> LineRange<BaseLine> {
+-        let start = base.start.0.max(self.base_end);
++        let start = base.start.0.max(self.previous_base_end);
+         let after = LineRange {
+             start: BaseLine(start),
+             len: base.end().0.saturating_sub(start),
+         };
+-        self.base_end = after.end().0;
++        self.previous_base_end = after.end().0;
+         after
+     }
+ 
+@@ -300,18 +299,18 @@ mod tests {
+         let texts = texts(
+             "dup\nmid\nbase\nend\n",
+             "dup\nmid\ndup\nend\n",
+-            "DUP\nmid\nother\nend\n",
++            "DUP\nnew\nmid\nother\nend\n",
+         );
+-        let disk = "DUP\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
++        let disk = "DUP\nnew\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
+ 
+         let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+ 
+-        assert_eq!(seeded.middle, "DUP\nmid\nbase\nend\n");
+-        assert_eq!(ranges(&seeded), [[(2, 1), (2, 1), (2, 1)]]);
++        assert_eq!(seeded.middle, "DUP\nnew\nmid\nbase\nend\n");
++        assert_eq!(ranges(&seeded), [[(3, 1), (2, 1), (3, 1)]]);
+         assert_eq!(base_ranges(&seeded), [(2, 1)]);
+         assert_eq!(
+             with_local_applied(&seeded, &texts.local),
+-            "DUP\nmid\ndup\nend\n"
++            "DUP\nnew\nmid\ndup\nend\n"
+         );
+         assert_eq!(with_remote_applied(&seeded, &texts.remote), texts.remote);
+     }
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index acde31b..6fa4561 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -134,7 +134,7 @@ impl MergeSession {
+             match found {
+                 Settlement::Add => adds.push(&file.path),
+                 Settlement::Remove => removes.push(&file.path),
+-                Settlement::MarkersLeft { .. } | Settlement::LeaveAsIs => {}
++                Settlement::LeaveWithMarkers { .. } | Settlement::LeaveAsIs => {}
+             }
+             decided.push((index, disk, found));
+         }
+diff --git a/crates/session/src/start.rs b/crates/session/src/start.rs
+index 85325c6..e51e6c3 100644
+--- a/crates/session/src/start.rs
++++ b/crates/session/src/start.rs
+@@ -35,14 +35,14 @@ pub(crate) struct Attributes {
+     pub(crate) encoded: bool,
+ }
+ 
+-/// The `merge` attribute (gitattributes(5) "Built-in merge drivers").
++/// The driver git used, resolved from the attribute and the merge config (`merge_driver`).
+ #[derive(Clone, Copy, PartialEq, Eq)]
+ pub(crate) enum MergeDriver {
+     Text,
+     Union,
+-    /// `-merge` or `merge=binary`: git keeps ours.
++    /// `-merge`, `merge=binary` or `merge.default=binary`: git keeps ours.
+     Binary,
+-    /// Any other driver: what it wrote cannot be known.
++    /// A `merge.<name>.driver` from the config: what it wrote cannot be known.
+     Custom,
+ }
+ 
+diff --git a/crates/session/tests/start_from_disk.rs b/crates/session/tests/start_from_disk.rs
+index ab70ac1..38141e4 100644
+--- a/crates/session/tests/start_from_disk.rs
++++ b/crates/session/tests/start_from_disk.rs
+@@ -277,20 +277,19 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
+ 
+ // gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a
+ // non-zero exit marks a conflict.
+-const MARKER_WRITING_DRIVER: &str = "{ echo '<<<<<<< ours'; echo local; echo '======='; echo remote; echo '>>>>>>> theirs'; } > %A; exit 1";
++const TEXT_MERGING_DRIVER: &str = "git merge-file -L ours -L base -L theirs %A %O %B; exit 1";
+ 
+ #[test]
+ fn a_configured_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
+-    let config = [("merge.mergiraf.driver", MARKER_WRITING_DRIVER)];
++    let config = [("merge.mergiraf.driver", TEXT_MERGING_DRIVER)];
+     let dir = merged(&config, Some("f.txt merge=mergiraf\n"));
+-    let driver_output = "<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\n";
+-    assert_eq!(read(&dir, TEXT), driver_output);
++    assert!(read(&dir, TEXT).contains("\n<<<<<<< ours\n"));
+ 
+     let (mut session, list) = first_list(&dir);
+ 
+     assert_eq!(
+         changes(&list),
+-        [(TEXT, &DiskResult::MarkersLeft { conflicts: 1 })]
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
+     );
+     assert!(matches!(
+         session.load(TEXT).unwrap().middle,
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index d9eb07b..2ec9f05 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2), `window.rs` (the one window; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window), `commands.rs` (commands ≤ 15 lines delegating to `session`, `IpcError`, one `Mutex<MergeSession>`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`). `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session` only, never on `gitio`.
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2), `window.rs` (the one window; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window), `commands.rs` (commands ≤ 15 lines delegating to `session`, one `Mutex<MergeSession>`), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`). `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session` only, never on `gitio`.
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index 08c388c..23df34f 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -1,7 +1,5 @@
+ use yamt_session::UnsupportedReason;
+ 
+-const NOT_A_FILE: &str = "it is not a regular file";
+-
+ #[derive(Debug, serde::Serialize, specta::Type)]
+ #[serde(tag = "kind")]
+ pub enum IpcError {
+@@ -19,6 +17,9 @@ pub enum IpcError {
+         path: String,
+         message: String,
+     },
++    NotAFile {
++        path: String,
++    },
+     ReadFailed {
+         path: String,
+         message: String,
+@@ -39,10 +40,7 @@ impl From<yamt_session::Error> for IpcError {
+                 path,
+                 message: source.to_string(),
+             },
+-            yamt_session::Error::NotAFile { path } => IpcError::WriteFailed {
+-                path,
+-                message: NOT_A_FILE.to_owned(),
+-            },
++            yamt_session::Error::NotAFile { path } => IpcError::NotAFile { path },
+             yamt_session::Error::ReadFailed { path, source } => IpcError::ReadFailed {
+                 path,
+                 message: source.to_string(),
+@@ -103,7 +101,7 @@ mod tests {
+         };
+         assert_eq!(
+             ipc_json(not_a_file),
+-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "it is not a regular file" })
++            json!({ "kind": "NotAFile", "path": "a.ts" })
+         );
+         let read_failed = yamt_session::Error::ReadFailed {
+             path: "a.ts".to_owned(),

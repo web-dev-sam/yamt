@@ -19,13 +19,17 @@ Verified against commit: `dd9abc4` (v0 retro applied: desktop shell, take a side
 
 ```
 crates/merge-core   (yamt-merge-core) pure diff3 chunk model and per-side word changes: chunk, compute, apply, line (InlineRange/InlinePoint),
-                    token (tokenizer), line_pairs (line pairing, Dice ≥ 50 %), word (`word_changes`). NO I/O, NO git, NO tauri, NO serde_json, NO tokio
-crates/gitio        (yamt-gitio) git subprocess layer (ls-files -u/-s, cat-file --batch, update-index incl. --index-info/--force-remove, add, checkout -m, checkout-index: take, rollback). NO diff logic
-crates/session      (yamt-session) MergeSession state machine; describe/take (`sides.rs`); finish/take all-or-nothing; the only crate that knows both of the above
+                    token (tokenizer), line_pairs (line pairing, Dice ≥ 50 %), word (`word_changes`), line_map (2-way `LineMap`: `exact`/`covering`,
+                    used to locate disk conflict blocks in the stages, plan §2 #53). NO I/O, NO git, NO tauri, NO serde_json, NO tokio
+crates/gitio        (yamt-gitio) git subprocess layer (ls-files -u/-s, cat-file --batch, update-index incl. --index-info/--force-remove, add, checkout -m, checkout-index: take, rollback;
+                    version, attributes (check-attr), merge_config, hash-object --stdin-paths, merge_file (temp files, exit 0..127 = conflicts)). NO diff logic
+crates/session      (yamt-session) MergeSession state machine; describe/take (`sides.rs`); finish/take/reset all-or-nothing (`writes.rs`); the only crate that knows both of the above.
+                    Disk is the truth (plan §2 #52/#53): open (`open.rs`), what git wrote at start (`start.rs`), per-file disk memory and settling (`disk.rs`),
+                    marker parsing and views (`markers.rs`), locating blocks in the stages (`locate.rs`), the middle seeded from the disk (`seed.rs`), DTO building (`merge_data.rs`)
 crates/cli          (yamt-cli, bin yamt-cli) headless binary: classify / scan / golden / fixture
-crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge stops with scripted conflicts (regular, symlink, gitlink); dev-dependency of gitio, session, cli
+crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge stops with scripted conflicts (regular, symlink, gitlink; `conflict_repo_with`: config and attributes set before the merge); dev-dependency of gitio, session, cli
 src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-specta builder for both bins) + graphics (NVIDIA guard, the one `unsafe`, plan §2 #43),
-                    args, outcome (start-up decision, exit status), window (close fallback when the page is gone), commands (IpcError), frontend_log,
+                    args, outcome (start-up decision, exit status), window (close fallback when the page is gone), commands, ipc_error (IpcError), frontend_log,
                     appimage (a relative repo path is resolved against OWD only when the running binary lives under $APPDIR with APPIMAGE set; never chdir);
                     bins `yamt` and `export-bindings` (→ ipc/bindings.ts); tauri.conf.json (bundles: AppImage, deb, app, dmg); icons/icon.svg source (plan §2 #41)
 release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.md, THIRD_PARTY_LICENSES.txt (GENERATED, in every bundle), docs/screenshot.png, .github/workflows/release.yml (draft release on `v*`; plan §2 #38)
@@ -85,25 +89,26 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 ## State ownership (vision 2)
 
-| state                                                 | owner                                                                                                                                                                   |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)                       | CodeMirror `EditorState`                                                                                                                                                |
-| chunk current positions (center)                      | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect        |
-| chunk apply status                                    | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)       |
-| left/right decorations                                | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                                     |
-| find space above line 1                               | `findSpace` field in every pane (`find.ts`), pushed by the controller each frame from "any pane's bar open" (no history, plan §2 #44)                                   |
-| drag over the icons (press, covered highlight)        | press in `editor/internal/drag.ts`; highlight in a side-pane field (`covered.ts`) pushed by the controller (no history, plan §2 #45)                                    |
-| scroll positions                                      | DOM, driven by `editor/scrollSync`                                                                                                                                      |
-| chunk rows and scroll anchors                         | one cache in `MergeController` (rows + the sync's anchors), dropped by `rowsChanged` (doc, measured heights, statuses); strip positions written per frame (plan §2 #51) |
-| file list, opened files, active file                  | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`               |
-| saved baseline per opened file                        | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                         |
-| choice per file the editor cannot show (its sides)    | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; Rust's index is the truth for "resolved"                                  |
-| side taken (choice files and deleted-side text files) | one `taken` map in `ui/store.ts`: set by `takeSide`, deleted by reset (plan §2 #47)                                                                                     |
-| marks in the file list                                | git's view: `files` re-read by `refreshFiles` on window focus (`useWindowFocus` in App.vue) and returned by each action (plan §2 #49)                                   |
-| failure shown in the window                           | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                             |
-| question waiting for an answer                        | `ui/asking.ts` (`createAsking`, held by the store state); words in `ui/question.ts`                                                                                     |
-| summary counts of the open file                       | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                          |
-| captured index stages (for reset)                     | `session::FileState.stages`, captured at `open()`                                                                                                                       |
+| state                                                 | owner                                                                                                                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)                       | CodeMirror `EditorState`                                                                                                                                                  |
+| chunk current positions (center)                      | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect          |
+| chunk apply status                                    | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it)         |
+| left/right decorations                                | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                                       |
+| find space above line 1                               | `findSpace` field in every pane (`find.ts`), pushed by the controller each frame from "any pane's bar open" (no history, plan §2 #44)                                     |
+| drag over the icons (press, covered highlight)        | press in `editor/internal/drag.ts`; highlight in a side-pane field (`covered.ts`) pushed by the controller (no history, plan §2 #45)                                      |
+| scroll positions                                      | DOM, driven by `editor/scrollSync`                                                                                                                                        |
+| chunk rows and scroll anchors                         | one cache in `MergeController` (rows + the sync's anchors), dropped by `rowsChanged` (doc, measured heights, statuses); strip positions written per frame (plan §2 #51)   |
+| file list, opened files, active file                  | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`                 |
+| saved baseline per opened file                        | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                           |
+| choice per file the editor cannot show (its sides)    | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; Rust's index is the truth for "resolved"                                    |
+| side taken (choice files and deleted-side text files) | one `taken` map in `ui/store.ts`: set by `takeSide`, deleted by reset (plan §2 #47)                                                                                       |
+| marks in the file list                                | git's view: `files` re-read by `refreshFiles` on window focus (`useWindowFocus` in App.vue) and returned by each action (plan §2 #49)                                     |
+| failure shown in the window                           | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                               |
+| question waiting for an answer                        | `ui/asking.ts` (`createAsking`, held by the store state); words in `ui/question.ts`                                                                                       |
+| summary counts of the open file                       | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                            |
+| captured index stages (for reset)                     | `session::FileState.stages`, captured at `open()`                                                                                                                         |
+| what each file looked like on disk, its disk version  | `session::FileState.seen` (`Seen`: `GitOutput` \| `ViewFromStages` \| `ViewFromDisk`) and `settled` (last `DiskResult`, version); written only by `session` (plan §2 #53) |
 
 Vue state never holds an `EditorView`, a position, or document text.
 
