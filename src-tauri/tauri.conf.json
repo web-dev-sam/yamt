@@ -17,7 +17,13 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["appimage", "deb", "app", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "Three-way merge window for every conflicted file of a git merge",
+    "longDescription": "yamt opens all conflicted files of a stopped git merge, rebase or cherry-pick in one window: your side on the left, theirs on the right, the result in the middle, with arrows to apply each change. Marking a file resolved stages it.",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Samuel Braun",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
