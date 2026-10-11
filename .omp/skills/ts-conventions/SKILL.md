@@ -13,7 +13,7 @@ Base: `references/typescript-best-practices.md` (rule table) and
 - [TS1] Line numbers are branded: `BaseLine`, `LocalLine`, `RemoteLine` (created only in
   `ipc/domain.ts`), `DocPos` (created only in `editor/`). `LineRange<L> = { start: L; len: number }`.
   A function taking a line takes the branded type. Violation: `function lineTop(line: number)`.
-- [TS2] Variants are discriminated unions with a `kind` field (`ChunkAction = { kind: "apply" | "ignore"; chunk; side }`);
+- [TS2] Variants are discriminated unions with a `kind` field (`ChunkAction = { kind: "apply" | "ignore"; side; chunks }`, `editor/internal/apply.ts`);
   no optional-field bags. A fact held per side is a `Readonly<Record<Side, …>>` of a closed union:
   chunk status is `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2 #33), never
   `{ applied?: boolean; side?: Side }`.

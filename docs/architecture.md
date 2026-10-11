@@ -397,6 +397,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | chunk current positions in center                                                                   | `editor/chunkField` (`StateField`)                                                                                                                                          | mapped every transaction per CM1 (`-1`; `to` `+1` only when a range ends mid-line); restored on undo by an `invertedEffects` effect |
 | chunk apply status, per side (`{ local, remote }`, each `pending`/`applied`/`ignored`; plan §2 #33) | same `StateField`, changed only via `StateEffect` registered with `invertedEffects`; side panes hold a read-only mirror the controller pushes after each center transaction | **undo must revert status together with text**                                                                                      |
 | left/right decorations                                                                              | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
+| drag over the icons: the press, the covered changes' highlight                                      | the press in `editor/internal/drag.ts` (`IconDrag`); the highlight in a side-pane field (`covered.ts`), pushed by the controller                                            | no history; derived from the press and the pointer each frame                                                                       |
 | scroll positions                                                                                    | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
 | connector geometry                                                                                  | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
 | file list, opened files, active file, the shown failure                                             | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`                        | chrome only                                                                                                                         |
@@ -412,7 +413,7 @@ baseline in `useMergeController`).
 
 ```ts
 export class MergeController {
-  constructor(data: FileMergeData, hosts: MergeHosts); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]
+  constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly } (plan §2 #47)
   applyAllNonConflicting(side: Side): void; // one undo step
   undo(): boolean;
   redo(): boolean;
@@ -423,7 +424,8 @@ export class MergeController {
 }
 ```
 
-Per-change apply/ignore is internal: the arrows in the strips are its only caller.
+Per-change apply/ignore is internal: its callers are the icons in the strips (a click or a drag over
+several, plan §2 #45) and Ctrl/Cmd+click on a side block (#46).
 
 Internals (`editor/internal/`, not importable from `ui/`):
 
