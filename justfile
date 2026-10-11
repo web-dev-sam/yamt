@@ -49,6 +49,10 @@ arch-check:
 map-check:
     scripts/map-check.sh
 
+# Rewrites THIRD_PARTY_LICENSES.txt from the Rust and JS dependency trees; run after a dependency change.
+third-party-licenses:
+    scripts/third-party-licenses.sh
+
 sfc-order: (frontend "sfc-order")
 
 hooks-test:

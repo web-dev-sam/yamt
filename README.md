@@ -10,17 +10,20 @@ right, the result in the middle.
 
 Download from the [releases page](../../releases):
 
-- **Linux**: the `.AppImage` (make it executable, then run it) or the `.deb`
-  (`sudo apt install ./yamt_0.1.0_amd64.deb`). If AppImageLauncher is installed, it asks once
-  whether to integrate the AppImage before yamt starts.
+- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
+  puts `yamt` on your PATH. For the AppImage, copy it there yourself:
+  `install -m755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt`. If AppImageLauncher is installed, it
+  asks once whether to integrate the AppImage before yamt starts.
 - **Arch Linux**: the AppImage, or build from source (below).
 - **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time
-  right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`.
+  right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`. Then put
+  `yamt` on your PATH: `sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt`.
 
 ## Use
 
 When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `yamt` in the
-repository (or `yamt --repo <path>` from anywhere).
+repository (or `yamt --repo <path>` from anywhere). yamt starts from a terminal inside a repository;
+double-clicking it in a file manager or Finder shows nothing.
 
 - The file list on the left shows every conflicted file; click one to open it.
 - Each change has an arrow that applies it to the result and a × that ignores it. The toolbar applies
@@ -64,4 +67,6 @@ NVIDIA driver is loaded; a value you set for `WEBKIT_DISABLE_DMABUF_RENDERER` wi
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT, see [LICENSE](LICENSE). Bundled third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+(summary) and [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) (every copyright line and licence
+text; also inside each download).

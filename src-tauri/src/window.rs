@@ -18,6 +18,7 @@ const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
 // `--color-window` in frontend/src/style.css.
 const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
+const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
 
@@ -80,27 +81,44 @@ impl CloseWatch {
     }
 
     fn on_close_request(&mut self, window: &WebviewWindow) -> tauri::Result<()> {
-        if self.is_page_gone(Instant::now()) {
+        if self.record_close_request(Instant::now()) {
             tracing::warn!("closing without the page: it did not answer the last close request");
             return window.destroy();
         }
         let answer_sender = self.answer_sender.clone();
-        // wry passes "" to the callback when the script cannot run (wry 0.57 webkitgtk `eval`).
         window.eval_with_callback(PAGE_PING, move |result| {
-            if !result.is_empty() {
+            if answered(&result) {
                 answer_sender.send(()).ok();
             }
         })
     }
 
-    fn is_page_gone(&mut self, request_at: Instant) -> bool {
+    fn record_close_request(&mut self, at: Instant) -> bool {
         if self.answers.try_iter().count() > 0 {
             self.unanswered_since = None;
         }
-        self.unanswered_since
-            .replace(request_at)
-            .is_some_and(|since| request_at.duration_since(since) <= UNANSWERED_CLOSE_TIMEOUT)
+        let gone = page_gone(self.unanswered_since, at);
+        let within_grace = self
+            .unanswered_since
+            .is_some_and(|since| at.duration_since(since) < UNANSWERED_CLOSE_GRACE);
+        if !within_grace {
+            self.unanswered_since = Some(at);
+        }
+        gone
     }
+}
+
+fn page_gone(unanswered_since: Option<Instant>, request_at: Instant) -> bool {
+    unanswered_since.is_some_and(|since| {
+        let unanswered_for = request_at.duration_since(since);
+        (UNANSWERED_CLOSE_GRACE..=UNANSWERED_CLOSE_TIMEOUT).contains(&unanswered_for)
+    })
+}
+
+// wry 0.57 passes "" to the callback when the script cannot run: webkitgtk/mod.rs:799-805
+// (`unwrap_or_default`), wkwebview/mod.rs:740-754 (a null value); otherwise the result as JSON.
+fn answered(result: &str) -> bool {
+    result == PAGE_PING
 }
 
 #[cfg(test)]
@@ -117,33 +135,54 @@ mod tests {
     }
 
     #[test]
-    fn a_second_close_soon_after_an_unanswered_one_finds_the_page_gone() {
+    fn only_the_ping_answer_counts_as_answered() {
+        assert!(answered(PAGE_PING));
+        assert!(!answered(""));
+    }
+
+    #[test]
+    fn a_close_without_an_earlier_unanswered_one_never_finds_the_page_gone() {
+        assert!(!page_gone(None, Instant::now()));
+    }
+
+    #[test]
+    fn the_page_is_gone_only_between_grace_and_timeout_after_the_unanswered_request() {
+        let asked = Instant::now();
+        let millisecond = Duration::from_millis(1);
+        let gone_after = |delay: Duration| page_gone(Some(asked), asked + delay);
+        assert!(!gone_after(
+            UNANSWERED_CLOSE_GRACE.saturating_sub(millisecond)
+        ));
+        assert!(gone_after(UNANSWERED_CLOSE_GRACE));
+        assert!(gone_after(UNANSWERED_CLOSE_TIMEOUT));
+        assert!(!gone_after(UNANSWERED_CLOSE_TIMEOUT + millisecond));
+    }
+
+    #[test]
+    fn a_double_click_inside_the_grace_keeps_counting_from_the_first_request() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.is_page_gone(asked));
-        assert!(watch.is_page_gone(asked + Duration::from_secs(1)));
-
-        let mut watch = CloseWatch::new();
-        assert!(!watch.is_page_gone(asked));
-        assert!(watch.is_page_gone(asked + UNANSWERED_CLOSE_TIMEOUT));
+        assert!(!watch.record_close_request(asked));
+        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE / 2));
+        assert!(watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
     }
 
     #[test]
     fn a_late_second_close_asks_the_page_again() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.is_page_gone(asked));
+        assert!(!watch.record_close_request(asked));
         let late = asked + UNANSWERED_CLOSE_TIMEOUT + Duration::from_millis(1);
-        assert!(!watch.is_page_gone(late));
-        assert!(watch.is_page_gone(late + Duration::from_secs(1)));
+        assert!(!watch.record_close_request(late));
+        assert!(watch.record_close_request(late + UNANSWERED_CLOSE_GRACE));
     }
 
     #[test]
     fn an_answered_close_request_never_finds_the_page_gone() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.is_page_gone(asked));
+        assert!(!watch.record_close_request(asked));
         watch.answer_sender.send(()).unwrap();
-        assert!(!watch.is_page_gone(asked + Duration::from_secs(1)));
+        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
     }
 }

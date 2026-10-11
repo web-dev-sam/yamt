@@ -24,6 +24,10 @@
     "longDescription": "yamt opens all conflicted files of a stopped git merge, rebase or cherry-pick in one window: your side on the left, theirs on the right, the result in the middle, with arrows to apply each change. Marking a file resolved stages it.",
     "license": "MIT",
     "copyright": "Copyright (c) 2026 Samuel Braun",
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,0 +1,585 @@
+diff --git a/.omp/skills/project-map/SKILL.md b/.omp/skills/project-map/SKILL.md
+index 94067fe..9f03125 100644
+--- a/.omp/skills/project-map/SKILL.md
++++ b/.omp/skills/project-map/SKILL.md
+@@ -50,7 +50,8 @@ frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry 
+ frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
+                     useMergeController (only ../editor importer), store.ts singleton; problem.ts (Problem types, attempt) + ProblemBar + problemText.ts (failures in words, 2.1);
+                     QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`);
+-                    ChoiceView + choiceText.ts (two-button choice for files the editor cannot show: sentences, labels, resolved line, plan §2 #36)
++                    ChoiceView + choiceText.ts (two-button choice for files the editor cannot show: sentences, labels, resolved line, plan §2 #36);
++                    sideHeaders.ts (the "Local (yours)" / "Remote (theirs)" column headers, read by MergeView and ChoiceView)
+ frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), creates the store, loads the file list, mounts App
+ frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
+ frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself
+diff --git a/frontend/src/editor/internal/side.ts b/frontend/src/editor/internal/side.ts
+index 896bcdc..9cbf180 100644
+--- a/frontend/src/editor/internal/side.ts
++++ b/frontend/src/editor/internal/side.ts
+@@ -1,6 +1,6 @@
+-import type { Chunk } from "../../ipc";
++import type { Chunk, Side } from "../../ipc";
+ 
+-export type Side = "local" | "remote";
++export type { Side } from "../../ipc";
+ 
+ const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
+   LocalOnly: ["local"],
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 1981321..dda07de 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -16,7 +16,7 @@ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+ 
+ type Records = {
+   readonly fixtures: ReadonlyMap<string, FileMergeData>;
+-  readonly finished: Map<string, string>;
++  readonly finished: Set<string>;
+ };
+ 
+ // Stryker disable all: Vite needs import.meta.glob arguments as literals
+@@ -133,16 +133,15 @@ function entries({ fixtures, finished }: Records): FileEntry[] {
+   }));
+ }
+ 
+-function changed(
++function updateKnown(
+   records: Records,
+   path: string,
+-  change: (data: FileMergeData) => void,
++  update: () => void,
+ ): SourceResult<FileEntry[]> {
+-  const data = records.fixtures.get(path);
+-  if (data === undefined) {
++  if (!records.fixtures.has(path)) {
+     return unknownPath(path);
+   }
+-  change(data);
++  update();
+   return { ok: true, value: entries(records) };
+ }
+ 
+@@ -161,7 +160,7 @@ export function createFixtureSource(
+   log: Log,
+   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+ ): ChunkSource {
+-  const records: Records = { fixtures: parseFixtures(files), finished: new Map() };
++  const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
+ 
+   return {
+     async listFiles() {
+@@ -172,13 +171,13 @@ export function createFixtureSource(
+       return data === undefined ? unknownPath(path) : { ok: true, value: data };
+     },
+     async finishFile(path, text) {
+-      return changed(records, path, () => {
+-        records.finished.set(path, text);
++      return updateKnown(records, path, () => {
++        records.finished.add(path);
+         log.info("fixture.finish", { path, text });
+       });
+     },
+     async resetFile(path) {
+-      return changed(records, path, () => {
++      return updateKnown(records, path, () => {
+         records.finished.delete(path);
+       });
+     },
+@@ -186,8 +185,8 @@ export function createFixtureSource(
+       return describeRecord(path, records.fixtures.get(path));
+     },
+     async takeSide(path, side) {
+-      return changed(records, path, (data) => {
+-        records.finished.set(path, data[side]);
++      return updateKnown(records, path, () => {
++        records.finished.add(path);
+         log.info("fixture.take", { path, side });
+       });
+     },
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 89ef416..e38260e 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -3,6 +3,7 @@ import { computed } from "vue";
+ 
+ import type { Side } from "../ipc";
+ import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { SIDE_HEADERS } from "./sideHeaders";
+ import { useAppStore, type Choice } from "./store";
+ 
+ type Column = {
+@@ -15,10 +16,6 @@ type Column = {
+ 
+ const props = defineProps<{ choice: Choice; shown: boolean }>();
+ 
+-const HEADERS: Readonly<Record<Side, string>> = {
+-  local: "Local (yours)",
+-  remote: "Remote (theirs)",
+-};
+ const SIDES: readonly Side[] = ["local", "remote"];
+ 
+ const { takeSide, reset } = useAppStore();
+@@ -26,7 +23,7 @@ const { takeSide, reset } = useAppStore();
+ const columns = computed(() =>
+   SIDES.map((side): Column => ({
+     side,
+-    header: HEADERS[side],
++    header: SIDE_HEADERS[side],
+     sentence: sideSentence(props.choice.sides[side]),
+     tooltip: sideTooltip(props.choice.sides[side]),
+     button: sideButton(props.choice.sides, side),
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 42a6a17..230c8ff 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -3,6 +3,7 @@ import { onUnmounted, useTemplateRef } from "vue";
+ 
+ import type { FileMergeData } from "../ipc";
+ import MergeToolbar from "./MergeToolbar.vue";
++import { SIDE_HEADERS } from "./sideHeaders";
+ import { useAppStore, type FileWork } from "./store";
+ import { useMergeController } from "./useMergeController";
+ 
+@@ -45,11 +46,15 @@ function markResolved(): void {
+     <section
+       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
+     >
+-      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Local (yours)</h2>
++      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
++        {{ SIDE_HEADERS.local }}
++      </h2>
+       <div class="border-b border-separator bg-window" />
+       <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Result</h2>
+       <div class="border-b border-separator bg-window" />
+-      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Remote (theirs)</h2>
++      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
++        {{ SIDE_HEADERS.remote }}
++      </h2>
+ 
+       <div ref="left" class="min-h-0 min-w-0" />
+       <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+diff --git a/frontend/src/ui/sideHeaders.ts b/frontend/src/ui/sideHeaders.ts
+new file mode 100644
+index 0000000..6f0f5d6
+--- /dev/null
++++ b/frontend/src/ui/sideHeaders.ts
+@@ -0,0 +1,6 @@
++import type { Side } from "../ipc";
++
++export const SIDE_HEADERS: Readonly<Record<Side, string>> = {
++  local: "Local (yours)",
++  remote: "Remote (theirs)",
++};
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 4e9d7a1..27be08a 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -9,7 +9,7 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+-import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
++import { createAppStore, useAppStore, type AppStore, type Choice, type FileWork } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -688,19 +688,29 @@ test("a reset landing in the background keeps another file's problem; a problem
+ });
+ 
+ const LOGO = "assets/logo.bin";
++const REMOVED = "docs/removed.md";
+ const LOGO_ENTRY: FileEntry = { ...entry(LOGO), unsupported: "Binary" };
+-const REMOVED_ENTRY: FileEntry = { ...entry("docs/removed.md"), unsupported: "RemoteDeleted" };
++const REMOVED_ENTRY: FileEntry = { ...entry(REMOVED), unsupported: "RemoteDeleted" };
+ const LOGO_SIDES: FileSides = {
+   path: LOGO,
+   reason: "Binary",
+   local: { kind: "Binary", bytes: 11 },
+   remote: { kind: "Binary", bytes: 12 },
+ };
++const REMOVED_SIDES: FileSides = {
++  path: REMOVED,
++  reason: "RemoteDeleted",
++  local: { kind: "Text", lines: 3 },
++  remote: { kind: "Missing" },
++};
+ 
+-function choiceSource(overrides: Partial<ChunkSource>): { source: ChunkSource; calls: string[] } {
++function choiceSource(
++  overrides: Partial<ChunkSource>,
++  files: FileEntry[] = [entry("a.ts"), LOGO_ENTRY],
++): { source: ChunkSource; calls: string[] } {
+   const calls: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve([entry("a.ts"), LOGO_ENTRY]),
++    listFiles: () => Promise.resolve(files),
+     loadFile: async (path) => {
+       calls.push(`loadFile ${path}`);
+       return ok(await dataFor(path));
+@@ -708,15 +718,18 @@ function choiceSource(overrides: Partial<ChunkSource>): { source: ChunkSource; c
+     finishFile: () => Promise.reject(new Error("not used")),
+     resetFile: (path) => {
+       calls.push(`resetFile ${path}`);
+-      return Promise.resolve(ok([entry("a.ts"), LOGO_ENTRY]));
++      return Promise.resolve(ok(files));
+     },
+     describeFile: (path) => {
+       calls.push(`describeFile ${path}`);
+-      return Promise.resolve(ok(LOGO_SIDES));
++      return Promise.resolve(ok(path === REMOVED ? REMOVED_SIDES : LOGO_SIDES));
+     },
+     takeSide: (path, side) => {
+       calls.push(`takeSide ${path} ${side}`);
+-      return Promise.resolve(ok([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]));
++      const taken = files.map((file): FileEntry =>
++        file.path === path ? { ...file, status: "Resolved" } : file,
++      );
++      return Promise.resolve(ok(taken));
+     },
+     ...overrides,
+   };
+@@ -775,25 +788,64 @@ test("a failed describe is a failed open of that file and shows no choice", asyn
+   expect(lines.error).toEqual([`[error] store.open_failed {path: "${LOGO}", kind: "UnknownPath"}`]);
+ });
+ 
+-test("taking a side updates the list, records the side, and clears the problem", async () => {
+-  spyConsole();
+-  const { source, calls } = choiceSource({
+-    listFiles: () => Promise.resolve([LOGO_ENTRY]),
+-    loadFile: () => Promise.resolve({ ok: false, failure: { kind: "UnknownPath", path: "x" } }),
+-  });
++async function twoChoices(
++  overrides: Partial<ChunkSource>,
++): Promise<{ store: AppStore; calls: string[]; removed: Choice | undefined }> {
++  const { source, calls } = choiceSource(overrides, [LOGO_ENTRY, REMOVED_ENTRY]);
+   const store = createAppStore(source);
+   await store.loadFiles();
+-  await store.open("gone.ts");
+-  expect(store.problem.value).not.toBeNull();
++  await store.open(REMOVED);
++  return { store, calls, removed: store.choices.value[1] };
++}
++
++test("taking a side updates the list, marks only that file taken, and clears a problem about it", async () => {
++  spyConsole();
++  const git: SourceFailure = { kind: "Git", message: "index.lock exists" };
++  const takes: string[] = [];
++  const { store, removed } = await twoChoices({
++    takeSide: (path, side) => {
++      takes.push(`${path} ${side}`);
++      return Promise.resolve(
++        takes.length === 1
++          ? { ok: false, failure: git }
++          : ok([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]),
++      );
++    },
++  });
++  await store.takeSide(LOGO, "remote");
++  expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: git });
+ 
+   await store.takeSide(LOGO, "remote");
+ 
+-  expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} remote`]);
+-  expect(store.files.value).toEqual([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]);
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
++  expect(takes).toEqual([`${LOGO} remote`, `${LOGO} remote`]);
++  expect(store.files.value).toEqual([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]);
++  expect(store.choices.value).toEqual([
++    { sides: LOGO_SIDES, taken: "remote" },
++    { sides: REMOVED_SIDES, taken: null },
++  ]);
++  expect(store.choices.value[1]).toBe(removed);
+   expect(store.problem.value).toBeNull();
+ });
+ 
++test("a take keeps a problem about another file", async () => {
++  spyConsole();
++  const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
++  const { source } = choiceSource(
++    { loadFile: () => Promise.resolve({ ok: false, failure: unknown }) },
++    [LOGO_ENTRY],
++  );
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open("gone.ts");
++  const gone = store.problem.value;
++  expect(gone).toEqual({ action: "open", path: "gone.ts", cause: unknown });
++
++  await store.takeSide(LOGO, "remote");
++
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
++  expect(store.problem.value).toBe(gone);
++});
++
+ test("a failed take keeps the list and the choice and names the file", async () => {
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git rm failed" };
+@@ -821,7 +873,7 @@ function describedLater(): {
+   describes: ((result: SourceResult<FileSides>) => void)[];
+ } {
+   const describes: ((result: SourceResult<FileSides>) => void)[] = [];
+-  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
++  const { source, calls } = choiceSource({}, [LOGO_ENTRY, REMOVED_ENTRY]);
+   source.describeFile = (path) => {
+     calls.push(`describeFile ${path}`);
+     return new Promise((resolve) => {
+@@ -835,6 +887,7 @@ async function takenChoice(): Promise<{
+   store: AppStore;
+   calls: string[];
+   describes: ((result: SourceResult<FileSides>) => void)[];
++  removed: Choice | undefined;
+ }> {
+   const { source, calls, describes } = describedLater();
+   const store = createAppStore(source);
+@@ -844,66 +897,75 @@ async function takenChoice(): Promise<{
+   });
+   describes[0]?.(ok(LOGO_SIDES));
+   await loading;
++  const opening = store.open(REMOVED);
++  describes[1]?.(ok(REMOVED_SIDES));
++  await opening;
+   await store.takeSide(LOGO, "local");
+-  return { store, calls, describes };
++  return { store, calls, describes, removed: store.choices.value[1] };
+ }
+ 
+-test("reset of a taken choice forgets the side at once and describes the file again", async () => {
++test("reset of a taken choice forgets only its side at once and describes the file again", async () => {
+   spyConsole();
+-  const { store, calls, describes } = await takenChoice();
++  const { store, calls, describes, removed } = await takenChoice();
+   const fresh: FileSides = { ...LOGO_SIDES, local: { kind: "Binary", bytes: 13 } };
+ 
+   const resetting = store.reset(LOGO);
+   await vi.waitFor(() => {
+-    expect(describes).toHaveLength(2);
++    expect(describes).toHaveLength(3);
+   });
+ 
+-  expect(store.choices.value).toEqual([]);
+-  expect(store.files.value).toEqual([entry("a.ts"), LOGO_ENTRY]);
++  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
++  expect(store.files.value).toEqual([LOGO_ENTRY, REMOVED_ENTRY]);
+ 
+-  describes[1]?.(ok(fresh));
++  describes[2]?.(ok(fresh));
+   await resetting;
+ 
+   expect(calls).toEqual([
+     `describeFile ${LOGO}`,
++    `describeFile ${REMOVED}`,
+     `takeSide ${LOGO} local`,
+     `resetFile ${LOGO}`,
+     `describeFile ${LOGO}`,
+   ]);
+-  expect(store.choices.value).toEqual([{ sides: fresh, taken: null }]);
+-  expect(store.active.value).toBe(LOGO);
++  expect(store.choices.value).toEqual([
++    { sides: REMOVED_SIDES, taken: null },
++    { sides: fresh, taken: null },
++  ]);
++  expect(store.choices.value[0]).toBe(removed);
++  expect(store.active.value).toBe(REMOVED);
+ });
+ 
+ test("a failed describe after a reset is a failed open; opening the file again describes it", async () => {
+   spyConsole();
+-  const { store, describes } = await takenChoice();
++  const { store, describes, removed } = await takenChoice();
+   const unknown: SourceFailure = { kind: "UnknownPath", path: LOGO };
+ 
+   const resetting = store.reset(LOGO);
+   await vi.waitFor(() => {
+-    expect(describes).toHaveLength(2);
++    expect(describes).toHaveLength(3);
+   });
+-  describes[1]?.({ ok: false, failure: unknown });
++  describes[2]?.({ ok: false, failure: unknown });
+   await resetting;
+ 
+   expect(store.problem.value).toEqual({ action: "open", path: LOGO, cause: unknown });
+-  expect(store.choices.value).toEqual([]);
++  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
++  expect(store.choices.value[0]).toBe(removed);
+ 
+   const opening = store.open(LOGO);
+-  describes[2]?.(ok(LOGO_SIDES));
++  describes[3]?.(ok(LOGO_SIDES));
+   await opening;
+ 
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([
++    { sides: REMOVED_SIDES, taken: null },
++    { sides: LOGO_SIDES, taken: null },
++  ]);
+   expect(store.problem.value).toBeNull();
+ });
+ 
+ test("choices count toward everything resolved", async () => {
+   spyConsole();
+-  const { source } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
+-  const store = createAppStore({
+-    ...source,
+-    takeSide: () => Promise.resolve(ok([{ ...LOGO_ENTRY, status: "Resolved" }])),
+-  });
++  const { source } = choiceSource({}, [LOGO_ENTRY]);
++  const store = createAppStore(source);
+   await store.loadFiles();
+   expect(store.allResolved.value).toBe(false);
+ 
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 672c29c..9a8c198 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -8,7 +8,6 @@ import {
+   type FileMergeData,
+   type FileSides,
+   type Side,
+-  type SourceResult,
+ } from "../ipc";
+ import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+ import { exitMustAsk, finishMustAsk, type Question } from "./question";
+@@ -38,9 +37,12 @@ type State = {
+   latestLoad: number;
+ };
+ 
+-type Shared = "files" | "opened" | "choices" | "active" | "problem";
+-
+-export type AppStore = { readonly [K in Shared]: Readonly<State[K]> } & {
++export type AppStore = {
++  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
++  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
++  readonly choices: Readonly<ShallowRef<readonly Choice[]>>;
++  readonly active: Readonly<ShallowRef<string | null>>;
++  readonly problem: Readonly<ShallowRef<Problem | null>>;
+   readonly question: ComputedRef<Question | null>;
+   readonly allResolved: ComputedRef<boolean>;
+   loadFiles(): Promise<void>;
+@@ -107,6 +109,13 @@ function dismissProblem(state: State): void {
+   state.problem.value = null;
+ }
+ 
++function clearProblemAbout(state: State, path: string): void {
++  const problem = state.problem.value;
++  if (problem !== null && problem.action !== "list" && problem.path === path) {
++    state.problem.value = null;
++  }
++}
++
+ function track(state: State, path: string, work: FileWork): void {
+   state.work.set(path, work);
+ }
+@@ -133,18 +142,12 @@ async function loadFiles(state: State): Promise<void> {
+   }
+ }
+ 
+-function isUnsupported(state: State, path: string): boolean {
+-  return (state.files.value.find((file) => file.path === path)?.unsupported ?? null) !== null;
+-}
+-
+ async function open(state: State, path: string): Promise<void> {
+   const shown =
+     state.opened.value.some((file) => file.path === path) ||
+     state.choices.value.some((choice) => choice.sides.path === path);
+   if (!shown) {
+-    await (isUnsupported(state, path)
+-      ? load(state, path, () => state.source.describeFile(path), putChoice)
+-      : load(state, path, () => state.source.loadFile(path), putOpened));
++    await load(state, path);
+     return;
+   }
+   if (path === state.active.value) {
+@@ -155,18 +158,13 @@ async function open(state: State, path: string): Promise<void> {
+   state.problem.value = null;
+ }
+ 
+-async function load<T>(
+-  state: State,
+-  path: string,
+-  fetch: () => Promise<SourceResult<T>>,
+-  put: (state: State, value: T) => void,
+-): Promise<void> {
++async function load(state: State, path: string): Promise<void> {
+   state.latestLoad += 1;
+   const ticket = state.latestLoad;
+-  const outcome = await attempt(fetch);
++  const view = await fetchView(state, path);
+   const current = ticket === state.latestLoad;
+-  if (!outcome.ok) {
+-    const failure: Problem = { action: "open", path, cause: outcome.cause };
++  if (!view.ok) {
++    const failure: Problem = { action: "open", path, cause: view.cause };
+     logProblem(failure);
+     if (current) {
+       state.problem.value = failure;
+@@ -174,12 +172,22 @@ async function load<T>(
+     return;
+   }
+   if (current) {
+-    put(state, outcome.value);
++    view.value();
+     state.active.value = path;
+     state.problem.value = null;
+   }
+ }
+ 
++async function fetchView(state: State, path: string): Promise<Outcome<() => void>> {
++  const listed = state.files.value.find((file) => file.path === path);
++  if ((listed?.unsupported ?? null) !== null) {
++    const sides = await attempt(() => state.source.describeFile(path));
++    return sides.ok ? { ok: true, value: () => putChoice(state, sides.value) } : sides;
++  }
++  const data = await attempt(() => state.source.loadFile(path));
++  return data.ok ? { ok: true, value: () => putOpened(state, data.value) } : data;
++}
++
+ function putOpened(state: State, data: FileMergeData): void {
+   // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
+   const loaded = { ...data };
+@@ -219,7 +227,7 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
+   state.choices.value = state.choices.value.map((choice) =>
+     choice.sides.path === path ? { ...choice, taken: side } : choice,
+   );
+-  state.problem.value = null;
++  clearProblemAbout(state, path);
+ }
+ 
+ async function reset(state: State, path: string): Promise<void> {
+@@ -229,31 +237,14 @@ async function reset(state: State, path: string): Promise<void> {
+     return;
+   }
+   state.files.value = files.value;
+-  const fresh = await reopen(state, path);
+-  if (!fresh.ok) {
+-    report(state, { action: "open", path, cause: fresh.cause });
++  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
++  const view = await fetchView(state, path);
++  if (!view.ok) {
++    report(state, { action: "open", path, cause: view.cause });
+     return;
+   }
+-  const problem = state.problem.value;
+-  if (problem !== null && problem.action !== "list" && problem.path === path) {
+-    state.problem.value = null;
+-  }
+-}
+-
+-async function reopen(state: State, path: string): Promise<Outcome<unknown>> {
+-  if (!isUnsupported(state, path)) {
+-    const data = await attempt(() => state.source.loadFile(path));
+-    if (data.ok) {
+-      putOpened(state, data.value);
+-    }
+-    return data;
+-  }
+-  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
+-  const sides = await attempt(() => state.source.describeFile(path));
+-  if (sides.ok) {
+-    putChoice(state, sides.value);
+-  }
+-  return sides;
++  view.value();
++  clearProblemAbout(state, path);
+ }
+ 
+ function ask(state: State, question: Question): Promise<boolean> {

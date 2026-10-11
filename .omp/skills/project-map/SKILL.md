@@ -29,12 +29,15 @@ src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-spect
                     args, outcome (start-up decision, exit status), window (close fallback when the page is gone), commands (IpcError), frontend_log,
                     appimage (inside an AppImage a relative repo path is resolved against OWD; the cwd must stay for WebKit's helpers);
                     bins `yamt` and `export-bindings` (→ ipc/bindings.ts); tauri.conf.json (bundles: AppImage, deb, app, dmg); icons/icon.svg source (plan §2 #41)
-release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.md, docs/screenshot.png, .github/workflows/release.yml (draft release on a `v*` tag; plan §2 #38)
+release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.md (short summary), THIRD_PARTY_LICENSES.txt (full texts, GENERATED; shipped in every
+                    bundle via `bundle.resources`), docs/screenshot.png, .github/workflows/release.yml (draft release on a `v*` tag; plan §2 #38)
 scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-core, clippy threshold parity, `unsafe` only in src-tauri/src/graphics.rs
 scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map
 scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
 scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
 scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
+scripts/third-party-licenses.sh  `just third-party-licenses`: THIRD_PARTY_LICENSES.txt from `cargo metadata` + `pnpm licenses list --prod` + licence files on disk (jq);
+                    `ubuntu-versions` appends the AppImage's LGPL library versions and texts in the Linux release job
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
                     (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints]
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (the M1 source:
