@@ -56,10 +56,10 @@ index 001a5f3..d85aba4 100644
        this.#scroll.sync(rows);
        const press = this.#drag.press;
 diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
-index 4412690..98e34d7 100644
+index 4412690..e11c653 100644
 --- a/frontend/src/editor/internal/apply.test.ts
 +++ b/frontend/src/editor/internal/apply.test.ts
-@@ -26,18 +26,26 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
+@@ -26,18 +26,27 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
  
  async function synthetic(
    texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
@@ -73,6 +73,7 @@ index 4412690..98e34d7 100644
  ): Promise<FileMergeData> {
    const record = {
      path: "synthetic.ts",
++    deleted: null,
      ...texts,
 -    chunks: chunks.map((chunk, id) => ({
 -      id,
@@ -94,7 +95,7 @@ index 4412690..98e34d7 100644
      word_changes: chunks.map((_chunk, id) => ({
        chunk: id,
        local: { changed: [], removed_at: [] },
-@@ -431,6 +439,36 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
+@@ -431,6 +440,36 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
    expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
  });
  
