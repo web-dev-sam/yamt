@@ -24,7 +24,7 @@ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./interna
 import { languageOf } from "./internal/language";
 import { applyOnModClick } from "./internal/modClick";
 import { createPane, languageCompartment, paneText } from "./internal/pane";
-import { ScrollSync } from "./internal/scrollSync";
+import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
@@ -43,6 +43,7 @@ export type MergeHosts = {
 export type MergeOptions = { readonly readOnly: boolean };
 
 type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
+type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
 
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
@@ -53,7 +54,7 @@ export class MergeController {
   readonly #scroll: ScrollSync;
   readonly #drag: IconDrag;
   #frameId: number | null = null;
-  #rowsCache: ChunkRow[] | null = null;
+  #layoutCache: Layout | null = null;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
@@ -73,7 +74,7 @@ export class MergeController {
         this.#requestFrame();
       },
       released: (press) => {
-        this.#act(coveredAction(press, this.#rows(), this.#views));
+        this.#act(coveredAction(press, this.#layout().rows, this.#views));
       },
     });
     this.#scroll = new ScrollSync(this.#views, () => {
@@ -105,7 +106,7 @@ export class MergeController {
 
   readonly #repaint = EditorView.updateListener.of((update) => {
     if (rowsChanged(update, this.#field)) {
-      this.#rowsCache = null;
+      this.#layoutCache = null;
     }
     if (
       update.docChanged ||
@@ -211,9 +212,12 @@ export class MergeController {
     this.#summaryListener?.(summarize(after));
   }
 
-  #rows(): ChunkRow[] {
-    this.#rowsCache ??= chunkRows(this.#views, this.#views.center.state.field(this.#field));
-    return this.#rowsCache;
+  #layout(): Layout {
+    if (this.#layoutCache === null) {
+      const rows = chunkRows(this.#views, this.#views.center.state.field(this.#field));
+      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(this.#views)) };
+    }
+    return this.#layoutCache;
   }
 
   #showCovered(covered: ChunkAction | null): void {
@@ -242,8 +246,8 @@ export class MergeController {
     this.#frameId ??= requestAnimationFrame(() => {
       this.#frameId = null;
       this.#showFindSpace();
-      const rows = this.#rows();
-      this.#scroll.sync(rows);
+      const { rows, anchors } = this.#layout();
+      this.#scroll.sync(anchors);
       const press = this.#drag.press;
       const covered = press === null ? null : coveredAction(press, rows, this.#views);
       this.#showCovered(covered);

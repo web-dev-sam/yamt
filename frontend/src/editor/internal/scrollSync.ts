@@ -47,7 +47,7 @@ function contentEnd(view: EditorView): number {
   return view.lineBlockAt(view.state.doc.length).bottom;
 }
 
-function ends(views: PaneViews): Anchor {
+export function contentEnds(views: PaneViews): Anchor {
   return {
     left: contentEnd(views.left),
     center: contentEnd(views.center),
@@ -67,7 +67,6 @@ export class ScrollSync {
   #echoes: readonly Pane[] = [];
   #clearEchoes: number | null = null;
   #syncedTops: Readonly<Record<Pane, number>> | null = null;
-  #anchors: { readonly rows: readonly SpanRow[]; readonly anchors: Anchor[] } | null = null;
 
   constructor(views: PaneViews, requestFrame: () => void) {
     this.#views = views;
@@ -85,14 +84,14 @@ export class ScrollSync {
     }
   }
 
-  sync(rows: readonly SpanRow[]): void {
+  sync(anchors: readonly Anchor[]): void {
     const source = this.#source;
     this.#source = null;
     const views = this.#views;
     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.[source]) {
       return;
     }
-    const at = targets(this.#anchorsOf(rows), source, middle(views[source]));
+    const at = targets(anchors, source, middle(views[source]));
     const followers = PANES.filter((pane) => pane !== source);
     for (const pane of followers) {
       const { scrollDOM, documentPadding } = views[pane];
@@ -111,15 +110,6 @@ export class ScrollSync {
       this.#clearEchoes = null;
       this.#echoes = [];
     });
-  }
-
-  #anchorsOf(rows: readonly SpanRow[]): Anchor[] {
-    if (this.#anchors?.rows === rows) {
-      return this.#anchors.anchors;
-    }
-    const anchors = anchorsOf(rows, ends(this.#views));
-    this.#anchors = { rows, anchors };
-    return anchors;
   }
 
   destroy(): void {

@@ -1,0 +1,45 @@
+import { bandPath } from "../../connectors";
+import type { Chunk } from "../../ipc";
+import type { ChunkRow } from "./geometry";
+import type { Side } from "./side";
+import { applyMode, isSideOpen, type ApplyMode } from "./status";
+import { chunkTone, type Tone } from "./tone";
+
+export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
+export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+
+export function crossesStrip(top: number, bottom: number, height: number): boolean {
+  return top <= height && bottom >= 0;
+}
+
+export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+  return rows
+    .filter((row) => isSideOpen(row.chunk, row.status, side))
+    .map((row) => ({
+      top: (side === "local" ? row.left : row.right).top,
+      chunk: row.chunk,
+      mode: applyMode(row.status, side),
+    }));
+}
+
+export function bandPaints(
+  { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
+  shifts: { readonly left: number; readonly right: number },
+  size: { readonly width: number; readonly height: number },
+): BandPaint[] {
+  const paints = [];
+  for (const row of rows) {
+    if (isSideOpen(row.chunk, row.status, side)) {
+      const left = side === "local" ? row.left : row.center;
+      const right = side === "local" ? row.center : row.right;
+      const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+      const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
+      const top = Math.min(onLeft.top, onRight.top);
+      if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
+        const d = bandPath({ left: onLeft, right: onRight }, size.width);
+        paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
+      }
+    }
+  }
+  return paints;
+}

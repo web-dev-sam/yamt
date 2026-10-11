@@ -14,7 +14,7 @@ import {
 } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations } from "./decorations";
-import { gapArrows } from "./geometry";
+import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
 import { paneState, paneText } from "./pane";
 import type { Side } from "./side";

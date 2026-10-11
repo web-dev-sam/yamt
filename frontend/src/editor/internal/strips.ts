@@ -8,15 +8,8 @@ import xIcon from "~icons/lucide/x?raw";
 
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
-import {
-  bandPaints,
-  crossesStrip,
-  gapArrows,
-  type Arrow,
-  type BandPaint,
-  type ChunkRow,
-  type PaneViews,
-} from "./geometry";
+import { bandPaints, crossesStrip, gapArrows, type Arrow, type BandPaint } from "./gap";
+import type { ChunkRow, PaneViews } from "./geometry";
 import type { Side } from "./side";
 import type { ApplyMode } from "./status";
 
@@ -28,15 +21,22 @@ export type IconPress = {
 
 type OnPress = (press: IconPress, event: PointerEvent) => void;
 type GapPanes = { readonly left: EditorView; readonly right: EditorView };
-type Buttons = { readonly applyX: number; readonly ignoreX: number; readonly lineHeight: number };
-type GapPaint = {
-  readonly bands: readonly BandPaint[];
-  readonly arrows: readonly Arrow[];
-  readonly buttons: Buttons;
+type ButtonLayout = {
+  readonly applyX: number;
+  readonly ignoreX: number;
+  readonly lineHeight: number;
 };
+type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
+type ArrowPaint = {
+  readonly placed: readonly PlacedArrow[];
+  readonly layout: ButtonLayout;
+  readonly onPress: OnPress;
+};
+type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
 type ArrowRow = {
   readonly node: SVGGElement;
-  readonly look: string;
+  readonly mode: ApplyMode;
+  readonly layout: ButtonLayout;
   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
 };
 
@@ -110,11 +110,12 @@ function actionButton(
 }
 
 function arrowRow(
-  { arrow, side, look }: { readonly arrow: Arrow; readonly side: Side; readonly look: string },
-  { applyX, ignoreX, lineHeight }: Buttons,
+  { arrow, side }: { readonly arrow: Arrow; readonly side: Side },
+  layout: ButtonLayout,
   onPress: OnPress,
 ): ArrowRow {
   const { chunk, mode } = arrow;
+  const { applyX, ignoreX, lineHeight } = layout;
   const apply: IconPress = { kind: "apply", chunk, side };
   const ignore: IconPress = { kind: "ignore", chunk, side };
   const applyIcon = { icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] };
@@ -125,12 +126,22 @@ function arrowRow(
   node.append(applyButton, ignoreButton);
   return {
     node,
-    look,
+    mode,
+    layout,
     buttons: [
       [applyButton, apply],
       [ignoreButton, ignore],
     ],
   };
+}
+
+function sameShape(row: ArrowRow, mode: ApplyMode, layout: ButtonLayout): boolean {
+  return (
+    row.mode === mode &&
+    row.layout.applyX === layout.applyX &&
+    row.layout.ignoreX === layout.ignoreX &&
+    row.layout.lineHeight === layout.lineHeight
+  );
 }
 
 function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
@@ -146,10 +157,9 @@ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
 
 function dropMissing<T>(
   nodes: Map<Chunk["id"], T>,
-  kept: readonly { readonly chunk: Chunk }[],
+  keptIds: ReadonlySet<Chunk["id"]>,
   remove: (node: T) => void,
 ): void {
-  const keptIds = new Set(kept.map(({ chunk }) => chunk.id));
   for (const [id, node] of nodes) {
     if (!keptIds.has(id)) {
       remove(node);
@@ -177,39 +187,37 @@ class GapStrip {
 
   measure(panes: GapPanes, rows: readonly ChunkRow[]): GapPaint {
     const strip = this.#strip;
-    const side = this.#side;
     const stripTop = strip.getBoundingClientRect().top;
     const size = { width: strip.clientWidth, height: strip.clientHeight };
     const shifts = {
       left: panes.left.documentTop - stripTop,
       right: panes.right.documentTop - stripTop,
     };
-    const shift = side === "local" ? shifts.left : shifts.right;
-    const lineHeight = (side === "local" ? panes.left : panes.right).defaultLineHeight;
-    const applyX = side === "local" ? 0 : size.width - ACTION_WIDTH_PX;
-    const ignoreX = side === "local" ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
-    const arrows =
-      this.#onPress === null
-        ? []
-        : gapArrows(rows, side)
-            .map((arrow) => ({ ...arrow, top: arrow.top + shift }))
-            .filter(({ top }) => crossesStrip(top, top + lineHeight, size.height));
-    return {
-      bands: bandPaints({ rows, side }, shifts, size),
-      arrows,
-      buttons: { applyX, ignoreX, lineHeight },
-    };
+    const bands = bandPaints({ rows, side: this.#side }, shifts, size);
+    if (this.#onPress === null) {
+      return { bands, arrows: null };
+    }
+    const local = this.#side === "local";
+    const shift = local ? shifts.left : shifts.right;
+    const lineHeight = (local ? panes.left : panes.right).defaultLineHeight;
+    const applyX = local ? 0 : size.width - ACTION_WIDTH_PX;
+    const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
+    const placed = gapArrows(rows, this.#side)
+      .map((arrow) => ({ arrow, y: arrow.top + shift }))
+      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
+    const layout = { applyX, ignoreX, lineHeight };
+    return { bands, arrows: { placed, layout, onPress: this.#onPress } };
   }
 
-  paint({ bands, arrows, buttons }: GapPaint, covered: ChunkAction | null): void {
+  paint({ bands, arrows }: GapPaint, covered: ChunkAction | null): void {
     this.#paintBands(bands);
-    if (this.#onPress !== null) {
-      this.#paintArrows({ arrows, buttons, covered }, this.#onPress);
+    if (arrows !== null) {
+      this.#paintArrows(arrows, covered);
     }
   }
 
   #paintBands(paints: readonly BandPaint[]): void {
-    dropMissing(this.#bands, paints, (path) => {
+    dropMissing(this.#bands, new Set(paints.map(({ chunk }) => chunk.id)), (path) => {
       path.remove();
     });
     const nodes = paints.map(({ chunk, tone, d }) => {
@@ -225,26 +233,18 @@ class GapStrip {
     placeInOrder(this.#bandLayer, nodes);
   }
 
-  #paintArrows(
-    {
-      arrows,
-      buttons,
-      covered,
-    }: Pick<GapPaint, "arrows" | "buttons"> & { readonly covered: ChunkAction | null },
-    onPress: OnPress,
-  ): void {
-    dropMissing(this.#arrows, arrows, (row) => {
+  #paintArrows({ placed, layout, onPress }: ArrowPaint, covered: ChunkAction | null): void {
+    dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
       row.node.remove();
     });
-    const nodes = arrows.map((arrow) => {
-      const look = `${arrow.mode} ${buttons.applyX} ${buttons.ignoreX} ${buttons.lineHeight}`;
+    const nodes = placed.map(({ arrow, y }) => {
       let row = this.#arrows.get(arrow.chunk.id);
-      if (row?.look !== look) {
+      if (row === undefined || !sameShape(row, arrow.mode, layout)) {
         row?.node.remove();
-        row = arrowRow({ arrow, side: this.#side, look }, buttons, onPress);
+        row = arrowRow({ arrow, side: this.#side }, layout, onPress);
         this.#arrows.set(arrow.chunk.id, row);
       }
-      row.node.setAttribute("transform", `translate(0 ${arrow.top})`);
+      row.node.setAttribute("transform", `translate(0 ${y})`);
       for (const [button, press] of row.buttons) {
         button.classList.toggle("chunk-action-covered", isCovered(covered, press));
       }

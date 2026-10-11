@@ -1,0 +1,489 @@
+diff --git i/frontend/src/editor/index.ts w/frontend/src/editor/index.ts
+index bed864d..df541a8 100644
+--- i/frontend/src/editor/index.ts
++++ w/frontend/src/editor/index.ts
+@@ -24,7 +24,7 @@ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./interna
+ import { languageOf } from "./internal/language";
+ import { applyOnModClick } from "./internal/modClick";
+ import { createPane, languageCompartment, paneText } from "./internal/pane";
+-import { ScrollSync } from "./internal/scrollSync";
++import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+@@ -43,6 +43,7 @@ export type MergeHosts = {
+ export type MergeOptions = { readonly readOnly: boolean };
+ 
+ type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
++type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
+ 
+ export class MergeController {
+   readonly #field: StateField<readonly ChunkSpan[]>;
+@@ -53,7 +54,7 @@ export class MergeController {
+   readonly #scroll: ScrollSync;
+   readonly #drag: IconDrag;
+   #frameId: number | null = null;
+-  #rowsCache: ChunkRow[] | null = null;
++  #layoutCache: Layout | null = null;
+   #summaryListener: ((summary: MergeSummary) => void) | null = null;
+   #destroyed = false;
+ 
+@@ -73,7 +74,7 @@ export class MergeController {
+         this.#requestFrame();
+       },
+       released: (press) => {
+-        this.#act(coveredAction(press, this.#rows(), this.#views));
++        this.#act(coveredAction(press, this.#layout().rows, this.#views));
+       },
+     });
+     this.#scroll = new ScrollSync(this.#views, () => {
+@@ -105,7 +106,7 @@ export class MergeController {
+ 
+   readonly #repaint = EditorView.updateListener.of((update) => {
+     if (rowsChanged(update, this.#field)) {
+-      this.#rowsCache = null;
++      this.#layoutCache = null;
+     }
+     if (
+       update.docChanged ||
+@@ -211,9 +212,12 @@ export class MergeController {
+     this.#summaryListener?.(summarize(after));
+   }
+ 
+-  #rows(): ChunkRow[] {
+-    this.#rowsCache ??= chunkRows(this.#views, this.#views.center.state.field(this.#field));
+-    return this.#rowsCache;
++  #layout(): Layout {
++    if (this.#layoutCache === null) {
++      const rows = chunkRows(this.#views, this.#views.center.state.field(this.#field));
++      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(this.#views)) };
++    }
++    return this.#layoutCache;
+   }
+ 
+   #showCovered(covered: ChunkAction | null): void {
+@@ -242,8 +246,8 @@ export class MergeController {
+     this.#frameId ??= requestAnimationFrame(() => {
+       this.#frameId = null;
+       this.#showFindSpace();
+-      const rows = this.#rows();
+-      this.#scroll.sync(rows);
++      const { rows, anchors } = this.#layout();
++      this.#scroll.sync(anchors);
+       const press = this.#drag.press;
+       const covered = press === null ? null : coveredAction(press, rows, this.#views);
+       this.#showCovered(covered);
+diff --git i/frontend/src/editor/internal/apply.test.ts w/frontend/src/editor/internal/apply.test.ts
+index 8adcfcc..8275a59 100644
+--- i/frontend/src/editor/internal/apply.test.ts
++++ w/frontend/src/editor/internal/apply.test.ts
+@@ -14,7 +14,7 @@ import {
+ } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations } from "./decorations";
+-import { gapArrows } from "./geometry";
++import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+ import { paneState, paneText } from "./pane";
+ import type { Side } from "./side";
+diff --git i/frontend/src/editor/internal/drag.test.ts w/frontend/src/editor/internal/drag.test.ts
+index 431d376..cd76e73 100644
+--- i/frontend/src/editor/internal/drag.test.ts
++++ w/frontend/src/editor/internal/drag.test.ts
+@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
+ 
+ import { loadFixture, type Chunk } from "../../ipc";
+ import { coveredChunks } from "./drag";
+-import { gapArrows, type ChunkRow } from "./geometry";
++import { gapArrows } from "./gap";
++import type { ChunkRow } from "./geometry";
+ import type { Side } from "./side";
+ import { PENDING, type ChunkStatus } from "./status";
+ 
+diff --git i/frontend/src/editor/internal/drag.ts w/frontend/src/editor/internal/drag.ts
+index ac24705..fcff999 100644
+--- i/frontend/src/editor/internal/drag.ts
++++ w/frontend/src/editor/internal/drag.ts
+@@ -1,6 +1,7 @@
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+-import { gapArrows, type ChunkRow, type PaneViews } from "./geometry";
++import { gapArrows } from "./gap";
++import type { ChunkRow, PaneViews } from "./geometry";
+ import type { IconPress } from "./strips";
+ 
+ type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
+diff --git i/frontend/src/editor/internal/geometry.test.ts w/frontend/src/editor/internal/geometry.test.ts
+index 3da2067..2a71472 100644
+--- i/frontend/src/editor/internal/geometry.test.ts
++++ w/frontend/src/editor/internal/geometry.test.ts
+@@ -3,11 +3,10 @@ import { expect, test } from "vitest";
+ 
+ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
+-import { crossesStrip, rangeSpan, rowsChanged } from "./geometry";
++import { rangeSpan, rowsChanged } from "./geometry";
+ import { statusAfterIgnore } from "./status";
+ 
+ const LINE_PX = 20;
+-const STRIP_PX = 600;
+ 
+ function spanOf(
+   lines: readonly string[],
+@@ -78,15 +77,3 @@ test("chunk rows go stale on a status change, an edit or new measurements, not o
+     true,
+   );
+ });
+-
+-test("a shape is drawn while any part of it touches the strip, edges included", () => {
+-  expect(crossesStrip(-LINE_PX, 0, STRIP_PX)).toBe(true);
+-  expect(crossesStrip(STRIP_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
+-  expect(crossesStrip(-LINE_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
+-  expect(crossesStrip(LINE_PX, LINE_PX, STRIP_PX)).toBe(true);
+-});
+-
+-test("a shape wholly above or below the strip is left out", () => {
+-  expect(crossesStrip(-LINE_PX - 1, -1, STRIP_PX)).toBe(false);
+-  expect(crossesStrip(STRIP_PX + 1, STRIP_PX + LINE_PX, STRIP_PX)).toBe(false);
+-});
+diff --git i/frontend/src/editor/internal/geometry.ts w/frontend/src/editor/internal/geometry.ts
+index 2f32af6..197c06b 100644
+--- i/frontend/src/editor/internal/geometry.ts
++++ w/frontend/src/editor/internal/geometry.ts
+@@ -1,19 +1,14 @@
+ import type { StateField, Text } from "@codemirror/state";
+ import type { EditorView, ViewUpdate } from "@codemirror/view";
+ 
+-import { bandPath, type Span } from "../../connectors";
+-import type { Chunk } from "../../ipc";
++import type { Span } from "../../connectors";
+ import type { ChunkSpan } from "./chunkField";
+ import { lineSpan } from "./lineSpan";
+-import type { Side } from "./side";
+-import { applyMode, isSideOpen, type ApplyMode, type ChunkState } from "./status";
+-import { chunkTone, type Tone } from "./tone";
++import type { ChunkState } from "./status";
+ 
+ export type Pane = "left" | "center" | "right";
+ export type PaneViews = Readonly<Record<Pane, EditorView>>;
+ export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+-export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
+-export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+ 
+ export function rangeSpan(
+   doc: Text,
+@@ -55,39 +50,3 @@ export function rowsChanged(
+     update.startState.field(field, false) !== update.state.field(field, false)
+   );
+ }
+-
+-export function crossesStrip(top: number, bottom: number, height: number): boolean {
+-  return top <= height && bottom >= 0;
+-}
+-
+-export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+-  return rows
+-    .filter((row) => isSideOpen(row.chunk, row.status, side))
+-    .map((row) => ({
+-      top: (side === "local" ? row.left : row.right).top,
+-      chunk: row.chunk,
+-      mode: applyMode(row.status, side),
+-    }));
+-}
+-
+-export function bandPaints(
+-  { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
+-  shifts: { readonly left: number; readonly right: number },
+-  size: { readonly width: number; readonly height: number },
+-): BandPaint[] {
+-  const paints = [];
+-  for (const row of rows) {
+-    if (isSideOpen(row.chunk, row.status, side)) {
+-      const left = side === "local" ? row.left : row.center;
+-      const right = side === "local" ? row.center : row.right;
+-      const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+-      const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
+-      const top = Math.min(onLeft.top, onRight.top);
+-      if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
+-        const d = bandPath({ left: onLeft, right: onRight }, size.width);
+-        paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
+-      }
+-    }
+-  }
+-  return paints;
+-}
+diff --git i/frontend/src/editor/internal/scrollSync.ts w/frontend/src/editor/internal/scrollSync.ts
+index 8a888cb..0b3493b 100644
+--- i/frontend/src/editor/internal/scrollSync.ts
++++ w/frontend/src/editor/internal/scrollSync.ts
+@@ -47,7 +47,7 @@ function contentEnd(view: EditorView): number {
+   return view.lineBlockAt(view.state.doc.length).bottom;
+ }
+ 
+-function ends(views: PaneViews): Anchor {
++export function contentEnds(views: PaneViews): Anchor {
+   return {
+     left: contentEnd(views.left),
+     center: contentEnd(views.center),
+@@ -67,7 +67,6 @@ export class ScrollSync {
+   #echoes: readonly Pane[] = [];
+   #clearEchoes: number | null = null;
+   #syncedTops: Readonly<Record<Pane, number>> | null = null;
+-  #anchors: { readonly rows: readonly SpanRow[]; readonly anchors: Anchor[] } | null = null;
+ 
+   constructor(views: PaneViews, requestFrame: () => void) {
+     this.#views = views;
+@@ -85,14 +84,14 @@ export class ScrollSync {
+     }
+   }
+ 
+-  sync(rows: readonly SpanRow[]): void {
++  sync(anchors: readonly Anchor[]): void {
+     const source = this.#source;
+     this.#source = null;
+     const views = this.#views;
+     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.[source]) {
+       return;
+     }
+-    const at = targets(this.#anchorsOf(rows), source, middle(views[source]));
++    const at = targets(anchors, source, middle(views[source]));
+     const followers = PANES.filter((pane) => pane !== source);
+     for (const pane of followers) {
+       const { scrollDOM, documentPadding } = views[pane];
+@@ -113,15 +112,6 @@ export class ScrollSync {
+     });
+   }
+ 
+-  #anchorsOf(rows: readonly SpanRow[]): Anchor[] {
+-    if (this.#anchors?.rows === rows) {
+-      return this.#anchors.anchors;
+-    }
+-    const anchors = anchorsOf(rows, ends(this.#views));
+-    this.#anchors = { rows, anchors };
+-    return anchors;
+-  }
+-
+   destroy(): void {
+     this.#listeners.abort();
+     if (this.#clearEchoes !== null) {
+diff --git i/frontend/src/editor/internal/sides.test.ts w/frontend/src/editor/internal/sides.test.ts
+index e5b5556..b449e91 100644
+--- i/frontend/src/editor/internal/sides.test.ts
++++ w/frontend/src/editor/internal/sides.test.ts
+@@ -7,7 +7,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+-import { gapArrows } from "./geometry";
++import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+ import { paneState } from "./pane";
+ import type { Side } from "./side";
+diff --git i/frontend/src/editor/internal/strips.ts w/frontend/src/editor/internal/strips.ts
+index e1ef1fd..0255a22 100644
+--- i/frontend/src/editor/internal/strips.ts
++++ w/frontend/src/editor/internal/strips.ts
+@@ -8,15 +8,8 @@ import xIcon from "~icons/lucide/x?raw";
+ 
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+-import {
+-  bandPaints,
+-  crossesStrip,
+-  gapArrows,
+-  type Arrow,
+-  type BandPaint,
+-  type ChunkRow,
+-  type PaneViews,
+-} from "./geometry";
++import { bandPaints, crossesStrip, gapArrows, type Arrow, type BandPaint } from "./gap";
++import type { ChunkRow, PaneViews } from "./geometry";
+ import type { Side } from "./side";
+ import type { ApplyMode } from "./status";
+ 
+@@ -28,15 +21,22 @@ export type IconPress = {
+ 
+ type OnPress = (press: IconPress, event: PointerEvent) => void;
+ type GapPanes = { readonly left: EditorView; readonly right: EditorView };
+-type Buttons = { readonly applyX: number; readonly ignoreX: number; readonly lineHeight: number };
+-type GapPaint = {
+-  readonly bands: readonly BandPaint[];
+-  readonly arrows: readonly Arrow[];
+-  readonly buttons: Buttons;
++type ButtonLayout = {
++  readonly applyX: number;
++  readonly ignoreX: number;
++  readonly lineHeight: number;
+ };
++type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
++type ArrowPaint = {
++  readonly placed: readonly PlacedArrow[];
++  readonly layout: ButtonLayout;
++  readonly onPress: OnPress;
++};
++type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
+ type ArrowRow = {
+   readonly node: SVGGElement;
+-  readonly look: string;
++  readonly mode: ApplyMode;
++  readonly layout: ButtonLayout;
+   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
+ };
+ 
+@@ -110,11 +110,12 @@ function actionButton(
+ }
+ 
+ function arrowRow(
+-  { arrow, side, look }: { readonly arrow: Arrow; readonly side: Side; readonly look: string },
+-  { applyX, ignoreX, lineHeight }: Buttons,
++  { arrow, side }: { readonly arrow: Arrow; readonly side: Side },
++  layout: ButtonLayout,
+   onPress: OnPress,
+ ): ArrowRow {
+   const { chunk, mode } = arrow;
++  const { applyX, ignoreX, lineHeight } = layout;
+   const apply: IconPress = { kind: "apply", chunk, side };
+   const ignore: IconPress = { kind: "ignore", chunk, side };
+   const applyIcon = { icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] };
+@@ -125,7 +126,8 @@ function arrowRow(
+   node.append(applyButton, ignoreButton);
+   return {
+     node,
+-    look,
++    mode,
++    layout,
+     buttons: [
+       [applyButton, apply],
+       [ignoreButton, ignore],
+@@ -133,6 +135,15 @@ function arrowRow(
+   };
+ }
+ 
++function sameShape(row: ArrowRow, mode: ApplyMode, layout: ButtonLayout): boolean {
++  return (
++    row.mode === mode &&
++    row.layout.applyX === layout.applyX &&
++    row.layout.ignoreX === layout.ignoreX &&
++    row.layout.lineHeight === layout.lineHeight
++  );
++}
++
+ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   let next = parent.firstElementChild;
+   for (const node of nodes) {
+@@ -146,10 +157,9 @@ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+ 
+ function dropMissing<T>(
+   nodes: Map<Chunk["id"], T>,
+-  kept: readonly { readonly chunk: Chunk }[],
++  keptIds: ReadonlySet<Chunk["id"]>,
+   remove: (node: T) => void,
+ ): void {
+-  const keptIds = new Set(kept.map(({ chunk }) => chunk.id));
+   for (const [id, node] of nodes) {
+     if (!keptIds.has(id)) {
+       remove(node);
+@@ -177,39 +187,37 @@ class GapStrip {
+ 
+   measure(panes: GapPanes, rows: readonly ChunkRow[]): GapPaint {
+     const strip = this.#strip;
+-    const side = this.#side;
+     const stripTop = strip.getBoundingClientRect().top;
+     const size = { width: strip.clientWidth, height: strip.clientHeight };
+     const shifts = {
+       left: panes.left.documentTop - stripTop,
+       right: panes.right.documentTop - stripTop,
+     };
+-    const shift = side === "local" ? shifts.left : shifts.right;
+-    const lineHeight = (side === "local" ? panes.left : panes.right).defaultLineHeight;
+-    const applyX = side === "local" ? 0 : size.width - ACTION_WIDTH_PX;
+-    const ignoreX = side === "local" ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
+-    const arrows =
+-      this.#onPress === null
+-        ? []
+-        : gapArrows(rows, side)
+-            .map((arrow) => ({ ...arrow, top: arrow.top + shift }))
+-            .filter(({ top }) => crossesStrip(top, top + lineHeight, size.height));
+-    return {
+-      bands: bandPaints({ rows, side }, shifts, size),
+-      arrows,
+-      buttons: { applyX, ignoreX, lineHeight },
+-    };
++    const bands = bandPaints({ rows, side: this.#side }, shifts, size);
++    if (this.#onPress === null) {
++      return { bands, arrows: null };
++    }
++    const local = this.#side === "local";
++    const shift = local ? shifts.left : shifts.right;
++    const lineHeight = (local ? panes.left : panes.right).defaultLineHeight;
++    const applyX = local ? 0 : size.width - ACTION_WIDTH_PX;
++    const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
++    const placed = gapArrows(rows, this.#side)
++      .map((arrow) => ({ arrow, y: arrow.top + shift }))
++      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
++    const layout = { applyX, ignoreX, lineHeight };
++    return { bands, arrows: { placed, layout, onPress: this.#onPress } };
+   }
+ 
+-  paint({ bands, arrows, buttons }: GapPaint, covered: ChunkAction | null): void {
++  paint({ bands, arrows }: GapPaint, covered: ChunkAction | null): void {
+     this.#paintBands(bands);
+-    if (this.#onPress !== null) {
+-      this.#paintArrows({ arrows, buttons, covered }, this.#onPress);
++    if (arrows !== null) {
++      this.#paintArrows(arrows, covered);
+     }
+   }
+ 
+   #paintBands(paints: readonly BandPaint[]): void {
+-    dropMissing(this.#bands, paints, (path) => {
++    dropMissing(this.#bands, new Set(paints.map(({ chunk }) => chunk.id)), (path) => {
+       path.remove();
+     });
+     const nodes = paints.map(({ chunk, tone, d }) => {
+@@ -225,26 +233,18 @@ class GapStrip {
+     placeInOrder(this.#bandLayer, nodes);
+   }
+ 
+-  #paintArrows(
+-    {
+-      arrows,
+-      buttons,
+-      covered,
+-    }: Pick<GapPaint, "arrows" | "buttons"> & { readonly covered: ChunkAction | null },
+-    onPress: OnPress,
+-  ): void {
+-    dropMissing(this.#arrows, arrows, (row) => {
++  #paintArrows({ placed, layout, onPress }: ArrowPaint, covered: ChunkAction | null): void {
++    dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
+       row.node.remove();
+     });
+-    const nodes = arrows.map((arrow) => {
+-      const look = `${arrow.mode} ${buttons.applyX} ${buttons.ignoreX} ${buttons.lineHeight}`;
++    const nodes = placed.map(({ arrow, y }) => {
+       let row = this.#arrows.get(arrow.chunk.id);
+-      if (row?.look !== look) {
++      if (row === undefined || !sameShape(row, arrow.mode, layout)) {
+         row?.node.remove();
+-        row = arrowRow({ arrow, side: this.#side, look }, buttons, onPress);
++        row = arrowRow({ arrow, side: this.#side }, layout, onPress);
+         this.#arrows.set(arrow.chunk.id, row);
+       }
+-      row.node.setAttribute("transform", `translate(0 ${arrow.top})`);
++      row.node.setAttribute("transform", `translate(0 ${y})`);
+       for (const [button, press] of row.buttons) {
+         button.classList.toggle("chunk-action-covered", isCovered(covered, press));
+       }
+diff --git i/frontend/src/ui/MergeView.vue w/frontend/src/ui/MergeView.vue
+index 75d7324..9a89d80 100644
+--- i/frontend/src/ui/MergeView.vue
++++ w/frontend/src/ui/MergeView.vue
+@@ -135,7 +135,7 @@ function markResolved(): void {
+         class="col-start-1 row-start-2 min-h-0 min-w-0"
+         :class="{ invisible: data.deleted === 'local' }"
+       />
+-      <!-- Own layer: a strip repainted every scroll frame inside the window's layer cost about 5 ms per frame in WebKitGTK 2.54 (slice 3.P). -->
++      <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
+       <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
+         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
+       </div>

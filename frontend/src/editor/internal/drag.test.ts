@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk } from "../../ipc";
 import { coveredChunks } from "./drag";
-import { gapArrows, type ChunkRow } from "./geometry";
+import { gapArrows } from "./gap";
+import type { ChunkRow } from "./geometry";
 import type { Side } from "./side";
 import { PENDING, type ChunkStatus } from "./status";
 

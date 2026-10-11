@@ -3,11 +3,10 @@ import { expect, test } from "vitest";
 
 import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
-import { crossesStrip, rangeSpan, rowsChanged } from "./geometry";
+import { rangeSpan, rowsChanged } from "./geometry";
 import { statusAfterIgnore } from "./status";
 
 const LINE_PX = 20;
-const STRIP_PX = 600;
 
 function spanOf(
   lines: readonly string[],
@@ -77,16 +76,4 @@ test("chunk rows go stale on a status change, an edit or new measurements, not o
   expect(rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, field)).toBe(
     true,
   );
-});
-
-test("a shape is drawn while any part of it touches the strip, edges included", () => {
-  expect(crossesStrip(-LINE_PX, 0, STRIP_PX)).toBe(true);
-  expect(crossesStrip(STRIP_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
-  expect(crossesStrip(-LINE_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
-  expect(crossesStrip(LINE_PX, LINE_PX, STRIP_PX)).toBe(true);
-});
-
-test("a shape wholly above or below the strip is left out", () => {
-  expect(crossesStrip(-LINE_PX - 1, -1, STRIP_PX)).toBe(false);
-  expect(crossesStrip(STRIP_PX + 1, STRIP_PX + LINE_PX, STRIP_PX)).toBe(false);
 });

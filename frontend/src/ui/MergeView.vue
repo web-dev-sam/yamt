@@ -135,7 +135,7 @@ function markResolved(): void {
         class="col-start-1 row-start-2 min-h-0 min-w-0"
         :class="{ invisible: data.deleted === 'local' }"
       />
-      <!-- Own layer: a strip repainted every scroll frame inside the window's layer cost about 5 ms per frame in WebKitGTK 2.54 (slice 3.P). -->
+      <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
       <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
       </div>

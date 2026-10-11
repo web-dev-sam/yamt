@@ -7,7 +7,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
-import { gapArrows } from "./geometry";
+import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
 import { paneState } from "./pane";
 import type { Side } from "./side";
