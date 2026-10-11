@@ -28,6 +28,9 @@ Download from the [releases page](../../releases):
   mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
   ```
 
+  If `yamt` is then not found, `~/.local/bin` is not on your PATH: add
+  `export PATH="$HOME/.local/bin:$PATH"` to your shell's start-up file (`~/.bashrc`, `~/.zshrc`).
+
 - **Arch Linux**: the AppImage, or build from source (below).
 - **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time
   right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`. Then put
@@ -43,14 +46,21 @@ When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `y
 repository (or `yamt --repo <path>` from anywhere). yamt starts from a terminal inside a repository;
 double-clicking it in a file manager or Finder shows nothing.
 
-- The file list on the left shows every conflicted file; click one to open it.
-- Each change has an arrow that applies it to the result and a × that ignores it. The toolbar applies
-  all non-conflicting changes from the left or from the right in one click.
+- The file list on the left shows every conflicted file with git's view of it (resolved or not, also
+  when you run `git add` elsewhere); click one to open it. Drag its edge to make it wider.
+- The right pane's header names what you are merging in: the branch, or the commit and its subject.
+- Each change has an arrow that applies it to the result and a × that ignores it; press one and drag
+  up or down to apply or ignore several at once (one undo step). Ctrl+click (Cmd+click on macOS) a
+  highlighted change applies it. The toolbar applies all non-conflicting changes from the left or
+  from the right in one click.
 - The result pane is a normal editor: type, Tab / Shift+Tab indent and outdent, undo and redo.
-- **Mark resolved** writes the result and stages the file. **Reset file** brings the conflict back
-  as git left it.
-- Files the editor cannot show (binary, deleted on one side, symlinks, submodules) get a choice
-  instead: two buttons, one sentence per side.
+  Ctrl+F (Cmd+F) finds text in whichever pane you clicked.
+- **Mark resolved** writes the result, stages the file and opens the next unresolved one. It turns
+  blue once nothing is left to process. **Reset**, next to "Result", brings the conflict back as git
+  left it.
+- A file deleted on one side and changed on the other shows the changed side with its changes, and
+  two buttons: **Keep** and **Delete**. Other files the editor cannot show (binary, symlinks,
+  submodules) get a choice between the two sides.
 - Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can
   tell. Then continue as usual (`git commit`, `git rebase --continue`, …).
 
