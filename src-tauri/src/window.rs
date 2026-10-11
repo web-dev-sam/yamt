@@ -21,6 +21,7 @@ const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
 const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
+const PAGE_ANSWER: &str = "true";
 
 pub(crate) fn run(session: MergeSession) -> Ending {
     let title = window_title(session.root());
@@ -57,6 +58,12 @@ struct CloseWatch {
     answers: Receiver<()>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum CloseRequest {
+    PageGone,
+    AskPage,
+}
+
 impl CloseWatch {
     fn new() -> CloseWatch {
         let (answer_sender, answers) = mpsc::channel();
@@ -81,44 +88,44 @@ impl CloseWatch {
     }
 
     fn on_close_request(&mut self, window: &WebviewWindow) -> tauri::Result<()> {
-        if self.record_close_request(Instant::now()) {
-            tracing::warn!("closing without the page: it did not answer the last close request");
-            return window.destroy();
-        }
-        let answer_sender = self.answer_sender.clone();
-        window.eval_with_callback(PAGE_PING, move |result| {
-            if answered(&result) {
-                answer_sender.send(()).ok();
+        match self.record_close_request(Instant::now()) {
+            CloseRequest::PageGone => {
+                tracing::warn!(
+                    "closing without the page: it did not answer the last close request"
+                );
+                window.destroy()
             }
-        })
+            CloseRequest::AskPage => {
+                let answer_sender = self.answer_sender.clone();
+                window.eval_with_callback(PAGE_PING, move |result| {
+                    if answered(&result) {
+                        answer_sender.send(()).ok();
+                    }
+                })
+            }
+        }
     }
 
-    fn record_close_request(&mut self, at: Instant) -> bool {
+    fn record_close_request(&mut self, at: Instant) -> CloseRequest {
         if self.answers.try_iter().count() > 0 {
             self.unanswered_since = None;
         }
-        let gone = page_gone(self.unanswered_since, at);
-        let within_grace = self
-            .unanswered_since
-            .is_some_and(|since| at.duration_since(since) < UNANSWERED_CLOSE_GRACE);
-        if !within_grace {
-            self.unanswered_since = Some(at);
+        let unanswered_for = self.unanswered_since.map(|since| at.duration_since(since));
+        match unanswered_for {
+            Some(age) if age < UNANSWERED_CLOSE_GRACE => CloseRequest::AskPage,
+            Some(age) if age <= UNANSWERED_CLOSE_TIMEOUT => CloseRequest::PageGone,
+            Some(_) | None => {
+                self.unanswered_since = Some(at);
+                CloseRequest::AskPage
+            }
         }
-        gone
     }
-}
-
-fn page_gone(unanswered_since: Option<Instant>, request_at: Instant) -> bool {
-    unanswered_since.is_some_and(|since| {
-        let unanswered_for = request_at.duration_since(since);
-        (UNANSWERED_CLOSE_GRACE..=UNANSWERED_CLOSE_TIMEOUT).contains(&unanswered_for)
-    })
 }
 
 // wry 0.57 passes "" to the callback when the script cannot run: webkitgtk/mod.rs:799-805
 // (`unwrap_or_default`), wkwebview/mod.rs:740-754 (a null value); otherwise the result as JSON.
 fn answered(result: &str) -> bool {
-    result == PAGE_PING
+    result == PAGE_ANSWER
 }
 
 #[cfg(test)]
@@ -136,53 +143,84 @@ mod tests {
 
     #[test]
     fn only_the_ping_answer_counts_as_answered() {
-        assert!(answered(PAGE_PING));
+        assert!(answered("true"));
         assert!(!answered(""));
     }
 
+    fn second_request_after(delay: Duration) -> CloseRequest {
+        let asked = Instant::now();
+        let mut watch = CloseWatch::new();
+        assert_eq!(watch.record_close_request(asked), CloseRequest::AskPage);
+        watch.record_close_request(asked + delay)
+    }
+
     #[test]
-    fn a_close_without_an_earlier_unanswered_one_never_finds_the_page_gone() {
-        assert!(!page_gone(None, Instant::now()));
+    fn a_close_without_an_earlier_unanswered_one_asks_the_page() {
+        let mut watch = CloseWatch::new();
+        assert_eq!(
+            watch.record_close_request(Instant::now()),
+            CloseRequest::AskPage
+        );
     }
 
     #[test]
     fn the_page_is_gone_only_between_grace_and_timeout_after_the_unanswered_request() {
-        let asked = Instant::now();
         let millisecond = Duration::from_millis(1);
-        let gone_after = |delay: Duration| page_gone(Some(asked), asked + delay);
-        assert!(!gone_after(
-            UNANSWERED_CLOSE_GRACE.saturating_sub(millisecond)
-        ));
-        assert!(gone_after(UNANSWERED_CLOSE_GRACE));
-        assert!(gone_after(UNANSWERED_CLOSE_TIMEOUT));
-        assert!(!gone_after(UNANSWERED_CLOSE_TIMEOUT + millisecond));
+        assert_eq!(
+            second_request_after(UNANSWERED_CLOSE_GRACE.saturating_sub(millisecond)),
+            CloseRequest::AskPage
+        );
+        assert_eq!(
+            second_request_after(UNANSWERED_CLOSE_GRACE),
+            CloseRequest::PageGone
+        );
+        assert_eq!(
+            second_request_after(UNANSWERED_CLOSE_TIMEOUT),
+            CloseRequest::PageGone
+        );
+        assert_eq!(
+            second_request_after(UNANSWERED_CLOSE_TIMEOUT + millisecond),
+            CloseRequest::AskPage
+        );
     }
 
     #[test]
     fn a_double_click_inside_the_grace_keeps_counting_from_the_first_request() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.record_close_request(asked));
-        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE / 2));
-        assert!(watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
+        watch.record_close_request(asked);
+        assert_eq!(
+            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE / 2),
+            CloseRequest::AskPage
+        );
+        assert_eq!(
+            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE),
+            CloseRequest::PageGone
+        );
     }
 
     #[test]
     fn a_late_second_close_asks_the_page_again() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.record_close_request(asked));
+        watch.record_close_request(asked);
         let late = asked + UNANSWERED_CLOSE_TIMEOUT + Duration::from_millis(1);
-        assert!(!watch.record_close_request(late));
-        assert!(watch.record_close_request(late + UNANSWERED_CLOSE_GRACE));
+        assert_eq!(watch.record_close_request(late), CloseRequest::AskPage);
+        assert_eq!(
+            watch.record_close_request(late + UNANSWERED_CLOSE_GRACE),
+            CloseRequest::PageGone
+        );
     }
 
     #[test]
     fn an_answered_close_request_never_finds_the_page_gone() {
         let asked = Instant::now();
         let mut watch = CloseWatch::new();
-        assert!(!watch.record_close_request(asked));
+        watch.record_close_request(asked);
         watch.answer_sender.send(()).unwrap();
-        assert!(!watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE));
+        assert_eq!(
+            watch.record_close_request(asked + UNANSWERED_CLOSE_GRACE),
+            CloseRequest::AskPage
+        );
     }
 }

@@ -65,6 +65,14 @@ jobs:
       - name: Frontend packages
         run: pnpm -C frontend install --frozen-lockfile
 
+      - name: THIRD_PARTY_LICENSES.txt is current
+        run: |
+          scripts/third-party-licenses.sh
+          if ! git diff --exit-code THIRD_PARTY_LICENSES.txt; then
+            echo "::error file=THIRD_PARTY_LICENSES.txt::stale: run 'just third-party-licenses' and commit the result"
+            exit 1
+          fi
+
       - name: Ubuntu library versions for the AppImage's licence file
         if: runner.os == 'Linux'
         run: scripts/third-party-licenses.sh ubuntu-versions

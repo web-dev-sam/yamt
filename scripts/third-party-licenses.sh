@@ -7,9 +7,11 @@
 # A package without licence files gets the standard text of its declared licence with the holder from its
 # metadata; when the script has no text for that licence it stops, naming the package.
 # With `ubuntu-versions` (the Linux release job on Ubuntu 22.04, before bundling): appends the installed
-# versions of the Ubuntu source packages listed for the AppImage, and the LGPL texts from
-# /usr/share/common-licenses.
+# versions of the Ubuntu source packages listed for the AppImage, and the GNU GPL and LGPL texts from
+# /usr/share/common-licenses (LGPLv3 §4(b) requires the GPL next to it).
+# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's.
 set -euo pipefail
+export LC_ALL=C
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/THIRD_PARTY_LICENSES.txt"
@@ -21,7 +23,7 @@ ubuntu_lgpl_sources=(
     libproxy libgcrypt20 gnutls28 nettle libtasn1-6 libidn2 libunistring avahi colord libthai libdatrie
     librsvg systemd util-linux libseccomp hyphen elfutils
 )
-lgpl_texts=(LGPL-2 LGPL-2.1 LGPL-3)
+gnu_licences=(GPL-3 LGPL-2 LGPL-2.1 LGPL-3)
 field=$'\x1f'
 
 # The crates reachable from the app over normal and build dependencies, outside the workspace.
@@ -89,12 +91,12 @@ licence_files() {
 
 # Prints the MPL-2.0 text shipped by the first crate licensed under exactly MPL-2.0.
 mpl_text() {
-    local name version licence dir rest files
+    local name version licence dir rest files file
     while IFS=$field read -r name version licence dir rest; do
         [ "$licence" = MPL-2.0 ] || continue
         files=$(licence_files "$dir" "$licence")
         if [ -n "$files" ]; then
-            xargs -d '\n' cat <<<"$files"
+            while read -r file; do cat "$file"; done <<<"$files"
             return
         fi
     done <<<"$rust_rows"
@@ -254,8 +256,17 @@ generate() {
         "${#icon_sets[@]} icon sets -> ${out#"$root"/} ($(wc -c <"$out") bytes)"
 }
 
+# Prints the GNU licence texts the AppImage's LGPL libraries need, from Ubuntu's common-licenses.
+gnu_licence_texts() {
+    local licence
+    for licence in "${gnu_licences[@]}"; do
+        printf '\n---- %s ----\n\n' "$licence"
+        cat "/usr/share/common-licenses/$licence"
+    done
+}
+
 append_ubuntu_versions() {
-    local installed source lines text
+    local installed source lines
     [ -f "$out" ] || die "missing $out"
     installed=$(dpkg-query -W -f='${source:Package} ${source:Version}\n' | sort -u)
     {
@@ -265,10 +276,7 @@ append_ubuntu_versions() {
             [ -n "$lines" ] || die "Ubuntu source package $source is not installed"
             echo "$lines"
         done
-        for text in "${lgpl_texts[@]}"; do
-            printf '\n---- %s ----\n\n' "$text"
-            cat "/usr/share/common-licenses/$text"
-        done
+        gnu_licence_texts
     } >>"$out"
     echo "third-party-licenses: appended ${#ubuntu_lgpl_sources[@]} Ubuntu source packages to ${out#"$root"/}"
 }

@@ -12,12 +12,28 @@ Download from the [releases page](../../releases):
 
 - **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
   puts `yamt` on your PATH. For the AppImage, copy it there yourself:
-  `install -m755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt`. If AppImageLauncher is installed, it
-  asks once whether to integrate the AppImage before yamt starts.
+
+  ```sh
+  install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt
+  ```
+
+  AppImageLauncher stops a copy outside its folder with a dialog; with AppImageLauncher, let it
+  integrate the AppImage instead (it moves the file to `~/Applications` and adds a hash to the
+  name) and link the moved file:
+
+  ```sh
+  ail-cli integrate yamt_0.1.0_amd64.AppImage
+  mkdir -p ~/.local/bin && ln -s ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
+  ```
+
 - **Arch Linux**: the AppImage, or build from source (below).
 - **macOS**: the `.dmg`; drag yamt to Applications. The build is not signed, so the first time
   right-click yamt → Open, or run `xattr -d com.apple.quarantine /Applications/yamt.app`. Then put
-  `yamt` on your PATH: `sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt`.
+  `yamt` on your PATH:
+
+  ```sh
+  sudo mkdir -p /usr/local/bin && sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt
+  ```
 
 ## Use
 

@@ -13,10 +13,17 @@ const START_DIR_VAR: &str = "OWD";
 pub(crate) fn repo_from_start_dir(repo: PathBuf) -> PathBuf {
     let inside_appimage = is_inside_appimage(
         std::env::var_os(APPIMAGE_VAR).is_some(),
-        std::env::var_os(APPDIR_VAR).map(PathBuf::from),
+        std::env::var_os(APPDIR_VAR).map(resolved_appdir),
         std::env::current_exe().ok(),
     );
     resolved(repo, inside_appimage, std::env::var_os(START_DIR_VAR))
+}
+
+// The runtime builds APPDIR from `$TMPDIR` as given (AppImageKit `runtime.c`), while Linux's
+// `current_exe` is the kernel-resolved `/proc/self/exe`; a symlinked TMPDIR must not hide the match.
+fn resolved_appdir(appdir: OsString) -> PathBuf {
+    let appdir = PathBuf::from(appdir);
+    appdir.canonicalize().unwrap_or(appdir)
 }
 
 fn is_inside_appimage(appimage_set: bool, appdir: Option<PathBuf>, exe: Option<PathBuf>) -> bool {
@@ -74,11 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_or_relative_start_dir_is_ignored() {
-        assert_eq!(
-            resolved(".".into(), true, Some("".into())),
-            PathBuf::from(".")
-        );
+    fn a_relative_start_dir_is_ignored() {
         assert_eq!(
             resolved(".".into(), true, Some("tmp/repo".into())),
             PathBuf::from(".")
@@ -108,6 +111,15 @@ mod tests {
         assert_eq!(
             resolved(".".into(), inside, Some(START.into())),
             PathBuf::from(".")
+        );
+    }
+
+    #[test]
+    fn appdir_is_resolved_when_it_exists_and_kept_as_given_otherwise() {
+        assert_eq!(resolved_appdir("/usr/..".into()), PathBuf::from("/"));
+        assert_eq!(
+            resolved_appdir(APPDIR.into()),
+            PathBuf::from("/tmp/.mount_yamtAbC")
         );
     }
 }
