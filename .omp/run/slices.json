@@ -1,6 +1,11 @@
 {
-  "V0ScrollSmooth": {
-    "owned": ["frontend/src/editor/**", "frontend/src/ui/**"],
-    "readonly": ["frontend/src/ipc/**", "docs/**", ".omp/run/scroll-timing.py"]
+  "V0ScrollSmoothR1": {
+    "owned": ["frontend/src/editor/**", "frontend/src/ui/MergeView.vue"],
+    "readonly": [
+      "frontend/src/ui/**",
+      "frontend/src/ipc/**",
+      "docs/**",
+      ".omp/run/scroll-timing.py"
+    ]
   }
 }
