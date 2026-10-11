@@ -8,7 +8,6 @@ import {
   type FileMergeData,
   type FileSides,
   type Side,
-  type SourceResult,
 } from "../ipc";
 import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
 import { exitMustAsk, finishMustAsk, type Question } from "./question";
@@ -38,9 +37,12 @@ type State = {
   latestLoad: number;
 };
 
-type Shared = "files" | "opened" | "choices" | "active" | "problem";
-
-export type AppStore = { readonly [K in Shared]: Readonly<State[K]> } & {
+export type AppStore = {
+  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
+  readonly choices: Readonly<ShallowRef<readonly Choice[]>>;
+  readonly active: Readonly<ShallowRef<string | null>>;
+  readonly problem: Readonly<ShallowRef<Problem | null>>;
   readonly question: ComputedRef<Question | null>;
   readonly allResolved: ComputedRef<boolean>;
   loadFiles(): Promise<void>;
@@ -107,6 +109,13 @@ function dismissProblem(state: State): void {
   state.problem.value = null;
 }
 
+function clearProblemAbout(state: State, path: string): void {
+  const problem = state.problem.value;
+  if (problem !== null && problem.action !== "list" && problem.path === path) {
+    state.problem.value = null;
+  }
+}
+
 function track(state: State, path: string, work: FileWork): void {
   state.work.set(path, work);
 }
@@ -133,18 +142,12 @@ async function loadFiles(state: State): Promise<void> {
   }
 }
 
-function isUnsupported(state: State, path: string): boolean {
-  return (state.files.value.find((file) => file.path === path)?.unsupported ?? null) !== null;
-}
-
 async function open(state: State, path: string): Promise<void> {
   const shown =
     state.opened.value.some((file) => file.path === path) ||
     state.choices.value.some((choice) => choice.sides.path === path);
   if (!shown) {
-    await (isUnsupported(state, path)
-      ? load(state, path, () => state.source.describeFile(path), putChoice)
-      : load(state, path, () => state.source.loadFile(path), putOpened));
+    await load(state, path);
     return;
   }
   if (path === state.active.value) {
@@ -155,18 +158,13 @@ async function open(state: State, path: string): Promise<void> {
   state.problem.value = null;
 }
 
-async function load<T>(
-  state: State,
-  path: string,
-  fetch: () => Promise<SourceResult<T>>,
-  put: (state: State, value: T) => void,
-): Promise<void> {
+async function load(state: State, path: string): Promise<void> {
   state.latestLoad += 1;
   const ticket = state.latestLoad;
-  const outcome = await attempt(fetch);
+  const view = await fetchView(state, path);
   const current = ticket === state.latestLoad;
-  if (!outcome.ok) {
-    const failure: Problem = { action: "open", path, cause: outcome.cause };
+  if (!view.ok) {
+    const failure: Problem = { action: "open", path, cause: view.cause };
     logProblem(failure);
     if (current) {
       state.problem.value = failure;
@@ -174,10 +172,20 @@ async function load<T>(
     return;
   }
   if (current) {
-    put(state, outcome.value);
+    view.value();
     state.active.value = path;
     state.problem.value = null;
   }
+}
+
+async function fetchView(state: State, path: string): Promise<Outcome<() => void>> {
+  const listed = state.files.value.find((file) => file.path === path);
+  if ((listed?.unsupported ?? null) !== null) {
+    const sides = await attempt(() => state.source.describeFile(path));
+    return sides.ok ? { ok: true, value: () => putChoice(state, sides.value) } : sides;
+  }
+  const data = await attempt(() => state.source.loadFile(path));
+  return data.ok ? { ok: true, value: () => putOpened(state, data.value) } : data;
 }
 
 function putOpened(state: State, data: FileMergeData): void {
@@ -219,7 +227,7 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
   state.choices.value = state.choices.value.map((choice) =>
     choice.sides.path === path ? { ...choice, taken: side } : choice,
   );
-  state.problem.value = null;
+  clearProblemAbout(state, path);
 }
 
 async function reset(state: State, path: string): Promise<void> {
@@ -229,31 +237,14 @@ async function reset(state: State, path: string): Promise<void> {
     return;
   }
   state.files.value = files.value;
-  const fresh = await reopen(state, path);
-  if (!fresh.ok) {
-    report(state, { action: "open", path, cause: fresh.cause });
+  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
+  const view = await fetchView(state, path);
+  if (!view.ok) {
+    report(state, { action: "open", path, cause: view.cause });
     return;
   }
-  const problem = state.problem.value;
-  if (problem !== null && problem.action !== "list" && problem.path === path) {
-    state.problem.value = null;
-  }
-}
-
-async function reopen(state: State, path: string): Promise<Outcome<unknown>> {
-  if (!isUnsupported(state, path)) {
-    const data = await attempt(() => state.source.loadFile(path));
-    if (data.ok) {
-      putOpened(state, data.value);
-    }
-    return data;
-  }
-  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
-  const sides = await attempt(() => state.source.describeFile(path));
-  if (sides.ok) {
-    putChoice(state, sides.value);
-  }
-  return sides;
+  view.value();
+  clearProblemAbout(state, path);
 }
 
 function ask(state: State, question: Question): Promise<boolean> {

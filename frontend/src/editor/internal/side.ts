@@ -1,6 +1,6 @@
-import type { Chunk } from "../../ipc";
+import type { Chunk, Side } from "../../ipc";
 
-export type Side = "local" | "remote";
+export type { Side } from "../../ipc";
 
 const CHANGED_SIDES: Readonly<Record<Chunk["kind"], readonly Side[]>> = {
   LocalOnly: ["local"],

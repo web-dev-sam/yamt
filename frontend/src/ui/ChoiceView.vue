@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import type { Side } from "../ipc";
 import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import { SIDE_HEADERS } from "./sideHeaders";
 import { useAppStore, type Choice } from "./store";
 
 type Column = {
@@ -15,10 +16,6 @@ type Column = {
 
 const props = defineProps<{ choice: Choice; shown: boolean }>();
 
-const HEADERS: Readonly<Record<Side, string>> = {
-  local: "Local (yours)",
-  remote: "Remote (theirs)",
-};
 const SIDES: readonly Side[] = ["local", "remote"];
 
 const { takeSide, reset } = useAppStore();
@@ -26,7 +23,7 @@ const { takeSide, reset } = useAppStore();
 const columns = computed(() =>
   SIDES.map((side): Column => ({
     side,
-    header: HEADERS[side],
+    header: SIDE_HEADERS[side],
     sentence: sideSentence(props.choice.sides[side]),
     tooltip: sideTooltip(props.choice.sides[side]),
     button: sideButton(props.choice.sides, side),

@@ -9,7 +9,7 @@ import {
   type SourceFailure,
   type SourceResult,
 } from "../ipc";
-import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
+import { createAppStore, useAppStore, type AppStore, type Choice, type FileWork } from "./store";
 
 type PendingLoad = {
   readonly path: string;
@@ -688,19 +688,29 @@ test("a reset landing in the background keeps another file's problem; a problem 
 });
 
 const LOGO = "assets/logo.bin";
+const REMOVED = "docs/removed.md";
 const LOGO_ENTRY: FileEntry = { ...entry(LOGO), unsupported: "Binary" };
-const REMOVED_ENTRY: FileEntry = { ...entry("docs/removed.md"), unsupported: "RemoteDeleted" };
+const REMOVED_ENTRY: FileEntry = { ...entry(REMOVED), unsupported: "RemoteDeleted" };
 const LOGO_SIDES: FileSides = {
   path: LOGO,
   reason: "Binary",
   local: { kind: "Binary", bytes: 11 },
   remote: { kind: "Binary", bytes: 12 },
 };
+const REMOVED_SIDES: FileSides = {
+  path: REMOVED,
+  reason: "RemoteDeleted",
+  local: { kind: "Text", lines: 3 },
+  remote: { kind: "Missing" },
+};
 
-function choiceSource(overrides: Partial<ChunkSource>): { source: ChunkSource; calls: string[] } {
+function choiceSource(
+  overrides: Partial<ChunkSource>,
+  files: FileEntry[] = [entry("a.ts"), LOGO_ENTRY],
+): { source: ChunkSource; calls: string[] } {
   const calls: string[] = [];
   const source: ChunkSource = {
-    listFiles: () => Promise.resolve([entry("a.ts"), LOGO_ENTRY]),
+    listFiles: () => Promise.resolve(files),
     loadFile: async (path) => {
       calls.push(`loadFile ${path}`);
       return ok(await dataFor(path));
@@ -708,15 +718,18 @@ function choiceSource(overrides: Partial<ChunkSource>): { source: ChunkSource; c
     finishFile: () => Promise.reject(new Error("not used")),
     resetFile: (path) => {
       calls.push(`resetFile ${path}`);
-      return Promise.resolve(ok([entry("a.ts"), LOGO_ENTRY]));
+      return Promise.resolve(ok(files));
     },
     describeFile: (path) => {
       calls.push(`describeFile ${path}`);
-      return Promise.resolve(ok(LOGO_SIDES));
+      return Promise.resolve(ok(path === REMOVED ? REMOVED_SIDES : LOGO_SIDES));
     },
     takeSide: (path, side) => {
       calls.push(`takeSide ${path} ${side}`);
-      return Promise.resolve(ok([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]));
+      const taken = files.map((file): FileEntry =>
+        file.path === path ? { ...file, status: "Resolved" } : file,
+      );
+      return Promise.resolve(ok(taken));
     },
     ...overrides,
   };
@@ -775,23 +788,62 @@ test("a failed describe is a failed open of that file and shows no choice", asyn
   expect(lines.error).toEqual([`[error] store.open_failed {path: "${LOGO}", kind: "UnknownPath"}`]);
 });
 
-test("taking a side updates the list, records the side, and clears the problem", async () => {
-  spyConsole();
-  const { source, calls } = choiceSource({
-    listFiles: () => Promise.resolve([LOGO_ENTRY]),
-    loadFile: () => Promise.resolve({ ok: false, failure: { kind: "UnknownPath", path: "x" } }),
-  });
+async function twoChoices(
+  overrides: Partial<ChunkSource>,
+): Promise<{ store: AppStore; calls: string[]; removed: Choice | undefined }> {
+  const { source, calls } = choiceSource(overrides, [LOGO_ENTRY, REMOVED_ENTRY]);
   const store = createAppStore(source);
   await store.loadFiles();
-  await store.open("gone.ts");
-  expect(store.problem.value).not.toBeNull();
+  await store.open(REMOVED);
+  return { store, calls, removed: store.choices.value[1] };
+}
+
+test("taking a side updates the list, marks only that file taken, and clears a problem about it", async () => {
+  spyConsole();
+  const git: SourceFailure = { kind: "Git", message: "index.lock exists" };
+  const takes: string[] = [];
+  const { store, removed } = await twoChoices({
+    takeSide: (path, side) => {
+      takes.push(`${path} ${side}`);
+      return Promise.resolve(
+        takes.length === 1
+          ? { ok: false, failure: git }
+          : ok([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]),
+      );
+    },
+  });
+  await store.takeSide(LOGO, "remote");
+  expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: git });
 
   await store.takeSide(LOGO, "remote");
 
-  expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} remote`]);
-  expect(store.files.value).toEqual([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]);
-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
+  expect(takes).toEqual([`${LOGO} remote`, `${LOGO} remote`]);
+  expect(store.files.value).toEqual([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]);
+  expect(store.choices.value).toEqual([
+    { sides: LOGO_SIDES, taken: "remote" },
+    { sides: REMOVED_SIDES, taken: null },
+  ]);
+  expect(store.choices.value[1]).toBe(removed);
   expect(store.problem.value).toBeNull();
+});
+
+test("a take keeps a problem about another file", async () => {
+  spyConsole();
+  const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
+  const { source } = choiceSource(
+    { loadFile: () => Promise.resolve({ ok: false, failure: unknown }) },
+    [LOGO_ENTRY],
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  await store.open("gone.ts");
+  const gone = store.problem.value;
+  expect(gone).toEqual({ action: "open", path: "gone.ts", cause: unknown });
+
+  await store.takeSide(LOGO, "remote");
+
+  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
+  expect(store.problem.value).toBe(gone);
 });
 
 test("a failed take keeps the list and the choice and names the file", async () => {
@@ -821,7 +873,7 @@ function describedLater(): {
   describes: ((result: SourceResult<FileSides>) => void)[];
 } {
   const describes: ((result: SourceResult<FileSides>) => void)[] = [];
-  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
+  const { source, calls } = choiceSource({}, [LOGO_ENTRY, REMOVED_ENTRY]);
   source.describeFile = (path) => {
     calls.push(`describeFile ${path}`);
     return new Promise((resolve) => {
@@ -835,6 +887,7 @@ async function takenChoice(): Promise<{
   store: AppStore;
   calls: string[];
   describes: ((result: SourceResult<FileSides>) => void)[];
+  removed: Choice | undefined;
 }> {
   const { source, calls, describes } = describedLater();
   const store = createAppStore(source);
@@ -844,66 +897,75 @@ async function takenChoice(): Promise<{
   });
   describes[0]?.(ok(LOGO_SIDES));
   await loading;
+  const opening = store.open(REMOVED);
+  describes[1]?.(ok(REMOVED_SIDES));
+  await opening;
   await store.takeSide(LOGO, "local");
-  return { store, calls, describes };
+  return { store, calls, describes, removed: store.choices.value[1] };
 }
 
-test("reset of a taken choice forgets the side at once and describes the file again", async () => {
+test("reset of a taken choice forgets only its side at once and describes the file again", async () => {
   spyConsole();
-  const { store, calls, describes } = await takenChoice();
+  const { store, calls, describes, removed } = await takenChoice();
   const fresh: FileSides = { ...LOGO_SIDES, local: { kind: "Binary", bytes: 13 } };
 
   const resetting = store.reset(LOGO);
   await vi.waitFor(() => {
-    expect(describes).toHaveLength(2);
+    expect(describes).toHaveLength(3);
   });
 
-  expect(store.choices.value).toEqual([]);
-  expect(store.files.value).toEqual([entry("a.ts"), LOGO_ENTRY]);
+  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
+  expect(store.files.value).toEqual([LOGO_ENTRY, REMOVED_ENTRY]);
 
-  describes[1]?.(ok(fresh));
+  describes[2]?.(ok(fresh));
   await resetting;
 
   expect(calls).toEqual([
     `describeFile ${LOGO}`,
+    `describeFile ${REMOVED}`,
     `takeSide ${LOGO} local`,
     `resetFile ${LOGO}`,
     `describeFile ${LOGO}`,
   ]);
-  expect(store.choices.value).toEqual([{ sides: fresh, taken: null }]);
-  expect(store.active.value).toBe(LOGO);
+  expect(store.choices.value).toEqual([
+    { sides: REMOVED_SIDES, taken: null },
+    { sides: fresh, taken: null },
+  ]);
+  expect(store.choices.value[0]).toBe(removed);
+  expect(store.active.value).toBe(REMOVED);
 });
 
 test("a failed describe after a reset is a failed open; opening the file again describes it", async () => {
   spyConsole();
-  const { store, describes } = await takenChoice();
+  const { store, describes, removed } = await takenChoice();
   const unknown: SourceFailure = { kind: "UnknownPath", path: LOGO };
 
   const resetting = store.reset(LOGO);
   await vi.waitFor(() => {
-    expect(describes).toHaveLength(2);
+    expect(describes).toHaveLength(3);
   });
-  describes[1]?.({ ok: false, failure: unknown });
+  describes[2]?.({ ok: false, failure: unknown });
   await resetting;
 
   expect(store.problem.value).toEqual({ action: "open", path: LOGO, cause: unknown });
-  expect(store.choices.value).toEqual([]);
+  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
+  expect(store.choices.value[0]).toBe(removed);
 
   const opening = store.open(LOGO);
-  describes[2]?.(ok(LOGO_SIDES));
+  describes[3]?.(ok(LOGO_SIDES));
   await opening;
 
-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
+  expect(store.choices.value).toEqual([
+    { sides: REMOVED_SIDES, taken: null },
+    { sides: LOGO_SIDES, taken: null },
+  ]);
   expect(store.problem.value).toBeNull();
 });
 
 test("choices count toward everything resolved", async () => {
   spyConsole();
-  const { source } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
-  const store = createAppStore({
-    ...source,
-    takeSide: () => Promise.resolve(ok([{ ...LOGO_ENTRY, status: "Resolved" }])),
-  });
+  const { source } = choiceSource({}, [LOGO_ENTRY]);
+  const store = createAppStore(source);
   await store.loadFiles();
   expect(store.allResolved.value).toBe(false);
 

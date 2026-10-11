@@ -16,7 +16,7 @@ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
 
 type Records = {
   readonly fixtures: ReadonlyMap<string, FileMergeData>;
-  readonly finished: Map<string, string>;
+  readonly finished: Set<string>;
 };
 
 // Stryker disable all: Vite needs import.meta.glob arguments as literals
@@ -133,16 +133,15 @@ function entries({ fixtures, finished }: Records): FileEntry[] {
   }));
 }
 
-function changed(
+function updateKnown(
   records: Records,
   path: string,
-  change: (data: FileMergeData) => void,
+  update: () => void,
 ): SourceResult<FileEntry[]> {
-  const data = records.fixtures.get(path);
-  if (data === undefined) {
+  if (!records.fixtures.has(path)) {
     return unknownPath(path);
   }
-  change(data);
+  update();
   return { ok: true, value: entries(records) };
 }
 
@@ -161,7 +160,7 @@ export function createFixtureSource(
   log: Log,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
 ): ChunkSource {
-  const records: Records = { fixtures: parseFixtures(files), finished: new Map() };
+  const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
 
   return {
     async listFiles() {
@@ -172,13 +171,13 @@ export function createFixtureSource(
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
     async finishFile(path, text) {
-      return changed(records, path, () => {
-        records.finished.set(path, text);
+      return updateKnown(records, path, () => {
+        records.finished.add(path);
         log.info("fixture.finish", { path, text });
       });
     },
     async resetFile(path) {
-      return changed(records, path, () => {
+      return updateKnown(records, path, () => {
         records.finished.delete(path);
       });
     },
@@ -186,8 +185,8 @@ export function createFixtureSource(
       return describeRecord(path, records.fixtures.get(path));
     },
     async takeSide(path, side) {
-      return changed(records, path, (data) => {
-        records.finished.set(path, data[side]);
+      return updateKnown(records, path, () => {
+        records.finished.add(path);
         log.info("fixture.take", { path, side });
       });
     },
