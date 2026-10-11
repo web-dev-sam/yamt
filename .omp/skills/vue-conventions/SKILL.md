@@ -33,10 +33,10 @@ and `references/create-adaptable-composable.md`. House rules win on conflict.
 - [VU10] Vue state never holds an `EditorView`, a document position, or document text
   (`skill://project-map` state table). The controller instance is a non-reactive `let`
   inside `useMergeController`, not a `ref`.
-- [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts)` is the
-  **only** place `ui/` imports from `editor/`. It is an adaptable composable: `toRef(data)`
-  in a `watch` creates/destroys the controller; `summary` is a `shallowRef` fed by
-  `onSummaryChange`.
+- [VU11] `useMergeController(data: MaybeRefOrGetter<FileMergeData | null>, hosts, readOnly:
+  MaybeRefOrGetter<boolean>)` is the **only** place `ui/` imports from `editor/`. It is an adaptable
+  composable: `toRef(data)` and `readOnly` in a `watch` create/destroy the controller; `summary` is a
+  `shallowRef` fed by `onSummaryChange`.
 
 ## Library use
 

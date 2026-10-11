@@ -555,6 +555,7 @@ The Vue↔editor seam is one adaptable composable:
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: MergeHosts,
+  readOnly: MaybeRefOrGetter<boolean>, // MergeView's one rule: deleted side or a middle that is not text on disk
 ): {
   summary: Readonly<ShallowRef<MergeSummary | null>>;
   applyAllNonConflicting;
@@ -564,7 +565,7 @@ export function useMergeController(
 };
 ```
 
-It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data))`, pipes
+It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data), readOnly)`, pipes
 `onSummaryChange` into a `shallowRef`, and is the only place `editor/` is imported from `ui/`.
 
 ### 5.5 Frontend file and component conventions (house rules)
