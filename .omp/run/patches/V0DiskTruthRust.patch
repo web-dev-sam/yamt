@@ -1,0 +1,5358 @@
+diff --git a/crates/cli/src/fixture.rs b/crates/cli/src/fixture.rs
+index ff66754..c20eaa5 100644
+--- a/crates/cli/src/fixture.rs
++++ b/crates/cli/src/fixture.rs
+@@ -1,6 +1,6 @@
+ use std::path::Path;
+ 
+-use yamt_session::merge_data;
++use yamt_session::{DiskVersion, merge_data};
+ 
+ use crate::case::Case;
+ use crate::{Result, print};
+@@ -8,6 +8,13 @@ use crate::{Result, print};
+ pub(crate) fn fixture(case_dir: &Path) -> Result<()> {
+     let case = Case::load(case_dir)?;
+     let path = format!("{}.{}", case.name, case.extension);
+-    let data = merge_data(&path, &case.base, &case.local, &case.remote, None);
++    let data = merge_data(
++        &path,
++        &case.base,
++        &case.local,
++        &case.remote,
++        None,
++        DiskVersion(0),
++    );
+     print(&(serde_json::to_string_pretty(&data)? + "\n"))
+ }
+diff --git a/crates/cli/src/scan.rs b/crates/cli/src/scan.rs
+index ab689dc..6ccaa4b 100644
+--- a/crates/cli/src/scan.rs
++++ b/crates/cli/src/scan.rs
+@@ -1,5 +1,6 @@
+ use std::path::Path;
+ 
++use yamt_merge_core::Chunk;
+ use yamt_session::{FileStatus, MergeSession, UnsupportedReason};
+ 
+ use crate::classify::kind_summary;
+@@ -11,7 +12,7 @@ pub(crate) fn scan(repo: &Path) -> Result<()> {
+     for entry in session.files() {
+         let detail = match entry.unsupported {
+             Some(reason) => format!("unsupported {}", reason_name(reason)),
+-            None => kind_summary(&session.load(&entry.path)?.chunks),
++            None => chunk_summary(&mut session, &entry.path)?,
+         };
+         report.push(format!(
+             "{} {} {detail}",
+@@ -23,6 +24,12 @@ pub(crate) fn scan(repo: &Path) -> Result<()> {
+     print_lines(&report)
+ }
+ 
++fn chunk_summary(session: &mut MergeSession, path: &str) -> Result<String> {
++    let data = session.load(path)?;
++    let chunks: Vec<Chunk> = data.chunks.iter().map(|merge| merge.chunk).collect();
++    Ok(kind_summary(&chunks))
++}
++
+ fn status_name(status: FileStatus) -> &'static str {
+     match status {
+         FileStatus::Unresolved => "Unresolved",
+diff --git a/crates/cli/tests/commands.rs b/crates/cli/tests/commands.rs
+index 5482191..bcd5f14 100644
+--- a/crates/cli/tests/commands.rs
++++ b/crates/cli/tests/commands.rs
+@@ -255,26 +255,21 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
+     assert_eq!(output.code, 0, "{}", output.stderr);
+     let data: Value = serde_json::from_str(&output.stdout).unwrap();
+     assert_eq!(data["path"], "cart.ts");
+-    assert_eq!(data["base"], BASE);
++    assert_eq!(data["middle"], json!({ "kind": "Stages", "text": BASE }));
+     assert_eq!(data["local"], LOCAL);
+     assert_eq!(data["remote"], REMOTE);
+     assert_eq!(data["eol"], "Lf");
++    assert_eq!(data["disk_version"], 0);
+     let classified: Value = serde_json::from_str(&classify(&["--json"]).stdout).unwrap();
+-    assert_eq!(data["chunks"], classified);
+-    let word_chunks: Vec<&Value> = data["word_changes"]
+-        .as_array()
+-        .unwrap()
+-        .iter()
+-        .map(|words| &words["chunk"])
+-        .collect();
+-    let chunk_ids: Vec<&Value> = classified
+-        .as_array()
+-        .unwrap()
+-        .iter()
+-        .map(|chunk| &chunk["id"])
+-        .collect();
+-    assert_eq!(chunk_ids.len(), 3);
+-    assert_eq!(word_chunks, chunk_ids);
++    let chunks = data["chunks"].as_array().unwrap();
++    let merge_chunks: Vec<&Value> = chunks.iter().map(|chunk| &chunk["chunk"]).collect();
++    let classified = classified.as_array().unwrap();
++    assert_eq!(merge_chunks, classified.iter().collect::<Vec<_>>());
++    assert_eq!(chunks.len(), 3);
++    for chunk in chunks {
++        assert_eq!(chunk["words"]["chunk"], chunk["chunk"]["id"]);
++        assert_eq!(chunk["middle"], chunk["chunk"]["base"]);
++    }
+ }
+ 
+ #[test]
+diff --git a/crates/conflict-repo/AGENTS.md b/crates/conflict-repo/AGENTS.md
+index f90b694..7093690 100644
+--- a/crates/conflict-repo/AGENTS.md
++++ b/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`). The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index 7f24238..886a38b 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -26,6 +26,7 @@ pub enum Error {
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+ 
+ const SUBMODULE_MODE: &str = "160000";
++const GITATTRIBUTES: &str = ".gitattributes";
+ const HASH_OBJECT_ARGS: [&str; 2] = ["hash-object", "--stdin"];
+ 
+ /// One path in the scripted merge; `None` means the file does not exist on that side.
+@@ -110,10 +111,30 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
+     Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
+ }
+ 
++/// What a test sets before the merge runs: repository config (also in force for the merge, so it
++/// wins over the fixture's own `core.autocrlf=false`) and a `.gitattributes` committed with base.
++#[derive(Clone, Copy, Debug, Default)]
++pub struct Setup<'a> {
++    pub config: &'a [(&'a str, &'a str)],
++    pub attributes: Option<&'a str>,
++}
++
+ /// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
+ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
+-    let dir = diverged_repo(files)?;
+-    let merge = git(dir.path(), &["merge", "--quiet", "remote"])?;
++    conflict_repo_with(files, &Setup::default())
++}
++
++/// `conflict_repo`, with `setup` applied before the merge.
++pub fn conflict_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> {
++    let dir = diverged_repo_with(files, setup)?;
++    let mut merge_args: Vec<String> = Vec::new();
++    for (key, value) in setup.config {
++        git_ok(dir.path(), &["config", key, value])?;
++        merge_args.extend(["-c".to_owned(), format!("{key}={value}")]);
++    }
++    merge_args.extend(["merge", "--quiet", "remote"].map(str::to_owned));
++    let merge_args: Vec<&str> = merge_args.iter().map(String::as_str).collect();
++    let merge = git(dir.path(), &merge_args)?;
+     if merge.status.success() {
+         return Err(Error::MergeDidNotConflict);
+     }
+@@ -122,10 +143,18 @@ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
+ 
+ /// A repo on branch `local` with commits `base` (branch `main`), `local` and `remote` (branch `remote`), not merged.
+ pub fn diverged_repo(files: &[ConflictFile]) -> Result<TempDir> {
++    diverged_repo_with(files, &Setup::default())
++}
++
++fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> {
+     let dir = tempfile::tempdir()?;
+     let root = dir.path();
+     git_ok(root, &["init", "--quiet"])?;
+     git_ok(root, &["config", "core.autocrlf", "false"])?;
++    if let Some(attributes) = setup.attributes {
++        fs::write(root.join(GITATTRIBUTES), attributes)?;
++        git_ok(root, &["add", "--", GITATTRIBUTES])?;
++    }
+     commit_side(root, files, |file| file.base, "base")?;
+     git_ok(root, &["checkout", "--quiet", "-b", "local"])?;
+     commit_side(root, files, |file| file.local, "local")?;
+diff --git a/crates/gitio/src/attributes.rs b/crates/gitio/src/attributes.rs
+new file mode 100644
+index 0000000..422e156
+--- /dev/null
++++ b/crates/gitio/src/attributes.rs
+@@ -0,0 +1,126 @@
++use std::os::unix::ffi::OsStrExt;
++use std::path::Path;
++
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::{Error, Result};
++
++const CHECK_ATTR: &str = "check-attr";
++const MARKER_SIZE: &str = "conflict-marker-size";
++const MERGE: &str = "merge";
++const WORKING_TREE_ENCODING: &str = "working-tree-encoding";
++const ATTRIBUTES: usize = 3;
++const FIELDS_PER_RECORD: usize = 3;
++
++/// One attribute of one path, as `git check-attr` reports it (gitattributes(5)).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum AttributeValue {
++    Unspecified,
++    Unset,
++    Set,
++    Value(Vec<u8>),
++}
++
++/// The attributes that decide how git merged a path and wrote it to the worktree.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct MergeAttributes {
++    pub conflict_marker_size: AttributeValue,
++    pub merge: AttributeValue,
++    pub working_tree_encoding: AttributeValue,
++}
++
++impl Repo {
++    /// One entry per path, in the order of `paths`.
++    pub fn attributes(&self, paths: &[&Path]) -> Result<Vec<MergeAttributes>> {
++        if paths.is_empty() {
++            return Ok(Vec::new());
++        }
++        let args = [
++            CHECK_ATTR,
++            "-z",
++            "--stdin",
++            MARKER_SIZE,
++            MERGE,
++            WORKING_TREE_ENCODING,
++        ];
++        let mut input = Vec::new();
++        for path in paths {
++            input.extend_from_slice(path.as_os_str().as_bytes());
++            input.push(b'\0');
++        }
++        let output = run(self.command(Access::Read, &args), Some(input), GIT_TIMEOUT)?;
++        parse_attributes(&output, paths).ok_or_else(|| Error::UnexpectedOutput {
++            command: CHECK_ATTR,
++            output: String::from_utf8_lossy(&output).into_owned(),
++        })
++    }
++}
++
++// git-check-attr(1) `-z`: `<path> NUL <attribute> NUL <info> NUL`, for each path in input order and
++// each attribute in command-line order.
++fn parse_attributes(output: &[u8], paths: &[&Path]) -> Option<Vec<MergeAttributes>> {
++    let mut fields: Vec<&[u8]> = output.split(|&byte| byte == b'\0').collect();
++    let ends_with_nul = fields.pop().is_some_and(<[u8]>::is_empty);
++    if !ends_with_nul || fields.len() != paths.len() * ATTRIBUTES * FIELDS_PER_RECORD {
++        return None;
++    }
++    let (records, _) = fields.as_chunks::<FIELDS_PER_RECORD>();
++    let mut records = records.iter();
++    let mut attributes = Vec::with_capacity(paths.len());
++    for path in paths {
++        let mut value_of = |name: &str| {
++            let [record_path, attribute, info] = records.next()?;
++            let matches =
++                *record_path == path.as_os_str().as_bytes() && *attribute == name.as_bytes();
++            matches.then(|| attribute_value(info))
++        };
++        attributes.push(MergeAttributes {
++            conflict_marker_size: value_of(MARKER_SIZE)?,
++            merge: value_of(MERGE)?,
++            working_tree_encoding: value_of(WORKING_TREE_ENCODING)?,
++        });
++    }
++    Some(attributes)
++}
++
++fn attribute_value(info: &[u8]) -> AttributeValue {
++    match info {
++        b"unspecified" => AttributeValue::Unspecified,
++        b"unset" => AttributeValue::Unset,
++        b"set" => AttributeValue::Set,
++        value => AttributeValue::Value(value.to_vec()),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn records_parse_per_path_in_order_and_a_missing_record_is_unexpected() {
++        let output = b"a.txt\0conflict-marker-size\x0012\0a.txt\0merge\0unset\0a.txt\0working-tree-encoding\0unspecified\0\
++b c\0conflict-marker-size\0unspecified\0b c\0merge\0set\0b c\0working-tree-encoding\0UTF-16\0";
++        let paths = [Path::new("a.txt"), Path::new("b c")];
++        let parsed = parse_attributes(output, &paths).unwrap();
++        assert_eq!(
++            parsed,
++            [
++                MergeAttributes {
++                    conflict_marker_size: AttributeValue::Value(b"12".to_vec()),
++                    merge: AttributeValue::Unset,
++                    working_tree_encoding: AttributeValue::Unspecified,
++                },
++                MergeAttributes {
++                    conflict_marker_size: AttributeValue::Unspecified,
++                    merge: AttributeValue::Set,
++                    working_tree_encoding: AttributeValue::Value(b"UTF-16".to_vec()),
++                },
++            ]
++        );
++        assert_eq!(parse_attributes(output, &paths[..1]), None);
++        assert_eq!(parse_attributes(&output[..40], &paths[..1]), None);
++        let one_more = [paths[0], paths[1], Path::new("c")];
++        assert_eq!(parse_attributes(output, &one_more), None);
++        assert_eq!(parse_attributes(output, &[paths[1], paths[0]]), None);
++    }
++}
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 9331d7a..aba0280 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,15 +1,21 @@
+-//! Git subprocess layer: reads and writes index stages and blobs as bytes, and reads the merge
+-//! heads, the refs that point at them and the merge message.
++//! Git subprocess layer: reads and writes index stages and blobs as bytes, reads the merge heads,
++//! the refs that point at them and the merge message, and re-runs git's merge of one file.
+ #![forbid(unsafe_code)]
+ 
++mod attributes;
+ mod blob;
+ mod entry;
++mod merge_file;
+ mod repo;
+ mod run;
++mod version;
+ 
++pub use attributes::{AttributeValue, MergeAttributes};
+ pub use blob::BlobReader;
+ pub use entry::{Oid, Stage, StageEntry};
++pub use merge_file::{MergeFileOptions, MergeInputs};
+ pub use repo::{CommitSummary, Repo};
++pub use version::GitVersion;
+ 
+ #[derive(Debug, thiserror::Error)]
+ pub enum Error {
+@@ -38,6 +44,11 @@ pub enum Error {
+         path: std::path::PathBuf,
+         source: std::io::Error,
+     },
++    #[error("cannot write {}: {source}", path.display())]
++    WriteFailed {
++        path: std::path::PathBuf,
++        source: std::io::Error,
++    },
+     #[error("i/o error while running git: {0}")]
+     Io(#[from] std::io::Error),
+ }
+diff --git a/crates/gitio/src/merge_file.rs b/crates/gitio/src/merge_file.rs
+new file mode 100644
+index 0000000..db8cdd2
+--- /dev/null
++++ b/crates/gitio/src/merge_file.rs
+@@ -0,0 +1,69 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++use std::process::ExitStatus;
++
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run_accepting};
++use crate::{Error, Result};
++
++// git-merge-file(1): "The exit value of this program is negative on error, and the number of
++// conflicts otherwise (truncated to 127 if there are more than that many conflicts)."
++const FIRST_ERROR_STATUS: i32 = 128;
++
++/// The three versions one `git merge-file` run merges.
++#[derive(Clone, Copy, Debug)]
++pub struct MergeInputs<'a> {
++    pub base: &'a [u8],
++    pub local: &'a [u8],
++    pub remote: &'a [u8],
++}
++
++/// How `git merge-file` merges: marker length, `--union`, and `--diff-algorithm=histogram`.
++#[derive(Clone, Copy, Debug)]
++pub struct MergeFileOptions {
++    pub marker_size: usize,
++    pub union: bool,
++    pub histogram: bool,
++}
++
++impl Repo {
++    /// git's merge of `inputs`, written with the labels `ours`, `base` and `theirs`; the three
++    /// inputs are written to files in `scratch`, an existing directory the caller removes.
++    pub fn merge_file(
++        &self,
++        scratch: &Path,
++        inputs: &MergeInputs<'_>,
++        options: &MergeFileOptions,
++    ) -> Result<Vec<u8>> {
++        let local = write_input(scratch, "local", inputs.local)?;
++        let base = write_input(scratch, "base", inputs.base)?;
++        let remote = write_input(scratch, "remote", inputs.remote)?;
++        let marker_size = format!("--marker-size={}", options.marker_size);
++        let mut args = vec!["merge-file", "-p", "-q", marker_size.as_str()];
++        if options.union {
++            args.push("--union");
++        }
++        if options.histogram {
++            args.push("--diff-algorithm=histogram");
++        }
++        args.extend(["-L", "ours", "-L", "base", "-L", "theirs", "--"]);
++        let mut command = self.command(Access::Read, &args);
++        command.args([&local, &base, &remote]);
++        run_accepting(command, None, GIT_TIMEOUT, is_conflict_count)
++    }
++}
++
++fn is_conflict_count(status: ExitStatus) -> bool {
++    status
++        .code()
++        .is_some_and(|code| (0..FIRST_ERROR_STATUS).contains(&code))
++}
++
++fn write_input(scratch: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
++    let path = scratch.join(name);
++    fs::write(&path, bytes).map_err(|source| Error::WriteFailed {
++        path: path.clone(),
++        source,
++    })?;
++    Ok(path)
++}
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index ae7eed7..e65cd79 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -14,6 +14,7 @@ use crate::{Error, Result, StageEntry};
+ const ANY_EXECUTE_BIT: u32 = 0o111;
+ const REV_PARSE: &str = "rev-parse";
+ const LOG: &str = "log";
++const HASH_OBJECT: &str = "hash-object";
+ const MERGE_MSG: &str = "MERGE_MSG";
+ const UNRESOLVED_NAME_STATUS: i32 = 1;
+ const NON_SYMBOLIC_SHORT_NAME: &str =
+@@ -129,7 +130,7 @@ impl Repo {
+     // git-update-index(1) "USING --INDEX-INFO" reads the records `ls-files --stage` prints.
+     pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()> {
+         if records.is_empty() {
+-            return self.remove_from_index(path);
++            return self.remove_paths(&[path]);
+         }
+         let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
+         run(command, Some(records), GIT_TIMEOUT)?;
+@@ -153,9 +154,10 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    pub fn add(&self, path: &Path) -> Result<()> {
++    /// Stages each path as it is in the worktree: `git add -- <paths>`.
++    pub fn add_paths(&self, paths: &[&Path]) -> Result<()> {
+         let mut command = self.command(Access::Write, &["add", "--"]);
+-        command.arg(path);
++        command.args(paths);
+         run(command, None, GIT_TIMEOUT)?;
+         Ok(())
+     }
+@@ -170,13 +172,54 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    pub fn remove_from_index(&self, path: &Path) -> Result<()> {
++    /// Removes every index entry of each path: `git update-index --force-remove -- <paths>`.
++    pub fn remove_paths(&self, paths: &[&Path]) -> Result<()> {
+         let mut command = self.command(Access::Write, &["update-index", "--force-remove", "--"]);
+-        command.arg(path);
++        command.args(paths);
+         run(command, None, GIT_TIMEOUT)?;
+         Ok(())
+     }
+ 
++    /// The blob id each worktree file would get when staged, through the path's filters; one per path.
++    pub fn hash_objects(&self, paths: &[&Path]) -> Result<Vec<Oid>> {
++        if paths.is_empty() {
++            return Ok(Vec::new());
++        }
++        let mut input = Vec::new();
++        for path in paths {
++            input.extend_from_slice(path.as_os_str().as_bytes());
++            input.push(b'\n');
++        }
++        let command = self.command(Access::Read, &[HASH_OBJECT, "--stdin-paths"]);
++        let output = run(command, Some(input), GIT_TIMEOUT)?;
++        let text = String::from_utf8_lossy(&output);
++        let oids: Vec<Oid> = text.lines().map(Oid::parse).collect::<Result<_>>()?;
++        if oids.len() != paths.len() {
++            return Err(Error::UnexpectedOutput {
++                command: HASH_OBJECT,
++                output: text.into_owned(),
++            });
++        }
++        Ok(oids)
++    }
++
++    /// The commit checked out in the submodule at `path`; `None` when it is not checked out.
++    pub fn submodule_head(&self, path: &Path) -> Result<Option<Oid>> {
++        let submodule = self.root.join(path);
++        if fs::symlink_metadata(submodule.join(".git")).is_err() {
++            return Ok(None);
++        }
++        let args = [REV_PARSE, "--verify", "--quiet", "HEAD"];
++        let command = git_command(&self.git, &submodule, Access::Read, &args);
++        let output = match run(command, None, GIT_TIMEOUT) {
++            Ok(output) => output,
++            Err(error) if is_unresolved_name(&error) => return Ok(None),
++            Err(error) => return Err(error),
++        };
++        let line = without_final_newline(output)?;
++        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
++    }
++
+     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
+         let mut command = self.command(Access::Write, &["checkout-index", "-u", "--force", "--"]);
+         command.arg(path);
+@@ -184,7 +227,7 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    fn command(&self, access: Access, args: &[&str]) -> Command {
++    pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
+         git_command(&self.git, &self.root, access, args)
+     }
+ }
+diff --git a/crates/gitio/src/run.rs b/crates/gitio/src/run.rs
+index 47bb1f0..1da20d3 100644
+--- a/crates/gitio/src/run.rs
++++ b/crates/gitio/src/run.rs
+@@ -50,6 +50,15 @@ pub(crate) fn argv(command: &Command) -> Vec<String> {
+ }
+ 
+ pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Vec<u8>> {
++    run_accepting(command, stdin, timeout, |status| status.success())
++}
++
++pub(crate) fn run_accepting(
++    command: Command,
++    stdin: Option<Vec<u8>>,
++    timeout: Duration,
++    accepts: fn(ExitStatus) -> bool,
++) -> Result<Vec<u8>> {
+     let args = argv(&command);
+     tracing::debug!(?args, "running git");
+     let deadline = Instant::now() + timeout;
+@@ -72,7 +81,7 @@ pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -
+             });
+         }
+     };
+-    if !status.success() {
++    if !accepts(status) {
+         return Err(Error::GitFailed {
+             args,
+             status: status.code(),
+diff --git a/crates/gitio/src/version.rs b/crates/gitio/src/version.rs
+new file mode 100644
+index 0000000..f85bd31
+--- /dev/null
++++ b/crates/gitio/src/version.rs
+@@ -0,0 +1,73 @@
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::{Error, Result};
++
++const VERSION: &str = "version";
++const VERSION_PREFIX: &str = "git version ";
++
++/// The release of the git binary in use; ordered by major, then minor.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
++pub struct GitVersion {
++    pub major: u32,
++    pub minor: u32,
++}
++
++impl Repo {
++    pub fn version(&self) -> Result<GitVersion> {
++        let output = run(self.command(Access::Read, &[VERSION]), None, GIT_TIMEOUT)?;
++        let line = String::from_utf8_lossy(&output);
++        parse_version(&line).ok_or_else(|| Error::UnexpectedOutput {
++            command: VERSION,
++            output: line.into_owned(),
++        })
++    }
++}
++
++fn parse_version(line: &str) -> Option<GitVersion> {
++    let numbers = line.trim_end().strip_prefix(VERSION_PREFIX)?;
++    let dotted = numbers.split(' ').next()?;
++    let mut parts = dotted.split('.');
++    let major = parts.next()?.parse().ok()?;
++    let minor = parts.next()?.parse().ok()?;
++    Some(GitVersion { major, minor })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn apple_and_plain_version_lines_give_major_and_minor() {
++        assert_eq!(
++            parse_version("git version 2.39.5 (Apple Git-154)\n"),
++            Some(GitVersion {
++                major: 2,
++                minor: 39
++            })
++        );
++        assert_eq!(
++            parse_version("git version 2.56.0\n"),
++            Some(GitVersion {
++                major: 2,
++                minor: 56
++            })
++        );
++        assert_eq!(
++            parse_version("git version 2.45.windows.1"),
++            Some(GitVersion {
++                major: 2,
++                minor: 45
++            })
++        );
++        assert_eq!(parse_version("hub version 2.14.2"), None);
++        assert_eq!(parse_version("git version 2"), None);
++    }
++
++    #[test]
++    fn versions_order_by_major_then_minor() {
++        let version = |major, minor| GitVersion { major, minor };
++        assert!(version(2, 39) < version(2, 44));
++        assert!(version(2, 44) < version(3, 0));
++        assert!(version(2, 56) >= version(2, 44));
++    }
++}
+diff --git a/crates/gitio/tests/repo.rs b/crates/gitio/tests/repo.rs
+index 7ea7561..48b7994 100644
+--- a/crates/gitio/tests/repo.rs
++++ b/crates/gitio/tests/repo.rs
+@@ -119,7 +119,7 @@ fn assert_add_then_restore_round_trips(base: Option<&[u8]>, path: &str) {
+     let captured = repo.unmerged().unwrap();
+     assert!(captured.iter().all(|entry| entry.path == Path::new(path)));
+ 
+-    repo.add(Path::new(path)).unwrap();
++    repo.add_paths(&[Path::new(path)]).unwrap();
+     assert_eq!(repo.unmerged().unwrap(), []);
+     repo.restore_stages(&captured).unwrap();
+ 
+@@ -157,7 +157,7 @@ fn checkout_merge_after_restore_rewrites_conflict_markers() {
+     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let captured = repo.unmerged().unwrap();
+-    repo.add(Path::new(FILE)).unwrap();
++    repo.add_paths(&[Path::new(FILE)]).unwrap();
+     repo.restore_stages(&captured).unwrap();
+     fs::write(dir.path().join(FILE), "resolved\n").unwrap();
+ 
+@@ -198,13 +198,13 @@ fn require_conflict_markers(dir: &TempDir) {
+ }
+ 
+ #[test]
+-fn remove_from_index_drops_every_stage_and_leaves_the_worktree_file() {
++fn remove_paths_drops_every_stage_and_leaves_the_worktree_file() {
+     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     require_conflict_markers(&dir);
+     let before = worktree(&dir);
+ 
+-    repo.remove_from_index(Path::new(FILE)).unwrap();
++    repo.remove_paths(&[Path::new(FILE)]).unwrap();
+ 
+     assert_eq!(staged(&dir), "");
+     assert_eq!(worktree(&dir), before);
+@@ -234,7 +234,7 @@ fn restore_index_records_without_records_removes_the_path_again() {
+     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+     let remote = repo.unmerged().unwrap().remove(2);
+-    repo.remove_from_index(Path::new(FILE)).unwrap();
++    repo.remove_paths(&[Path::new(FILE)]).unwrap();
+     let records = repo.index_records(Path::new(FILE)).unwrap();
+     assert_eq!(records, b"");
+     repo.resolve_with(&remote).unwrap();
+diff --git a/crates/gitio/tests/what_git_wrote.rs b/crates/gitio/tests/what_git_wrote.rs
+new file mode 100644
+index 0000000..c72fb73
+--- /dev/null
++++ b/crates/gitio/tests/what_git_wrote.rs
+@@ -0,0 +1,253 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Setup, TempDir, conflict_repo, conflict_repo_with, git_ok, hash_object,
++};
++use yamt_gitio::{
++    AttributeValue, Error, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Repo,
++};
++
++const FIRST: &str = "a.txt";
++const SECOND: &str = "b c.txt";
++const PLAIN: MergeFileOptions = MergeFileOptions {
++    marker_size: 7,
++    union: false,
++    histogram: false,
++};
++
++fn text_conflict(path: &str) -> ConflictFile<'_> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base: Some(b"one\ntwo\n"),
++        local: Some(b"one\nlocal\n"),
++        remote: Some(b"one\nremote\n"),
++    }
++}
++
++fn two_conflicts(setup: &Setup) -> (TempDir, Repo) {
++    let dir = conflict_repo_with(&[text_conflict(FIRST), text_conflict(SECOND)], setup).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    (dir, repo)
++}
++
++fn text(bytes: Vec<u8>) -> String {
++    String::from_utf8(bytes).unwrap()
++}
++
++#[test]
++fn version_is_the_one_git_prints() {
++    let (dir, repo) = two_conflicts(&Setup::default());
++    let printed = text(git_ok(dir.path(), &["version"]).unwrap());
++
++    let GitVersion { major, minor } = repo.version().unwrap();
++
++    assert!(
++        printed.starts_with(&format!("git version {major}.{minor}.")),
++        "{printed}"
++    );
++}
++
++#[test]
++fn attributes_reads_marker_size_merge_driver_and_encoding_of_every_path_in_one_call() {
++    use AttributeValue::{Unset, Unspecified, Value};
++    let attributes =
++        "a.txt conflict-marker-size=12 -merge\n*.md merge=union working-tree-encoding=UTF-16\n";
++    let setup = Setup {
++        attributes: Some(attributes),
++        ..Setup::default()
++    };
++    let (_dir, repo) = two_conflicts(&setup);
++
++    let found = repo
++        .attributes(&[Path::new(FIRST), Path::new("docs/x.md"), Path::new(SECOND)])
++        .unwrap();
++
++    let expected = [
++        (Value(b"12".to_vec()), Unset, Unspecified),
++        (
++            Unspecified,
++            Value(b"union".to_vec()),
++            Value(b"UTF-16".to_vec()),
++        ),
++        (Unspecified, Unspecified, Unspecified),
++    ]
++    .map(
++        |(conflict_marker_size, merge, working_tree_encoding)| MergeAttributes {
++            conflict_marker_size,
++            merge,
++            working_tree_encoding,
++        },
++    );
++    assert_eq!(found, expected);
++    assert_eq!(repo.attributes(&[]).unwrap(), []);
++}
++
++#[test]
++fn hash_objects_cleans_each_file_through_autocrlf_like_git_add() {
++    let setup = Setup {
++        config: &[("core.autocrlf", "true")],
++        ..Setup::default()
++    };
++    let (dir, repo) = two_conflicts(&setup);
++    fs::write(dir.path().join(FIRST), "one\r\ncrlf\r\n").unwrap();
++    fs::write(dir.path().join(SECOND), "plain\n").unwrap();
++
++    let oids = repo
++        .hash_objects(&[Path::new(FIRST), Path::new(SECOND)])
++        .unwrap();
++
++    let expected = [
++        hash_object(dir.path(), b"one\ncrlf\n").unwrap(),
++        hash_object(dir.path(), b"plain\n").unwrap(),
++    ];
++    let found: Vec<&str> = oids.iter().map(yamt_gitio::Oid::as_str).collect();
++    assert_eq!(found, expected);
++    assert_eq!(repo.hash_objects(&[]).unwrap(), Vec::new());
++}
++
++fn merged(repo: &Repo, scratch: &Path, inputs: [&[u8]; 3], options: &MergeFileOptions) -> String {
++    let [base, local, remote] = inputs;
++    let inputs = MergeInputs {
++        base,
++        local,
++        remote,
++    };
++    text(repo.merge_file(scratch, &inputs, options).unwrap())
++}
++
++const BASE: &[u8] = b"a\nb\nc\nd\ne\n";
++const ONE_CONFLICT: [&[u8]; 3] = [BASE, b"a\nB\nc\nd\ne\n", b"a\nX\nc\nd\ne\n"];
++
++#[test]
++fn merge_file_returns_the_merge_with_one_or_two_conflicts() {
++    let (_dir, repo) = two_conflicts(&Setup::default());
++    let scratch = TempDir::new().unwrap();
++    let two_blocks = [BASE, b"A\nb\nc\nd\nE\n", b"X\nb\nc\nd\nY\n"];
++
++    let one = merged(&repo, scratch.path(), ONE_CONFLICT, &PLAIN);
++    let two = merged(&repo, scratch.path(), two_blocks, &PLAIN);
++
++    // The base section depends on the user's `merge.conflictStyle`, which gitio reads (plan §2 #8).
++    assert!(one.starts_with("a\n<<<<<<< ours\nB\n"), "{one}");
++    assert!(
++        one.ends_with("=======\nX\n>>>>>>> theirs\nc\nd\ne\n"),
++        "{one}"
++    );
++    assert_eq!(two.matches("<<<<<<< ours\n").count(), 2, "{two}");
++}
++
++#[test]
++fn merge_file_honours_union_histogram_and_marker_size() {
++    let (_dir, repo) = two_conflicts(&Setup::default());
++    let scratch = TempDir::new().unwrap();
++    let union = MergeFileOptions {
++        marker_size: 9,
++        union: true,
++        histogram: true,
++    };
++    let wide = MergeFileOptions {
++        marker_size: 9,
++        ..PLAIN
++    };
++
++    let unioned = merged(&repo, scratch.path(), ONE_CONFLICT, &union);
++    let nine = merged(&repo, scratch.path(), ONE_CONFLICT, &wide);
++
++    assert_eq!(unioned, "a\nB\nX\nc\nd\ne\n");
++    assert!(
++        nine.contains("\n<<<<<<<<< ours\n") && nine.contains("\n>>>>>>>>> theirs\n"),
++        "{nine}"
++    );
++}
++
++#[test]
++fn merge_file_of_binary_input_is_a_git_failure_and_a_missing_scratch_dir_a_write_failure() {
++    let (_dir, repo) = two_conflicts(&Setup::default());
++    let scratch = TempDir::new().unwrap();
++    let binary = MergeInputs {
++        base: b"\0base",
++        local: b"\0local",
++        remote: b"\0remote",
++    };
++
++    let error = repo
++        .merge_file(scratch.path(), &binary, &PLAIN)
++        .unwrap_err();
++    let gone = scratch.path().join("gone");
++    let missing = repo.merge_file(&gone, &binary, &PLAIN).unwrap_err();
++
++    assert!(
++        matches!(error, Error::GitFailed { status: Some(code), .. } if code >= 128),
++        "{error:?}"
++    );
++    assert!(matches!(missing, Error::WriteFailed { .. }), "{missing:?}");
++}
++
++#[test]
++fn submodule_head_is_the_checked_out_commit_or_none() {
++    let (dir, repo) = two_conflicts(&Setup::default());
++    let checked_out = dir.path().join("lib/checked-out");
++    fs::create_dir_all(&checked_out).unwrap();
++    git_ok(&checked_out, &["init", "--quiet"]).unwrap();
++    git_ok(
++        &checked_out,
++        &["commit", "--quiet", "--allow-empty", "-m", "first"],
++    )
++    .unwrap();
++    let head = text(git_ok(&checked_out, &["rev-parse", "HEAD"]).unwrap());
++    let unborn = dir.path().join("lib/unborn");
++    fs::create_dir_all(&unborn).unwrap();
++    git_ok(&unborn, &["init", "--quiet"]).unwrap();
++    fs::create_dir_all(dir.path().join("lib/empty")).unwrap();
++
++    let found = |path: &str| {
++        repo.submodule_head(Path::new(path))
++            .unwrap()
++            .map(|oid| oid.as_str().to_owned())
++    };
++
++    assert_eq!(found("lib/checked-out"), Some(head.trim_end().to_owned()));
++    assert_eq!(found("lib/unborn"), None);
++    assert_eq!(found("lib/empty"), None);
++    assert_eq!(found("lib/absent"), None);
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    text(git_ok(dir.path(), &["ls-files", "-u"]).unwrap())
++}
++
++#[test]
++fn add_paths_and_remove_paths_stage_every_path_in_one_call() {
++    let (dir, repo) = two_conflicts(&Setup::default());
++    fs::write(dir.path().join(FIRST), "first\n").unwrap();
++    fs::write(dir.path().join(SECOND), "second\n").unwrap();
++
++    repo.add_paths(&[Path::new(FIRST), Path::new(SECOND)])
++        .unwrap();
++
++    assert_eq!(unmerged(&dir), "");
++    let staged = text(git_ok(dir.path(), &["ls-files", "-s"]).unwrap());
++    let first_oid = hash_object(dir.path(), b"first\n").unwrap();
++    assert!(
++        staged.contains(&format!("{first_oid} 0\t{FIRST}")),
++        "{staged}"
++    );
++
++    let conflicts = conflict_repo(&[text_conflict(FIRST), text_conflict(SECOND)]).unwrap();
++    let repo = Repo::discover(conflicts.path()).unwrap();
++    fs::remove_file(conflicts.path().join(FIRST)).unwrap();
++
++    repo.remove_paths(&[Path::new(FIRST), Path::new(SECOND)])
++        .unwrap();
++
++    assert_eq!(unmerged(&conflicts), "");
++    assert_eq!(
++        text(git_ok(conflicts.path(), &["ls-files", "-s"]).unwrap()),
++        ""
++    );
++    assert!(conflicts.path().join(SECOND).exists());
++}
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index 735b31d..0729d23 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -6,6 +6,7 @@ mod apply;
+ mod chunk;
+ mod compute;
+ mod line;
++mod line_map;
+ mod line_pairs;
+ mod token;
+ mod word;
+@@ -14,4 +15,5 @@ pub use apply::apply_non_conflicting;
+ pub use chunk::{Chunk, ChunkId, ChunkKind};
+ pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+ pub use line::{BaseLine, InlinePoint, InlineRange, LineRange, LocalLine, RemoteLine};
++pub use line_map::{LineMap, line_map};
+ pub use word::{SideWordChanges, WordChanges, word_changes};
+diff --git a/crates/merge-core/src/line_map.rs b/crates/merge-core/src/line_map.rs
+new file mode 100644
+index 0000000..eaa96a4
+--- /dev/null
++++ b/crates/merge-core/src/line_map.rs
+@@ -0,0 +1,166 @@
++use std::ops::Range;
++
++use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
++
++/// Where the lines of one text sit in another, from a line diff of the two.
++#[derive(Clone, Debug)]
++pub struct LineMap {
++    hunks: Vec<Hunk>,
++}
++
++/// Aligns the lines of `from` with the lines of `to`.
++#[must_use]
++pub fn line_map(from: &str, to: &str) -> LineMap {
++    let input = InternedInput::new(from, to);
++    let mut diff = Diff::compute(Algorithm::Histogram, &input);
++    diff.postprocess_lines(&input);
++    LineMap {
++        hunks: diff.hunks().collect(),
++    }
++}
++
++impl LineMap {
++    /// The `to` lines equal to these `from` lines, or `None` when any of them changed; an empty
++    /// range gives the place after the last unchanged line before it.
++    #[must_use]
++    pub fn exact(&self, from: Range<u32>) -> Option<Range<u32>> {
++        if from.is_empty() {
++            let point = self.before_changes_at(from.start);
++            return Some(point..point);
++        }
++        let changed = self
++            .hunks
++            .iter()
++            .any(|hunk| hunk.before.start < from.end && hunk.before.end > from.start);
++        if changed {
++            return None;
++        }
++        let start = self.after_changes_at(from.start);
++        Some(start..start + (from.end - from.start))
++    }
++
++    /// The `to` lines that cover these `from` lines, grown outward to whole changed hunks;
++    /// lines inserted right at either edge are included.
++    #[must_use]
++    pub fn covering(&self, from: Range<u32>) -> Range<u32> {
++        self.before_changes_at(from.start)..self.after_changes_at(from.end)
++    }
++
++    fn before_changes_at(&self, from_point: u32) -> u32 {
++        let preceding = self
++            .hunks
++            .partition_point(|hunk| hunk.before.start < from_point);
++        let Some(hunk) = preceding
++            .checked_sub(1)
++            .and_then(|last| self.hunks.get(last))
++        else {
++            return from_point;
++        };
++        if hunk.before.end > from_point {
++            hunk.after.start
++        } else {
++            hunk.after.end + (from_point - hunk.before.end)
++        }
++    }
++
++    fn after_changes_at(&self, from_point: u32) -> u32 {
++        let reaching = self.hunks.partition_point(|hunk| {
++            hunk.before.start < from_point
++                || (hunk.before.start == from_point && hunk.before.is_empty())
++        });
++        let Some(hunk) = reaching
++            .checked_sub(1)
++            .and_then(|last| self.hunks.get(last))
++        else {
++            return from_point;
++        };
++        if hunk.before.end > from_point {
++            hunk.after.end
++        } else {
++            hunk.after.end + (from_point - hunk.before.end)
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const LOCAL: &str = "a\nb\nc\nd\ne\n";
++
++    #[test]
++    fn unchanged_lines_map_exactly_and_cover_themselves() {
++        let map = line_map(LOCAL, "new\na\nb\nc\nd\ne\n");
++        assert_eq!(map.exact(1..3), Some(2..4));
++        assert_eq!(map.covering(1..3), 2..4);
++        assert_eq!(map.exact(0..5), Some(1..6));
++    }
++
++    #[test]
++    fn a_changed_line_inside_the_range_makes_it_inexact_and_covering_grows_to_the_hunk() {
++        let map = line_map(LOCAL, "a\nB\nC\nX\nd\ne\n");
++        assert_eq!(map.exact(1..2), None);
++        assert_eq!(map.exact(0..2), None);
++        assert_eq!(map.exact(3..5), Some(4..6));
++        assert_eq!(map.covering(1..2), 1..4);
++        assert_eq!(map.covering(0..2), 0..4);
++    }
++
++    #[test]
++    fn lines_inserted_inside_a_range_make_it_inexact() {
++        let map = line_map(LOCAL, "a\nb\nnew\nc\nd\ne\n");
++        assert_eq!(map.exact(1..3), None);
++        assert_eq!(map.exact(0..2), Some(0..2));
++        assert_eq!(map.exact(2..4), Some(3..5));
++        assert_eq!(map.covering(1..3), 1..4);
++    }
++
++    #[test]
++    fn an_empty_range_is_a_point_after_the_last_unchanged_line_and_covers_lines_inserted_there() {
++        let map = line_map(LOCAL, "a\nb\nnew\nc\nd\ne\n");
++        assert_eq!(map.exact(2..2), Some(2..2));
++        assert_eq!(map.covering(2..2), 2..3);
++        assert_eq!(map.exact(4..4), Some(5..5));
++        assert_eq!(map.covering(4..4), 5..5);
++    }
++
++    #[test]
++    fn an_empty_range_inside_a_changed_hunk_sits_before_it_and_covers_all_of_it() {
++        let map = line_map(LOCAL, "a\nB\nC\nd\ne\n");
++        assert_eq!(map.exact(2..2), Some(1..1));
++        assert_eq!(map.covering(2..2), 1..3);
++    }
++
++    #[test]
++    fn the_start_and_the_end_of_the_text_are_points_too() {
++        let map = line_map(LOCAL, "first\na\nb\nc\nd\ne\nlast\n");
++        assert_eq!(map.exact(0..0), Some(0..0));
++        assert_eq!(map.covering(0..0), 0..1);
++        assert_eq!(map.exact(5..5), Some(6..6));
++        assert_eq!(map.covering(5..5), 6..7);
++        assert_eq!(map.covering(0..5), 0..7);
++    }
++
++    #[test]
++    fn deleted_lines_cover_nothing_and_are_not_exact() {
++        let map = line_map(LOCAL, "a\ne\n");
++        assert_eq!(map.exact(1..4), None);
++        assert_eq!(map.covering(1..4), 1..1);
++        assert_eq!(map.covering(2..3), 1..1);
++        assert_eq!(map.exact(4..5), Some(1..2));
++    }
++
++    #[test]
++    fn an_empty_input_maps_to_points_and_covers_the_whole_other_text() {
++        let from_empty = line_map("", LOCAL);
++        assert_eq!(from_empty.exact(0..0), Some(0..0));
++        assert_eq!(from_empty.covering(0..0), 0..5);
++        let to_empty = line_map(LOCAL, "");
++        assert_eq!(to_empty.exact(0..5), None);
++        assert_eq!(to_empty.covering(0..5), 0..0);
++        assert_eq!(to_empty.exact(5..5), Some(0..0));
++        let both_empty = line_map("", "");
++        assert_eq!(both_empty.exact(0..0), Some(0..0));
++        assert_eq!(both_empty.covering(0..0), 0..0);
++    }
++}
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 19c0c2f..41a4d74 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), finish/reset, and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). Statuses are git's view: `refresh_statuses` re-reads `ls-files -u` (plan §2 #49). `remote_name.rs` names what is merged in, read once at `open`; a git failure there only drops the name (plan §2 #50). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk (`disk.rs` `Seen`, read back after each own write); `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → the view becomes the disk), then re-reads `ls-files -u` (plan §2 #49); finish/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`. `markers.rs` reads git's markers from bytes, `seed.rs` builds the middle text and one conflict per open block from the disk, `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes). `remote_name.rs` names what is merged in, read once at `open`; a git failure there only drops the name (plan §2 #50). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs`.
+diff --git a/crates/session/src/disk.rs b/crates/session/src/disk.rs
+new file mode 100644
+index 0000000..d4e538f
+--- /dev/null
++++ b/crates/session/src/disk.rs
+@@ -0,0 +1,178 @@
++use std::fs;
++use std::io;
++use std::os::unix::ffi::OsStringExt;
++use std::path::Path;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++use yamt_gitio::{Oid, Repo};
++
++use crate::markers::{open_regions, parse, split_lines};
++use crate::{Error, Result};
++
++/// Counts the settles of one file's disk changes; a view is built from one version.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++pub struct DiskVersion(pub u32);
++
++/// What yamt did with a file that changed on disk.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum DiskResult {
++    Staged,
++    /// Not staged: the file still has this many open blocks and raw regions.
++    MarkersLeft {
++        conflicts: u32,
++    },
++    StageFailed {
++        message: String,
++    },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct DiskChange {
++    pub path: String,
++    pub result: DiskResult,
++}
++
++/// A worktree entry as read, without following a link; the executable bit is not kept.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) enum OnDisk {
++    Missing,
++    File(Vec<u8>),
++    Link(Vec<u8>),
++    /// The commit checked out in the submodule; `None` when it is not checked out.
++    Submodule(Option<Oid>),
++    /// A directory (other than a submodule) or a special file.
++    Other,
++}
++
++/// What yamt last saw at a path, and what the window's view of the file is built from.
++pub(crate) enum Seen {
++    /// The file differed from git's merge output at start; no read equals it.
++    GitOutput,
++    /// The view is yamt's merge of the stages.
++    Stages(OnDisk),
++    /// The view is built from this read (`Middle::Disk` or `Middle::DiskNotText`).
++    Disk(OnDisk),
++}
++
++/// How a change to a file that is still present is settled.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum MarkerRule {
++    /// Binary, link, submodule and deleted-side files: git writes no markers, any change stages.
++    StageAny,
++    /// Two-sided text: staged only once no marker line is left.
++    StageWithoutMarkers,
++    /// `working-tree-encoding` files: their markers cannot be read, so they are never staged.
++    NeverStage,
++}
++
++pub(crate) enum Settlement {
++    Add,
++    Remove,
++    Leave { conflicts: u32 },
++}
++
++/// The outcome of the two batched staging commands of one settle.
++pub(crate) struct Staging {
++    added: Result<(), String>,
++    removed: Result<(), String>,
++}
++
++impl Seen {
++    pub(crate) fn is(&self, disk: &OnDisk) -> bool {
++        match self {
++            Seen::GitOutput => false,
++            Seen::Stages(seen) | Seen::Disk(seen) => seen == disk,
++        }
++    }
++}
++
++pub(crate) fn read_on_disk(repo: &Repo, path: &Path, is_submodule: bool) -> Result<OnDisk> {
++    let full_path = repo.root().join(path);
++    let read_failed = |source| Error::ReadFailed {
++        path: path.to_string_lossy().into_owned(),
++        source,
++    };
++    let file_type = match fs::symlink_metadata(&full_path) {
++        Ok(metadata) => metadata.file_type(),
++        Err(source) if is_absent(&source) => return Ok(OnDisk::Missing),
++        Err(source) => return Err(read_failed(source)),
++    };
++    let read = if file_type.is_symlink() {
++        fs::read_link(&full_path).map(|target| OnDisk::Link(target.into_os_string().into_vec()))
++    } else if file_type.is_file() {
++        fs::read(&full_path).map(OnDisk::File)
++    } else if file_type.is_dir() && is_submodule {
++        return Ok(OnDisk::Submodule(repo.submodule_head(path)?));
++    } else {
++        Ok(OnDisk::Other)
++    };
++    match read {
++        Ok(disk) => Ok(disk),
++        Err(source) if is_absent(&source) => Ok(OnDisk::Missing),
++        Err(source) => Err(read_failed(source)),
++    }
++}
++
++fn is_absent(error: &io::Error) -> bool {
++    matches!(
++        error.kind(),
++        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
++    )
++}
++
++pub(crate) fn settlement(disk: &OnDisk, rule: MarkerRule, marker_size: usize) -> Settlement {
++    let conflicts = || match disk {
++        OnDisk::File(bytes) => open_regions(&parse(&split_lines(bytes), marker_size)),
++        OnDisk::Missing | OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => 0,
++    };
++    if rule == MarkerRule::NeverStage {
++        return Settlement::Leave {
++            conflicts: conflicts(),
++        };
++    }
++    match disk {
++        OnDisk::Missing | OnDisk::Other => Settlement::Remove,
++        OnDisk::Submodule(None) => Settlement::Leave { conflicts: 0 },
++        OnDisk::Link(_) | OnDisk::Submodule(Some(_)) => Settlement::Add,
++        OnDisk::File(_) if rule == MarkerRule::StageAny => Settlement::Add,
++        OnDisk::File(_) => match conflicts() {
++            0 => Settlement::Add,
++            conflicts => Settlement::Leave { conflicts },
++        },
++    }
++}
++
++pub(crate) fn stage(repo: &Repo, to_add: &[&Path], to_remove: &[&Path]) -> Staging {
++    let added = if to_add.is_empty() {
++        Ok(())
++    } else {
++        repo.add_paths(to_add).map_err(|error| error.to_string())
++    };
++    let removed = if to_remove.is_empty() {
++        Ok(())
++    } else {
++        repo.remove_paths(to_remove)
++            .map_err(|error| error.to_string())
++    };
++    Staging { added, removed }
++}
++
++impl Staging {
++    pub(crate) fn result(&self, settlement: &Settlement) -> DiskResult {
++        let staged = |outcome: &Result<(), String>| match outcome {
++            Ok(()) => DiskResult::Staged,
++            Err(message) => DiskResult::StageFailed {
++                message: message.clone(),
++            },
++        };
++        match settlement {
++            Settlement::Add => staged(&self.added),
++            Settlement::Remove => staged(&self.removed),
++            Settlement::Leave { conflicts } => DiskResult::MarkersLeft {
++                conflicts: *conflicts,
++            },
++        }
++    }
++}
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index e8bf3fa..4277f9b 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -2,14 +2,23 @@
+ #![forbid(unsafe_code)]
+ 
+ mod decode;
++mod disk;
++mod markers;
++mod merge_data;
++mod open;
+ mod remote_name;
++mod seed;
+ mod session;
+ mod sides;
+ mod stages;
++mod start;
++mod writes;
+ 
+ pub use decode::{Eol, UnsupportedReason};
++pub use disk::{DiskChange, DiskResult, DiskVersion};
++pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, merge_data};
+ pub use remote_name::RemoteName;
+-pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession, merge_data};
++pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
+ pub use sides::{FileSides, Side, SideContent};
+ 
+ #[derive(Debug, thiserror::Error)]
+@@ -28,6 +37,11 @@ pub enum Error {
+         path: String,
+         source: std::io::Error,
+     },
++    #[error("cannot read {path}: {source}")]
++    ReadFailed {
++        path: String,
++        source: std::io::Error,
++    },
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/session/src/markers.rs b/crates/session/src/markers.rs
+new file mode 100644
+index 0000000..eb28614
+--- /dev/null
++++ b/crates/session/src/markers.rs
+@@ -0,0 +1,355 @@
++use std::ops::Range;
++
++pub(crate) const DEFAULT_MARKER_SIZE: usize = 7;
++
++/// A stretch of a worktree file, as line indexes into `split_lines` of its bytes.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) enum Piece {
++    Settled(Range<usize>),
++    Block(Block),
++    Raw(Range<usize>),
++}
++
++/// An open conflict: its lines from `<<<<<<<` to `>>>>>>>`, and the lines of each side's section.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct Block {
++    pub(crate) whole: Range<usize>,
++    pub(crate) ours: Range<usize>,
++    pub(crate) theirs: Range<usize>,
++}
++
++/// The file as each side would read it: settled lines, raw regions as they are, and each block's
++/// section of that side; marker lines, labels and base sections dropped, `\r\n` read as `\n`.
++#[derive(Debug, PartialEq, Eq)]
++pub(crate) struct Views {
++    pub(crate) ours: Vec<u8>,
++    pub(crate) theirs: Vec<u8>,
++}
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum Marker {
++    Open,
++    Base,
++    Separator,
++    Close,
++}
++
++enum InBlock {
++    Ours { from: usize },
++    Base { ours: Range<usize> },
++    Theirs { ours: Range<usize>, from: usize },
++}
++
++pub(crate) fn split_lines(text: &[u8]) -> Vec<&[u8]> {
++    text.split_inclusive(|&byte| byte == b'\n').collect()
++}
++
++pub(crate) fn open_regions(pieces: &[Piece]) -> u32 {
++    let open = pieces.iter().filter(|piece| match piece {
++        Piece::Settled(_) => false,
++        Piece::Block(_) | Piece::Raw(_) => true,
++    });
++    u32::try_from(open.count()).unwrap_or(u32::MAX)
++}
++
++pub(crate) fn parse(lines: &[&[u8]], marker_size: usize) -> Vec<Piece> {
++    let mut pieces = Vec::new();
++    let mut settled_from = 0;
++    let mut at = 0;
++    while let Some(line) = lines.get(at) {
++        let found = match marker(line, marker_size) {
++            Some(Marker::Open) => Some(read_block(lines, at, marker_size)),
++            Some(Marker::Close) => Some(Piece::Raw(at..at + 1)),
++            Some(Marker::Base | Marker::Separator) | None => None,
++        };
++        let Some(piece) = found else {
++            at += 1;
++            continue;
++        };
++        if settled_from < at {
++            pieces.push(Piece::Settled(settled_from..at));
++        }
++        at = piece_end(&piece);
++        settled_from = at;
++        pieces.push(piece);
++    }
++    if settled_from < lines.len() {
++        pieces.push(Piece::Settled(settled_from..lines.len()));
++    }
++    pieces
++}
++
++fn piece_end(piece: &Piece) -> usize {
++    match piece {
++        Piece::Settled(lines) | Piece::Raw(lines) => lines.end,
++        Piece::Block(block) => block.whole.end,
++    }
++}
++
++fn read_block(lines: &[&[u8]], start: usize, marker_size: usize) -> Piece {
++    let mut state = InBlock::Ours { from: start + 1 };
++    for (at, line) in lines.iter().enumerate().skip(start + 1) {
++        let Some(found) = marker(line, marker_size) else {
++            continue;
++        };
++        state = match (state, found) {
++            (InBlock::Ours { from }, Marker::Base) => InBlock::Base { ours: from..at },
++            (InBlock::Ours { from }, Marker::Separator) => InBlock::Theirs {
++                ours: from..at,
++                from: at + 1,
++            },
++            (InBlock::Base { ours }, Marker::Separator) => InBlock::Theirs { ours, from: at + 1 },
++            (InBlock::Theirs { ours, from }, Marker::Close) => {
++                return Piece::Block(Block {
++                    whole: start..at + 1,
++                    ours,
++                    theirs: from..at,
++                });
++            }
++            (InBlock::Ours { .. } | InBlock::Base { .. }, Marker::Close) => {
++                return Piece::Raw(start..at + 1);
++            }
++            (_, Marker::Open | Marker::Base | Marker::Separator) => {
++                return Piece::Raw(start..raw_end(lines, at + 1, marker_size));
++            }
++        };
++    }
++    Piece::Raw(start..lines.len())
++}
++
++fn raw_end(lines: &[&[u8]], from: usize, marker_size: usize) -> usize {
++    for (at, line) in lines.iter().enumerate().skip(from) {
++        match marker(line, marker_size) {
++            Some(Marker::Close) => return at + 1,
++            Some(Marker::Open) => return at,
++            Some(Marker::Base | Marker::Separator) | None => {}
++        }
++    }
++    lines.len()
++}
++
++// git rerere.c `is_cmarker`: exactly `marker_size` copies of the marker character, then a space,
++// or the end of the line.
++fn marker(line: &[u8], marker_size: usize) -> Option<Marker> {
++    let first = *line.first()?;
++    let kind = match first {
++        b'<' => Marker::Open,
++        b'|' => Marker::Base,
++        b'=' => Marker::Separator,
++        b'>' => Marker::Close,
++        _ => return None,
++    };
++    let run = line.get(..marker_size)?;
++    if run.iter().any(|&byte| byte != first) {
++        return None;
++    }
++    match line.get(marker_size) {
++        None | Some(b' ' | b'\r' | b'\n') => Some(kind),
++        Some(_) => None,
++    }
++}
++
++pub(crate) fn views(text: &[u8], marker_size: usize) -> Views {
++    let lines = split_lines(text);
++    let mut views = Views {
++        ours: Vec::with_capacity(text.len()),
++        theirs: Vec::with_capacity(text.len()),
++    };
++    for piece in parse(&lines, marker_size) {
++        let (ours, theirs) = match &piece {
++            Piece::Settled(both) | Piece::Raw(both) => (both, both),
++            Piece::Block(block) => (&block.ours, &block.theirs),
++        };
++        push_without_cr(&mut views.ours, &lines, ours);
++        push_without_cr(&mut views.theirs, &lines, theirs);
++    }
++    views
++}
++
++fn push_without_cr(view: &mut Vec<u8>, lines: &[&[u8]], range: &Range<usize>) {
++    for line in lines.get(range.clone()).unwrap_or_default() {
++        match line.strip_suffix(b"\r\n") {
++            Some(content) => {
++                view.extend_from_slice(content);
++                view.push(b'\n');
++            }
++            None => view.extend_from_slice(line),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const MERGE: &[u8] = include_bytes!("../tests/markers/style-merge.txt");
++    const DIFF3: &[u8] = include_bytes!("../tests/markers/style-diff3.txt");
++    const ZDIFF3: &[u8] = include_bytes!("../tests/markers/style-zdiff3.txt");
++    const SIZE_12: &[u8] = include_bytes!("../tests/markers/marker-size-12.txt");
++    const CRLF: &[u8] = include_bytes!("../tests/markers/crlf.txt");
++    const SIZE_12_MARKERS: usize = 12;
++
++    fn parsed(text: &[u8]) -> Vec<Piece> {
++        parse(&split_lines(text), DEFAULT_MARKER_SIZE)
++    }
++
++    fn section_texts(text: &[u8], marker_size: usize) -> Vec<(String, String)> {
++        let lines = split_lines(text);
++        let joined =
++            |range: &Range<usize>| String::from_utf8(lines[range.clone()].concat()).unwrap();
++        let blocks = parse(&lines, marker_size)
++            .into_iter()
++            .filter_map(|piece| match piece {
++                Piece::Block(block) => Some((joined(&block.ours), joined(&block.theirs))),
++                Piece::Settled(_) | Piece::Raw(_) => None,
++            });
++        blocks.collect()
++    }
++
++    #[test]
++    fn the_three_styles_parse_to_two_blocks_with_the_same_sections_around_the_settled_separator() {
++        let first = (
++            "one\nTWO\nshared-a\nthree-ours\n".to_owned(),
++            "ONE\ntwo\nshared-a\nthree-theirs\n".to_owned(),
++        );
++        let second = ("eight-ours\n".to_owned(), "eight-theirs\n".to_owned());
++        assert_eq!(
++            section_texts(MERGE, DEFAULT_MARKER_SIZE),
++            [first.clone(), second.clone()]
++        );
++        assert_eq!(
++            section_texts(ZDIFF3, DEFAULT_MARKER_SIZE),
++            [first, second.clone()]
++        );
++        let diff3_first = (
++            "one\nTWO\nshared-a\nthree-ours\nshared-b\n".to_owned(),
++            "ONE\ntwo\nshared-a\nthree-theirs\nshared-b\n".to_owned(),
++        );
++        assert_eq!(
++            section_texts(DIFF3, DEFAULT_MARKER_SIZE),
++            [diff3_first, second]
++        );
++        let zdiff3 = parsed(ZDIFF3);
++        assert_eq!(zdiff3[0], Piece::Settled(0..2));
++        assert_eq!(
++            zdiff3[1],
++            Piece::Block(Block {
++                whole: 2..17,
++                ours: 3..7,
++                theirs: 12..16
++            })
++        );
++        assert_eq!(open_regions(&zdiff3), 2);
++    }
++
++    #[test]
++    fn marker_size_twelve_parses_with_twelve_and_is_all_text_with_seven() {
++        assert_eq!(
++            section_texts(SIZE_12, SIZE_12_MARKERS),
++            section_texts(ZDIFF3, DEFAULT_MARKER_SIZE)
++        );
++        let lines = split_lines(SIZE_12).len();
++        assert_eq!(
++            parse(&split_lines(SIZE_12), DEFAULT_MARKER_SIZE),
++            [Piece::Settled(0..lines)]
++        );
++    }
++
++    #[test]
++    fn crlf_markers_parse_like_lf_ones() {
++        let crlf = parse(&split_lines(CRLF), DEFAULT_MARKER_SIZE);
++        assert_eq!(crlf, parsed(ZDIFF3));
++    }
++
++    #[test]
++    fn a_deleted_separator_or_a_close_before_it_makes_the_block_raw_to_its_close() {
++        let text = b"a\n<<<<<<< ours\nx\n||||||| base\nb\n>>>>>>> theirs\nz\n";
++        assert_eq!(
++            parsed(text),
++            [Piece::Settled(0..1), Piece::Raw(1..6), Piece::Settled(6..7)]
++        );
++        let no_base = b"<<<<<<< ours\nx\ny\n>>>>>>> theirs\n";
++        assert_eq!(parsed(no_base), [Piece::Raw(0..4)]);
++    }
++
++    #[test]
++    fn a_nested_open_makes_the_block_raw_to_the_next_close() {
++        let text = b"<<<<<<< a\nx\n<<<<<<< b\ny\n=======\nz\n>>>>>>> b\nafter\n";
++        assert_eq!(parsed(text), [Piece::Raw(0..7), Piece::Settled(7..8)]);
++        let open_again =
++            b"<<<<<<< a\nx\n=======\n=======\ny\n<<<<<<< b\nc\n=======\nd\n>>>>>>> b\n";
++        assert_eq!(
++            parsed(open_again),
++            [
++                Piece::Raw(0..5),
++                Piece::Block(Block {
++                    whole: 5..10,
++                    ours: 6..7,
++                    theirs: 8..9
++                })
++            ]
++        );
++    }
++
++    #[test]
++    fn a_stray_close_is_one_raw_line_and_an_open_without_close_is_raw_to_the_end() {
++        let stray = b"a\n>>>>>>> x\nb\n";
++        assert_eq!(
++            parsed(stray),
++            [Piece::Settled(0..1), Piece::Raw(1..2), Piece::Settled(2..3)]
++        );
++        let unclosed = b"a\n<<<<<<< ours\nx\n=======\ny\n";
++        assert_eq!(parsed(unclosed), [Piece::Settled(0..1), Piece::Raw(1..5)]);
++        assert_eq!(open_regions(&parsed(unclosed)), 1);
++    }
++
++    #[test]
++    fn separators_and_base_markers_outside_a_block_are_text() {
++        let text = b"=======\n||||||| x\ntext\n";
++        assert_eq!(parsed(text), [Piece::Settled(0..3)]);
++        assert_eq!(open_regions(&parsed(text)), 0);
++    }
++
++    #[test]
++    fn a_last_line_without_a_newline_closes_a_block_and_needs_no_label() {
++        let text = b"<<<<<<<\nx\n=======\ny\n>>>>>>>";
++        assert_eq!(
++            parsed(text),
++            [Piece::Block(Block {
++                whole: 0..5,
++                ours: 1..2,
++                theirs: 3..4
++            })]
++        );
++    }
++
++    #[test]
++    fn markers_two_longer_than_the_size_and_markers_followed_by_text_stay_text() {
++        let text = b"<<<<<<<<< inner\n=========\n>>>>>>>>> inner\n<<<<<<<x\n";
++        assert_eq!(parsed(text), [Piece::Settled(0..4)]);
++    }
++
++    #[test]
++    fn views_are_the_same_in_every_style_and_line_ending() {
++        let expected = views(MERGE, DEFAULT_MARKER_SIZE);
++        assert_eq!(views(ZDIFF3, DEFAULT_MARKER_SIZE), expected);
++        assert_eq!(views(DIFF3, DEFAULT_MARKER_SIZE), expected);
++        assert_eq!(views(CRLF, DEFAULT_MARKER_SIZE), expected);
++        assert_eq!(views(SIZE_12, SIZE_12_MARKERS), expected);
++        let ours = include_bytes!("../tests/markers/ours.txt");
++        assert_eq!(expected.ours, ours);
++    }
++
++    #[test]
++    fn views_keep_raw_regions_whole_in_both_sides() {
++        let text = b"a\r\n<<<<<<< ours\nx\n>>>>>>> theirs\n";
++        let expected = b"a\n<<<<<<< ours\nx\n>>>>>>> theirs\n".to_vec();
++        assert_eq!(
++            views(text, DEFAULT_MARKER_SIZE),
++            Views {
++                ours: expected.clone(),
++                theirs: expected
++            }
++        );
++    }
++}
+diff --git a/crates/session/src/merge_data.rs b/crates/session/src/merge_data.rs
+new file mode 100644
+index 0000000..525a0b4
+--- /dev/null
++++ b/crates/session/src/merge_data.rs
+@@ -0,0 +1,156 @@
++use serde::Serialize;
++use specta::Type;
++use yamt_merge_core::{Chunk, LineRange, Options, WordChanges, compute_chunks, word_changes};
++
++use crate::decode::{Eol, MAX_TEXT_BYTES, detect_eol, is_binary};
++use crate::disk::{DiskVersion, OnDisk};
++use crate::seed::{Seeded, seed};
++use crate::sides::Side;
++
++/// 0-based line of the middle pane's starting text.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Type)]
++pub struct MiddleLine(pub u32);
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct MergeChunk {
++    pub chunk: Chunk,
++    pub middle: LineRange<MiddleLine>,
++    pub words: WordChanges,
++}
++
++/// Why the file on disk cannot be shown as the middle text.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub enum NotText {
++    Deleted,
++    Binary,
++    NonUtf8,
++    TooLarge,
++    Link,
++    Directory,
++}
++
++/// Where the middle pane starts: yamt's merge of the stages (base), or the file as found on disk.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum Middle {
++    Stages { text: String },
++    Disk { text: String },
++    DiskNotText { found: NotText },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct FileMergeData {
++    pub path: String,
++    pub middle: Middle,
++    pub local: String,
++    pub remote: String,
++    pub deleted: Option<Side>,
++    pub eol: Eol,
++    pub chunks: Vec<MergeChunk>,
++    pub disk_version: DiskVersion,
++}
++
++pub(crate) struct Texts {
++    pub(crate) base: String,
++    pub(crate) local: String,
++    pub(crate) remote: String,
++    pub(crate) deleted: Option<Side>,
++}
++
++#[must_use]
++pub fn merge_data(
++    path: &str,
++    base: &str,
++    local: &str,
++    remote: &str,
++    deleted: Option<Side>,
++    disk_version: DiskVersion,
++) -> FileMergeData {
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    let words = word_changes(base, local, remote, &chunks);
++    let mut merge_chunks = Vec::with_capacity(chunks.len());
++    for (chunk, words) in chunks.into_iter().zip(words) {
++        let middle = LineRange {
++            start: MiddleLine(chunk.base.start.0),
++            len: chunk.base.len,
++        };
++        merge_chunks.push(MergeChunk {
++            chunk,
++            middle,
++            words,
++        });
++    }
++    FileMergeData {
++        path: path.to_owned(),
++        middle: Middle::Stages {
++            text: base.to_owned(),
++        },
++        local: local.to_owned(),
++        remote: remote.to_owned(),
++        deleted,
++        eol: stages_eol(base, local, remote),
++        chunks: merge_chunks,
++        disk_version,
++    }
++}
++
++pub(crate) fn disk_merge_data(
++    path: &str,
++    texts: &Texts,
++    disk: &OnDisk,
++    marker_size: usize,
++    disk_version: DiskVersion,
++) -> FileMergeData {
++    let (middle, eol, chunks) = match seeded_from_disk(disk, marker_size, texts) {
++        Ok(seeded) => (
++            Middle::Disk {
++                text: seeded.middle,
++            },
++            seeded.eol,
++            seeded.chunks,
++        ),
++        Err(found) => (
++            Middle::DiskNotText { found },
++            stages_eol(&texts.base, &texts.local, &texts.remote),
++            Vec::new(),
++        ),
++    };
++    FileMergeData {
++        path: path.to_owned(),
++        middle,
++        local: texts.local.clone(),
++        remote: texts.remote.clone(),
++        deleted: texts.deleted,
++        eol,
++        chunks,
++        disk_version,
++    }
++}
++
++fn seeded_from_disk(disk: &OnDisk, marker_size: usize, texts: &Texts) -> Result<Seeded, NotText> {
++    let bytes = match disk {
++        OnDisk::File(bytes) => bytes,
++        OnDisk::Missing => return Err(NotText::Deleted),
++        OnDisk::Link(_) => return Err(NotText::Link),
++        OnDisk::Submodule(_) | OnDisk::Other => return Err(NotText::Directory),
++    };
++    Ok(seed(disk_text(bytes)?, marker_size, texts))
++}
++
++fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
++    if is_binary(bytes) {
++        return Err(NotText::Binary);
++    }
++    if bytes.len() > MAX_TEXT_BYTES {
++        return Err(NotText::TooLarge);
++    }
++    std::str::from_utf8(bytes).map_err(|_| NotText::NonUtf8)
++}
++
++fn stages_eol(base: &str, local: &str, remote: &str) -> Eol {
++    let eol_source = [base, local, remote]
++        .into_iter()
++        .find(|text| text.contains('\n'))
++        .unwrap_or_default();
++    detect_eol(eol_source)
++}
+diff --git a/crates/session/src/open.rs b/crates/session/src/open.rs
+new file mode 100644
+index 0000000..54c79a5
+--- /dev/null
++++ b/crates/session/src/open.rs
+@@ -0,0 +1,184 @@
++use std::path::{Path, PathBuf};
++
++use yamt_gitio::{BlobReader, MergeAttributes, Repo, StageEntry};
++
++use crate::Result;
++use crate::decode::{UnsupportedReason, decode_sides};
++use crate::disk::{MarkerRule, Seen, read_on_disk};
++use crate::merge_data::Texts;
++use crate::remote_name::read_remote_name;
++use crate::session::{Content, FileState, FileStatus, MergeSession};
++use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
++use crate::stages::{CapturedStages, group_by_path};
++use crate::start::{Attributes, StartCheck, StartFile, StartLook};
++
++/// What the index holds for a path, with the blobs of a regular file read.
++enum Stored {
++    Submodule,
++    Symlink,
++    BothDeleted,
++    /// base, local and remote bytes; a deleted side holds base.
++    Regular {
++        deleted: Option<Side>,
++        sides: [Vec<u8>; 3],
++    },
++}
++
++impl MergeSession {
++    pub fn open(cwd: &Path) -> Result<MergeSession> {
++        let repo = Repo::discover(cwd)?;
++        let groups = group_by_path(repo.unmerged()?);
++        let paths: Vec<&Path> = groups.iter().map(|(path, _)| path.as_path()).collect();
++        let attributes = repo.attributes(&paths)?;
++        let files = open_files(&repo, groups, &attributes)?;
++        let remote_name = read_remote_name(&repo);
++        Ok(MergeSession {
++            repo,
++            files,
++            remote_name,
++        })
++    }
++}
++
++fn open_files(
++    repo: &Repo,
++    groups: Vec<(PathBuf, CapturedStages)>,
++    attributes: &[MergeAttributes],
++) -> Result<Vec<FileState>> {
++    let mut blobs = repo.blob_reader()?;
++    let mut check = StartCheck::new(repo);
++    let mut files = Vec::with_capacity(groups.len());
++    let mut looks = Vec::with_capacity(groups.len());
++    for ((path, stages), found) in groups.into_iter().zip(attributes) {
++        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, found)?;
++        files.push(file);
++        looks.push(look);
++    }
++    let paths = files.iter().map(|file| file.path.as_path());
++    let looks: Vec<(&Path, StartLook)> = paths.zip(looks).collect();
++    let untouched = check.untouched(&looks);
++    for (file, untouched) in files.iter_mut().zip(untouched) {
++        if !untouched {
++            file.seen = Seen::GitOutput;
++        }
++    }
++    Ok(files)
++}
++
++fn open_file(
++    repo: &Repo,
++    blobs: &mut BlobReader,
++    check: &mut StartCheck,
++    path: PathBuf,
++    stages: CapturedStages,
++    found: &MergeAttributes,
++) -> Result<(FileState, StartLook)> {
++    let attributes = Attributes::from_git(found);
++    let stored = stored(blobs, &stages)?;
++    let disk = read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE))?;
++    let sides = match &stored {
++        Stored::Regular { sides, .. } => Some(sides),
++        Stored::Submodule | Stored::Symlink | Stored::BothDeleted => None,
++    };
++    let start = StartFile {
++        path: &path,
++        stages: &stages,
++        sides,
++        attributes: &attributes,
++        disk: &disk,
++    };
++    let look = check.look(&start, blobs)?;
++    let content = content(&path, stored);
++    let file = FileState {
++        rule: marker_rule(&content, &attributes),
++        path,
++        stages,
++        status: FileStatus::Unresolved,
++        content,
++        marker_size: attributes.marker_size,
++        seen: Seen::Stages(disk),
++        settled: None,
++    };
++    Ok((file, look))
++}
++
++fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {
++    if stages.has_mode(SUBMODULE_MODE) {
++        return Ok(Stored::Submodule);
++    }
++    if stages.has_mode(SYMLINK_MODE) {
++        return Ok(Stored::Symlink);
++    }
++    let deleted = match (&stages.local, &stages.remote) {
++        (Some(_), Some(_)) => None,
++        (None, Some(_)) => Some(Side::Local),
++        (Some(_), None) => Some(Side::Remote),
++        (None, None) => return Ok(Stored::BothDeleted),
++    };
++    let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
++    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
++    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
++    Ok(Stored::Regular {
++        deleted,
++        sides: [base, local, remote],
++    })
++}
++
++fn stage_bytes(
++    blobs: &mut BlobReader,
++    entry: Option<&StageEntry>,
++    missing: &[u8],
++) -> Result<Vec<u8>> {
++    match entry {
++        Some(entry) => Ok(blobs.read(&entry.oid)?),
++        None => Ok(missing.to_vec()),
++    }
++}
++
++fn content(path: &Path, stored: Stored) -> Content {
++    if path.to_str().is_none() {
++        return Content::Unsupported(UnsupportedReason::NonUtf8);
++    }
++    let (deleted, sides) = match stored {
++        Stored::Submodule => return Content::Unsupported(UnsupportedReason::Submodule),
++        Stored::Symlink => return Content::Unsupported(UnsupportedReason::Symlink),
++        Stored::BothDeleted => return Content::Unsupported(UnsupportedReason::LocalDeleted),
++        Stored::Regular { deleted, sides } => (deleted, sides),
++    };
++    match decode_sides(sides) {
++        Ok([base, local, remote]) => Content::Text(Texts {
++            base,
++            local,
++            remote,
++            deleted,
++        }),
++        Err(reason) => Content::Unsupported(deleted_reason(deleted).unwrap_or(reason)),
++    }
++}
++
++fn deleted_reason(deleted: Option<Side>) -> Option<UnsupportedReason> {
++    deleted.map(|side| match side {
++        Side::Local => UnsupportedReason::LocalDeleted,
++        Side::Remote => UnsupportedReason::RemoteDeleted,
++    })
++}
++
++fn marker_rule(content: &Content, attributes: &Attributes) -> MarkerRule {
++    if attributes.encoded {
++        return MarkerRule::NeverStage;
++    }
++    match content {
++        Content::Text(texts) if texts.deleted.is_none() => MarkerRule::StageWithoutMarkers,
++        Content::Text(_) => MarkerRule::StageAny,
++        Content::Unsupported(reason) => match reason {
++            UnsupportedReason::NonUtf8 | UnsupportedReason::TooLarge => {
++                MarkerRule::StageWithoutMarkers
++            }
++            UnsupportedReason::Binary
++            | UnsupportedReason::LocalDeleted
++            | UnsupportedReason::RemoteDeleted
++            | UnsupportedReason::Symlink
++            | UnsupportedReason::Submodule => MarkerRule::StageAny,
++        },
++    }
++}
+diff --git a/crates/session/src/seed.rs b/crates/session/src/seed.rs
+new file mode 100644
+index 0000000..42ccc7a
+--- /dev/null
++++ b/crates/session/src/seed.rs
+@@ -0,0 +1,393 @@
++use std::ops::Range;
++
++use yamt_merge_core::{
++    BaseLine, Chunk, ChunkId, ChunkKind, LineMap, LineRange, LocalLine, RemoteLine, line_map,
++    word_changes,
++};
++
++use crate::decode::{Eol, detect_eol};
++use crate::markers::{Block, Piece, parse, split_lines};
++use crate::merge_data::{MergeChunk, MiddleLine, Texts};
++
++/// The middle pane's starting text built from a worktree file, and its open conflicts.
++pub(crate) struct Seeded {
++    pub(crate) middle: String,
++    pub(crate) eol: Eol,
++    pub(crate) chunks: Vec<MergeChunk>,
++}
++
++/// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`), and the
++/// line where each piece starts in it.
++struct SideView {
++    text: String,
++    piece_starts: Vec<u32>,
++}
++
++/// Where an open block or raw region sits in local and remote; `exact` when every line of both
++/// sections was found unchanged.
++struct Located {
++    local: Range<u32>,
++    remote: Range<u32>,
++    exact: bool,
++}
++
++struct Maps {
++    ours_to_local: LineMap,
++    theirs_to_remote: LineMap,
++    local_to_base: LineMap,
++    remote_to_base: LineMap,
++}
++
++/// The middle text as it is built, with each conflict's chunk and its lines in the middle.
++struct MiddleText<'a> {
++    disk_lines: &'a [&'a str],
++    base_lines: Vec<&'a str>,
++    eol: Eol,
++    text: String,
++    line_count: u32,
++    chunks: Vec<Chunk>,
++    ranges: Vec<LineRange<MiddleLine>>,
++}
++
++pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
++    let disk_lines: Vec<&str> = disk.split_inclusive('\n').collect();
++    let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
++    let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
++    let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
++    let maps = Maps {
++        ours_to_local: line_map(&ours.text, &texts.local.replace("\r\n", "\n")),
++        theirs_to_remote: line_map(&theirs.text, &texts.remote.replace("\r\n", "\n")),
++        local_to_base: line_map(&texts.local, &texts.base),
++        remote_to_base: line_map(&texts.remote, &texts.base),
++    };
++    let mut middle = MiddleText {
++        disk_lines: &disk_lines,
++        base_lines: texts.base.split_inclusive('\n').collect(),
++        eol: detect_eol(disk),
++        text: String::with_capacity(disk.len()),
++        line_count: 0,
++        chunks: Vec::new(),
++        ranges: Vec::new(),
++    };
++    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
++    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
++        match piece {
++            Piece::Settled(lines) => middle.push_disk_lines(lines),
++            Piece::Block(block) => {
++                let located = maps.block(block, ours_start, theirs_start);
++                middle.push_conflict(&located, maps.base(&located), &block.whole);
++            }
++            Piece::Raw(lines) => {
++                let located = maps.raw(ours_start, theirs_start);
++                middle.push_conflict(&located, maps.base(&located), lines);
++            }
++        }
++    }
++    middle.seeded(texts)
++}
++
++fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usize>) -> SideView {
++    let mut view = SideView {
++        text: String::new(),
++        piece_starts: Vec::with_capacity(pieces.len()),
++    };
++    let mut line_count = 0;
++    for piece in pieces {
++        view.piece_starts.push(line_count);
++        let included = match piece {
++            Piece::Settled(lines) => lines,
++            Piece::Block(block) => section(block),
++            Piece::Raw(_) => continue,
++        };
++        for line in lines.get(included.clone()).unwrap_or_default() {
++            match line.strip_suffix("\r\n") {
++                Some(content) => {
++                    view.text.push_str(content);
++                    view.text.push('\n');
++                }
++                None => view.text.push_str(line),
++            }
++            line_count += 1;
++        }
++    }
++    view
++}
++
++impl Maps {
++    fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
++        let ours = ours_start..ours_start + line_number(block.ours.len());
++        let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
++        match (
++            self.ours_to_local.exact(ours.clone()),
++            self.theirs_to_remote.exact(theirs.clone()),
++        ) {
++            (Some(local), Some(remote)) => Located {
++                local,
++                remote,
++                exact: true,
++            },
++            (None, _) | (_, None) => Located {
++                local: self.ours_to_local.covering(ours),
++                remote: self.theirs_to_remote.covering(theirs),
++                exact: false,
++            },
++        }
++    }
++
++    fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
++        Located {
++            local: self.ours_to_local.covering(ours_start..ours_start),
++            remote: self.theirs_to_remote.covering(theirs_start..theirs_start),
++            exact: false,
++        }
++    }
++
++    fn base(&self, located: &Located) -> Range<u32> {
++        let from_local = self.local_to_base.covering(located.local.clone());
++        let from_remote = self.remote_to_base.covering(located.remote.clone());
++        from_local.start.min(from_remote.start)..from_local.end.max(from_remote.end)
++    }
++}
++
++impl MiddleText<'_> {
++    fn push_disk_lines(&mut self, lines: &Range<usize>) {
++        for line in self.disk_lines.get(lines.clone()).unwrap_or_default() {
++            self.text.push_str(line);
++            self.line_count += 1;
++        }
++    }
++
++    fn push_base_lines(&mut self, lines: &Range<u32>) {
++        let range = lines.start as usize..lines.end as usize;
++        for line in self.base_lines.get(range).unwrap_or_default() {
++            let bare_lf = line
++                .strip_suffix('\n')
++                .filter(|content| !content.ends_with('\r'));
++            match (self.eol, bare_lf) {
++                (Eol::CrLf, Some(content)) => {
++                    self.text.push_str(content);
++                    self.text.push_str("\r\n");
++                }
++                (Eol::CrLf | Eol::Lf | Eol::Mixed, _) => self.text.push_str(line),
++            }
++            self.line_count += 1;
++        }
++    }
++
++    fn push_conflict(&mut self, located: &Located, base: Range<u32>, disk_lines: &Range<usize>) {
++        let start = self.line_count;
++        if located.exact {
++            self.push_base_lines(&base);
++        } else {
++            self.push_disk_lines(disk_lines);
++        }
++        self.ranges.push(LineRange {
++            start: MiddleLine(start),
++            len: self.line_count - start,
++        });
++        self.chunks.push(Chunk {
++            id: ChunkId(line_number(self.chunks.len())),
++            kind: ChunkKind::Conflict,
++            base: LineRange {
++                start: BaseLine(base.start),
++                len: base.end - base.start,
++            },
++            local: LineRange {
++                start: LocalLine(located.local.start),
++                len: located.local.end - located.local.start,
++            },
++            remote: LineRange {
++                start: RemoteLine(located.remote.start),
++                len: located.remote.end - located.remote.start,
++            },
++        });
++    }
++
++    fn seeded(self, texts: &Texts) -> Seeded {
++        let words = word_changes(&texts.base, &texts.local, &texts.remote, &self.chunks);
++        let mut chunks = Vec::with_capacity(self.chunks.len());
++        for ((chunk, middle), words) in self.chunks.into_iter().zip(self.ranges).zip(words) {
++            chunks.push(MergeChunk {
++                chunk,
++                middle,
++                words,
++            });
++        }
++        Seeded {
++            middle: self.text,
++            eol: self.eol,
++            chunks,
++        }
++    }
++}
++
++fn line_number(count: usize) -> u32 {
++    u32::try_from(count).unwrap_or(u32::MAX)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::markers::DEFAULT_MARKER_SIZE;
++
++    const BASE: &str = include_str!("../tests/markers/base.txt");
++    const OURS: &str = include_str!("../tests/markers/ours.txt");
++    const THEIRS: &str = include_str!("../tests/markers/theirs.txt");
++    const ZDIFF3: &str = include_str!("../tests/markers/style-zdiff3.txt");
++    const MERGE: &str = include_str!("../tests/markers/style-merge.txt");
++    const SECOND_BLOCK_ZDIFF3: &str =
++        "<<<<<<< HEAD\neight-ours\n||||||| 8409db1\neight\n=======\neight-theirs\n>>>>>>> theirs\n";
++    const SECOND_BLOCK_MERGE: &str =
++        "<<<<<<< HEAD\neight-ours\n=======\neight-theirs\n>>>>>>> theirs\n";
++    const WORKED_MIDDLE: &str = "title\n=======\none\ntwo\nthree\nshared-b\nfour\nfive\nsix\nseven\neight-theirs\nnine\nten\n";
++
++    fn texts(base: &str, local: &str, remote: &str) -> Texts {
++        Texts {
++            base: base.to_owned(),
++            local: local.to_owned(),
++            remote: remote.to_owned(),
++            deleted: None,
++        }
++    }
++
++    fn sample_texts() -> Texts {
++        texts(BASE, OURS, THEIRS)
++    }
++
++    fn ranges(seeded: &Seeded) -> Vec<[(u32, u32); 3]> {
++        let ranges = seeded.chunks.iter().map(|chunk| {
++            [
++                (chunk.middle.start.0, chunk.middle.len),
++                (chunk.chunk.local.start.0, chunk.chunk.local.len),
++                (chunk.chunk.remote.start.0, chunk.chunk.remote.len),
++            ]
++        });
++        ranges.collect()
++    }
++
++    fn with_local_applied(seeded: &Seeded, local: &str) -> String {
++        let middle: Vec<&str> = seeded.middle.split_inclusive('\n').collect();
++        let local: Vec<&str> = local.split_inclusive('\n').collect();
++        let [chunk] = seeded.chunks.as_slice() else {
++            panic!("expected one chunk, got {}", seeded.chunks.len());
++        };
++        let (start, len) = (chunk.middle.start.0 as usize, chunk.middle.len as usize);
++        let (local_start, local_len) = (
++            chunk.chunk.local.start.0 as usize,
++            chunk.chunk.local.len as usize,
++        );
++        let mut applied = middle[..start].concat();
++        applied += &local[local_start..local_start + local_len].concat();
++        applied + &middle[start + len..].concat()
++    }
++
++    #[test]
++    fn one_block_resolved_by_hand_leaves_one_chunk_over_its_base_lines_in_both_styles() {
++        for (style, second_block) in [(ZDIFF3, SECOND_BLOCK_ZDIFF3), (MERGE, SECOND_BLOCK_MERGE)] {
++            let disk = style.replace(second_block, "eight-theirs\n");
++
++            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++
++            assert_eq!(seeded.middle, WORKED_MIDDLE);
++            assert_eq!(ranges(&seeded), [[(2, 3), (2, 4), (2, 4)]]);
++            assert_eq!(seeded.chunks[0].chunk.base.start.0, 2);
++            assert_eq!(seeded.chunks[0].chunk.base.len, 3);
++            let by_hand = OURS.replace("eight-ours", "eight-theirs");
++            assert_eq!(with_local_applied(&seeded, OURS), by_hand);
++        }
++    }
++
++    #[test]
++    fn the_mirror_case_puts_the_chunk_on_the_second_block() {
++        let first_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours\n||||||| 8409db1\none\ntwo\nthree\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
++        let disk = ZDIFF3.replace(first_block, "one\nTWO\nshared-a\nthree-ours\n");
++
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++
++        assert_eq!(ranges(&seeded), [[(11, 1), (11, 1), (11, 1)]]);
++        assert_eq!(with_local_applied(&seeded, OURS), OURS);
++        assert!(
++            seeded.middle.ends_with("seven\neight\nnine\nten\n"),
++            "{}",
++            seeded.middle
++        );
++    }
++
++    #[test]
++    fn an_edit_inside_the_ours_section_leaves_the_block_raw_with_covering_ranges() {
++        let disk = MERGE.replace("three-ours\n", "three-ours, edited\n");
++
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++
++        let raw_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours, edited\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
++        assert!(
++            seeded
++                .middle
++                .starts_with(&format!("title\n=======\n{raw_block}shared-b\n")),
++            "{}",
++            seeded.middle
++        );
++        let [first, second] = ranges(&seeded)[..] else {
++            panic!("expected two chunks");
++        };
++        assert_eq!(first[0], (2, 11));
++        let (local_start, local_len) = first[1];
++        assert!(
++            local_start <= 3 && local_start + local_len >= 6,
++            "{first:?}"
++        );
++        assert_eq!(first[2], (2, 4));
++        assert_eq!(second[1], (11, 1));
++    }
++
++    #[test]
++    fn an_empty_ours_section_is_an_insertion_point_in_local() {
++        let texts = texts("a\nb\nc\n", "a\nc\n", "a\nB\nc\n");
++        let disk = "a\n<<<<<<< ours\n=======\nB\n>>>>>>> theirs\nc\n";
++
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++
++        assert_eq!(seeded.middle, "a\nb\nc\n");
++        assert_eq!(ranges(&seeded), [[(1, 1), (1, 0), (1, 1)]]);
++        assert_eq!(with_local_applied(&seeded, &texts.local), "a\nc\n");
++    }
++
++    #[test]
++    fn a_section_line_repeated_elsewhere_still_applies_the_exact_text() {
++        let texts = texts(
++            "dup\nmid\nbase\nend\n",
++            "dup\nmid\ndup\nend\n",
++            "dup\nmid\nother\nend\n",
++        );
++        let disk = "dup\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
++
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++
++        assert_eq!(seeded.middle, "dup\nmid\nbase\nend\n");
++        assert_eq!(ranges(&seeded), [[(2, 1), (2, 1), (2, 1)]]);
++        assert_eq!(with_local_applied(&seeded, &texts.local), texts.local);
++    }
++
++    #[test]
++    fn a_crlf_disk_keeps_crlf_in_the_middle_and_the_eol_also_over_lf_stages() {
++        let crlf = |text: &str| text.replace('\n', "\r\n");
++        let disk = crlf(&ZDIFF3.replace(SECOND_BLOCK_ZDIFF3, "eight-theirs\n"));
++        let crlf_stages = texts(&crlf(BASE), &crlf(OURS), &crlf(THEIRS));
++
++        for stages in [crlf_stages, sample_texts()] {
++            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &stages);
++
++            assert_eq!(seeded.middle, crlf(WORKED_MIDDLE));
++            assert_eq!(seeded.eol, Eol::CrLf);
++            assert_eq!(ranges(&seeded), [[(2, 3), (2, 4), (2, 4)]]);
++        }
++    }
++
++    #[test]
++    fn settled_text_only_gives_no_chunk_and_the_text_as_it_is() {
++        let seeded = seed(OURS, DEFAULT_MARKER_SIZE, &sample_texts());
++        assert_eq!(seeded.middle, OURS);
++        assert_eq!(seeded.chunks, Vec::new());
++        assert_eq!(seeded.eol, Eol::Lf);
++    }
++}
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index d76e2ac..92f7c97 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -1,16 +1,18 @@
+-use std::fs;
+-use std::io;
+ use std::path::{Path, PathBuf};
+ 
+ use serde::Serialize;
+ use specta::Type;
+-use yamt_gitio::{BlobReader, Repo, StageEntry};
+-use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
++use yamt_gitio::Repo;
+ 
+-use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
+-use crate::remote_name::{RemoteName, read_remote_name};
+-use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
+-use crate::stages::{CapturedStages, group_by_path};
++use crate::decode::UnsupportedReason;
++use crate::disk::{
++    DiskChange, DiskResult, DiskVersion, MarkerRule, OnDisk, Seen, Settlement, read_on_disk,
++    settlement, stage,
++};
++use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
++use crate::remote_name::RemoteName;
++use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
++use crate::stages::CapturedStages;
+ use crate::{Error, Result};
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -26,97 +28,57 @@ pub struct FileEntry {
+     pub unsupported: Option<UnsupportedReason>,
+ }
+ 
++/// The files as git sees them, and the disk changes settled while looking.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+-pub struct FileMergeData {
+-    pub path: String,
+-    pub base: String,
+-    pub local: String,
+-    pub remote: String,
+-    pub deleted: Option<Side>,
+-    pub eol: Eol,
+-    pub chunks: Vec<Chunk>,
+-    pub word_changes: Vec<WordChanges>,
++pub struct FileList {
++    pub files: Vec<FileEntry>,
++    pub disk_changes: Vec<DiskChange>,
+ }
+ 
+-#[must_use]
+-pub fn merge_data(
+-    path: &str,
+-    base: &str,
+-    local: &str,
+-    remote: &str,
+-    deleted: Option<Side>,
+-) -> FileMergeData {
+-    let eol_source = [base, local, remote]
+-        .into_iter()
+-        .find(|text| text.contains('\n'))
+-        .unwrap_or_default();
+-    let chunks = compute_chunks(base, local, remote, &Options::default());
+-    FileMergeData {
+-        path: path.to_owned(),
+-        base: base.to_owned(),
+-        local: local.to_owned(),
+-        remote: remote.to_owned(),
+-        deleted,
+-        eol: detect_eol(eol_source),
+-        word_changes: word_changes(base, local, remote, &chunks),
+-        chunks,
+-    }
++/// What a write did: written, or nothing written because the file changed on disk first.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum WriteReply {
++    Written {
++        files: Vec<FileEntry>,
++    },
++    ChangedOnDisk {
++        files: Vec<FileEntry>,
++        change: DiskChange,
++    },
+ }
+ 
+ pub(crate) const LOG_TARGET: &str = "session";
+ 
+ pub struct MergeSession {
+-    repo: Repo,
+-    files: Vec<FileState>,
+-    remote_name: Option<RemoteName>,
++    pub(crate) repo: Repo,
++    pub(crate) files: Vec<FileState>,
++    pub(crate) remote_name: Option<RemoteName>,
+ }
+ 
+-struct FileState {
+-    path: PathBuf,
+-    stages: CapturedStages,
+-    status: FileStatus,
+-    content: Content,
++pub(crate) struct FileState {
++    pub(crate) path: PathBuf,
++    pub(crate) stages: CapturedStages,
++    pub(crate) status: FileStatus,
++    pub(crate) content: Content,
++    pub(crate) marker_size: usize,
++    pub(crate) rule: MarkerRule,
++    pub(crate) seen: Seen,
++    pub(crate) settled: Option<Settled>,
+ }
+ 
+-enum Content {
++/// The latest settle of a file's disk change.
++pub(crate) struct Settled {
++    pub(crate) version: DiskVersion,
++    pub(crate) result: DiskResult,
++}
++
++pub(crate) enum Content {
+     Text(Texts),
+     Unsupported(UnsupportedReason),
+ }
+ 
+-struct Texts {
+-    base: String,
+-    local: String,
+-    remote: String,
+-    deleted: Option<Side>,
+-}
+-
+-enum IndexBefore {
+-    Conflicted,
+-    Resolved(Vec<u8>),
+-}
+-
+ impl MergeSession {
+-    pub fn open(cwd: &Path) -> Result<MergeSession> {
+-        let repo = Repo::discover(cwd)?;
+-        let mut blobs = repo.blob_reader()?;
+-        let mut files = Vec::new();
+-        for (path, stages) in group_by_path(repo.unmerged()?) {
+-            let content = read_content(&mut blobs, &path, &stages)?;
+-            files.push(FileState {
+-                path,
+-                stages,
+-                status: FileStatus::Unresolved,
+-                content,
+-            });
+-        }
+-        let remote_name = read_remote_name(&repo);
+-        Ok(MergeSession {
+-            repo,
+-            files,
+-            remote_name,
+-        })
+-    }
+-
+     #[must_use]
+     pub fn root(&self) -> &Path {
+         self.repo.root()
+@@ -127,7 +89,28 @@ impl MergeSession {
+         self.remote_name.clone()
+     }
+ 
+-    pub fn refresh_statuses(&mut self) -> Result<()> {
++    /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
++    pub fn refresh(&mut self) -> Result<FileList> {
++        let mut looked = Vec::with_capacity(self.files.len());
++        for file in &self.files {
++            match file.look(&self.repo) {
++                Ok(change) => looked.push(change),
++                Err(error) => {
++                    let path = file.display_path();
++                    tracing::warn!(target: LOG_TARGET, event = "disk_unread", %path, %error, "the file is looked at again next time");
++                    looked.push(None);
++                }
++            }
++        }
++        let disk_changes = self.settle(looked);
++        self.refresh_statuses()?;
++        Ok(FileList {
++            files: self.files(),
++            disk_changes,
++        })
++    }
++
++    pub(crate) fn refresh_statuses(&mut self) -> Result<()> {
+         let unmerged = self.repo.unmerged()?;
+         for file in &mut self.files {
+             let is_unmerged = unmerged.iter().any(|entry| entry.path == file.path);
+@@ -140,6 +123,34 @@ impl MergeSession {
+         Ok(())
+     }
+ 
++    /// Settles each `Some` read (one per file, in file order): one batch of `git add` and one of
++    /// `update-index --force-remove`.
++    pub(crate) fn settle(&mut self, looked: Vec<Option<OnDisk>>) -> Vec<DiskChange> {
++        let mut adds: Vec<&Path> = Vec::new();
++        let mut removes: Vec<&Path> = Vec::new();
++        let mut settlements = Vec::with_capacity(looked.len());
++        for (file, disk) in self.files.iter().zip(&looked) {
++            let found = disk
++                .as_ref()
++                .map(|disk| settlement(disk, file.rule, file.marker_size));
++            match &found {
++                Some(Settlement::Add) => adds.push(&file.path),
++                Some(Settlement::Remove) => removes.push(&file.path),
++                Some(Settlement::Leave { .. }) | None => {}
++            }
++            settlements.push(found);
++        }
++        let staging = stage(&self.repo, &adds, &removes);
++        let mut changes = Vec::new();
++        let decided = looked.into_iter().zip(settlements);
++        for (file, (disk, found)) in self.files.iter_mut().zip(decided) {
++            if let (Some(disk), Some(found)) = (disk, found) {
++                changes.push(file.settled_as(disk, staging.result(&found)));
++            }
++        }
++        changes
++    }
++
+     #[must_use]
+     pub fn files(&self) -> Vec<FileEntry> {
+         let mut entries = Vec::with_capacity(self.files.len());
+@@ -156,33 +167,25 @@ impl MergeSession {
+     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
+         let file = find_file(&mut self.files, path)?;
+         let texts = file.require_text()?;
+-        Ok(merge_data(
+-            &file.display_path(),
+-            &texts.base,
+-            &texts.local,
+-            &texts.remote,
+-            texts.deleted,
+-        ))
+-    }
+-
+-    pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
+-        let file = find_file(&mut self.files, path)?;
+-        file.require_text()?;
+-        let worktree_file = self.repo.root().join(&file.path);
+-        let before = worktree_bytes(&worktree_file, path)?;
+-        write_worktree_file(&worktree_file, path, result.as_bytes())?;
+-        if let Err(error) = self.repo.add(&file.path) {
+-            let rollback = match before {
+-                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes),
+-                None => remove_worktree_file(&worktree_file, path),
+-            };
+-            if let Err(rollback_error) = rollback {
+-                warn_rollback_failed("finish_rollback_failed", path, &rollback_error);
+-            }
+-            return Err(error.into());
++        let version = file.disk_version();
++        let path = file.display_path();
++        match &file.seen {
++            Seen::Disk(disk) => Ok(disk_merge_data(
++                &path,
++                texts,
++                disk,
++                file.marker_size,
++                version,
++            )),
++            Seen::Stages(_) | Seen::GitOutput => Ok(merge_data(
++                &path,
++                &texts.base,
++                &texts.local,
++                &texts.remote,
++                texts.deleted,
++                version,
++            )),
+         }
+-        file.status = FileStatus::Resolved;
+-        Ok(())
+     }
+ 
+     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
+@@ -193,43 +196,10 @@ impl MergeSession {
+             reason: file.unsupported_reason(),
+             local: side_content(&mut blobs, file.stages.local.as_ref())?,
+             remote: side_content(&mut blobs, file.stages.remote.as_ref())?,
++            disk_version: file.disk_version(),
+         })
+     }
+ 
+-    pub fn take(&mut self, path: &str, side: Side) -> Result<()> {
+-        let file = find_file(&mut self.files, path)?;
+-        let index_before = match file.status {
+-            FileStatus::Unresolved => IndexBefore::Conflicted,
+-            FileStatus::Resolved => IndexBefore::Resolved(self.repo.index_records(&file.path)?),
+-        };
+-        let chosen = file.stages.side(side);
+-        match chosen {
+-            Some(entry) => self.repo.resolve_with(entry)?,
+-            None => self.repo.remove_from_index(&file.path)?,
+-        }
+-        if let Err(error) = write_chosen_side(&self.repo, file, chosen) {
+-            if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
+-                warn_rollback_failed("take_restore_failed", path, &restore_error);
+-                // A failed `update-index` leaves the index as it was: git replaces it only by
+-                // renaming `index.lock` over it (git lockfile.h), so the chosen side is still staged.
+-                file.status = FileStatus::Resolved;
+-            }
+-            return Err(error);
+-        }
+-        file.status = FileStatus::Resolved;
+-        Ok(())
+-    }
+-
+-    pub fn reset(&mut self, path: &str) -> Result<()> {
+-        let file = find_file(&mut self.files, path)?;
+-        self.repo.restore_stages(&file.stages.entries())?;
+-        file.status = FileStatus::Unresolved;
+-        if file.stages.can_rebuild_markers() {
+-            self.repo.checkout_merge(&file.path)?;
+-        }
+-        Ok(())
+-    }
+-
+     #[must_use]
+     pub fn remaining(&self) -> usize {
+         self.files
+@@ -239,7 +209,7 @@ impl MergeSession {
+     }
+ }
+ 
+-fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {
++pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {
+     files
+         .iter_mut()
+         .find(|file| file.path.to_string_lossy() == path)
+@@ -248,59 +218,12 @@ fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileS
+         })
+ }
+ 
+-fn write_chosen_side(repo: &Repo, file: &FileState, chosen: Option<&StageEntry>) -> Result<()> {
+-    match chosen {
+-        Some(entry) if entry.mode == SUBMODULE_MODE => Ok(()),
+-        Some(_) => Ok(repo.checkout_from_index(&file.path)?),
+-        None if file.stages.has_mode(SUBMODULE_MODE) => Ok(()),
+-        None => remove_worktree_file(&repo.root().join(&file.path), &file.display_path()),
+-    }
+-}
+-
+-fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<()> {
+-    match before {
+-        IndexBefore::Conflicted => Ok(repo.restore_stages(&file.stages.entries())?),
+-        IndexBefore::Resolved(records) => Ok(repo.restore_index_records(&file.path, records)?),
+-    }
+-}
+-
+-fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
+-    tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
+-}
+-
+-fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
+-    match fs::read(worktree_file) {
+-        Ok(bytes) => Ok(Some(bytes)),
+-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+-        Err(source) => Err(write_failed(path, source)),
+-    }
+-}
+-
+-fn write_worktree_file(worktree_file: &Path, path: &str, bytes: &[u8]) -> Result<()> {
+-    fs::write(worktree_file, bytes).map_err(|source| write_failed(path, source))
+-}
+-
+-fn remove_worktree_file(worktree_file: &Path, path: &str) -> Result<()> {
+-    match fs::remove_file(worktree_file) {
+-        Ok(()) => Ok(()),
+-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+-        Err(source) => Err(write_failed(path, source)),
+-    }
+-}
+-
+-fn write_failed(path: &str, source: io::Error) -> Error {
+-    Error::WriteFailed {
+-        path: path.to_owned(),
+-        source,
+-    }
+-}
+-
+ impl FileState {
+-    fn display_path(&self) -> String {
++    pub(crate) fn display_path(&self) -> String {
+         self.path.to_string_lossy().into_owned()
+     }
+ 
+-    fn require_text(&self) -> Result<&Texts> {
++    pub(crate) fn require_text(&self) -> Result<&Texts> {
+         match &self.content {
+             Content::Text(texts) => Ok(texts),
+             Content::Unsupported(reason) => Err(Error::Unsupported {
+@@ -316,54 +239,39 @@ impl FileState {
+             Content::Unsupported(reason) => Some(*reason),
+         }
+     }
+-}
+ 
+-fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) -> Result<Content> {
+-    if path.to_str().is_none() {
+-        return Ok(Content::Unsupported(UnsupportedReason::NonUtf8));
++    pub(crate) fn disk_version(&self) -> DiskVersion {
++        self.settled
++            .as_ref()
++            .map_or(DiskVersion(0), |settled| settled.version)
+     }
+-    if stages.has_mode(SUBMODULE_MODE) {
+-        return Ok(Content::Unsupported(UnsupportedReason::Submodule));
+-    }
+-    if stages.has_mode(SYMLINK_MODE) {
+-        return Ok(Content::Unsupported(UnsupportedReason::Symlink));
+-    }
+-    let deleted = match (&stages.local, &stages.remote) {
+-        (Some(_), Some(_)) => None,
+-        (None, Some(_)) => Some(Side::Local),
+-        (Some(_), None) => Some(Side::Remote),
+-        (None, None) => return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted)),
+-    };
+-    let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
+-    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
+-    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
+-    match decode_sides([base, local, remote]) {
+-        Ok([base, local, remote]) => Ok(Content::Text(Texts {
+-            base,
+-            local,
+-            remote,
+-            deleted,
+-        })),
+-        Err(reason) => Ok(Content::Unsupported(
+-            deleted_reason(deleted).unwrap_or(reason),
+-        )),
+-    }
+-}
+ 
+-fn stage_bytes(
+-    blobs: &mut BlobReader,
+-    entry: Option<&StageEntry>,
+-    missing: &[u8],
+-) -> Result<Vec<u8>> {
+-    match entry {
+-        Some(entry) => Ok(blobs.read(&entry.oid)?),
+-        None => Ok(missing.to_vec()),
++    pub(crate) fn read_disk(&self, repo: &Repo) -> Result<OnDisk> {
++        read_on_disk(repo, &self.path, self.stages.has_mode(SUBMODULE_MODE))
++    }
++
++    /// The disk read to settle: the file differs from what yamt last saw, or its last staging failed.
++    pub(crate) fn look(&self, repo: &Repo) -> Result<Option<OnDisk>> {
++        let disk = self.read_disk(repo)?;
++        let stage_failed = matches!(
++            self.settled,
++            Some(Settled {
++                result: DiskResult::StageFailed { .. },
++                ..
++            })
++        );
++        Ok((stage_failed || !self.seen.is(&disk)).then_some(disk))
++    }
++
++    fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
++        self.seen = Seen::Disk(disk);
++        self.settled = Some(Settled {
++            version: DiskVersion(self.disk_version().0.saturating_add(1)),
++            result: result.clone(),
++        });
++        DiskChange {
++            path: self.display_path(),
++            result,
++        }
+     }
+ }
+-
+-fn deleted_reason(deleted: Option<Side>) -> Option<UnsupportedReason> {
+-    deleted.map(|side| match side {
+-        Side::Local => UnsupportedReason::LocalDeleted,
+-        Side::Remote => UnsupportedReason::RemoteDeleted,
+-    })
+-}
+diff --git a/crates/session/src/sides.rs b/crates/session/src/sides.rs
+index ff1bd5f..e0f0d2e 100644
+--- a/crates/session/src/sides.rs
++++ b/crates/session/src/sides.rs
+@@ -4,6 +4,7 @@ use yamt_gitio::{BlobReader, StageEntry};
+ 
+ use crate::Result;
+ use crate::decode::{MAX_TEXT_BYTES, UnsupportedReason, is_binary};
++use crate::disk::DiskVersion;
+ 
+ pub(crate) const SYMLINK_MODE: u32 = 0o120_000;
+ pub(crate) const SUBMODULE_MODE: u32 = 0o160_000;
+@@ -50,6 +51,7 @@ pub struct FileSides {
+     pub reason: Option<UnsupportedReason>,
+     pub local: SideContent,
+     pub remote: SideContent,
++    pub disk_version: DiskVersion,
+ }
+ 
+ pub(crate) fn side_content(
+diff --git a/crates/session/src/start.rs b/crates/session/src/start.rs
+new file mode 100644
+index 0000000..a2934cf
+--- /dev/null
++++ b/crates/session/src/start.rs
+@@ -0,0 +1,316 @@
++use std::fs;
++use std::io;
++use std::os::unix::ffi::OsStrExt;
++use std::path::{Path, PathBuf};
++use std::time::Instant;
++
++use yamt_gitio::{
++    AttributeValue, BlobReader, GitVersion, MergeAttributes, MergeFileOptions, MergeInputs, Oid,
++    Repo, StageEntry,
++};
++
++use crate::Result;
++use crate::decode::is_binary;
++use crate::disk::OnDisk;
++use crate::markers::{DEFAULT_MARKER_SIZE, views};
++use crate::session::LOG_TARGET;
++use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE};
++use crate::stages::CapturedStages;
++
++// merge-ort merges with histogram (merge-ort.c `DIFF_WITH_ALG(opt, HISTOGRAM_DIFF)`); `git merge-file`
++// has `--diff-algorithm` since 2.44 (git-merge-file(1)).
++const HISTOGRAM_SINCE: GitVersion = GitVersion {
++    major: 2,
++    minor: 44,
++};
++const SCRATCH_ATTEMPTS: u32 = 1000;
++
++/// The gitattributes that decide what git wrote to a conflicted path.
++pub(crate) struct Attributes {
++    pub(crate) marker_size: usize,
++    pub(crate) driver: MergeDriver,
++    /// `working-tree-encoding` is set: the worktree bytes are not the blob's encoding.
++    pub(crate) encoded: bool,
++}
++
++/// The `merge` attribute (gitattributes(5) "Built-in merge drivers").
++#[derive(Clone, Copy, PartialEq, Eq)]
++pub(crate) enum MergeDriver {
++    Text,
++    Union,
++    /// `-merge` or `merge=binary`: git keeps ours.
++    Binary,
++    /// Any other driver: what it wrote cannot be known.
++    Custom,
++}
++
++/// One conflicted path as `open()` found it, before its stages are decoded.
++pub(crate) struct StartFile<'a> {
++    pub(crate) path: &'a Path,
++    pub(crate) stages: &'a CapturedStages,
++    /// base, local and remote bytes of a regular file with at least one side.
++    pub(crate) sides: Option<&'a [Vec<u8>; 3]>,
++    pub(crate) attributes: &'a Attributes,
++    pub(crate) disk: &'a OnDisk,
++}
++
++/// The result of comparing one path with what git wrote; `BlobOf` is decided in one batch.
++pub(crate) enum StartLook {
++    Untouched,
++    Changed,
++    /// Untouched when the worktree file, cleaned by git, hashes to this blob.
++    BlobOf(Oid),
++}
++
++enum GitWrote<'a> {
++    Merged {
++        sides: &'a [Vec<u8>; 3],
++        union: bool,
++    },
++    Stage(&'a StageEntry),
++    Nothing,
++    Unknown,
++    NotWritten,
++}
++
++/// The start-up comparison of every conflicted path with what git wrote to it.
++pub(crate) struct StartCheck<'r> {
++    repo: &'r Repo,
++    scratch: Option<ScratchDir>,
++    histogram: Option<bool>,
++    merge_file_runs: u32,
++    started: Instant,
++}
++
++/// A directory under the system temp directory, removed when dropped.
++struct ScratchDir(PathBuf);
++
++impl Attributes {
++    pub(crate) fn from_git(found: &MergeAttributes) -> Attributes {
++        let marker_size = match &found.conflict_marker_size {
++            AttributeValue::Value(value) => std::str::from_utf8(value)
++                .ok()
++                .and_then(|text| text.parse().ok())
++                .filter(|&size| size > 0)
++                .unwrap_or(DEFAULT_MARKER_SIZE),
++            AttributeValue::Unspecified | AttributeValue::Unset | AttributeValue::Set => {
++                DEFAULT_MARKER_SIZE
++            }
++        };
++        let driver = match &found.merge {
++            AttributeValue::Unspecified | AttributeValue::Set => MergeDriver::Text,
++            AttributeValue::Unset => MergeDriver::Binary,
++            AttributeValue::Value(name) => match name.as_slice() {
++                b"text" => MergeDriver::Text,
++                b"union" => MergeDriver::Union,
++                b"binary" => MergeDriver::Binary,
++                _ => MergeDriver::Custom,
++            },
++        };
++        let encoded = match &found.working_tree_encoding {
++            AttributeValue::Value(_) => true,
++            AttributeValue::Unspecified | AttributeValue::Unset | AttributeValue::Set => false,
++        };
++        Attributes {
++            marker_size,
++            driver,
++            encoded,
++        }
++    }
++}
++
++fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
++    if file.attributes.encoded || file.stages.has_mode(SUBMODULE_MODE) {
++        return GitWrote::NotWritten;
++    }
++    let local = match (&file.stages.local, &file.stages.remote) {
++        (None, None) => return GitWrote::Nothing,
++        // merge-ort.c, modify/delete: "Version %s of %s left in tree" — the kept side.
++        (Some(kept), None) | (None, Some(kept)) => return GitWrote::Stage(kept),
++        (Some(local), Some(_)) => local,
++    };
++    // merge-ort.c `handle_content_merge`: two symlinks keep ours; merge-ll.c `ll_binary_merge`:
++    // "For the final merge, it is 'ours' by default", also when any version is binary.
++    if file.stages.has_mode(SYMLINK_MODE) {
++        return GitWrote::Stage(local);
++    }
++    let union = match file.attributes.driver {
++        MergeDriver::Custom => return GitWrote::Unknown,
++        MergeDriver::Binary => return GitWrote::Stage(local),
++        MergeDriver::Text => false,
++        MergeDriver::Union => true,
++    };
++    match file.sides {
++        Some(sides) if !sides.iter().any(|side| is_binary(side)) => {
++            GitWrote::Merged { sides, union }
++        }
++        Some(_) | None => GitWrote::Stage(local),
++    }
++}
++
++impl<'r> StartCheck<'r> {
++    pub(crate) fn new(repo: &'r Repo) -> StartCheck<'r> {
++        StartCheck {
++            repo,
++            scratch: None,
++            histogram: None,
++            merge_file_runs: 0,
++            started: Instant::now(),
++        }
++    }
++
++    pub(crate) fn look(&mut self, file: &StartFile, blobs: &mut BlobReader) -> Result<StartLook> {
++        let look = match git_wrote(file) {
++            GitWrote::NotWritten => StartLook::Untouched,
++            GitWrote::Nothing if *file.disk == OnDisk::Missing => StartLook::Untouched,
++            GitWrote::Unknown | GitWrote::Nothing => StartLook::Changed,
++            GitWrote::Merged { sides, union } => self.compare_merged(file, sides, union),
++            GitWrote::Stage(entry) => compare_stage(file, entry, blobs)?,
++        };
++        Ok(look)
++    }
++
++    fn compare_merged(&mut self, file: &StartFile, sides: &[Vec<u8>; 3], union: bool) -> StartLook {
++        let OnDisk::File(disk) = file.disk else {
++            return StartLook::Changed;
++        };
++        let marker_size = file.attributes.marker_size;
++        match self.merged(sides, marker_size, union) {
++            Ok(output) if views(disk, marker_size) == views(&output, marker_size) => {
++                StartLook::Untouched
++            }
++            Ok(_) => StartLook::Changed,
++            Err(error) => {
++                let path = file.path.to_string_lossy();
++                tracing::warn!(target: LOG_TARGET, event = "start_merge_file_failed", %path, %error, "the file counts as untouched");
++                StartLook::Untouched
++            }
++        }
++    }
++
++    fn merged(
++        &mut self,
++        sides: &[Vec<u8>; 3],
++        marker_size: usize,
++        union: bool,
++    ) -> std::result::Result<Vec<u8>, String> {
++        let histogram = self.histogram()?;
++        let scratch = match self.scratch.take() {
++            Some(scratch) => scratch,
++            None => ScratchDir::create().map_err(|error| error.to_string())?,
++        };
++        let [base, local, remote] = sides;
++        let inputs = MergeInputs {
++            base,
++            local,
++            remote,
++        };
++        let options = MergeFileOptions {
++            marker_size,
++            union,
++            histogram,
++        };
++        self.merge_file_runs += 1;
++        let merged = self.repo.merge_file(&scratch.0, &inputs, &options);
++        self.scratch = Some(scratch);
++        merged.map_err(|error| error.to_string())
++    }
++
++    fn histogram(&mut self) -> std::result::Result<bool, String> {
++        if let Some(histogram) = self.histogram {
++            return Ok(histogram);
++        }
++        let version = self.repo.version().map_err(|error| error.to_string())?;
++        let histogram = version >= HISTOGRAM_SINCE;
++        self.histogram = Some(histogram);
++        Ok(histogram)
++    }
++
++    /// Whether each path is untouched, in the order of `looks`.
++    pub(crate) fn untouched(self, looks: &[(&Path, StartLook)]) -> Vec<bool> {
++        let mut hashed_paths = Vec::new();
++        for (path, look) in looks {
++            match look {
++                StartLook::BlobOf(_) => hashed_paths.push(*path),
++                StartLook::Untouched | StartLook::Changed => {}
++            }
++        }
++        let hashes = match self.repo.hash_objects(&hashed_paths) {
++            Ok(hashes) => Some(hashes),
++            Err(error) => {
++                tracing::warn!(target: LOG_TARGET, event = "start_hash_failed", %error, "files git wrote one stage to count as untouched");
++                None
++            }
++        };
++        let mut hashes = hashes.map(Vec::into_iter);
++        let mut untouched = Vec::with_capacity(looks.len());
++        for (_, look) in looks {
++            untouched.push(match look {
++                StartLook::Untouched => true,
++                StartLook::Changed => false,
++                StartLook::BlobOf(expected) => match &mut hashes {
++                    Some(hashes) => hashes.next().is_some_and(|hash| hash == *expected),
++                    None => true,
++                },
++            });
++        }
++        let elapsed_ms = self.started.elapsed().as_millis();
++        tracing::debug!(target: LOG_TARGET, event = "start_checked", merge_file_runs = self.merge_file_runs, hashed = hashed_paths.len(), elapsed_ms, "compared the worktree with what git wrote");
++        untouched
++    }
++}
++
++fn compare_stage(
++    file: &StartFile,
++    entry: &StageEntry,
++    blobs: &mut BlobReader,
++) -> Result<StartLook> {
++    let is_link = entry.mode == SYMLINK_MODE;
++    let look = match file.disk {
++        OnDisk::Link(target) if is_link => same(&blobs.read(&entry.oid)?, target),
++        // git-hash-object(1) `--stdin-paths` reads one path per line.
++        OnDisk::File(bytes) if !is_link && file.path.as_os_str().as_bytes().contains(&b'\n') => {
++            same(&blobs.read(&entry.oid)?, bytes)
++        }
++        OnDisk::File(_) if !is_link => StartLook::BlobOf(entry.oid.clone()),
++        OnDisk::Missing
++        | OnDisk::File(_)
++        | OnDisk::Link(_)
++        | OnDisk::Submodule(_)
++        | OnDisk::Other => StartLook::Changed,
++    };
++    Ok(look)
++}
++
++fn same(expected: &[u8], found: &[u8]) -> StartLook {
++    if expected == found {
++        StartLook::Untouched
++    } else {
++        StartLook::Changed
++    }
++}
++
++impl ScratchDir {
++    fn create() -> io::Result<ScratchDir> {
++        let temp = std::env::temp_dir();
++        let process = std::process::id();
++        for attempt in 0..SCRATCH_ATTEMPTS {
++            let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
++            match fs::create_dir(&dir) {
++                Ok(()) => return Ok(ScratchDir(dir)),
++                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
++                Err(error) => return Err(error),
++            }
++        }
++        Err(io::Error::from(io::ErrorKind::AlreadyExists))
++    }
++}
++
++impl Drop for ScratchDir {
++    fn drop(&mut self) {
++        if let Err(error) = fs::remove_dir_all(&self.0) {
++            let dir = self.0.display();
++            tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
++        }
++    }
++}
+diff --git a/crates/session/src/writes.rs b/crates/session/src/writes.rs
+new file mode 100644
+index 0000000..23462f8
+--- /dev/null
++++ b/crates/session/src/writes.rs
+@@ -0,0 +1,199 @@
++use std::fs;
++use std::io;
++use std::path::Path;
++
++use yamt_gitio::{Repo, StageEntry};
++
++use crate::disk::{DiskChange, DiskVersion, OnDisk, Seen};
++use crate::session::{
++    FileState, FileStatus, LOG_TARGET, MergeSession, Settled, WriteReply, find_file,
++};
++use crate::sides::{SUBMODULE_MODE, Side};
++use crate::{Error, Result};
++
++enum IndexBefore {
++    Conflicted,
++    Resolved(Vec<u8>),
++}
++
++impl MergeSession {
++    /// Writes `result` and stages it, unless the file changed on disk or since `disk_version`.
++    pub fn finish(
++        &mut self,
++        path: &str,
++        result: &str,
++        disk_version: DiskVersion,
++    ) -> Result<WriteReply> {
++        find_file(&mut self.files, path)?.require_text()?;
++        if let Some(change) = self.changed_on_disk(path, disk_version)? {
++            return Ok(self.changed_reply(change));
++        }
++        let file = find_file(&mut self.files, path)?;
++        let worktree_file = self.repo.root().join(&file.path);
++        let before = worktree_bytes(&worktree_file, path)?;
++        write_worktree_file(&worktree_file, path, result.as_bytes())?;
++        if let Err(error) = self.repo.add_paths(&[file.path.as_path()]) {
++            let rollback = match before {
++                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes),
++                None => remove_worktree_file(&worktree_file, path),
++            };
++            if let Err(rollback_error) = rollback {
++                warn_rollback_failed("finish_rollback_failed", path, &rollback_error);
++            }
++            return Err(error.into());
++        }
++        file.status = FileStatus::Resolved;
++        let read_back = file.read_disk(&self.repo)?;
++        file.seen = match &file.seen {
++            Seen::Disk(_) => Seen::Disk(read_back),
++            Seen::Stages(_) | Seen::GitOutput => Seen::Stages(read_back),
++        };
++        Ok(self.written_reply())
++    }
++
++    /// Resolves the file with one side, unless it changed on disk or since `disk_version`.
++    pub fn take(
++        &mut self,
++        path: &str,
++        side: Side,
++        disk_version: DiskVersion,
++    ) -> Result<WriteReply> {
++        if let Some(change) = self.changed_on_disk(path, disk_version)? {
++            return Ok(self.changed_reply(change));
++        }
++        let file = find_file(&mut self.files, path)?;
++        let index_before = match file.status {
++            FileStatus::Unresolved => IndexBefore::Conflicted,
++            FileStatus::Resolved => IndexBefore::Resolved(self.repo.index_records(&file.path)?),
++        };
++        let chosen = file.stages.side(side);
++        match chosen {
++            Some(entry) => self.repo.resolve_with(entry)?,
++            None => self.repo.remove_paths(&[file.path.as_path()])?,
++        }
++        if let Err(error) = write_chosen_side(&self.repo, file, chosen) {
++            if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
++                warn_rollback_failed("take_restore_failed", path, &restore_error);
++                // A failed `update-index` leaves the index as it was: git replaces it only by
++                // renaming `index.lock` over it (git lockfile.h), so the chosen side is still staged.
++                file.status = FileStatus::Resolved;
++            }
++            return Err(error);
++        }
++        file.status = FileStatus::Resolved;
++        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
++        Ok(self.written_reply())
++    }
++
++    /// Puts the captured stages back (and the markers, where git can), unless the file changed on
++    /// disk or since `disk_version`.
++    pub fn reset(&mut self, path: &str, disk_version: DiskVersion) -> Result<WriteReply> {
++        if let Some(change) = self.changed_on_disk(path, disk_version)? {
++            return Ok(self.changed_reply(change));
++        }
++        let file = find_file(&mut self.files, path)?;
++        self.repo.restore_stages(&file.stages.entries())?;
++        file.status = FileStatus::Unresolved;
++        if file.stages.can_rebuild_markers() {
++            self.repo.checkout_merge(&file.path)?;
++        }
++        file.seen = Seen::Stages(file.read_disk(&self.repo)?);
++        Ok(self.written_reply())
++    }
++
++    /// The change that stops a write to `path`: one settled after the window's `disk_version`,
++    /// or one found now, which is settled before returning.
++    fn changed_on_disk(
++        &mut self,
++        path: &str,
++        disk_version: DiskVersion,
++    ) -> Result<Option<DiskChange>> {
++        let file = find_file(&mut self.files, path)?;
++        if let Some(Settled { version, result }) = &file.settled
++            && *version != disk_version
++        {
++            return Ok(Some(DiskChange {
++                path: file.display_path(),
++                result: result.clone(),
++            }));
++        }
++        let Some(disk) = file.look(&self.repo)? else {
++            return Ok(None);
++        };
++        let mut disk = Some(disk);
++        let looked: Vec<Option<OnDisk>> = self
++            .files
++            .iter()
++            .map(|other| {
++                if other.path.to_string_lossy() == path {
++                    disk.take()
++                } else {
++                    None
++                }
++            })
++            .collect();
++        let change = self.settle(looked).pop();
++        self.refresh_statuses()?;
++        Ok(change)
++    }
++
++    fn changed_reply(&self, change: DiskChange) -> WriteReply {
++        WriteReply::ChangedOnDisk {
++            files: self.files(),
++            change,
++        }
++    }
++
++    fn written_reply(&self) -> WriteReply {
++        WriteReply::Written {
++            files: self.files(),
++        }
++    }
++}
++
++fn write_chosen_side(repo: &Repo, file: &FileState, chosen: Option<&StageEntry>) -> Result<()> {
++    match chosen {
++        Some(entry) if entry.mode == SUBMODULE_MODE => Ok(()),
++        Some(_) => Ok(repo.checkout_from_index(&file.path)?),
++        None if file.stages.has_mode(SUBMODULE_MODE) => Ok(()),
++        None => remove_worktree_file(&repo.root().join(&file.path), &file.display_path()),
++    }
++}
++
++fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<()> {
++    match before {
++        IndexBefore::Conflicted => Ok(repo.restore_stages(&file.stages.entries())?),
++        IndexBefore::Resolved(records) => Ok(repo.restore_index_records(&file.path, records)?),
++    }
++}
++
++fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
++    tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
++}
++
++fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
++    match fs::read(worktree_file) {
++        Ok(bytes) => Ok(Some(bytes)),
++        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
++        Err(source) => Err(write_failed(path, source)),
++    }
++}
++
++fn write_worktree_file(worktree_file: &Path, path: &str, bytes: &[u8]) -> Result<()> {
++    fs::write(worktree_file, bytes).map_err(|source| write_failed(path, source))
++}
++
++fn remove_worktree_file(worktree_file: &Path, path: &str) -> Result<()> {
++    match fs::remove_file(worktree_file) {
++        Ok(()) => Ok(()),
++        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
++        Err(source) => Err(write_failed(path, source)),
++    }
++}
++
++fn write_failed(path: &str, source: io::Error) -> Error {
++    Error::WriteFailed {
++        path: path.to_owned(),
++        source,
++    }
++}
+diff --git a/crates/session/tests/all_or_nothing.rs b/crates/session/tests/all_or_nothing.rs
+index 9777c0f..a0878de 100644
+--- a/crates/session/tests/all_or_nothing.rs
++++ b/crates/session/tests/all_or_nothing.rs
+@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
+ use std::path::PathBuf;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+-use yamt_session::{Error, FileStatus, MergeSession, Side};
++use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Side, WriteReply};
+ 
+ const TEXT: &str = "src/cart.ts";
+ const BINARY: &str = "assets/logo.bin";
+@@ -70,7 +70,7 @@ fn assert_nothing_changed(
+     assert_eq!(status_of(session, path), FileStatus::Unresolved);
+ }
+ 
+-fn assert_git_error(result: Result<(), Error>) {
++fn assert_git_error(result: Result<WriteReply, Error>) {
+     let error = result.unwrap_err();
+     assert!(matches!(error, Error::Git(_)), "{error:?}");
+ }
+@@ -82,11 +82,13 @@ fn finish_with_a_held_index_lock_puts_the_worktree_file_back_and_stays_unresolve
+     let before = (unmerged(&dir), worktree(&dir, TEXT));
+     let lock = index_lock(&dir);
+ 
+-    assert_git_error(session.finish(TEXT, "one\nmerged\n"));
++    assert_git_error(session.finish(TEXT, "one\nmerged\n", DiskVersion(0)));
+ 
+     assert_nothing_changed(&dir, &session, TEXT, &before);
+     fs::remove_file(lock).unwrap();
+-    session.finish(TEXT, "one\nmerged\n").unwrap();
++    session
++        .finish(TEXT, "one\nmerged\n", DiskVersion(0))
++        .unwrap();
+     assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
+ }
+ 
+@@ -95,12 +97,16 @@ fn finish_with_a_held_index_lock_leaves_a_deleted_worktree_file_absent() {
+     let dir = mixed_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     fs::remove_file(dir.path().join(TEXT)).unwrap();
+-    let before = (unmerged(&dir), None);
++    let deleted = session.refresh().unwrap().disk_changes.remove(0).result;
++    assert_eq!(deleted, DiskResult::Staged);
++    let staged_before = staged(&dir, TEXT);
+     let _lock = index_lock(&dir);
+ 
+-    assert_git_error(session.finish(TEXT, "one\nmerged\n"));
++    assert_git_error(session.finish(TEXT, "one\nmerged\n", DiskVersion(1)));
+ 
+-    assert_nothing_changed(&dir, &session, TEXT, &before);
++    assert_eq!(worktree(&dir, TEXT), None);
++    assert_eq!(staged(&dir, TEXT), staged_before);
++    assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
+ }
+ 
+ #[test]
+@@ -111,7 +117,7 @@ fn take_with_a_held_index_lock_changes_nothing() {
+ 
+     for (path, side) in [(BINARY, Side::Remote), (DELETED, Side::Local)] {
+         let before = (unmerged(&dir), worktree(&dir, path));
+-        assert_git_error(session.take(path, side));
++        assert_git_error(session.take(path, side, DiskVersion(0)));
+         assert_nothing_changed(&dir, &session, path, &before);
+     }
+ }
+@@ -129,8 +135,8 @@ fn take_whose_worktree_write_fails_puts_the_conflict_back() {
+     let deleted_before = (unmerged(&dir), worktree(&dir, DELETED));
+     set_assets_mode(&dir, READ_ONLY_DIR);
+ 
+-    let binary = session.take(BINARY, Side::Remote);
+-    let deleted = session.take(DELETED, Side::Local);
++    let binary = session.take(BINARY, Side::Remote, DiskVersion(0));
++    let deleted = session.take(DELETED, Side::Local, DiskVersion(0));
+ 
+     set_assets_mode(&dir, WRITABLE_DIR);
+     assert_git_error(binary);
+@@ -150,15 +156,15 @@ fn staged(dir: &TempDir, path: &str) -> String {
+ fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
+     let dir = mixed_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    session.take(BINARY, Side::Local).unwrap();
+-    session.take(DELETED, Side::Local).unwrap();
++    session.take(BINARY, Side::Local, DiskVersion(0)).unwrap();
++    session.take(DELETED, Side::Local, DiskVersion(0)).unwrap();
+     let before = |path| (staged(&dir, path), worktree(&dir, path));
+     let (binary_before, deleted_before) = (before(BINARY), before(DELETED));
+     assert_eq!(deleted_before, (String::new(), None));
+     set_assets_mode(&dir, READ_ONLY_DIR);
+ 
+-    let binary = session.take(BINARY, Side::Remote);
+-    let deleted = session.take(DELETED, Side::Remote);
++    let binary = session.take(BINARY, Side::Remote, DiskVersion(0));
++    let deleted = session.take(DELETED, Side::Remote, DiskVersion(0));
+ 
+     set_assets_mode(&dir, WRITABLE_DIR);
+     assert_git_error(binary);
+diff --git a/crates/session/tests/deleted_side.rs b/crates/session/tests/deleted_side.rs
+index b4832b0..9901660 100644
+--- a/crates/session/tests/deleted_side.rs
++++ b/crates/session/tests/deleted_side.rs
+@@ -4,7 +4,9 @@ use std::fs;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_merge_core::ChunkKind;
+-use yamt_session::{Eol, Error, FileStatus, MergeSession, Side, UnsupportedReason};
++use yamt_session::{
++    DiskVersion, Eol, Error, FileStatus, MergeSession, Middle, Side, UnsupportedReason,
++};
+ 
+ const LOCAL_DELETED: &str = "a_local_deleted.ts";
+ const REMOTE_DELETED: &str = "b_remote_deleted.ts";
+@@ -79,13 +81,16 @@ fn a_text_file_deleted_on_one_side_loads_with_base_as_the_deleted_side() {
+         let data = session.load(path).unwrap();
+ 
+         assert_eq!(data.deleted, Some(side), "{path}");
+-        assert_eq!(data.base, base);
++        let base_text = Middle::Stages {
++            text: base.to_owned(),
++        };
++        assert_eq!(data.middle, base_text);
+         let (deleted_text, kept_text) = match side {
+             Side::Local => (&data.local, &data.remote),
+             Side::Remote => (&data.remote, &data.local),
+         };
+         assert_eq!((deleted_text.as_str(), kept_text.as_str()), (base, kept));
+-        let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
++        let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.chunk.kind).collect();
+         let one_sided = kinds.iter().all(|kind| *kind == kept_side_change);
+         assert!(!kinds.is_empty() && one_sided, "{path}: {kinds:?}");
+     }
+@@ -141,12 +146,12 @@ fn keep_or_delete_then_reset_brings_the_stages_back_and_leaves_the_worktree() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let before = unmerged(&dir);
+     for side in [Side::Remote, Side::Local] {
+-        session.take(LOCAL_DELETED, side).unwrap();
++        session.take(LOCAL_DELETED, side, DiskVersion(0)).unwrap();
+         let worktree_after_take = fs::read(dir.path().join(LOCAL_DELETED)).ok();
+         assert!(!unmerged(&dir).contains(LOCAL_DELETED), "{side:?}");
+         git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+ 
+-        session.reset(LOCAL_DELETED).unwrap();
++        session.reset(LOCAL_DELETED, DiskVersion(0)).unwrap();
+ 
+         assert_eq!(unmerged(&dir), before, "{side:?}");
+         let worktree = fs::read(dir.path().join(LOCAL_DELETED)).ok();
+@@ -160,8 +165,12 @@ fn keep_writes_and_stages_the_kept_side_and_delete_removes_the_file() {
+     let dir = deleted_on_one_side();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+-    session.take(LOCAL_DELETED, Side::Remote).unwrap();
+-    session.take(REMOTE_DELETED, Side::Remote).unwrap();
++    session
++        .take(LOCAL_DELETED, Side::Remote, DiskVersion(0))
++        .unwrap();
++    session
++        .take(REMOTE_DELETED, Side::Remote, DiskVersion(0))
++        .unwrap();
+ 
+     assert_eq!(fs::read(dir.path().join(LOCAL_DELETED)).unwrap(), KEPT);
+     let staged = git_ok(dir.path(), &["ls-files", "-s", "--", LOCAL_DELETED]).unwrap();
+@@ -176,7 +185,9 @@ fn finish_of_a_deleted_on_one_side_file_writes_and_stages_the_result() {
+     let dir = deleted_on_one_side();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+-    session.finish(REMOTE_DELETED, "merged\n").unwrap();
++    session
++        .finish(REMOTE_DELETED, "merged\n", DiskVersion(0))
++        .unwrap();
+ 
+     assert_eq!(
+         fs::read(dir.path().join(REMOTE_DELETED)).unwrap(),
+diff --git a/crates/session/tests/describe_and_take.rs b/crates/session/tests/describe_and_take.rs
+index 8f3a75b..8c4103c 100644
+--- a/crates/session/tests/describe_and_take.rs
++++ b/crates/session/tests/describe_and_take.rs
+@@ -4,7 +4,9 @@ use std::fs;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
+-use yamt_session::{FileStatus, MergeSession, Side, SideContent, UnsupportedReason};
++use yamt_session::{
++    DiskVersion, FileStatus, MergeSession, Side, SideContent, UnsupportedReason, WriteReply,
++};
+ 
+ const TEXT: &str = "a_text.txt";
+ const LOCAL_DELETED: &str = "b_local_deleted.txt";
+@@ -228,27 +230,50 @@ fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
+     assert_eq!(reason, Some(UnsupportedReason::Symlink));
+ }
+ 
+-fn assert_take_resolves_to_that_side(dir: &TempDir, path: &str, side: Side) {
+-    let mut session = MergeSession::open(dir.path()).unwrap();
++/// The merge as the window opens it: its first list settles what changed on disk before start.
++fn opened(dir: &TempDir) -> (MergeSession, String) {
+     let before = unmerged(dir);
+-    let remaining = session.remaining();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    session.refresh().unwrap();
++    (session, before)
++}
+ 
+-    session.take(path, side).unwrap();
++fn unmerged_path_count(dir: &TempDir) -> usize {
++    let args = ["diff", "--name-only", "--diff-filter=U"];
++    String::from_utf8(git_ok(dir.path(), &args).unwrap())
++        .unwrap()
++        .lines()
++        .count()
++}
+ 
+-    let tab_path = format!("\t{path}");
+-    let still_unmerged = unmerged(dir).lines().any(|line| line.ends_with(&tab_path));
+-    assert!(!still_unmerged, "{}", unmerged(dir));
+-    assert_eq!(staged(dir, path), stage_zero_of(&before, path, side));
+-    assert_eq!(status_of(&session, path), FileStatus::Resolved);
+-    assert_eq!(session.remaining(), remaining - 1);
++fn assert_take_resolves_to_that_side(
++    dir: &TempDir,
++    session: &mut MergeSession,
++    before: &str,
++    path: &str,
++    side: Side,
++) {
++    let version = session.describe(path).unwrap().disk_version;
++
++    let reply = session.take(path, side, version).unwrap();
++
++    assert!(matches!(reply, WriteReply::Written { .. }), "{reply:?}");
++    assert_eq!(staged(dir, path), stage_zero_of(before, path, side));
++    assert_eq!(status_of(session, path), FileStatus::Resolved);
++    assert_eq!(session.remaining(), unmerged_path_count(dir));
+ }
+ 
+ fn taken(path: &str, side: Side) -> TempDir {
+     let dir = every_kind_of_conflict();
+-    assert_take_resolves_to_that_side(&dir, path, side);
++    taken_in(&dir, path, side);
+     dir
+ }
+ 
++fn taken_in(dir: &TempDir, path: &str, side: Side) {
++    let (mut session, before) = opened(dir);
++    assert_take_resolves_to_that_side(dir, &mut session, &before, path, side);
++}
++
+ #[test]
+ fn take_of_a_binary_file_stages_and_writes_the_chosen_side_with_fresh_stat_data() {
+     for (side, bytes) in [
+@@ -281,8 +306,10 @@ fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
+     let dir = file_against_link();
+     fs::remove_file(dir.path().join(FILE_OR_LINK)).unwrap();
+     fs::remove_file(dir.path().join(FILE_OR_LINK_RENAMED)).unwrap();
+-    assert_take_resolves_to_that_side(&dir, FILE_OR_LINK, Side::Remote);
+-    assert_take_resolves_to_that_side(&dir, FILE_OR_LINK_RENAMED, Side::Local);
++    let (mut session, before) = opened(&dir);
++    assert_take_resolves_to_that_side(&dir, &mut session, &before, FILE_OR_LINK, Side::Remote);
++    let renamed = FILE_OR_LINK_RENAMED;
++    assert_take_resolves_to_that_side(&dir, &mut session, &before, renamed, Side::Local);
+     assert_eq!(
+         fs::read_link(dir.path().join(FILE_OR_LINK)).unwrap(),
+         Path::new("docs/README.md")
+@@ -306,7 +333,7 @@ fn take_of_the_deleting_side_removes_index_entry_and_worktree_file() {
+ fn take_of_the_deleting_side_accepts_a_worktree_file_already_gone() {
+     let dir = every_kind_of_conflict();
+     fs::remove_file(dir.path().join(LOCAL_DELETED)).unwrap();
+-    assert_take_resolves_to_that_side(&dir, LOCAL_DELETED, Side::Local);
++    taken_in(&dir, LOCAL_DELETED, Side::Local);
+     assert_eq!(staged(&dir, LOCAL_DELETED), "");
+ }
+ 
+@@ -325,7 +352,7 @@ fn take_of_the_deleting_side_of_a_submodule_unstages_it_and_leaves_its_directory
+     .unwrap();
+     fs::create_dir_all(dir.path().join(DELETED_SUBMODULE)).unwrap();
+ 
+-    assert_take_resolves_to_that_side(&dir, DELETED_SUBMODULE, Side::Remote);
++    taken_in(&dir, DELETED_SUBMODULE, Side::Remote);
+ 
+     assert_eq!(staged(&dir, DELETED_SUBMODULE), "");
+     assert!(dir.path().join(DELETED_SUBMODULE).is_dir());
+@@ -339,7 +366,7 @@ fn take_of_the_kept_side_of_a_deleted_file_restores_it() {
+     ] {
+         let dir = every_kind_of_conflict();
+         fs::remove_file(dir.path().join(path)).unwrap();
+-        assert_take_resolves_to_that_side(&dir, path, side);
++        taken_in(&dir, path, side);
+         assert_eq!(fs::read(dir.path().join(path)).unwrap(), bytes);
+     }
+ }
+@@ -349,7 +376,7 @@ fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_worktree_alone()
+     for (side, commit) in [(Side::Local, LOCAL_COMMIT), (Side::Remote, REMOTE_COMMIT)] {
+         let dir = every_kind_of_conflict();
+         fs::remove_dir(dir.path().join(SUBMODULE)).unwrap();
+-        assert_take_resolves_to_that_side(&dir, SUBMODULE, side);
++        taken_in(&dir, SUBMODULE, side);
+         assert_eq!(
+             staged(&dir, SUBMODULE),
+             format!("160000 {commit} 0\t{SUBMODULE}\n")
+@@ -373,13 +400,13 @@ fn reset_after_take_brings_back_the_stages_of_every_kind() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let before = unmerged(&dir);
+     for (path, side) in kinds {
+-        session.take(path, side).unwrap();
++        session.take(path, side, DiskVersion(0)).unwrap();
+     }
+     assert_eq!(unmerged(&dir), "");
+     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+ 
+     for (path, _) in kinds {
+-        session.reset(path).unwrap();
++        session.reset(path, DiskVersion(0)).unwrap();
+     }
+ 
+     assert_eq!(unmerged(&dir), before);
+diff --git a/crates/session/tests/disk_is_truth.rs b/crates/session/tests/disk_is_truth.rs
+new file mode 100644
+index 0000000..9c80ea7
+--- /dev/null
++++ b/crates/session/tests/disk_is_truth.rs
+@@ -0,0 +1,378 @@
++#![cfg(test)]
++
++use std::fs;
++use std::os::unix::fs::symlink;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
++};
++use yamt_session::{
++    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
++    WriteReply,
++};
++
++const TEXT: &str = "f.txt";
++const BINARY: &str = "logo.bin";
++const LINK: &str = "link";
++const SUBMODULE: &str = "vendor/lib";
++
++mod samples;
++use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
++
++const USER_TEXT: &[u8] = b"written by the user\n";
++
++const FILES: [ConflictFile<'static>; 4] = [
++    ConflictFile {
++        path: TEXT,
++        kind: FileKind::Regular,
++        base: Some(BASE.as_bytes()),
++        local: Some(OURS.as_bytes()),
++        remote: Some(THEIRS.as_bytes()),
++    },
++    ConflictFile {
++        path: BINARY,
++        kind: FileKind::Regular,
++        base: Some(b"\0base"),
++        local: Some(b"\0local"),
++        remote: Some(b"\0remote"),
++    },
++    ConflictFile {
++        path: LINK,
++        kind: FileKind::Symlink,
++        base: Some(b"base-target"),
++        local: Some(b"local-target"),
++        remote: Some(b"remote-target"),
++    },
++    ConflictFile {
++        path: SUBMODULE,
++        kind: FileKind::Submodule,
++        base: Some(b"1111111111111111111111111111111111111111"),
++        local: Some(b"2222222222222222222222222222222222222222"),
++        remote: Some(b"3333333333333333333333333333333333333333"),
++    },
++];
++
++fn merged_in(style: &str, config: &[(&str, &str)]) -> TempDir {
++    let mut all_config = vec![("merge.conflictStyle", style)];
++    all_config.extend_from_slice(config);
++    let setup = Setup {
++        config: &all_config,
++        ..Setup::default()
++    };
++    conflict_repo_with(&FILES, &setup).unwrap()
++}
++
++fn merged() -> TempDir {
++    merged_in("zdiff3", &[])
++}
++
++fn opened(dir: &TempDir) -> MergeSession {
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    session
++}
++
++fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
++    let changes = list.disk_changes.iter();
++    changes
++        .map(|change| (change.path.as_str(), &change.result))
++        .collect()
++}
++
++fn read(dir: &TempDir, path: &str) -> Vec<u8> {
++    fs::read(dir.path().join(path)).unwrap()
++}
++
++fn write(dir: &TempDir, path: &str, bytes: &[u8]) {
++    fs::write(dir.path().join(path), bytes).unwrap();
++}
++
++fn text(bytes: Vec<u8>) -> String {
++    String::from_utf8(bytes).unwrap()
++}
++
++fn staged(dir: &TempDir, path: &str) -> String {
++    text(git_ok(dir.path(), &["ls-files", "-s", "--", path]).unwrap())
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    text(git_ok(dir.path(), &["ls-files", "-u"]).unwrap())
++}
++
++fn stage_zero_blob(dir: &TempDir, path: &str, bytes: &[u8]) -> String {
++    let oid = hash_object(dir.path(), bytes).unwrap();
++    format!("100644 {oid} 0\t{path}\n")
++}
++
++fn status_of(session: &MergeSession, path: &str) -> FileStatus {
++    let files = session.files();
++    files.iter().find(|file| file.path == path).unwrap().status
++}
++
++fn splice_local(middle: &str, local: &str, data_chunk: &yamt_session::MergeChunk) -> String {
++    let middle: Vec<&str> = middle.split_inclusive('\n').collect();
++    let local: Vec<&str> = local.split_inclusive('\n').collect();
++    let start = data_chunk.middle.start.0 as usize;
++    let end = start + data_chunk.middle.len as usize;
++    let local_start = data_chunk.chunk.local.start.0 as usize;
++    let local_end = local_start + data_chunk.chunk.local.len as usize;
++    middle[..start].concat() + &local[local_start..local_end].concat() + &middle[end..].concat()
++}
++
++#[test]
++fn a_regenerated_file_without_markers_is_staged_once() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    write(&dir, TEXT, USER_TEXT);
++
++    let first = session.refresh().unwrap();
++    let second = session.refresh().unwrap();
++
++    assert_eq!(changes(&first), [(TEXT, &DiskResult::Staged)]);
++    assert!(!unmerged(&dir).contains(TEXT), "{}", unmerged(&dir));
++    assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
++    assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
++    assert_eq!(second.disk_changes, []);
++}
++
++#[test]
++fn one_of_two_blocks_resolved_on_disk_leaves_one_conflict_over_its_base_lines() {
++    for style in ["zdiff3", "merge"] {
++        let dir = merged_in(style, &[]);
++        let mut session = opened(&dir);
++        let git_output = text(read(&dir, TEXT));
++        write(
++            &dir,
++            TEXT,
++            with_block_resolved(&git_output, 1, "eight-theirs\n").as_bytes(),
++        );
++
++        let list = session.refresh().unwrap();
++        let data = session.load(TEXT).unwrap();
++
++        let markers_left = DiskResult::MarkersLeft { conflicts: 1 };
++        assert_eq!(changes(&list), [(TEXT, &markers_left)], "{style}");
++        assert_eq!(status_of(&session, TEXT), FileStatus::Unresolved);
++        let middle = Middle::Disk {
++            text: WORKED_MIDDLE.to_owned(),
++        };
++        assert_eq!(data.middle, middle, "{style}");
++        assert_eq!(data.disk_version, DiskVersion(1));
++        let [chunk] = data.chunks.as_slice() else {
++            panic!("{style}: {:?}", data.chunks);
++        };
++        assert_eq!((chunk.middle.start.0, chunk.middle.len), (2, 3));
++        assert_eq!((chunk.chunk.local.start.0, chunk.chunk.local.len), (2, 4));
++        assert_eq!((chunk.chunk.remote.start.0, chunk.chunk.remote.len), (2, 4));
++        let by_hand = with_block_resolved(&git_output, 1, "eight-theirs\n");
++        let by_hand = with_block_resolved(&by_hand, 0, "one\nTWO\nshared-a\nthree-ours\n");
++        assert_eq!(splice_local(WORKED_MIDDLE, OURS, chunk), by_hand, "{style}");
++    }
++}
++
++#[test]
++fn the_first_block_resolved_on_disk_leaves_the_second_one_open() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    let git_output = text(read(&dir, TEXT));
++    write(
++        &dir,
++        TEXT,
++        with_block_resolved(&git_output, 0, "one\nTWO\nshared-a\nthree-ours\n").as_bytes(),
++    );
++
++    session.refresh().unwrap();
++    let data = session.load(TEXT).unwrap();
++
++    let [chunk] = data.chunks.as_slice() else {
++        panic!("{:?}", data.chunks);
++    };
++    assert_eq!((chunk.middle.start.0, chunk.middle.len), (11, 1));
++    let Middle::Disk { text: middle } = &data.middle else {
++        panic!("{:?}", data.middle);
++    };
++    assert_eq!(splice_local(middle, OURS, chunk), OURS);
++}
++
++#[test]
++fn a_file_deleted_on_disk_is_staged_as_deleted_and_loads_as_deleted() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    fs::remove_file(dir.path().join(TEXT)).unwrap();
++
++    let list = session.refresh().unwrap();
++
++    assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
++    assert_eq!(staged(&dir, TEXT), "");
++    assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
++    let deleted = Middle::DiskNotText {
++        found: NotText::Deleted,
++    };
++    assert_eq!(session.load(TEXT).unwrap().middle, deleted);
++}
++
++fn assert_changed_on_disk(reply: WriteReply) {
++    let WriteReply::ChangedOnDisk { files, change } = reply else {
++        panic!("expected ChangedOnDisk, got {reply:?}");
++    };
++    let staged_change = DiskChange {
++        path: TEXT.to_owned(),
++        result: DiskResult::Staged,
++    };
++    assert_eq!(change, staged_change);
++    let entry = files.iter().find(|file| file.path == TEXT).unwrap();
++    assert_eq!(entry.status, FileStatus::Resolved);
++}
++
++#[test]
++fn a_change_not_yet_seen_stops_finish_take_and_reset_and_is_staged_instead() {
++    type Write = fn(&mut MergeSession) -> WriteReply;
++    let writes: [Write; 3] = [
++        |session| session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap(),
++        |session| session.take(TEXT, Side::Remote, DiskVersion(0)).unwrap(),
++        |session| session.reset(TEXT, DiskVersion(0)).unwrap(),
++    ];
++    for write_now in writes {
++        let dir = merged();
++        let mut session = opened(&dir);
++        write(&dir, TEXT, USER_TEXT);
++
++        assert_changed_on_disk(write_now(&mut session));
++
++        assert_eq!(read(&dir, TEXT), USER_TEXT);
++        assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
++        assert_eq!(session.refresh().unwrap().disk_changes, []);
++    }
++}
++
++#[test]
++fn a_write_from_a_view_older_than_the_last_settle_changes_nothing() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    write(&dir, TEXT, USER_TEXT);
++    session.refresh().unwrap();
++    let staged_before = staged(&dir, TEXT);
++
++    let reply = session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
++
++    assert_changed_on_disk(reply);
++    assert_eq!(read(&dir, TEXT), USER_TEXT);
++    assert_eq!(staged(&dir, TEXT), staged_before);
++    let current = session.finish(TEXT, "merged\n", DiskVersion(1)).unwrap();
++    assert!(matches!(current, WriteReply::Written { .. }), "{current:?}");
++    assert_eq!(read(&dir, TEXT), b"merged\n");
++}
++
++#[test]
++fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf() {
++    for config in [&[][..], &[("core.autocrlf", "true")][..]] {
++        let dir = merged_in("zdiff3", config);
++        let mut session = opened(&dir);
++
++        session.finish(TEXT, "a\nb\n", DiskVersion(0)).unwrap();
++        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        session.take(TEXT, Side::Remote, DiskVersion(0)).unwrap();
++        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        session.reset(TEXT, DiskVersion(0)).unwrap();
++        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        assert!(text(read(&dir, TEXT)).contains("<<<<<<<"));
++    }
++}
++
++#[test]
++fn a_resolved_file_changed_again_is_staged_again_with_its_new_bytes() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
++    write(&dir, TEXT, USER_TEXT);
++
++    let list = session.refresh().unwrap();
++
++    assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
++    assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
++}
++
++#[test]
++fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    write(&dir, BINARY, b"\0new");
++    fs::remove_file(dir.path().join(LINK)).unwrap();
++    symlink("new-target", dir.path().join(LINK)).unwrap();
++    let submodule = dir.path().join(SUBMODULE);
++    git_ok(&submodule, &["init", "--quiet"]).unwrap();
++    git_ok(
++        &submodule,
++        &["commit", "--quiet", "--allow-empty", "-m", "moved"],
++    )
++    .unwrap();
++    let head = text(git_ok(&submodule, &["rev-parse", "HEAD"]).unwrap());
++
++    let list = session.refresh().unwrap();
++
++    let staged_paths: Vec<&str> = changes(&list).into_iter().map(|(path, _)| path).collect();
++    assert_eq!(staged_paths, [LINK, BINARY, SUBMODULE]);
++    assert!(
++        changes(&list)
++            .iter()
++            .all(|(_, result)| **result == DiskResult::Staged)
++    );
++    let binary_oid = hash_object(dir.path(), b"\0new").unwrap();
++    assert_eq!(
++        staged(&dir, BINARY),
++        format!("100644 {binary_oid} 0\t{BINARY}\n")
++    );
++    let link_oid = hash_object(dir.path(), b"new-target").unwrap();
++    assert_eq!(staged(&dir, LINK), format!("120000 {link_oid} 0\t{LINK}\n"));
++    let head = head.trim_end();
++    assert_eq!(
++        staged(&dir, SUBMODULE),
++        format!("160000 {head} 0\t{SUBMODULE}\n")
++    );
++}
++
++#[test]
++fn a_held_index_lock_fails_the_staging_reports_every_file_and_is_retried() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    write(&dir, BINARY, b"\0new");
++    let git_output = text(read(&dir, TEXT));
++    write(
++        &dir,
++        TEXT,
++        with_block_resolved(&git_output, 1, "eight-theirs\n").as_bytes(),
++    );
++    let lock = dir.path().join(".git/index.lock");
++    fs::write(&lock, "").unwrap();
++
++    let list = session.refresh().unwrap();
++
++    let [(text_path, markers_left), (binary, failed)] = changes(&list)[..] else {
++        panic!("{list:?}");
++    };
++    assert_eq!((binary, text_path), (BINARY, TEXT));
++    assert!(
++        matches!(failed, DiskResult::StageFailed { message } if message.contains("index.lock")),
++        "{failed:?}"
++    );
++    assert_eq!(*markers_left, DiskResult::MarkersLeft { conflicts: 1 });
++    assert_eq!(read(&dir, BINARY), b"\0new");
++    fs::remove_file(lock).unwrap();
++    let retried = session.refresh().unwrap();
++    assert_eq!(changes(&retried), [(BINARY, &DiskResult::Staged)]);
++    assert_eq!(status_of(&session, BINARY), FileStatus::Resolved);
++}
++
++#[test]
++fn an_unchanged_disk_reports_nothing_and_writes_nothing_to_git() {
++    let dir = merged();
++    let mut session = opened(&dir);
++    let index = dir.path().join(".git/index");
++    let before = fs::metadata(&index).unwrap().modified().unwrap();
++
++    let list = session.refresh().unwrap();
++
++    assert_eq!(list.disk_changes, []);
++    assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), before);
++    assert_eq!(list.files.len(), FILES.len());
++}
+diff --git a/crates/session/tests/finish_and_reset.rs b/crates/session/tests/finish_and_reset.rs
+index 4ad0c41..d9e4e47 100644
+--- a/crates/session/tests/finish_and_reset.rs
++++ b/crates/session/tests/finish_and_reset.rs
+@@ -3,7 +3,7 @@
+ use std::fs;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+-use yamt_session::{Eol, Error, FileStatus, MergeSession, UnsupportedReason};
++use yamt_session::{DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason};
+ 
+ const FILE: &str = "src/cart.ts";
+ const OTHER: &str = "src/other.ts";
+@@ -56,7 +56,9 @@ fn assert_finish_with_local_round_trips_bytes(sides: [&[u8]; 3], expected_eol: E
+     let data = session.load(PATH).unwrap();
+     assert_eq!(data.eol, expected_eol);
+ 
+-    session.finish(PATH, &data.local).unwrap();
++    session
++        .finish(PATH, &data.local, data.disk_version)
++        .unwrap();
+ 
+     let worktree = fs::read(dir.path().join(PATH)).unwrap();
+     assert_eq!(worktree, sides[1]);
+@@ -97,7 +99,7 @@ fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     assert_eq!(session.remaining(), 2);
+ 
+-    session.finish(FILE, RESULT).unwrap();
++    session.finish(FILE, RESULT, DiskVersion(0)).unwrap();
+ 
+     assert!(!unmerged(&dir).contains(FILE));
+     assert!(unmerged(&dir).contains(OTHER));
+@@ -107,7 +109,7 @@ fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
+ }
+ 
+ fn finish_and_drop_resolve_undo(dir: &TempDir, session: &mut MergeSession, path: &str) {
+-    session.finish(path, "resolved\n").unwrap();
++    session.finish(path, "resolved\n", DiskVersion(0)).unwrap();
+     // `git add` leaves a resolve-undo record that `checkout -m` alone would use to bring the
+     // conflict back (git-ls-files(1) --resolve-undo); without it only the captured stages can.
+     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+@@ -127,7 +129,7 @@ fn reset_after_finish_restores_git_stages_and_conflict_markers() {
+     let before_finish = unmerged(&dir);
+     finish_and_drop_resolve_undo(&dir, &mut session, FILE);
+ 
+-    session.reset(FILE).unwrap();
++    session.reset(FILE, DiskVersion(0)).unwrap();
+ 
+     assert_conflict_is_back(&dir, &session, FILE, &before_finish);
+     assert_eq!(session.remaining(), 2);
+@@ -148,7 +150,7 @@ fn reset_after_finish_restores_an_add_add_conflict() {
+     let before_finish = unmerged(&dir);
+     finish_and_drop_resolve_undo(&dir, &mut session, PATH);
+ 
+-    session.reset(PATH).unwrap();
++    session.reset(PATH, DiskVersion(0)).unwrap();
+ 
+     assert_conflict_is_back(&dir, &session, PATH, &before_finish);
+ }
+@@ -159,7 +161,7 @@ fn reset_of_a_file_never_finished_keeps_its_stages_and_markers() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let before = unmerged(&dir);
+ 
+-    session.reset(FILE).unwrap();
++    session.reset(FILE, DiskVersion(0)).unwrap();
+ 
+     assert_conflict_is_back(&dir, &session, FILE, &before);
+     assert_eq!(session.remaining(), 2);
+@@ -173,8 +175,10 @@ fn unknown_path_is_rejected_by_load_finish_and_reset() {
+ 
+     let errors = [
+         session.load(UNKNOWN).unwrap_err(),
+-        session.finish(UNKNOWN, "text\n").unwrap_err(),
+-        session.reset(UNKNOWN).unwrap_err(),
++        session
++            .finish(UNKNOWN, "text\n", DiskVersion(0))
++            .unwrap_err(),
++        session.reset(UNKNOWN, DiskVersion(0)).unwrap_err(),
+     ];
+ 
+     for error in errors {
+@@ -193,7 +197,7 @@ fn finish_refuses_an_unsupported_file_and_leaves_the_worktree_alone() {
+     let worktree_before = fs::read(dir.path().join(PATH)).unwrap();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+-    let error = session.finish(PATH, "text\n").unwrap_err();
++    let error = session.finish(PATH, "text\n", DiskVersion(0)).unwrap_err();
+ 
+     assert!(
+         matches!(
+@@ -225,7 +229,7 @@ fn reset_of_a_delete_modify_file_resolved_outside_restores_its_stages() {
+     git_ok(dir.path(), &["add", "--", PATH]).unwrap();
+     git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
+ 
+-    session.reset(PATH).unwrap();
++    session.reset(PATH, DiskVersion(0)).unwrap();
+ 
+     assert_eq!(unmerged(&dir), before);
+     assert_eq!(status_of(&session, PATH), FileStatus::Unresolved);
+diff --git a/crates/session/tests/git_view.rs b/crates/session/tests/git_view.rs
+index 37132ac..055645a 100644
+--- a/crates/session/tests/git_view.rs
++++ b/crates/session/tests/git_view.rs
+@@ -1,7 +1,7 @@
+ #![cfg(test)]
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+-use yamt_session::{FileStatus, MergeSession};
++use yamt_session::{DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession};
+ 
+ const FIRST: &str = "a.ts";
+ const SECOND: &str = "b.ts";
+@@ -40,10 +40,11 @@ fn a_file_added_outside_after_start_reads_as_resolved() {
+     git_ok(dir.path(), &["add", FIRST]).unwrap();
+     assert_eq!(session.remaining(), 2);
+ 
+-    session.refresh_statuses().unwrap();
++    let list = session.refresh().unwrap();
+ 
+     let after = expected(&[(FIRST, Resolved), (SECOND, Unresolved)]);
+     assert_eq!(statuses(&session), after);
++    assert_eq!(list.disk_changes, []);
+     assert_eq!(session.remaining(), 1);
+ }
+ 
+@@ -52,16 +53,22 @@ fn a_finished_file_checked_out_with_markers_outside_reads_as_unresolved() {
+     use FileStatus::{Resolved, Unresolved};
+     let dir = two_conflicts();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    session.finish(FIRST, "done\n").unwrap();
+-    session.finish(SECOND, "done\n").unwrap();
++    session.finish(FIRST, "done\n", DiskVersion(0)).unwrap();
++    session.finish(SECOND, "done\n", DiskVersion(0)).unwrap();
+     git_ok(dir.path(), &["checkout", "-m", FIRST]).unwrap();
+ 
+-    session.refresh_statuses().unwrap();
++    let list = session.refresh().unwrap();
+ 
+     assert_eq!(
+         statuses(&session),
+         expected(&[(FIRST, Unresolved), (SECOND, Resolved)])
+     );
++    let markers_left = DiskResult::MarkersLeft { conflicts: 1 };
++    let change = DiskChange {
++        path: FIRST.to_owned(),
++        result: markers_left,
++    };
++    assert_eq!(list.disk_changes, [change]);
+ }
+ 
+ #[test]
+@@ -71,7 +78,7 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     git_ok(dir.path(), &["checkout", "-m", SECOND]).unwrap();
+ 
+-    session.refresh_statuses().unwrap();
++    session.refresh().unwrap();
+ 
+     assert_eq!(
+         statuses(&session),
+@@ -83,11 +90,11 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
+ fn refresh_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
+     let dir = two_conflicts();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    session.finish(FIRST, "done\n").unwrap();
++    session.finish(FIRST, "done\n", DiskVersion(0)).unwrap();
+     let before = statuses(&session);
+     std::fs::write(dir.path().join(".git/index"), "not an index").unwrap();
+ 
+-    let error = session.refresh_statuses().unwrap_err();
++    let error = session.refresh().unwrap_err();
+ 
+     assert!(matches!(error, yamt_session::Error::Git(_)), "{error:?}");
+     assert_eq!(statuses(&session), before);
+diff --git a/crates/session/tests/markers/base.txt b/crates/session/tests/markers/base.txt
+new file mode 100644
+index 0000000..d58189d
+--- /dev/null
++++ b/crates/session/tests/markers/base.txt
+@@ -0,0 +1,12 @@
++title
++=======
++one
++two
++three
++four
++five
++six
++seven
++eight
++nine
++ten
+diff --git a/crates/session/tests/markers/crlf.txt b/crates/session/tests/markers/crlf.txt
+new file mode 100644
+index 0000000..e1c5d47
+--- /dev/null
++++ b/crates/session/tests/markers/crlf.txt
+@@ -0,0 +1,31 @@
++title
++=======
++<<<<<<< HEAD
++one
++TWO
++shared-a
++three-ours
++||||||| 8956f4f
++one
++two
++three
++=======
++ONE
++two
++shared-a
++three-theirs
++>>>>>>> theirs
++shared-b
++four
++five
++six
++seven
++<<<<<<< HEAD
++eight-ours
++||||||| 8956f4f
++eight
++=======
++eight-theirs
++>>>>>>> theirs
++nine
++ten
+diff --git a/crates/session/tests/markers/marker-size-12.txt b/crates/session/tests/markers/marker-size-12.txt
+new file mode 100644
+index 0000000..04ce32f
+--- /dev/null
++++ b/crates/session/tests/markers/marker-size-12.txt
+@@ -0,0 +1,31 @@
++title
++=======
++<<<<<<<<<<<< HEAD
++one
++TWO
++shared-a
++three-ours
++|||||||||||| e87a625
++one
++two
++three
++============
++ONE
++two
++shared-a
++three-theirs
++>>>>>>>>>>>> theirs
++shared-b
++four
++five
++six
++seven
++<<<<<<<<<<<< HEAD
++eight-ours
++|||||||||||| e87a625
++eight
++============
++eight-theirs
++>>>>>>>>>>>> theirs
++nine
++ten
+diff --git a/crates/session/tests/markers/ours.txt b/crates/session/tests/markers/ours.txt
+new file mode 100644
+index 0000000..a3896b7
+--- /dev/null
++++ b/crates/session/tests/markers/ours.txt
+@@ -0,0 +1,14 @@
++title
++=======
++one
++TWO
++shared-a
++three-ours
++shared-b
++four
++five
++six
++seven
++eight-ours
++nine
++ten
+diff --git a/crates/session/tests/markers/style-diff3.txt b/crates/session/tests/markers/style-diff3.txt
+new file mode 100644
+index 0000000..31a8ad3
+--- /dev/null
++++ b/crates/session/tests/markers/style-diff3.txt
+@@ -0,0 +1,32 @@
++title
++=======
++<<<<<<< HEAD
++one
++TWO
++shared-a
++three-ours
++shared-b
++||||||| 8409db1
++one
++two
++three
++=======
++ONE
++two
++shared-a
++three-theirs
++shared-b
++>>>>>>> theirs
++four
++five
++six
++seven
++<<<<<<< HEAD
++eight-ours
++||||||| 8409db1
++eight
++=======
++eight-theirs
++>>>>>>> theirs
++nine
++ten
+diff --git a/crates/session/tests/markers/style-merge.txt b/crates/session/tests/markers/style-merge.txt
+new file mode 100644
+index 0000000..3e15939
+--- /dev/null
++++ b/crates/session/tests/markers/style-merge.txt
+@@ -0,0 +1,25 @@
++title
++=======
++<<<<<<< HEAD
++one
++TWO
++shared-a
++three-ours
++=======
++ONE
++two
++shared-a
++three-theirs
++>>>>>>> theirs
++shared-b
++four
++five
++six
++seven
++<<<<<<< HEAD
++eight-ours
++=======
++eight-theirs
++>>>>>>> theirs
++nine
++ten
+diff --git a/crates/session/tests/markers/style-zdiff3.txt b/crates/session/tests/markers/style-zdiff3.txt
+new file mode 100644
+index 0000000..74e4294
+--- /dev/null
++++ b/crates/session/tests/markers/style-zdiff3.txt
+@@ -0,0 +1,31 @@
++title
++=======
++<<<<<<< HEAD
++one
++TWO
++shared-a
++three-ours
++||||||| 8409db1
++one
++two
++three
++=======
++ONE
++two
++shared-a
++three-theirs
++>>>>>>> theirs
++shared-b
++four
++five
++six
++seven
++<<<<<<< HEAD
++eight-ours
++||||||| 8409db1
++eight
++=======
++eight-theirs
++>>>>>>> theirs
++nine
++ten
+diff --git a/crates/session/tests/markers/theirs.txt b/crates/session/tests/markers/theirs.txt
+new file mode 100644
+index 0000000..2cae9c0
+--- /dev/null
++++ b/crates/session/tests/markers/theirs.txt
+@@ -0,0 +1,14 @@
++title
++=======
++ONE
++two
++shared-a
++three-theirs
++shared-b
++four
++five
++six
++seven
++eight-theirs
++nine
++ten
+diff --git a/crates/session/tests/open_and_load.rs b/crates/session/tests/open_and_load.rs
+index 3fce42e..9fdb5dd 100644
+--- a/crates/session/tests/open_and_load.rs
++++ b/crates/session/tests/open_and_load.rs
+@@ -2,7 +2,10 @@
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_merge_core::{ChunkKind, Options, compute_chunks, word_changes};
+-use yamt_session::{Eol, Error, FileEntry, FileStatus, MergeSession, UnsupportedReason};
++use yamt_session::{
++    DiskVersion, Eol, Error, FileEntry, FileStatus, MergeSession, Middle, MiddleLine,
++    UnsupportedReason,
++};
+ 
+ const MODIFY_TS: &str = "a_modify.ts";
+ const ADD_ADD: &str = "b_added.txt";
+@@ -141,23 +144,23 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
+ 
+     let [base, local, remote] = MODIFY_SIDES;
+     assert_eq!(data.path, MODIFY_TS);
+-    assert_eq!(
+-        [&data.base, &data.local, &data.remote],
+-        [base, local, remote]
+-    );
++    assert_eq!([&data.local, &data.remote], [local, remote]);
++    let base_text = Middle::Stages {
++        text: base.to_owned(),
++    };
++    assert_eq!(data.middle, base_text);
+     assert_eq!(data.eol, Eol::Lf);
+     assert_eq!(data.deleted, None);
+-    assert_eq!(
+-        data.chunks,
+-        compute_chunks(base, local, remote, &Options::default())
+-    );
+-    assert_eq!(
+-        data.word_changes,
+-        word_changes(base, local, remote, &data.chunks)
+-    );
+-    let word_chunks: Vec<_> = data.word_changes.iter().map(|words| words.chunk).collect();
+-    let chunk_ids: Vec<_> = data.chunks.iter().map(|chunk| chunk.id).collect();
+-    assert_eq!(word_chunks, chunk_ids);
++    assert_eq!(data.disk_version, DiskVersion(0));
++    let chunks = compute_chunks(base, local, remote, &Options::default());
++    let words = word_changes(base, local, remote, &chunks);
++    assert_eq!(data.chunks.len(), chunks.len());
++    for ((found, chunk), words) in data.chunks.iter().zip(&chunks).zip(&words) {
++        assert_eq!(found.chunk, *chunk);
++        assert_eq!(found.words, *words);
++        assert_eq!(found.middle.start, MiddleLine(chunk.base.start.0));
++        assert_eq!(found.middle.len, chunk.base.len);
++    }
+ }
+ 
+ #[test]
+@@ -167,8 +170,13 @@ fn load_add_add_has_empty_base_and_one_conflict_chunk() {
+ 
+     let data = session.load(ADD_ADD).unwrap();
+ 
+-    assert_eq!(data.base, "");
+-    let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
++    assert_eq!(
++        data.middle,
++        Middle::Stages {
++            text: String::new()
++        }
++    );
++    let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.chunk.kind).collect();
+     assert_eq!(kinds, [ChunkKind::Conflict]);
+ }
+ 
+@@ -226,7 +234,12 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
+ 
+     let data = session.load(PATH).unwrap();
+ 
+-    assert_eq!(data.base, "");
++    assert_eq!(
++        data.middle,
++        Middle::Stages {
++            text: String::new()
++        }
++    );
+     assert_eq!(data.eol, Eol::CrLf);
+ }
+ 
+@@ -276,7 +289,7 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
+         (SYMLINK, UnsupportedReason::Symlink),
+     ] {
+         assert_eq!(unsupported_error(&mut session, path), reason);
+-        let error = session.finish(path, "text\n").unwrap_err();
++        let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
+         assert!(
+             matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
+             "{error:?}"
+@@ -291,7 +304,7 @@ fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
+ 
+-    session.reset(SUBMODULE).unwrap();
++    session.reset(SUBMODULE, DiskVersion(0)).unwrap();
+ 
+     assert_eq!(git_ok(dir.path(), &["ls-files", "-u"]).unwrap(), before);
+     let files = session.files();
+diff --git a/crates/session/tests/samples/mod.rs b/crates/session/tests/samples/mod.rs
+new file mode 100644
+index 0000000..10543f9
+--- /dev/null
++++ b/crates/session/tests/samples/mod.rs
+@@ -0,0 +1,31 @@
++//! git's own sample merge (`.omp/run/markers/make.sh`): two conflicts around a settled `=======`.
++
++pub const BASE: &str = include_str!("../markers/base.txt");
++pub const OURS: &str = include_str!("../markers/ours.txt");
++pub const THEIRS: &str = include_str!("../markers/theirs.txt");
++/// The middle seeded from the sample with its second block resolved to `eight-theirs` by hand.
++pub const WORKED_MIDDLE: &str =
++    "title\n=======\none\ntwo\nthree\nshared-b\nfour\nfive\nsix\nseven\neight-theirs\nnine\nten\n";
++
++/// `text` with its `index`-th open block (from `<<<<<<<` to `>>>>>>>`) replaced by `resolution`.
++pub fn with_block_resolved(text: &str, index: usize, resolution: &str) -> String {
++    let mut resolved = String::new();
++    let mut blocks_seen = 0;
++    let mut inside = false;
++    for line in text.split_inclusive('\n') {
++        if line.starts_with("<<<<<<<") {
++            inside = blocks_seen == index;
++            blocks_seen += 1;
++            if inside {
++                resolved.push_str(resolution);
++                continue;
++            }
++        }
++        if !inside {
++            resolved.push_str(line);
++        } else if line.starts_with(">>>>>>>") {
++            inside = false;
++        }
++    }
++    resolved
++}
+diff --git a/crates/session/tests/start_from_disk.rs b/crates/session/tests/start_from_disk.rs
+new file mode 100644
+index 0000000..72ffeaf
+--- /dev/null
++++ b/crates/session/tests/start_from_disk.rs
+@@ -0,0 +1,333 @@
++#![cfg(test)]
++
++use std::fs;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
++};
++use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
++
++const TEXT: &str = "f.txt";
++const DELETED: &str = "gone.txt";
++const BINARY: &str = "logo.bin";
++const LINK: &str = "link";
++
++mod samples;
++use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
++
++const FILES: [ConflictFile<'static>; 4] = [
++    ConflictFile {
++        path: TEXT,
++        kind: FileKind::Regular,
++        base: Some(BASE.as_bytes()),
++        local: Some(OURS.as_bytes()),
++        remote: Some(THEIRS.as_bytes()),
++    },
++    ConflictFile {
++        path: DELETED,
++        kind: FileKind::Regular,
++        base: Some(b"kept\nbase\n"),
++        local: None,
++        remote: Some(b"kept\nremote\n"),
++    },
++    ConflictFile {
++        path: BINARY,
++        kind: FileKind::Regular,
++        base: Some(b"\0base"),
++        local: Some(b"\0local"),
++        remote: Some(b"\0remote"),
++    },
++    ConflictFile {
++        path: LINK,
++        kind: FileKind::Symlink,
++        base: Some(b"base-target"),
++        local: Some(b"local-target"),
++        remote: Some(b"remote-target"),
++    },
++];
++
++fn merged(config: &[(&str, &str)], attributes: Option<&str>) -> TempDir {
++    let setup = Setup { config, attributes };
++    conflict_repo_with(&FILES, &setup).unwrap()
++}
++
++fn zdiff3() -> TempDir {
++    merged(&[("merge.conflictStyle", "zdiff3")], None)
++}
++
++fn first_list(dir: &TempDir) -> (MergeSession, FileList) {
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let list = session.refresh().unwrap();
++    (session, list)
++}
++
++fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
++    let changes = list.disk_changes.iter();
++    changes
++        .map(|change| (change.path.as_str(), &change.result))
++        .collect()
++}
++
++fn text(bytes: Vec<u8>) -> String {
++    String::from_utf8(bytes).unwrap()
++}
++
++fn read(dir: &TempDir, path: &str) -> String {
++    fs::read_to_string(dir.path().join(path)).unwrap()
++}
++
++fn write(dir: &TempDir, path: &str, bytes: &[u8]) {
++    fs::write(dir.path().join(path), bytes).unwrap();
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    text(git_ok(dir.path(), &["ls-files", "-u"]).unwrap())
++}
++
++fn assert_untouched(dir: &TempDir) {
++    let unmerged_before = unmerged(dir);
++    let (mut session, list) = first_list(dir);
++    assert_eq!(list.disk_changes, []);
++    assert_eq!(unmerged(dir), unmerged_before);
++    let base = Middle::Stages {
++        text: BASE.to_owned(),
++    };
++    assert_eq!(session.load(TEXT).unwrap().middle, base);
++}
++
++#[test]
++fn files_git_wrote_in_any_conflict_style_are_untouched() {
++    for style in ["zdiff3", "merge", "diff3"] {
++        let dir = merged(&[("merge.conflictStyle", style)], None);
++        assert_untouched(&dir);
++    }
++}
++
++#[test]
++fn a_file_rewritten_by_checkout_conflict_diff3_is_untouched() {
++    let dir = zdiff3();
++    git_ok(dir.path(), &["checkout", "--conflict=diff3", "--", TEXT]).unwrap();
++    assert!(read(&dir, TEXT).contains("|||||||"));
++    assert_untouched(&dir);
++}
++
++#[test]
++fn a_crlf_worktree_over_lf_blobs_is_untouched() {
++    let dir = merged(&[("core.autocrlf", "true")], None);
++    assert!(read(&dir, TEXT).contains("<<<<<<< HEAD\r\n"));
++    assert!(read(&dir, DELETED).contains("\r\n"));
++    assert_untouched(&dir);
++}
++
++#[test]
++fn markers_of_the_size_set_in_gitattributes_are_untouched() {
++    let dir = merged(&[], Some("f.txt conflict-marker-size=12\n"));
++    assert!(read(&dir, TEXT).contains("<<<<<<<<<<<< HEAD\n"));
++    assert_untouched(&dir);
++}
++
++#[test]
++fn an_edit_inside_a_base_section_only_is_untouched() {
++    let dir = zdiff3();
++    let edited = read(&dir, TEXT).replace("\neight\n", "\neight, edited in base\n");
++    write(&dir, TEXT, edited.as_bytes());
++    assert_untouched(&dir);
++}
++
++#[test]
++fn a_rename_conflict_with_branch_and_path_labels_is_untouched() {
++    let dir = TempDir::new().unwrap();
++    let root = dir.path();
++    let commit = |message: &str| {
++        git_ok(root, &["add", "--all"]).unwrap();
++        git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++    };
++    git_ok(root, &["init", "--quiet"]).unwrap();
++    fs::write(root.join("old.txt"), BASE).unwrap();
++    commit("base");
++    git_ok(root, &["checkout", "--quiet", "-b", "local"]).unwrap();
++    git_ok(root, &["mv", "old.txt", TEXT]).unwrap();
++    fs::write(root.join(TEXT), OURS).unwrap();
++    commit("local");
++    git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"]).unwrap();
++    fs::write(root.join("old.txt"), THEIRS).unwrap();
++    commit("remote");
++    git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
++    assert!(
++        !git(root, &["merge", "--quiet", "remote"])
++            .unwrap()
++            .status
++            .success()
++    );
++    assert!(
++        read(&dir, TEXT).contains(">>>>>>> remote:old.txt"),
++        "{}",
++        read(&dir, TEXT)
++    );
++
++    let (_, list) = first_list(&dir);
++
++    assert_eq!(list.disk_changes, []);
++}
++
++#[test]
++fn a_file_regenerated_before_start_is_staged_by_the_first_list() {
++    let dir = zdiff3();
++    write(&dir, TEXT, b"regenerated\n");
++
++    let (session, list) = first_list(&dir);
++
++    assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
++    let oid = hash_object(dir.path(), b"regenerated\n").unwrap();
++    let staged = text(git_ok(dir.path(), &["ls-files", "-s", "--", TEXT]).unwrap());
++    assert_eq!(staged, format!("100644 {oid} 0\t{TEXT}\n"));
++    assert_eq!(session.remaining(), FILES.len() - 1);
++}
++
++#[test]
++fn a_block_resolved_before_start_opens_from_disk_with_the_other_block() {
++    let dir = zdiff3();
++    write(
++        &dir,
++        TEXT,
++        with_block_resolved(&read(&dir, TEXT), 1, "eight-theirs\n").as_bytes(),
++    );
++
++    let (mut session, list) = first_list(&dir);
++
++    assert_eq!(
++        changes(&list),
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 1 })]
++    );
++    let data = session.load(TEXT).unwrap();
++    assert_eq!(
++        data.middle,
++        Middle::Disk {
++            text: WORKED_MIDDLE.to_owned()
++        }
++    );
++    let [chunk] = data.chunks.as_slice() else {
++        panic!("{:?}", data.chunks);
++    };
++    assert_eq!((chunk.middle.start.0, chunk.middle.len), (2, 3));
++}
++
++#[test]
++fn settled_text_edited_before_start_opens_from_disk_with_both_blocks() {
++    let dir = zdiff3();
++    write(
++        &dir,
++        TEXT,
++        read(&dir, TEXT)
++            .replace("five\n", "five, edited\n")
++            .as_bytes(),
++    );
++
++    let (session, list) = first_list(&dir);
++
++    assert_eq!(
++        changes(&list),
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
++    );
++    let text_status = session.files().into_iter().find(|file| file.path == TEXT);
++    assert_eq!(
++        text_status.map(|file| file.status),
++        Some(FileStatus::Unresolved)
++    );
++}
++
++#[test]
++fn a_deleted_side_file_is_untouched_under_autocrlf_and_staged_once_removed() {
++    let dir = merged(&[("core.autocrlf", "true")], None);
++    let (_, untouched) = first_list(&dir);
++    assert_eq!(untouched.disk_changes, []);
++
++    let dir = zdiff3();
++    fs::remove_file(dir.path().join(DELETED)).unwrap();
++    let (_, list) = first_list(&dir);
++
++    assert_eq!(changes(&list), [(DELETED, &DiskResult::Staged)]);
++    assert_eq!(
++        git_ok(dir.path(), &["ls-files", "-s", "--", DELETED]).unwrap(),
++        b""
++    );
++}
++
++#[test]
++fn a_binary_file_is_untouched_as_ours_and_staged_once_replaced_by_theirs() {
++    let dir = zdiff3();
++    assert_eq!(fs::read(dir.path().join(BINARY)).unwrap(), b"\0local");
++    write(&dir, BINARY, b"\0remote");
++
++    let (_, list) = first_list(&dir);
++
++    assert_eq!(changes(&list), [(BINARY, &DiskResult::Staged)]);
++}
++
++#[test]
++fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
++    let dir = merged(&[], Some("f.txt -merge\n"));
++    assert_eq!(read(&dir, TEXT), OURS);
++    let (_, list) = first_list(&dir);
++    assert_eq!(list.disk_changes, []);
++    let target = fs::read_link(dir.path().join(LINK)).unwrap();
++    assert_eq!(target.to_str(), Some("local-target"));
++}
++
++#[test]
++fn a_custom_merge_driver_with_markers_opens_from_disk_at_the_first_list() {
++    let dir = merged(&[], Some("f.txt merge=mergiraf\n"));
++    assert!(read(&dir, TEXT).contains("<<<<<<<"));
++
++    let (mut session, list) = first_list(&dir);
++
++    assert_eq!(
++        changes(&list),
++        [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
++    );
++    assert!(matches!(
++        session.load(TEXT).unwrap().middle,
++        Middle::Disk { .. }
++    ));
++}
++
++fn utf16(text: &str) -> Vec<u8> {
++    let mut bytes = vec![0xFF, 0xFE];
++    for unit in text.encode_utf16() {
++        bytes.extend_from_slice(&unit.to_le_bytes());
++    }
++    bytes
++}
++
++#[test]
++fn a_working_tree_encoding_file_is_never_staged() {
++    const ENCODED: &str = "u.txt";
++    let sides = [
++        utf16("one\ntwo\n"),
++        utf16("one\nlocal\n"),
++        utf16("one\nremote\n"),
++    ];
++    let file = ConflictFile {
++        path: ENCODED,
++        kind: FileKind::Regular,
++        base: Some(&sides[0]),
++        local: Some(&sides[1]),
++        remote: Some(&sides[2]),
++    };
++    let setup = Setup {
++        attributes: Some("u.txt working-tree-encoding=UTF-16\n"),
++        ..Setup::default()
++    };
++    let dir = conflict_repo_with(&[file], &setup).unwrap();
++    let (mut session, list) = first_list(&dir);
++    assert_eq!(list.disk_changes, []);
++    write(&dir, ENCODED, &utf16("resolved\n"));
++
++    let changed = session.refresh().unwrap();
++
++    assert_eq!(
++        changes(&changed),
++        [(ENCODED, &DiskResult::MarkersLeft { conflicts: 0 })]
++    );
++    assert!(unmerged(&dir).contains(ENCODED));
++}
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 0e27478..cffe04e 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -2,7 +2,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::{Runtime, State};
+ use yamt_session::{
+-    FileEntry, FileMergeData, FileSides, MergeSession, RemoteName, Side, UnsupportedReason,
++    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side,
++    UnsupportedReason, WriteReply,
+ };
+ 
+ use crate::frontend_log::LogEntry;
+@@ -38,7 +39,8 @@ impl From<yamt_session::Error> for IpcError {
+             yamt_session::Error::Unsupported { path, reason } => {
+                 IpcError::Unsupported { path, reason }
+             }
+-            yamt_session::Error::WriteFailed { path, source } => IpcError::WriteFailed {
++            yamt_session::Error::WriteFailed { path, source }
++            | yamt_session::Error::ReadFailed { path, source } => IpcError::WriteFailed {
+                 path,
+                 message: source.to_string(),
+             },
+@@ -75,10 +77,8 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn list_files(state: State<'_, SessionState>) -> Result<Vec<FileEntry>, IpcError> {
+-    let mut session = lock(&state);
+-    session.refresh_statuses()?;
+-    Ok(session.files())
++fn list_files(state: State<'_, SessionState>) -> Result<FileList, IpcError> {
++    Ok(lock(&state).refresh()?)
+ }
+ 
+ #[tauri::command]
+@@ -102,19 +102,20 @@ fn finish_file(
+     state: State<'_, SessionState>,
+     path: &str,
+     text: &str,
+-) -> Result<Vec<FileEntry>, IpcError> {
+-    let mut session = lock(&state);
+-    session.finish(path, text)?;
+-    Ok(session.files())
++    disk_version: DiskVersion,
++) -> Result<WriteReply, IpcError> {
++    Ok(lock(&state).finish(path, text, disk_version)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn reset_file(state: State<'_, SessionState>, path: &str) -> Result<Vec<FileEntry>, IpcError> {
+-    let mut session = lock(&state);
+-    session.reset(path)?;
+-    Ok(session.files())
++fn reset_file(
++    state: State<'_, SessionState>,
++    path: &str,
++    disk_version: DiskVersion,
++) -> Result<WriteReply, IpcError> {
++    Ok(lock(&state).reset(path, disk_version)?)
+ }
+ 
+ #[tauri::command]
+@@ -131,10 +132,9 @@ fn take_side(
+     state: State<'_, SessionState>,
+     path: &str,
+     side: Side,
+-) -> Result<Vec<FileEntry>, IpcError> {
+-    let mut session = lock(&state);
+-    session.take(path, side)?;
+-    Ok(session.files())
++    disk_version: DiskVersion,
++) -> Result<WriteReply, IpcError> {
++    Ok(lock(&state).take(path, side, disk_version)?)
+ }
+ 
+ #[tauri::command]
+@@ -241,18 +241,46 @@ mod tests {
+         Value::Array(entries)
+     }
+ 
++    fn written(statuses: [&str; 3]) -> Value {
++        json!({ "kind": "Written", "files": entries(statuses) })
++    }
++
+     #[test]
+-    fn list_files_returns_every_conflicted_file_as_git_sees_it() {
++    fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
+         let window = open_window();
+         let unresolved = "Unresolved";
++        let listed = |statuses| json!({ "files": entries(statuses), "disk_changes": [] });
+         assert_eq!(
+             window.invoke("list_files", json!({})),
+-            Ok(entries([unresolved, unresolved, unresolved]))
++            Ok(listed([unresolved, unresolved, unresolved]))
+         );
+         git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
+         assert_eq!(
+             window.invoke("list_files", json!({})),
+-            Ok(entries([unresolved, "Resolved", unresolved]))
++            Ok(listed([unresolved, "Resolved", unresolved]))
++        );
++    }
++
++    #[test]
++    fn list_files_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
++        let window = open_window();
++        fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
++        let staged = json!({ "path": "view.vue", "result": { "kind": "Staged" } });
++        let after = entries(["Unresolved", "Unresolved", "Resolved"]);
++
++        let listed = window.invoke("list_files", json!({}));
++        let args = json!({ "path": "view.vue", "text": "mine\n", "diskVersion": 0 });
++        let finished = window.invoke("finish_file", args);
++
++        assert_eq!(
++            listed,
++            Ok(json!({ "files": after, "disk_changes": [staged] }))
++        );
++        let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
++        assert_eq!(finished, Ok(changed));
++        assert_eq!(
++            fs::read(window.repo.path().join("view.vue")).unwrap(),
++            b"<d/>\n"
+         );
+     }
+ 
+@@ -267,8 +295,9 @@ mod tests {
+     fn finish_file_writes_crlf_text_verbatim_and_stages_it_while_others_stay_open() {
+         let window = open_window();
+         let text = "a\r\nmerged\r\n";
+-        let files = window.invoke("finish_file", json!({ "path": CRLF_PATH, "text": text }));
+-        assert_eq!(files, Ok(entries(["Unresolved", "Resolved", "Unresolved"])));
++        let args = json!({ "path": CRLF_PATH, "text": text, "diskVersion": 0 });
++        let files = window.invoke("finish_file", args);
++        assert_eq!(files, Ok(written(["Unresolved", "Resolved", "Unresolved"])));
+         assert_eq!(
+             fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
+             text.as_bytes()
+@@ -287,15 +316,18 @@ mod tests {
+         let unmerged_before = window.unmerged();
+         for path in ["added.ts", CRLF_PATH, "view.vue"] {
+             window
+-                .invoke("finish_file", json!({ "path": path, "text": "done\n" }))
++                .invoke(
++                    "finish_file",
++                    json!({ "path": path, "text": "done\n", "diskVersion": 0 }),
++                )
+                 .unwrap();
+         }
+         assert_eq!(window.unmerged(), "");
+         assert_eq!(window.exit_on_close(), Exit::Success);
+ 
+-        let files = window.invoke("reset_file", json!({ "path": CRLF_PATH }));
++        let files = window.invoke("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 }));
+ 
+-        assert_eq!(files, Ok(entries(["Resolved", "Unresolved", "Resolved"])));
++        assert_eq!(files, Ok(written(["Resolved", "Unresolved", "Resolved"])));
+         let crlf_stages: Vec<&str> = unmerged_before
+             .lines()
+             .filter(|line| line.ends_with(CRLF_PATH))
+@@ -313,13 +345,16 @@ mod tests {
+         let path = json!({ "path": LOGO });
+         let local = json!({ "kind": "Binary", "bytes": 6 });
+         let remote = json!({ "kind": "Binary", "bytes": 7 });
+-        let sides = json!({ "path": LOGO, "reason": "Binary", "local": local, "remote": remote });
++        let sides = json!({
++            "path": LOGO, "reason": "Binary", "local": local, "remote": remote, "disk_version": 0
++        });
+         assert_eq!(window.invoke("describe_file", path), Ok(sides));
+ 
+-        let files = window.invoke("take_side", json!({ "path": LOGO, "side": "remote" }));
++        let args = json!({ "path": LOGO, "side": "remote", "diskVersion": 0 });
++        let files = window.invoke("take_side", args);
+ 
+         let resolved = json!({ "path": LOGO, "status": "Resolved", "unsupported": "Binary" });
+-        assert_eq!(files, Ok(json!([resolved])));
++        assert_eq!(files, Ok(json!({ "kind": "Written", "files": [resolved] })));
+         assert_eq!(
+             fs::read(window.repo.path().join(LOGO)).unwrap(),
+             b"\0remote"
+@@ -368,6 +403,14 @@ mod tests {
+             serde_json::to_value(IpcError::from(write_failed)).unwrap(),
+             json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
+         );
++        let read_failed = yamt_session::Error::ReadFailed {
++            path: "a.ts".to_owned(),
++            source: std::io::Error::other("permission denied"),
++        };
++        assert_eq!(
++            serde_json::to_value(IpcError::from(read_failed)).unwrap(),
++            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "permission denied" })
++        );
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index ea282d6..0cf90f6 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -49,7 +49,7 @@ pub(crate) fn startup(repo: &Path) -> Startup {
+ }
+ 
+ pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
+-    if let Err(error) = session.refresh_statuses() {
++    if let Err(error) = session.refresh() {
+         tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+     }
+     let unresolved = session.remaining();
+@@ -71,6 +71,7 @@ pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
+ #[cfg(test)]
+ mod tests {
+     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
++    use yamt_session::DiskVersion;
+ 
+     use super::*;
+     use crate::frontend_log::tests::logged;
+@@ -147,12 +148,12 @@ mod tests {
+                 message: Some("2 of 2 files still unresolved".to_owned()),
+             }
+         );
+-        session.finish("a.ts", "done\n").unwrap();
++        session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
+         assert_eq!(
+             ending_on_close(&mut session).message.as_deref(),
+             Some("1 of 2 files still unresolved")
+         );
+-        session.finish("b.ts", "done\n").unwrap();
++        session.finish("b.ts", "done\n", DiskVersion(0)).unwrap();
+         assert_eq!(
+             ending_on_close(&mut session),
+             Ending {
+@@ -181,11 +182,33 @@ mod tests {
+         assert_eq!(ending_on_close(&mut session).exit, Exit::Unresolved);
+     }
+ 
++    #[test]
++    fn closing_stages_a_file_regenerated_on_disk_and_keeps_one_with_markers_unresolved() {
++        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
++        let mut session = MergeSession::open(repo.path()).unwrap();
++        std::fs::write(repo.path().join("a.ts"), "regenerated\n").unwrap();
++        let with_markers = "<<<<<<< ours\nlocal\n=======\nremote, edited\n>>>>>>> theirs\n";
++        std::fs::write(repo.path().join("b.ts"), with_markers).unwrap();
++
++        let ending = ending_on_close(&mut session);
++
++        assert_eq!(
++            ending.message.as_deref(),
++            Some("1 of 2 files still unresolved")
++        );
++        let unmerged = git_ok(repo.path(), &["ls-files", "-u"]).unwrap();
++        let unmerged = String::from_utf8(unmerged).unwrap();
++        assert!(
++            !unmerged.contains("a.ts") && unmerged.contains("b.ts"),
++            "{unmerged}"
++        );
++    }
++
+     #[test]
+     fn closing_with_a_broken_index_uses_the_session_statuses_and_warns() {
+         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+         let mut session = MergeSession::open(repo.path()).unwrap();
+-        session.finish("a.ts", "done\n").unwrap();
++        session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
+         std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
+ 
+         let (ending, logged) = logged(|| ending_on_close(&mut session));

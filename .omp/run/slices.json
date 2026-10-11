@@ -1,5 +1,5 @@
 {
-  "V0DiskTruthRust": {
+  "V0DiskTruthRustR1": {
     "owned": [
       "crates/**",
       "src-tauri/**",
