@@ -1,15 +1,10 @@
 {
-  "V0EditorFindDrag": {
-    "owned": ["frontend/src/editor/**"],
+  "V0EditorFindDragR1": {
+    "owned": ["frontend/src/editor/**", "frontend/src/style.css"],
     "readonly": ["frontend/src/ui/**", "frontend/src/ipc/**", "frontend/package.json", "docs/**"]
   },
-  "V0RustGitView": {
-    "owned": [
-      "crates/**",
-      "src-tauri/**",
-      "frontend/fixtures/golden/**",
-      "frontend/fixtures/showcase/**"
-    ],
-    "readonly": ["frontend/src/**", "docs/**", "tests/golden/**"]
+  "V0RustGitViewR1": {
+    "owned": ["crates/**", "src-tauri/**"],
+    "readonly": ["frontend/**", "docs/**", "tests/golden/**"]
   }
 }
