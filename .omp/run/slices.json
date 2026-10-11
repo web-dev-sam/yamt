@@ -1,1 +1,32 @@
-{}
+{
+  "V0ChoicePanel": {
+    "owned": [
+      "frontend/src/ui/**",
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/window.ts",
+      "frontend/src/ipc/window.test.ts",
+      "frontend/src/ipc/log.ts",
+      "frontend/src/ipc/log.test.ts",
+      "frontend/src/style.css"
+    ]
+  },
+  "V0Release": {
+    "owned": [
+      "README.md",
+      "LICENSE",
+      "CHANGELOG.md",
+      "THIRD_PARTY_NOTICES.md",
+      ".github/**",
+      "docs/screenshot.png",
+      "src-tauri/tauri.conf.json",
+      "src-tauri/src/window.rs",
+      "frontend/src/main.ts"
+    ]
+  }
+}
