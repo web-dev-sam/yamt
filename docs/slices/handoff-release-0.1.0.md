@@ -24,14 +24,14 @@ The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
 
 ## Steps
 
-1. **Push and tag.** Everything is committed; the working tree is clean.
-   ```bash
-   cd ~/Projects/yamt
-   git status --short              # expect no output
-   git push origin main
-   git tag -a v0.1.0 -m "yamt 0.1.0"
-   git push origin v0.1.0
-   ```
+1. **Push and tag.** Done 2026-10-11: the first tag `v0.1.0` (`847607a`) failed on macOS (see "If
+   something fails"); the fix `7844ebd` is tagged **`v0.1.1`** (run 38174078717). By your call the
+   files inside still say 0.1.0 (plan §2 #38): the downloads are named `yamt_0.1.0_*` and
+   `yamt --version` prints 0.1.0.
+
+   Delete the old **`v0.1.0` draft** on the releases page: its macOS job failed and its Linux files
+   install the internal `export-bindings` tool.
+
 2. **Watch the build** at https://github.com/web-dev-sam/yamt/actions. Run "release" has three jobs:
    - `draft-release`;
    - `build (ubuntu-22.04)`;
@@ -40,13 +40,13 @@ The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
    The two build jobs do not cancel each other. Expect roughly 15–30 min [INFERENCE: tauri builds on
    hosted runners; never measured for this repo].
 
-3. **Check the draft** at https://github.com/web-dev-sam/yamt/releases. Draft `v0.1.0` should list:
+3. **Check the draft** at https://github.com/web-dev-sam/yamt/releases. Draft `v0.1.1` should list:
    - `yamt_0.1.0_amd64.AppImage` and `yamt_0.1.0_amd64.deb`. The README's install commands use these
      exact names.
    - A macOS `.dmg` (tauri-action names it after the target, e.g. `yamt_0.1.0_universal.dmg`) and an
      `.app.tar.gz`.
 4. **Release notes.** Paste the `## [0.1.0] - 2026-10-11` section of `CHANGELOG.md` into the draft's
-   description.
+   description (the version inside the files is 0.1.0).
 5. **Smoke one download** before publishing; 5 minutes, Linux:
 
    ```bash
