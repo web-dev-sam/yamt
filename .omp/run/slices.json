@@ -1,1 +1,6 @@
-{}
+{
+  "V0EditorFindDrag": {
+    "owned": ["frontend/src/editor/**"],
+    "readonly": ["frontend/src/ui/**", "frontend/src/ipc/**", "frontend/package.json", "docs/**"]
+  }
+}

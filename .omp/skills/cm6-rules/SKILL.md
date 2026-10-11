@@ -60,7 +60,8 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
 
 - [CM10] Decorations: `Decoration.line({ class })` for bands. Side panes add `Decoration.mark`
   word marks and `Decoration.widget` removal bars (`words.ts`; `ignoreEvent()` false). Apply/ignore
-  arrows are SVG groups in the gap strips, acting on `pointerdown`; each strip's `mousedown` calls
+  arrows are SVG groups in the gap strips, acting on release and draggable over several changes as one
+  undo step (plan §2 #45); each strip's `mousedown` calls
   `preventDefault`, so the middle pane keeps focus (a CM gutter on the inner edge missed clicks in
   WebKit; 1.4). Compute with `RangeSetBuilder` over `view.visibleRanges` only when the set depends
   on the viewport.
@@ -83,4 +84,5 @@ lines the selection touches by the file's own unit, plan §2 #35). Also `@lezer/
 `@codemirror/language-data` (every official grammar, each loaded on demand, plan §2 #29). The panes
 get only the grammar's `Language`, never its `LanguageSupport` extras (auto-closing tags, Markdown
 list keys). Grammars are reached only through `language-data`, never imported one by one.
-Not the `codemirror` bundle, not `@codemirror/merge`, not `@codemirror/search`/`autocomplete`.
+Also `@codemirror/search` (find bar per pane, our own panel, plan §2 #44). Not the `codemirror` bundle,
+not `@codemirror/merge`, not `@codemirror/autocomplete`.
