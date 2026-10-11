@@ -30,7 +30,7 @@ Base: `references/typescript-best-practices.md` (rule table) and
   can be swapped without a type error (two `number`s, two `string`s, two `Side`s). Positional is
   fine when every parameter has its own type (`isSideOpen(chunk, status, side)`,
   `mapSpans(spans, changes, doc, applied)`), and in the per-frame paths (`connectors/`,
-  `scrollSync.ts`, `strips.ts`). Violation: `lineSpan(doc, from: number, to: number)`.
+  `scrollSync.ts`, `strips.ts`, `gap.ts`). Violation: `lineSpan(doc, from: number, to: number)`.
 
 ## Modules and files (Rust-typical, vision 1)
 

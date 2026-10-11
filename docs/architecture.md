@@ -401,7 +401,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | find space above line 1 (while any pane's find bar is open)                                             | `findSpace` field in every pane (`editor/internal/find.ts`), pushed by the controller each frame from "any pane's bar open"                                                                                           | no history; same space in all three panes keeps them aligned (plan §2 #44)                                                          |
 | drag over the icons: the press, the covered changes' highlight                                          | the press in `editor/internal/drag.ts` (`IconDrag`); the highlight in a side-pane field (`covered.ts`), pushed by the controller                                                                                      | no history; derived from the press and the pointer each frame                                                                       |
 | scroll positions                                                                                        | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                                                            | not state, derived                                                                                                                  |
-| connector geometry                                                                                      | computed per frame from `lineBlockAt`, never stored                                                                                                                                                                   | derived                                                                                                                             |
+| chunk rows and scroll anchors                                                                           | one cache in `MergeController` (rows from `lineBlockAt` + the sync's anchors), dropped by `rowsChanged`: doc change, measured heights (`geometryChanged`), statuses; the strips move their kept nodes per frame       | derived, cached (plan §2 #51)                                                                                                       |
 | file list, opened files, active file, the shown failure                                                 | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`; the marks are git's view, re-read on window focus (plan §2 #49) | chrome only                                                                                                                         |
 | saved baseline per opened file (loaded text, then the last text marked resolved)                        | non-reactive `let` in `useMergeController`, set when the controller is built, replaced by `markSaved` after a successful finish                                                                                       | one place decides "unsaved work" (plan §2 #37)                                                                                      |
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files) | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map set by `takeSide`, deleted by reset                                                                     | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47)                   |
@@ -455,13 +455,17 @@ Internals (`editor/internal/`, not importable from `ui/`):
   are handled (plan §2 #31, #33).
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
   bar where the side removed text) from `chunk.words` (plan §2 #30, #31).
-- `geometry.ts`, `strips.ts` — bands and the apply/ignore buttons in the two `<svg>` strips
+- `geometry.ts` (where each chunk sits in each pane), `gap.ts` (what a strip shows: the bands that
+  cross it and each open change's icon row in document space), `strips.ts` (places the icon rows,
+  keeps the nodes of what is in the strip and moves them per frame) — bands and the apply/ignore
+  buttons in the two `<svg>` strips
   (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
   WebKit). Icons are Lucide SVG markup imported as strings (`~icons/lucide/<name>?raw`), parsed
   once and cloned per button (plan §2 #34); the apply button turns into "add below" while the
   other side is applied. A button press only starts a press; none are drawn in read-only mode.
 - `drag.ts`, `covered.ts` — the press and drag over the icons (plan §2 #45): pointer capture on the
-  persistent `<svg>` strips (buttons are repainted every frame), the changes covered between the press
+  persistent `<svg>` strips (a button row exists only while it is in the strip and its side is open;
+  its position is updated per frame), the changes covered between the press
   and the pointer, highlighted through a side-pane effect outside history; release sends one
   `ChunkAction` with every covered chunk, one undo step (CM7).
 - `modClick.ts` — Ctrl/Cmd+click on a line of an open block in a side pane sends that change's apply
@@ -485,15 +489,20 @@ export type Band = { readonly left: Span; readonly right: Span };
 export function bandPath(band: Band, width: number): string; // closed path, cubic top/bottom edges, control points at width / 2
 ```
 
-`editor/internal/strips.ts` turns chunk ranges into `Span`s (`editor/internal/geometry.ts`, via
-`lineBlockAt`) and draws the bands into the two `<svg>` strips once per animation frame, after
-any pane scroll, center edit or geometry change. Only bands whose box intersects the strip are
-drawn. `connectors/` is unit-tested on numbers, no DOM.
+`editor/internal/geometry.ts` turns chunk ranges into `Span`s (via `lineBlockAt`); `MergeController`
+caches these rows with the scroll sync's anchors until the document, the measured heights or the
+statuses change (plan §2 #51). `editor/internal/gap.ts` picks the bands that cross each strip and the
+open changes' icon rows; `editor/internal/strips.ts` places the rows, keeps the nodes of what is in
+the strip and moves them once per animation frame, after any pane scroll, center edit or geometry
+change. Each strip is its own compositing layer (plan §2 #51). `connectors/` is unit-tested on
+numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
 Components: `App.vue`, `FileList.vue` (file list, resolved mark, vscode-icons), `MergeView.vue`
-(toolbar + three `<div>` hosts + two `<svg>`, one per opened file, inactive ones `invisible`;
+(toolbar + three `<div>` hosts + two `<svg>`, each in a bordered wrapper on its own compositing layer;
+one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
+paint, editors, scroll positions and work kept, plan §2 #51;
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
 data object changes and destroys it with the component), `MergeToolbar.vue` (bulk apply
 left/right, undo/redo, counts, finish, reset — `MergeView` calls the store's `finish`/`reset`),
