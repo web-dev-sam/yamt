@@ -2,13 +2,13 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok,
 };
 use yamt_gitio::{CommitSummary, Error, Oid, Repo};
 
-const MIN_SHORT_ID: usize = 7;
 const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     path: "cart.ts",
     kind: FileKind::Regular,
@@ -20,6 +20,17 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
 fn stdout_line(root: &Path, args: &[&str]) -> String {
     let output = git_ok(root, args).unwrap();
     String::from_utf8(output).unwrap().trim_end().to_owned()
+}
+
+fn short_id_as_gitio_reads_config(root: &Path, revision: &str) -> Vec<u8> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .env("LC_ALL", "C")
+        .args(["rev-parse", "--short", revision])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    output.stdout.trim_ascii_end().to_vec()
 }
 
 fn oid_of(root: &Path, revision: &str) -> Oid {
@@ -154,13 +165,8 @@ fn commit_summary_gives_the_short_id_subject_and_raw_message() {
 
     let summary = repo.commit_summary(&oid_of(root, "HEAD")).unwrap();
 
-    let full_id = stdout_line(root, &["rev-parse", "HEAD"]).into_bytes();
-    assert!(
-        summary.short_id.len() >= MIN_SHORT_ID && full_id.starts_with(&summary.short_id),
-        "{summary:?}"
-    );
     let expected = CommitSummary {
-        short_id: summary.short_id.clone(),
+        short_id: short_id_as_gitio_reads_config(root, "HEAD"),
         subject: b"subject".to_vec(),
         message: b"subject\n\nbody\n\n".to_vec(),
     };

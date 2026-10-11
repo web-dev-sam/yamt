@@ -2,12 +2,12 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
 use yamt_session::{MergeSession, RemoteName};
 
 const FILE: &str = "cart.ts";
-const MIN_SHORT_ID: usize = 7;
 
 fn diverged() -> TempDir {
     diverged_repo(&[ConflictFile {
@@ -30,6 +30,20 @@ fn stdout_line(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output).unwrap().trim_end().to_owned()
 }
 
+fn short_id_as_gitio_reads_config(root: &Path, revision: &str) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .env("LC_ALL", "C")
+        .args(["rev-parse", "--short", revision])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .trim_end()
+        .to_owned()
+}
+
 fn remote_name_of(root: &Path) -> Option<RemoteName> {
     MergeSession::open(root).unwrap().remote_name()
 }
@@ -41,21 +55,12 @@ fn branch(name: &str) -> RemoteName {
 }
 
 fn assert_names_commit(root: &Path, revision: &str, subject: &str, message: &str) {
-    let name = remote_name_of(root);
-    let full_id = stdout_line(root, &["rev-parse", revision]);
-    let Some(RemoteName::Commit { short_id, .. }) = &name else {
-        panic!("not a commit: {name:?}");
-    };
-    assert!(
-        short_id.len() >= MIN_SHORT_ID && full_id.starts_with(short_id.as_str()),
-        "{short_id} is not a short form of {full_id}"
-    );
     let expected = RemoteName::Commit {
-        short_id: short_id.clone(),
+        short_id: short_id_as_gitio_reads_config(root, revision),
         subject: subject.to_owned(),
         message: message.to_owned(),
     };
-    assert_eq!(name, Some(expected));
+    assert_eq!(remote_name_of(root), Some(expected));
 }
 
 #[test]

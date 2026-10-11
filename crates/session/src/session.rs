@@ -48,7 +48,7 @@ pub fn merge_data(
 ) -> FileMergeData {
     let eol_source = [base, local, remote]
         .into_iter()
-        .find(|text| !text.is_empty())
+        .find(|text| text.contains('\n'))
         .unwrap_or_default();
     let chunks = compute_chunks(base, local, remote, &Options::default());
     FileMergeData {

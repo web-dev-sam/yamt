@@ -36,7 +36,6 @@ pub enum Error {
     #[error("cannot read {}: {source}", path.display())]
     ReadFailed {
         path: std::path::PathBuf,
-        #[source]
         source: std::io::Error,
     },
     #[error("i/o error while running git: {0}")]

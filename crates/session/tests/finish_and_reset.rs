@@ -79,6 +79,18 @@ fn mixed_eol_file_is_detected_and_finish_writes_its_bytes_unchanged() {
 }
 
 #[test]
+fn base_without_a_line_break_takes_the_eol_from_the_crlf_sides() {
+    let sides: [&[u8]; 3] = [b"x", b"a\r\nlocal\r\n", b"a\r\nremote\r\n"];
+    assert_finish_with_local_round_trips_bytes(sides, Eol::CrLf);
+}
+
+#[test]
+fn base_with_a_line_break_decides_the_eol_over_the_kept_side() {
+    let sides: [&[u8]; 3] = [b"a\nb\nc\n", b"a\r\nlocal\r\nc\r\n", b"a\nremote\nc\n"];
+    assert_finish_with_local_round_trips_bytes(sides, Eol::Lf);
+}
+
+#[test]
 fn finish_writes_the_result_marks_it_resolved_and_git_no_longer_lists_it() {
     const RESULT: &str = "one\nmerged\nthree\n";
     let dir = two_file_conflict();
