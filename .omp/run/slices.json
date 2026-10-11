@@ -1,14 +1,5 @@
 {
-  "V0ReleaseR2": {
-    "owned": [
-      "src-tauri/src/appimage.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/AGENTS.md",
-      "README.md",
-      "THIRD_PARTY_NOTICES.md",
-      "THIRD_PARTY_LICENSES.txt",
-      ".github/workflows/release.yml",
-      "scripts/third-party-licenses.sh"
-    ]
+  "V0ReleasePolish": {
+    "owned": ["README.md", "src-tauri/src/window.rs", "scripts/third-party-licenses.sh"]
   }
 }
