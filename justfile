@@ -8,8 +8,10 @@ fmt-check: (frontend "fmt:check")
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# yamt reads the user's git config (merge drivers, attributes); the test repositories are merged
+# without it (RK19), so the tests run without it too.
 test:
-    cargo nextest run --workspace
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=/nonexistent cargo nextest run --workspace
 
 deny:
     cargo deny check --warn unmaintained
@@ -105,6 +107,7 @@ golden-repo case dir:
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=/nonexistent
     mkdir -p target/mutants
     git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
     if [ -s target/mutants/rust.diff ]; then
