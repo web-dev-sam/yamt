@@ -10,6 +10,16 @@ default-run = "yamt"
 name = "yamt"
 path = "src/main.rs"
 
+# The generator behind `just bindings`. Off in `cargo tauri build`, so the bundles carry only `yamt`:
+# tauri bundles every bin it is not told to skip, and the universal macOS build makes only the main one.
+[[bin]]
+name = "export-bindings"
+path = "src/bin/export-bindings.rs"
+required-features = ["bindings"]
+
+[features]
+bindings = []
+
 [build-dependencies]
 tauri-build.workspace = true
 

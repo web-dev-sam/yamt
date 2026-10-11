@@ -82,6 +82,12 @@ The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
   redo the tag.
 - **Never bump** tauri 2.12.1, tauri-build 2.7.1, @tauri-apps/api 2.12.1 or tauri-cli 2.12.1 to fix
   a build. The workflow installs tauri-cli 2.12.1 on purpose.
+- **First tag run (2026-10-11): macOS failed** with `Failed to copy binary ...
+  universal-apple-darwin/release/export-bindings ... does not exist`. Cause: tauri packs every
+  program of the app package, and the internal bindings generator was one of them. The universal
+  macOS build makes only `yamt`, so the copy failed; the Linux `.deb` and AppImage carried the
+  generator in `/usr/bin`. Fixed: the generator now needs the `bindings` feature, so no package has
+  it (a fresh `.deb` holds only `usr/bin/yamt`). Redo the tag as above.
 
 ## After publishing
 

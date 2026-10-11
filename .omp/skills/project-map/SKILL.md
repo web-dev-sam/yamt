@@ -31,7 +31,7 @@ crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge s
 src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-specta builder for both bins) + graphics (NVIDIA guard, the one `unsafe`, plan §2 #43),
                     args, outcome (start-up decision, exit status), window (close fallback when the page is gone), commands, ipc_error (IpcError), frontend_log,
                     appimage (a relative repo path is resolved against OWD only when the running binary lives under $APPDIR with APPIMAGE set; never chdir);
-                    bins `yamt` and `export-bindings` (→ ipc/bindings.ts); tauri.conf.json (bundles: AppImage, deb, app, dmg); icons/icon.svg source (plan §2 #41)
+                    bins `yamt` and `export-bindings` (→ ipc/bindings.ts; feature `bindings`, so no bundle carries it); tauri.conf.json (bundles: AppImage, deb, app, dmg); icons/icon.svg source (plan §2 #41)
 release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.md, THIRD_PARTY_LICENSES.txt (GENERATED, in every bundle), docs/screenshot.png, .github/workflows/release.yml (draft release on `v*`; plan §2 #38)
 scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-core, clippy threshold parity, `unsafe` only in src-tauri/src/graphics.rs
 scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map

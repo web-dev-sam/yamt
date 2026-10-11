@@ -12,7 +12,7 @@ fmt-check: (frontend "fmt:check")
     cargo fmt --all --check
 
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --features yamt-app/bindings -- -D warnings
 
 # Rust tests, without the user's git config (RK19).
 test:
@@ -22,10 +22,10 @@ deny:
     cargo deny check --warn unmaintained
 
 bindings:
-    cargo run --quiet -p yamt-app --bin export-bindings
+    cargo run --quiet -p yamt-app --features bindings --bin export-bindings
 
 bindings-check:
-    cargo run --quiet -p yamt-app --bin export-bindings -- target/bindings-check.ts
+    cargo run --quiet -p yamt-app --features bindings --bin export-bindings -- target/bindings-check.ts
     diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts
 
 fixtures: (fixtures-into "frontend/fixtures")

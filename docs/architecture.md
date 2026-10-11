@@ -101,7 +101,7 @@ Rules (each one is enforced, not advised — §8 says by what):
 | `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin)                                                                       | `scripts/arch-check.sh` (yamt-app's direct deps); reviewer rule                                                                 |
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
-| `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --bin export-bindings` output                                                    | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
+| `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --features bindings --bin export-bindings` output                                | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
 | No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
 | No `any`, no non-null assertions, no `as` casts outside `ipc/fixture.ts`                                                                                     | oxlint `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (override for the fixture parser)        |
 | Every `switch` over a union is exhaustive; every Rust `match` over a domain enum lists all variants                                                          | oxlint type-aware `switch-exhaustiveness-check`; clippy `wildcard_enum_match_arm = deny`                                        |
@@ -336,7 +336,9 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
-- `export-bindings` bin writes `frontend/src/ipc/bindings.ts`.
+- `export-bindings` bin writes `frontend/src/ipc/bindings.ts`. It needs the `bindings` feature, so
+  `cargo tauri build` neither builds nor bundles it: tauri bundles every bin of the package unless
+  its required features are off, and the universal macOS build makes only the main binary.
 
 ---
 
@@ -682,7 +684,7 @@ fmt-check:      pnpm -C frontend fmt:check && cargo fmt --all --check
 clippy:         cargo clippy --workspace --all-targets -- -D warnings
 test:           {{ hermetic_git }} cargo nextest run --workspace   (no user/system git config, RK19)
 deny:           cargo deny check --warn unmaintained
-bindings:       cargo run -p yamt-app --bin export-bindings
+bindings:       cargo run -p yamt-app --features bindings --bin export-bindings
 bindings-check: export to target/ and `diff -u` against the committed frontend/src/ipc/bindings.ts
 web-*:          delegate to the package scripts in frontend/package.json (lint, typecheck, test, unused, sfc-order); `unused` = exports nobody imports
 arch-check:     scripts/arch-check.sh — gitio ↛ merge-core; merge-core ↛ serde_json/tokio/tauri; no std::{fs,process} in merge-core
