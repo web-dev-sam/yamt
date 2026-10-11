@@ -250,13 +250,15 @@ fn taken(path: &str, side: Side) -> TempDir {
 }
 
 #[test]
-fn take_of_a_binary_file_stages_and_writes_the_chosen_side() {
+fn take_of_a_binary_file_stages_and_writes_the_chosen_side_with_fresh_stat_data() {
     for (side, bytes) in [
         (Side::Local, b"\0local".as_slice()),
         (Side::Remote, b"\0remote!"),
     ] {
         let dir = taken(BINARY, side);
         assert_eq!(fs::read(dir.path().join(BINARY)).unwrap(), bytes);
+        let diff_files = git(dir.path(), &["diff-files", "--quiet", "--", BINARY]).unwrap();
+        assert!(diff_files.status.success(), "{diff_files:?}");
     }
 }
 
@@ -275,8 +277,10 @@ fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
 }
 
 #[test]
-fn take_of_a_file_against_a_link_writes_the_link_or_keeps_the_file() {
+fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
     let dir = file_against_link();
+    fs::remove_file(dir.path().join(FILE_OR_LINK)).unwrap();
+    fs::remove_file(dir.path().join(FILE_OR_LINK_RENAMED)).unwrap();
     assert_take_resolves_to_that_side(&dir, FILE_OR_LINK, Side::Remote);
     assert_take_resolves_to_that_side(&dir, FILE_OR_LINK_RENAMED, Side::Local);
     assert_eq!(
@@ -341,14 +345,16 @@ fn take_of_the_kept_side_of_a_deleted_file_restores_it() {
 }
 
 #[test]
-fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_directory() {
+fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_worktree_alone() {
     for (side, commit) in [(Side::Local, LOCAL_COMMIT), (Side::Remote, REMOTE_COMMIT)] {
-        let dir = taken(SUBMODULE, side);
+        let dir = every_kind_of_conflict();
+        fs::remove_dir(dir.path().join(SUBMODULE)).unwrap();
+        assert_take_resolves_to_that_side(&dir, SUBMODULE, side);
         assert_eq!(
             staged(&dir, SUBMODULE),
             format!("160000 {commit} 0\t{SUBMODULE}\n")
         );
-        assert!(dir.path().join(SUBMODULE).is_dir());
+        assert!(dir.path().join(SUBMODULE).symlink_metadata().is_err());
     }
 }
 

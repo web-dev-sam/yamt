@@ -116,25 +116,55 @@ fn take_with_a_held_index_lock_changes_nothing() {
     }
 }
 
+fn set_assets_mode(dir: &TempDir, mode: u32) {
+    let assets = dir.path().join("assets");
+    fs::set_permissions(assets, fs::Permissions::from_mode(mode)).unwrap();
+}
+
 #[test]
 fn take_whose_worktree_write_fails_puts_the_conflict_back() {
     let dir = mixed_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
-    let before = (unmerged(&dir), worktree(&dir, DELETED));
-    session.take(BINARY, Side::Local).unwrap();
-    let assets = dir.path().join("assets");
-    fs::set_permissions(&assets, fs::Permissions::from_mode(READ_ONLY_DIR)).unwrap();
+    let binary_before = (unmerged(&dir), worktree(&dir, BINARY));
+    let deleted_before = (unmerged(&dir), worktree(&dir, DELETED));
+    set_assets_mode(&dir, READ_ONLY_DIR);
 
     let binary = session.take(BINARY, Side::Remote);
     let deleted = session.take(DELETED, Side::Local);
 
-    fs::set_permissions(&assets, fs::Permissions::from_mode(WRITABLE_DIR)).unwrap();
-    assert!(matches!(binary, Err(Error::Git(_))), "{binary:?}");
+    set_assets_mode(&dir, WRITABLE_DIR);
+    assert_git_error(binary);
     assert!(
         matches!(deleted, Err(Error::WriteFailed { .. })),
         "{deleted:?}"
     );
-    assert_nothing_changed(&dir, &session, DELETED, &before);
-    let local_bytes = Some(b"\0local".to_vec());
-    assert_nothing_changed(&dir, &session, BINARY, &(before.0.clone(), local_bytes));
+    assert_nothing_changed(&dir, &session, BINARY, &binary_before);
+    assert_nothing_changed(&dir, &session, DELETED, &deleted_before);
+}
+
+fn staged(dir: &TempDir, path: &str) -> String {
+    String::from_utf8(git_ok(dir.path(), &["ls-files", "-s", "--", path]).unwrap()).unwrap()
+}
+
+#[test]
+fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
+    let dir = mixed_conflict();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    session.take(BINARY, Side::Local).unwrap();
+    session.take(DELETED, Side::Local).unwrap();
+    let before = |path| (staged(&dir, path), worktree(&dir, path));
+    let (binary_before, deleted_before) = (before(BINARY), before(DELETED));
+    assert_eq!(deleted_before, (String::new(), None));
+    set_assets_mode(&dir, READ_ONLY_DIR);
+
+    let binary = session.take(BINARY, Side::Remote);
+    let deleted = session.take(DELETED, Side::Remote);
+
+    set_assets_mode(&dir, WRITABLE_DIR);
+    assert_git_error(binary);
+    assert_git_error(deleted);
+    for (path, before) in [(BINARY, binary_before), (DELETED, deleted_before)] {
+        assert_eq!((staged(&dir, path), worktree(&dir, path)), before, "{path}");
+        assert_eq!(status_of(&session, path), FileStatus::Resolved, "{path}");
+    }
 }

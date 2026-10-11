@@ -50,6 +50,8 @@ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMerg
     }
 }
 
+const LOG_TARGET: &str = "session";
+
 pub struct MergeSession {
     repo: Repo,
     files: Vec<FileState>,
@@ -78,6 +80,11 @@ struct Texts {
     base: String,
     local: String,
     remote: String,
+}
+
+enum IndexBefore {
+    Conflicted,
+    Resolved(Vec<u8>),
 }
 
 impl MergeSession {
@@ -133,9 +140,12 @@ impl MergeSession {
         let before = worktree_bytes(&worktree_file, path)?;
         write_worktree_file(&worktree_file, path, result.as_bytes())?;
         if let Err(error) = self.repo.add(&file.path) {
-            match before {
-                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes)?,
-                None => remove_worktree_file(&worktree_file, path)?,
+            let rollback = match before {
+                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes),
+                None => remove_worktree_file(&worktree_file, path),
+            };
+            if let Err(rollback_error) = rollback {
+                warn_rollback_failed("finish_rollback_failed", path, &rollback_error);
             }
             return Err(error.into());
         }
@@ -156,14 +166,22 @@ impl MergeSession {
 
     pub fn take(&mut self, path: &str, side: Side) -> Result<()> {
         let file = find_file(&mut self.files, path)?;
+        let index_before = match file.status {
+            FileStatus::Unresolved => IndexBefore::Conflicted,
+            FileStatus::Resolved => IndexBefore::Resolved(self.repo.index_records(&file.path)?),
+        };
         let chosen = file.stages.side(side);
         match chosen {
             Some(entry) => self.repo.resolve_with(entry)?,
             None => self.repo.remove_from_index(&file.path)?,
         }
         if let Err(error) = write_chosen_side(&self.repo, file, chosen) {
-            self.repo.restore_stages(&file.stages.entries())?;
-            file.status = FileStatus::Unresolved;
+            if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
+                warn_rollback_failed("take_restore_failed", path, &restore_error);
+                // A failed `update-index` leaves the index as it was: git replaces it only by
+                // renaming `index.lock` over it (git lockfile.h), so the chosen side is still staged.
+                file.status = FileStatus::Resolved;
+            }
             return Err(error);
         }
         file.status = FileStatus::Resolved;
@@ -207,6 +225,17 @@ fn write_chosen_side(repo: &Repo, file: &FileState, chosen: Option<&StageEntry>)
     }
 }
 
+fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<()> {
+    match before {
+        IndexBefore::Conflicted => Ok(repo.restore_stages(&file.stages.entries())?),
+        IndexBefore::Resolved(records) => Ok(repo.restore_index_records(&file.path, records)?),
+    }
+}
+
+fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
+    tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
+}
+
 fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
     match fs::read(worktree_file) {
         Ok(bytes) => Ok(Some(bytes)),
@@ -221,8 +250,9 @@ fn write_worktree_file(worktree_file: &Path, path: &str, bytes: &[u8]) -> Result
 
 fn remove_worktree_file(worktree_file: &Path, path: &str) -> Result<()> {
     match fs::remove_file(worktree_file) {
-        Err(source) if source.kind() != io::ErrorKind::NotFound => Err(write_failed(path, source)),
-        Ok(()) | Err(_) => Ok(()),
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(write_failed(path, source)),
     }
 }
 

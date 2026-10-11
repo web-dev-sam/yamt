@@ -42,6 +42,22 @@ impl Repo {
         parse_unmerged(&run(command, None, GIT_TIMEOUT)?)
     }
 
+    pub fn index_records(&self, path: &Path) -> Result<Vec<u8>> {
+        let mut command = self.command(Access::Read, &[LS_FILES, "-s", "-z", "--"]);
+        command.arg(path);
+        run(command, None, GIT_TIMEOUT)
+    }
+
+    // git-update-index(1) "USING --INDEX-INFO" reads the records `ls-files --stage` prints.
+    pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()> {
+        if records.is_empty() {
+            return self.remove_from_index(path);
+        }
+        let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
+        run(command, Some(records), GIT_TIMEOUT)?;
+        Ok(())
+    }
+
     pub fn blob_reader(&self) -> Result<BlobReader> {
         BlobReader::spawn(self.command(Access::Read, &[CAT_FILE, "--batch"]))
     }
@@ -84,7 +100,7 @@ impl Repo {
     }
 
     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
-        let mut command = self.command(Access::Write, &["checkout-index", "--force", "--"]);
+        let mut command = self.command(Access::Write, &["checkout-index", "-u", "--force", "--"]);
         command.arg(path);
         run(command, None, GIT_TIMEOUT)?;
         Ok(())

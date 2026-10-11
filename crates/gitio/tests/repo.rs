@@ -181,26 +181,80 @@ fn resolve_with_replaces_every_stage_by_one_stage_zero_entry_of_the_chosen_side(
 
     assert_eq!(repo.unmerged().unwrap(), []);
     let oid = remote.oid.as_str();
-    assert_eq!(staged(&dir), format!("100644 {oid} 0\t{FILE}\n"));
-    merged_worktree(&dir);
+    assert_eq!(
+        staged(&dir),
+        format!("{REGULAR_FILE_MODE:o} {oid} 0\t{FILE}\n")
+    );
+    require_conflict_markers(&dir);
 }
 
-fn merged_worktree(dir: &TempDir) -> Vec<u8> {
-    let worktree = fs::read(dir.path().join(FILE)).unwrap();
+fn worktree(dir: &TempDir) -> Vec<u8> {
+    fs::read(dir.path().join(FILE)).unwrap()
+}
+
+fn require_conflict_markers(dir: &TempDir) {
+    let worktree = worktree(dir);
     assert!(worktree.starts_with(b"one\n<<<<<<<"), "{worktree:?}");
-    worktree
 }
 
 #[test]
 fn remove_from_index_drops_every_stage_and_leaves_the_worktree_file() {
     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
     let repo = Repo::discover(dir.path()).unwrap();
-    let worktree = merged_worktree(&dir);
+    require_conflict_markers(&dir);
+    let before = worktree(&dir);
 
     repo.remove_from_index(Path::new(FILE)).unwrap();
 
     assert_eq!(staged(&dir), "");
-    assert_eq!(fs::read(dir.path().join(FILE)).unwrap(), worktree);
+    assert_eq!(worktree(&dir), before);
+}
+
+#[test]
+fn restore_index_records_puts_back_the_stage_zero_entry_read_before() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+    let entries = repo.unmerged().unwrap();
+    let (local, remote) = (&entries[1], &entries[2]);
+    repo.resolve_with(local).unwrap();
+    let records = repo.index_records(Path::new(FILE)).unwrap();
+    let oid = local.oid.as_str();
+    let record = format!("{REGULAR_FILE_MODE:o} {oid} 0\t{FILE}");
+    assert_eq!(records, format!("{record}\0").into_bytes());
+    repo.resolve_with(remote).unwrap();
+
+    repo.restore_index_records(Path::new(FILE), records)
+        .unwrap();
+
+    assert_eq!(staged(&dir), format!("{record}\n"));
+}
+
+#[test]
+fn restore_index_records_without_records_removes_the_path_again() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+    let remote = repo.unmerged().unwrap().remove(2);
+    repo.remove_from_index(Path::new(FILE)).unwrap();
+    let records = repo.index_records(Path::new(FILE)).unwrap();
+    assert_eq!(records, b"");
+    repo.resolve_with(&remote).unwrap();
+
+    repo.restore_index_records(Path::new(FILE), records)
+        .unwrap();
+
+    assert_eq!(staged(&dir), "");
+}
+
+#[test]
+fn index_records_of_a_conflicted_path_list_every_stage() {
+    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+    let repo = Repo::discover(dir.path()).unwrap();
+
+    let records = repo.index_records(Path::new(FILE)).unwrap();
+
+    let listed = String::from_utf8(records).unwrap().replace('\0', "\n");
+    assert_eq!(listed, staged(&dir));
+    assert_eq!(listed.lines().count(), 3);
 }
 
 #[test]
