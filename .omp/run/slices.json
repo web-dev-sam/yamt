@@ -1,10 +1,1 @@
-{
-  "V0WindowChromeR1": {
-    "owned": ["frontend/src/ui/**"],
-    "readonly": ["frontend/src/editor/**", "frontend/src/ipc/**", "docs/**"]
-  },
-  "V0RustGitViewR2": {
-    "owned": ["crates/**"],
-    "readonly": ["src-tauri/**", "frontend/**", "docs/**", "tests/golden/**"]
-  }
-}
+{}
