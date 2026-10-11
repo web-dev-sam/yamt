@@ -55,8 +55,8 @@ test.each<[Side, Taken | null, DeletedSideView]>([
 
 test.each<FileMergeData["middle"]["kind"]>(["Disk", "DiskNotText"])(
   "a middle loaded from the disk (%s) can be reset before any take",
-  (loaded) => {
-    expect(deletedSideView("remote", null, loaded)).toEqual({
+  (middleKind) => {
+    expect(deletedSideView("remote", null, middleKind)).toEqual({
       kept: "local",
       keepIn: "local",
       deleteIn: "remote",
@@ -77,6 +77,6 @@ test("nothing is applied before a take, after a Delete, or after the disk resolv
   const changes = { changes: 2, conflicts: 0 };
   expect(keptToApply(deletedSideView("remote", null, "Stages"), changes)).toBeNull();
   expect(keptToApply(deletedSideView("remote", REMOTE, "Stages"), changes)).toBeNull();
-  expect(keptToApply(deletedSideView("remote", DISK, "Disk"), changes)).toBeNull();
+  expect(keptToApply(deletedSideView("remote", null, "Disk"), changes)).toBeNull();
   expect(keptToApply(deletedSideView("local", REMOTE, "Stages"), changes)).toBe("remote");
 });

@@ -1365,7 +1365,7 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
   ]);
 });
 
-test("a choice or a deleted-side file staged from the disk is taken by the disk and shown again", async () => {
+test("a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again", async () => {
   spyConsole();
   const files = [LOGO_ENTRY, entry(REMOVED_TEXT)];
   let listed = listing(files);
@@ -1390,12 +1390,7 @@ test("a choice or a deleted-side file staged from the disk is taken by the disk 
 
   await store.refreshFiles();
 
-  expect(store.taken.value).toEqual(
-    new Map([
-      [LOGO, { by: "disk" }],
-      [REMOVED_TEXT, { by: "disk" }],
-    ]),
-  );
+  expect(store.taken.value).toEqual(new Map([[LOGO, { by: "disk" }]]));
   expect(calls.slice(-2).toSorted()).toEqual([`describeFile ${LOGO}`, `loadFile ${REMOVED_TEXT}`]);
 });
 
@@ -1508,7 +1503,7 @@ test.each(["take", "reset"] as const)(
   },
 );
 
-test("each write sends the disk version of the view it acts on", async () => {
+test("finish, take and reset forward the disk version they are given", async () => {
   spyConsole();
   const seven = await versioned(7);
   const sent: string[] = [];

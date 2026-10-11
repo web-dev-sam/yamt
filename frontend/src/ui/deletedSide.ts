@@ -22,7 +22,7 @@ function middle(deleted: Side, taken: Taken | null): Middle {
 export function deletedSideView(
   deleted: Side,
   taken: Taken | null,
-  loaded: FileMergeData["middle"]["kind"],
+  middleKind: FileMergeData["middle"]["kind"],
 ): DeletedSideView {
   const kept = otherSide(deleted);
   const choosing = taken === null || taken.by === "disk";
@@ -31,7 +31,7 @@ export function deletedSideView(
     keepIn: choosing ? kept : null,
     deleteIn: choosing ? deleted : null,
     middle: middle(deleted, taken),
-    resettable: taken !== null || loaded !== "Stages",
+    resettable: taken !== null || middleKind !== "Stages",
   };
 }
 

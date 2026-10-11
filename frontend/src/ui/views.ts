@@ -19,10 +19,11 @@ export function isShown(shown: Shown, path: string): boolean {
 }
 
 export function takesASide(shown: Shown, path: string): boolean {
-  return (
-    shown.files.value.some((file) => file.path === path && file.unsupported !== null) ||
-    shown.opened.value.some((file) => file.path === path && file.deleted !== null)
-  );
+  return shown.files.value.some((file) => file.path === path && file.unsupported !== null);
+}
+
+export function isEditable({ deleted, middle }: FileMergeData): boolean {
+  return deleted === null && middle.kind !== "DiskNotText";
 }
 
 function putOpened(shown: Shown, data: FileMergeData): void {

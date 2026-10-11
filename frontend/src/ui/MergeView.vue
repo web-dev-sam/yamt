@@ -10,6 +10,7 @@ import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { useMergeController } from "./useMergeController";
+import { isEditable } from "./views";
 
 type Column = {
   readonly side: Side;
@@ -84,10 +85,6 @@ watch(
 onUnmounted(() => {
   untrack(props.data.path, work);
 });
-
-function isEditable({ deleted, middle }: FileMergeData): boolean {
-  return deleted === null && middle.kind !== "DiskNotText";
-}
 
 function markResolved(): void {
   const text = resultText();
