@@ -10,7 +10,7 @@ Base: `references/typescript-best-practices.md` (rule table) and
 
 ## Types (vision 4)
 
-- [TS1] Line numbers are branded: `BaseLine`, `LocalLine`, `RemoteLine` (created only in
+- [TS1] Line numbers are branded: `MiddleLine`, `LocalLine`, `RemoteLine` (created only in
   `ipc/domain.ts`), `DocPos` (created only in `editor/`). `LineRange<L> = { start: L; len: number }`.
   A function taking a line takes the branded type. Violation: `function lineTop(line: number)`.
 - [TS2] Variants are discriminated unions with a `kind` field (`ChunkAction = { kind: "apply" | "ignore"; side; chunks }`, `editor/internal/apply.ts`);

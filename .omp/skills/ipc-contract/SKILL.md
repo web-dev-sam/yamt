@@ -20,8 +20,8 @@ from them and committed.
   diffs a fresh export against the committed file.
 - [IPC2] Nothing outside `ipc/` imports `bindings.ts` or sees a DTO; consumers get domain
   types from `ipc/index.ts`. Detector: oxlint `no-restricted-imports`.
-- [IPC3] Rust newtypes (`BaseLine`, `LocalLine`, `RemoteLine`, `ChunkId`) arrive as `number`;
-  `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is BaseLine`), never `as` (TS4).
+- [IPC3] Rust newtypes (`MiddleLine`, `LocalLine`, `RemoteLine`, `ChunkId`, `DiskVersion`) arrive as `number`;
+  `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is MiddleLine`), never `as` (TS4).
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
   (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`; #53:
   `NotAFile { path }`, `ReadFailed { path, message }`); never a string. The frontend `switch`es on
