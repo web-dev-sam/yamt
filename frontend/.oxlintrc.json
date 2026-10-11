@@ -142,7 +142,7 @@
             ],
             "patterns": [
               {
-                "group": ["vue/*", "@vue/*", "@vueuse/*", "@tauri-apps/*"],
+                "group": ["vue/**", "@vue/**", "@vueuse/**", "@tauri-apps/**"],
                 "message": "editor/, model/, connectors/ are framework-free (PM3)."
               },
               {

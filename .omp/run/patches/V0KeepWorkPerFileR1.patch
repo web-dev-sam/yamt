@@ -1,0 +1,621 @@
+diff --git a/frontend/.oxlintrc.json b/frontend/.oxlintrc.json
+index 5d585ab..990fc2b 100644
+--- a/frontend/.oxlintrc.json
++++ b/frontend/.oxlintrc.json
+@@ -100,6 +100,10 @@
+                 "group": ["@codemirror/*"],
+                 "message": "ui/ never imports CodeMirror (PM2); go through editor/index.ts."
+               },
++              {
++                "group": ["@tauri-apps/**"],
++                "message": "ui/ never imports Tauri (PM2); only src/ipc/ talks to the app."
++              },
+               {
+                 "group": ["../editor/internal/*", "**/internal", "**/internal/*"],
+                 "message": "No module imports another module's internal/ (PM5)."
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 27b14c0..df69025 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -54,6 +54,19 @@ test("ui importing @codemirror/view violates PM2", () => {
+   ]);
+ });
+ 
++test("ui importing @tauri-apps/api/window violates PM2", () => {
++  const files = [
++    {
++      path: "src/ui/App.vue",
++      text: `<script setup lang="ts">\nimport { getCurrentWindow } from "@tauri-apps/api/window";\n</script>`,
++    },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM2", file: "src/ui/App.vue", specifier: "@tauri-apps/api/window" },
++  ]);
++});
++
+ test("ui importing editor/internal violates PM2", () => {
+   const files = [
+     { path: "src/ui/Pane.ts", text: `import { pane } from "../editor/internal/pane";` },
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 1f2b9b3..37db628 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -56,6 +56,9 @@ function packageFinding(module: string | undefined, specifier: string): Finding
+   if (module === "ui" && bare.startsWith("@codemirror/")) {
+     return { rule: "PM2", reason: "ui/ never imports CodeMirror; go through editor/index.ts" };
+   }
++  if (module === "ui" && bare.startsWith("@tauri-apps/")) {
++    return { rule: "PM2", reason: "ui/ never imports Tauri; go through ipc/index.ts" };
++  }
+   if (module === undefined || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
+     return undefined;
+   }
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 62e6311..e369224 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -120,6 +120,12 @@ test("a string error from Tauri's IPC layer rejects the call with that message",
+   );
+ });
+ 
++test.each([null, 404])("a %s error from Tauri's IPC layer rejects the call", async (error) => {
++  commands.resetFile.mockResolvedValue({ status: "error", error });
++
++  await expect(createTauriSource().resetFile("src/a.ts")).rejects.toThrow(new Error(String(error)));
++});
++
+ test("the forward stringifies non-finite numbers and keeps every other value", async () => {
+   commands.log.mockResolvedValue(undefined);
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 10361f3..e73466a 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -3,18 +3,19 @@ import type { ChunkSource } from "./ChunkSource";
+ import { toDomain, type SourceFailure, type SourceResult } from "./domain";
+ import type { LogEntry } from "./log";
+ 
+-// Tauri's own IPC layer (invalid arguments, unknown command, ACL denial) rejects with a string,
+-// which the generated `typedError` returns as the command's error.
++// `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
++// error. Tauri rejects invalid arguments, unknown commands and ACL denials with a plain JSON value, a
++// string so far (tauri 2 `ipc/mod.rs` `InvokeError::from_error`, `webview/mod.rs` "not allowed by ACL").
+ type CommandResult<T> =
+   | { status: "ok"; data: T }
+-  | { status: "error"; error: SourceFailure | string };
++  | { status: "error"; error: SourceFailure | string | number | boolean | null | undefined };
+ 
+ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+   if (result.status === "ok") {
+     return { ok: true, value: result.data };
+   }
+-  if (typeof result.error === "string") {
+-    throw new Error(result.error);
++  if (typeof result.error !== "object" || result.error === null) {
++    throw new Error(String(result.error));
+   }
+   return { ok: false, failure: result.error };
+ }
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index c273b27..af53cc5 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -15,8 +15,6 @@ const {
+   question,
+   allResolved,
+   open,
+-  finish,
+-  reset,
+   dismissProblem,
+   answer,
+   watchWindowClose,
+@@ -45,8 +43,6 @@ onMounted(() => {
+           :key="file.path"
+           :data="file"
+           :shown="file.path === active"
+-          @finish="finish"
+-          @reset="reset"
+         />
+       </div>
+     </div>
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 8d657f7..42a6a17 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -3,33 +3,30 @@ import { onUnmounted, useTemplateRef } from "vue";
+ 
+ import type { FileMergeData } from "../ipc";
+ import MergeToolbar from "./MergeToolbar.vue";
+-import { useAppStore, type FileWork, type FinishRequest } from "./store";
++import { useAppStore, type FileWork } from "./store";
+ import { useMergeController } from "./useMergeController";
+ 
+ const props = defineProps<{ data: FileMergeData; shown: boolean }>();
+-const emit = defineEmits<{ finish: [request: FinishRequest]; reset: [path: string] }>();
+ 
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-const { summary, applyAllNonConflicting, undo, redo, resultText, loadedText } = useMergeController(
+-  () => props.data,
+-  { left, center, right, strips: [leftStrip, rightStrip] },
+-);
+-const { track, untrack } = useAppStore();
+-const work: FileWork = { resultText, loadedText };
++const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
++  useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
++const { track, untrack, finish, reset } = useAppStore();
++const work: FileWork = { unsaved, markSaved };
+ track(props.data.path, work);
+ 
+ onUnmounted(() => {
+   untrack(props.data.path, work);
+ });
+ 
+-function finish(): void {
++function markResolved(): void {
+   const text = resultText();
+   if (text !== null && summary.value !== null) {
+-    emit("finish", { path: props.data.path, text, summary: summary.value });
++    void finish({ path: props.data.path, text, summary: summary.value });
+   }
+ }
+ </script>
+@@ -42,8 +39,8 @@ function finish(): void {
+       @apply-right="applyAllNonConflicting('remote')"
+       @undo="undo"
+       @redo="redo"
+-      @reset="emit('reset', data.path)"
+-      @finish="finish"
++      @reset="reset(data.path)"
++      @finish="markResolved"
+     />
+     <section
+       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index a05a623..80b5226 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -16,7 +16,7 @@ type PendingLoad = {
+   readonly reject: (error: Error) => void;
+ };
+ 
+-type FakeView = { text: string; readonly work: FileWork };
++type FakeView = { text: string; saved: string; readonly work: FileWork };
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+ const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+@@ -69,7 +69,13 @@ function spyConsole(): { info: string[]; error: string[] } {
+ function fakeView(store: AppStore, path: string, loaded: string): FakeView {
+   const view: FakeView = {
+     text: loaded,
+-    work: { resultText: () => view.text, loadedText: () => loaded },
++    saved: loaded,
++    work: {
++      unsaved: () => view.text !== view.saved,
++      markSaved: (text) => {
++        view.saved = text;
++      },
++    },
+   };
+   store.track(path, view.work);
+   return view;
+@@ -173,6 +179,30 @@ test("opening A, B, then A again loads each once and keeps both; re-clicking the
+   expect(store.active.value).toBe("a.ts");
+ });
+ 
++test("re-clicking the shown file keeps the problem and lets a pending load win", async () => {
++  spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore(source);
++  await openNow(store, pending, "a.ts");
++  const failed = store.open("gone.ts");
++  pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
++  await failed;
++  const problem = store.problem.value;
++
++  await store.open("a.ts");
++
++  expect(store.problem.value).not.toBeNull();
++  expect(store.problem.value).toBe(problem);
++
++  const openC = store.open("c.ts");
++  await store.open("a.ts");
++  pending[2]?.resolve(ok(await dataFor("c.ts")));
++  await openC;
++
++  expect(store.active.value).toBe("c.ts");
++  expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
++});
++
+ test("switching to an opened file wins over a load that resolves later and clears the problem", async () => {
+   const lines = spyConsole();
+   const { source, pending } = handSource([]);
+@@ -315,6 +345,7 @@ test("a finish with nothing left sends the text without asking, keeps the file o
+   expect(store.opened.value).toBe(shown);
+   expect(store.active.value).toBe("a.ts");
+   expect(store.problem.value).toBeNull();
++  expect(view.saved).toBe("merged\r\n");
+   expect(store.unsavedFiles()).toEqual([]);
+ 
+   view.text = "edited again\n";
+@@ -368,6 +399,7 @@ test("a failed finish keeps the list unresolved and the old saved text; dismissP
+   expect(store.files.value).toEqual([entry("a.ts")]);
+   expect(store.opened.value).toBe(shown);
+   expect(store.opened.value).toEqual([a]);
++  expect(view.saved).toBe("loaded\n");
+   expect(store.unsavedFiles()).toEqual(["a.ts"]);
+   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
+   expect(lines.error).toEqual([
+@@ -410,6 +442,8 @@ test("the unsaved list names exactly the opened files whose text differs from lo
+   fakeView(store, "b.ts", "b\n");
+   const c = fakeView(store, "c.ts", "c\n");
+   const d = fakeView(store, "d.ts", "d\n");
++  const notOpened = fakeView(store, "z.ts", "z\n");
++  notOpened.text = "z edited\n";
+   a.text = "a edited\n";
+   c.text = "c finished\n";
+   await store.finish({ path: "c.ts", text: "c finished\n", summary: NOTHING_LEFT });
+@@ -419,7 +453,7 @@ test("the unsaved list names exactly the opened files whose text differs from lo
+ 
+   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
+ 
+-  store.untrack("a.ts", { resultText: () => "other", loadedText: () => "other" });
++  store.untrack("a.ts", { unsaved: () => true, markSaved: () => undefined });
+   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
+   store.untrack("a.ts", a.work);
+   expect(store.unsavedFiles()).toEqual(["d.ts"]);
+@@ -468,7 +502,7 @@ test("everything is resolved only when every listed file is", async () => {
+   expect(store.allResolved.value).toBe(true);
+ });
+ 
+-test("reset of A reloads only A as a new object and keeps B opened", async () => {
++test("reset of A replaces only A in place with a new object and keeps B opened", async () => {
+   spyConsole();
+   const reset: string[] = [];
+   const { source, pending } = handSource([]);
+@@ -478,21 +512,18 @@ test("reset of A reloads only A as a new object and keeps B opened", async () =>
+       reset.push(path);
+       return Promise.resolve(ok([entry("a.ts"), entry("b.ts")]));
+     },
+-    finishFile: () => Promise.resolve(ok([])),
+   });
+   await openNow(store, pending, "a.ts");
+   await openNow(store, pending, "b.ts");
+   await store.open("a.ts");
+   const [shownA, shownB] = store.opened.value;
+-  const view = fakeView(store, "a.ts", "a\n");
+-  view.text = "finished\n";
+-  await store.finish({ path: "a.ts", text: "finished\n", summary: NOTHING_LEFT });
+   const a = await dataFor("a.ts");
+ 
+   const resetting = store.reset("a.ts");
+   await vi.waitFor(() => {
+     expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
+   });
++  expect(store.opened.value).toEqual([shownA, shownB]);
+   pending[2]?.resolve(ok(a));
+   await resetting;
+ 
+@@ -500,12 +531,10 @@ test("reset of A reloads only A as a new object and keeps B opened", async () =>
+   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
+   expect(store.active.value).toBe("a.ts");
+   expect(store.opened.value).toHaveLength(2);
+-  expect(store.opened.value).toContain(shownB);
+-  expect(store.opened.value).not.toContain(shownA);
+-  const reloaded = store.opened.value.find((file) => file.path === "a.ts");
+-  expect(reloaded).toEqual(a);
+-  expect(reloaded).not.toBe(a);
+-  expect(store.unsavedFiles()).toEqual(["a.ts"]);
++  expect(store.opened.value[0]).toEqual(a);
++  expect(store.opened.value[0]).not.toBe(a);
++  expect(store.opened.value[0]).not.toBe(shownA);
++  expect(store.opened.value[1]).toBe(shownB);
+ });
+ 
+ test("a failed reset keeps the current file and names the path", async () => {
+@@ -526,26 +555,92 @@ test("a failed reset keeps the current file and names the path", async () => {
+   });
+ });
+ 
+-test("a later open wins over a reset that resolves last, and the reset file is dropped", async () => {
++test("a failed reload after a reset keeps A's old view and names the path", async () => {
++  const lines = spyConsole();
++  const { store, pending } = await openedStore({
++    resetFile: () => Promise.resolve(ok([entry("a.ts")])),
++  });
++  const shown = store.opened.value;
++
++  const resetting = store.reset("a.ts");
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(2);
++  });
++  pending[1]?.reject(new Error("disk gone"));
++  await resetting;
++
++  expect(store.files.value).toEqual([entry("a.ts")]);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.opened.value).toBe(shown);
++  expect(store.problem.value).toEqual({
++    action: "reset",
++    path: "a.ts",
++    cause: { kind: "Unexpected", message: "disk gone" },
++  });
++  expect(lines.error).toEqual([
++    '[error] store.reset_failed {path: "a.ts", kind: "Unexpected", message: "disk gone"}',
++  ]);
++});
++
++test("reset A, open B, open A, then the reset resolves: A shows its fresh view", async () => {
+   spyConsole();
+   const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
+-  const { store, pending } = await openedStore({
++  const { store, pending, a } = await openedStore({
+     resetFile: () =>
+       new Promise((resolve) => {
+         resets.push(resolve);
+       }),
+   });
+   const b = await dataFor("b.ts");
++  const fresh = await dataFor("a.ts");
++
++  const resetting = store.reset("a.ts");
++  const openB = store.open("b.ts");
++  pending[1]?.resolve(ok(b));
++  await openB;
++  await store.open("a.ts");
++  resets[0]?.(ok([entry("a.ts"), entry("b.ts")]));
++  await vi.waitFor(() => {
++    expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
++  });
++  pending[2]?.resolve(ok(fresh));
++  await resetting;
++
++  expect(store.active.value).toBe("a.ts");
++  expect(store.opened.value).toEqual([fresh, b]);
++  expect(store.opened.value[0]).not.toBe(a);
++
++  await store.open("a.ts");
++
++  expect(pending).toHaveLength(3);
++  expect(store.active.value).toBe("a.ts");
++});
++
++test("a later open wins over a reset that resolves last; the reset file is replaced in place", async () => {
++  spyConsole();
++  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
++  const { store, pending, a } = await openedStore({
++    resetFile: () =>
++      new Promise((resolve) => {
++        resets.push(resolve);
++      }),
++  });
++  const b = await dataFor("b.ts");
++  const fresh = await dataFor("a.ts");
+ 
+   const resetting = store.reset("a.ts");
+   const openB = store.open("b.ts");
+   pending[1]?.resolve(ok(b));
+   await openB;
+   resets[0]?.(ok([entry("a.ts")]));
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(3);
++  });
++  pending[2]?.resolve(ok(fresh));
+   await resetting;
+ 
+-  expect(pending).toHaveLength(2);
+   expect(store.active.value).toBe("b.ts");
+   expect(store.files.value).toEqual([entry("a.ts")]);
+-  expect(store.opened.value).toEqual([b]);
++  expect(store.opened.value).toEqual([fresh, b]);
++  expect(store.opened.value[0]).not.toBe(a);
+ });
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index ac3d1f8..3aaaf77 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -24,9 +24,9 @@ export type Problem =
+       readonly cause: ProblemCause;
+     };
+ 
+-export type FileWork = { resultText(): string | null; loadedText(): string | null };
++export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
+ 
+-export type FinishRequest = {
++type FinishRequest = {
+   readonly path: string;
+   readonly text: string;
+   readonly summary: MergeSummary;
+@@ -46,7 +46,6 @@ type State = {
+   readonly problem: ShallowRef<Problem | null>;
+   readonly asking: ShallowRef<Asking | null>;
+   readonly work: Map<string, FileWork>;
+-  readonly finished: Map<string, string>;
+   latestLoad: number;
+ };
+ 
+@@ -81,7 +80,6 @@ export function createAppStore(source: ChunkSource): AppStore {
+     problem: shallowRef<Problem | null>(null),
+     asking: shallowRef<Asking | null>(null),
+     work: new Map(),
+-    finished: new Map(),
+     latestLoad: 0,
+   };
+   const { files, opened, active, problem } = state;
+@@ -145,16 +143,16 @@ async function loadFiles(state: State): Promise<void> {
+ }
+ 
+ async function open(state: State, path: string): Promise<void> {
++  if (!state.opened.value.some((file) => file.path === path)) {
++    await load(state, path);
++    return;
++  }
+   if (path === state.active.value) {
+     return;
+   }
+-  if (state.opened.value.some((file) => file.path === path)) {
+-    state.latestLoad += 1;
+-    state.active.value = path;
+-    state.problem.value = null;
+-    return;
+-  }
+-  await load(state, path);
++  state.latestLoad += 1;
++  state.active.value = path;
++  state.problem.value = null;
+ }
+ 
+ async function load(state: State, path: string): Promise<void> {
+@@ -171,18 +169,21 @@ async function load(state: State, path: string): Promise<void> {
+     }
+     return;
+   }
+-  if (!current) {
+-    return;
++  if (current) {
++    putOpened(state, outcome.value);
++    state.active.value = path;
+   }
++}
++
++function putOpened(state: State, data: FileMergeData): void {
+   // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
+-  const loaded = { ...outcome.value };
++  const loaded = { ...data };
+   const opened = state.opened.value;
+-  state.opened.value = opened.some((file) => file.path === path)
+-    ? opened.map((file) => (file.path === path ? loaded : file))
++  state.opened.value = opened.some((file) => file.path === data.path)
++    ? opened.map((file) => (file.path === data.path ? loaded : file))
+     : [...opened, loaded];
+-  state.active.value = path;
+   state.problem.value = null;
+-  log.info("file.loaded", { path, chunks: loaded.chunks.length });
++  log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
+ }
+ 
+ async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
+@@ -195,24 +196,23 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
+     return;
+   }
+   state.files.value = outcome.value;
+-  state.finished.set(path, text);
++  state.work.get(path)?.markSaved(text);
+   state.problem.value = null;
+ }
+ 
+ async function reset(state: State, path: string): Promise<void> {
+-  state.latestLoad += 1;
+-  const ticket = state.latestLoad;
+-  const outcome = await attempt(() => state.source.resetFile(path));
+-  if (!outcome.ok) {
+-    report(state, { action: "reset", path, cause: outcome.cause });
++  const files = await attempt(() => state.source.resetFile(path));
++  if (!files.ok) {
++    report(state, { action: "reset", path, cause: files.cause });
+     return;
+   }
+-  state.files.value = outcome.value;
+-  state.opened.value = state.opened.value.filter((file) => file.path !== path);
+-  state.finished.delete(path);
+-  if (ticket === state.latestLoad) {
+-    await load(state, path);
++  state.files.value = files.value;
++  const fresh = await attempt(() => state.source.loadFile(path));
++  if (!fresh.ok) {
++    report(state, { action: "reset", path, cause: fresh.cause });
++    return;
+   }
++  putOpened(state, fresh.value);
+ }
+ 
+ function ask(state: State, question: Question): Promise<boolean> {
+@@ -233,11 +233,7 @@ function answer(state: State, yes: boolean): void {
+ function unsavedFiles(state: State): string[] {
+   return state.opened.value
+     .map((file) => file.path)
+-    .filter((path) => {
+-      const work = state.work.get(path);
+-      const text = work?.resultText() ?? null;
+-      return text !== null && text !== (state.finished.get(path) ?? work?.loadedText());
+-    });
++    .filter((path) => state.work.get(path)?.unsaved() ?? false);
+ }
+ 
+ async function mayClose(state: State): Promise<boolean> {
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index e22c97d..cb12921 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -27,9 +27,12 @@ type MergeHandle = {
+   undo(): void;
+   redo(): void;
+   resultText(): string | null;
+-  loadedText(): string | null;
++  unsaved(): boolean;
++  markSaved(text: string): void;
+ };
+ 
++type Loaded = { readonly controller: MergeController; saved: string };
++
+ type HostElements = readonly [
+   HTMLDivElement | null,
+   HTMLDivElement | null,
+@@ -60,12 +63,10 @@ export function useMergeController(
+   hosts: Hosts,
+ ): MergeHandle {
+   const summary = shallowRef<MergeSummary | null>(null);
+-  let controller: MergeController | null = null;
+-  let loaded: string | null = null;
++  let loaded: Loaded | null = null;
+ 
+   function destroyController(): void {
+-    controller?.destroy();
+-    controller = null;
++    loaded?.controller.destroy();
+     loaded = null;
+     summary.value = null;
+   }
+@@ -74,13 +75,12 @@ export function useMergeController(
+     [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+     ([current, ...elements]) => {
+       destroyController();
+-      const created = createController(current, elements);
+-      created?.onSummaryChange((next) => {
++      const controller = createController(current, elements);
++      controller?.onSummaryChange((next) => {
+         summary.value = next;
+       });
+-      controller = created;
+-      summary.value = created?.summary() ?? null;
+-      loaded = created?.resultText() ?? null;
++      summary.value = controller?.summary() ?? null;
++      loaded = controller === null ? null : { controller, saved: controller.resultText() };
+     },
+     { immediate: true, flush: "post" },
+   );
+@@ -89,10 +89,15 @@ export function useMergeController(
+ 
+   return {
+     summary,
+-    applyAllNonConflicting: (side) => controller?.applyAllNonConflicting(side),
+-    undo: () => controller?.undo(),
+-    redo: () => controller?.redo(),
+-    resultText: () => controller?.resultText() ?? null,
+-    loadedText: () => loaded,
++    applyAllNonConflicting: (side) => loaded?.controller.applyAllNonConflicting(side),
++    undo: () => loaded?.controller.undo(),
++    redo: () => loaded?.controller.redo(),
++    resultText: () => loaded?.controller.resultText() ?? null,
++    unsaved: () => loaded !== null && loaded.controller.resultText() !== loaded.saved,
++    markSaved: (text) => {
++      if (loaded !== null) {
++        loaded.saved = text;
++      }
++    },
+   };
+ }
