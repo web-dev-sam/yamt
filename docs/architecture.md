@@ -98,8 +98,8 @@ Rules (each one is enforced, not advised — §8 says by what):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
 | `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
-| `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin)                                                                       | dependency list; reviewer rule                                                                                                  |
-| `ui/**` never imports `@codemirror/*`, `editor/internal/**`, `model/**` directly                                                                             | oxlint `no-restricted-imports` in a per-directory `overrides` block                                                             |
+| `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin)                                                                       | `scripts/arch-check.sh` (yamt-app's direct deps); reviewer rule                                                                 |
+| `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
 | `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --bin export-bindings` output                                                    | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
 | No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
@@ -394,11 +394,13 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | left/right decorations                                                                              | derived from the pane's fixed ranges + the mirrored status                                                                                                                  | immutable docs                                                                                                                      |
 | scroll positions                                                                                    | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                  | not state, derived                                                                                                                  |
 | connector geometry                                                                                  | computed per frame from `lineBlockAt`, never stored                                                                                                                         | derived                                                                                                                             |
-| file list, active file, loaded file data                                                            | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia)                                                                                                              | chrome only                                                                                                                         |
+| file list, opened files, active file, the shown failure                                             | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`                        | chrome only                                                                                                                         |
+| saved baseline per opened file (loaded text, then the last text marked resolved)                    | non-reactive `let` in `useMergeController`, set when the controller is built, replaced by `markSaved` after a successful finish                                             | one place decides "unsaved work" (plan §2 #37)                                                                                      |
 | summary counts of the open file                                                                     | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                              | per controller                                                                                                                      |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
-text passes through once, from `resultText()` to `store.finish`.
+text passes through once, from `resultText()` to `store.finish` (and back into that file's own
+baseline in `useMergeController`).
 
 ### 5.2 `editor/` — public surface is one class
 
@@ -467,18 +469,20 @@ drawn. `connectors/` is unit-tested on numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
-Components: `App.vue`, `FileList.vue` (file list, resolved mark), `MergeView.vue` (toolbar + three
-`<div>` hosts + two `<svg>`; creates its `MergeController` through `useMergeController`, which
-recreates it when the file or a host changes and destroys it with the component),
-`MergeToolbar.vue` (bulk apply left/right, undo/redo, counts, finish, reset — rendered by
-`MergeView` so it acts on that view's controller; finish/reset are emitted up to `App`, which
-calls the store), `WarningBanner.vue` (planned: unsupported file / mixed EOL warnings). Names are
-multi-word (the Vue linter's `multi-word-component-names`; `App` exempt).
+Components: `App.vue`, `FileList.vue` (file list, resolved mark, vscode-icons), `MergeView.vue`
+(toolbar + three `<div>` hosts + two `<svg>`, one per opened file, inactive ones `invisible`;
+creates its `MergeController` through `useMergeController`, which recreates it when the file's
+data object changes and destroys it with the component), `MergeToolbar.vue` (bulk apply
+left/right, undo/redo, counts, finish, reset — `MergeView` calls the store's `finish`/`reset`),
+`ProblemBar.vue` (failures, words from `problemText.ts`), `QuestionDialog.vue` ("Unprocessed
+Changes" / "Cancel File Merge", words and decisions in `question.ts`). Names are multi-word (the
+Vue linter's `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
-`createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file
-list, the active path (derived from the loaded data) and the loaded `FileMergeData` in a
-`shallowRef`; actions: load the list, open (a later open wins), finish, reset.
+`createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file list,
+the opened files (each loaded once per session; reset replaces it in place), the active path, the
+problem and the open question; actions: load the list, open (a later open wins; re-clicking the
+shown file does nothing), finish (asks when work is left), reset, the window-close check.
 
 The Vue↔editor seam is one adaptable composable:
 
