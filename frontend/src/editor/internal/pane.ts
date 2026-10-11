@@ -19,9 +19,10 @@ import {
 import { tags } from "@lezer/highlight";
 
 import type { FileMergeData } from "../../ipc";
+import { find } from "./find";
 import { indentUnitOf } from "./indent";
 
-type PaneKind = "side" | "center";
+type PaneKind = "side" | "center" | "readOnlyCenter";
 
 export const languageCompartment = new Compartment();
 
@@ -51,6 +52,13 @@ const darkTheme = EditorView.theme(
     ".cm-activeLineGutter": {
       backgroundColor: "var(--color-active-line)",
       color: "var(--color-gutter-active)",
+    },
+    ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
+    ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--color-separator)" },
+    ".cm-searchMatch": { backgroundColor: "var(--color-success-border)" },
+    ".cm-searchMatch.cm-searchMatch-selected": {
+      backgroundColor: "var(--color-selection)",
+      outline: "1px solid var(--color-primary)",
     },
   },
   { dark: true },
@@ -97,18 +105,28 @@ const selectionOverTints = Prec.highest(
   ),
 );
 
+function centerExtensions(doc: string): Extension {
+  return [
+    history(),
+    indentUnit.of(indentUnitOf(doc)),
+    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+    highlightActiveLine(),
+    highlightActiveLineGutter(),
+  ];
+}
+
 function kindExtensions(kind: PaneKind, doc: string): Extension {
   switch (kind) {
     case "side":
-      return [EditorState.readOnly.of(true), EditorView.editable.of(false)];
-    case "center":
       return [
-        history(),
-        indentUnit.of(indentUnitOf(doc)),
-        keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-        highlightActiveLine(),
-        highlightActiveLineGutter(),
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        EditorView.contentAttributes.of({ tabindex: "0" }),
       ];
+    case "center":
+      return centerExtensions(doc);
+    case "readOnlyCenter":
+      return [centerExtensions(doc), EditorState.readOnly.of(true)];
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -133,6 +151,7 @@ export function paneState(pane: {
       darkTheme,
       syntaxHighlighting(paletteHighlight),
       languageCompartment.of(pane.language ?? []),
+      find,
       kindExtensions(pane.kind, pane.doc),
       pane.extensions,
     ],

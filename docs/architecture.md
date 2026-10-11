@@ -427,8 +427,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
 - `pane.ts` — shared extensions (bundled font theme, line numbers, Lezer highlight with the
   language compartment, `EditorState.lineSeparator` for CRLF, a highest-precedence selection mark
   so selected text shows over block tints and word marks), `readOnly` + `editable(false)` for
-  sides, `history()` and Tab / Shift+Tab (`indentWithTab`) for center only, with the indent unit
-  guessed from the starting text by `indent.ts` (plan §2 #35).
+  sides (focusable through `tabindex` so find works), `history()` and Tab / Shift+Tab
+  (`indentWithTab`) for center only, with the indent unit guessed from the starting text by
+  `indent.ts` (plan §2 #35); the center also gets `readOnly` in the controller's read-only mode
+  (plan §2 #47); the find bar in every pane.
 - `language.ts` — the file's language from its base name via `@codemirror/language-data` (plan §2 #29).
 - `chunkField.ts` — the center `StateField` + effects described above (CM1, CM2, CM8).
 - `status.ts`, `apply.ts` — every status rule (a side still open, resolved, append or replace,
@@ -450,7 +452,15 @@ Internals (`editor/internal/`, not importable from `ui/`):
   (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
   WebKit). Icons are Lucide SVG markup imported as strings (`~icons/lucide/<name>?raw`), parsed
   once and cloned per button (plan §2 #34); the apply button turns into "add below" while the
-  other side is applied.
+  other side is applied. A button press only starts a press; none are drawn in read-only mode.
+- `drag.ts`, `covered.ts` — the press and drag over the icons (plan §2 #45): pointer capture on the
+  persistent `<svg>` strips (buttons are repainted every frame), the changes covered between the press
+  and the pointer, highlighted through a side-pane effect outside history; release sends one
+  `ChunkAction` with every covered chunk, one undo step (CM7).
+- `modClick.ts` — Ctrl/Cmd+click on a line of an open block in a side pane sends that change's apply
+  action (plan §2 #46).
+- `find.ts` — the find bar of each pane on `@codemirror/search` (plan §2 #44): our panel, the count
+  ("k of N" / "N results" / "No results"), next/previous with wrap.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
   interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
   of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan

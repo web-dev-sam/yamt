@@ -104,3 +104,73 @@ path.chunk-band {
 .chunk-action rect {
   fill: transparent;
 }
+
+.chunk-action-covered {
+  color: var(--color-fg);
+}
+
+.chunk-action-covered rect {
+  fill: var(--color-hover);
+}
+
+.cm-editor .cm-line.chunk-band.chunk-covered {
+  background-image: linear-gradient(var(--chunk-tone), var(--chunk-tone));
+}
+
+.find-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.find-bar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.find-icon {
+  display: flex;
+  color: var(--color-fg-muted);
+}
+
+.find-field {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-fg);
+  outline: none;
+}
+
+.find-field::placeholder {
+  color: var(--color-fg-muted);
+}
+
+.find-count {
+  padding: 0 6px;
+  color: var(--color-fg-muted);
+  white-space: nowrap;
+}
+
+.find-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+
+.find-button:hover {
+  background-color: var(--color-hover);
+  color: var(--color-fg);
+}

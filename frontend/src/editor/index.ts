@@ -1,29 +1,32 @@
 import { redo, undo } from "@codemirror/commands";
 import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
-import type { StateField } from "@codemirror/state";
+import type { Extension, StateField } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { log, type FileMergeData } from "../ipc";
 import {
-  applySteps,
+  actionSteps,
   bulkApplySteps,
   dispatchSteps,
-  ignoreSteps,
   type ApplyTarget,
+  type ChunkAction,
   type SideDocs,
   type Steps,
   type VisibleLines,
 } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
+import { coveredDecorations, sameCovered, showCovered } from "./internal/covered";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
-import { chunkRows, type PaneViews } from "./internal/geometry";
+import { coveredAction, IconDrag } from "./internal/drag";
+import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { languageOf } from "./internal/language";
+import { applyOnModClick } from "./internal/modClick";
 import { createPane, languageCompartment, paneText } from "./internal/pane";
 import { ScrollSync } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
-import { summarize, type MergeSummary } from "./internal/status";
-import { keepEditorFocus, paintStrips, type ChunkAction } from "./internal/strips";
+import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+import { keepEditorFocus, paintStrips, type IconPress } from "./internal/strips";
 
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
@@ -35,21 +38,27 @@ export type MergeHosts = {
   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
 };
 
+export type MergeOptions = { readonly readOnly: boolean };
+
 type ViewSources = { data: FileMergeData; hosts: MergeHosts; language: Language | null };
 
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
+  readonly #readOnly: boolean;
   readonly #views: PaneViews;
   readonly #sides: SideDocs;
   readonly #strips: MergeHosts["strips"];
   readonly #scroll: ScrollSync;
+  readonly #drag: IconDrag;
+  #covered: ChunkAction | null = null;
   #frameId: number | null = null;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
-  constructor(data: FileMergeData, hosts: MergeHosts) {
+  constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions) {
     const description = languageOf(data.path);
     this.#field = chunkField(data.chunks);
+    this.#readOnly = options?.readOnly ?? false;
     this.#views = this.#createViews({
       data,
       hosts,
@@ -60,6 +69,14 @@ export class MergeController {
     for (const strip of this.#strips) {
       strip.addEventListener("mousedown", keepEditorFocus);
     }
+    this.#drag = new IconDrag(this.#strips, {
+      changed: () => {
+        this.#requestFrame();
+      },
+      released: (press) => {
+        this.#act(coveredAction(press, this.#rows(), this.#views));
+      },
+    });
     this.#scroll = new ScrollSync(this.#views, () => {
       this.#requestFrame();
     });
@@ -87,23 +104,24 @@ export class MergeController {
     }
   }
 
+  readonly #repaint = EditorView.updateListener.of((update) => {
+    if (update.docChanged || update.geometryChanged) {
+      this.#requestFrame();
+    }
+  });
+
   #createViews({ data, hosts, language }: ViewSources): PaneViews {
     const field = this.#field;
-    const repaint = EditorView.updateListener.of((update) => {
-      if (update.docChanged || update.geometryChanged) {
-        this.#requestFrame();
-      }
-    });
     const statusSync = EditorView.updateListener.of((update) => {
       this.#statusesChanged(update);
     });
     const shared = { eol: data.eol, language };
     const center = createPane({
       ...shared,
-      kind: "center",
+      kind: this.#readOnly ? "readOnlyCenter" : "center",
       doc: data.base,
       parent: hosts.center,
-      extensions: [field, centerDecorations(field), repaint, statusSync],
+      extensions: [field, centerDecorations(field), this.#repaint, statusSync],
     });
     const statuses = sideStatusField(
       center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
@@ -114,7 +132,7 @@ export class MergeController {
         kind: "side",
         doc: data.local,
         parent: hosts.left,
-        extensions: [statuses, sideDecorations(statuses, "local"), repaint],
+        extensions: this.#sideExtensions(statuses, "local"),
       }),
       center,
       right: createPane({
@@ -122,9 +140,23 @@ export class MergeController {
         kind: "side",
         doc: data.remote,
         parent: hosts.right,
-        extensions: [statuses, sideDecorations(statuses, "remote"), repaint],
+        extensions: this.#sideExtensions(statuses, "remote"),
       }),
     };
+  }
+
+  #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
+    return [
+      statuses,
+      sideDecorations(statuses, side),
+      coveredDecorations(side),
+      this.#repaint,
+      this.#readOnly
+        ? []
+        : applyOnModClick(statuses, side, (chunk) => {
+            this.#act({ kind: "apply", side, chunks: [chunk] });
+          }),
+    ];
   }
 
   #target(): ApplyTarget {
@@ -152,22 +184,8 @@ export class MergeController {
     };
   }
 
-  #stepsFor(action: ChunkAction): Steps {
-    const request = { target: this.#target(), chunk: action.chunk, side: action.side };
-    switch (action.kind) {
-      case "apply":
-        return applySteps(request);
-      case "ignore":
-        return ignoreSteps(request);
-      default: {
-        const _exhaustive: never = action;
-        return _exhaustive;
-      }
-    }
-  }
-
   #act(action: ChunkAction): void {
-    this.#dispatch(this.#stepsFor(action));
+    this.#dispatch(actionSteps(this.#target(), action));
     const center = this.#views.center;
     if (!center.hasFocus) {
       center.focus();
@@ -187,14 +205,34 @@ export class MergeController {
     this.#summaryListener?.(summarize(after));
   }
 
+  #rows(): ChunkRow[] {
+    return chunkRows(this.#views, this.#views.center.state.field(this.#field));
+  }
+
+  #showCovered(covered: ChunkAction | null): void {
+    if (sameCovered(covered, this.#covered)) {
+      return;
+    }
+    this.#covered = covered;
+    this.#views.left.dispatch({ effects: showCovered.of(covered) });
+    this.#views.right.dispatch({ effects: showCovered.of(covered) });
+  }
+
+  readonly #press = (press: IconPress, event: PointerEvent): void => {
+    this.#drag.start(press, event);
+  };
+
   #requestFrame(): void {
     this.#frameId ??= requestAnimationFrame(() => {
       this.#frameId = null;
-      const views = this.#views;
-      const rows = chunkRows(views, views.center.state.field(this.#field));
+      const rows = this.#rows();
       this.#scroll.sync(rows);
-      paintStrips(views, this.#strips, rows, (action) => {
-        this.#act(action);
+      const press = this.#drag.press;
+      const covered = press === null ? null : coveredAction(press, rows, this.#views);
+      this.#showCovered(covered);
+      paintStrips(this.#views, this.#strips, rows, {
+        covered,
+        onPress: this.#readOnly ? null : this.#press,
       });
     });
   }
@@ -230,6 +268,7 @@ export class MergeController {
       cancelAnimationFrame(this.#frameId);
     }
     this.#scroll.destroy();
+    this.#drag.destroy();
     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
       view.destroy();
     }

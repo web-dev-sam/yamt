@@ -41,9 +41,10 @@ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed 
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (fixture mode (browser without the app): valibot over
                     fixtures/{golden,showcase}/*.json); bindings.ts (GENERATED); log.ts; tauri.ts (`createTauriSource` over `commands`); window.ts (close-request guard, the only `@tauri-apps/api/window` importer)
 frontend/src/model  empty and unused (AGENTS.md only); reserved for pure TS shared by more than one module
-frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s): undo, redo, resultText, summary, onSummaryChange,
-                    applyAllNonConflicting, destroy; types `Side`, `MergeSummary`. internal/: pane, chunkField, status, sideStatus, apply, decorations, words, language, indent, side,
-                    tone, lineSpan, geometry, strips, scrollSync; theme.css; framework-free (all `*.test.ts` in `node`; `engine.browser.test.ts` is the WebKit probe)
+frontend/src/editor CodeMirror 6 integration; public surface = MergeController(FileMergeData, hosts incl. two strip <svg>s, options? { readOnly }): undo, redo, resultText, summary, onSummaryChange,
+                    applyAllNonConflicting, destroy; types `Side`, `MergeSummary`, `MergeOptions`. internal/: pane, chunkField, status, sideStatus, apply, decorations, words, language, indent, side,
+                    tone, lineSpan, geometry, strips, drag (icon press/drag on the persistent strips, plan §2 #45), covered (drag highlight, no history), modClick (Ctrl/Cmd+click, #46),
+                    find (find bar per pane on @codemirror/search, #44), scrollSync; theme.css; framework-free (all `*.test.ts` in `node`; `engine.browser.test.ts` is the WebKit probe)
 frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,

@@ -4,7 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
-import { applySteps, dispatchSteps, ignoreSteps, type ApplyTarget } from "./apply";
+import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { lineSpan } from "./lineSpan";
@@ -97,11 +97,11 @@ function spanAt(merge: Merge, id: number): ChunkSpan {
   return span;
 }
 
-function click(merge: Merge, id: number, { kind, side }: Click): Merge {
+function act(merge: Merge, ids: readonly number[], { kind, side }: Click): Merge {
   const sides = { local: merge.left.doc, remote: merge.right.doc };
   const target: ApplyTarget = { state: merge.center, field: merge.field, sides };
-  const request = { target, chunk: spanAt(merge, id).chunk, side };
-  const steps = kind === "apply" ? applySteps(request) : ignoreSteps(request);
+  const chunks = ids.map((id) => spanAt(merge, id).chunk);
+  const steps = actionSteps(target, { kind, side, chunks });
   if (steps.length === 0) {
     throw new Error("expected a transaction");
   }
@@ -110,6 +110,14 @@ function click(merge: Merge, id: number, { kind, side }: Click): Merge {
     center = center.update(spec).state;
   }, steps);
   return mirrored(merge, center);
+}
+
+function click(merge: Merge, id: number, how: Click): Merge {
+  return act(merge, [id], how);
+}
+
+function clicks(merge: Merge, ids: readonly number[], how: Click): Merge {
+  return ids.reduce((done, id) => click(done, id, how), merge);
 }
 
 function history(merge: Merge, command: StateCommand): Merge {
@@ -297,4 +305,41 @@ test("deleting a whole open or half-applied conflict in the middle pane ignores 
     );
     expectOneUndoStep(start, deleted);
   }
+});
+
+test("a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step", async () => {
+  const texts = {
+    base: "a\nb\nc\nd\ne\nf\ng\n",
+    local: "a\nB\nc\nL\ne\nX\ng\n",
+    remote: "a\nb\nc\nR\ne\ng\n",
+  };
+  const start = open(
+    await synthetic(texts, [
+      { kind: "LocalOnly", base: [1, 1], local: [1, 1], remote: [1, 1] },
+      { kind: "Conflict", base: [3, 1], local: [3, 1], remote: [3, 1] },
+      { kind: "Conflict", base: [5, 1], local: [5, 1], remote: [5, 0] },
+    ]),
+  );
+  const rightApplied = click(start, 1, { kind: "apply", side: "remote" });
+  const ids = [0, 1, 2];
+  const kinds: readonly Click["kind"][] = ["apply", "ignore"];
+  const applied = act(rightApplied, ids, { kind: "apply", side: "local" });
+
+  for (const kind of kinds) {
+    const how: Click = { kind, side: "local" };
+    const dragged = act(rightApplied, ids, how);
+    const clicked = clicks(rightApplied, ids, how);
+
+    expect(dragged.center.sliceDoc()).toBe(clicked.center.sliceDoc());
+    expect(ids.map((id) => status(dragged, id))).toEqual(ids.map((id) => status(clicked, id)));
+    expect(decoratedLines(dragged.left)).toEqual(decoratedLines(clicked.left));
+    expect(dragged.center.selection.main.head).toBe(clicked.center.selection.main.head);
+    expectOneUndoStep(rightApplied, dragged);
+  }
+  expect(applied.center.sliceDoc()).toBe("a\nB\nc\nR\nL\ne\nX\ng\n");
+  expect(ids.map((id) => status(applied, id))).toEqual([
+    "applied pending",
+    "applied applied",
+    "applied ignored",
+  ]);
 });

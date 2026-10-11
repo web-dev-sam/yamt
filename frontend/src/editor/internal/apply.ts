@@ -11,7 +11,20 @@ import {
 import type { Chunk } from "../../ipc";
 import { setStatus, type ChunkSpan } from "./chunkField";
 import type { Side } from "./side";
-import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
+import {
+  applyMode,
+  canBulkApply,
+  isSideOpen,
+  statusAfterApply,
+  statusAfterIgnore,
+  type ChunkStatus,
+} from "./status";
+
+export type ChunkAction = {
+  readonly kind: "apply" | "ignore";
+  readonly side: Side;
+  readonly chunks: readonly Chunk[];
+};
 
 export type SideDocs = Readonly<Record<Side, Text>>;
 
@@ -46,8 +59,24 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
   return wholeLines(target.state.doc, { from, to: span.to }, lines);
 }
 
-function spanOf(target: ApplyTarget, chunk: Chunk): ChunkSpan | undefined {
-  return target.state.field(target.field).find((span) => span.chunk.id === chunk.id);
+function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
+  const ids = new Set(chunks.map((chunk) => chunk.id));
+  return target.state
+    .field(target.field)
+    .filter((span) => ids.has(span.chunk.id) && isSideOpen(span.chunk, span.status, side));
+}
+
+function statusAfter(span: ChunkSpan, { kind, side }: ChunkAction): ChunkStatus {
+  switch (kind) {
+    case "apply":
+      return statusAfterApply(span.chunk, span.status, side);
+    case "ignore":
+      return statusAfterIgnore(span.chunk, span.status, side);
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
 }
 
 // History restores the selection from before the action's transaction, so the cursor moves in a
@@ -77,31 +106,25 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps: 
   }
 }
 
-export function applySteps({
-  target,
-  chunk,
-  side,
-}: {
-  readonly target: ApplyTarget;
-  readonly chunk: Chunk;
-  readonly side: Side;
-}): Steps {
-  const span = spanOf(target, chunk);
-  if (span === undefined || !isSideOpen(span.chunk, span.status, side)) {
+export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
+  const spans = chosenSpans(target, action);
+  const last = spans.at(-1);
+  if (last === undefined) {
     return [];
   }
-  const changes = target.state.changes(applyChange(target, span, side));
+  const changes = target.state.changes(
+    action.kind === "apply" ? spans.map((span) => applyChange(target, span, action.side)) : [],
+  );
   return [
-    moveCursor(span.from),
+    moveCursor(last.from),
     {
       changes,
-      effects: setStatus.of({
-        id: chunk.id,
-        status: statusAfterApply(span.chunk, span.status, side),
-      }),
-      userEvent: "yamt.apply",
+      effects: spans.map((span) =>
+        setStatus.of({ id: span.chunk.id, status: statusAfter(span, action) }),
+      ),
+      userEvent: `yamt.${action.kind}`,
     },
-    recordSelection(EditorSelection.single(span.from).map(changes)),
+    recordSelection(EditorSelection.single(last.from).map(changes)),
   ];
 }
 
@@ -133,30 +156,4 @@ export function bulkApplySteps({
     return [action, recordSelection(target.state.selection.map(changes))];
   }
   return [moveCursor(cursor), action, recordSelection(EditorSelection.single(cursor).map(changes))];
-}
-
-export function ignoreSteps({
-  target,
-  chunk,
-  side,
-}: {
-  readonly target: ApplyTarget;
-  readonly chunk: Chunk;
-  readonly side: Side;
-}): Steps {
-  const span = spanOf(target, chunk);
-  if (span === undefined || !isSideOpen(span.chunk, span.status, side)) {
-    return [];
-  }
-  return [
-    moveCursor(span.from),
-    {
-      effects: setStatus.of({
-        id: chunk.id,
-        status: statusAfterIgnore(span.chunk, span.status, side),
-      }),
-      userEvent: "yamt.ignore",
-    },
-    recordSelection(EditorSelection.single(span.from)),
-  ];
 }

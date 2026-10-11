@@ -8,16 +8,21 @@ import xIcon from "~icons/lucide/x?raw";
 
 import { bandPath, type Band } from "../../connectors";
 import type { Chunk } from "../../ipc";
+import type { ChunkAction } from "./apply";
 import type { ChunkRow, PaneViews } from "./geometry";
 import type { Side } from "./side";
 import { applyMode, isSideOpen, type ApplyMode } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
-export type ChunkAction =
-  | { readonly kind: "apply"; readonly chunk: Chunk; readonly side: Side }
-  | { readonly kind: "ignore"; readonly chunk: Chunk; readonly side: Side };
+export type IconPress = {
+  readonly kind: ChunkAction["kind"];
+  readonly chunk: Chunk;
+  readonly side: Side;
+};
 
-type OnAction = (action: ChunkAction) => void;
+type OnPress = (press: IconPress, event: PointerEvent) => void;
+type Icons = { readonly covered: ChunkAction | null; readonly onPress: OnPress };
+export type StripPaint = { readonly covered: ChunkAction | null; readonly onPress: OnPress | null };
 type ToneBand = Band & { readonly tone: Tone };
 type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
 type ArrowPane = {
@@ -110,13 +115,23 @@ function iconElement(markup: string, lineHeight: number): SVGSVGElement {
   return icon;
 }
 
+function isCovered(covered: ChunkAction | null, press: IconPress): boolean {
+  return (
+    covered !== null &&
+    covered.kind === press.kind &&
+    covered.side === press.side &&
+    covered.chunks.some((chunk) => chunk.id === press.chunk.id)
+  );
+}
+
 function actionButton(
   button: { x: number; lineHeight: number; icon: string; title: string },
-  action: ChunkAction,
-  onAction: OnAction,
+  press: IconPress,
+  icons: Icons,
 ): SVGGElement {
   const group = document.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", `chunk-action chunk-action-${action.kind}`);
+  const covered = isCovered(icons.covered, press) ? " chunk-action-covered" : "";
+  group.setAttribute("class", `chunk-action chunk-action-${press.kind}${covered}`);
   group.setAttribute("transform", `translate(${button.x} 0)`);
   const title = document.createElementNS(SVG_NS, "title");
   title.textContent = button.title;
@@ -126,7 +141,7 @@ function actionButton(
   group.append(title, hit, iconElement(button.icon, button.lineHeight));
   group.addEventListener("pointerdown", (event) => {
     if (event.button === 0) {
-      onAction(action);
+      icons.onPress(press, event);
     }
   });
   return group;
@@ -136,7 +151,7 @@ function arrowGroups(
   strip: SVGSVGElement,
   stripTop: number,
   { view, side, arrows }: ArrowPane,
-  onAction: OnAction,
+  icons: Icons,
 ): SVGGElement[] {
   const shift = view.documentTop - stripTop;
   const lineHeight = view.defaultLineHeight;
@@ -152,12 +167,12 @@ function arrowGroups(
         actionButton(
           { x: applyX, lineHeight, icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] },
           { kind: "apply", chunk, side },
-          onAction,
+          icons,
         ),
         actionButton(
           { x: ignoreX, lineHeight, icon: xIcon, title: "Ignore" },
           { kind: "ignore", chunk, side },
-          onAction,
+          icons,
         ),
       );
       return row;
@@ -168,13 +183,14 @@ function paintGap(
   strip: SVGSVGElement,
   panes: { readonly left: EditorView; readonly right: EditorView },
   { side, rows }: { readonly side: Side; readonly rows: readonly ChunkRow[] },
-  onAction: OnAction,
+  { covered, onPress }: StripPaint,
 ): void {
   const stripTop = strip.getBoundingClientRect().top;
   const view = side === "local" ? panes.left : panes.right;
+  const arrows = { view, side, arrows: gapArrows(rows, side) };
   strip.replaceChildren(
     ...bandPaths(strip, stripTop, panes, gapBands(rows, side)),
-    ...arrowGroups(strip, stripTop, { view, side, arrows: gapArrows(rows, side) }, onAction),
+    ...(onPress === null ? [] : arrowGroups(strip, stripTop, arrows, { covered, onPress })),
   );
 }
 
@@ -182,15 +198,10 @@ export function paintStrips(
   views: PaneViews,
   strips: readonly [SVGSVGElement, SVGSVGElement],
   rows: readonly ChunkRow[],
-  onAction: OnAction,
+  paint: StripPaint,
 ): void {
-  paintGap(strips[0], { left: views.left, right: views.center }, { side: "local", rows }, onAction);
-  paintGap(
-    strips[1],
-    { left: views.center, right: views.right },
-    { side: "remote", rows },
-    onAction,
-  );
+  paintGap(strips[0], { left: views.left, right: views.center }, { side: "local", rows }, paint);
+  paintGap(strips[1], { left: views.center, right: views.right }, { side: "remote", rows }, paint);
 }
 
 export function keepEditorFocus(event: MouseEvent): void {
