@@ -1,31 +1,10 @@
 {
-  "V0WindowChrome": {
-    "owned": [
-      "frontend/src/ui/**",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/log.ts",
-      "frontend/src/ipc/log.test.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
-      "frontend/src/ipc/window.ts",
-      "frontend/src/ipc/window.test.ts",
-      "frontend/src/main.ts",
-      "frontend/src/style.css"
-    ],
-    "readonly": [
-      "frontend/src/editor/**",
-      "frontend/src/ipc/bindings.ts",
-      "frontend/fixtures/**",
-      "docs/**"
-    ]
+  "V0WindowChromeR1": {
+    "owned": ["frontend/src/ui/**"],
+    "readonly": ["frontend/src/editor/**", "frontend/src/ipc/**", "docs/**"]
   },
-  "V0EditorFindDragR2": {
-    "owned": ["frontend/src/editor/**"],
-    "readonly": ["frontend/src/ui/**", "frontend/src/ipc/**", "docs/**"]
+  "V0RustGitViewR2": {
+    "owned": ["crates/**"],
+    "readonly": ["src-tauri/**", "frontend/**", "docs/**", "tests/golden/**"]
   }
 }
