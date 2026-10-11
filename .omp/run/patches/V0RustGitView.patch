@@ -1,0 +1,1482 @@
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index d623f6d..7f24238 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -112,6 +112,16 @@ pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
+ 
+ /// A repo where `git merge remote` on branch `local` has stopped with `files` conflicted.
+ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
++    let dir = diverged_repo(files)?;
++    let merge = git(dir.path(), &["merge", "--quiet", "remote"])?;
++    if merge.status.success() {
++        return Err(Error::MergeDidNotConflict);
++    }
++    Ok(dir)
++}
++
++/// A repo on branch `local` with commits `base` (branch `main`), `local` and `remote` (branch `remote`), not merged.
++pub fn diverged_repo(files: &[ConflictFile]) -> Result<TempDir> {
+     let dir = tempfile::tempdir()?;
+     let root = dir.path();
+     git_ok(root, &["init", "--quiet"])?;
+@@ -122,10 +132,6 @@ pub fn conflict_repo(files: &[ConflictFile]) -> Result<TempDir> {
+     git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"])?;
+     commit_side(root, files, |file| file.remote, "remote")?;
+     git_ok(root, &["checkout", "--quiet", "local"])?;
+-    let merge = git(root, &["merge", "--quiet", "remote"])?;
+-    if merge.status.success() {
+-        return Err(Error::MergeDidNotConflict);
+-    }
+     Ok(dir)
+ }
+ 
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index f3af205..411ee7d 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -8,7 +8,7 @@ mod run;
+ 
+ pub use blob::BlobReader;
+ pub use entry::{Oid, Stage, StageEntry};
+-pub use repo::Repo;
++pub use repo::{CommitSummary, Repo};
+ 
+ #[derive(Debug, thiserror::Error)]
+ pub enum Error {
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index bf27c77..db67047 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -1,33 +1,43 @@
+ use std::ffi::OsStr;
++use std::fs;
++use std::io;
+ use std::os::unix::ffi::OsStrExt;
+ use std::os::unix::fs::PermissionsExt;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ 
+ use crate::blob::{BlobReader, CAT_FILE};
+-use crate::entry::{LS_FILES, index_info, parse_unmerged};
++use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged};
+ use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+ use crate::{Error, Result, StageEntry};
+ 
+ const ANY_EXECUTE_BIT: u32 = 0o111;
+ const REV_PARSE: &str = "rev-parse";
++const LOG: &str = "log";
++const MERGE_MSG: &str = "MERGE_MSG";
++const UNRESOLVED_NAME_STATUS: i32 = 1;
++const NON_SYMBOLIC_SHORT_NAME: &str = "--format=%(if)%(symref)%(then)%(else)%(refname:short)%(end)";
++const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
++const COMMIT_SUMMARY_FIELDS: usize = 3;
+ 
+ pub struct Repo {
+     root: PathBuf,
+     git: PathBuf,
+ }
+ 
++/// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct CommitSummary {
++    pub short_id: Vec<u8>,
++    pub subject: Vec<u8>,
++    pub message: Vec<u8>,
++}
++
+ impl Repo {
+     pub fn discover(cwd: &Path) -> Result<Repo> {
+         let git = find_git_on_path()?;
+         let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+-        let mut output = run(command, None, GIT_TIMEOUT)?;
+-        if output.pop() != Some(b'\n') {
+-            return Err(Error::UnexpectedOutput {
+-                command: REV_PARSE,
+-                output: String::from_utf8_lossy(&output).into_owned(),
+-            });
+-        }
++        let output = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+         let root = PathBuf::from(OsStr::from_bytes(&output));
+         Ok(Repo { root, git })
+     }
+@@ -42,6 +52,72 @@ impl Repo {
+         parse_unmerged(&run(command, None, GIT_TIMEOUT)?)
+     }
+ 
++    pub fn commit_named(&self, name: &str) -> Result<Option<Oid>> {
++        let revision = format!("{name}^{{commit}}");
++        let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
++        let output = match run(command, None, GIT_TIMEOUT) {
++            Ok(output) => output,
++            Err(error) if is_unresolved_name(&error) => return Ok(None),
++            Err(error) => return Err(error),
++        };
++        let line = without_final_newline(output)?;
++        let hex = String::from_utf8_lossy(&line);
++        Ok(Some(Oid::parse(&hex)?))
++    }
++
++    pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
++        let args = [
++            "for-each-ref",
++            NON_SYMBOLIC_SHORT_NAME,
++            "--points-at",
++            commit.as_str(),
++            "refs/heads",
++            "refs/remotes",
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        let names = output.split(|&byte| byte == b'\n');
++        Ok(names
++            .filter(|name| !name.is_empty())
++            .map(<[u8]>::to_vec)
++            .collect())
++    }
++
++    pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
++        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
++        let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
++        match fs::read(self.root.join(OsStr::from_bytes(&git_path))) {
++            Ok(message) => Ok(Some(message)),
++            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
++            Err(source) => Err(source.into()),
++        }
++    }
++
++    pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
++        let args = [
++            LOG,
++            "-1",
++            "--no-show-signature",
++            SHORT_ID_SUBJECT_MESSAGE,
++            commit.as_str(),
++            "--",
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        let fields: Vec<&[u8]> = output
++            .splitn(COMMIT_SUMMARY_FIELDS, |&byte| byte == b'\0')
++            .collect();
++        let [short_id, subject, message] = fields.as_slice() else {
++            return Err(Error::UnexpectedOutput {
++                command: LOG,
++                output: String::from_utf8_lossy(&output).into_owned(),
++            });
++        };
++        Ok(CommitSummary {
++            short_id: short_id.to_vec(),
++            subject: subject.to_vec(),
++            message: message.to_vec(),
++        })
++    }
++
+     pub fn index_records(&self, path: &Path) -> Result<Vec<u8>> {
+         let mut command = self.command(Access::Read, &[LS_FILES, "-s", "-z", "--"]);
+         command.arg(path);
+@@ -111,6 +187,24 @@ impl Repo {
+     }
+ }
+ 
++// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
++fn is_unresolved_name(error: &Error) -> bool {
++    matches!(
++        error,
++        Error::GitFailed { status: Some(UNRESOLVED_NAME_STATUS), stderr, .. } if stderr.is_empty()
++    )
++}
++
++fn without_final_newline(mut output: Vec<u8>) -> Result<Vec<u8>> {
++    if output.pop() == Some(b'\n') {
++        return Ok(output);
++    }
++    Err(Error::UnexpectedOutput {
++        command: REV_PARSE,
++        output: String::from_utf8_lossy(&output).into_owned(),
++    })
++}
++
+ fn find_git_on_path() -> Result<PathBuf> {
+     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+     for dir in std::env::split_paths(&search_path) {
+diff --git a/crates/gitio/tests/merge_heads.rs b/crates/gitio/tests/merge_heads.rs
+new file mode 100644
+index 0000000..644a0b6
+--- /dev/null
++++ b/crates/gitio/tests/merge_heads.rs
+@@ -0,0 +1,145 @@
++#![cfg(test)]
++
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok,
++};
++use yamt_gitio::{CommitSummary, Error, Oid, Repo};
++
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "cart.ts",
++    kind: FileKind::Regular,
++    base: Some(b"one\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn stdout_line(root: &Path, args: &[&str]) -> String {
++    let output = git_ok(root, args).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn oid_of(root: &Path, revision: &str) -> Oid {
++    Oid::parse(&stdout_line(root, &["rev-parse", revision])).unwrap()
++}
++
++fn merging() -> (TempDir, Repo) {
++    let dir = conflict_repo(&FILES).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    (dir, repo)
++}
++
++#[test]
++fn commit_named_resolves_merge_head_and_is_none_for_a_missing_head() {
++    let (dir, repo) = merging();
++
++    let merge_head = repo.commit_named("MERGE_HEAD").unwrap();
++
++    assert_eq!(merge_head, Some(oid_of(dir.path(), "remote")));
++    assert_eq!(repo.commit_named("CHERRY_PICK_HEAD").unwrap(), None);
++}
++
++#[test]
++fn commit_named_without_a_repository_is_a_git_failure_not_a_missing_head() {
++    let (dir, repo) = merging();
++    std::fs::remove_dir_all(dir.path().join(".git")).unwrap();
++
++    let error = repo.commit_named("MERGE_HEAD").unwrap_err();
++
++    let Error::GitFailed { stderr, .. } = error else {
++        panic!("expected GitFailed, got {error:?}");
++    };
++    assert!(stderr.contains("not a git repository"), "{stderr}");
++}
++
++#[test]
++fn branches_at_lists_local_and_remote_tracking_branches_but_not_symbolic_refs() {
++    let (dir, repo) = merging();
++    let root = dir.path();
++    git_ok(root, &["branch", "also", "remote"]).unwrap();
++    git_ok(root, &["update-ref", "refs/remotes/origin/main", "remote"]).unwrap();
++    git_ok(root, &["update-ref", "refs/tags/v1", "remote"]).unwrap();
++    git_ok(
++        root,
++        &[
++            "symbolic-ref",
++            "refs/remotes/origin/HEAD",
++            "refs/remotes/origin/main",
++        ],
++    )
++    .unwrap();
++
++    let branches = repo.branches_at(&oid_of(root, "remote")).unwrap();
++
++    let expected: [&[u8]; 3] = [b"also", b"remote", b"origin/main"];
++    assert_eq!(branches, expected);
++}
++
++#[test]
++fn merge_message_reads_merge_msg_and_is_none_outside_a_merge() {
++    let (_dir, repo) = merging();
++    let message = repo.merge_message().unwrap().unwrap();
++    assert!(
++        message.starts_with(b"Merge branch 'remote' into local\n"),
++        "{}",
++        String::from_utf8_lossy(&message)
++    );
++
++    let dir = diverged_repo(&FILES).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    assert_eq!(repo.merge_message().unwrap(), None);
++}
++
++#[test]
++fn merge_message_of_a_linked_worktree_is_read_from_its_own_git_dir() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let linked = root.join("linked");
++    let linked_arg = linked.to_str().unwrap();
++    git_ok(
++        root,
++        &[
++            "worktree", "add", "--quiet", "--detach", linked_arg, "local",
++        ],
++    )
++    .unwrap();
++    let merge = git(&linked, &["merge", "remote"]).unwrap();
++    assert!(!merge.status.success());
++    let repo = Repo::discover(&linked).unwrap();
++
++    let message = repo.merge_message().unwrap().unwrap();
++
++    assert!(message.starts_with(b"Merge branch 'remote' into HEAD\n"));
++    assert_eq!(Repo::discover(root).unwrap().merge_message().unwrap(), None);
++}
++
++#[test]
++fn commit_summary_gives_the_short_id_subject_and_raw_message() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    git_ok(root, &["checkout", "--quiet", "--detach", "remote"]).unwrap();
++    git_ok(
++        root,
++        &[
++            "commit",
++            "--quiet",
++            "--allow-empty",
++            "-m",
++            "subject",
++            "-m",
++            "body",
++        ],
++    )
++    .unwrap();
++
++    let summary = repo.commit_summary(&oid_of(root, "HEAD")).unwrap();
++
++    let expected = CommitSummary {
++        short_id: stdout_line(root, &["rev-parse", "--short", "HEAD"]).into_bytes(),
++        subject: b"subject".to_vec(),
++        message: b"subject\n\nbody\n\n".to_vec(),
++    };
++    assert_eq!(summary, expected);
++}
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index d7ee794..19c0c2f 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages, finish/reset, and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), finish/reset, and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). Statuses are git's view: `refresh_statuses` re-reads `ls-files -u` (plan §2 #49). `remote_name.rs` names what is merged in, read once at `open`; a git failure there only drops the name (plan §2 #50). Finish and take are all or nothing: a failed stage leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18.
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index 1850f2a..e8bf3fa 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -2,10 +2,13 @@
+ #![forbid(unsafe_code)]
+ 
+ mod decode;
++mod remote_name;
+ mod session;
+ mod sides;
++mod stages;
+ 
+ pub use decode::{Eol, UnsupportedReason};
++pub use remote_name::RemoteName;
+ pub use session::{FileEntry, FileMergeData, FileStatus, MergeSession, merge_data};
+ pub use sides::{FileSides, Side, SideContent};
+ 
+diff --git a/crates/session/src/remote_name.rs b/crates/session/src/remote_name.rs
+new file mode 100644
+index 0000000..e31a2dd
+--- /dev/null
++++ b/crates/session/src/remote_name.rs
+@@ -0,0 +1,103 @@
++use serde::Serialize;
++use specta::Type;
++use yamt_gitio::{Oid, Repo};
++
++use crate::Result;
++use crate::session::LOG_TARGET;
++
++const MERGE_HEAD: &str = "MERGE_HEAD";
++const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
++const QUOTE: char = '\'';
++
++/// What is merged in: the one branch at `MERGE_HEAD`, else the commit being merged or replayed.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum RemoteName {
++    Branch {
++        name: String,
++    },
++    Commit {
++        short_id: String,
++        subject: String,
++        message: String,
++    },
++}
++
++pub(crate) fn remote_name(repo: &Repo) -> Option<RemoteName> {
++    match merged_in(repo) {
++        Ok(name) => name,
++        Err(error) => {
++            tracing::warn!(target: LOG_TARGET, event = "remote_name_unread", %error, "the merged-in name is left out");
++            None
++        }
++    }
++}
++
++fn merged_in(repo: &Repo) -> Result<Option<RemoteName>> {
++    if let Some(commit) = repo.commit_named(MERGE_HEAD)? {
++        return Ok(Some(merge_head_name(repo, &commit)?));
++    }
++    for head in REPLAYED_HEADS {
++        if let Some(commit) = repo.commit_named(head)? {
++            return Ok(Some(commit_name(repo, &commit)?));
++        }
++    }
++    Ok(None)
++}
++
++fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<RemoteName> {
++    let branches: Vec<String> = repo
++        .branches_at(commit)?
++        .iter()
++        .map(|name| text(name))
++        .collect();
++    let branch = match branches.as_slice() {
++        [] => None,
++        [only] => Some(only.clone()),
++        [_, _, ..] => {
++            let message = repo.merge_message()?.map(|message| text(&message));
++            let quoted = message.as_deref().and_then(quoted_name).map(str::to_owned);
++            quoted.filter(|name| branches.contains(name))
++        }
++    };
++    match branch {
++        Some(name) => Ok(RemoteName::Branch { name }),
++        None => commit_name(repo, commit),
++    }
++}
++
++fn commit_name(repo: &Repo, commit: &Oid) -> Result<RemoteName> {
++    let summary = repo.commit_summary(commit)?;
++    Ok(RemoteName::Commit {
++        short_id: text(&summary.short_id),
++        subject: text(&summary.subject),
++        message: text(&summary.message).trim().to_owned(),
++    })
++}
++
++fn quoted_name(message: &str) -> Option<&str> {
++    let first_line = message.lines().next()?;
++    let (_, after_quote) = first_line.split_once(QUOTE)?;
++    let (name, _) = after_quote.split_once(QUOTE)?;
++    Some(name)
++}
++
++fn text(bytes: &[u8]) -> String {
++    String::from_utf8_lossy(bytes).into_owned()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_quoted_name_is_the_first_one_on_the_first_line() {
++        let local = "Merge branch 'minor' into vapor\n\n# 'not this'\n";
++        let remote = "Merge remote-tracking branch 'origin/main'";
++        assert_eq!(quoted_name(local), Some("minor"));
++        assert_eq!(quoted_name(remote), Some("origin/main"));
++        assert_eq!(quoted_name("Merge 'unclosed\n'name'"), None);
++        assert_eq!(quoted_name("Merge abc123\n'second line'"), None);
++        assert_eq!(quoted_name(""), None);
++    }
++}
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index c8d5db3..0b455fa 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
+ 
+ use serde::Serialize;
+ use specta::Type;
+-use yamt_gitio::{BlobReader, Repo, Stage, StageEntry};
++use yamt_gitio::{BlobReader, Repo, StageEntry};
+ use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
+ 
+ use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
++use crate::remote_name::{RemoteName, remote_name};
+ use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
++use crate::stages::{CapturedStages, group_by_path};
+ use crate::{Error, Result};
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -30,6 +32,7 @@ pub struct FileMergeData {
+     pub base: String,
+     pub local: String,
+     pub remote: String,
++    pub deleted: Option<Side>,
+     pub eol: Eol,
+     pub chunks: Vec<Chunk>,
+     pub word_changes: Vec<WordChanges>,
+@@ -44,17 +47,19 @@ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMerg
+         base: base.to_owned(),
+         local: local.to_owned(),
+         remote: remote.to_owned(),
++        deleted: None,
+         eol: detect_eol(eol_source),
+         word_changes: word_changes(base, local, remote, &chunks),
+         chunks,
+     }
+ }
+ 
+-const LOG_TARGET: &str = "session";
++pub(crate) const LOG_TARGET: &str = "session";
+ 
+ pub struct MergeSession {
+     repo: Repo,
+     files: Vec<FileState>,
++    remote_name: Option<RemoteName>,
+ }
+ 
+ struct FileState {
+@@ -64,13 +69,6 @@ struct FileState {
+     content: Content,
+ }
+ 
+-#[derive(Default)]
+-struct CapturedStages {
+-    base: Option<StageEntry>,
+-    local: Option<StageEntry>,
+-    remote: Option<StageEntry>,
+-}
+-
+ enum Content {
+     Text(Texts),
+     Unsupported(UnsupportedReason),
+@@ -80,6 +78,7 @@ struct Texts {
+     base: String,
+     local: String,
+     remote: String,
++    deleted: Option<Side>,
+ }
+ 
+ enum IndexBefore {
+@@ -101,7 +100,12 @@ impl MergeSession {
+                 content,
+             });
+         }
+-        Ok(MergeSession { repo, files })
++        let remote_name = remote_name(&repo);
++        Ok(MergeSession {
++            repo,
++            files,
++            remote_name,
++        })
+     }
+ 
+     #[must_use]
+@@ -109,6 +113,24 @@ impl MergeSession {
+         self.repo.root()
+     }
+ 
++    #[must_use]
++    pub fn remote_name(&self) -> Option<RemoteName> {
++        self.remote_name.clone()
++    }
++
++    pub fn refresh_statuses(&mut self) -> Result<()> {
++        let unmerged = self.repo.unmerged()?;
++        for file in &mut self.files {
++            let is_unmerged = unmerged.iter().any(|entry| entry.path == file.path);
++            file.status = if is_unmerged {
++                FileStatus::Unresolved
++            } else {
++                FileStatus::Resolved
++            };
++        }
++        Ok(())
++    }
++
+     #[must_use]
+     pub fn files(&self) -> Vec<FileEntry> {
+         let mut entries = Vec::with_capacity(self.files.len());
+@@ -125,12 +147,16 @@ impl MergeSession {
+     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
+         let file = find_file(&mut self.files, path)?;
+         let texts = file.require_text()?;
+-        Ok(merge_data(
++        let data = merge_data(
+             &file.display_path(),
+             &texts.base,
+             &texts.local,
+             &texts.remote,
+-        ))
++        );
++        Ok(FileMergeData {
++            deleted: texts.deleted,
++            ..data
++        })
+     }
+ 
+     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {
+@@ -286,62 +312,6 @@ impl FileState {
+     }
+ }
+ 
+-impl CapturedStages {
+-    fn side(&self, side: Side) -> Option<&StageEntry> {
+-        match side {
+-            Side::Local => self.local.as_ref(),
+-            Side::Remote => self.remote.as_ref(),
+-        }
+-    }
+-
+-    fn insert(&mut self, entry: StageEntry) {
+-        match entry.stage {
+-            Stage::Base => self.base = Some(entry),
+-            Stage::Local => self.local = Some(entry),
+-            Stage::Remote => self.remote = Some(entry),
+-        }
+-    }
+-
+-    fn can_rebuild_markers(&self) -> bool {
+-        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
+-        let has_both_sides = self.local.is_some() && self.remote.is_some();
+-        // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
+-        has_both_sides && !self.has_mode(SUBMODULE_MODE)
+-    }
+-
+-    fn has_mode(&self, mode: u32) -> bool {
+-        [&self.base, &self.local, &self.remote]
+-            .into_iter()
+-            .flatten()
+-            .any(|entry| entry.mode == mode)
+-    }
+-
+-    fn entries(&self) -> Vec<StageEntry> {
+-        [&self.base, &self.local, &self.remote]
+-            .into_iter()
+-            .flatten()
+-            .cloned()
+-            .collect()
+-    }
+-}
+-
+-fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
+-    let mut groups: Vec<(PathBuf, CapturedStages)> = Vec::new();
+-    for entry in entries {
+-        if let Some((path, stages)) = groups.last_mut()
+-            && *path == entry.path
+-        {
+-            stages.insert(entry);
+-        } else {
+-            let mut stages = CapturedStages::default();
+-            let path = entry.path.clone();
+-            stages.insert(entry);
+-            groups.push((path, stages));
+-        }
+-    }
+-    groups
+-}
+-
+ fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) -> Result<Content> {
+     if path.to_str().is_none() {
+         return Ok(Content::Unsupported(UnsupportedReason::NonUtf8));
+@@ -352,23 +322,42 @@ fn read_content(blobs: &mut BlobReader, path: &Path, stages: &CapturedStages) ->
+     if stages.has_mode(SYMLINK_MODE) {
+         return Ok(Content::Unsupported(UnsupportedReason::Symlink));
+     }
+-    let Some(local) = &stages.local else {
+-        return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted));
++    let deleted = match (&stages.local, &stages.remote) {
++        (Some(_), Some(_)) => None,
++        (None, Some(_)) => Some(Side::Local),
++        (Some(_), None) => Some(Side::Remote),
++        (None, None) => return Ok(Content::Unsupported(UnsupportedReason::LocalDeleted)),
+     };
+-    let Some(remote) = &stages.remote else {
+-        return Ok(Content::Unsupported(UnsupportedReason::RemoteDeleted));
+-    };
+-    let base = match &stages.base {
+-        Some(entry) => blobs.read(&entry.oid)?,
+-        None => Vec::new(),
+-    };
+-    let sides = [base, blobs.read(&local.oid)?, blobs.read(&remote.oid)?];
+-    match decode_sides(sides) {
++    let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
++    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
++    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
++    match decode_sides([base, local, remote]) {
+         Ok([base, local, remote]) => Ok(Content::Text(Texts {
+             base,
+             local,
+             remote,
++            deleted,
+         })),
+-        Err(reason) => Ok(Content::Unsupported(reason)),
++        Err(reason) => Ok(Content::Unsupported(
++            deleted_reason(deleted).unwrap_or(reason),
++        )),
+     }
+ }
++
++fn stage_bytes(
++    blobs: &mut BlobReader,
++    entry: Option<&StageEntry>,
++    missing: &[u8],
++) -> Result<Vec<u8>> {
++    match entry {
++        Some(entry) => Ok(blobs.read(&entry.oid)?),
++        None => Ok(missing.to_vec()),
++    }
++}
++
++fn deleted_reason(deleted: Option<Side>) -> Option<UnsupportedReason> {
++    deleted.map(|side| match side {
++        Side::Local => UnsupportedReason::LocalDeleted,
++        Side::Remote => UnsupportedReason::RemoteDeleted,
++    })
++}
+diff --git a/crates/session/src/stages.rs b/crates/session/src/stages.rs
+new file mode 100644
+index 0000000..ba10a77
+--- /dev/null
++++ b/crates/session/src/stages.rs
+@@ -0,0 +1,68 @@
++use std::path::PathBuf;
++
++use yamt_gitio::{Stage, StageEntry};
++
++use crate::sides::{SUBMODULE_MODE, Side};
++
++#[derive(Default)]
++pub(crate) struct CapturedStages {
++    pub(crate) base: Option<StageEntry>,
++    pub(crate) local: Option<StageEntry>,
++    pub(crate) remote: Option<StageEntry>,
++}
++
++impl CapturedStages {
++    pub(crate) fn side(&self, side: Side) -> Option<&StageEntry> {
++        match side {
++            Side::Local => self.local.as_ref(),
++            Side::Remote => self.remote.as_ref(),
++        }
++    }
++
++    fn insert(&mut self, entry: StageEntry) {
++        match entry.stage {
++            Stage::Base => self.base = Some(entry),
++            Stage::Local => self.local = Some(entry),
++            Stage::Remote => self.remote = Some(entry),
++        }
++    }
++
++    pub(crate) fn can_rebuild_markers(&self) -> bool {
++        // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
++        let has_both_sides = self.local.is_some() && self.remote.is_some();
++        // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
++        has_both_sides && !self.has_mode(SUBMODULE_MODE)
++    }
++
++    pub(crate) fn has_mode(&self, mode: u32) -> bool {
++        [&self.base, &self.local, &self.remote]
++            .into_iter()
++            .flatten()
++            .any(|entry| entry.mode == mode)
++    }
++
++    pub(crate) fn entries(&self) -> Vec<StageEntry> {
++        [&self.base, &self.local, &self.remote]
++            .into_iter()
++            .flatten()
++            .cloned()
++            .collect()
++    }
++}
++
++pub(crate) fn group_by_path(entries: Vec<StageEntry>) -> Vec<(PathBuf, CapturedStages)> {
++    let mut groups: Vec<(PathBuf, CapturedStages)> = Vec::new();
++    for entry in entries {
++        if let Some((path, stages)) = groups.last_mut()
++            && *path == entry.path
++        {
++            stages.insert(entry);
++        } else {
++            let mut stages = CapturedStages::default();
++            let path = entry.path.clone();
++            stages.insert(entry);
++            groups.push((path, stages));
++        }
++    }
++    groups
++}
+diff --git a/crates/session/tests/deleted_side.rs b/crates/session/tests/deleted_side.rs
+new file mode 100644
+index 0000000..7f14fb7
+--- /dev/null
++++ b/crates/session/tests/deleted_side.rs
+@@ -0,0 +1,166 @@
++#![cfg(test)]
++
++use std::fs;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
++use yamt_merge_core::ChunkKind;
++use yamt_session::{Error, FileStatus, MergeSession, Side, UnsupportedReason};
++
++const LOCAL_DELETED: &str = "a_local_deleted.ts";
++const REMOTE_DELETED: &str = "b_remote_deleted.ts";
++const KEPT_BINARY: &str = "c_kept_binary.bin";
++const BASE_BINARY: &str = "d_base_binary.txt";
++const KEPT_LATIN1: &str = "e_kept_latin1.txt";
++const KEPT_LINK: &str = "f_kept_link";
++const BASE: &[u8] = b"one\ntwo\nthree\nfour\n";
++const KEPT: &[u8] = b"one\nTWO\nthree\nfour\nfive\n";
++
++const fn deleted(
++    path: &'static str,
++    kind: FileKind,
++    base: &'static [u8],
++    local: Option<&'static [u8]>,
++    remote: Option<&'static [u8]>,
++) -> ConflictFile<'static> {
++    ConflictFile {
++        path,
++        kind,
++        base: Some(base),
++        local,
++        remote,
++    }
++}
++
++const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 6] = {
++    use FileKind::{Regular, Symlink};
++    [
++        deleted(LOCAL_DELETED, Regular, BASE, None, Some(KEPT)),
++        deleted(REMOTE_DELETED, Regular, BASE, Some(KEPT), None),
++        deleted(KEPT_BINARY, Regular, b"base\n", Some(b"\0kept"), None),
++        deleted(BASE_BINARY, Regular, b"\0base", None, Some(b"kept\n")),
++        deleted(KEPT_LATIN1, Regular, b"base\n", None, Some(b"caf\xe9\n")),
++        deleted(
++            KEPT_LINK,
++            Symlink,
++            b"base-target",
++            Some(b"kept-target"),
++            None,
++        ),
++    ]
++};
++
++fn deleted_on_one_side() -> TempDir {
++    conflict_repo(&DELETED_ON_ONE_SIDE).unwrap()
++}
++
++fn unmerged(dir: &TempDir) -> String {
++    String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
++}
++
++#[test]
++fn a_text_file_deleted_on_one_side_loads_with_base_as_the_deleted_side() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let base = std::str::from_utf8(BASE).unwrap();
++    let kept = std::str::from_utf8(KEPT).unwrap();
++    let cases = [
++        (LOCAL_DELETED, Side::Local, ChunkKind::RemoteOnly),
++        (REMOTE_DELETED, Side::Remote, ChunkKind::LocalOnly),
++    ];
++    for (path, side, kept_side_change) in cases {
++        let data = session.load(path).unwrap();
++
++        assert_eq!(data.deleted, Some(side), "{path}");
++        assert_eq!(data.base, base);
++        let (deleted_text, kept_text) = match side {
++            Side::Local => (&data.local, &data.remote),
++            Side::Remote => (&data.remote, &data.local),
++        };
++        assert_eq!((deleted_text.as_str(), kept_text.as_str()), (base, kept));
++        let kinds: Vec<ChunkKind> = data.chunks.iter().map(|chunk| chunk.kind).collect();
++        let one_sided = kinds.iter().all(|kind| *kind == kept_side_change);
++        assert!(!kinds.is_empty() && one_sided, "{path}: {kinds:?}");
++    }
++}
++
++#[test]
++fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let listed: Vec<_> = session
++        .files()
++        .into_iter()
++        .map(|file| (file.path, file.unsupported))
++        .collect();
++    let expected = [
++        (LOCAL_DELETED, None),
++        (REMOTE_DELETED, None),
++        (KEPT_BINARY, Some(UnsupportedReason::RemoteDeleted)),
++        (BASE_BINARY, Some(UnsupportedReason::LocalDeleted)),
++        (KEPT_LATIN1, Some(UnsupportedReason::LocalDeleted)),
++        (KEPT_LINK, Some(UnsupportedReason::Symlink)),
++    ]
++    .map(|(path, reason)| (path.to_owned(), reason));
++    assert_eq!(listed, expected);
++    let error = session.load(KEPT_BINARY).unwrap_err();
++    assert!(
++        matches!(
++            error,
++            Error::Unsupported {
++                reason: UnsupportedReason::RemoteDeleted,
++                ..
++            }
++        ),
++        "{error:?}"
++    );
++}
++
++#[test]
++fn keep_or_delete_then_reset_brings_the_stages_back_and_leaves_the_worktree() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let before = unmerged(&dir);
++    for side in [Side::Remote, Side::Local] {
++        session.take(LOCAL_DELETED, side).unwrap();
++        let worktree_after_take = fs::read(dir.path().join(LOCAL_DELETED)).ok();
++        assert!(!unmerged(&dir).contains(LOCAL_DELETED), "{side:?}");
++        git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
++
++        session.reset(LOCAL_DELETED).unwrap();
++
++        assert_eq!(unmerged(&dir), before, "{side:?}");
++        let worktree = fs::read(dir.path().join(LOCAL_DELETED)).ok();
++        assert_eq!(worktree, worktree_after_take, "{side:?}");
++        assert_eq!(session.files()[0].status, FileStatus::Unresolved);
++    }
++}
++
++#[test]
++fn keep_writes_and_stages_the_kept_side_and_delete_removes_the_file() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    session.take(LOCAL_DELETED, Side::Remote).unwrap();
++    session.take(REMOTE_DELETED, Side::Remote).unwrap();
++
++    assert_eq!(fs::read(dir.path().join(LOCAL_DELETED)).unwrap(), KEPT);
++    let staged = git_ok(dir.path(), &["ls-files", "-s", "--", LOCAL_DELETED]).unwrap();
++    assert!(String::from_utf8(staged).unwrap().contains(" 0\t"));
++    assert!(!dir.path().join(REMOTE_DELETED).exists());
++    let staged = git_ok(dir.path(), &["ls-files", "-s", "--", REMOTE_DELETED]).unwrap();
++    assert_eq!(staged, b"");
++}
++
++#[test]
++fn finish_of_a_deleted_on_one_side_file_writes_and_stages_the_result() {
++    let dir = deleted_on_one_side();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    session.finish(REMOTE_DELETED, "merged\n").unwrap();
++
++    assert_eq!(
++        fs::read(dir.path().join(REMOTE_DELETED)).unwrap(),
++        b"merged\n"
++    );
++    assert!(!unmerged(&dir).contains(REMOTE_DELETED));
++}
+diff --git a/crates/session/tests/describe_and_take.rs b/crates/session/tests/describe_and_take.rs
+index 8134544..8f3a75b 100644
+--- a/crates/session/tests/describe_and_take.rs
++++ b/crates/session/tests/describe_and_take.rs
+@@ -200,8 +200,8 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let reasons = [
+         (TEXT, None),
+-        (LOCAL_DELETED, Some(UnsupportedReason::LocalDeleted)),
+-        (REMOTE_DELETED, Some(UnsupportedReason::RemoteDeleted)),
++        (LOCAL_DELETED, None),
++        (REMOTE_DELETED, None),
+         (BINARY, Some(UnsupportedReason::Binary)),
+         (LATIN1, Some(UnsupportedReason::NonUtf8)),
+         (SYMLINK, Some(UnsupportedReason::Symlink)),
+diff --git a/crates/session/tests/git_view.rs b/crates/session/tests/git_view.rs
+new file mode 100644
+index 0000000..37132ac
+--- /dev/null
++++ b/crates/session/tests/git_view.rs
+@@ -0,0 +1,94 @@
++#![cfg(test)]
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
++use yamt_session::{FileStatus, MergeSession};
++
++const FIRST: &str = "a.ts";
++const SECOND: &str = "b.ts";
++
++fn text_conflict(path: &str) -> ConflictFile<'_> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base: Some(b"one\n"),
++        local: Some(b"local\n"),
++        remote: Some(b"remote\n"),
++    }
++}
++
++fn two_conflicts() -> TempDir {
++    conflict_repo(&[text_conflict(FIRST), text_conflict(SECOND)]).unwrap()
++}
++
++fn statuses(session: &MergeSession) -> Vec<(String, FileStatus)> {
++    let files = session.files().into_iter();
++    files.map(|file| (file.path, file.status)).collect()
++}
++
++fn expected(statuses: &[(&str, FileStatus)]) -> Vec<(String, FileStatus)> {
++    let statuses = statuses.iter();
++    statuses
++        .map(|(path, status)| ((*path).to_owned(), *status))
++        .collect()
++}
++
++#[test]
++fn a_file_added_outside_after_start_reads_as_resolved() {
++    use FileStatus::{Resolved, Unresolved};
++    let dir = two_conflicts();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    git_ok(dir.path(), &["add", FIRST]).unwrap();
++    assert_eq!(session.remaining(), 2);
++
++    session.refresh_statuses().unwrap();
++
++    let after = expected(&[(FIRST, Resolved), (SECOND, Unresolved)]);
++    assert_eq!(statuses(&session), after);
++    assert_eq!(session.remaining(), 1);
++}
++
++#[test]
++fn a_finished_file_checked_out_with_markers_outside_reads_as_unresolved() {
++    use FileStatus::{Resolved, Unresolved};
++    let dir = two_conflicts();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    session.finish(FIRST, "done\n").unwrap();
++    session.finish(SECOND, "done\n").unwrap();
++    git_ok(dir.path(), &["checkout", "-m", FIRST]).unwrap();
++
++    session.refresh_statuses().unwrap();
++
++    assert_eq!(
++        statuses(&session),
++        expected(&[(FIRST, Unresolved), (SECOND, Resolved)])
++    );
++}
++
++#[test]
++fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
++    let dir = two_conflicts();
++    git_ok(dir.path(), &["add", SECOND]).unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    git_ok(dir.path(), &["checkout", "-m", SECOND]).unwrap();
++
++    session.refresh_statuses().unwrap();
++
++    assert_eq!(
++        statuses(&session),
++        expected(&[(FIRST, FileStatus::Unresolved)])
++    );
++}
++
++#[test]
++fn refresh_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
++    let dir = two_conflicts();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    session.finish(FIRST, "done\n").unwrap();
++    let before = statuses(&session);
++    std::fs::write(dir.path().join(".git/index"), "not an index").unwrap();
++
++    let error = session.refresh_statuses().unwrap_err();
++
++    assert!(matches!(error, yamt_session::Error::Git(_)), "{error:?}");
++    assert_eq!(statuses(&session), before);
++}
+diff --git a/crates/session/tests/open_and_load.rs b/crates/session/tests/open_and_load.rs
+index 53ac606..3fce42e 100644
+--- a/crates/session/tests/open_and_load.rs
++++ b/crates/session/tests/open_and_load.rs
+@@ -114,8 +114,8 @@ fn open_lists_each_conflicted_file_once_in_git_order_with_its_unsupported_reason
+     let expected = [
+         (MODIFY_TS, None),
+         (ADD_ADD, None),
+-        (LOCAL_DELETED, Some(UnsupportedReason::LocalDeleted)),
+-        (REMOTE_DELETED, Some(UnsupportedReason::RemoteDeleted)),
++        (LOCAL_DELETED, None),
++        (REMOTE_DELETED, None),
+         (BINARY, Some(UnsupportedReason::Binary)),
+         (LATIN1, Some(UnsupportedReason::NonUtf8)),
+         (CRLF, None),
+@@ -146,6 +146,7 @@ fn load_modify_modify_typescript_returns_three_sides_and_their_chunks() {
+         [base, local, remote]
+     );
+     assert_eq!(data.eol, Eol::Lf);
++    assert_eq!(data.deleted, None);
+     assert_eq!(
+         data.chunks,
+         compute_chunks(base, local, remote, &Options::default())
+@@ -172,13 +173,11 @@ fn load_add_add_has_empty_base_and_one_conflict_chunk() {
+ }
+ 
+ #[test]
+-fn load_refuses_deleted_binary_and_non_utf8_files_with_their_reason() {
++fn load_refuses_binary_and_non_utf8_files_with_their_reason() {
+     let dir = every_kind_of_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+     let cases = [
+-        (LOCAL_DELETED, UnsupportedReason::LocalDeleted),
+-        (REMOTE_DELETED, UnsupportedReason::RemoteDeleted),
+         (BINARY, UnsupportedReason::Binary),
+         (LATIN1, UnsupportedReason::NonUtf8),
+     ];
+diff --git a/crates/session/tests/remote_name.rs b/crates/session/tests/remote_name.rs
+new file mode 100644
+index 0000000..52031b8
+--- /dev/null
++++ b/crates/session/tests/remote_name.rs
+@@ -0,0 +1,165 @@
++#![cfg(test)]
++
++use std::fs;
++use std::os::unix::fs::PermissionsExt;
++use std::path::Path;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
++use yamt_session::{MergeSession, RemoteName};
++
++const FILE: &str = "cart.ts";
++const UNREADABLE: u32 = 0o000;
++
++fn diverged() -> TempDir {
++    diverged_repo(&[ConflictFile {
++        path: FILE,
++        kind: FileKind::Regular,
++        base: Some(b"one\n"),
++        local: Some(b"local\n"),
++        remote: Some(b"remote\n"),
++    }])
++    .unwrap()
++}
++
++fn require_conflict(root: &Path, args: &[&str]) {
++    let output = git(root, args).unwrap();
++    assert!(!output.status.success(), "{args:?} did not conflict");
++}
++
++fn stdout_line(root: &Path, args: &[&str]) -> String {
++    let output = git_ok(root, args).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn remote_name_of(root: &Path) -> Option<RemoteName> {
++    MergeSession::open(root).unwrap().remote_name()
++}
++
++fn branch(name: &str) -> RemoteName {
++    RemoteName::Branch {
++        name: name.to_owned(),
++    }
++}
++
++fn commit(root: &Path, revision: &str, subject: &str, message: &str) -> RemoteName {
++    RemoteName::Commit {
++        short_id: stdout_line(root, &["rev-parse", "--short", revision]),
++        subject: subject.to_owned(),
++        message: message.to_owned(),
++    }
++}
++
++#[test]
++fn merging_a_branch_names_the_branch() {
++    let dir = diverged();
++    require_conflict(dir.path(), &["merge", "remote"]);
++
++    assert_eq!(remote_name_of(dir.path()), Some(branch("remote")));
++}
++
++#[test]
++fn merging_a_commit_no_branch_points_at_names_the_commit() {
++    let dir = diverged();
++    let root = dir.path();
++    git_ok(root, &["checkout", "--quiet", "--detach", "remote"]).unwrap();
++    let message = ["-m", "detached subject", "-m", "detached body"];
++    git_ok(
++        root,
++        &[&["commit", "--quiet", "--allow-empty"], &message[..]].concat(),
++    )
++    .unwrap();
++    let detached = stdout_line(root, &["rev-parse", "HEAD"]);
++    git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
++    require_conflict(root, &["merge", &detached]);
++
++    let expected = commit(
++        root,
++        &detached,
++        "detached subject",
++        "detached subject\n\ndetached body",
++    );
++    assert_eq!(remote_name_of(root), Some(expected));
++}
++
++#[test]
++fn two_branches_at_the_merged_commit_are_told_apart_by_the_merge_message() {
++    let dir = diverged();
++    let root = dir.path();
++    git_ok(root, &["branch", "also", "remote"]).unwrap();
++    git_ok(
++        root,
++        &[
++            "symbolic-ref",
++            "refs/remotes/origin/HEAD",
++            "refs/heads/remote",
++        ],
++    )
++    .unwrap();
++    require_conflict(root, &["merge", "remote"]);
++
++    assert_eq!(remote_name_of(root), Some(branch("remote")));
++}
++
++#[test]
++fn two_branches_and_a_merge_message_naming_neither_give_the_commit() {
++    let dir = diverged();
++    let root = dir.path();
++    git_ok(root, &["branch", "also", "remote"]).unwrap();
++    let remote = stdout_line(root, &["rev-parse", "remote"]);
++    require_conflict(root, &["merge", &remote]);
++
++    assert_eq!(
++        remote_name_of(root),
++        Some(commit(root, "remote", "remote", "remote"))
++    );
++}
++
++#[test]
++fn an_unreadable_merge_message_drops_the_name() {
++    let dir = diverged();
++    let root = dir.path();
++    git_ok(root, &["branch", "also", "remote"]).unwrap();
++    require_conflict(root, &["merge", "remote"]);
++    let merge_msg = root.join(".git/MERGE_MSG");
++    fs::set_permissions(&merge_msg, fs::Permissions::from_mode(UNREADABLE)).unwrap();
++
++    assert_eq!(remote_name_of(root), None);
++}
++
++#[test]
++fn a_cherry_pick_names_the_picked_commit() {
++    let dir = diverged();
++    require_conflict(dir.path(), &["cherry-pick", "remote"]);
++
++    assert_eq!(
++        remote_name_of(dir.path()),
++        Some(commit(dir.path(), "remote", "remote", "remote"))
++    );
++}
++
++#[test]
++fn a_rebase_names_the_replayed_commit() {
++    let dir = diverged();
++    let local = stdout_line(dir.path(), &["rev-parse", "local"]);
++    require_conflict(dir.path(), &["rebase", "remote"]);
++
++    assert_eq!(
++        remote_name_of(dir.path()),
++        Some(commit(dir.path(), &local, "local", "local"))
++    );
++}
++
++#[test]
++fn a_conflict_from_stash_pop_has_no_name() {
++    let dir = diverged();
++    let root = dir.path();
++    git_ok(root, &["checkout", "--quiet", "remote"]).unwrap();
++    fs::write(root.join(FILE), "stashed\n").unwrap();
++    git_ok(root, &["stash", "--quiet"]).unwrap();
++    git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
++    require_conflict(root, &["stash", "pop"]);
++
++    let session = MergeSession::open(root).unwrap();
++    assert_eq!(session.files().len(), 1);
++    assert_eq!(session.remote_name(), None);
++}
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 0074a60..0e27478 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -1,7 +1,9 @@
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::{Runtime, State};
+-use yamt_session::{FileEntry, FileMergeData, FileSides, MergeSession, Side, UnsupportedReason};
++use yamt_session::{
++    FileEntry, FileMergeData, FileSides, MergeSession, RemoteName, Side, UnsupportedReason,
++};
+ 
+ use crate::frontend_log::LogEntry;
+ 
+@@ -52,6 +54,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         reset_file,
+         describe_file,
+         take_side,
++        remote_name,
+         log,
+     ])
+ }
+@@ -72,8 +75,17 @@ pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn list_files(state: State<'_, SessionState>) -> Vec<FileEntry> {
+-    lock(&state).files()
++fn list_files(state: State<'_, SessionState>) -> Result<Vec<FileEntry>, IpcError> {
++    let mut session = lock(&state);
++    session.refresh_statuses()?;
++    Ok(session.files())
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++fn remote_name(state: State<'_, SessionState>) -> Option<RemoteName> {
++    lock(&state).remote_name()
+ }
+ 
+ #[tauri::command]
+@@ -211,7 +223,7 @@ mod tests {
+         }
+ 
+         fn exit_on_close(&self) -> Exit {
+-            ending_on_close(&lock(&self.app.state::<SessionState>())).exit
++            ending_on_close(&mut lock(&self.app.state::<SessionState>())).exit
+         }
+ 
+         fn unmerged(&self) -> String {
+@@ -230,13 +242,25 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn list_files_returns_every_conflicted_file() {
++    fn list_files_returns_every_conflicted_file_as_git_sees_it() {
+         let window = open_window();
+         let unresolved = "Unresolved";
+         assert_eq!(
+             window.invoke("list_files", json!({})),
+             Ok(entries([unresolved, unresolved, unresolved]))
+         );
++        git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
++        assert_eq!(
++            window.invoke("list_files", json!({})),
++            Ok(entries([unresolved, "Resolved", unresolved]))
++        );
++    }
++
++    #[test]
++    fn remote_name_names_the_merged_branch() {
++        let window = open_window();
++        let branch = json!({ "kind": "Branch", "name": "remote" });
++        assert_eq!(window.invoke("remote_name", json!({})), Ok(branch));
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index 1bbaf08..ea282d6 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -48,7 +48,10 @@ pub(crate) fn startup(repo: &Path) -> Startup {
+     }
+ }
+ 
+-pub(crate) fn ending_on_close(session: &MergeSession) -> Ending {
++pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
++    if let Err(error) = session.refresh_statuses() {
++        tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
++    }
+     let unresolved = session.remaining();
+     if unresolved == 0 {
+         return Ending {
+@@ -70,6 +73,7 @@ mod tests {
+     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ 
+     use super::*;
++    use crate::frontend_log::tests::logged;
+ 
+     fn text_conflict(path: &str) -> ConflictFile<'_> {
+         ConflictFile {
+@@ -137,7 +141,7 @@ mod tests {
+         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+         let mut session = MergeSession::open(repo.path()).unwrap();
+         assert_eq!(
+-            ending_on_close(&session),
++            ending_on_close(&mut session),
+             Ending {
+                 exit: Exit::Unresolved,
+                 message: Some("2 of 2 files still unresolved".to_owned()),
+@@ -145,12 +149,12 @@ mod tests {
+         );
+         session.finish("a.ts", "done\n").unwrap();
+         assert_eq!(
+-            ending_on_close(&session).message.as_deref(),
++            ending_on_close(&mut session).message.as_deref(),
+             Some("1 of 2 files still unresolved")
+         );
+         session.finish("b.ts", "done\n").unwrap();
+         assert_eq!(
+-            ending_on_close(&session),
++            ending_on_close(&mut session),
+             Ending {
+                 exit: Exit::Success,
+                 message: None,
+@@ -158,4 +162,41 @@ mod tests {
+         );
+         assert_eq!((Exit::Success as u8, Exit::Unresolved as u8), (0, 1));
+     }
++
++    #[test]
++    fn closing_counts_the_files_git_still_has_unmerged() {
++        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
++        let mut session = MergeSession::open(repo.path()).unwrap();
++        git_ok(repo.path(), &["add", "a.ts"]).unwrap();
++        assert_eq!(
++            ending_on_close(&mut session),
++            Ending {
++                exit: Exit::Unresolved,
++                message: Some("1 of 2 files still unresolved".to_owned()),
++            }
++        );
++        git_ok(repo.path(), &["add", "b.ts"]).unwrap();
++        assert_eq!(ending_on_close(&mut session).exit, Exit::Success);
++        git_ok(repo.path(), &["checkout", "-m", "b.ts"]).unwrap();
++        assert_eq!(ending_on_close(&mut session).exit, Exit::Unresolved);
++    }
++
++    #[test]
++    fn closing_with_a_broken_index_uses_the_session_statuses_and_warns() {
++        let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
++        let mut session = MergeSession::open(repo.path()).unwrap();
++        session.finish("a.ts", "done\n").unwrap();
++        std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
++
++        let (ending, logged) = logged(|| ending_on_close(&mut session));
++
++        assert_eq!(
++            ending.message.as_deref(),
++            Some("1 of 2 files still unresolved")
++        );
++        assert!(
++            logged.contains("WARN") && logged.contains("git could not list the unmerged files"),
++            "{logged}"
++        );
++    }
+ }
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 62199b9..3ce11a2 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -42,7 +42,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     let handle = app.handle().clone();
+     let mut close_watch = CloseWatch::new();
+     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+-    Ok(ending_on_close(&lock(&handle.state::<SessionState>())))
++    Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
+ }
+ 
+ fn window_title(root: &Path) -> String {
