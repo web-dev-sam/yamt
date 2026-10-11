@@ -26,18 +26,26 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
 
 async function synthetic(
   texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
-  chunks: readonly { kind: Chunk["kind"]; base: [number, number]; side: [number, number] }[],
+  chunks: readonly {
+    kind: Chunk["kind"];
+    base: [number, number];
+    side: [number, number];
+    remote?: [number, number];
+  }[],
 ): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
     ...texts,
-    chunks: chunks.map((chunk, id) => ({
-      id,
-      kind: chunk.kind,
-      base: { start: chunk.base[0], len: chunk.base[1] },
-      local: { start: chunk.side[0], len: chunk.side[1] },
-      remote: { start: chunk.side[0], len: chunk.side[1] },
-    })),
+    chunks: chunks.map((chunk, id) => {
+      const [remoteStart, remoteLen] = chunk.remote ?? chunk.side;
+      return {
+        id,
+        kind: chunk.kind,
+        base: { start: chunk.base[0], len: chunk.base[1] },
+        local: { start: chunk.side[0], len: chunk.side[1] },
+        remote: { start: remoteStart, len: remoteLen },
+      };
+    }),
     word_changes: chunks.map((_chunk, id) => ({
       chunk: id,
       local: { changed: [], removed_at: [] },
@@ -429,6 +437,36 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "remote"));
   }
   expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
+});
+
+test("bulk apply over touching spans whose last deletes an unterminated final line equals clicking each", async () => {
+  const start = open(
+    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc", eol: "Lf" }, [
+      { kind: "LocalOnly", base: [1, 1], side: [1, 1], remote: [1, 1] },
+      { kind: "LocalOnly", base: [2, 1], side: [2, 0], remote: [2, 1] },
+    ]),
+  );
+  function spans(merge: ApplyTarget): [number, number][] {
+    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
+  }
+
+  const bulk = run(
+    start,
+    bulkApplySteps({ target: start, side: "local", visible: allVisible(start) }),
+  );
+  const first = run(start, applyOne(start, chunkAt(start, 0), "local"));
+  const clicked = run(first, applyOne(first, chunkAt(first, 1), "local"));
+  const undone = command(bulk, undo);
+
+  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+  expect(clicked.state.sliceDoc()).toBe("a\nB");
+  expect(bulk.state.sliceDoc()).toBe("a\nB");
+  expect(spans(bulk)).toEqual(spans(clicked));
+  expect(statuses(bulk)).toEqual(statuses(clicked));
+  expect(undoDepth(bulk.state)).toBe(undoDepth(start.state) + 1);
+  expect(undone.state.sliceDoc()).toBe(start.state.sliceDoc());
+  expect(statuses(undone)).toEqual(statuses(start));
+  expect(spans(undone)).toEqual(spans(start));
 });
 
 test("deleting all of a change's lines in the middle pane ignores it", async () => {

@@ -1,5 +1,6 @@
 import { redo, undo } from "@codemirror/commands";
 import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
+import { searchPanelOpen } from "@codemirror/search";
 import type { Extension, StateField } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
@@ -18,6 +19,7 @@ import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
 import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
+import { findSpace, showFindSpace } from "./internal/find";
 import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { languageOf } from "./internal/language";
 import { applyOnModClick } from "./internal/modClick";
@@ -104,7 +106,11 @@ export class MergeController {
   }
 
   readonly #repaint = EditorView.updateListener.of((update) => {
-    if (update.docChanged || update.geometryChanged) {
+    if (
+      update.docChanged ||
+      update.geometryChanged ||
+      searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
+    ) {
       this.#requestFrame();
     }
   });
@@ -216,6 +222,16 @@ export class MergeController {
     this.#views.right.dispatch({ effects: showCovered.of(covered) });
   }
 
+  #showFindSpace(): void {
+    const views = [this.#views.left, this.#views.center, this.#views.right];
+    const shown = views.some((view) => searchPanelOpen(view.state));
+    for (const view of views) {
+      if (view.state.field(findSpace) !== shown) {
+        view.dispatch({ effects: showFindSpace.of(shown) });
+      }
+    }
+  }
+
   readonly #press = (press: IconPress, event: PointerEvent): void => {
     this.#drag.start(press, event);
   };
@@ -223,6 +239,7 @@ export class MergeController {
   #requestFrame(): void {
     this.#frameId ??= requestAnimationFrame(() => {
       this.#frameId = null;
+      this.#showFindSpace();
       const rows = this.#rows();
       this.#scroll.sync(rows);
       const press = this.#drag.press;

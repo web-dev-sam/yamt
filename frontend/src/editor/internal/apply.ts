@@ -5,6 +5,7 @@ import {
   Transaction,
   type ChangeSpec,
   type EditorState,
+  type StateEffect,
   type StateField,
   type TransactionSpec,
 } from "@codemirror/state";
@@ -12,14 +13,7 @@ import {
 import type { Chunk } from "../../ipc";
 import { setStatus, type ChunkSpan } from "./chunkField";
 import type { Side } from "./side";
-import {
-  applyMode,
-  canBulkApply,
-  isSideOpen,
-  statusAfterApply,
-  statusAfterIgnore,
-  type ChunkStatus,
-} from "./status";
+import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
 
 export type ChunkAction = {
   readonly kind: "apply" | "ignore";
@@ -60,22 +54,33 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
   return wholeLines(target.state.doc, { from, to: span.to }, lines);
 }
 
-function chainedChanges(target: ApplyTarget, spans: readonly ChunkSpan[], side: Side): ChangeSet {
+type ChainedAction = {
+  readonly changes: ChangeSet;
+  readonly effects: readonly StateEffect<unknown>[];
+};
+
+function chainedChanges(target: ApplyTarget, chunks: readonly Chunk[], side: Side): ChainedAction {
   let state = target.state;
   let changes = ChangeSet.empty(state.doc.length);
-  for (const { chunk } of spans) {
+  const effects: StateEffect<unknown>[] = [];
+  for (const chunk of chunks) {
     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
     if (span === undefined) {
       throw new Error(`chunk ${chunk.id} is not in the chunk field`);
     }
+    const effect = setStatus.of({
+      id: chunk.id,
+      status: statusAfterApply(chunk, span.status, side),
+    });
     const click = state.update({
       changes: applyChange({ ...target, state }, span, side),
-      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(chunk, span.status, side) }),
+      effects: effect,
     });
     changes = changes.compose(click.changes);
+    effects.push(effect);
     state = click.state;
   }
-  return changes;
+  return { changes, effects };
 }
 
 function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
@@ -83,19 +88,6 @@ function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkS
   return target.state
     .field(target.field)
     .filter((span) => ids.has(span.chunk.id) && isSideOpen(span.chunk, span.status, side));
-}
-
-function statusAfter(span: ChunkSpan, { kind, side }: ChunkAction): ChunkStatus {
-  switch (kind) {
-    case "apply":
-      return statusAfterApply(span.chunk, span.status, side);
-    case "ignore":
-      return statusAfterIgnore(span.chunk, span.status, side);
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
 }
 
 // History restores the selection from before the action's transaction, so the cursor moves in a
@@ -125,25 +117,46 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps: 
   }
 }
 
+function chosenAction(
+  target: ApplyTarget,
+  spans: readonly ChunkSpan[],
+  action: ChunkAction,
+): ChainedAction {
+  const { kind, side } = action;
+  switch (kind) {
+    case "apply":
+      return chainedChanges(
+        target,
+        spans.map((span) => span.chunk),
+        side,
+      );
+    case "ignore":
+      return {
+        changes: ChangeSet.empty(target.state.doc.length),
+        effects: spans.map((span) =>
+          setStatus.of({
+            id: span.chunk.id,
+            status: statusAfterIgnore(span.chunk, span.status, side),
+          }),
+        ),
+      };
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
+}
+
 export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
   const spans = chosenSpans(target, action);
   const last = spans.at(-1);
   if (last === undefined) {
     return [];
   }
-  const changes =
-    action.kind === "apply"
-      ? chainedChanges(target, spans, action.side)
-      : ChangeSet.empty(target.state.doc.length);
+  const { changes, effects } = chosenAction(target, spans, action);
   return [
     moveCursor(last.from),
-    {
-      changes,
-      effects: spans.map((span) =>
-        setStatus.of({ id: span.chunk.id, status: statusAfter(span, action) }),
-      ),
-      userEvent: `yamt.${action.kind}`,
-    },
+    { changes, effects, userEvent: `yamt.${action.kind}` },
     recordSelection(EditorSelection.single(last.from).map(changes)),
   ];
 }
@@ -157,20 +170,15 @@ export function bulkApplySteps({
   readonly side: Side;
   readonly visible: VisibleLines;
 }): Steps {
-  const spans = target.state
+  const chunks = target.state
     .field(target.field)
-    .filter((span) => canBulkApply(span.chunk, span.status, side));
-  if (spans.length === 0) {
+    .filter((span) => canBulkApply(span.chunk, span.status, side))
+    .map((span) => span.chunk);
+  if (chunks.length === 0) {
     return [];
   }
-  const changes = chainedChanges(target, spans, side);
-  const action = {
-    changes,
-    effects: spans.map((span) =>
-      setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.chunk, span.status, side) }),
-    ),
-    userEvent: "yamt.apply",
-  };
+  const { changes, effects } = chainedChanges(target, chunks, side);
+  const action = { changes, effects, userEvent: "yamt.apply" };
   const cursor = bulkCursorTarget(target.state, visible);
   if (cursor === null) {
     return [action, recordSelection(target.state.selection.map(changes))];

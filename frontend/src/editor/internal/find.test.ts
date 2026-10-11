@@ -1,8 +1,9 @@
 import { search, SearchQuery, setSearchQuery } from "@codemirror/search";
 import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { findLabel, labelOutdated, stepMatch } from "./find";
+import { find, findLabel, labelOutdated, showFindSpace, stepMatch } from "./find";
 
 const DOC = "foo bar\nFoo baz\nqux FOO\n";
 const FIRST = { from: 0, to: 3 };
@@ -65,4 +66,24 @@ test("the count is recomputed after a document, selection or query change and on
   expect(labelOutdated(state, transactions.query.state)).toBe(true);
   expect(labelOutdated(state, transactions.none.state)).toBe(false);
   expect(findLabel(transactions.edit.state, query("foo"))).toBe("1 of 4");
+});
+
+test("the space above the first line stays from show to hide, across edits; the last effect wins", () => {
+  function spaced(state: EditorState): boolean {
+    return state
+      .facet(EditorView.editorAttributes)
+      .some((attrs) => typeof attrs !== "function" && attrs["class"] === "find-space");
+  }
+  const state = EditorState.create({ doc: DOC, extensions: find });
+  const shown = state.update({ effects: showFindSpace.of(true) }).state;
+  const edited = shown.update({ changes: { from: 0, insert: "x" } }).state;
+  const hidden = edited.update({ effects: [showFindSpace.of(false)] }).state;
+
+  expect(spaced(state)).toBe(false);
+  expect(spaced(shown)).toBe(true);
+  expect(spaced(edited)).toBe(true);
+  expect(spaced(hidden)).toBe(false);
+  expect(
+    spaced(state.update({ effects: [showFindSpace.of(true), showFindSpace.of(false)] }).state),
+  ).toBe(false);
 });

@@ -54,15 +54,6 @@ const darkTheme = EditorView.theme(
       color: "var(--color-gutter-active)",
     },
     ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
-    ".cm-panels.cm-panels-top": {
-      position: "absolute",
-      left: "auto",
-      right: "16px",
-      maxWidth: "calc(100% - 32px)",
-      border: "1px solid var(--color-control-border)",
-      borderTop: "none",
-      borderRadius: "0 0 6px 6px",
-    },
     ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
     ".cm-searchMatch.cm-searchMatch-selected": {
       backgroundColor: "var(--color-selection)",

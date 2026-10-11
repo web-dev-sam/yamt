@@ -7,7 +7,13 @@ import {
   SearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
-import { EditorSelection, type EditorState, type TransactionSpec } from "@codemirror/state";
+import {
+  EditorSelection,
+  StateEffect,
+  StateField,
+  type EditorState,
+  type TransactionSpec,
+} from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -22,6 +28,32 @@ import xIcon from "~icons/lucide/x?raw";
 
 type Match = { readonly from: number; readonly to: number };
 type Direction = "next" | "previous";
+
+const FIND_BAR_HEIGHT_PX = 29;
+const FIND_BAR_INSET_PX = 16;
+
+const findTheme = EditorView.theme({
+  ".cm-panels.cm-panels-top": {
+    position: "absolute",
+    left: "auto",
+    right: `${FIND_BAR_INSET_PX}px`,
+    maxWidth: `calc(100% - ${FIND_BAR_INSET_PX}px - ${FIND_BAR_INSET_PX}px)`,
+    height: `${FIND_BAR_HEIGHT_PX}px`,
+    border: "1px solid var(--color-control-border)",
+    borderTop: "none",
+    borderRadius: "0 0 6px 6px",
+  },
+  "&.find-space .cm-content": { paddingTop: `${FIND_BAR_HEIGHT_PX}px` },
+});
+
+export const showFindSpace = StateEffect.define<boolean>();
+
+export const findSpace = StateField.define<boolean>({
+  create: () => false,
+  update: (shown, tr) => tr.effects.findLast((effect) => effect.is(showFindSpace))?.value ?? shown,
+  provide: (field) =>
+    EditorView.editorAttributes.from(field, (shown) => (shown ? { class: "find-space" } : {})),
+});
 
 function matches(state: EditorState, query: SearchQuery): Match[] {
   const found: Match[] = [];
@@ -222,6 +254,8 @@ class FindPanel implements Panel {
 }
 
 export const find = [
+  findTheme,
+  findSpace,
   search({ literal: true, createPanel: (view) => new FindPanel(view) }),
   keymap.of([
     { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
