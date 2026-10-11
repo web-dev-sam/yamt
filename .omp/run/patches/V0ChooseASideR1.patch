@@ -1,0 +1,482 @@
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 3ec8c72..bf27c77 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -42,6 +42,22 @@ impl Repo {
+         parse_unmerged(&run(command, None, GIT_TIMEOUT)?)
+     }
+ 
++    pub fn index_records(&self, path: &Path) -> Result<Vec<u8>> {
++        let mut command = self.command(Access::Read, &[LS_FILES, "-s", "-z", "--"]);
++        command.arg(path);
++        run(command, None, GIT_TIMEOUT)
++    }
++
++    // git-update-index(1) "USING --INDEX-INFO" reads the records `ls-files --stage` prints.
++    pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()> {
++        if records.is_empty() {
++            return self.remove_from_index(path);
++        }
++        let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
++        run(command, Some(records), GIT_TIMEOUT)?;
++        Ok(())
++    }
++
+     pub fn blob_reader(&self) -> Result<BlobReader> {
+         BlobReader::spawn(self.command(Access::Read, &[CAT_FILE, "--batch"]))
+     }
+@@ -84,7 +100,7 @@ impl Repo {
+     }
+ 
+     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
+-        let mut command = self.command(Access::Write, &["checkout-index", "--force", "--"]);
++        let mut command = self.command(Access::Write, &["checkout-index", "-u", "--force", "--"]);
+         command.arg(path);
+         run(command, None, GIT_TIMEOUT)?;
+         Ok(())
+diff --git a/crates/gitio/tests/repo.rs b/crates/gitio/tests/repo.rs
+index 84dc2ee..7ea7561 100644
+--- a/crates/gitio/tests/repo.rs
++++ b/crates/gitio/tests/repo.rs
+@@ -181,26 +181,80 @@ fn resolve_with_replaces_every_stage_by_one_stage_zero_entry_of_the_chosen_side(
+ 
+     assert_eq!(repo.unmerged().unwrap(), []);
+     let oid = remote.oid.as_str();
+-    assert_eq!(staged(&dir), format!("100644 {oid} 0\t{FILE}\n"));
+-    merged_worktree(&dir);
++    assert_eq!(
++        staged(&dir),
++        format!("{REGULAR_FILE_MODE:o} {oid} 0\t{FILE}\n")
++    );
++    require_conflict_markers(&dir);
+ }
+ 
+-fn merged_worktree(dir: &TempDir) -> Vec<u8> {
+-    let worktree = fs::read(dir.path().join(FILE)).unwrap();
++fn worktree(dir: &TempDir) -> Vec<u8> {
++    fs::read(dir.path().join(FILE)).unwrap()
++}
++
++fn require_conflict_markers(dir: &TempDir) {
++    let worktree = worktree(dir);
+     assert!(worktree.starts_with(b"one\n<<<<<<<"), "{worktree:?}");
+-    worktree
+ }
+ 
+ #[test]
+ fn remove_from_index_drops_every_stage_and_leaves_the_worktree_file() {
+     let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
+     let repo = Repo::discover(dir.path()).unwrap();
+-    let worktree = merged_worktree(&dir);
++    require_conflict_markers(&dir);
++    let before = worktree(&dir);
+ 
+     repo.remove_from_index(Path::new(FILE)).unwrap();
+ 
+     assert_eq!(staged(&dir), "");
+-    assert_eq!(fs::read(dir.path().join(FILE)).unwrap(), worktree);
++    assert_eq!(worktree(&dir), before);
++}
++
++#[test]
++fn restore_index_records_puts_back_the_stage_zero_entry_read_before() {
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let repo = Repo::discover(dir.path()).unwrap();
++    let entries = repo.unmerged().unwrap();
++    let (local, remote) = (&entries[1], &entries[2]);
++    repo.resolve_with(local).unwrap();
++    let records = repo.index_records(Path::new(FILE)).unwrap();
++    let oid = local.oid.as_str();
++    let record = format!("{REGULAR_FILE_MODE:o} {oid} 0\t{FILE}");
++    assert_eq!(records, format!("{record}\0").into_bytes());
++    repo.resolve_with(remote).unwrap();
++
++    repo.restore_index_records(Path::new(FILE), records)
++        .unwrap();
++
++    assert_eq!(staged(&dir), format!("{record}\n"));
++}
++
++#[test]
++fn restore_index_records_without_records_removes_the_path_again() {
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let repo = Repo::discover(dir.path()).unwrap();
++    let remote = repo.unmerged().unwrap().remove(2);
++    repo.remove_from_index(Path::new(FILE)).unwrap();
++    let records = repo.index_records(Path::new(FILE)).unwrap();
++    assert_eq!(records, b"");
++    repo.resolve_with(&remote).unwrap();
++
++    repo.restore_index_records(Path::new(FILE), records)
++        .unwrap();
++
++    assert_eq!(staged(&dir), "");
++}
++
++#[test]
++fn index_records_of_a_conflicted_path_list_every_stage() {
++    let dir = one_file_repo(FILE, Some(BASE), Some(LOCAL), Some(REMOTE));
++    let repo = Repo::discover(dir.path()).unwrap();
++
++    let records = repo.index_records(Path::new(FILE)).unwrap();
++
++    let listed = String::from_utf8(records).unwrap().replace('\0', "\n");
++    assert_eq!(listed, staged(&dir));
++    assert_eq!(listed.lines().count(), 3);
+ }
+ 
+ #[test]
+diff --git a/crates/session/src/decode.rs b/crates/session/src/decode.rs
+index b046576..ae5db69 100644
+--- a/crates/session/src/decode.rs
++++ b/crates/session/src/decode.rs
+@@ -1,11 +1,9 @@
+ use serde::Serialize;
+ use specta::Type;
+ 
+-use crate::sides::SideContent;
+-
+ // git's binary heuristic: a NUL within the first 8000 bytes (xdiff-interface.c FIRST_FEW_BYTES).
+ const BINARY_PROBE_LEN: usize = 8000;
+-const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
++pub(crate) const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+ pub enum Eol {
+@@ -36,7 +34,7 @@ pub(crate) fn decode_sides(sides: [Vec<u8>; 3]) -> Result<[String; 3], Unsupport
+     Ok([to_text(base)?, to_text(local)?, to_text(remote)?])
+ }
+ 
+-fn is_binary(bytes: &[u8]) -> bool {
++pub(crate) fn is_binary(bytes: &[u8]) -> bool {
+     let probe = bytes.get(..BINARY_PROBE_LEN).unwrap_or(bytes);
+     probe.contains(&b'\0')
+ }
+@@ -45,22 +43,6 @@ fn to_text(bytes: Vec<u8>) -> Result<String, UnsupportedReason> {
+     String::from_utf8(bytes).map_err(|_| UnsupportedReason::NonUtf8)
+ }
+ 
+-pub(crate) fn describe_blob(bytes: &[u8]) -> SideContent {
+-    let size = bytes.len() as u64;
+-    if is_binary(bytes) {
+-        return SideContent::Binary { bytes: size };
+-    }
+-    if bytes.len() > MAX_TEXT_BYTES {
+-        return SideContent::TooLarge { bytes: size };
+-    }
+-    match std::str::from_utf8(bytes) {
+-        Ok(text) => SideContent::Text {
+-            lines: u32::try_from(text.lines().count()).unwrap_or(u32::MAX),
+-        },
+-        Err(_) => SideContent::NonUtf8 { bytes: size },
+-    }
+-}
+-
+ pub(crate) fn detect_eol(text: &str) -> Eol {
+     let line_breaks = text.matches('\n').count();
+     let crlf_breaks = text.matches("\r\n").count();
+@@ -134,26 +116,4 @@ mod tests {
+             Err(UnsupportedReason::NonUtf8)
+         );
+     }
+-
+-    #[test]
+-    fn a_blob_is_described_by_the_first_failing_check_with_its_size_or_its_line_count() {
+-        let too_large_and_latin1 = vec![b'\xe9'; MAX_TEXT_BYTES + 1];
+-        let binary_and_too_large = vec![b'\0'; MAX_TEXT_BYTES + 1];
+-        let size = (MAX_TEXT_BYTES + 1) as u64;
+-        assert_eq!(
+-            describe_blob(&binary_and_too_large),
+-            SideContent::Binary { bytes: size }
+-        );
+-        assert_eq!(
+-            describe_blob(&too_large_and_latin1),
+-            SideContent::TooLarge { bytes: size }
+-        );
+-        assert_eq!(
+-            describe_blob(b"caf\xe9\n"),
+-            SideContent::NonUtf8 { bytes: 5 }
+-        );
+-        assert_eq!(describe_blob(b"one\ntwo"), SideContent::Text { lines: 2 });
+-        assert_eq!(describe_blob(b"one\ntwo\n"), SideContent::Text { lines: 2 });
+-        assert_eq!(describe_blob(b""), SideContent::Text { lines: 0 });
+-    }
+ }
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index c666b77..c8d5db3 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -50,6 +50,8 @@ pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMerg
+     }
+ }
+ 
++const LOG_TARGET: &str = "session";
++
+ pub struct MergeSession {
+     repo: Repo,
+     files: Vec<FileState>,
+@@ -80,6 +82,11 @@ struct Texts {
+     remote: String,
+ }
+ 
++enum IndexBefore {
++    Conflicted,
++    Resolved(Vec<u8>),
++}
++
+ impl MergeSession {
+     pub fn open(cwd: &Path) -> Result<MergeSession> {
+         let repo = Repo::discover(cwd)?;
+@@ -133,9 +140,12 @@ impl MergeSession {
+         let before = worktree_bytes(&worktree_file, path)?;
+         write_worktree_file(&worktree_file, path, result.as_bytes())?;
+         if let Err(error) = self.repo.add(&file.path) {
+-            match before {
+-                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes)?,
+-                None => remove_worktree_file(&worktree_file, path)?,
++            let rollback = match before {
++                Some(bytes) => write_worktree_file(&worktree_file, path, &bytes),
++                None => remove_worktree_file(&worktree_file, path),
++            };
++            if let Err(rollback_error) = rollback {
++                warn_rollback_failed("finish_rollback_failed", path, &rollback_error);
+             }
+             return Err(error.into());
+         }
+@@ -156,14 +166,22 @@ impl MergeSession {
+ 
+     pub fn take(&mut self, path: &str, side: Side) -> Result<()> {
+         let file = find_file(&mut self.files, path)?;
++        let index_before = match file.status {
++            FileStatus::Unresolved => IndexBefore::Conflicted,
++            FileStatus::Resolved => IndexBefore::Resolved(self.repo.index_records(&file.path)?),
++        };
+         let chosen = file.stages.side(side);
+         match chosen {
+             Some(entry) => self.repo.resolve_with(entry)?,
+             None => self.repo.remove_from_index(&file.path)?,
+         }
+         if let Err(error) = write_chosen_side(&self.repo, file, chosen) {
+-            self.repo.restore_stages(&file.stages.entries())?;
+-            file.status = FileStatus::Unresolved;
++            if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
++                warn_rollback_failed("take_restore_failed", path, &restore_error);
++                // A failed `update-index` leaves the index as it was: git replaces it only by
++                // renaming `index.lock` over it (git lockfile.h), so the chosen side is still staged.
++                file.status = FileStatus::Resolved;
++            }
+             return Err(error);
+         }
+         file.status = FileStatus::Resolved;
+@@ -207,6 +225,17 @@ fn write_chosen_side(repo: &Repo, file: &FileState, chosen: Option<&StageEntry>)
+     }
+ }
+ 
++fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<()> {
++    match before {
++        IndexBefore::Conflicted => Ok(repo.restore_stages(&file.stages.entries())?),
++        IndexBefore::Resolved(records) => Ok(repo.restore_index_records(&file.path, records)?),
++    }
++}
++
++fn warn_rollback_failed(event: &str, path: &str, error: &Error) {
++    tracing::warn!(target: LOG_TARGET, event, path, %error, "rollback failed");
++}
++
+ fn worktree_bytes(worktree_file: &Path, path: &str) -> Result<Option<Vec<u8>>> {
+     match fs::read(worktree_file) {
+         Ok(bytes) => Ok(Some(bytes)),
+@@ -221,8 +250,9 @@ fn write_worktree_file(worktree_file: &Path, path: &str, bytes: &[u8]) -> Result
+ 
+ fn remove_worktree_file(worktree_file: &Path, path: &str) -> Result<()> {
+     match fs::remove_file(worktree_file) {
+-        Err(source) if source.kind() != io::ErrorKind::NotFound => Err(write_failed(path, source)),
+-        Ok(()) | Err(_) => Ok(()),
++        Ok(()) => Ok(()),
++        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
++        Err(source) => Err(write_failed(path, source)),
+     }
+ }
+ 
+diff --git a/crates/session/src/sides.rs b/crates/session/src/sides.rs
+index 9a09505..ff1bd5f 100644
+--- a/crates/session/src/sides.rs
++++ b/crates/session/src/sides.rs
+@@ -3,7 +3,7 @@ use specta::Type;
+ use yamt_gitio::{BlobReader, StageEntry};
+ 
+ use crate::Result;
+-use crate::decode::{UnsupportedReason, describe_blob};
++use crate::decode::{MAX_TEXT_BYTES, UnsupportedReason, is_binary};
+ 
+ pub(crate) const SYMLINK_MODE: u32 = 0o120_000;
+ pub(crate) const SUBMODULE_MODE: u32 = 0o160_000;
+@@ -70,3 +70,46 @@ pub(crate) fn side_content(
+     };
+     Ok(content)
+ }
++
++fn describe_blob(bytes: &[u8]) -> SideContent {
++    let size = bytes.len() as u64;
++    if is_binary(bytes) {
++        return SideContent::Binary { bytes: size };
++    }
++    if bytes.len() > MAX_TEXT_BYTES {
++        return SideContent::TooLarge { bytes: size };
++    }
++    match std::str::from_utf8(bytes) {
++        Ok(text) => SideContent::Text {
++            lines: u32::try_from(text.lines().count()).unwrap_or(u32::MAX),
++        },
++        Err(_) => SideContent::NonUtf8 { bytes: size },
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_blob_is_described_by_the_first_failing_check_with_its_size_or_its_line_count() {
++        let too_large_and_latin1 = vec![b'\xe9'; MAX_TEXT_BYTES + 1];
++        let binary_and_too_large = vec![b'\0'; MAX_TEXT_BYTES + 1];
++        let size = (MAX_TEXT_BYTES + 1) as u64;
++        assert_eq!(
++            describe_blob(&binary_and_too_large),
++            SideContent::Binary { bytes: size }
++        );
++        assert_eq!(
++            describe_blob(&too_large_and_latin1),
++            SideContent::TooLarge { bytes: size }
++        );
++        assert_eq!(
++            describe_blob(b"caf\xe9\n"),
++            SideContent::NonUtf8 { bytes: 5 }
++        );
++        assert_eq!(describe_blob(b"one\ntwo"), SideContent::Text { lines: 2 });
++        assert_eq!(describe_blob(b"one\ntwo\n"), SideContent::Text { lines: 2 });
++        assert_eq!(describe_blob(b""), SideContent::Text { lines: 0 });
++    }
++}
+diff --git a/crates/session/tests/all_or_nothing.rs b/crates/session/tests/all_or_nothing.rs
+index 9951111..9777c0f 100644
+--- a/crates/session/tests/all_or_nothing.rs
++++ b/crates/session/tests/all_or_nothing.rs
+@@ -116,25 +116,55 @@ fn take_with_a_held_index_lock_changes_nothing() {
+     }
+ }
+ 
++fn set_assets_mode(dir: &TempDir, mode: u32) {
++    let assets = dir.path().join("assets");
++    fs::set_permissions(assets, fs::Permissions::from_mode(mode)).unwrap();
++}
++
+ #[test]
+ fn take_whose_worktree_write_fails_puts_the_conflict_back() {
+     let dir = mixed_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    let before = (unmerged(&dir), worktree(&dir, DELETED));
+-    session.take(BINARY, Side::Local).unwrap();
+-    let assets = dir.path().join("assets");
+-    fs::set_permissions(&assets, fs::Permissions::from_mode(READ_ONLY_DIR)).unwrap();
++    let binary_before = (unmerged(&dir), worktree(&dir, BINARY));
++    let deleted_before = (unmerged(&dir), worktree(&dir, DELETED));
++    set_assets_mode(&dir, READ_ONLY_DIR);
+ 
+     let binary = session.take(BINARY, Side::Remote);
+     let deleted = session.take(DELETED, Side::Local);
+ 
+-    fs::set_permissions(&assets, fs::Permissions::from_mode(WRITABLE_DIR)).unwrap();
+-    assert!(matches!(binary, Err(Error::Git(_))), "{binary:?}");
++    set_assets_mode(&dir, WRITABLE_DIR);
++    assert_git_error(binary);
+     assert!(
+         matches!(deleted, Err(Error::WriteFailed { .. })),
+         "{deleted:?}"
+     );
+-    assert_nothing_changed(&dir, &session, DELETED, &before);
+-    let local_bytes = Some(b"\0local".to_vec());
+-    assert_nothing_changed(&dir, &session, BINARY, &(before.0.clone(), local_bytes));
++    assert_nothing_changed(&dir, &session, BINARY, &binary_before);
++    assert_nothing_changed(&dir, &session, DELETED, &deleted_before);
++}
++
++fn staged(dir: &TempDir, path: &str) -> String {
++    String::from_utf8(git_ok(dir.path(), &["ls-files", "-s", "--", path]).unwrap()).unwrap()
++}
++
++#[test]
++fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
++    let dir = mixed_conflict();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    session.take(BINARY, Side::Local).unwrap();
++    session.take(DELETED, Side::Local).unwrap();
++    let before = |path| (staged(&dir, path), worktree(&dir, path));
++    let (binary_before, deleted_before) = (before(BINARY), before(DELETED));
++    assert_eq!(deleted_before, (String::new(), None));
++    set_assets_mode(&dir, READ_ONLY_DIR);
++
++    let binary = session.take(BINARY, Side::Remote);
++    let deleted = session.take(DELETED, Side::Remote);
++
++    set_assets_mode(&dir, WRITABLE_DIR);
++    assert_git_error(binary);
++    assert_git_error(deleted);
++    for (path, before) in [(BINARY, binary_before), (DELETED, deleted_before)] {
++        assert_eq!((staged(&dir, path), worktree(&dir, path)), before, "{path}");
++        assert_eq!(status_of(&session, path), FileStatus::Resolved, "{path}");
++    }
+ }
+diff --git a/crates/session/tests/describe_and_take.rs b/crates/session/tests/describe_and_take.rs
+index a27a764..8134544 100644
+--- a/crates/session/tests/describe_and_take.rs
++++ b/crates/session/tests/describe_and_take.rs
+@@ -250,13 +250,15 @@ fn taken(path: &str, side: Side) -> TempDir {
+ }
+ 
+ #[test]
+-fn take_of_a_binary_file_stages_and_writes_the_chosen_side() {
++fn take_of_a_binary_file_stages_and_writes_the_chosen_side_with_fresh_stat_data() {
+     for (side, bytes) in [
+         (Side::Local, b"\0local".as_slice()),
+         (Side::Remote, b"\0remote!"),
+     ] {
+         let dir = taken(BINARY, side);
+         assert_eq!(fs::read(dir.path().join(BINARY)).unwrap(), bytes);
++        let diff_files = git(dir.path(), &["diff-files", "--quiet", "--", BINARY]).unwrap();
++        assert!(diff_files.status.success(), "{diff_files:?}");
+     }
+ }
+ 
+@@ -275,8 +277,10 @@ fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
+ }
+ 
+ #[test]
+-fn take_of_a_file_against_a_link_writes_the_link_or_keeps_the_file() {
++fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
+     let dir = file_against_link();
++    fs::remove_file(dir.path().join(FILE_OR_LINK)).unwrap();
++    fs::remove_file(dir.path().join(FILE_OR_LINK_RENAMED)).unwrap();
+     assert_take_resolves_to_that_side(&dir, FILE_OR_LINK, Side::Remote);
+     assert_take_resolves_to_that_side(&dir, FILE_OR_LINK_RENAMED, Side::Local);
+     assert_eq!(
+@@ -341,14 +345,16 @@ fn take_of_the_kept_side_of_a_deleted_file_restores_it() {
+ }
+ 
+ #[test]
+-fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_directory() {
++fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_worktree_alone() {
+     for (side, commit) in [(Side::Local, LOCAL_COMMIT), (Side::Remote, REMOTE_COMMIT)] {
+-        let dir = taken(SUBMODULE, side);
++        let dir = every_kind_of_conflict();
++        fs::remove_dir(dir.path().join(SUBMODULE)).unwrap();
++        assert_take_resolves_to_that_side(&dir, SUBMODULE, side);
+         assert_eq!(
+             staged(&dir, SUBMODULE),
+             format!("160000 {commit} 0\t{SUBMODULE}\n")
+         );
+-        assert!(dir.path().join(SUBMODULE).is_dir());
++        assert!(dir.path().join(SUBMODULE).symlink_metadata().is_err());
+     }
+ }
+ 
