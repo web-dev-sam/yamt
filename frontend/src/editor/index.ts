@@ -20,7 +20,7 @@ import { coveredDecorations, coveredField, sameCovered, showCovered } from "./in
 import { centerDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
 import { findSpace, showFindSpace } from "./internal/find";
-import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
+import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { languageOf } from "./internal/language";
 import { applyOnModClick } from "./internal/modClick";
 import { createPane, languageCompartment, paneText } from "./internal/pane";
@@ -28,7 +28,7 @@ import { ScrollSync } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
-import { keepEditorFocus, paintStrips, type IconPress } from "./internal/strips";
+import { Strips, type IconPress } from "./internal/strips";
 
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
@@ -49,10 +49,11 @@ export class MergeController {
   readonly #readOnly: boolean;
   readonly #views: PaneViews;
   readonly #sides: SideDocs;
-  readonly #strips: MergeHosts["strips"];
+  readonly #strips: Strips;
   readonly #scroll: ScrollSync;
   readonly #drag: IconDrag;
   #frameId: number | null = null;
+  #rowsCache: ChunkRow[] | null = null;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
@@ -66,11 +67,8 @@ export class MergeController {
       language: description?.support?.language ?? null,
     });
     this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
-    this.#strips = hosts.strips;
-    for (const strip of this.#strips) {
-      strip.addEventListener("mousedown", keepEditorFocus);
-    }
-    this.#drag = new IconDrag(this.#strips, {
+    this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
+    this.#drag = new IconDrag(hosts.strips, {
       changed: () => {
         this.#requestFrame();
       },
@@ -106,6 +104,9 @@ export class MergeController {
   }
 
   readonly #repaint = EditorView.updateListener.of((update) => {
+    if (rowsChanged(update, this.#field)) {
+      this.#rowsCache = null;
+    }
     if (
       update.docChanged ||
       update.geometryChanged ||
@@ -211,7 +212,8 @@ export class MergeController {
   }
 
   #rows(): ChunkRow[] {
-    return chunkRows(this.#views, this.#views.center.state.field(this.#field));
+    this.#rowsCache ??= chunkRows(this.#views, this.#views.center.state.field(this.#field));
+    return this.#rowsCache;
   }
 
   #showCovered(covered: ChunkAction | null): void {
@@ -245,10 +247,7 @@ export class MergeController {
       const press = this.#drag.press;
       const covered = press === null ? null : coveredAction(press, rows, this.#views);
       this.#showCovered(covered);
-      paintStrips(this.#views, this.#strips, rows, {
-        covered,
-        onPress: this.#readOnly ? null : this.#press,
-      });
+      this.#strips.paint(this.#views, rows, covered);
     });
   }
 
@@ -287,9 +286,6 @@ export class MergeController {
     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
       view.destroy();
     }
-    for (const strip of this.#strips) {
-      strip.removeEventListener("mousedown", keepEditorFocus);
-      strip.replaceChildren();
-    }
+    this.#strips.destroy();
   }
 }

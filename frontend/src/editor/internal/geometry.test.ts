@@ -1,9 +1,13 @@
-import { Text } from "@codemirror/state";
+import { EditorSelection, EditorState, Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { rangeSpan } from "./geometry";
+import { loadFixture } from "../../ipc";
+import { chunkField, setStatus } from "./chunkField";
+import { crossesStrip, rangeSpan, rowsChanged } from "./geometry";
+import { statusAfterIgnore } from "./status";
 
 const LINE_PX = 20;
+const STRIP_PX = 600;
 
 function spanOf(
   lines: readonly string[],
@@ -41,4 +45,48 @@ test("a range to the end of a newline-terminated document ends at the empty last
 
 test("an empty document has one point at the top", () => {
   expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
+});
+
+test("chunk rows go stale on a status change, an edit or new measurements, not on a cursor move", async () => {
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
+  const field = chunkField(data.chunks);
+  const state = EditorState.create({ doc: data.base, extensions: field });
+  const [first] = state.field(field);
+  if (first === undefined) {
+    throw new Error("fixture lost its chunks");
+  }
+  const status = statusAfterIgnore(first.chunk, first.status, "local");
+  const ignored = state.update({ effects: setStatus.of({ id: first.chunk.id, status }) }).state;
+  const edited = state.update({ changes: { from: 0, insert: "x\n" } }).state;
+  const moved = state.update({ selection: EditorSelection.cursor(1) }).state;
+  const sidePane = EditorState.create({ doc: data.local });
+
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: ignored }, field)).toBe(
+    true,
+  );
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: edited }, field)).toBe(
+    true,
+  );
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, field)).toBe(
+    false,
+  );
+  expect(rowsChanged({ geometryChanged: true, startState: state, state: moved }, field)).toBe(true);
+  expect(
+    rowsChanged({ geometryChanged: false, startState: sidePane, state: sidePane }, field),
+  ).toBe(false);
+  expect(rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, field)).toBe(
+    true,
+  );
+});
+
+test("a shape is drawn while any part of it touches the strip, edges included", () => {
+  expect(crossesStrip(-LINE_PX, 0, STRIP_PX)).toBe(true);
+  expect(crossesStrip(STRIP_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
+  expect(crossesStrip(-LINE_PX, STRIP_PX + LINE_PX, STRIP_PX)).toBe(true);
+  expect(crossesStrip(LINE_PX, LINE_PX, STRIP_PX)).toBe(true);
+});
+
+test("a shape wholly above or below the strip is left out", () => {
+  expect(crossesStrip(-LINE_PX - 1, -1, STRIP_PX)).toBe(false);
+  expect(crossesStrip(STRIP_PX + 1, STRIP_PX + LINE_PX, STRIP_PX)).toBe(false);
 });

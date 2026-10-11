@@ -2,10 +2,9 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk } from "../../ipc";
 import { coveredChunks } from "./drag";
-import type { ChunkRow } from "./geometry";
+import { gapArrows, type ChunkRow } from "./geometry";
 import type { Side } from "./side";
 import { PENDING, type ChunkStatus } from "./status";
-import { gapArrows } from "./strips";
 
 const LINE_PX = 20;
 const FAR_BELOW = 1_000_000;

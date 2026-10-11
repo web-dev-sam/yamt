@@ -4,6 +4,7 @@ import type { Span } from "../../connectors";
 import type { Pane, PaneViews } from "./geometry";
 
 export type Anchor = Readonly<Record<Pane, number>>;
+type SpanRow = Readonly<Record<Pane, Span>>;
 
 const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 const ANCHOR_AT = 0.5;
@@ -12,11 +13,11 @@ function shifted(anchor: Anchor, by: number): Anchor {
   return { left: anchor.left + by, center: anchor.center + by, right: anchor.right + by };
 }
 
-function edge(row: Readonly<Record<Pane, Span>>, side: keyof Span): Anchor {
+function edge(row: SpanRow, side: keyof Span): Anchor {
   return { left: row.left[side], center: row.center[side], right: row.right[side] };
 }
 
-export function anchorsOf(rows: readonly Readonly<Record<Pane, Span>>[], ends: Anchor): Anchor[] {
+export function anchorsOf(rows: readonly SpanRow[], ends: Anchor): Anchor[] {
   const start = { left: 0, center: 0, right: 0 };
   return [start, ...rows.flatMap((row) => [edge(row, "top"), edge(row, "bottom")]), ends];
 }
@@ -66,6 +67,7 @@ export class ScrollSync {
   #echoes: readonly Pane[] = [];
   #clearEchoes: number | null = null;
   #syncedTops: Readonly<Record<Pane, number>> | null = null;
+  #anchors: { readonly rows: readonly SpanRow[]; readonly anchors: Anchor[] } | null = null;
 
   constructor(views: PaneViews, requestFrame: () => void) {
     this.#views = views;
@@ -83,14 +85,14 @@ export class ScrollSync {
     }
   }
 
-  sync(rows: readonly Readonly<Record<Pane, Span>>[]): void {
+  sync(rows: readonly SpanRow[]): void {
     const source = this.#source;
     this.#source = null;
     const views = this.#views;
     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.[source]) {
       return;
     }
-    const at = targets(anchorsOf(rows, ends(views)), source, middle(views[source]));
+    const at = targets(this.#anchorsOf(rows), source, middle(views[source]));
     const followers = PANES.filter((pane) => pane !== source);
     for (const pane of followers) {
       const { scrollDOM, documentPadding } = views[pane];
@@ -109,6 +111,15 @@ export class ScrollSync {
       this.#clearEchoes = null;
       this.#echoes = [];
     });
+  }
+
+  #anchorsOf(rows: readonly SpanRow[]): Anchor[] {
+    if (this.#anchors?.rows === rows) {
+      return this.#anchors.anchors;
+    }
+    const anchors = anchorsOf(rows, ends(this.#views));
+    this.#anchors = { rows, anchors };
+    return anchors;
   }
 
   destroy(): void {

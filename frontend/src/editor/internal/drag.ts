@@ -1,7 +1,7 @@
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
-import type { ChunkRow, PaneViews } from "./geometry";
-import { gapArrows, type IconPress } from "./strips";
+import { gapArrows, type ChunkRow, type PaneViews } from "./geometry";
+import type { IconPress } from "./strips";
 
 type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
 

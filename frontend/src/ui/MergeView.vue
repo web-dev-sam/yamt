@@ -81,7 +81,10 @@ function markResolved(): void {
 </script>
 
 <template>
-  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
+  <div
+    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
+    :class="{ 'invisible [content-visibility:hidden]': !shown }"
+  >
     <MergeToolbar
       v-if="data.deleted === null"
       :summary="summary"
@@ -132,22 +135,19 @@ function markResolved(): void {
         class="col-start-1 row-start-2 min-h-0 min-w-0"
         :class="{ invisible: data.deleted === 'local' }"
       />
-      <svg
-        ref="leftStrip"
-        aria-hidden="true"
-        class="col-start-2 row-start-2 h-full w-full border-x border-separator"
-      />
+      <!-- Own layer: a strip repainted every scroll frame inside the window's layer cost about 5 ms per frame in WebKitGTK 2.54 (slice 3.P). -->
+      <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
+        <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
+      </div>
       <div
         ref="center"
         class="col-start-3 row-start-2 min-h-0 min-w-0"
         :class="{ invisible: deletedShown }"
       />
       <p v-if="deletedShown" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
-      <svg
-        ref="rightStrip"
-        aria-hidden="true"
-        class="col-start-4 row-start-2 h-full w-full border-x border-separator"
-      />
+      <div class="col-start-4 row-start-2 min-h-0 border-x border-separator will-change-transform">
+        <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
+      </div>
       <div
         ref="right"
         class="col-start-5 row-start-2 min-h-0 min-w-0"
