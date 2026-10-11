@@ -395,11 +395,11 @@ export type SourceResult<T> = { ok: true; value: T } | { ok: false; failure: Sou
 export interface ChunkSource {
   listFiles(): Promise<SourceResult<FileList>>; // settles disk changes, then re-reads git: marks are git's view (plan §2 #49/#53)
   loadFile(path: string): Promise<SourceResult<FileMergeData>>; // domain Chunk: { id, kind, middle, local, remote, words }; base is not shown, so not carried
-  finishFile(
-    path: string,
-    text: string,
-    diskVersion: DiskVersion,
-  ): Promise<SourceResult<WriteReply>>;
+  finishFile(request: {
+    path: string;
+    text: string;
+    diskVersion: DiskVersion;
+  }): Promise<SourceResult<WriteReply>>;
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
