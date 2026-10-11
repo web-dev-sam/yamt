@@ -1,19 +1,9 @@
 {
-  "V0ChoicePanelR1": {
-    "owned": [
-      "frontend/src/ui/**",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/editor/internal/side.ts"
-    ]
-  },
-  "V0ReleaseR1": {
+  "V0ReleaseR2": {
     "owned": [
       "src-tauri/src/appimage.rs",
       "src-tauri/src/window.rs",
-      "src-tauri/src/lib.rs",
       "src-tauri/AGENTS.md",
-      "src-tauri/tauri.conf.json",
       "README.md",
       "THIRD_PARTY_NOTICES.md",
       "THIRD_PARTY_LICENSES.txt",
