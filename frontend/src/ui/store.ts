@@ -3,6 +3,8 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 import {
   log,
   type ChunkSource,
+  type DiskChange,
+  type DiskVersion,
   type FileEntry,
   type FileMergeData,
   type FileSides,
@@ -11,22 +13,28 @@ import {
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
+import { applyDiskChanges } from "./diskChanges";
 import { nextUnresolved } from "./nextFile";
+import type { Notice } from "./noticeText";
 import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
+import type { Taken } from "./sides";
 import type { MergeSummary } from "./useMergeController";
+import { fetchView, isShown, reload, shownVersion } from "./views";
 
 type FinishRequest = {
   readonly path: string;
   readonly text: string;
   readonly summary: MergeSummary;
+  readonly diskVersion: DiskVersion;
 };
 
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
   readonly choices: ShallowRef<readonly FileSides[]>;
-  readonly taken: ShallowRef<ReadonlyMap<string, Side>>;
+  readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+  readonly notices: ShallowRef<readonly Notice[]>;
   readonly remoteName: ShallowRef<RemoteName | null>;
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
@@ -48,6 +56,7 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
   takeSide(path: string, side: Side): Promise<void>;
   reset(path: string): Promise<void>;
   dismissProblem(): void;
+  dismissNotice(path: string): void;
   answer(yes: boolean): void;
 };
 
@@ -63,7 +72,8 @@ export function createAppStore(source: ChunkSource): AppStore {
     files: shallowRef<readonly FileEntry[]>([]),
     opened: shallowRef<readonly FileMergeData[]>([]),
     choices: shallowRef<readonly FileSides[]>([]),
-    taken: shallowRef<ReadonlyMap<string, Side>>(new Map()),
+    taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+    notices: shallowRef<readonly Notice[]>([]),
     remoteName: shallowRef<RemoteName | null>(null),
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
@@ -87,7 +97,7 @@ function actions(state: State): Actions {
   return {
     loadFiles: () => loadFiles(state),
     refreshFiles: async () => {
-      await refreshFiles(state);
+      await refreshFiles(state, "running");
     },
     loadRemoteName: () => loadRemoteName(state),
     open: (path) => open(state, path),
@@ -96,6 +106,9 @@ function actions(state: State): Actions {
     reset: (path) => reset(state, path),
     dismissProblem: () => {
       state.problem.value = null;
+    },
+    dismissNotice: (path) => {
+      state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
     },
     answer: state.asking.answer,
     track: state.guard.track,
@@ -119,24 +132,29 @@ function clearProblemAbout(state: State, path: string): void {
 }
 
 async function loadFiles(state: State): Promise<void> {
-  const listed = await refreshFiles(state);
+  const listed = await refreshFiles(state, "start");
   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
   if (first !== undefined) {
     await open(state, first.path);
   }
 }
 
-async function refreshFiles(state: State): Promise<readonly FileEntry[] | null> {
+async function refreshFiles(
+  state: State,
+  when: Notice["when"],
+): Promise<readonly FileEntry[] | null> {
   const listed = await attempt(() => state.source.listFiles());
   if (!listed.ok) {
     report(state, { action: "list", cause: listed.cause });
     return null;
   }
-  state.files.value = listed.value;
+  const { files, diskChanges } = listed.value;
+  state.files.value = files;
   if (state.problem.value?.action === "list") {
     state.problem.value = null;
   }
-  return listed.value;
+  await applyDiskChanges(state, diskChanges, when);
+  return files;
 }
 
 async function loadRemoteName(state: State): Promise<void> {
@@ -148,10 +166,7 @@ async function loadRemoteName(state: State): Promise<void> {
 }
 
 async function open(state: State, path: string): Promise<void> {
-  const shown =
-    state.opened.value.some((file) => file.path === path) ||
-    state.choices.value.some((sides) => sides.path === path);
-  if (!shown) {
+  if (!isShown(state, path)) {
     await load(state, path);
     return;
   }
@@ -183,31 +198,6 @@ async function load(state: State, path: string): Promise<void> {
   }
 }
 
-async function fetchView(state: State, path: string): Promise<Outcome<() => void>> {
-  const listed = state.files.value.find((file) => file.path === path);
-  if ((listed?.unsupported ?? null) !== null) {
-    const sides = await attempt(() => state.source.describeFile(path));
-    return sides.ok ? { ok: true, value: () => putChoice(state, sides.value) } : sides;
-  }
-  const data = await attempt(() => state.source.loadFile(path));
-  return data.ok ? { ok: true, value: () => putOpened(state, data.value) } : data;
-}
-
-function putOpened(state: State, data: FileMergeData): void {
-  // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
-  const loaded = { ...data };
-  const opened = state.opened.value;
-  state.opened.value = opened.some((file) => file.path === data.path)
-    ? opened.map((file) => (file.path === data.path ? loaded : file))
-    : [...opened, loaded];
-  log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
-}
-
-function putChoice(state: State, sides: FileSides): void {
-  const others = state.choices.value.filter((shown) => shown.path !== sides.path);
-  state.choices.value = [...others, sides];
-}
-
 async function moveOn(state: State, path: string, opensBefore: number): Promise<void> {
   const untouched = state.active.value === path && state.latestOpen === opensBefore;
   const next = untouched ? nextUnresolved(state.files.value, path) : null;
@@ -216,18 +206,35 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
   }
 }
 
-async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
+async function changedOnDisk(state: State, path: string, change: DiskChange): Promise<void> {
+  clearProblemAbout(state, path);
+  await applyDiskChanges(state, [change], "running");
+}
+
+function notShown(path: string): Outcome<never> {
+  return { ok: false, cause: { kind: "Unexpected", message: `${path} is not shown` } };
+}
+
+async function finish(
+  state: State,
+  { path, text, summary, diskVersion }: FinishRequest,
+): Promise<void> {
   const opensBefore = state.latestOpen;
   const unprocessed: Question = { kind: "unprocessed", summary };
   if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
     return;
   }
-  const outcome = await attempt(() => state.source.finishFile(path, text));
+  const outcome = await attempt(() => state.source.finishFile(path, text, diskVersion));
   if (!outcome.ok) {
     report(state, { action: "finish", path, cause: outcome.cause });
     return;
   }
-  state.files.value = outcome.value;
+  const reply = outcome.value;
+  state.files.value = reply.files;
+  if (reply.kind === "ChangedOnDisk") {
+    await changedOnDisk(state, path, reply.change);
+    return;
+  }
   state.guard.markSaved(path, text);
   state.problem.value = null;
   await moveOn(state, path, opensBefore);
@@ -235,33 +242,53 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
 
 async function takeSide(state: State, path: string, side: Side): Promise<void> {
   const opensBefore = state.latestOpen;
-  const outcome = await attempt(() => state.source.takeSide(path, side));
+  const diskVersion = shownVersion(state, path);
+  const outcome =
+    diskVersion === null
+      ? notShown(path)
+      : await attempt(() => state.source.takeSide(path, side, diskVersion));
   if (!outcome.ok) {
     report(state, { action: "take", path, cause: outcome.cause });
     return;
   }
-  state.files.value = outcome.value;
-  state.taken.value = new Map([...state.taken.value, [path, side]]);
+  const reply = outcome.value;
+  state.files.value = reply.files;
+  if (reply.kind === "ChangedOnDisk") {
+    await changedOnDisk(state, path, reply.change);
+    return;
+  }
+  state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
   clearProblemAbout(state, path);
+  const fromDisk = state.opened.value.some(
+    (file) => file.path === path && file.middle.kind !== "Stages",
+  );
+  if (fromDisk) {
+    await reload(state, path);
+  }
   await moveOn(state, path, opensBefore);
 }
 
 async function reset(state: State, path: string): Promise<void> {
-  const files = await attempt(() => state.source.resetFile(path));
-  if (!files.ok) {
-    report(state, { action: "reset", path, cause: files.cause });
+  const diskVersion = shownVersion(state, path);
+  const outcome =
+    diskVersion === null
+      ? notShown(path)
+      : await attempt(() => state.source.resetFile(path, diskVersion));
+  if (!outcome.ok) {
+    report(state, { action: "reset", path, cause: outcome.cause });
     return;
   }
-  state.files.value = files.value;
+  const reply = outcome.value;
+  state.files.value = reply.files;
+  if (reply.kind === "ChangedOnDisk") {
+    await changedOnDisk(state, path, reply.change);
+    return;
+  }
   state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
   state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
-  const view = await fetchView(state, path);
-  if (!view.ok) {
-    report(state, { action: "open", path, cause: view.cause });
-    return;
+  if (await reload(state, path)) {
+    clearProblemAbout(state, path);
   }
-  view.value();
-  clearProblemAbout(state, path);
 }
 
 export function useAppStore(): AppStore {

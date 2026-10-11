@@ -54,6 +54,26 @@ test("WriteFailed names the path and the system's message", () => {
   expect(text).toContain("disk full");
 });
 
+test("NotAFile says nothing was written because the path is not a regular file", () => {
+  const text = problemText(onFinish({ kind: "NotAFile", path: PATH }));
+
+  expect(text).toBe(
+    `Could not mark ${PATH} as resolved: ${PATH} is not a regular file on disk; nothing was written`,
+  );
+});
+
+test("ReadFailed names the path and the system's message", () => {
+  const text = problemText({
+    action: "take",
+    path: PATH,
+    cause: { kind: "ReadFailed", path: PATH, message: "permission denied\n" },
+  });
+
+  expect(text).toBe(
+    `Could not resolve ${PATH} with one side: reading ${PATH} failed: permission denied`,
+  );
+});
+
 test.each([
   ["Binary", "it is a binary file"],
   ["NonUtf8", "it is not UTF-8 text"],

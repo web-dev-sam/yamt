@@ -2,7 +2,7 @@
 import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 
 import type { FileMergeData, Side } from "../ipc";
-import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP } from "./choiceText";
+import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
@@ -52,7 +52,14 @@ const columns = computed(() =>
     delete: deletedView.value?.deleteIn === side,
   })),
 );
-const deletedShown = computed(() => deletedView.value?.middle === "deleted");
+const centerLine = computed(() => {
+  const { middle } = props.data;
+  if (deletedView.value?.middle === "deleted") {
+    return DELETED_LINE;
+  }
+  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
+});
+const editable = computed(() => props.data.deleted === null && centerLine.value === null);
 const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
 const keptSideToApply = computed(() =>
   deletedView.value === null ? null : keptToApply(deletedView.value, summary.value),
@@ -75,7 +82,12 @@ onUnmounted(() => {
 function markResolved(): void {
   const text = resultText();
   if (text !== null && summary.value !== null) {
-    void finish({ path: props.data.path, text, summary: summary.value });
+    void finish({
+      path: props.data.path,
+      text,
+      summary: summary.value,
+      diskVersion: props.data.diskVersion,
+    });
   }
 }
 </script>
@@ -86,7 +98,7 @@ function markResolved(): void {
     :class="{ 'invisible [content-visibility:hidden]': !shown }"
   >
     <MergeToolbar
-      v-if="data.deleted === null"
+      v-if="editable"
       :summary="summary"
       @apply-left="applyAllNonConflicting('local')"
       @apply-right="applyAllNonConflicting('remote')"
@@ -142,9 +154,9 @@ function markResolved(): void {
       <div
         ref="center"
         class="col-start-3 row-start-2 min-h-0 min-w-0"
-        :class="{ invisible: deletedShown }"
+        :class="{ invisible: centerLine !== null }"
       />
-      <p v-if="deletedShown" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
+      <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
       <div class="col-start-4 row-start-2 min-h-0 border-x border-separator will-change-transform">
         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
       </div>

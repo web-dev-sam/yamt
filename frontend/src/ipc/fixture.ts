@@ -9,6 +9,7 @@ import {
   type FileSides,
   type SideContent,
   type SourceResult,
+  type WriteReply,
 } from "./domain";
 import type { Log } from "./log";
 
@@ -36,6 +37,15 @@ const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {
 const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
 
 const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
+
+const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {
+  Deleted: true,
+  Binary: true,
+  NonUtf8: true,
+  TooLarge: true,
+  Link: true,
+  Directory: true,
+};
 
 function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
   return v.custom<T>(
@@ -79,15 +89,27 @@ const WORD_CHANGES = v.object({
   remote: SIDE_WORD_CHANGES,
 } satisfies SchemaOf<Generated.WordChanges>);
 
+const MERGE_CHUNK = v.object({
+  chunk: CHUNK,
+  middle: LINE_RANGE,
+  words: WORD_CHANGES,
+} satisfies SchemaOf<Generated.MergeChunk>);
+
+const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", [
+  v.object({ kind: v.literal("Stages"), text: v.string() }),
+  v.object({ kind: v.literal("Disk"), text: v.string() }),
+  v.object({ kind: v.literal("DiskNotText"), found: memberOf(NOT_TEXT) }),
+]);
+
 const FILE_MERGE_DATA = v.object({
   path: v.string(),
-  base: v.string(),
+  middle: MIDDLE,
   local: v.string(),
   remote: v.string(),
   deleted: v.nullable(memberOf(SIDES)),
   eol: memberOf(EOLS),
-  chunks: v.array(CHUNK),
-  word_changes: v.array(WORD_CHANGES),
+  chunks: v.array(MERGE_CHUNK),
+  disk_version: v.number(),
 } satisfies SchemaOf<Generated.FileMergeData>);
 
 function parseFixture(file: string, json: unknown): FileMergeData {
@@ -124,7 +146,13 @@ function describeRecord(path: string, data: FileMergeData | undefined): SourceRe
   if (data === undefined) {
     return unknownPath(path);
   }
-  const sides = { path, reason: null, local: textSide(data.local), remote: textSide(data.remote) };
+  const sides = {
+    path,
+    reason: null,
+    local: textSide(data.local),
+    remote: textSide(data.remote),
+    diskVersion: data.diskVersion,
+  };
   return { ok: true, value: sides };
 }
 
@@ -136,16 +164,12 @@ function entries({ fixtures, finished }: Records): FileEntry[] {
   }));
 }
 
-function updateKnown(
-  records: Records,
-  path: string,
-  update: () => void,
-): SourceResult<FileEntry[]> {
+function updateKnown(records: Records, path: string, update: () => void): SourceResult<WriteReply> {
   if (!records.fixtures.has(path)) {
     return unknownPath(path);
   }
   update();
-  return { ok: true, value: entries(records) };
+  return { ok: true, value: { kind: "Written", files: entries(records) } };
 }
 
 export async function loadFixture(
@@ -167,7 +191,7 @@ export function createFixtureSource(
 
   return {
     async listFiles() {
-      return { ok: true, value: entries(records) };
+      return { ok: true, value: { files: entries(records), diskChanges: [] } };
     },
     async loadFile(path) {
       const data = records.fixtures.get(path);

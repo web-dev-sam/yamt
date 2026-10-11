@@ -23,8 +23,8 @@ function rowOf(chunk: Chunk, status: ChunkStatus): ChunkRow {
       bottom: (chunk.local.start + chunk.local.len) * LINE_PX,
     },
     center: {
-      top: chunk.base.start * LINE_PX,
-      bottom: (chunk.base.start + chunk.base.len) * LINE_PX,
+      top: chunk.middle.start * LINE_PX,
+      bottom: (chunk.middle.start + chunk.middle.len) * LINE_PX,
     },
     right: {
       top: chunk.remote.start * LINE_PX,
@@ -49,35 +49,43 @@ async function conflictBand(
   return bandPaints({ rows, side }, shifts, STRIP).find(({ chunk }) => chunk.id === CONFLICT_ID)?.d;
 }
 
+function noWords(chunk: number): Record<string, unknown> {
+  return { chunk, local: { changed: [], removed_at: [] }, remote: { changed: [], removed_at: [] } };
+}
+
 async function oneLineDeletedOnEachSide(): Promise<readonly Chunk[]> {
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    base: "a\nb\nc\n",
+    middle: { kind: "Stages", text: "a\nb\nc\n" },
     local: "b\nc\n",
     remote: "a\nb\n",
     eol: "Lf",
+    disk_version: 0,
     chunks: [
       {
-        id: 0,
-        kind: "LocalOnly",
-        base: { start: 0, len: 1 },
-        local: { start: 0, len: 0 },
-        remote: { start: 0, len: 1 },
+        chunk: {
+          id: 0,
+          kind: "LocalOnly",
+          base: { start: 0, len: 1 },
+          local: { start: 0, len: 0 },
+          remote: { start: 0, len: 1 },
+        },
+        middle: { start: 0, len: 1 },
+        words: noWords(0),
       },
       {
-        id: 1,
-        kind: "RemoteOnly",
-        base: { start: 2, len: 1 },
-        local: { start: 1, len: 1 },
-        remote: { start: 2, len: 0 },
+        chunk: {
+          id: 1,
+          kind: "RemoteOnly",
+          base: { start: 2, len: 1 },
+          local: { start: 1, len: 1 },
+          remote: { start: 2, len: 0 },
+        },
+        middle: { start: 2, len: 1 },
+        words: noWords(1),
       },
     ],
-    word_changes: [0, 1].map((chunk) => ({
-      chunk,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
-    })),
   };
   const data = await loadFixture("synthetic.ts", { "synthetic.json": record });
   return data.chunks;

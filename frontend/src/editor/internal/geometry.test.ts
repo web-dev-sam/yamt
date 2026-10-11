@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
 import { rangeSpan, rowsChanged } from "./geometry";
+import { centerPane } from "./pane";
 import { statusAfterIgnore } from "./status";
 
 const LINE_PX = 20;
@@ -49,7 +50,10 @@ test("an empty document has one point at the top", () => {
 test("chunk rows go stale on a status change, an edit or new measurements, not on a cursor move", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
-  const state = EditorState.create({ doc: data.base, extensions: field });
+  const state = EditorState.create({
+    doc: centerPane(data.middle, false).doc,
+    extensions: field,
+  });
   const [first] = state.field(field);
   if (first === undefined) {
     throw new Error("fixture lost its chunks");

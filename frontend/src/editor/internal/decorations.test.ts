@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
+import { centerPane } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import { PENDING, type ChunkState } from "./status";
@@ -53,25 +54,38 @@ async function synthetic(
     remote: [start: number, len: number];
   }[],
 ): Promise<FileMergeData> {
+  const { base: middleText, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    ...texts,
+    middle: { kind: "Stages", text: middleText },
+    ...sides,
     eol: "Lf",
-    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
-      id,
-      kind,
-      base: { start: base[0], len: base[1] },
-      local: { start: local[0], len: local[1] },
-      remote: { start: remote[0], len: remote[1] },
-    })),
-    word_changes: chunks.map((_chunk, id) => ({
-      chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
-    })),
+    disk_version: 0,
+    chunks: chunks.map(({ kind, base, local, remote }, id) => {
+      const middle = { start: base[0], len: base[1] };
+      return {
+        chunk: {
+          id,
+          kind,
+          base: middle,
+          local: { start: local[0], len: local[1] },
+          remote: { start: remote[0], len: remote[1] },
+        },
+        middle,
+        words: {
+          chunk: id,
+          local: { changed: [], removed_at: [] },
+          remote: { changed: [], removed_at: [] },
+        },
+      };
+    }),
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
+}
+
+function middleOf(data: FileMergeData): string {
+  return centerPane(data.middle, false).doc;
 }
 
 test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
@@ -92,7 +106,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
     "120-123 chunk-modified chunk-band",
     "141-154 chunk-conflict chunk-band",
   ]);
-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
     "3 chunk-modified chunk-band",
     "22 chunk-modified chunk-band",
     "54 chunk-modified chunk-band",
@@ -134,7 +148,7 @@ test("center colours follow their text when a line is typed above them", async (
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   const state = EditorState.create({
-    doc: data.base,
+    doc: middleOf(data),
     extensions: [field, centerDecorations(field)],
   });
 
@@ -152,7 +166,7 @@ test("an empty range at the end of an unterminated last line is drawn below that
   ]);
   const field = chunkField(data.chunks);
 
-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
     "2 chunk-marker-inserted chunk-point-below",
   ]);
   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
@@ -167,7 +181,7 @@ test("a marker on another chunk's band line keeps its own tone class", async () 
   ]);
   const field = chunkField(data.chunks);
   const state = EditorState.create({
-    doc: data.base,
+    doc: middleOf(data),
     extensions: [field, centerDecorations(field)],
   });
 
@@ -186,7 +200,7 @@ test("a line break pasted at the end of a band line stops at the marker that fol
   ]);
   const field = chunkField(data.chunks);
   const joined = EditorState.create({
-    doc: data.base,
+    doc: middleOf(data),
     extensions: [field, centerDecorations(field)],
   }).update({ changes: { from: 1, to: 2 } }).state;
 
@@ -205,7 +219,10 @@ test("a line break pasted at the end of a band line stops at the marker that fol
 test("random edits keep center ranges sorted, disjoint, inside the document, and drawable", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
-  let state = EditorState.create({ doc: data.base, extensions: [field, centerDecorations(field)] });
+  let state = EditorState.create({
+    doc: middleOf(data),
+    extensions: [field, centerDecorations(field)],
+  });
   let seed = 7;
   function random(below: number): number {
     seed = (seed * 48_271) % 2_147_483_647;
@@ -239,7 +256,7 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
   ]);
   const field = chunkField(data.chunks);
 
-  expect(decoratedRuns(data.base, [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
     "1-2 chunk-deleted chunk-band",
   ]);
   expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([

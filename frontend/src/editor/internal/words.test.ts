@@ -7,7 +7,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { actionSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
-import { paneState } from "./pane";
+import { centerPane, paneState } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
@@ -39,31 +39,55 @@ function words(ranges: readonly Columns[], points: readonly Point[]): object {
   };
 }
 
+function merged({
+  id,
+  kind,
+  line,
+  words: chunkWords,
+}: {
+  id: number;
+  kind: Chunk["kind"];
+  line: number;
+  words: object;
+}): object {
+  return {
+    chunk: { id, kind, base: block(line), local: block(line), remote: block(line) },
+    middle: block(line),
+    words: { chunk: id, ...chunkWords },
+  };
+}
+
 async function synthetic(): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    base: texts("old", "1"),
+    middle: { kind: "Stages", text: texts("old", "1") },
     local: texts("mine", "2"),
     remote: texts("theirs", "1"),
     eol: "CrLf",
+    disk_version: 0,
     chunks: [
-      { id: CONFLICT, kind: "Conflict", base: block(1), local: block(1), remote: block(1) },
-      { id: MODIFIED, kind: "LocalOnly", base: block(2), local: block(2), remote: block(2) },
-    ],
-    word_changes: [
-      {
-        chunk: CONFLICT,
-        local: words(
-          [[1, 11, 4]],
-          [
-            [1, 0],
-            [1, 16],
-          ],
-        ),
-        remote: words([[1, 11, 6]], [[1, 8]]),
-      },
-      { chunk: MODIFIED, local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
+      merged({
+        id: CONFLICT,
+        kind: "Conflict",
+        line: 1,
+        words: {
+          local: words(
+            [[1, 11, 4]],
+            [
+              [1, 0],
+              [1, 16],
+            ],
+          ),
+          remote: words([[1, 11, 6]], [[1, 8]]),
+        },
+      }),
+      merged({
+        id: MODIFIED,
+        kind: "LocalOnly",
+        line: 2,
+        words: { local: words([[2, 4, 1]], [[2, 5]]), remote: words([], []) },
+      }),
     ],
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
@@ -88,8 +112,7 @@ function open(data: FileMergeData): Merge {
   const center = paneState({
     eol: data.eol,
     language: null,
-    kind: "center",
-    doc: data.base,
+    ...centerPane(data.middle, false),
     extensions: [field, centerDecorations(field)],
   });
   const statuses = sideStatusField(

@@ -1,8 +1,8 @@
 import type { Side } from "../ipc";
-import { otherSide } from "./sides";
+import { otherSide, type Taken } from "./sides";
 import type { MergeSummary } from "./useMergeController";
 
-type Middle = "base" | "kept" | "deleted";
+type Middle = "loaded" | "kept" | "deleted";
 
 export type DeletedSideView = {
   readonly kept: Side;
@@ -12,22 +12,22 @@ export type DeletedSideView = {
   readonly resettable: boolean;
 };
 
-function middle(deleted: Side, taken: Side | null): Middle {
-  if (taken === null) {
-    return "base";
+function middle(deleted: Side, taken: Taken | null): Middle {
+  if (taken === null || taken.by === "disk") {
+    return "loaded";
   }
-  return taken === deleted ? "deleted" : "kept";
+  return taken.side === deleted ? "deleted" : "kept";
 }
 
-export function deletedSideView(deleted: Side, taken: Side | null): DeletedSideView {
+export function deletedSideView(deleted: Side, taken: Taken | null): DeletedSideView {
   const kept = otherSide(deleted);
-  const choosing = taken === null;
+  const choosing = taken === null || taken.by === "disk";
   return {
     kept,
     keepIn: choosing ? kept : null,
     deleteIn: choosing ? deleted : null,
     middle: middle(deleted, taken),
-    resettable: !choosing,
+    resettable: taken !== null,
   };
 }
 

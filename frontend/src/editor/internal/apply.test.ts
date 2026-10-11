@@ -16,7 +16,7 @@ import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations } from "./decorations";
 import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
-import { paneState, paneText } from "./pane";
+import { centerPane, paneState, paneText } from "./pane";
 import type { Side } from "./side";
 import { summarize } from "./status";
 
@@ -33,37 +33,43 @@ async function synthetic(
     remote?: [number, number];
   }[],
 ): Promise<FileMergeData> {
+  const { base, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    ...texts,
+    middle: { kind: "Stages", text: base },
+    ...sides,
+    disk_version: 0,
     chunks: chunks.map((chunk, id) => {
       const [remoteStart, remoteLen] = chunk.remote ?? chunk.side;
+      const middle = { start: chunk.base[0], len: chunk.base[1] };
       return {
-        id,
-        kind: chunk.kind,
-        base: { start: chunk.base[0], len: chunk.base[1] },
-        local: { start: chunk.side[0], len: chunk.side[1] },
-        remote: { start: remoteStart, len: remoteLen },
+        chunk: {
+          id,
+          kind: chunk.kind,
+          base: middle,
+          local: { start: chunk.side[0], len: chunk.side[1] },
+          remote: { start: remoteStart, len: remoteLen },
+        },
+        middle,
+        words: {
+          chunk: id,
+          local: { changed: [], removed_at: [] },
+          remote: { changed: [], removed_at: [] },
+        },
       };
     }),
-    word_changes: chunks.map((_chunk, id) => ({
-      chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
-    })),
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
-function open(data: FileMergeData, kind: "center" | "readOnlyCenter" = "center"): ApplyTarget {
+function open(data: FileMergeData, readOnly = false): ApplyTarget {
   const field = chunkField(data.chunks);
   const pane = { eol: data.eol, language: null };
   return {
     state: paneState({
       ...pane,
-      kind,
-      doc: data.base,
+      ...centerPane(data.middle, readOnly),
       extensions: [field, centerDecorations(field)],
     }),
     field,
@@ -545,7 +551,7 @@ test("a change on an unterminated last line keeps the file without a final line 
 });
 
 test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it", async () => {
-  const merge = open(await loadFixture(MAGIC_KEYS), "readOnlyCenter");
+  const merge = open(await loadFixture(MAGIC_KEYS), true);
   function refused(target: ApplyTarget, edit: StateCommand): boolean {
     let dispatched = false;
     const ran = edit({
@@ -569,4 +575,150 @@ test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still chan
   expect(centerText(bulk, 0)).toBe(sideText(bulk, 0, "local"));
   expect(refused(bulk, undo)).toBe(true);
   expect(refused(open(await loadFixture(MAGIC_KEYS)), insertNewlineAndIndent)).toBe(false);
+});
+
+const WORKED_OURS = [
+  "title",
+  "=======",
+  "one",
+  "TWO",
+  "shared-a",
+  "three-ours",
+  "shared-b",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight-ours",
+  "nine",
+  "ten",
+];
+const WORKED_THEIRS = [
+  "title",
+  "=======",
+  "ONE",
+  "two",
+  "shared-a",
+  "three-theirs",
+  "shared-b",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight-theirs",
+  "nine",
+  "ten",
+];
+
+type Seeded = {
+  readonly middle: readonly string[];
+  readonly base: [number, number];
+  readonly at: [number, number];
+  readonly side: [number, number];
+  readonly eol: FileMergeData["eol"];
+};
+
+function lines(texts: readonly string[], eol: FileMergeData["eol"]): string {
+  const separator = eol === "CrLf" ? "\r\n" : "\n";
+  return texts.map((text) => `${text}${separator}`).join("");
+}
+
+function range([start, len]: [number, number]): { start: number; len: number } {
+  return { start, len };
+}
+
+async function diskSeeded({ middle, base, at, side, eol }: Seeded): Promise<FileMergeData> {
+  const record = {
+    path: "worked.txt",
+    deleted: null,
+    middle: { kind: "Disk", text: lines(middle, eol) },
+    local: lines(WORKED_OURS, eol),
+    remote: lines(WORKED_THEIRS, eol),
+    eol,
+    disk_version: 1,
+    chunks: [
+      {
+        chunk: {
+          id: 0,
+          kind: "Conflict",
+          base: range(base),
+          local: range(side),
+          remote: range(side),
+        },
+        middle: range(at),
+        words: {
+          chunk: 0,
+          local: { changed: [], removed_at: [] },
+          remote: { changed: [], removed_at: [] },
+        },
+      },
+    ],
+  };
+  return loadFixture("worked.txt", { "worked.json": record });
+}
+
+const ONE_BLOCK_LEFT = [
+  "title",
+  "=======",
+  "one",
+  "two",
+  "three",
+  "shared-b",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight-theirs",
+  "nine",
+  "ten",
+];
+
+test.each<FileMergeData["eol"]>(["Lf", "CrLf"])(
+  "a disk-seeded block takes ours exactly as the hand resolution, and undo brings base back (%s)",
+  async (eol) => {
+    const merge = open(
+      await diskSeeded({ middle: ONE_BLOCK_LEFT, base: [2, 3], at: [2, 3], side: [2, 4], eol }),
+    );
+
+    const applied = run(merge, applyOne(merge, chunkAt(merge, 0), "local"));
+    const undone = command(applied, undo);
+
+    expect(paneText(merge.state)).toBe(lines(ONE_BLOCK_LEFT, eol));
+    expect(paneText(applied.state)).toBe(
+      lines([...WORKED_OURS.slice(0, -3), "eight-theirs", "nine", "ten"], eol),
+    );
+    expect(statuses(applied)).toEqual(["applied pending"]);
+    expect(paneText(undone.state)).toBe(lines(ONE_BLOCK_LEFT, eol));
+    expect(centerText(undone, 0)).toBe(lines(["one", "two", "three"], eol));
+  },
+);
+
+test("a chunk spans its middle range, not where its base range would put it", async () => {
+  const middle = [...WORKED_OURS.slice(0, -3), "eight", "nine", "ten"];
+  const merge = open(
+    await diskSeeded({ middle, base: [9, 1], at: [11, 1], side: [11, 1], eol: "Lf" }),
+  );
+
+  expect(centerText(merge, 0)).toBe("eight\n");
+
+  const applied = run(merge, applyOne(merge, chunkAt(merge, 0), "remote"));
+
+  expect(paneText(applied.state)).toBe(
+    lines([...middle.slice(0, -3), "eight-theirs", "nine", "ten"], "Lf"),
+  );
+});
+
+test("a middle that is not text on disk is empty and read-only", async () => {
+  const data = await diskSeeded({ middle: [], base: [0, 0], at: [0, 0], side: [0, 0], eol: "Lf" });
+  const notText: FileMergeData = {
+    ...data,
+    middle: { kind: "DiskNotText", found: "Binary" },
+    chunks: [],
+  };
+
+  expect(centerPane(notText.middle, false)).toEqual({ kind: "readOnlyCenter", doc: "" });
+  expect(open(notText).state.readOnly).toBe(true);
+  expect(open(notText).state.sliceDoc()).toBe("");
+  expect(centerPane(data.middle, false).kind).toBe("center");
+  expect(centerPane(data.middle, true).kind).toBe("readOnlyCenter");
 });

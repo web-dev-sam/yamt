@@ -4,33 +4,38 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type FileMergeData } from "../../ipc";
 import { chunkField, type ChunkSpan } from "./chunkField";
+import { centerPane } from "./pane";
 
 type Center = { state: EditorState; field: StateField<readonly ChunkSpan[]> };
 
 const MAPPED_BASE = "zero\none\ntwo\nthree\nfour\n";
 
 async function synthetic(
-  base: string,
+  middle: string,
   ranges: readonly { start: number; len: number }[],
 ): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    base,
+    middle: { kind: "Disk", text: middle },
     local: "",
     remote: "",
     eol: "Lf",
-    chunks: ranges.map((base, id) => ({
-      id,
-      kind: "Conflict",
-      base,
-      local: { start: 0, len: 1 },
-      remote: { start: 0, len: 1 },
-    })),
-    word_changes: ranges.map((_range, id) => ({
-      chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
+    disk_version: 0,
+    chunks: ranges.map((range, id) => ({
+      chunk: {
+        id,
+        kind: "Conflict",
+        base: { start: 0, len: 1 },
+        local: { start: 0, len: 1 },
+        remote: { start: 0, len: 1 },
+      },
+      middle: range,
+      words: {
+        chunk: id,
+        local: { changed: [], removed_at: [] },
+        remote: { changed: [], removed_at: [] },
+      },
     })),
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
@@ -38,7 +43,8 @@ async function synthetic(
 
 function center(data: FileMergeData): Center {
   const field = chunkField(data.chunks);
-  const state = EditorState.create({ doc: data.base, extensions: [history(), field] });
+  const doc = centerPane(data.middle, false).doc;
+  const state = EditorState.create({ doc, extensions: [history(), field] });
   return { state, field };
 }
 

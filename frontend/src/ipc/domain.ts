@@ -1,6 +1,7 @@
 import type * as Generated from "./bindings";
 
-type BaseLine = number & { readonly __brand: "BaseLine" };
+type MiddleLine = number & { readonly __brand: "MiddleLine" };
+export type DiskVersion = number & { readonly __brand: "DiskVersion" };
 type LocalLine = number & { readonly __brand: "LocalLine" };
 type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
@@ -16,7 +17,7 @@ type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideW
 export type Chunk = {
   readonly id: ChunkId;
   readonly kind: Generated.ChunkKind;
-  readonly base: LineRange<BaseLine>;
+  readonly middle: LineRange<MiddleLine>;
   readonly local: LineRange<LocalLine>;
   readonly remote: LineRange<RemoteLine>;
   readonly words: ChunkWords;
@@ -24,7 +25,9 @@ export type Chunk = {
 
 export type FileEntry = Generated.FileEntry;
 
-export type FileSides = Generated.FileSides;
+export type FileSides = Omit<Generated.FileSides, "disk_version"> & {
+  readonly diskVersion: DiskVersion;
+};
 
 export type SideContent = Generated.SideContent;
 
@@ -32,14 +35,28 @@ export type Side = Generated.Side;
 
 export type RemoteName = Generated.RemoteName;
 
+export type NotText = Generated.NotText;
+
+export type DiskResult = Generated.DiskResult;
+
+export type DiskChange = Generated.DiskChange;
+
+export type WriteReply = Generated.WriteReply;
+
+export type FileList = {
+  readonly files: readonly FileEntry[];
+  readonly diskChanges: readonly DiskChange[];
+};
+
 export type FileMergeData = {
   readonly path: string;
-  readonly base: string;
+  readonly middle: Generated.Middle;
   readonly local: string;
   readonly remote: string;
   readonly deleted: Side | null;
   readonly eol: Generated.Eol;
   readonly chunks: readonly Chunk[];
+  readonly diskVersion: DiskVersion;
 };
 
 export type SourceFailure = Generated.IpcError;
@@ -52,7 +69,11 @@ function isNonNegativeInteger(n: number): boolean {
   return Number.isSafeInteger(n) && n >= 0;
 }
 
-function isBaseLine(n: number): n is BaseLine {
+function isMiddleLine(n: number): n is MiddleLine {
+  return isNonNegativeInteger(n);
+}
+
+function isDiskVersion(n: number): n is DiskVersion {
   return isNonNegativeInteger(n);
 }
 
@@ -169,52 +190,48 @@ function toRange<L extends number>({
   return { start, len };
 }
 
-function toChunk({
-  chunk,
-  words,
-  index,
-}: {
-  chunk: Generated.Chunk;
-  words: Generated.WordChanges;
-  index: number;
-}): Chunk {
+function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
   const field = `chunks[${index}]`;
+  const { chunk } = merged;
   const { id } = chunk;
   if (!isChunkId(id)) {
-    throw invalid(`${field}.id`, id);
+    throw invalid(`${field}.chunk.id`, id);
   }
   return {
     id,
     kind: chunk.kind,
-    base: toRange({ range: chunk.base, isLine: isBaseLine, field: `${field}.base` }),
-    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.local` }),
-    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.remote` }),
-    words: toWords({ words, chunkId: id, field: `word_changes[${index}]` }),
+    middle: toRange({ range: merged.middle, isLine: isMiddleLine, field: `${field}.middle` }),
+    local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.chunk.local` }),
+    remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.chunk.remote` }),
+    words: toWords({ words: merged.words, chunkId: id, field: `${field}.words` }),
   };
 }
 
-function toChunks(dto: Generated.FileMergeData): Chunk[] {
-  const misaligned = `word_changes must have one entry per chunk (${dto.chunks.length}), got ${dto.word_changes.length}`;
-  if (dto.word_changes.length > dto.chunks.length) {
-    throw new Error(misaligned);
+function toDiskVersion(n: number, field: string): DiskVersion {
+  if (!isDiskVersion(n)) {
+    throw invalid(field, n);
   }
-  return dto.chunks.map((chunk, index) => {
-    const words = dto.word_changes[index];
-    if (words === undefined) {
-      throw new Error(misaligned);
-    }
-    return toChunk({ chunk, words, index });
-  });
+  return n;
 }
 
 export function toDomain(dto: Generated.FileMergeData): FileMergeData {
   return {
     path: dto.path,
-    base: dto.base,
+    middle: dto.middle,
     local: dto.local,
     remote: dto.remote,
     deleted: dto.deleted,
     eol: dto.eol,
-    chunks: toChunks(dto),
+    chunks: dto.chunks.map(toChunk),
+    diskVersion: toDiskVersion(dto.disk_version, "disk_version"),
   };
+}
+
+export function toSides(dto: Generated.FileSides): FileSides {
+  const { disk_version: diskVersion, ...sides } = dto;
+  return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
+}
+
+export function toFileList(dto: Generated.FileList): FileList {
+  return { files: dto.files, diskChanges: dto.disk_changes };
 }

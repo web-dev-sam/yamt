@@ -5,14 +5,20 @@ import { guardWindowClose } from "./window";
 export type { ChunkSource } from "./ChunkSource";
 export type {
   Chunk,
+  DiskChange,
+  DiskResult,
+  DiskVersion,
   FileEntry,
+  FileList,
   FileMergeData,
   FileSides,
+  NotText,
   RemoteName,
   Side,
   SideContent,
   SourceFailure,
   SourceResult,
+  WriteReply,
 } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createTauriSource } from "./tauri";

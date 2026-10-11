@@ -1,14 +1,15 @@
 import { expect, test } from "vitest";
 
-import type { FileSides, SideContent } from "../ipc";
-import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import { loadFixture, type FileSides, type NotText, type SideContent } from "../ipc";
+import { notTextLine, resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
 
 const COMMIT = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
 const MISSING: SideContent = { kind: "Missing" };
 const BINARY: SideContent = { kind: "Binary", bytes: 12_697 };
+const { diskVersion } = await loadFixture("word-marks.ts");
 
 function sides(local: SideContent, remote: SideContent): FileSides {
-  return { path: "logo.bin", reason: "Binary", local, remote };
+  return { path: "logo.bin", reason: "Binary", local, remote, diskVersion };
 }
 
 test.each<[SideContent, string]>([
@@ -67,10 +68,23 @@ test("after a choice the Result column names the side taken, or the deletion", (
   const both = sides(BINARY, { kind: "Text", lines: 2 });
   const deletedRemotely = sides(BINARY, MISSING);
 
-  expect(resultLine(both, "local")).toBe("Resolved with the left version.");
-  expect(resultLine(both, "remote")).toBe("Resolved with the right version.");
-  expect(resultLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
-  expect(resultLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
+  expect(resultLine(both, { by: "side", side: "local" })).toBe("Resolved with the left version.");
+  expect(resultLine(both, { by: "side", side: "remote" })).toBe("Resolved with the right version.");
+  expect(resultLine(deletedRemotely, { by: "side", side: "remote" })).toBe(
+    "Resolved by deleting the file.",
+  );
+  expect(resultLine(deletedRemotely, { by: "side", side: "local" })).toBe(
+    "Resolved with the left version.",
+  );
+});
+
+test("a file the disk resolved says so in the Result column, whatever its sides", () => {
+  expect(resultLine(sides(BINARY, MISSING), { by: "disk" })).toBe(
+    "Changed on disk — staged as it is.",
+  );
+  expect(resultLine(sides(BINARY, BINARY), { by: "disk" })).toBe(
+    "Changed on disk — staged as it is.",
+  );
 });
 
 test("before a choice the Result column says what there is to choose", () => {
@@ -79,4 +93,15 @@ test("before a choice the Result column says what there is to choose", () => {
   );
   expect(resultLine(sides(BINARY, MISSING), null)).toBe("Keep the file or delete it.");
   expect(resultLine(sides(MISSING, BINARY), null)).toBe("Keep the file or delete it.");
+});
+
+test.each<[NotText, string]>([
+  ["Deleted", "Deleted on disk — staged as deleted."],
+  ["Binary", "Not shown: the file on disk is binary — staged as it is."],
+  ["NonUtf8", "Not shown: the file on disk is not UTF-8 — staged as it is."],
+  ["TooLarge", "Not shown: the file on disk is too large — staged as it is."],
+  ["Link", "A link on disk now — staged as it is."],
+  ["Directory", "A folder on disk now — staged as deleted."],
+])("a middle that is %s on disk reads %j", (found, line) => {
+  expect(notTextLine(found)).toBe(line);
 });

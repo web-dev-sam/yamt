@@ -9,7 +9,7 @@ import { loadFixture } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
-import { languageCompartment, paletteHighlight, paneState } from "./pane";
+import { centerPane, languageCompartment, paletteHighlight, paneState } from "./pane";
 import { sideStatusField } from "./sideStatus";
 
 const PARSE_BUDGET_MS = 5000;
@@ -120,16 +120,20 @@ async function tintedLeft(): Promise<EditorState> {
     "selection.json": {
       path: "selection.ts",
       deleted: null,
-      base: "const a = old;\n",
+      middle: { kind: "Stages", text: "const a = old;\n" },
       local: "const a = mine;\n",
       remote: "const a = theirs;\n",
       eol: "Lf",
-      chunks: [{ id: 0, kind: "Conflict", base: line, local: line, remote: line }],
-      word_changes: [
+      disk_version: 0,
+      chunks: [
         {
-          chunk: 0,
-          local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
-          remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
+          chunk: { id: 0, kind: "Conflict", base: line, local: line, remote: line },
+          middle: line,
+          words: {
+            chunk: 0,
+            local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
+            remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
+          },
         },
       ],
     },
@@ -184,8 +188,7 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
   const data = await loadFixture("vue-core-playground-app.vue");
   const field = chunkField(data.chunks);
   const plain = paneState({
-    kind: "center",
-    doc: data.base,
+    ...centerPane(data.middle, false),
     eol: data.eol,
     language: null,
     extensions: [field],

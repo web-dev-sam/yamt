@@ -9,7 +9,7 @@ import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
-import { paneState } from "./pane";
+import { centerPane, paneState } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
@@ -35,23 +35,32 @@ async function synthetic(
   texts: { base: string; local: string; remote: string },
   chunks: readonly { kind: Chunk["kind"]; base: Range; local: Range; remote: Range }[],
 ): Promise<FileMergeData> {
+  const { base: middleText, ...sides } = texts;
   const record = {
     path: "synthetic.ts",
     deleted: null,
-    ...texts,
+    middle: { kind: "Stages", text: middleText },
+    ...sides,
     eol: "Lf",
-    chunks: chunks.map(({ kind, base, local, remote }, id) => ({
-      id,
-      kind,
-      base: { start: base[0], len: base[1] },
-      local: { start: local[0], len: local[1] },
-      remote: { start: remote[0], len: remote[1] },
-    })),
-    word_changes: chunks.map((_chunk, id) => ({
-      chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
-    })),
+    disk_version: 0,
+    chunks: chunks.map(({ kind, base, local, remote }, id) => {
+      const middle = { start: base[0], len: base[1] };
+      return {
+        chunk: {
+          id,
+          kind,
+          base: middle,
+          local: { start: local[0], len: local[1] },
+          remote: { start: remote[0], len: remote[1] },
+        },
+        middle,
+        words: {
+          chunk: id,
+          local: { changed: [], removed_at: [] },
+          remote: { changed: [], removed_at: [] },
+        },
+      };
+    }),
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
@@ -61,8 +70,7 @@ function open(data: FileMergeData): Merge {
   const pane = { eol: data.eol, language: null };
   const center = paneState({
     ...pane,
-    kind: "center",
-    doc: data.base,
+    ...centerPane(data.middle, false),
     extensions: [field, centerDecorations(field)],
   });
   const statuses = sideStatusField(

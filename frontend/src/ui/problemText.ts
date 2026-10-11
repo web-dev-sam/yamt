@@ -55,6 +55,10 @@ export function problemText(problem: Problem): string {
       return `${cause.path} cannot be shown in the editor: ${unsupportedBecause(cause.reason)}.`;
     case "WriteFailed":
       return `${attempted(problem)}: writing ${cause.path} failed: ${cause.message.trim()}`;
+    case "NotAFile":
+      return `${attempted(problem)}: ${cause.path} is not a regular file on disk; nothing was written`;
+    case "ReadFailed":
+      return `${attempted(problem)}: reading ${cause.path} failed: ${cause.message.trim()}`;
     case "Unexpected":
       return `${attempted(problem)}: ${cause.message.trim()}`;
     default: {

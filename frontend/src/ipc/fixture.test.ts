@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { Side, SourceResult } from "./domain";
+import type { DiskVersion, FileList, Side, SourceResult } from "./domain";
 import { createFixtureSource, loadFixture } from "./fixture";
 import { createLog, type Log, type LogEntry } from "./log";
 
@@ -28,13 +28,26 @@ function valueOf<T>(result: SourceResult<T>): T {
   return result.value;
 }
 
+async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
+  return valueOf(await createFixtureSource(log, files).listFiles());
+}
+
+async function versionOf(
+  path: string,
+  files: Readonly<Record<string, unknown>>,
+): Promise<DiskVersion> {
+  return (await loadFixture(path, files)).diskVersion;
+}
+
 const CHUNK = {
   id: 0,
   kind: "Conflict",
-  base: { start: 0, len: 0 },
+  base: { start: 5, len: 0 },
   local: { start: 0, len: 1 },
   remote: { start: 0, len: 1 },
 };
+
+const MIDDLE_RANGE = { start: 0, len: 0 };
 
 const WORDS = {
   local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [{ line: 0, column: 1 }] },
@@ -46,32 +59,51 @@ const DOMAIN_WORDS = {
   remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
 };
 
-function record(
-  path: string,
-  chunk: Record<string, unknown> = {},
-  words: Record<string, unknown> = {},
-): Record<string, unknown> {
+type Overrides = {
+  readonly chunk?: Record<string, unknown>;
+  readonly words?: Record<string, unknown>;
+  readonly merged?: Record<string, unknown>;
+};
+
+function record(path: string, overrides: Overrides = {}): Record<string, unknown> {
   return {
     path,
-    base: "b\n",
+    middle: { kind: "Stages", text: "b\n" },
     local: "l\n",
     remote: "r\n",
     deleted: null,
     eol: "Lf",
-    chunks: [{ ...CHUNK, ...chunk }],
-    word_changes: [{ chunk: 0, ...WORDS, ...words }],
+    disk_version: 0,
+    chunks: [
+      {
+        chunk: { ...CHUNK, ...overrides.chunk },
+        middle: MIDDLE_RANGE,
+        words: { chunk: 0, ...WORDS, ...overrides.words },
+        ...overrides.merged,
+      },
+    ],
   };
 }
 
 function loaded(path: string): Record<string, unknown> {
   return {
     path,
-    base: "b\n",
+    middle: { kind: "Stages", text: "b\n" },
     local: "l\n",
     remote: "r\n",
     deleted: null,
     eol: "Lf",
-    chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
+    diskVersion: 0,
+    chunks: [
+      {
+        id: 0,
+        kind: "Conflict",
+        middle: MIDDLE_RANGE,
+        local: CHUNK.local,
+        remote: CHUNK.remote,
+        words: DOMAIN_WORDS,
+      },
+    ],
   };
 }
 
@@ -79,14 +111,20 @@ function without(json: Record<string, unknown>, field: string): Record<string, u
   return Object.fromEntries(Object.entries(json).filter(([key]) => key !== field));
 }
 
+function withoutMiddleRange(path: string): Record<string, unknown> {
+  const { chunks: _chunks, ...rest } = record(path);
+  return {
+    ...rest,
+    chunks: [{ chunk: CHUNK, words: { chunk: 0, ...WORDS } }],
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
-  const source = createFixtureSource(quietLog().log);
-
-  const files = valueOf(await source.listFiles());
+test("the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes", async () => {
+  const { files, diskChanges } = await listed(quietLog().log);
 
   expect(files.map((file) => file.path)).toEqual([
     "language-tools-script-setup.ts",
@@ -104,9 +142,10 @@ test("the committed fixtures list 11 files, sorted by path, all unresolved", asy
   for (const file of files) {
     expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
   }
+  expect(diskChanges).toEqual([]);
 });
 
-test("each committed fixture loads with its JSON's chunk count", async () => {
+test("each committed fixture loads with its JSON's chunk count, its stages middle and version 0", async () => {
   const source = createFixtureSource(quietLog().log);
   const committed = Object.values(COMMITTED);
   expect(committed).toHaveLength(11);
@@ -114,6 +153,8 @@ test("each committed fixture loads with its JSON's chunk count", async () => {
     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
     const data = valueOf(await source.loadFile(path));
     expect(data.chunks).toHaveLength(chunks.length);
+    expect(data.middle.kind).toBe("Stages");
+    expect(data.diskVersion).toBe(0);
   }
 });
 
@@ -125,10 +166,11 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
   expect(data.chunks[8]).toMatchObject({
     id: 8,
     kind: "Conflict",
-    base: { start: 128, len: 10 },
+    middle: { start: 128, len: 10 },
     local: { start: 128, len: 8 },
     remote: { start: 140, len: 14 },
   });
+  expect(data.chunks[8]).not.toHaveProperty("base");
   expect(data.local.split("\n")[128]).toBe(
     "  useEventListener(target, 'keydown', (e: KeyboardEvent) => {",
   );
@@ -154,16 +196,38 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
 });
 
 test("in-memory records are listed sorted by path and keep every field", async () => {
-  const source = createFixtureSource(quietLog().log, {
+  const files = {
     "z.json": record("z.ts"),
     "a.json": { ...record("a.ts"), eol: "CrLf" },
-  });
+  };
+  const source = createFixtureSource(quietLog().log, files);
 
-  expect(valueOf(await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+  expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
+    "a.ts",
+    "z.ts",
+  ]);
   expect(await source.loadFile("a.ts")).toEqual({
     ok: true,
     value: { ...loaded("a.ts"), eol: "CrLf" },
   });
+});
+
+test("a middle from the disk, or not text on disk, and its disk version arrive as they are", async () => {
+  const files = {
+    "d.json": { ...record("d.ts"), middle: { kind: "Disk", text: "d\n" }, disk_version: 3 },
+    "n.json": { ...record("n.ts"), middle: { kind: "DiskNotText", found: "Link" }, chunks: [] },
+  };
+  const source = createFixtureSource(quietLog().log, files);
+
+  expect(valueOf(await source.loadFile("d.ts"))).toMatchObject({
+    middle: { kind: "Disk", text: "d\n" },
+    diskVersion: 3,
+  });
+  expect(valueOf(await source.loadFile("n.ts"))).toMatchObject({
+    middle: { kind: "DiskNotText", found: "Link" },
+    chunks: [],
+  });
+  expect(valueOf(await source.describeFile("d.ts")).diskVersion).toBe(3);
 });
 
 test.each<Side>(["local", "remote"])(
@@ -184,7 +248,7 @@ test("the fixture source names nothing merged in", async () => {
 test.each([
   [
     "an unknown chunk kind",
-    record("x.ts", { kind: "Mystery" }),
+    record("x.ts", { chunk: { kind: "Mystery" } }),
     "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
   ],
   ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
@@ -195,27 +259,46 @@ test.each([
   ],
   ["missing deleted", without(record("x.ts"), "deleted"), 'Invalid key: Expected "deleted"'],
   ["missing chunks", without(record("x.ts"), "chunks"), 'Invalid key: Expected "chunks"'],
+  ["missing middle", without(record("x.ts"), "middle"), 'Invalid key: Expected "middle"'],
   [
-    "missing word_changes",
-    without(record("x.ts"), "word_changes"),
-    'Invalid key: Expected "word_changes"',
+    "missing disk_version",
+    without(record("x.ts"), "disk_version"),
+    'Invalid key: Expected "disk_version"',
+  ],
+  ["a missing middle range", withoutMiddleRange("x.ts"), "chunks.0.middle"],
+  ["an unknown middle kind", { ...record("x.ts"), middle: { kind: "Base", text: "" } }, "middle"],
+  [
+    "an unknown not-text reason",
+    { ...record("x.ts"), middle: { kind: "DiskNotText", found: "Fifo" } },
+    "expected one of Deleted, Binary, NonUtf8, TooLarge, Link, Directory",
   ],
   [
     "a string word column",
-    record("x.ts", {}, { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } }),
-    "word_changes.0.local.changed.0.start",
+    record("x.ts", {
+      words: { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } },
+    }),
+    "chunks.0.words.local.changed.0.start",
   ],
   [
     "a string point column",
-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } }),
-    "word_changes.0.remote.removed_at.0.column",
+    record("x.ts", { words: { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } } }),
+    "chunks.0.words.remote.removed_at.0.column",
   ],
   [
     "the old flat word shape",
-    record("x.ts", {}, { local: [], base: [], remote: [] }),
-    "word_changes.0.local",
+    record("x.ts", { words: { local: [], base: [], remote: [] } }),
+    "chunks.0.words.local",
   ],
-  ["a string line", record("x.ts", { base: { start: "1", len: 1 } }), "chunks.0.base.start"],
+  [
+    "a string line",
+    record("x.ts", { chunk: { local: { start: "1", len: 1 } } }),
+    "chunks.0.chunk.local.start",
+  ],
+  [
+    "a string middle line",
+    record("x.ts", { merged: { middle: { start: "1", len: 1 } } }),
+    "chunks.0.middle.start",
+  ],
 ])("a record with %s is rejected naming the file", (_case, json, detail) => {
   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
     /^fixture bad\.json: /,
@@ -224,64 +307,94 @@ test.each([
 });
 
 test.each([
-  ["a negative base line", { base: { start: -1, len: 0 } }, "chunks[0].base.start", -1],
-  ["a negative local line", { local: { start: -1, len: 1 } }, "chunks[0].local.start", -1],
-  ["a negative remote line", { remote: { start: -2, len: 1 } }, "chunks[0].remote.start", -2],
-  ["a non-integer local line", { local: { start: 0.5, len: 1 } }, "chunks[0].local.start", 0.5],
+  [
+    "a negative middle line",
+    { merged: { middle: { start: -1, len: 0 } } },
+    "chunks[0].middle.start",
+    -1,
+  ],
+  [
+    "a negative middle len",
+    { merged: { middle: { start: 0, len: -1 } } },
+    "chunks[0].middle.len",
+    -1,
+  ],
+  [
+    "a negative local line",
+    { chunk: { local: { start: -1, len: 1 } } },
+    "chunks[0].chunk.local.start",
+    -1,
+  ],
+  [
+    "a negative remote line",
+    { chunk: { remote: { start: -2, len: 1 } } },
+    "chunks[0].chunk.remote.start",
+    -2,
+  ],
+  [
+    "a non-integer local line",
+    { chunk: { local: { start: 0.5, len: 1 } } },
+    "chunks[0].chunk.local.start",
+    0.5,
+  ],
   [
     "an unsafe remote line",
-    { remote: { start: 2 ** 53, len: 1 } },
-    "chunks[0].remote.start",
+    { chunk: { remote: { start: 2 ** 53, len: 1 } } },
+    "chunks[0].chunk.remote.start",
     2 ** 53,
   ],
-  ["a non-integer len", { base: { start: 0, len: 1.5 } }, "chunks[0].base.len", 1.5],
-  ["a negative len", { remote: { start: 0, len: -1 } }, "chunks[0].remote.len", -1],
-  ["a negative chunk id", { id: -1 }, "chunks[0].id", -1],
-  ["a non-integer chunk id", { id: 0.25 }, "chunks[0].id", 0.25],
-])("a record with %s is rejected naming the file and field", (_case, chunk, field, value) => {
-  expect(() => createFixtureSource(quietLog().log, { "bad.json": record("x.ts", chunk) })).toThrow(
-    `fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`,
-  );
+  [
+    "a non-integer len",
+    { merged: { middle: { start: 0, len: 1.5 } } },
+    "chunks[0].middle.len",
+    1.5,
+  ],
+  [
+    "a negative len",
+    { chunk: { remote: { start: 0, len: -1 } } },
+    "chunks[0].chunk.remote.len",
+    -1,
+  ],
+  ["a negative chunk id", { chunk: { id: -1 } }, "chunks[0].chunk.id", -1],
+  ["a non-integer chunk id", { chunk: { id: 0.25 } }, "chunks[0].chunk.id", 0.25],
+])("a record with %s is rejected naming the file and field", (_case, overrides, field, value) => {
+  expect(() =>
+    createFixtureSource(quietLog().log, { "bad.json": record("x.ts", overrides) }),
+  ).toThrow(`fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`);
+});
+
+test.each([-1, 0.5, 2 ** 53])("a record with disk version %s is rejected", (version) => {
+  expect(() =>
+    createFixtureSource(quietLog().log, {
+      "bad.json": { ...record("x.ts"), disk_version: version },
+    }),
+  ).toThrow(`fixture bad.json: disk_version must be a non-negative safe integer, got ${version}`);
 });
 
 test.each([
   [
-    "fewer word_changes than chunks",
-    { ...record("x.ts"), word_changes: [] },
-    "word_changes must have one entry per chunk (1), got 0",
-  ],
-  [
-    "more word_changes than chunks",
-    {
-      ...record("x.ts"),
-      word_changes: [
-        { chunk: 0, ...WORDS },
-        { chunk: 1, ...WORDS },
-      ],
-    },
-    "word_changes must have one entry per chunk (1), got 2",
-  ],
-  [
-    "word_changes of another chunk",
-    record("x.ts", {}, { chunk: 1 }),
-    "word_changes[0].chunk must be 0, got 1",
+    "words of another chunk",
+    record("x.ts", { words: { chunk: 1 } }),
+    "chunks[0].words.chunk must be 0, got 1",
   ],
   [
     "a negative word line",
-    record("x.ts", {}, { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } }),
-    "word_changes[0].local.changed[0].line must be a non-negative safe integer, got -1",
+    record("x.ts", {
+      words: { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } },
+    }),
+    "chunks[0].words.local.changed[0].line must be a non-negative safe integer, got -1",
   ],
   [
     "a non-integer remote word line",
-    record("x.ts", {}, { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } }),
-    "word_changes[0].remote.changed[0].line must be a non-negative safe integer, got 0.5",
+    record("x.ts", {
+      words: { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } },
+    }),
+    "chunks[0].words.remote.changed[0].line must be a non-negative safe integer, got 0.5",
   ],
   [
     "a negative word column",
-    record(
-      "x.ts",
-      {},
-      {
+    record("x.ts", {
+      words: {
         remote: {
           changed: [
             { line: 0, start: 1, len: 1 },
@@ -290,30 +403,34 @@ test.each([
           removed_at: [],
         },
       },
-    ),
-    "word_changes[0].remote.changed[1].start must be a non-negative safe integer, got -1",
+    }),
+    "chunks[0].words.remote.changed[1].start must be a non-negative safe integer, got -1",
   ],
   [
     "an empty word range",
-    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } }),
-    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0",
+    record("x.ts", {
+      words: { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } },
+    }),
+    "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0",
   ],
   [
     "a fractional word length",
-    record("x.ts", {}, { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } }),
-    "word_changes[0].local.changed[0].len must be a positive safe integer, got 0.5",
+    record("x.ts", {
+      words: { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } },
+    }),
+    "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0.5",
   ],
   [
     "a negative point line",
-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } }),
-    "word_changes[0].remote.removed_at[0].line must be a non-negative safe integer, got -1",
+    record("x.ts", {
+      words: { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } },
+    }),
+    "chunks[0].words.remote.removed_at[0].line must be a non-negative safe integer, got -1",
   ],
   [
     "a negative point column",
-    record(
-      "x.ts",
-      {},
-      {
+    record("x.ts", {
+      words: {
         local: {
           changed: [],
           removed_at: [
@@ -322,20 +439,24 @@ test.each([
           ],
         },
       },
-    ),
-    "word_changes[0].local.removed_at[1].column must be a non-negative safe integer, got -1",
+    }),
+    "chunks[0].words.local.removed_at[1].column must be a non-negative safe integer, got -1",
   ],
   [
     "a fractional point column",
-    record("x.ts", {}, { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } }),
-    "word_changes[0].local.removed_at[0].column must be a non-negative safe integer, got 0.5",
+    record("x.ts", {
+      words: { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } },
+    }),
+    "chunks[0].words.local.removed_at[0].column must be a non-negative safe integer, got 0.5",
   ],
   [
     "an unsafe point column",
-    record("x.ts", {}, { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } }),
-    `word_changes[0].remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
+    record("x.ts", {
+      words: { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } },
+    }),
+    `chunks[0].words.remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
   ],
-])("a record with %s is rejected naming its word_changes entry", (_case, json, message) => {
+])("a record with %s is rejected naming its words", (_case, json, message) => {
   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
     `fixture bad.json: ${message}`,
   );
@@ -343,32 +464,40 @@ test.each([
 
 test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
   const { log, entries } = quietLog();
-  const source = createFixtureSource(log, { "a.json": record("a.ts") });
+  const files = { "a.json": record("a.ts") };
+  const source = createFixtureSource(log, files);
+  const version = await versionOf("a.ts", files);
   const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
 
   expect(await source.loadFile("nope.ts")).toEqual(failure);
-  expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
-  expect(await source.resetFile("nope.ts")).toEqual(failure);
+  expect(await source.finishFile("nope.ts", "x", version)).toEqual(failure);
+  expect(await source.resetFile("nope.ts", version)).toEqual(failure);
   expect(await source.describeFile("nope.ts")).toEqual(failure);
-  expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
-  expect(valueOf(await source.listFiles())).toEqual([
-    { path: "a.ts", status: "Unresolved", unsupported: null },
-  ]);
+  expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
+  expect(valueOf(await source.listFiles())).toEqual({
+    files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
+    diskChanges: [],
+  });
   expect(entries).toEqual([]);
 });
 
 test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
   const { log, entries } = quietLog();
-  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
+  const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+  const source = createFixtureSource(log, files);
+  const version = await versionOf("a.ts", files);
 
-  const finished = await source.finishFile("a.ts", "merged\n");
+  const finished = await source.finishFile("a.ts", "merged\n", version);
 
   expect(finished).toEqual({
     ok: true,
-    value: [
-      { path: "a.ts", status: "Resolved", unsupported: null },
-      { path: "b.ts", status: "Unresolved", unsupported: null },
-    ],
+    value: {
+      kind: "Written",
+      files: [
+        { path: "a.ts", status: "Resolved", unsupported: null },
+        { path: "b.ts", status: "Unresolved", unsupported: null },
+      ],
+    },
   });
   expect(entries).toEqual([
     { level: "info", event: "fixture.finish", fields: { path: "a.ts", text: "merged\n" } },
@@ -378,30 +507,38 @@ test("finish marks the file resolved and logs its text once; reset returns it un
     { path: "a.ts", status: "Unresolved", unsupported: null },
     { path: "b.ts", status: "Unresolved", unsupported: null },
   ];
-  expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
-  expect(valueOf(await source.listFiles())).toEqual(unresolved);
+  expect(await source.resetFile("a.ts", version)).toEqual({
+    ok: true,
+    value: { kind: "Written", files: unresolved },
+  });
+  expect(valueOf(await source.listFiles())).toEqual({ files: unresolved, diskChanges: [] });
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
 });
 
 test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
   const { log, entries } = quietLog();
-  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
+  const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+  const source = createFixtureSource(log, files);
+  const version = await versionOf("b.ts", files);
 
-  expect(await source.takeSide("b.ts", "remote")).toEqual({
+  expect(await source.takeSide("b.ts", "remote", version)).toEqual({
     ok: true,
-    value: [
-      { path: "a.ts", status: "Unresolved", unsupported: null },
-      { path: "b.ts", status: "Resolved", unsupported: null },
-    ],
+    value: {
+      kind: "Written",
+      files: [
+        { path: "a.ts", status: "Unresolved", unsupported: null },
+        { path: "b.ts", status: "Resolved", unsupported: null },
+      ],
+    },
   });
   expect(entries).toEqual([
     { level: "info", event: "fixture.take", fields: { path: "b.ts", side: "remote" } },
   ]);
 
-  await source.resetFile("b.ts");
+  await source.resetFile("b.ts", version);
 
-  expect(valueOf(await source.listFiles()).map((file) => file.status)).toEqual([
+  expect(valueOf(await source.listFiles()).files.map((file) => file.status)).toEqual([
     "Unresolved",
     "Unresolved",
   ]);
@@ -425,6 +562,7 @@ test.each([
       reason: null,
       local: { kind: "Text", lines },
       remote: { kind: "Text", lines: 1 },
+      diskVersion: 0,
     },
   });
 });

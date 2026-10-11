@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
+import type { DiskVersion } from "./domain";
 import { createTauriSource, forwardLog } from "./tauri";
 
 const commands = vi.hoisted(() => ({
@@ -20,17 +21,21 @@ const LINE = { start: 0, len: 1 };
 
 const DTO: Generated.FileMergeData = {
   path: "src/a.ts",
-  base: "b\n",
+  middle: { kind: "Disk", text: "m\n" },
   local: "l\n",
   remote: "r\n",
   deleted: "local",
   eol: "CrLf",
-  chunks: [{ id: 0, kind: "Conflict", base: LINE, local: LINE, remote: LINE }],
-  word_changes: [
+  disk_version: 2,
+  chunks: [
     {
-      chunk: 0,
-      local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
-      remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
+      chunk: { id: 0, kind: "Conflict", base: { start: 3, len: 2 }, local: LINE, remote: LINE },
+      middle: LINE,
+      words: {
+        chunk: 0,
+        local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
+        remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
+      },
     },
   ],
 };
@@ -40,17 +45,41 @@ const ENTRIES: Generated.FileEntry[] = [
   { path: "logo.bin", status: "Unresolved", unsupported: "Binary" },
 ];
 
+const CHANGE: Generated.DiskChange = {
+  path: "src/a.ts",
+  result: { kind: "MarkersLeft", conflicts: 2 },
+};
+
+const WRITTEN: Generated.WriteReply = { kind: "Written", files: ENTRIES };
+
+const CHANGED: Generated.WriteReply = { kind: "ChangedOnDisk", files: ENTRIES, change: CHANGE };
+
+async function versionOfLoaded(): Promise<DiskVersion> {
+  commands.loadFile.mockResolvedValueOnce({ status: "ok", data: DTO });
+  const loaded = await createTauriSource().loadFile("src/a.ts");
+  if (!loaded.ok) {
+    throw new Error("expected the DTO to load");
+  }
+  return loaded.value.diskVersion;
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
 
-test("listFiles returns the app's entries and its failure unchanged", async () => {
+test("listFiles returns the app's entries and disk changes, and its failure unchanged", async () => {
   const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
-  commands.listFiles.mockResolvedValueOnce({ status: "ok", data: ENTRIES });
+  commands.listFiles.mockResolvedValueOnce({
+    status: "ok",
+    data: { files: ENTRIES, disk_changes: [CHANGE] },
+  });
   commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
   const source = createTauriSource();
 
-  expect(await source.listFiles()).toEqual({ ok: true, value: ENTRIES });
+  expect(await source.listFiles()).toEqual({
+    ok: true,
+    value: { files: ENTRIES, diskChanges: [CHANGE] },
+  });
   expect(await source.listFiles()).toEqual({ ok: false, failure: git });
 });
 
@@ -77,7 +106,7 @@ test("remoteName returns the app's answer", async () => {
   expect(await source.remoteName()).toBeNull();
 });
 
-test("loadFile turns the app's data into domain data", async () => {
+test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
 
   const result = await createTauriSource().loadFile("src/a.ts");
@@ -87,16 +116,17 @@ test("loadFile turns the app's data into domain data", async () => {
     ok: true,
     value: {
       path: "src/a.ts",
-      base: "b\n",
+      middle: { kind: "Disk", text: "m\n" },
       local: "l\n",
       remote: "r\n",
       deleted: "local",
       eol: "CrLf",
+      diskVersion: 2,
       chunks: [
         {
           id: 0,
           kind: "Conflict",
-          base: LINE,
+          middle: LINE,
           local: LINE,
           remote: LINE,
           words: {
@@ -109,7 +139,23 @@ test("loadFile turns the app's data into domain data", async () => {
   });
 });
 
+test("loadFile rejects data whose chunk has a negative middle line, naming the field", async () => {
+  const [merged] = DTO.chunks;
+  if (merged === undefined) {
+    throw new Error("the DTO lost its chunk");
+  }
+  commands.loadFile.mockResolvedValue({
+    status: "ok",
+    data: { ...DTO, chunks: [{ ...merged, middle: { start: -1, len: 1 } }] },
+  });
+
+  await expect(createTauriSource().loadFile("src/a.ts")).rejects.toThrow(
+    "chunks[0].middle.start must be a non-negative safe integer, got -1",
+  );
+});
+
 test("each command's error arrives as the failure, unchanged", async () => {
+  const version = await versionOfLoaded();
   const unsupported: Generated.IpcError = {
     kind: "Unsupported",
     path: "logo.bin",
@@ -117,46 +163,81 @@ test("each command's error arrives as the failure, unchanged", async () => {
   };
   const git: Generated.IpcError = { kind: "Git", message: "git add failed" };
   const unknown: Generated.IpcError = { kind: "UnknownPath", path: "x.ts" };
+  const notAFile: Generated.IpcError = { kind: "NotAFile", path: "src/a.ts" };
+  const readFailed: Generated.IpcError = {
+    kind: "ReadFailed",
+    path: "src/a.ts",
+    message: "permission denied",
+  };
   commands.loadFile.mockResolvedValue({ status: "error", error: unsupported });
-  commands.finishFile.mockResolvedValue({ status: "error", error: git });
+  commands.finishFile.mockResolvedValueOnce({ status: "error", error: notAFile });
+  commands.finishFile.mockResolvedValueOnce({ status: "error", error: readFailed });
   commands.resetFile.mockResolvedValue({ status: "error", error: unknown });
   commands.describeFile.mockResolvedValue({ status: "error", error: unknown });
   commands.takeSide.mockResolvedValue({ status: "error", error: git });
   const source = createTauriSource();
 
   expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
-  expect(await source.finishFile("src/a.ts", "text")).toEqual({ ok: false, failure: git });
-  expect(await source.resetFile("x.ts")).toEqual({ ok: false, failure: unknown });
+  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
+    ok: false,
+    failure: notAFile,
+  });
+  expect(await source.finishFile("src/a.ts", "text", version)).toEqual({
+    ok: false,
+    failure: readFailed,
+  });
+  expect(await source.resetFile("x.ts", version)).toEqual({ ok: false, failure: unknown });
   expect(await source.describeFile("x.ts")).toEqual({ ok: false, failure: unknown });
-  expect(await source.takeSide("logo.bin", "local")).toEqual({ ok: false, failure: git });
+  expect(await source.takeSide("logo.bin", "local", version)).toEqual({
+    ok: false,
+    failure: git,
+  });
 });
 
-test("finishFile and resetFile send their arguments and return the app's list", async () => {
-  commands.finishFile.mockResolvedValue({ status: "ok", data: ENTRIES });
-  commands.resetFile.mockResolvedValue({ status: "ok", data: ENTRIES });
+test("finishFile and resetFile send their arguments with the disk version and return the reply", async () => {
+  const version = await versionOfLoaded();
+  commands.finishFile.mockResolvedValue({ status: "ok", data: CHANGED });
+  commands.resetFile.mockResolvedValue({ status: "ok", data: WRITTEN });
   const source = createTauriSource();
 
-  expect(await source.finishFile("src/a.ts", "merged\r\n")).toEqual({ ok: true, value: ENTRIES });
-  expect(await source.resetFile("src/a.ts")).toEqual({ ok: true, value: ENTRIES });
-  expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n");
-  expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts");
+  expect(await source.finishFile("src/a.ts", "merged\r\n", version)).toEqual({
+    ok: true,
+    value: CHANGED,
+  });
+  expect(await source.resetFile("src/a.ts", version)).toEqual({ ok: true, value: WRITTEN });
+  expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n", 2);
+  expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts", 2);
 });
 
 test("describeFile and takeSide send their arguments and return the app's answer", async () => {
+  const version = await versionOfLoaded();
   const sides: Generated.FileSides = {
     path: "logo.bin",
     reason: "Binary",
     local: { kind: "Binary", bytes: 12 },
     remote: { kind: "Missing" },
+    disk_version: 4,
   };
   commands.describeFile.mockResolvedValue({ status: "ok", data: sides });
-  commands.takeSide.mockResolvedValue({ status: "ok", data: ENTRIES });
+  commands.takeSide.mockResolvedValue({ status: "ok", data: WRITTEN });
   const source = createTauriSource();
 
-  expect(await source.describeFile("logo.bin")).toEqual({ ok: true, value: sides });
-  expect(await source.takeSide("logo.bin", "remote")).toEqual({ ok: true, value: ENTRIES });
+  expect(await source.describeFile("logo.bin")).toEqual({
+    ok: true,
+    value: {
+      path: "logo.bin",
+      reason: "Binary",
+      local: { kind: "Binary", bytes: 12 },
+      remote: { kind: "Missing" },
+      diskVersion: 4,
+    },
+  });
+  expect(await source.takeSide("logo.bin", "remote", version)).toEqual({
+    ok: true,
+    value: WRITTEN,
+  });
   expect(commands.describeFile).toHaveBeenCalledWith("logo.bin");
-  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote");
+  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote", 2);
 });
 
 test("a rejected command rejects the call", async () => {
@@ -166,14 +247,16 @@ test("a rejected command rejects the call", async () => {
 });
 
 test("a string error from Tauri's IPC layer rejects the call with that message", async () => {
+  const version = await versionOfLoaded();
   commands.finishFile.mockResolvedValue({ status: "error", error: "finish_file not allowed" });
 
-  await expect(createTauriSource().finishFile("src/a.ts", "text")).rejects.toThrow(
+  await expect(createTauriSource().finishFile("src/a.ts", "text", version)).rejects.toThrow(
     new Error("finish_file not allowed"),
   );
 });
 
 test("a string error from describeFile or takeSide rejects the call with that message", async () => {
+  const version = await versionOfLoaded();
   commands.describeFile.mockResolvedValue({ status: "error", error: "describe_file not allowed" });
   commands.takeSide.mockResolvedValue({ status: "error", error: "take_side not allowed" });
   const source = createTauriSource();
@@ -181,15 +264,18 @@ test("a string error from describeFile or takeSide rejects the call with that me
   await expect(source.describeFile("logo.bin")).rejects.toThrow(
     new Error("describe_file not allowed"),
   );
-  await expect(source.takeSide("logo.bin", "local")).rejects.toThrow(
+  await expect(source.takeSide("logo.bin", "local", version)).rejects.toThrow(
     new Error("take_side not allowed"),
   );
 });
 
 test.each([null, 404])("a %s error from Tauri's IPC layer rejects the call", async (error) => {
+  const version = await versionOfLoaded();
   commands.resetFile.mockResolvedValue({ status: "error", error });
 
-  await expect(createTauriSource().resetFile("src/a.ts")).rejects.toThrow(new Error(String(error)));
+  await expect(createTauriSource().resetFile("src/a.ts", version)).rejects.toThrow(
+    new Error(String(error)),
+  );
 });
 
 test("the forward stringifies non-finite numbers and keeps every other value", async () => {

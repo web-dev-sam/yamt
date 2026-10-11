@@ -5,6 +5,7 @@ import { onMounted, watch } from "vue";
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
+import NoticeBar from "./NoticeBar.vue";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import { useAppStore } from "./store";
@@ -15,11 +16,13 @@ const {
   choices,
   active,
   problem,
+  notices,
   question,
   allResolved,
   open,
   refreshFiles,
   dismissProblem,
+  dismissNotice,
   answer,
   watchWindowClose,
 } = useAppStore();
@@ -41,6 +44,7 @@ onMounted(() => {
   <div class="flex h-full">
     <FileList :files="files" :active="active" @select="open" />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
       <p
         v-else-if="allResolved"

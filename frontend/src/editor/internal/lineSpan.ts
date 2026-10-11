@@ -4,7 +4,7 @@ import type { Chunk } from "../../ipc";
 
 export function lineSpan(
   doc: Text,
-  range: Chunk["base"] | Chunk["local"] | Chunk["remote"],
+  range: Chunk["middle"] | Chunk["local"] | Chunk["remote"],
 ): { from: number; to: number } {
   const end = range.start + range.len;
   return {

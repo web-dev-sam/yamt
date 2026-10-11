@@ -1,6 +1,6 @@
 import { commands, type LogValue } from "./bindings";
 import type { ChunkSource } from "./ChunkSource";
-import { toDomain, type SourceFailure, type SourceResult } from "./domain";
+import { toDomain, toFileList, toSides, type SourceFailure, type SourceResult } from "./domain";
 import type { LogEntry } from "./log";
 
 // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
@@ -23,23 +23,25 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
 export function createTauriSource(): ChunkSource {
   return {
     async listFiles() {
-      return toResult(await commands.listFiles());
+      const result = toResult(await commands.listFiles());
+      return result.ok ? { ok: true, value: toFileList(result.value) } : result;
     },
     async loadFile(path) {
       const result = toResult(await commands.loadFile(path));
       return result.ok ? { ok: true, value: toDomain(result.value) } : result;
     },
-    async finishFile(path, text) {
-      return toResult(await commands.finishFile(path, text));
+    async finishFile(path, text, diskVersion) {
+      return toResult(await commands.finishFile(path, text, diskVersion));
     },
-    async resetFile(path) {
-      return toResult(await commands.resetFile(path));
+    async resetFile(path, diskVersion) {
+      return toResult(await commands.resetFile(path, diskVersion));
     },
     async describeFile(path) {
-      return toResult(await commands.describeFile(path));
+      const result = toResult(await commands.describeFile(path));
+      return result.ok ? { ok: true, value: toSides(result.value) } : result;
     },
-    async takeSide(path, side) {
-      return toResult(await commands.takeSide(path, side));
+    async takeSide(path, side, diskVersion) {
+      return toResult(await commands.takeSide(path, side, diskVersion));
     },
     remoteName() {
       return commands.remoteName();

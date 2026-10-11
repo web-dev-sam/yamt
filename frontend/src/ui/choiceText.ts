@@ -1,5 +1,5 @@
-import type { FileSides, Side, SideContent } from "../ipc";
-import { otherSide } from "./sides";
+import type { FileSides, NotText, Side, SideContent } from "../ipc";
+import { otherSide, type Taken } from "./sides";
 
 const BYTES_PER_KB = 1024;
 const SHORT_COMMIT_LENGTH = 7;
@@ -62,18 +62,44 @@ export function sideButton(sides: FileSides, side: Side): string {
   return side === "local" ? "Take left" : "Take right";
 }
 
-function resolvedLine(sides: FileSides, taken: Side): string {
-  if (sides[taken].kind === "Missing") {
+function resolvedLine(sides: FileSides, taken: Taken): string {
+  if (taken.by === "disk") {
+    return "Changed on disk — staged as it is.";
+  }
+  if (sides[taken.side].kind === "Missing") {
     return DELETED_LINE;
   }
-  return taken === "local" ? "Resolved with the left version." : "Resolved with the right version.";
+  return taken.side === "local"
+    ? "Resolved with the left version."
+    : "Resolved with the right version.";
 }
 
-export function resultLine(sides: FileSides, taken: Side | null): string {
+export function resultLine(sides: FileSides, taken: Taken | null): string {
   if (taken !== null) {
     return resolvedLine(sides, taken);
   }
   return sides.local.kind === "Missing" || sides.remote.kind === "Missing"
     ? "Keep the file or delete it."
     : "Take the left or the right version.";
+}
+
+export function notTextLine(found: NotText): string {
+  switch (found) {
+    case "Deleted":
+      return "Deleted on disk — staged as deleted.";
+    case "Binary":
+      return "Not shown: the file on disk is binary — staged as it is.";
+    case "NonUtf8":
+      return "Not shown: the file on disk is not UTF-8 — staged as it is.";
+    case "TooLarge":
+      return "Not shown: the file on disk is too large — staged as it is.";
+    case "Link":
+      return "A link on disk now — staged as it is.";
+    case "Directory":
+      return "A folder on disk now — staged as deleted.";
+    default: {
+      const _exhaustive: never = found;
+      return _exhaustive;
+    }
+  }
 }

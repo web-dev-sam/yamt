@@ -102,7 +102,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
   return StateField.define<readonly ChunkSpan[]>({
     create: (state) =>
       chunks.map((chunk) => {
-        const { from, to } = lineSpan(state.doc, chunk.base);
+        const { from, to } = lineSpan(state.doc, chunk.middle);
         return {
           chunk,
           tone: chunkTone(chunk, "center"),

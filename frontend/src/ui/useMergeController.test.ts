@@ -8,7 +8,7 @@ const editor = vi.hoisted(() => {
   const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
   class MergeController {
     constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
-      state.text = data.base;
+      state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
       state.built += 1;
       state.readOnly.push(options.readOnly);
     }
@@ -55,8 +55,8 @@ function mount(
   return { scope, handle };
 }
 
-async function fileData(base: string): Promise<FileMergeData> {
-  return { ...(await loadFixture("vueuse-use-magic-keys.ts")), base };
+async function fileData(text: string): Promise<FileMergeData> {
+  return { ...(await loadFixture("vueuse-use-magic-keys.ts")), middle: { kind: "Disk", text } };
 }
 
 test("unsaved: false when built, true after an edit, false after markSaved, false after new data", async () => {
@@ -91,6 +91,21 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
   scope.stop();
 
   expect(editor.state.destroyed).toBe(2);
+});
+
+test("after a data swap, unsaved() is false even when the old controller had edits", async () => {
+  const data = shallowRef<FileMergeData | null>(await fileData("git's merge\n"));
+  const { handle } = mount(data);
+  await nextTick();
+  editor.state.text = "typed in yamt\n";
+  expect(handle.unsaved()).toBe(true);
+
+  data.value = await fileData("changed on disk\n");
+  await nextTick();
+
+  expect(editor.state.built).toBe(2);
+  expect(handle.resultText()).toBe("changed on disk\n");
+  expect(handle.unsaved()).toBe(false);
 });
 
 test("without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored", async () => {
