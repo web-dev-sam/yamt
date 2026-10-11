@@ -1,0 +1,1756 @@
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 05a0e62..3fd14fb 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,8 +1,10 @@
+-import type { FileEntry, FileMergeData, SourceResult } from "./domain";
++import type { FileEntry, FileMergeData, FileSides, Side, SourceResult } from "./domain";
+ 
+ export interface ChunkSource {
+   listFiles(): Promise<FileEntry[]>;
+   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+   finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
+   resetFile(path: string): Promise<SourceResult<FileEntry[]>>;
++  describeFile(path: string): Promise<SourceResult<FileSides>>;
++  takeSide(path: string, side: Side): Promise<SourceResult<FileEntry[]>>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 0d0fd1f..8bfcbe3 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -24,6 +24,12 @@ export type Chunk = {
+ 
+ export type FileEntry = Generated.FileEntry;
+ 
++export type FileSides = Generated.FileSides;
++
++export type SideContent = Generated.SideContent;
++
++export type Side = Generated.Side;
++
+ export type FileMergeData = {
+   readonly path: string;
+   readonly base: string;
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index adae34d..5c32e57 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -326,6 +326,8 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
+   expect(await source.loadFile("nope.ts")).toEqual(failure);
+   expect(await source.finishFile("nope.ts", "x")).toEqual(failure);
+   expect(await source.resetFile("nope.ts")).toEqual(failure);
++  expect(await source.describeFile("nope.ts")).toEqual(failure);
++  expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
+   expect(await source.listFiles()).toEqual([
+     { path: "a.ts", status: "Unresolved", unsupported: null },
+   ]);
+@@ -359,6 +361,51 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+   expect(entries).toHaveLength(1);
+ });
+ 
++test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureSource(log, { "a.json": record("a.ts"), "b.json": record("b.ts") });
++
++  expect(await source.takeSide("b.ts", "remote")).toEqual({
++    ok: true,
++    value: [
++      { path: "a.ts", status: "Unresolved", unsupported: null },
++      { path: "b.ts", status: "Resolved", unsupported: null },
++    ],
++  });
++  expect(entries).toEqual([
++    { level: "info", event: "fixture.take", fields: { path: "b.ts", side: "remote" } },
++  ]);
++
++  await source.resetFile("b.ts");
++
++  expect((await source.listFiles()).map((file) => file.status)).toEqual([
++    "Unresolved",
++    "Unresolved",
++  ]);
++});
++
++test.each([
++  ["", 0],
++  ["one", 1],
++  ["one\n", 1],
++  ["one\ntwo", 2],
++  ["one\r\ntwo\r\n", 2],
++  ["one\n\n", 2],
++])("describeFile counts %j as %i lines, like the app", async (local, lines) => {
++  const { log } = quietLog();
++  const source = createFixtureSource(log, { "a.json": { ...record("a.ts"), local } });
++
++  expect(await source.describeFile("a.ts")).toEqual({
++    ok: true,
++    value: {
++      path: "a.ts",
++      reason: null,
++      local: { kind: "Text", lines },
++      remote: { kind: "Text", lines: 1 },
++    },
++  });
++});
++
+ test("loadFixture reads a committed or an in-memory record and rejects an unknown path", async () => {
+   expect((await loadFixture("word-marks.ts")).path).toBe("word-marks.ts");
+   expect(await loadFixture("a.ts", { "a.json": record("a.ts") })).toEqual(loaded("a.ts"));
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 3f6dccc..1981321 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -2,11 +2,23 @@ import * as v from "valibot";
+ 
+ import type * as Generated from "./bindings";
+ import type { ChunkSource } from "./ChunkSource";
+-import { toDomain, type FileEntry, type FileMergeData, type SourceResult } from "./domain";
++import {
++  toDomain,
++  type FileEntry,
++  type FileMergeData,
++  type FileSides,
++  type SideContent,
++  type SourceResult,
++} from "./domain";
+ import type { Log } from "./log";
+ 
+ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+ 
++type Records = {
++  readonly fixtures: ReadonlyMap<string, FileMergeData>;
++  readonly finished: Map<string, string>;
++};
++
+ // Stryker disable all: Vite needs import.meta.glob arguments as literals
+ const FIXTURE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
+   ["../../fixtures/golden/*.json", "../../fixtures/showcase/*.json"],
+@@ -99,6 +111,41 @@ function unknownPath(path: string): SourceResult<never> {
+   return { ok: false, failure: { kind: "UnknownPath", path } };
+ }
+ 
++// The app counts lines with Rust's `str::lines`, which does not count an empty last line.
++function textSide(text: string): SideContent {
++  const breaks = text.split("\n").length - 1;
++  return { kind: "Text", lines: text === "" || text.endsWith("\n") ? breaks : breaks + 1 };
++}
++
++function describeRecord(path: string, data: FileMergeData | undefined): SourceResult<FileSides> {
++  if (data === undefined) {
++    return unknownPath(path);
++  }
++  const sides = { path, reason: null, local: textSide(data.local), remote: textSide(data.remote) };
++  return { ok: true, value: sides };
++}
++
++function entries({ fixtures, finished }: Records): FileEntry[] {
++  return [...fixtures.keys()].map((path): FileEntry => ({
++    path,
++    status: finished.has(path) ? "Resolved" : "Unresolved",
++    unsupported: null,
++  }));
++}
++
++function changed(
++  records: Records,
++  path: string,
++  change: (data: FileMergeData) => void,
++): SourceResult<FileEntry[]> {
++  const data = records.fixtures.get(path);
++  if (data === undefined) {
++    return unknownPath(path);
++  }
++  change(data);
++  return { ok: true, value: entries(records) };
++}
++
+ export async function loadFixture(
+   path: string,
+   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+@@ -114,39 +161,35 @@ export function createFixtureSource(
+   log: Log,
+   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+ ): ChunkSource {
+-  const fixtures = parseFixtures(files);
+-  const finished = new Map<string, string>();
+-
+-  function entries(): FileEntry[] {
+-    return [...fixtures.keys()].map((path): FileEntry => ({
+-      path,
+-      status: finished.has(path) ? "Resolved" : "Unresolved",
+-      unsupported: null,
+-    }));
+-  }
++  const records: Records = { fixtures: parseFixtures(files), finished: new Map() };
+ 
+   return {
+     async listFiles() {
+-      return entries();
++      return entries(records);
+     },
+     async loadFile(path) {
+-      const data = fixtures.get(path);
++      const data = records.fixtures.get(path);
+       return data === undefined ? unknownPath(path) : { ok: true, value: data };
+     },
+     async finishFile(path, text) {
+-      if (!fixtures.has(path)) {
+-        return unknownPath(path);
+-      }
+-      finished.set(path, text);
+-      log.info("fixture.finish", { path, text });
+-      return { ok: true, value: entries() };
++      return changed(records, path, () => {
++        records.finished.set(path, text);
++        log.info("fixture.finish", { path, text });
++      });
+     },
+     async resetFile(path) {
+-      if (!fixtures.has(path)) {
+-        return unknownPath(path);
+-      }
+-      finished.delete(path);
+-      return { ok: true, value: entries() };
++      return changed(records, path, () => {
++        records.finished.delete(path);
++      });
++    },
++    async describeFile(path) {
++      return describeRecord(path, records.fixtures.get(path));
++    },
++    async takeSide(path, side) {
++      return changed(records, path, (data) => {
++        records.finished.set(path, data[side]);
++        log.info("fixture.take", { path, side });
++      });
+     },
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 57af0a7..fc40847 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -3,7 +3,16 @@ import { forwardLog } from "./tauri";
+ import { guardWindowClose } from "./window";
+ 
+ export type { ChunkSource } from "./ChunkSource";
+-export type { Chunk, FileEntry, FileMergeData, SourceFailure, SourceResult } from "./domain";
++export type {
++  Chunk,
++  FileEntry,
++  FileMergeData,
++  FileSides,
++  Side,
++  SideContent,
++  SourceFailure,
++  SourceResult,
++} from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createTauriSource } from "./tauri";
+ 
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index e369224..39e482d 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -8,6 +8,8 @@ const commands = vi.hoisted(() => ({
+   loadFile: vi.fn(),
+   finishFile: vi.fn(),
+   resetFile: vi.fn(),
++  describeFile: vi.fn(),
++  takeSide: vi.fn(),
+   log: vi.fn(),
+ }));
+ 
+@@ -88,11 +90,15 @@ test("each command's error arrives as the failure, unchanged", async () => {
+   commands.loadFile.mockResolvedValue({ status: "error", error: unsupported });
+   commands.finishFile.mockResolvedValue({ status: "error", error: git });
+   commands.resetFile.mockResolvedValue({ status: "error", error: unknown });
++  commands.describeFile.mockResolvedValue({ status: "error", error: unknown });
++  commands.takeSide.mockResolvedValue({ status: "error", error: git });
+   const source = createTauriSource();
+ 
+   expect(await source.loadFile("logo.bin")).toEqual({ ok: false, failure: unsupported });
+   expect(await source.finishFile("src/a.ts", "text")).toEqual({ ok: false, failure: git });
+   expect(await source.resetFile("x.ts")).toEqual({ ok: false, failure: unknown });
++  expect(await source.describeFile("x.ts")).toEqual({ ok: false, failure: unknown });
++  expect(await source.takeSide("logo.bin", "local")).toEqual({ ok: false, failure: git });
+ });
+ 
+ test("finishFile and resetFile send their arguments and return the app's list", async () => {
+@@ -106,6 +112,23 @@ test("finishFile and resetFile send their arguments and return the app's list",
+   expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts");
+ });
+ 
++test("describeFile and takeSide send their arguments and return the app's answer", async () => {
++  const sides: Generated.FileSides = {
++    path: "logo.bin",
++    reason: "Binary",
++    local: { kind: "Binary", bytes: 12 },
++    remote: { kind: "Missing" },
++  };
++  commands.describeFile.mockResolvedValue({ status: "ok", data: sides });
++  commands.takeSide.mockResolvedValue({ status: "ok", data: ENTRIES });
++  const source = createTauriSource();
++
++  expect(await source.describeFile("logo.bin")).toEqual({ ok: true, value: sides });
++  expect(await source.takeSide("logo.bin", "remote")).toEqual({ ok: true, value: ENTRIES });
++  expect(commands.describeFile).toHaveBeenCalledWith("logo.bin");
++  expect(commands.takeSide).toHaveBeenCalledWith("logo.bin", "remote");
++});
++
+ test("a rejected command rejects the call", async () => {
+   commands.loadFile.mockRejectedValue(new Error("ipc down"));
+ 
+@@ -120,6 +143,19 @@ test("a string error from Tauri's IPC layer rejects the call with that message",
+   );
+ });
+ 
++test("a string error from describeFile or takeSide rejects the call with that message", async () => {
++  commands.describeFile.mockResolvedValue({ status: "error", error: "describe_file not allowed" });
++  commands.takeSide.mockResolvedValue({ status: "error", error: "take_side not allowed" });
++  const source = createTauriSource();
++
++  await expect(source.describeFile("logo.bin")).rejects.toThrow(
++    new Error("describe_file not allowed"),
++  );
++  await expect(source.takeSide("logo.bin", "local")).rejects.toThrow(
++    new Error("take_side not allowed"),
++  );
++});
++
+ test.each([null, 404])("a %s error from Tauri's IPC layer rejects the call", async (error) => {
+   commands.resetFile.mockResolvedValue({ status: "error", error });
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index e73466a..ad223cb 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -35,6 +35,12 @@ export function createTauriSource(): ChunkSource {
+     async resetFile(path) {
+       return toResult(await commands.resetFile(path));
+     },
++    async describeFile(path) {
++      return toResult(await commands.describeFile(path));
++    },
++    async takeSide(path, side) {
++      return toResult(await commands.takeSide(path, side));
++    },
+   };
+ }
+ 
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 9351108..5031469 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -1 +1 @@
+-Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()`; the single editor seam is `useMergeController`. Section order enforced by `scripts/check-sfc-order.ts`.
++Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()`; the single editor seam is `useMergeController`. Section order enforced by `scripts/check-sfc-order.ts`.
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index af53cc5..125e381 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -1,6 +1,7 @@
+ <script setup lang="ts">
+ import { onMounted } from "vue";
+ 
++import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+ import ProblemBar from "./ProblemBar.vue";
+@@ -10,6 +11,7 @@ import { useAppStore } from "./store";
+ const {
+   files,
+   opened,
++  choices,
+   active,
+   problem,
+   question,
+@@ -44,6 +46,12 @@ onMounted(() => {
+           :data="file"
+           :shown="file.path === active"
+         />
++        <ChoiceView
++          v-for="choice in choices"
++          :key="choice.sides.path"
++          :choice="choice"
++          :shown="choice.sides.path === active"
++        />
+       </div>
+     </div>
+     <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+new file mode 100644
+index 0000000..89ef416
+--- /dev/null
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -0,0 +1,74 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { Side } from "../ipc";
++import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { useAppStore, type Choice } from "./store";
++
++type Column = {
++  readonly side: Side;
++  readonly header: string;
++  readonly sentence: string;
++  readonly tooltip: string | undefined;
++  readonly button: string;
++};
++
++const props = defineProps<{ choice: Choice; shown: boolean }>();
++
++const HEADERS: Readonly<Record<Side, string>> = {
++  local: "Local (yours)",
++  remote: "Remote (theirs)",
++};
++const SIDES: readonly Side[] = ["local", "remote"];
++
++const { takeSide, reset } = useAppStore();
++
++const columns = computed(() =>
++  SIDES.map((side): Column => ({
++    side,
++    header: HEADERS[side],
++    sentence: sideSentence(props.choice.sides[side]),
++    tooltip: sideTooltip(props.choice.sides[side]),
++    button: sideButton(props.choice.sides, side),
++  })),
++);
++const resolved = computed(() =>
++  props.choice.taken === null ? "" : resolvedLine(props.choice.sides, props.choice.taken),
++);
++</script>
++
++<template>
++  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
++    <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
++      <span class="ml-3 text-fg-muted" role="status">{{ resolved }}</span>
++      <button
++        type="button"
++        :disabled="choice.taken === null"
++        class="ml-auto rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++        @click="reset(choice.sides.path)"
++      >
++        Reset file
++      </button>
++    </header>
++    <section
++      class="grid min-h-0 min-w-0 flex-1 grid-flow-col grid-cols-2 grid-rows-[auto_minmax(0,1fr)] gap-x-px bg-separator"
++    >
++      <template v-for="column in columns" :key="column.side">
++        <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
++          {{ column.header }}
++        </h2>
++        <div class="flex min-w-0 flex-col items-start gap-3 bg-editor p-3">
++          <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
++          <button
++            v-if="choice.taken === null"
++            type="button"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++            @click="takeSide(choice.sides.path, column.side)"
++          >
++            {{ column.button }}
++          </button>
++        </div>
++      </template>
++    </section>
++  </div>
++</template>
+diff --git a/frontend/src/ui/ProblemBar.vue b/frontend/src/ui/ProblemBar.vue
+index 1ed6550..f9178aa 100644
+--- a/frontend/src/ui/ProblemBar.vue
++++ b/frontend/src/ui/ProblemBar.vue
+@@ -2,8 +2,8 @@
+ import { computed } from "vue";
+ import X from "~icons/lucide/x";
+ 
++import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+-import type { Problem } from "./store";
+ 
+ const props = defineProps<{ problem: Problem }>();
+ const emit = defineEmits<{ close: [] }>();
+diff --git a/frontend/src/ui/choiceText.test.ts b/frontend/src/ui/choiceText.test.ts
+new file mode 100644
+index 0000000..f707c9e
+--- /dev/null
++++ b/frontend/src/ui/choiceText.test.ts
+@@ -0,0 +1,74 @@
++import { expect, test } from "vitest";
++
++import type { FileSides, SideContent } from "../ipc";
++import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++
++const COMMIT = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
++const MISSING: SideContent = { kind: "Missing" };
++const BINARY: SideContent = { kind: "Binary", bytes: 12_697 };
++
++function sides(local: SideContent, remote: SideContent): FileSides {
++  return { path: "logo.bin", reason: "Binary", local, remote };
++}
++
++test.each<[SideContent, string]>([
++  [MISSING, "Deleted in this branch."],
++  [{ kind: "Text", lines: 120 }, "A text file, 120 lines."],
++  [{ kind: "Text", lines: 1 }, "A text file, 1 line."],
++  [{ kind: "Text", lines: 0 }, "A text file, 0 lines."],
++  [BINARY, "A binary file, 12.4 KB."],
++  [{ kind: "NonUtf8", bytes: 3_174 }, "Not UTF-8 text, 3.1 KB."],
++  [{ kind: "TooLarge", bytes: 9_646_899 }, "A text file too large to show, 9.2 MB."],
++  [{ kind: "Link", target: "../shared/config.json" }, "A symbolic link to ../shared/config.json."],
++  [{ kind: "Commit", id: COMMIT }, "Submodule at commit 1a2b3c4."],
++])("%j reads %j", (content, sentence) => {
++  expect(sideSentence(content)).toBe(sentence);
++});
++
++test.each([
++  [0, "0 B"],
++  [1023, "1023 B"],
++  [1024, "1 KB"],
++  [1536, "1.5 KB"],
++  [1_048_524, "1023.9 KB"],
++  [1_048_575, "1 MB"],
++  [1_048_576, "1 MB"],
++  [1_572_864, "1.5 MB"],
++  [2_147_483_648, "2048 MB"],
++])("%i bytes are %s", (bytes, size) => {
++  expect(sideSentence({ kind: "Binary", bytes })).toBe(`A binary file, ${size}.`);
++});
++
++test("only a submodule side has a tooltip, its full commit id", () => {
++  expect(sideTooltip({ kind: "Commit", id: COMMIT })).toBe(COMMIT);
++  expect(sideTooltip(BINARY)).toBeUndefined();
++  expect(sideTooltip({ kind: "Link", target: COMMIT })).toBeUndefined();
++});
++
++test("both sides present: Take left and Take right", () => {
++  const both = sides(BINARY, { kind: "Link", target: "a" });
++
++  expect(sideButton(both, "local")).toBe("Take left");
++  expect(sideButton(both, "remote")).toBe("Take right");
++});
++
++test.each([
++  ["local", sides(MISSING, BINARY), "Delete", "Keep"],
++  ["remote", sides(BINARY, MISSING), "Keep", "Delete"],
++] as const)(
++  "deleted on the %s side: Delete there, Keep on the other",
++  (_side, files, left, right) => {
++    expect(sideButton(files, "local")).toBe(left);
++    expect(sideButton(files, "remote")).toBe(right);
++  },
++);
++
++test("the resolved line names the side taken, or the deletion", () => {
++  const both = sides(BINARY, { kind: "Text", lines: 2 });
++  const deletedRemotely = sides(BINARY, MISSING);
++
++  expect(resolvedLine(both, "local")).toBe("Resolved with the left version.");
++  expect(resolvedLine(both, "remote")).toBe("Resolved with the right version.");
++  expect(resolvedLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
++  expect(resolvedLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
++});
+diff --git a/frontend/src/ui/choiceText.ts b/frontend/src/ui/choiceText.ts
+new file mode 100644
+index 0000000..b2419a0
+--- /dev/null
++++ b/frontend/src/ui/choiceText.ts
+@@ -0,0 +1,65 @@
++import type { FileSides, Side, SideContent } from "../ipc";
++
++const BYTES_PER_KB = 1024;
++const SHORT_COMMIT_LENGTH = 7;
++
++function oneDecimal(value: number): string {
++  const rounded = value.toFixed(1);
++  return rounded.endsWith(".0") ? rounded.slice(0, -".0".length) : rounded;
++}
++
++function sizeText(bytes: number): string {
++  if (bytes < BYTES_PER_KB) {
++    return `${bytes} B`;
++  }
++  const kb = oneDecimal(bytes / BYTES_PER_KB);
++  if (Number(kb) < BYTES_PER_KB) {
++    return `${kb} KB`;
++  }
++  return `${oneDecimal(bytes / BYTES_PER_KB / BYTES_PER_KB)} MB`;
++}
++
++export function sideSentence(content: SideContent): string {
++  switch (content.kind) {
++    case "Missing":
++      return "Deleted in this branch.";
++    case "Text":
++      return `A text file, ${content.lines} ${content.lines === 1 ? "line" : "lines"}.`;
++    case "Binary":
++      return `A binary file, ${sizeText(content.bytes)}.`;
++    case "NonUtf8":
++      return `Not UTF-8 text, ${sizeText(content.bytes)}.`;
++    case "TooLarge":
++      return `A text file too large to show, ${sizeText(content.bytes)}.`;
++    case "Link":
++      return `A symbolic link to ${content.target}.`;
++    case "Commit":
++      return `Submodule at commit ${content.id.slice(0, SHORT_COMMIT_LENGTH)}.`;
++    default: {
++      const _exhaustive: never = content;
++      return _exhaustive;
++    }
++  }
++}
++
++export function sideTooltip(content: SideContent): string | undefined {
++  return content.kind === "Commit" ? content.id : undefined;
++}
++
++export function sideButton(sides: FileSides, side: Side): string {
++  if (sides[side].kind === "Missing") {
++    return "Delete";
++  }
++  const other = side === "local" ? "remote" : "local";
++  if (sides[other].kind === "Missing") {
++    return "Keep";
++  }
++  return side === "local" ? "Take left" : "Take right";
++}
++
++export function resolvedLine(sides: FileSides, taken: Side): string {
++  if (sides[taken].kind === "Missing") {
++    return "Resolved by deleting the file.";
++  }
++  return taken === "local" ? "Resolved with the left version." : "Resolved with the right version.";
++}
+diff --git a/frontend/src/ui/fileIcon.test.ts b/frontend/src/ui/fileIcon.test.ts
+index 6a6a199..5ee6bb2 100644
+--- a/frontend/src/ui/fileIcon.test.ts
++++ b/frontend/src/ui/fileIcon.test.ts
+@@ -7,22 +7,39 @@ import Docker from "~icons/vscode-icons/file-type-docker";
+ import Git from "~icons/vscode-icons/file-type-git";
+ import Jenkins from "~icons/vscode-icons/file-type-jenkins";
+ import Json from "~icons/vscode-icons/file-type-json";
++import Meson from "~icons/vscode-icons/file-type-meson";
+ import Npm from "~icons/vscode-icons/file-type-npm";
+ import ReactTs from "~icons/vscode-icons/file-type-reactts";
+ import TypeScript from "~icons/vscode-icons/file-type-typescript";
+ import TypeScriptDef from "~icons/vscode-icons/file-type-typescriptdef";
+ import Vue from "~icons/vscode-icons/file-type-vue";
+ 
+-import { fileIcon } from "./fileIcon";
++import { fileIcon, ICON_ROWS } from "./fileIcon";
++
++function repeatedKeys(rows: (typeof ICON_ROWS)["byName"]): string[] {
++  const keys = rows.flatMap(([, rowKeys]) => rowKeys);
++  return keys.filter((key, index) => keys.indexOf(key) !== index);
++}
+ 
+ describe("fileIcon", () => {
+   it("prefers the file name over the extension", () => {
+     expect(fileIcon("package.json")).toBe(Npm);
+     expect(fileIcon("data.json")).toBe(Json);
++    expect(fileIcon("meson.build")).toBe(Meson);
++    expect(fileIcon("meson.build")).not.toBe(Bazel);
++    expect(fileIcon("rules.build")).toBe(Bazel);
++  });
++
++  it("knows literal file names without an extension", () => {
+     expect(fileIcon("BUILD")).toBe(Bazel);
+     expect(fileIcon("Jenkinsfile")).toBe(Jenkins);
+   });
+ 
++  it("names every key once across the name rows and once across the extension rows", () => {
++    expect(repeatedKeys(ICON_ROWS.byName)).toEqual([]);
++    expect(repeatedKeys(ICON_ROWS.byExtension)).toEqual([]);
++  });
++
+   it("prefers the longer extension over its suffix", () => {
+     expect(fileIcon("env.d.ts")).toBe(TypeScriptDef);
+     expect(fileIcon("main.ts")).toBe(TypeScript);
+diff --git a/frontend/src/ui/fileIcon.ts b/frontend/src/ui/fileIcon.ts
+index ad521b6..a127de0 100644
+--- a/frontend/src/ui/fileIcon.ts
++++ b/frontend/src/ui/fileIcon.ts
+@@ -65,6 +65,7 @@ import Lua from "~icons/vscode-icons/file-type-lua";
+ import Makefile from "~icons/vscode-icons/file-type-makefile";
+ import SourceMap from "~icons/vscode-icons/file-type-map";
+ import Markdown from "~icons/vscode-icons/file-type-markdown";
++import Meson from "~icons/vscode-icons/file-type-meson";
+ import Neo4j from "~icons/vscode-icons/file-type-neo4j";
+ import Nginx from "~icons/vscode-icons/file-type-nginx";
+ import Npm from "~icons/vscode-icons/file-type-npm";
+@@ -136,140 +137,146 @@ function lookup(table: IconTable, key: string): Component | undefined {
+   return Object.hasOwn(table, key) ? table[key] : undefined;
+ }
+ 
+-const ICONS: Readonly<{ byName: IconTable; byExtension: IconTable; fallback: Component }> = {
+-  byName: iconTable([
+-    [Bazel, ["build"]],
+-    [BuckBuild, ["buck"]],
+-    [Bundler, ["gemfile", "gemfile.lock"]],
+-    [Cargo, ["cargo.lock", "cargo.toml"]],
+-    [CMake, ["cmakelists.txt"]],
+-    [Composer, ["composer.json", "composer.lock"]],
+-    [Config, ["extensions.conf"]],
+-    [Docker, ["dockerfile"]],
+-    [Dotenv, [".env"]],
+-    [EditorConfig, [".editorconfig"]],
+-    [Git, [".gitattributes", ".gitignore", ".gitmodules"]],
+-    [Jenkins, ["jenkinsfile"]],
+-    [License, ["license"]],
+-    [Makefile, ["makefile"]],
+-    [Nginx, ["nginx.conf"]],
+-    [Npm, ["package-lock.json", "package.json"]],
+-    [Pnpm, ["pnpm-lock.yaml", "pnpm-workspace.yaml"]],
+-    [Rake, ["rakefile"]],
+-    [Shell, ["pkgbuild"]],
+-    [TsConfig, ["tsconfig.json"]],
+-    [Yarn, ["yarn.lock"]],
+-  ]),
+-  byExtension: iconTable([
+-    [Apl, ["apl", "dyalog"]],
+-    [Arduino, ["ino"]],
+-    [Assembly, ["s", "z80"]],
+-    [Bazel, ["build", "bzl"]],
+-    [C, ["c"]],
+-    [CHeader, ["h"]],
+-    [Clojure, ["clj", "cljc", "cljx", "edn"]],
+-    [ClojureScript, ["cljs"]],
+-    [CMake, ["cmake", "cmake.in"]],
+-    [Cobol, ["cob", "cpy"]],
+-    [CoffeeScript, ["coffee"]],
+-    [Config, ["cfg"]],
+-    [Cpp, ["c++", "cc", "cpp", "cxx"]],
+-    [CppHeader, ["h++", "hh", "hpp", "hxx"]],
+-    [Crystal, ["cr"]],
+-    [CSharp, ["cs"]],
+-    [Css, ["css"]],
+-    [Cucumber, ["feature"]],
+-    [Cython, ["pxd", "pxi", "pyx"]],
+-    [DartLang, ["dart"]],
+-    [Delphi, ["p", "pas"]],
+-    [Diff, ["diff", "patch"]],
+-    [DLang, ["d"]],
+-    [Dtd, ["dtd"]],
+-    [Dylan, ["dyl", "dylan", "intr"]],
+-    [Elm, ["elm"]],
+-    [Emacs, ["el"]],
+-    [Erlang, ["erl"]],
+-    [Fortran, ["f", "f77", "f90", "f95", "for"]],
+-    [FSharp, ["fs"]],
+-    [Go, ["go"]],
+-    [Gpg, ["asc", "pgp", "sig"]],
+-    [Gradle, ["gradle"]],
+-    [Groovy, ["groovy"]],
+-    [Handlebars, ["handlebars", "hbs"]],
+-    [Haskell, ["hs"]],
+-    [Haxe, ["hx", "hxml"]],
+-    [Html, ["htm", "html"]],
+-    [Image, ["bmp", "gif", "ico", "jpeg", "jpg", "png", "webp"]],
+-    [Ini, ["ini", "properties"]],
+-    [Java, ["java"]],
+-    [Jinja, ["j2", "jinja", "jinja2"]],
+-    [Js, ["cjs", "js", "mjs"]],
+-    [Json, ["json"]],
+-    [JsonLd, ["jsonld"]],
+-    [Julia, ["jl"]],
+-    [Kotlin, ["kt", "kts"]],
+-    [Less, ["less"]],
+-    [Liquid, ["liquid"]],
+-    [Lisp, ["cl", "lisp"]],
+-    [LiveScript, ["ls"]],
+-    [Lua, ["lua"]],
+-    [Markdown, ["markdown", "md", "mkd"]],
+-    [Neo4j, ["cyp", "cypher"]],
+-    [Nsis, ["nsh", "nsi"]],
+-    [ObjectiveC, ["m"]],
+-    [ObjectiveCpp, ["mm"]],
+-    [OCaml, ["ml", "mll", "mly"]],
+-    [OCamlInterface, ["mli"]],
+-    [Perl, ["pl", "pm"]],
+-    [Php, ["php", "php3", "php4", "php5", "php7", "phtml"]],
+-    [PlSql, ["pls"]],
+-    [PowerShell, ["ps1"]],
+-    [PowerShellData, ["psd1"]],
+-    [PowerShellModule, ["psm1"]],
+-    [Protobuf, ["proto"]],
+-    [Pug, ["jade", "pug"]],
+-    [Puppet, ["pp"]],
+-    [Python, ["py", "pyw"]],
+-    [Q, ["q"]],
+-    [R, ["r"]],
+-    [ReactJs, ["jsx"]],
+-    [ReactTs, ["tsx"]],
+-    [Ruby, ["rb"]],
+-    [Rust, ["rs"]],
+-    [Sas, ["sas"]],
+-    [Sass, ["sass"]],
+-    [Scala, ["scala"]],
+-    [Scss, ["scss"]],
+-    [Shell, ["bash", "ksh", "sh"]],
+-    [SourceMap, ["map"]],
+-    [Sparql, ["rq", "sparql"]],
+-    [Sql, ["sql"]],
+-    [Squirrel, ["nut"]],
+-    [Stylus, ["styl"]],
+-    [Svg, ["svg"]],
+-    [Swift, ["swift"]],
+-    [SystemVerilog, ["sv", "svh"]],
+-    [Tcl, ["tcl"]],
+-    [Tex, ["ltx", "tex"]],
+-    [Text, ["text", "txt"]],
+-    [Textile, ["textile"]],
+-    [Toml, ["toml"]],
+-    [Ttcn, ["ttcn", "ttcn3", "ttcnpp"]],
+-    [TypeScript, ["cts", "mts", "ts"]],
+-    [TypeScriptDef, ["d.cts", "d.mts", "d.ts"]],
+-    [Velocity, ["vtl"]],
+-    [Verilog, ["v"]],
+-    [Vhdl, ["vhd", "vhdl"]],
+-    [VisualBasic, ["vb", "vbs"]],
+-    [Vue, ["vue"]],
+-    [Wasm, ["wast", "wat"]],
+-    [Wolfram, ["nb", "wl", "wls"]],
+-    [Xml, ["xml", "xsd"]],
+-    [XQuery, ["xq", "xqm", "xquery", "xqy", "xy"]],
+-    [Xsl, ["xsl"]],
+-    [Yaml, ["yaml", "yml"]],
+-  ]),
+-  fallback: DefaultFile,
++export const ICON_ROWS: Readonly<{ byName: readonly IconRow[]; byExtension: readonly IconRow[] }> =
++  {
++    byName: [
++      [Bazel, ["build"]],
++      [BuckBuild, ["buck"]],
++      [Bundler, ["gemfile", "gemfile.lock"]],
++      [Cargo, ["cargo.lock", "cargo.toml"]],
++      [CMake, ["cmakelists.txt"]],
++      [Composer, ["composer.json", "composer.lock"]],
++      [Config, ["extensions.conf"]],
++      [Docker, ["dockerfile"]],
++      [Dotenv, [".env"]],
++      [EditorConfig, [".editorconfig"]],
++      [Git, [".gitattributes", ".gitignore", ".gitmodules"]],
++      [Jenkins, ["jenkinsfile"]],
++      [License, ["license"]],
++      [Makefile, ["makefile"]],
++      [Meson, ["meson.build"]],
++      [Nginx, ["nginx.conf"]],
++      [Npm, ["package-lock.json", "package.json"]],
++      [Pnpm, ["pnpm-lock.yaml", "pnpm-workspace.yaml"]],
++      [Rake, ["rakefile"]],
++      [Shell, ["pkgbuild"]],
++      [TsConfig, ["tsconfig.json"]],
++      [Yarn, ["yarn.lock"]],
++    ],
++    byExtension: [
++      [Apl, ["apl", "dyalog"]],
++      [Arduino, ["ino"]],
++      [Assembly, ["s", "z80"]],
++      [Bazel, ["build", "bzl"]],
++      [C, ["c"]],
++      [CHeader, ["h"]],
++      [Clojure, ["clj", "cljc", "cljx", "edn"]],
++      [ClojureScript, ["cljs"]],
++      [CMake, ["cmake", "cmake.in"]],
++      [Cobol, ["cob", "cpy"]],
++      [CoffeeScript, ["coffee"]],
++      [Config, ["cfg"]],
++      [Cpp, ["c++", "cc", "cpp", "cxx"]],
++      [CppHeader, ["h++", "hh", "hpp", "hxx"]],
++      [Crystal, ["cr"]],
++      [CSharp, ["cs"]],
++      [Css, ["css"]],
++      [Cucumber, ["feature"]],
++      [Cython, ["pxd", "pxi", "pyx"]],
++      [DartLang, ["dart"]],
++      [Delphi, ["p", "pas"]],
++      [Diff, ["diff", "patch"]],
++      [DLang, ["d"]],
++      [Dtd, ["dtd"]],
++      [Dylan, ["dyl", "dylan", "intr"]],
++      [Elm, ["elm"]],
++      [Emacs, ["el"]],
++      [Erlang, ["erl"]],
++      [Fortran, ["f", "f77", "f90", "f95", "for"]],
++      [FSharp, ["fs"]],
++      [Go, ["go"]],
++      [Gpg, ["asc", "pgp", "sig"]],
++      [Gradle, ["gradle"]],
++      [Groovy, ["groovy"]],
++      [Handlebars, ["handlebars", "hbs"]],
++      [Haskell, ["hs"]],
++      [Haxe, ["hx", "hxml"]],
++      [Html, ["htm", "html"]],
++      [Image, ["bmp", "gif", "ico", "jpeg", "jpg", "png", "webp"]],
++      [Ini, ["ini", "properties"]],
++      [Java, ["java"]],
++      [Jinja, ["j2", "jinja", "jinja2"]],
++      [Js, ["cjs", "js", "mjs"]],
++      [Json, ["json"]],
++      [JsonLd, ["jsonld"]],
++      [Julia, ["jl"]],
++      [Kotlin, ["kt", "kts"]],
++      [Less, ["less"]],
++      [Liquid, ["liquid"]],
++      [Lisp, ["cl", "lisp"]],
++      [LiveScript, ["ls"]],
++      [Lua, ["lua"]],
++      [Markdown, ["markdown", "md", "mkd"]],
++      [Neo4j, ["cyp", "cypher"]],
++      [Nsis, ["nsh", "nsi"]],
++      [ObjectiveC, ["m"]],
++      [ObjectiveCpp, ["mm"]],
++      [OCaml, ["ml", "mll", "mly"]],
++      [OCamlInterface, ["mli"]],
++      [Perl, ["pl", "pm"]],
++      [Php, ["php", "php3", "php4", "php5", "php7", "phtml"]],
++      [PlSql, ["pls"]],
++      [PowerShell, ["ps1"]],
++      [PowerShellData, ["psd1"]],
++      [PowerShellModule, ["psm1"]],
++      [Protobuf, ["proto"]],
++      [Pug, ["jade", "pug"]],
++      [Puppet, ["pp"]],
++      [Python, ["py", "pyw"]],
++      [Q, ["q"]],
++      [R, ["r"]],
++      [ReactJs, ["jsx"]],
++      [ReactTs, ["tsx"]],
++      [Ruby, ["rb"]],
++      [Rust, ["rs"]],
++      [Sas, ["sas"]],
++      [Sass, ["sass"]],
++      [Scala, ["scala"]],
++      [Scss, ["scss"]],
++      [Shell, ["bash", "ksh", "sh"]],
++      [SourceMap, ["map"]],
++      [Sparql, ["rq", "sparql"]],
++      [Sql, ["sql"]],
++      [Squirrel, ["nut"]],
++      [Stylus, ["styl"]],
++      [Svg, ["svg"]],
++      [Swift, ["swift"]],
++      [SystemVerilog, ["sv", "svh"]],
++      [Tcl, ["tcl"]],
++      [Tex, ["ltx", "tex"]],
++      [Text, ["text", "txt"]],
++      [Textile, ["textile"]],
++      [Toml, ["toml"]],
++      [Ttcn, ["ttcn", "ttcn3", "ttcnpp"]],
++      [TypeScript, ["cts", "mts", "ts"]],
++      [TypeScriptDef, ["d.cts", "d.mts", "d.ts"]],
++      [Velocity, ["vtl"]],
++      [Verilog, ["v"]],
++      [Vhdl, ["vhd", "vhdl"]],
++      [VisualBasic, ["vb", "vbs"]],
++      [Vue, ["vue"]],
++      [Wasm, ["wast", "wat"]],
++      [Wolfram, ["nb", "wl", "wls"]],
++      [Xml, ["xml", "xsd"]],
++      [XQuery, ["xq", "xqm", "xquery", "xqy", "xy"]],
++      [Xsl, ["xsl"]],
++      [Yaml, ["yaml", "yml"]],
++    ],
++  };
++
++const ICONS: Readonly<{ byName: IconTable; byExtension: IconTable }> = {
++  byName: iconTable(ICON_ROWS.byName),
++  byExtension: iconTable(ICON_ROWS.byExtension),
+ };
+ 
+ export function fileIcon(path: string): Component {
+@@ -284,5 +291,5 @@ export function fileIcon(path: string): Component {
+       return extensionIcon;
+     }
+   }
+-  return ICONS.fallback;
++  return DefaultFile;
+ }
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+new file mode 100644
+index 0000000..398b5e2
+--- /dev/null
++++ b/frontend/src/ui/problem.ts
+@@ -0,0 +1,35 @@
++import { log, type SourceFailure, type SourceResult } from "../ipc";
++
++type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
++
++export type ProblemCause = SourceFailure | Unexpected;
++
++export type Problem =
++  | { readonly action: "list"; readonly cause: Unexpected }
++  | {
++      readonly action: "open" | "finish" | "take" | "reset";
++      readonly path: string;
++      readonly cause: ProblemCause;
++    };
++
++export type Outcome<T> =
++  | { readonly ok: true; readonly value: T }
++  | { readonly ok: false; readonly cause: ProblemCause };
++
++export function unexpected(error: unknown): Unexpected {
++  return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
++}
++
++export async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<Outcome<T>> {
++  try {
++    const result = await call();
++    return result.ok ? result : { ok: false, cause: result.failure };
++  } catch (error) {
++    return { ok: false, cause: unexpected(error) };
++  }
++}
++
++export function logProblem(problem: Problem): void {
++  const where = problem.action === "list" ? {} : { path: problem.path };
++  log.error(`store.${problem.action}_failed`, { ...where, ...problem.cause });
++}
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 19a1c04..361fc69 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -1,8 +1,8 @@
+ import { expect, test } from "vitest";
+ 
+ import type { SourceFailure } from "../ipc";
++import type { Problem, ProblemCause } from "./problem";
+ import { problemText } from "./problemText";
+-import type { Problem, ProblemCause } from "./store";
+ 
+ const PATH = "src/a.ts";
+ 
+@@ -13,6 +13,7 @@ function onFinish(cause: ProblemCause): Problem {
+ test.each([
+   ["open", `Could not open ${PATH}`],
+   ["finish", `Could not mark ${PATH} as resolved`],
++  ["take", `Could not resolve ${PATH} with one side`],
+   ["reset", `Could not reset ${PATH}`],
+ ] as const)("a failed %s names the file and what failed", (action, words) => {
+   const text = problemText({ action, path: PATH, cause: { kind: "Unexpected", message: "boom" } });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 411a840..990edfc 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -1,4 +1,4 @@
+-import type { Problem, ProblemCause } from "./store";
++import type { Problem, ProblemCause } from "./problem";
+ 
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
+@@ -10,6 +10,8 @@ function attempted(problem: Problem): string {
+       return `Could not open ${problem.path}`;
+     case "finish":
+       return `Could not mark ${problem.path} as resolved`;
++    case "take":
++      return `Could not resolve ${problem.path} with one side`;
+     case "reset":
+       return `Could not reset ${problem.path}`;
+     default: {
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 80b5226..4e9d7a1 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -5,6 +5,7 @@ import {
+   type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
++  type FileSides,
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+@@ -51,6 +52,8 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+       }),
+     finishFile: () => Promise.reject(new Error("not used")),
+     resetFile: () => Promise.reject(new Error("not used")),
++    describeFile: () => Promise.reject(new Error("not used")),
++    takeSide: () => Promise.reject(new Error("not used")),
+   };
+   return { source, pending };
+ }
+@@ -555,7 +558,7 @@ test("a failed reset keeps the current file and names the path", async () => {
+   });
+ });
+ 
+-test("a failed reload after a reset keeps A's old view and names the path", async () => {
++test("a failed reload after a reset keeps A's old view and reports it as a failed open", async () => {
+   const lines = spyConsole();
+   const { store, pending } = await openedStore({
+     resetFile: () => Promise.resolve(ok([entry("a.ts")])),
+@@ -573,12 +576,12 @@ test("a failed reload after a reset keeps A's old view and names the path", asyn
+   expect(store.active.value).toBe("a.ts");
+   expect(store.opened.value).toBe(shown);
+   expect(store.problem.value).toEqual({
+-    action: "reset",
++    action: "open",
+     path: "a.ts",
+     cause: { kind: "Unexpected", message: "disk gone" },
+   });
+   expect(lines.error).toEqual([
+-    '[error] store.reset_failed {path: "a.ts", kind: "Unexpected", message: "disk gone"}',
++    '[error] store.open_failed {path: "a.ts", kind: "Unexpected", message: "disk gone"}',
+   ]);
+ });
+ 
+@@ -644,3 +647,267 @@ test("a later open wins over a reset that resolves last; the reset file is repla
+   expect(store.opened.value).toEqual([fresh, b]);
+   expect(store.opened.value[0]).not.toBe(a);
+ });
++
++test("a reset landing in the background keeps another file's problem; a problem about its own file is cleared", async () => {
++  spyConsole();
++  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
++  const git: SourceFailure = { kind: "Git", message: "index.lock exists" };
++  const { store, pending } = await openedStore({
++    resetFile: () =>
++      new Promise((resolve) => {
++        resets.push(resolve);
++      }),
++    finishFile: () => Promise.resolve({ ok: false, failure: git }),
++  });
++
++  const resetting = store.reset("a.ts");
++  const failed = store.open("gone.ts");
++  pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
++  await failed;
++  const gone = store.problem.value;
++  resets[0]?.(ok([entry("a.ts")]));
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(3);
++  });
++  pending[2]?.resolve(ok(await dataFor("a.ts")));
++  await resetting;
++
++  expect(store.problem.value).toBe(gone);
++
++  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT });
++  expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
++  const again = store.reset("a.ts");
++  resets[1]?.(ok([entry("a.ts")]));
++  await vi.waitFor(() => {
++    expect(pending).toHaveLength(4);
++  });
++  pending[3]?.resolve(ok(await dataFor("a.ts")));
++  await again;
++
++  expect(store.problem.value).toBeNull();
++});
++
++const LOGO = "assets/logo.bin";
++const LOGO_ENTRY: FileEntry = { ...entry(LOGO), unsupported: "Binary" };
++const REMOVED_ENTRY: FileEntry = { ...entry("docs/removed.md"), unsupported: "RemoteDeleted" };
++const LOGO_SIDES: FileSides = {
++  path: LOGO,
++  reason: "Binary",
++  local: { kind: "Binary", bytes: 11 },
++  remote: { kind: "Binary", bytes: 12 },
++};
++
++function choiceSource(overrides: Partial<ChunkSource>): { source: ChunkSource; calls: string[] } {
++  const calls: string[] = [];
++  const source: ChunkSource = {
++    listFiles: () => Promise.resolve([entry("a.ts"), LOGO_ENTRY]),
++    loadFile: async (path) => {
++      calls.push(`loadFile ${path}`);
++      return ok(await dataFor(path));
++    },
++    finishFile: () => Promise.reject(new Error("not used")),
++    resetFile: (path) => {
++      calls.push(`resetFile ${path}`);
++      return Promise.resolve(ok([entry("a.ts"), LOGO_ENTRY]));
++    },
++    describeFile: (path) => {
++      calls.push(`describeFile ${path}`);
++      return Promise.resolve(ok(LOGO_SIDES));
++    },
++    takeSide: (path, side) => {
++      calls.push(`takeSide ${path} ${side}`);
++      return Promise.resolve(ok([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]));
++    },
++    ...overrides,
++  };
++  return { source, calls };
++}
++
++test("a list of files the editor cannot show opens the first one's choice and loads nothing", async () => {
++  spyConsole();
++  const { source, calls } = choiceSource({
++    listFiles: () => Promise.resolve([LOGO_ENTRY, REMOVED_ENTRY]),
++  });
++  const store = createAppStore(source);
++
++  await store.loadFiles();
++
++  expect(calls).toEqual([`describeFile ${LOGO}`]);
++  expect(store.active.value).toBe(LOGO);
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.opened.value).toEqual([]);
++});
++
++test("opening a file the editor cannot show describes it once and never loads it", async () => {
++  spyConsole();
++  const { source, calls } = choiceSource({});
++  const store = createAppStore(source);
++  await store.loadFiles();
++
++  await store.open(LOGO);
++
++  expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`]);
++  expect(store.active.value).toBe(LOGO);
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts"]);
++
++  await store.open("a.ts");
++  await store.open(LOGO);
++
++  expect(calls).toHaveLength(2);
++  expect(store.active.value).toBe(LOGO);
++});
++
++test("a failed describe is a failed open of that file and shows no choice", async () => {
++  const lines = spyConsole();
++  const unknown: SourceFailure = { kind: "UnknownPath", path: LOGO };
++  const { source } = choiceSource({
++    describeFile: () => Promise.resolve({ ok: false, failure: unknown }),
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++
++  await store.open(LOGO);
++
++  expect(store.problem.value).toEqual({ action: "open", path: LOGO, cause: unknown });
++  expect(store.active.value).toBe("a.ts");
++  expect(store.choices.value).toEqual([]);
++  expect(lines.error).toEqual([`[error] store.open_failed {path: "${LOGO}", kind: "UnknownPath"}`]);
++});
++
++test("taking a side updates the list, records the side, and clears the problem", async () => {
++  spyConsole();
++  const { source, calls } = choiceSource({
++    listFiles: () => Promise.resolve([LOGO_ENTRY]),
++    loadFile: () => Promise.resolve({ ok: false, failure: { kind: "UnknownPath", path: "x" } }),
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open("gone.ts");
++  expect(store.problem.value).not.toBeNull();
++
++  await store.takeSide(LOGO, "remote");
++
++  expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} remote`]);
++  expect(store.files.value).toEqual([entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }]);
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
++  expect(store.problem.value).toBeNull();
++});
++
++test("a failed take keeps the list and the choice and names the file", async () => {
++  const lines = spyConsole();
++  const git: SourceFailure = { kind: "Git", message: "git rm failed" };
++  const { source } = choiceSource({
++    listFiles: () => Promise.resolve([LOGO_ENTRY]),
++    takeSide: () => Promise.resolve({ ok: false, failure: git }),
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  const files = store.files.value;
++
++  await store.takeSide(LOGO, "local");
++
++  expect(store.files.value).toBe(files);
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: git });
++  expect(lines.error).toEqual([
++    `[error] store.take_failed {path: "${LOGO}", kind: "Git", message: "git rm failed"}`,
++  ]);
++});
++
++function describedLater(): {
++  source: ChunkSource;
++  calls: string[];
++  describes: ((result: SourceResult<FileSides>) => void)[];
++} {
++  const describes: ((result: SourceResult<FileSides>) => void)[] = [];
++  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
++  source.describeFile = (path) => {
++    calls.push(`describeFile ${path}`);
++    return new Promise((resolve) => {
++      describes.push(resolve);
++    });
++  };
++  return { source, calls, describes };
++}
++
++async function takenChoice(): Promise<{
++  store: AppStore;
++  calls: string[];
++  describes: ((result: SourceResult<FileSides>) => void)[];
++}> {
++  const { source, calls, describes } = describedLater();
++  const store = createAppStore(source);
++  const loading = store.loadFiles();
++  await vi.waitFor(() => {
++    expect(describes).toHaveLength(1);
++  });
++  describes[0]?.(ok(LOGO_SIDES));
++  await loading;
++  await store.takeSide(LOGO, "local");
++  return { store, calls, describes };
++}
++
++test("reset of a taken choice forgets the side at once and describes the file again", async () => {
++  spyConsole();
++  const { store, calls, describes } = await takenChoice();
++  const fresh: FileSides = { ...LOGO_SIDES, local: { kind: "Binary", bytes: 13 } };
++
++  const resetting = store.reset(LOGO);
++  await vi.waitFor(() => {
++    expect(describes).toHaveLength(2);
++  });
++
++  expect(store.choices.value).toEqual([]);
++  expect(store.files.value).toEqual([entry("a.ts"), LOGO_ENTRY]);
++
++  describes[1]?.(ok(fresh));
++  await resetting;
++
++  expect(calls).toEqual([
++    `describeFile ${LOGO}`,
++    `takeSide ${LOGO} local`,
++    `resetFile ${LOGO}`,
++    `describeFile ${LOGO}`,
++  ]);
++  expect(store.choices.value).toEqual([{ sides: fresh, taken: null }]);
++  expect(store.active.value).toBe(LOGO);
++});
++
++test("a failed describe after a reset is a failed open; opening the file again describes it", async () => {
++  spyConsole();
++  const { store, describes } = await takenChoice();
++  const unknown: SourceFailure = { kind: "UnknownPath", path: LOGO };
++
++  const resetting = store.reset(LOGO);
++  await vi.waitFor(() => {
++    expect(describes).toHaveLength(2);
++  });
++  describes[1]?.({ ok: false, failure: unknown });
++  await resetting;
++
++  expect(store.problem.value).toEqual({ action: "open", path: LOGO, cause: unknown });
++  expect(store.choices.value).toEqual([]);
++
++  const opening = store.open(LOGO);
++  describes[2]?.(ok(LOGO_SIDES));
++  await opening;
++
++  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.problem.value).toBeNull();
++});
++
++test("choices count toward everything resolved", async () => {
++  spyConsole();
++  const { source } = choiceSource({ listFiles: () => Promise.resolve([LOGO_ENTRY]) });
++  const store = createAppStore({
++    ...source,
++    takeSide: () => Promise.resolve(ok([{ ...LOGO_ENTRY, status: "Resolved" }])),
++  });
++  await store.loadFiles();
++  expect(store.allResolved.value).toBe(false);
++
++  await store.takeSide(LOGO, "remote");
++
++  expect(store.allResolved.value).toBe(true);
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 3aaaf77..672c29c 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -6,42 +6,31 @@ import {
+   type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
+-  type SourceFailure,
++  type FileSides,
++  type Side,
+   type SourceResult,
+ } from "../ipc";
++import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+ import { exitMustAsk, finishMustAsk, type Question } from "./question";
+ import type { MergeSummary } from "./useMergeController";
+ 
+-type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+-
+-export type ProblemCause = SourceFailure | Unexpected;
+-
+-export type Problem =
+-  | { readonly action: "list"; readonly cause: Unexpected }
+-  | {
+-      readonly action: "open" | "finish" | "reset";
+-      readonly path: string;
+-      readonly cause: ProblemCause;
+-    };
+-
+ export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
+ 
++export type Choice = { readonly sides: FileSides; readonly taken: Side | null };
++
+ type FinishRequest = {
+   readonly path: string;
+   readonly text: string;
+   readonly summary: MergeSummary;
+ };
+ 
+-type Outcome<T> =
+-  | { readonly ok: true; readonly value: T }
+-  | { readonly ok: false; readonly cause: ProblemCause };
+-
+ type Asking = { readonly question: Question; readonly answer: (yes: boolean) => void };
+ 
+ type State = {
+   readonly source: ChunkSource;
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
++  readonly choices: ShallowRef<readonly Choice[]>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly asking: ShallowRef<Asking | null>;
+@@ -49,16 +38,15 @@ type State = {
+   latestLoad: number;
+ };
+ 
+-export type AppStore = {
+-  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+-  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
+-  readonly active: Readonly<ShallowRef<string | null>>;
+-  readonly problem: Readonly<ShallowRef<Problem | null>>;
++type Shared = "files" | "opened" | "choices" | "active" | "problem";
++
++export type AppStore = { readonly [K in Shared]: Readonly<State[K]> } & {
+   readonly question: ComputedRef<Question | null>;
+   readonly allResolved: ComputedRef<boolean>;
+   loadFiles(): Promise<void>;
+   open(path: string): Promise<void>;
+   finish(request: FinishRequest): Promise<void>;
++  takeSide(path: string, side: Side): Promise<void>;
+   reset(path: string): Promise<void>;
+   dismissProblem(): void;
+   answer(yes: boolean): void;
+@@ -76,16 +64,18 @@ export function createAppStore(source: ChunkSource): AppStore {
+     source,
+     files: shallowRef<readonly FileEntry[]>([]),
+     opened: shallowRef<readonly FileMergeData[]>([]),
++    choices: shallowRef<readonly Choice[]>([]),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+     asking: shallowRef<Asking | null>(null),
+     work: new Map(),
+     latestLoad: 0,
+   };
+-  const { files, opened, active, problem } = state;
++  const { files, opened, choices, active, problem } = state;
+   store = {
+     files,
+     opened,
++    choices,
+     active,
+     problem,
+     question: computed(() => state.asking.value?.question ?? null),
+@@ -95,6 +85,7 @@ export function createAppStore(source: ChunkSource): AppStore {
+     loadFiles: () => loadFiles(state),
+     open: (path) => open(state, path),
+     finish: (request) => finish(state, request),
++    takeSide: (path, side) => takeSide(state, path, side),
+     reset: (path) => reset(state, path),
+     dismissProblem: () => dismissProblem(state),
+     answer: (yes) => answer(state, yes),
+@@ -108,7 +99,7 @@ export function createAppStore(source: ChunkSource): AppStore {
+ }
+ 
+ function report(state: State, failure: Problem): void {
+-  logFailure(failure);
++  logProblem(failure);
+   state.problem.value = failure;
+ }
+ 
+@@ -136,15 +127,24 @@ async function loadFiles(state: State): Promise<void> {
+   }
+   state.files.value = listed;
+   state.problem.value = null;
+-  const first = listed.find((file) => file.unsupported === null);
++  const first = listed.find((file) => file.unsupported === null) ?? listed[0];
+   if (first !== undefined) {
+     await open(state, first.path);
+   }
+ }
+ 
++function isUnsupported(state: State, path: string): boolean {
++  return (state.files.value.find((file) => file.path === path)?.unsupported ?? null) !== null;
++}
++
+ async function open(state: State, path: string): Promise<void> {
+-  if (!state.opened.value.some((file) => file.path === path)) {
+-    await load(state, path);
++  const shown =
++    state.opened.value.some((file) => file.path === path) ||
++    state.choices.value.some((choice) => choice.sides.path === path);
++  if (!shown) {
++    await (isUnsupported(state, path)
++      ? load(state, path, () => state.source.describeFile(path), putChoice)
++      : load(state, path, () => state.source.loadFile(path), putOpened));
+     return;
+   }
+   if (path === state.active.value) {
+@@ -155,23 +155,28 @@ async function open(state: State, path: string): Promise<void> {
+   state.problem.value = null;
+ }
+ 
+-async function load(state: State, path: string): Promise<void> {
++async function load<T>(
++  state: State,
++  path: string,
++  fetch: () => Promise<SourceResult<T>>,
++  put: (state: State, value: T) => void,
++): Promise<void> {
+   state.latestLoad += 1;
+   const ticket = state.latestLoad;
+-  const outcome = await attempt(() => state.source.loadFile(path));
++  const outcome = await attempt(fetch);
+   const current = ticket === state.latestLoad;
+   if (!outcome.ok) {
+     const failure: Problem = { action: "open", path, cause: outcome.cause };
++    logProblem(failure);
+     if (current) {
+-      report(state, failure);
+-    } else {
+-      logFailure(failure);
++      state.problem.value = failure;
+     }
+     return;
+   }
+   if (current) {
+-    putOpened(state, outcome.value);
++    put(state, outcome.value);
+     state.active.value = path;
++    state.problem.value = null;
+   }
+ }
+ 
+@@ -182,10 +187,14 @@ function putOpened(state: State, data: FileMergeData): void {
+   state.opened.value = opened.some((file) => file.path === data.path)
+     ? opened.map((file) => (file.path === data.path ? loaded : file))
+     : [...opened, loaded];
+-  state.problem.value = null;
+   log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
+ }
+ 
++function putChoice(state: State, sides: FileSides): void {
++  const others = state.choices.value.filter((choice) => choice.sides.path !== sides.path);
++  state.choices.value = [...others, { sides, taken: null }];
++}
++
+ async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
+   if (finishMustAsk(summary) && !(await ask(state, { kind: "unprocessed", summary }))) {
+     return;
+@@ -200,6 +209,19 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
+   state.problem.value = null;
+ }
+ 
++async function takeSide(state: State, path: string, side: Side): Promise<void> {
++  const outcome = await attempt(() => state.source.takeSide(path, side));
++  if (!outcome.ok) {
++    report(state, { action: "take", path, cause: outcome.cause });
++    return;
++  }
++  state.files.value = outcome.value;
++  state.choices.value = state.choices.value.map((choice) =>
++    choice.sides.path === path ? { ...choice, taken: side } : choice,
++  );
++  state.problem.value = null;
++}
++
+ async function reset(state: State, path: string): Promise<void> {
+   const files = await attempt(() => state.source.resetFile(path));
+   if (!files.ok) {
+@@ -207,12 +229,31 @@ async function reset(state: State, path: string): Promise<void> {
+     return;
+   }
+   state.files.value = files.value;
+-  const fresh = await attempt(() => state.source.loadFile(path));
++  const fresh = await reopen(state, path);
+   if (!fresh.ok) {
+-    report(state, { action: "reset", path, cause: fresh.cause });
++    report(state, { action: "open", path, cause: fresh.cause });
+     return;
+   }
+-  putOpened(state, fresh.value);
++  const problem = state.problem.value;
++  if (problem !== null && problem.action !== "list" && problem.path === path) {
++    state.problem.value = null;
++  }
++}
++
++async function reopen(state: State, path: string): Promise<Outcome<unknown>> {
++  if (!isUnsupported(state, path)) {
++    const data = await attempt(() => state.source.loadFile(path));
++    if (data.ok) {
++      putOpened(state, data.value);
++    }
++    return data;
++  }
++  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
++  const sides = await attempt(() => state.source.describeFile(path));
++  if (sides.ok) {
++    putChoice(state, sides.value);
++  }
++  return sides;
+ }
+ 
+ function ask(state: State, question: Question): Promise<boolean> {
+@@ -249,24 +290,6 @@ async function watchWindowClose(state: State): Promise<void> {
+   }
+ }
+ 
+-async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<Outcome<T>> {
+-  try {
+-    const result = await call();
+-    return result.ok ? result : { ok: false, cause: result.failure };
+-  } catch (error) {
+-    return { ok: false, cause: unexpected(error) };
+-  }
+-}
+-
+-function unexpected(error: unknown): Unexpected {
+-  return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
+-}
+-
+-function logFailure(failure: Problem): void {
+-  const where = failure.action === "list" ? {} : { path: failure.path };
+-  log.error(`store.${failure.action}_failed`, { ...where, ...failure.cause });
+-}
+-
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+new file mode 100644
+index 0000000..cc99e4b
+--- /dev/null
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -0,0 +1,102 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
++
++import { loadFixture, type FileMergeData } from "../ipc";
++import { useMergeController, type MergeHandle } from "./useMergeController";
++
++const editor = vi.hoisted(() => {
++  const state = { text: "", built: 0, destroyed: 0 };
++  class MergeController {
++    constructor(data: FileMergeData) {
++      state.text = data.base;
++      state.built += 1;
++    }
++    summary(): { conflicts: number; changes: number } {
++      return { conflicts: 0, changes: 0 };
++    }
++    onSummaryChange(): void {}
++    resultText(): string {
++      return state.text;
++    }
++    destroy(): void {
++      state.destroyed += 1;
++    }
++  }
++  return { state, MergeController };
++});
++
++vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
++
++afterEach(() => {
++  Object.assign(editor.state, { text: "", built: 0, destroyed: 0 });
++});
++
++function host<T>(present: boolean): ShallowRef<T | null> {
++  return shallowRef<T | null>(present ? Object.create(null) : null);
++}
++
++function mount(
++  data: ShallowRef<FileMergeData | null>,
++  present = true,
++): { scope: EffectScope; handle: MergeHandle } {
++  const scope = effectScope();
++  const handle = scope.run(() =>
++    useMergeController(data, {
++      left: host(present),
++      center: host(present),
++      right: host(present),
++      strips: [host(present), host(present)],
++    }),
++  );
++  if (handle === undefined) {
++    throw new Error("the scope did not run");
++  }
++  return { scope, handle };
++}
++
++async function fileData(base: string): Promise<FileMergeData> {
++  return { ...(await loadFixture("vueuse-use-magic-keys.ts")), base };
++}
++
++test("unsaved: false when built, true after an edit, false after markSaved, false after new data", async () => {
++  const data = shallowRef<FileMergeData | null>(await fileData("loaded\n"));
++  const { scope, handle } = mount(data);
++  await nextTick();
++
++  expect(editor.state.built).toBe(1);
++  expect(handle.resultText()).toBe("loaded\n");
++  expect(handle.unsaved()).toBe(false);
++
++  editor.state.text = "edited\n";
++  expect(handle.unsaved()).toBe(true);
++
++  handle.markSaved("edited\n");
++  expect(handle.unsaved()).toBe(false);
++
++  editor.state.text = "edited again\n";
++  expect(handle.unsaved()).toBe(true);
++
++  data.value = await fileData("reloaded\n");
++  await nextTick();
++
++  expect(editor.state).toEqual({ text: "reloaded\n", built: 2, destroyed: 1 });
++  expect(handle.unsaved()).toBe(false);
++
++  scope.stop();
++
++  expect(editor.state.destroyed).toBe(2);
++});
++
++test("without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored", async () => {
++  const empty = mount(shallowRef<FileMergeData | null>(null));
++  const hostless = mount(shallowRef<FileMergeData | null>(await fileData("loaded\n")), false);
++  await nextTick();
++
++  for (const { handle } of [empty, hostless]) {
++    handle.markSaved("x");
++    expect(handle.resultText()).toBeNull();
++    expect(handle.unsaved()).toBe(false);
++    expect(handle.summary.value).toBeNull();
++  }
++  expect(editor.state.built).toBe(0);
++});
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index cb12921..927ae8d 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -21,7 +21,7 @@ type Hosts = {
+   readonly strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
+ };
+ 
+-type MergeHandle = {
++export type MergeHandle = {
+   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
+   applyAllNonConflicting(side: Side): void;
+   undo(): void;
