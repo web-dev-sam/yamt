@@ -56,6 +56,9 @@ function packageFinding(module: string | undefined, specifier: string): Finding 
   if (module === "ui" && bare.startsWith("@codemirror/")) {
     return { rule: "PM2", reason: "ui/ never imports CodeMirror; go through editor/index.ts" };
   }
+  if (module === "ui" && bare.startsWith("@tauri-apps/")) {
+    return { rule: "PM2", reason: "ui/ never imports Tauri; go through ipc/index.ts" };
+  }
   if (module === undefined || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
     return undefined;
   }

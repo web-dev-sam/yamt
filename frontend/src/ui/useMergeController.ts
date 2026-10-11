@@ -27,8 +27,11 @@ type MergeHandle = {
   undo(): void;
   redo(): void;
   resultText(): string | null;
-  loadedText(): string | null;
+  unsaved(): boolean;
+  markSaved(text: string): void;
 };
+
+type Loaded = { readonly controller: MergeController; saved: string };
 
 type HostElements = readonly [
   HTMLDivElement | null,
@@ -60,12 +63,10 @@ export function useMergeController(
   hosts: Hosts,
 ): MergeHandle {
   const summary = shallowRef<MergeSummary | null>(null);
-  let controller: MergeController | null = null;
-  let loaded: string | null = null;
+  let loaded: Loaded | null = null;
 
   function destroyController(): void {
-    controller?.destroy();
-    controller = null;
+    loaded?.controller.destroy();
     loaded = null;
     summary.value = null;
   }
@@ -74,13 +75,12 @@ export function useMergeController(
     [toRef(data), hosts.left, hosts.center, hosts.right, ...hosts.strips],
     ([current, ...elements]) => {
       destroyController();
-      const created = createController(current, elements);
-      created?.onSummaryChange((next) => {
+      const controller = createController(current, elements);
+      controller?.onSummaryChange((next) => {
         summary.value = next;
       });
-      controller = created;
-      summary.value = created?.summary() ?? null;
-      loaded = created?.resultText() ?? null;
+      summary.value = controller?.summary() ?? null;
+      loaded = controller === null ? null : { controller, saved: controller.resultText() };
     },
     { immediate: true, flush: "post" },
   );
@@ -89,10 +89,15 @@ export function useMergeController(
 
   return {
     summary,
-    applyAllNonConflicting: (side) => controller?.applyAllNonConflicting(side),
-    undo: () => controller?.undo(),
-    redo: () => controller?.redo(),
-    resultText: () => controller?.resultText() ?? null,
-    loadedText: () => loaded,
+    applyAllNonConflicting: (side) => loaded?.controller.applyAllNonConflicting(side),
+    undo: () => loaded?.controller.undo(),
+    redo: () => loaded?.controller.redo(),
+    resultText: () => loaded?.controller.resultText() ?? null,
+    unsaved: () => loaded !== null && loaded.controller.resultText() !== loaded.saved,
+    markSaved: (text) => {
+      if (loaded !== null) {
+        loaded.saved = text;
+      }
+    },
   };
 }

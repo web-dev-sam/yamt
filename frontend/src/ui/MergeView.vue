@@ -3,33 +3,30 @@ import { onUnmounted, useTemplateRef } from "vue";
 
 import type { FileMergeData } from "../ipc";
 import MergeToolbar from "./MergeToolbar.vue";
-import { useAppStore, type FileWork, type FinishRequest } from "./store";
+import { useAppStore, type FileWork } from "./store";
 import { useMergeController } from "./useMergeController";
 
 const props = defineProps<{ data: FileMergeData; shown: boolean }>();
-const emit = defineEmits<{ finish: [request: FinishRequest]; reset: [path: string] }>();
 
 const left = useTemplateRef<HTMLDivElement>("left");
 const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
-const { summary, applyAllNonConflicting, undo, redo, resultText, loadedText } = useMergeController(
-  () => props.data,
-  { left, center, right, strips: [leftStrip, rightStrip] },
-);
-const { track, untrack } = useAppStore();
-const work: FileWork = { resultText, loadedText };
+const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
+  useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
+const { track, untrack, finish, reset } = useAppStore();
+const work: FileWork = { unsaved, markSaved };
 track(props.data.path, work);
 
 onUnmounted(() => {
   untrack(props.data.path, work);
 });
 
-function finish(): void {
+function markResolved(): void {
   const text = resultText();
   if (text !== null && summary.value !== null) {
-    emit("finish", { path: props.data.path, text, summary: summary.value });
+    void finish({ path: props.data.path, text, summary: summary.value });
   }
 }
 </script>
@@ -42,8 +39,8 @@ function finish(): void {
       @apply-right="applyAllNonConflicting('remote')"
       @undo="undo"
       @redo="redo"
-      @reset="emit('reset', data.path)"
-      @finish="finish"
+      @reset="reset(data.path)"
+      @finish="markResolved"
     />
     <section
       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"

@@ -120,6 +120,12 @@ test("a string error from Tauri's IPC layer rejects the call with that message",
   );
 });
 
+test.each([null, 404])("a %s error from Tauri's IPC layer rejects the call", async (error) => {
+  commands.resetFile.mockResolvedValue({ status: "error", error });
+
+  await expect(createTauriSource().resetFile("src/a.ts")).rejects.toThrow(new Error(String(error)));
+});
+
 test("the forward stringifies non-finite numbers and keeps every other value", async () => {
   commands.log.mockResolvedValue(undefined);
 

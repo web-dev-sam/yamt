@@ -24,9 +24,9 @@ export type Problem =
       readonly cause: ProblemCause;
     };
 
-export type FileWork = { resultText(): string | null; loadedText(): string | null };
+export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
 
-export type FinishRequest = {
+type FinishRequest = {
   readonly path: string;
   readonly text: string;
   readonly summary: MergeSummary;
@@ -46,7 +46,6 @@ type State = {
   readonly problem: ShallowRef<Problem | null>;
   readonly asking: ShallowRef<Asking | null>;
   readonly work: Map<string, FileWork>;
-  readonly finished: Map<string, string>;
   latestLoad: number;
 };
 
@@ -81,7 +80,6 @@ export function createAppStore(source: ChunkSource): AppStore {
     problem: shallowRef<Problem | null>(null),
     asking: shallowRef<Asking | null>(null),
     work: new Map(),
-    finished: new Map(),
     latestLoad: 0,
   };
   const { files, opened, active, problem } = state;
@@ -145,16 +143,16 @@ async function loadFiles(state: State): Promise<void> {
 }
 
 async function open(state: State, path: string): Promise<void> {
+  if (!state.opened.value.some((file) => file.path === path)) {
+    await load(state, path);
+    return;
+  }
   if (path === state.active.value) {
     return;
   }
-  if (state.opened.value.some((file) => file.path === path)) {
-    state.latestLoad += 1;
-    state.active.value = path;
-    state.problem.value = null;
-    return;
-  }
-  await load(state, path);
+  state.latestLoad += 1;
+  state.active.value = path;
+  state.problem.value = null;
 }
 
 async function load(state: State, path: string): Promise<void> {
@@ -171,18 +169,21 @@ async function load(state: State, path: string): Promise<void> {
     }
     return;
   }
-  if (!current) {
-    return;
+  if (current) {
+    putOpened(state, outcome.value);
+    state.active.value = path;
   }
+}
+
+function putOpened(state: State, data: FileMergeData): void {
   // A new object, so a kept view rebuilds its editor even when the source returns the record it cached.
-  const loaded = { ...outcome.value };
+  const loaded = { ...data };
   const opened = state.opened.value;
-  state.opened.value = opened.some((file) => file.path === path)
-    ? opened.map((file) => (file.path === path ? loaded : file))
+  state.opened.value = opened.some((file) => file.path === data.path)
+    ? opened.map((file) => (file.path === data.path ? loaded : file))
     : [...opened, loaded];
-  state.active.value = path;
   state.problem.value = null;
-  log.info("file.loaded", { path, chunks: loaded.chunks.length });
+  log.info("file.loaded", { path: data.path, chunks: loaded.chunks.length });
 }
 
 async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
@@ -195,24 +196,23 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
     return;
   }
   state.files.value = outcome.value;
-  state.finished.set(path, text);
+  state.work.get(path)?.markSaved(text);
   state.problem.value = null;
 }
 
 async function reset(state: State, path: string): Promise<void> {
-  state.latestLoad += 1;
-  const ticket = state.latestLoad;
-  const outcome = await attempt(() => state.source.resetFile(path));
-  if (!outcome.ok) {
-    report(state, { action: "reset", path, cause: outcome.cause });
+  const files = await attempt(() => state.source.resetFile(path));
+  if (!files.ok) {
+    report(state, { action: "reset", path, cause: files.cause });
     return;
   }
-  state.files.value = outcome.value;
-  state.opened.value = state.opened.value.filter((file) => file.path !== path);
-  state.finished.delete(path);
-  if (ticket === state.latestLoad) {
-    await load(state, path);
+  state.files.value = files.value;
+  const fresh = await attempt(() => state.source.loadFile(path));
+  if (!fresh.ok) {
+    report(state, { action: "reset", path, cause: fresh.cause });
+    return;
   }
+  putOpened(state, fresh.value);
 }
 
 function ask(state: State, question: Question): Promise<boolean> {
@@ -233,11 +233,7 @@ function answer(state: State, yes: boolean): void {
 function unsavedFiles(state: State): string[] {
   return state.opened.value
     .map((file) => file.path)
-    .filter((path) => {
-      const work = state.work.get(path);
-      const text = work?.resultText() ?? null;
-      return text !== null && text !== (state.finished.get(path) ?? work?.loadedText());
-    });
+    .filter((path) => state.work.get(path)?.unsaved() ?? false);
 }
 
 async function mayClose(state: State): Promise<boolean> {

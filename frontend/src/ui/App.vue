@@ -15,8 +15,6 @@ const {
   question,
   allResolved,
   open,
-  finish,
-  reset,
   dismissProblem,
   answer,
   watchWindowClose,
@@ -45,8 +43,6 @@ onMounted(() => {
           :key="file.path"
           :data="file"
           :shown="file.path === active"
-          @finish="finish"
-          @reset="reset"
         />
       </div>
     </div>

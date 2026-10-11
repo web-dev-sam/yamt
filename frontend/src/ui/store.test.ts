@@ -16,7 +16,7 @@ type PendingLoad = {
   readonly reject: (error: Error) => void;
 };
 
-type FakeView = { text: string; readonly work: FileWork };
+type FakeView = { text: string; saved: string; readonly work: FileWork };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 const NOTHING_LEFT = { conflicts: 0, changes: 0 };
@@ -69,7 +69,13 @@ function spyConsole(): { info: string[]; error: string[] } {
 function fakeView(store: AppStore, path: string, loaded: string): FakeView {
   const view: FakeView = {
     text: loaded,
-    work: { resultText: () => view.text, loadedText: () => loaded },
+    saved: loaded,
+    work: {
+      unsaved: () => view.text !== view.saved,
+      markSaved: (text) => {
+        view.saved = text;
+      },
+    },
   };
   store.track(path, view.work);
   return view;
@@ -171,6 +177,30 @@ test("opening A, B, then A again loads each once and keeps both; re-clicking the
 
   expect(pending).toHaveLength(2);
   expect(store.active.value).toBe("a.ts");
+});
+
+test("re-clicking the shown file keeps the problem and lets a pending load win", async () => {
+  spyConsole();
+  const { source, pending } = handSource([]);
+  const store = createAppStore(source);
+  await openNow(store, pending, "a.ts");
+  const failed = store.open("gone.ts");
+  pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
+  await failed;
+  const problem = store.problem.value;
+
+  await store.open("a.ts");
+
+  expect(store.problem.value).not.toBeNull();
+  expect(store.problem.value).toBe(problem);
+
+  const openC = store.open("c.ts");
+  await store.open("a.ts");
+  pending[2]?.resolve(ok(await dataFor("c.ts")));
+  await openC;
+
+  expect(store.active.value).toBe("c.ts");
+  expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
 });
 
 test("switching to an opened file wins over a load that resolves later and clears the problem", async () => {
@@ -315,6 +345,7 @@ test("a finish with nothing left sends the text without asking, keeps the file o
   expect(store.opened.value).toBe(shown);
   expect(store.active.value).toBe("a.ts");
   expect(store.problem.value).toBeNull();
+  expect(view.saved).toBe("merged\r\n");
   expect(store.unsavedFiles()).toEqual([]);
 
   view.text = "edited again\n";
@@ -368,6 +399,7 @@ test("a failed finish keeps the list unresolved and the old saved text; dismissP
   expect(store.files.value).toEqual([entry("a.ts")]);
   expect(store.opened.value).toBe(shown);
   expect(store.opened.value).toEqual([a]);
+  expect(view.saved).toBe("loaded\n");
   expect(store.unsavedFiles()).toEqual(["a.ts"]);
   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
   expect(lines.error).toEqual([
@@ -410,6 +442,8 @@ test("the unsaved list names exactly the opened files whose text differs from lo
   fakeView(store, "b.ts", "b\n");
   const c = fakeView(store, "c.ts", "c\n");
   const d = fakeView(store, "d.ts", "d\n");
+  const notOpened = fakeView(store, "z.ts", "z\n");
+  notOpened.text = "z edited\n";
   a.text = "a edited\n";
   c.text = "c finished\n";
   await store.finish({ path: "c.ts", text: "c finished\n", summary: NOTHING_LEFT });
@@ -419,7 +453,7 @@ test("the unsaved list names exactly the opened files whose text differs from lo
 
   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
 
-  store.untrack("a.ts", { resultText: () => "other", loadedText: () => "other" });
+  store.untrack("a.ts", { unsaved: () => true, markSaved: () => undefined });
   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
   store.untrack("a.ts", a.work);
   expect(store.unsavedFiles()).toEqual(["d.ts"]);
@@ -468,7 +502,7 @@ test("everything is resolved only when every listed file is", async () => {
   expect(store.allResolved.value).toBe(true);
 });
 
-test("reset of A reloads only A as a new object and keeps B opened", async () => {
+test("reset of A replaces only A in place with a new object and keeps B opened", async () => {
   spyConsole();
   const reset: string[] = [];
   const { source, pending } = handSource([]);
@@ -478,21 +512,18 @@ test("reset of A reloads only A as a new object and keeps B opened", async () =>
       reset.push(path);
       return Promise.resolve(ok([entry("a.ts"), entry("b.ts")]));
     },
-    finishFile: () => Promise.resolve(ok([])),
   });
   await openNow(store, pending, "a.ts");
   await openNow(store, pending, "b.ts");
   await store.open("a.ts");
   const [shownA, shownB] = store.opened.value;
-  const view = fakeView(store, "a.ts", "a\n");
-  view.text = "finished\n";
-  await store.finish({ path: "a.ts", text: "finished\n", summary: NOTHING_LEFT });
   const a = await dataFor("a.ts");
 
   const resetting = store.reset("a.ts");
   await vi.waitFor(() => {
     expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
   });
+  expect(store.opened.value).toEqual([shownA, shownB]);
   pending[2]?.resolve(ok(a));
   await resetting;
 
@@ -500,12 +531,10 @@ test("reset of A reloads only A as a new object and keeps B opened", async () =>
   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
   expect(store.active.value).toBe("a.ts");
   expect(store.opened.value).toHaveLength(2);
-  expect(store.opened.value).toContain(shownB);
-  expect(store.opened.value).not.toContain(shownA);
-  const reloaded = store.opened.value.find((file) => file.path === "a.ts");
-  expect(reloaded).toEqual(a);
-  expect(reloaded).not.toBe(a);
-  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+  expect(store.opened.value[0]).toEqual(a);
+  expect(store.opened.value[0]).not.toBe(a);
+  expect(store.opened.value[0]).not.toBe(shownA);
+  expect(store.opened.value[1]).toBe(shownB);
 });
 
 test("a failed reset keeps the current file and names the path", async () => {
@@ -526,26 +555,92 @@ test("a failed reset keeps the current file and names the path", async () => {
   });
 });
 
-test("a later open wins over a reset that resolves last, and the reset file is dropped", async () => {
+test("a failed reload after a reset keeps A's old view and names the path", async () => {
+  const lines = spyConsole();
+  const { store, pending } = await openedStore({
+    resetFile: () => Promise.resolve(ok([entry("a.ts")])),
+  });
+  const shown = store.opened.value;
+
+  const resetting = store.reset("a.ts");
+  await vi.waitFor(() => {
+    expect(pending).toHaveLength(2);
+  });
+  pending[1]?.reject(new Error("disk gone"));
+  await resetting;
+
+  expect(store.files.value).toEqual([entry("a.ts")]);
+  expect(store.active.value).toBe("a.ts");
+  expect(store.opened.value).toBe(shown);
+  expect(store.problem.value).toEqual({
+    action: "reset",
+    path: "a.ts",
+    cause: { kind: "Unexpected", message: "disk gone" },
+  });
+  expect(lines.error).toEqual([
+    '[error] store.reset_failed {path: "a.ts", kind: "Unexpected", message: "disk gone"}',
+  ]);
+});
+
+test("reset A, open B, open A, then the reset resolves: A shows its fresh view", async () => {
   spyConsole();
   const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
-  const { store, pending } = await openedStore({
+  const { store, pending, a } = await openedStore({
     resetFile: () =>
       new Promise((resolve) => {
         resets.push(resolve);
       }),
   });
   const b = await dataFor("b.ts");
+  const fresh = await dataFor("a.ts");
+
+  const resetting = store.reset("a.ts");
+  const openB = store.open("b.ts");
+  pending[1]?.resolve(ok(b));
+  await openB;
+  await store.open("a.ts");
+  resets[0]?.(ok([entry("a.ts"), entry("b.ts")]));
+  await vi.waitFor(() => {
+    expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts", "a.ts"]);
+  });
+  pending[2]?.resolve(ok(fresh));
+  await resetting;
+
+  expect(store.active.value).toBe("a.ts");
+  expect(store.opened.value).toEqual([fresh, b]);
+  expect(store.opened.value[0]).not.toBe(a);
+
+  await store.open("a.ts");
+
+  expect(pending).toHaveLength(3);
+  expect(store.active.value).toBe("a.ts");
+});
+
+test("a later open wins over a reset that resolves last; the reset file is replaced in place", async () => {
+  spyConsole();
+  const resets: ((result: SourceResult<FileEntry[]>) => void)[] = [];
+  const { store, pending, a } = await openedStore({
+    resetFile: () =>
+      new Promise((resolve) => {
+        resets.push(resolve);
+      }),
+  });
+  const b = await dataFor("b.ts");
+  const fresh = await dataFor("a.ts");
 
   const resetting = store.reset("a.ts");
   const openB = store.open("b.ts");
   pending[1]?.resolve(ok(b));
   await openB;
   resets[0]?.(ok([entry("a.ts")]));
+  await vi.waitFor(() => {
+    expect(pending).toHaveLength(3);
+  });
+  pending[2]?.resolve(ok(fresh));
   await resetting;
 
-  expect(pending).toHaveLength(2);
   expect(store.active.value).toBe("b.ts");
   expect(store.files.value).toEqual([entry("a.ts")]);
-  expect(store.opened.value).toEqual([b]);
+  expect(store.opened.value).toEqual([fresh, b]);
+  expect(store.opened.value[0]).not.toBe(a);
 });

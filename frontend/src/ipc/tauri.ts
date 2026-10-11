@@ -3,18 +3,19 @@ import type { ChunkSource } from "./ChunkSource";
 import { toDomain, type SourceFailure, type SourceResult } from "./domain";
 import type { LogEntry } from "./log";
 
-// Tauri's own IPC layer (invalid arguments, unknown command, ACL denial) rejects with a string,
-// which the generated `typedError` returns as the command's error.
+// `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
+// error. Tauri rejects invalid arguments, unknown commands and ACL denials with a plain JSON value, a
+// string so far (tauri 2 `ipc/mod.rs` `InvokeError::from_error`, `webview/mod.rs` "not allowed by ACL").
 type CommandResult<T> =
   | { status: "ok"; data: T }
-  | { status: "error"; error: SourceFailure | string };
+  | { status: "error"; error: SourceFailure | string | number | boolean | null | undefined };
 
 function toResult<T>(result: CommandResult<T>): SourceResult<T> {
   if (result.status === "ok") {
     return { ok: true, value: result.data };
   }
-  if (typeof result.error === "string") {
-    throw new Error(result.error);
+  if (typeof result.error !== "object" || result.error === null) {
+    throw new Error(String(result.error));
   }
   return { ok: false, failure: result.error };
 }

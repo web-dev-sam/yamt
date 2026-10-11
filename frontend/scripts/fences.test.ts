@@ -54,6 +54,19 @@ test("ui importing @codemirror/view violates PM2", () => {
   ]);
 });
 
+test("ui importing @tauri-apps/api/window violates PM2", () => {
+  const files = [
+    {
+      path: "src/ui/App.vue",
+      text: `<script setup lang="ts">\nimport { getCurrentWindow } from "@tauri-apps/api/window";\n</script>`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM2", file: "src/ui/App.vue", specifier: "@tauri-apps/api/window" },
+  ]);
+});
+
 test("ui importing editor/internal violates PM2", () => {
   const files = [
     { path: "src/ui/Pane.ts", text: `import { pane } from "../editor/internal/pane";` },

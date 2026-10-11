@@ -101,6 +101,10 @@
                 "message": "ui/ never imports CodeMirror (PM2); go through editor/index.ts."
               },
               {
+                "group": ["@tauri-apps/**"],
+                "message": "ui/ never imports Tauri (PM2); only src/ipc/ talks to the app."
+              },
+              {
                 "group": ["../editor/internal/*", "**/internal", "**/internal/*"],
                 "message": "No module imports another module's internal/ (PM5)."
               },
