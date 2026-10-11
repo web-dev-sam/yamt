@@ -4,7 +4,7 @@ use std::fs;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_merge_core::ChunkKind;
-use yamt_session::{Error, FileStatus, MergeSession, Side, UnsupportedReason};
+use yamt_session::{Eol, Error, FileStatus, MergeSession, Side, UnsupportedReason};
 
 const LOCAL_DELETED: &str = "a_local_deleted.ts";
 const REMOTE_DELETED: &str = "b_remote_deleted.ts";
@@ -12,6 +12,7 @@ const KEPT_BINARY: &str = "c_kept_binary.bin";
 const BASE_BINARY: &str = "d_base_binary.txt";
 const KEPT_LATIN1: &str = "e_kept_latin1.txt";
 const KEPT_LINK: &str = "f_kept_link";
+const EMPTY_BASE_CRLF: &str = "g_empty_base_crlf.ts";
 const BASE: &[u8] = b"one\ntwo\nthree\nfour\n";
 const KEPT: &[u8] = b"one\nTWO\nthree\nfour\nfive\n";
 
@@ -31,7 +32,7 @@ const fn deleted(
     }
 }
 
-const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 6] = {
+const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
     use FileKind::{Regular, Symlink};
     [
         deleted(LOCAL_DELETED, Regular, BASE, None, Some(KEPT)),
@@ -45,6 +46,13 @@ const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 6] = {
             b"base-target",
             Some(b"kept-target"),
             None,
+        ),
+        deleted(
+            EMPTY_BASE_CRLF,
+            Regular,
+            b"",
+            None,
+            Some(b"kept\r\nlines\r\n"),
         ),
     ]
 };
@@ -84,6 +92,17 @@ fn a_text_file_deleted_on_one_side_loads_with_base_as_the_deleted_side() {
 }
 
 #[test]
+fn a_deleted_file_with_an_empty_base_takes_its_line_endings_from_the_kept_side() {
+    let dir = deleted_on_one_side();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    let data = session.load(EMPTY_BASE_CRLF).unwrap();
+
+    assert_eq!(data.deleted, Some(Side::Local));
+    assert_eq!(data.eol, Eol::CrLf);
+}
+
+#[test]
 fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason() {
     let dir = deleted_on_one_side();
     let mut session = MergeSession::open(dir.path()).unwrap();
@@ -99,6 +118,7 @@ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason(
         (BASE_BINARY, Some(UnsupportedReason::LocalDeleted)),
         (KEPT_LATIN1, Some(UnsupportedReason::LocalDeleted)),
         (KEPT_LINK, Some(UnsupportedReason::Symlink)),
+        (EMPTY_BASE_CRLF, None),
     ]
     .map(|(path, reason)| (path.to_owned(), reason));
     assert_eq!(listed, expected);

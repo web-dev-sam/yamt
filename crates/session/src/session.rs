@@ -8,7 +8,7 @@ use yamt_gitio::{BlobReader, Repo, StageEntry};
 use yamt_merge_core::{Chunk, Options, WordChanges, compute_chunks, word_changes};
 
 use crate::decode::{Eol, UnsupportedReason, decode_sides, detect_eol};
-use crate::remote_name::{RemoteName, remote_name};
+use crate::remote_name::{RemoteName, read_remote_name};
 use crate::sides::{FileSides, SUBMODULE_MODE, SYMLINK_MODE, Side, side_content};
 use crate::stages::{CapturedStages, group_by_path};
 use crate::{Error, Result};
@@ -39,15 +39,24 @@ pub struct FileMergeData {
 }
 
 #[must_use]
-pub fn merge_data(path: &str, base: &str, local: &str, remote: &str) -> FileMergeData {
-    let eol_source = if base.is_empty() { local } else { base };
+pub fn merge_data(
+    path: &str,
+    base: &str,
+    local: &str,
+    remote: &str,
+    deleted: Option<Side>,
+) -> FileMergeData {
+    let eol_source = [base, local, remote]
+        .into_iter()
+        .find(|text| !text.is_empty())
+        .unwrap_or_default();
     let chunks = compute_chunks(base, local, remote, &Options::default());
     FileMergeData {
         path: path.to_owned(),
         base: base.to_owned(),
         local: local.to_owned(),
         remote: remote.to_owned(),
-        deleted: None,
+        deleted,
         eol: detect_eol(eol_source),
         word_changes: word_changes(base, local, remote, &chunks),
         chunks,
@@ -100,7 +109,7 @@ impl MergeSession {
                 content,
             });
         }
-        let remote_name = remote_name(&repo);
+        let remote_name = read_remote_name(&repo);
         Ok(MergeSession {
             repo,
             files,
@@ -147,16 +156,13 @@ impl MergeSession {
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
         let file = find_file(&mut self.files, path)?;
         let texts = file.require_text()?;
-        let data = merge_data(
+        Ok(merge_data(
             &file.display_path(),
             &texts.base,
             &texts.local,
             &texts.remote,
-        );
-        Ok(FileMergeData {
-            deleted: texts.deleted,
-            ..data
-        })
+            texts.deleted,
+        ))
     }
 
     pub fn finish(&mut self, path: &str, result: &str) -> Result<()> {

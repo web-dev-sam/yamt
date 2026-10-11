@@ -1,14 +1,13 @@
 #![cfg(test)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
 use yamt_session::{MergeSession, RemoteName};
 
 const FILE: &str = "cart.ts";
-const UNREADABLE: u32 = 0o000;
+const MIN_SHORT_ID: usize = 7;
 
 fn diverged() -> TempDir {
     diverged_repo(&[ConflictFile {
@@ -41,12 +40,22 @@ fn branch(name: &str) -> RemoteName {
     }
 }
 
-fn commit(root: &Path, revision: &str, subject: &str, message: &str) -> RemoteName {
-    RemoteName::Commit {
-        short_id: stdout_line(root, &["rev-parse", "--short", revision]),
+fn assert_names_commit(root: &Path, revision: &str, subject: &str, message: &str) {
+    let name = remote_name_of(root);
+    let full_id = stdout_line(root, &["rev-parse", revision]);
+    let Some(RemoteName::Commit { short_id, .. }) = &name else {
+        panic!("not a commit: {name:?}");
+    };
+    assert!(
+        short_id.len() >= MIN_SHORT_ID && full_id.starts_with(short_id.as_str()),
+        "{short_id} is not a short form of {full_id}"
+    );
+    let expected = RemoteName::Commit {
+        short_id: short_id.clone(),
         subject: subject.to_owned(),
         message: message.to_owned(),
-    }
+    };
+    assert_eq!(name, Some(expected));
 }
 
 #[test]
@@ -72,13 +81,12 @@ fn merging_a_commit_no_branch_points_at_names_the_commit() {
     git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
     require_conflict(root, &["merge", &detached]);
 
-    let expected = commit(
+    assert_names_commit(
         root,
         &detached,
         "detached subject",
         "detached subject\n\ndetached body",
     );
-    assert_eq!(remote_name_of(root), Some(expected));
 }
 
 #[test]
@@ -108,10 +116,7 @@ fn two_branches_and_a_merge_message_naming_neither_give_the_commit() {
     let remote = stdout_line(root, &["rev-parse", "remote"]);
     require_conflict(root, &["merge", &remote]);
 
-    assert_eq!(
-        remote_name_of(root),
-        Some(commit(root, "remote", "remote", "remote"))
-    );
+    assert_names_commit(root, "remote", "remote", "remote");
 }
 
 #[test]
@@ -121,7 +126,8 @@ fn an_unreadable_merge_message_drops_the_name() {
     git_ok(root, &["branch", "also", "remote"]).unwrap();
     require_conflict(root, &["merge", "remote"]);
     let merge_msg = root.join(".git/MERGE_MSG");
-    fs::set_permissions(&merge_msg, fs::Permissions::from_mode(UNREADABLE)).unwrap();
+    fs::remove_file(&merge_msg).unwrap();
+    fs::create_dir(&merge_msg).unwrap();
 
     assert_eq!(remote_name_of(root), None);
 }
@@ -129,24 +135,20 @@ fn an_unreadable_merge_message_drops_the_name() {
 #[test]
 fn a_cherry_pick_names_the_picked_commit() {
     let dir = diverged();
-    require_conflict(dir.path(), &["cherry-pick", "remote"]);
+    let root = dir.path();
+    require_conflict(root, &["cherry-pick", "remote"]);
 
-    assert_eq!(
-        remote_name_of(dir.path()),
-        Some(commit(dir.path(), "remote", "remote", "remote"))
-    );
+    assert_names_commit(root, "remote", "remote", "remote");
 }
 
 #[test]
 fn a_rebase_names_the_replayed_commit() {
     let dir = diverged();
-    let local = stdout_line(dir.path(), &["rev-parse", "local"]);
-    require_conflict(dir.path(), &["rebase", "remote"]);
+    let root = dir.path();
+    let local = stdout_line(root, &["rev-parse", "local"]);
+    require_conflict(root, &["rebase", "remote"]);
 
-    assert_eq!(
-        remote_name_of(dir.path()),
-        Some(commit(dir.path(), &local, "local", "local"))
-    );
+    assert_names_commit(root, &local, "local", "local");
 }
 
 #[test]

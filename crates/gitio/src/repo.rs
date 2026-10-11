@@ -16,7 +16,8 @@ const REV_PARSE: &str = "rev-parse";
 const LOG: &str = "log";
 const MERGE_MSG: &str = "MERGE_MSG";
 const UNRESOLVED_NAME_STATUS: i32 = 1;
-const NON_SYMBOLIC_SHORT_NAME: &str = "--format=%(if)%(symref)%(then)%(else)%(refname:short)%(end)";
+const NON_SYMBOLIC_SHORT_NAME: &str =
+    "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
 const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
 const COMMIT_SUMMARY_FIELDS: usize = 3;
 
@@ -85,10 +86,11 @@ impl Repo {
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
         let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
-        match fs::read(self.root.join(OsStr::from_bytes(&git_path))) {
+        let path = self.root.join(OsStr::from_bytes(&git_path));
+        match fs::read(&path) {
             Ok(message) => Ok(Some(message)),
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(source.into()),
+            Err(source) => Err(Error::ReadFailed { path, source }),
         }
     }
 

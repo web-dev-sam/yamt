@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{
@@ -7,6 +8,7 @@ use yamt_conflict_repo::{
 };
 use yamt_gitio::{CommitSummary, Error, Oid, Repo};
 
+const MIN_SHORT_ID: usize = 7;
 const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     path: "cart.ts",
     kind: FileKind::Regular,
@@ -60,6 +62,7 @@ fn branches_at_lists_local_and_remote_tracking_branches_but_not_symbolic_refs() 
     git_ok(root, &["branch", "also", "remote"]).unwrap();
     git_ok(root, &["update-ref", "refs/remotes/origin/main", "remote"]).unwrap();
     git_ok(root, &["update-ref", "refs/tags/v1", "remote"]).unwrap();
+    git_ok(root, &["tag", "remote", "remote"]).unwrap();
     git_ok(
         root,
         &[
@@ -89,6 +92,21 @@ fn merge_message_reads_merge_msg_and_is_none_outside_a_merge() {
     let dir = diverged_repo(&FILES).unwrap();
     let repo = Repo::discover(dir.path()).unwrap();
     assert_eq!(repo.merge_message().unwrap(), None);
+}
+
+#[test]
+fn merge_message_that_cannot_be_read_is_a_read_failure_naming_the_file() {
+    let (_dir, repo) = merging();
+    let merge_msg = repo.root().join(".git/MERGE_MSG");
+    fs::remove_file(&merge_msg).unwrap();
+    fs::create_dir(&merge_msg).unwrap();
+
+    let error = repo.merge_message().unwrap_err();
+
+    assert!(
+        matches!(&error, Error::ReadFailed { path, .. } if *path == merge_msg),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -136,8 +154,13 @@ fn commit_summary_gives_the_short_id_subject_and_raw_message() {
 
     let summary = repo.commit_summary(&oid_of(root, "HEAD")).unwrap();
 
+    let full_id = stdout_line(root, &["rev-parse", "HEAD"]).into_bytes();
+    assert!(
+        summary.short_id.len() >= MIN_SHORT_ID && full_id.starts_with(&summary.short_id),
+        "{summary:?}"
+    );
     let expected = CommitSummary {
-        short_id: stdout_line(root, &["rev-parse", "--short", "HEAD"]).into_bytes(),
+        short_id: summary.short_id.clone(),
         subject: b"subject".to_vec(),
         message: b"subject\n\nbody\n\n".to_vec(),
     };

@@ -23,7 +23,7 @@ pub enum RemoteName {
     },
 }
 
-pub(crate) fn remote_name(repo: &Repo) -> Option<RemoteName> {
+pub(crate) fn read_remote_name(repo: &Repo) -> Option<RemoteName> {
     match merged_in(repo) {
         Ok(name) => name,
         Err(error) => {
