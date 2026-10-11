@@ -1,0 +1,91 @@
+# Handoff — publish yamt 0.1.0 (2026-10-11)
+
+The owner runs this. Goal: v0.1.0 out today. Pushing a tag `v0.1.0` starts
+`.github/workflows/release.yml`. That run makes a **draft** release with the Linux AppImage and
+`.deb` and a universal macOS `.dmg`. Nothing is public until you publish the draft.
+
+## Where things stand
+
+- **Code.** `main` is pushed to github.com/web-dev-sam/yamt (`a28064c`) and the version is `0.1.0`
+  (workspace `Cargo.toml`). This handoff adds one commit (the changelog date and two handoff files),
+  so push `main` once more first. No tag exists yet, so **no release build has ever run**: this tag
+  is the first run, and the first macOS build ever.
+- **Licences.** `THIRD_PARTY_LICENSES.txt` is current (regenerated today: 332 Rust crates, 82 JS
+  packages, no diff). The release jobs check exactly this and stop if it is stale.
+- **What is verified for the last feature** (the disk is the truth):
+  - every reviewer passed;
+  - the full test suite passed (`just check`, exit 0, twice);
+  - all 8 desktop steps passed on a copy of the Vue merge. The start-up check takes 64 ms for the
+    7 files.
+- **Still open** (not blocking the release, by your call): mutation testing of the new code, and
+  one window check redone with real clicks. Both are in `handoff-verify-0.1.0.md`; run it after
+  publishing.
+- **Known follow-ups** that are not bugs are on the work board: rows 11, 11', 12, 12', 13'''.
+
+## Steps
+
+1. **Push and tag.** Everything is committed; the working tree is clean.
+   ```bash
+   cd ~/Projects/yamt
+   git status --short              # expect no output
+   git push origin main
+   git tag -a v0.1.0 -m "yamt 0.1.0"
+   git push origin v0.1.0
+   ```
+2. **Watch the build** at https://github.com/web-dev-sam/yamt/actions. Run "release" has three jobs:
+   - `draft-release`;
+   - `build (ubuntu-22.04)`;
+   - `build (macos-14)` (the universal build: Apple Silicon and Intel).
+
+   The two build jobs do not cancel each other. Expect roughly 15–30 min [INFERENCE: tauri builds on
+   hosted runners; never measured for this repo].
+
+3. **Check the draft** at https://github.com/web-dev-sam/yamt/releases. Draft `v0.1.0` should list:
+   - `yamt_0.1.0_amd64.AppImage` and `yamt_0.1.0_amd64.deb`. The README's install commands use these
+     exact names.
+   - A macOS `.dmg` (tauri-action names it after the target, e.g. `yamt_0.1.0_universal.dmg`) and an
+     `.app.tar.gz`.
+4. **Release notes.** Paste the `## [0.1.0] - 2026-10-11` section of `CHANGELOG.md` into the draft's
+   description.
+5. **Smoke one download** before publishing; 5 minutes, Linux:
+
+   ```bash
+   scripts/conflict-repo.sh /tmp/yamt-release-smoke          # a repository stopped in a merge, 7 conflicts
+   chmod +x ~/Downloads/yamt_0.1.0_amd64.AppImage
+   cd /tmp/yamt-release-smoke && ~/Downloads/yamt_0.1.0_amd64.AppImage
+   ```
+
+   Expect a window titled `yamt-release-smoke — yamt` listing 7 files. Resolve one file and close the
+   window. The exit status is 1 while files are unresolved (`echo $?`).
+
+   On the Mac, open the `.dmg`, drag yamt to Applications, then right-click → Open the first time
+   (the build is unsigned).
+
+6. **Publish.** Press "Publish release" on the draft.
+
+## If something fails
+
+- **Only one platform failed** (e.g. macOS): either publish with the assets that are there and say
+  so in the notes, or fix it and redo the tag (next bullet). A failed job can also simply be
+  re-run from the Actions page ("Re-run failed jobs"), which is enough for a flaky download or a
+  runner hiccup.
+- **Redoing the tag after a fix:**
+  1. Delete the draft release on the website.
+  2. Delete the tag and push the fix:
+     ```bash
+     git tag -d v0.1.0 && git push --delete origin v0.1.0
+     # commit the fix, then:
+     git push origin main && git tag -a v0.1.0 -m "yamt 0.1.0" && git push origin v0.1.0
+     ```
+  Redoing a tag is fine only before the release is published.
+- **"THIRD_PARTY_LICENSES.txt is stale"**: run `just third-party-licenses`, commit the file, then
+  redo the tag.
+- **Never bump** tauri 2.12.1, tauri-build 2.7.1, @tauri-apps/api 2.12.1 or tauri-cli 2.12.1 to fix
+  a build. The workflow installs tauri-cli 2.12.1 on purpose.
+
+## After publishing
+
+- Run `handoff-verify-0.1.0.md`; a problem found there goes into 0.1.1.
+- Board: rows 4 (macOS check, now on your Mac with the release build) and C' (a real merge of your
+  own, side by side with WebStorm) are yours. The review of the project's rules (D'') and the v0
+  write-up (`docs/walkthroughs/v0.md`) come after C'.
