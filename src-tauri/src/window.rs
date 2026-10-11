@@ -145,6 +145,8 @@ mod tests {
     fn only_the_ping_answer_counts_as_answered() {
         assert!(answered("true"));
         assert!(!answered(""));
+        assert!(!answered("false"));
+        assert!(!answered("null"));
     }
 
     fn second_request_after(delay: Duration) -> CloseRequest {

@@ -11,19 +11,21 @@ right, the result in the middle.
 Download from the [releases page](../../releases):
 
 - **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
-  puts `yamt` on your PATH. For the AppImage, copy it there yourself:
+  puts `yamt` on your PATH. For the AppImage, put it there yourself.
+
+  Without AppImageLauncher:
 
   ```sh
   install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt
   ```
 
-  AppImageLauncher stops a copy outside its folder with a dialog; with AppImageLauncher, let it
-  integrate the AppImage instead (it moves the file to `~/Applications` and adds a hash to the
-  name) and link the moved file:
+  With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the
+  AppImage (it moves the file to `~/Applications` and adds a hash to the name) and link the moved
+  file:
 
   ```sh
   ail-cli integrate yamt_0.1.0_amd64.AppImage
-  mkdir -p ~/.local/bin && ln -s ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
+  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
   ```
 
 - **Arch Linux**: the AppImage, or build from source (below).

@@ -251,6 +251,7 @@ generate() {
         icon_entries
         ubuntu_section
     } >"$tmp"
+    chmod 644 "$tmp"
     mv "$tmp" "$out"
     echo "third-party-licenses: $(grep -c . <<<"$rust_rows") Rust crates, $(grep -c . <<<"$js_rows") JS packages," \
         "${#icon_sets[@]} icon sets -> ${out#"$root"/} ($(wc -c <"$out") bytes)"
