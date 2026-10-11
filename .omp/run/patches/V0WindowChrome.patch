@@ -1,0 +1,1888 @@
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 3fd14fb..b2dcf1a 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,10 +1,11 @@
+-import type { FileEntry, FileMergeData, FileSides, Side, SourceResult } from "./domain";
++import type { FileEntry, FileMergeData, FileSides, RemoteName, Side, SourceResult } from "./domain";
+ 
+ export interface ChunkSource {
+-  listFiles(): Promise<FileEntry[]>;
++  listFiles(): Promise<SourceResult<FileEntry[]>>;
+   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+   finishFile(path: string, text: string): Promise<SourceResult<FileEntry[]>>;
+   resetFile(path: string): Promise<SourceResult<FileEntry[]>>;
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+   takeSide(path: string, side: Side): Promise<SourceResult<FileEntry[]>>;
++  remoteName(): Promise<RemoteName | null>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 8bfcbe3..d3be9e4 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -30,11 +30,14 @@ export type SideContent = Generated.SideContent;
+ 
+ export type Side = Generated.Side;
+ 
++export type RemoteName = Generated.RemoteName;
++
+ export type FileMergeData = {
+   readonly path: string;
+   readonly base: string;
+   readonly local: string;
+   readonly remote: string;
++  readonly deleted: Side | null;
+   readonly eol: Generated.Eol;
+   readonly chunks: readonly Chunk[];
+ };
+@@ -210,6 +213,7 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+     base: dto.base,
+     local: dto.local,
+     remote: dto.remote,
++    deleted: dto.deleted,
+     eol: dto.eol,
+     chunks: toChunks(dto),
+   };
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index 5c32e57..519aca5 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -1,7 +1,7 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { SourceResult } from "./domain";
++import type { Side, SourceResult } from "./domain";
+ import { createFixtureSource, loadFixture } from "./fixture";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+@@ -56,6 +56,7 @@ function record(
+     base: "b\n",
+     local: "l\n",
+     remote: "r\n",
++    deleted: null,
+     eol: "Lf",
+     chunks: [{ ...CHUNK, ...chunk }],
+     word_changes: [{ chunk: 0, ...WORDS, ...words }],
+@@ -68,6 +69,7 @@ function loaded(path: string): Record<string, unknown> {
+     base: "b\n",
+     local: "l\n",
+     remote: "r\n",
++    deleted: null,
+     eol: "Lf",
+     chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
+   };
+@@ -84,7 +86,7 @@ afterEach(() => {
+ test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
+   const source = createFixtureSource(quietLog().log);
+ 
+-  const files = await source.listFiles();
++  const files = valueOf(await source.listFiles());
+ 
+   expect(files.map((file) => file.path)).toEqual([
+     "language-tools-script-setup.ts",
+@@ -157,13 +159,28 @@ test("in-memory records are listed sorted by path and keep every field", async (
+     "a.json": { ...record("a.ts"), eol: "CrLf" },
+   });
+ 
+-  expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
++  expect(valueOf(await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+   expect(await source.loadFile("a.ts")).toEqual({
+     ok: true,
+     value: { ...loaded("a.ts"), eol: "CrLf" },
+   });
+ });
+ 
++test.each<Side>(["local", "remote"])(
++  "a record deleted on the %s side keeps that side",
++  async (deleted) => {
++    const source = createFixtureSource(quietLog().log, {
++      "a.json": { ...record("a.ts"), deleted },
++    });
++
++    expect(valueOf(await source.loadFile("a.ts")).deleted).toBe(deleted);
++  },
++);
++
++test("the fixture source names nothing merged in", async () => {
++  expect(await createFixtureSource(quietLog().log).remoteName()).toBeNull();
++});
++
+ test.each([
+   [
+     "an unknown chunk kind",
+@@ -171,6 +188,12 @@ test.each([
+     "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
+   ],
+   ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
++  [
++    "an unknown deleted side",
++    { ...record("x.ts"), deleted: "base" },
++    "expected one of local, remote",
++  ],
++  ["missing deleted", without(record("x.ts"), "deleted"), 'Invalid key: Expected "deleted"'],
+   ["missing chunks", without(record("x.ts"), "chunks"), 'Invalid key: Expected "chunks"'],
+   [
+     "missing word_changes",
+@@ -328,7 +351,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
+   expect(await source.resetFile("nope.ts")).toEqual(failure);
+   expect(await source.describeFile("nope.ts")).toEqual(failure);
+   expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
+-  expect(await source.listFiles()).toEqual([
++  expect(valueOf(await source.listFiles())).toEqual([
+     { path: "a.ts", status: "Unresolved", unsupported: null },
+   ]);
+   expect(entries).toEqual([]);
+@@ -356,7 +379,7 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+     { path: "b.ts", status: "Unresolved", unsupported: null },
+   ];
+   expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
+-  expect(await source.listFiles()).toEqual(unresolved);
++  expect(valueOf(await source.listFiles())).toEqual(unresolved);
+   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
+   expect(entries).toHaveLength(1);
+ });
+@@ -378,7 +401,7 @@ test("takeSide marks the file resolved and logs the side; reset returns it unres
+ 
+   await source.resetFile("b.ts");
+ 
+-  expect((await source.listFiles()).map((file) => file.status)).toEqual([
++  expect(valueOf(await source.listFiles()).map((file) => file.status)).toEqual([
+     "Unresolved",
+     "Unresolved",
+   ]);
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index dda07de..c6205a0 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -35,6 +35,8 @@ const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {
+ 
+ const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
+ 
++const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
++
+ function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
+   return v.custom<T>(
+     (input) => typeof input === "string" && Object.hasOwn(members, input),
+@@ -82,6 +84,7 @@ const FILE_MERGE_DATA = v.object({
+   base: v.string(),
+   local: v.string(),
+   remote: v.string(),
++  deleted: v.nullable(memberOf(SIDES)),
+   eol: memberOf(EOLS),
+   chunks: v.array(CHUNK),
+   word_changes: v.array(WORD_CHANGES),
+@@ -164,7 +167,7 @@ export function createFixtureSource(
+ 
+   return {
+     async listFiles() {
+-      return entries(records);
++      return { ok: true, value: entries(records) };
+     },
+     async loadFile(path) {
+       const data = records.fixtures.get(path);
+@@ -190,5 +193,8 @@ export function createFixtureSource(
+         log.info("fixture.take", { path, side });
+       });
+     },
++    async remoteName() {
++      return null;
++    },
+   };
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index fc40847..2c80031 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -8,6 +8,7 @@ export type {
+   FileEntry,
+   FileMergeData,
+   FileSides,
++  RemoteName,
+   Side,
+   SideContent,
+   SourceFailure,
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 39e482d..e95d66f 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -10,6 +10,7 @@ const commands = vi.hoisted(() => ({
+   resetFile: vi.fn(),
+   describeFile: vi.fn(),
+   takeSide: vi.fn(),
++  remoteName: vi.fn(),
+   log: vi.fn(),
+ }));
+ 
+@@ -22,6 +23,7 @@ const DTO: Generated.FileMergeData = {
+   base: "b\n",
+   local: "l\n",
+   remote: "r\n",
++  deleted: "local",
+   eol: "CrLf",
+   chunks: [{ id: 0, kind: "Conflict", base: LINE, local: LINE, remote: LINE }],
+   word_changes: [
+@@ -42,10 +44,37 @@ beforeEach(() => {
+   vi.resetAllMocks();
+ });
+ 
+-test("listFiles returns the app's entries", async () => {
+-  commands.listFiles.mockResolvedValue(ENTRIES);
++test("listFiles returns the app's entries and its failure unchanged", async () => {
++  const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
++  commands.listFiles.mockResolvedValueOnce({ status: "ok", data: ENTRIES });
++  commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
++  const source = createTauriSource();
+ 
+-  expect(await createTauriSource().listFiles()).toEqual(ENTRIES);
++  expect(await source.listFiles()).toEqual({ ok: true, value: ENTRIES });
++  expect(await source.listFiles()).toEqual({ ok: false, failure: git });
++});
++
++test("a string error from listFiles rejects the call with that message", async () => {
++  commands.listFiles.mockResolvedValue({ status: "error", error: "list_files not allowed" });
++
++  await expect(createTauriSource().listFiles()).rejects.toThrow(
++    new Error("list_files not allowed"),
++  );
++});
++
++test("remoteName returns the app's answer", async () => {
++  const name: Generated.RemoteName = {
++    kind: "Commit",
++    short_id: "1a2b3c4",
++    subject: "Fix parser crash",
++    message: "Fix parser crash\n\nThe lexer read past the end.",
++  };
++  commands.remoteName.mockResolvedValueOnce(name);
++  commands.remoteName.mockResolvedValueOnce(null);
++  const source = createTauriSource();
++
++  expect(await source.remoteName()).toEqual(name);
++  expect(await source.remoteName()).toBeNull();
+ });
+ 
+ test("loadFile turns the app's data into domain data", async () => {
+@@ -61,6 +90,7 @@ test("loadFile turns the app's data into domain data", async () => {
+       base: "b\n",
+       local: "l\n",
+       remote: "r\n",
++      deleted: "local",
+       eol: "CrLf",
+       chunks: [
+         {
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index ad223cb..27724a3 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -22,8 +22,8 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+ 
+ export function createTauriSource(): ChunkSource {
+   return {
+-    listFiles() {
+-      return commands.listFiles();
++    async listFiles() {
++      return toResult(await commands.listFiles());
+     },
+     async loadFile(path) {
+       const result = toResult(await commands.loadFile(path));
+@@ -41,6 +41,9 @@ export function createTauriSource(): ChunkSource {
+     async takeSide(path, side) {
+       return toResult(await commands.takeSide(path, side));
+     },
++    remoteName() {
++      return commands.remoteName();
++    },
+   };
+ }
+ 
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 63c0206..00dac88 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -10,4 +10,5 @@ const source =
+   import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
+ const store = createAppStore(source);
+ void store.loadFiles();
++void store.loadRemoteName();
+ createApp(App).mount("#app");
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 125e381..1ccd65a 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -1,5 +1,6 @@
+ <script setup lang="ts">
+-import { onMounted } from "vue";
++import { useWindowFocus } from "@vueuse/core";
++import { onMounted, watch } from "vue";
+ 
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+@@ -12,16 +13,26 @@ const {
+   files,
+   opened,
+   choices,
++  taken,
+   active,
+   problem,
+   question,
+   allResolved,
+   open,
++  refreshFiles,
+   dismissProblem,
+   answer,
+   watchWindowClose,
+ } = useAppStore();
+ 
++const focused = useWindowFocus();
++
++watch(focused, (now) => {
++  if (now) {
++    void refreshFiles();
++  }
++});
++
+ onMounted(() => {
+   void watchWindowClose();
+ });
+@@ -47,10 +58,11 @@ onMounted(() => {
+           :shown="file.path === active"
+         />
+         <ChoiceView
+-          v-for="choice in choices"
+-          :key="choice.sides.path"
+-          :choice="choice"
+-          :shown="choice.sides.path === active"
++          v-for="sides in choices"
++          :key="sides.path"
++          :sides="sides"
++          :taken="taken.get(sides.path) ?? null"
++          :shown="sides.path === active"
+         />
+       </div>
+     </div>
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index e38260e..d763adf 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -1,71 +1,91 @@
+ <script setup lang="ts">
+ import { computed } from "vue";
+ 
+-import type { Side } from "../ipc";
+-import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+-import { SIDE_HEADERS } from "./sideHeaders";
+-import { useAppStore, type Choice } from "./store";
++import type { FileSides, Side } from "../ipc";
++import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { sideHeader } from "./sideHeaders";
++import { useAppStore } from "./store";
+ 
+ type Column = {
+   readonly side: Side;
+   readonly header: string;
++  readonly headerTooltip: string;
++  readonly column: string;
+   readonly sentence: string;
+   readonly tooltip: string | undefined;
+   readonly button: string;
+ };
+ 
+-const props = defineProps<{ choice: Choice; shown: boolean }>();
++const props = defineProps<{ sides: FileSides; taken: Side | null; shown: boolean }>();
+ 
+ const SIDES: readonly Side[] = ["local", "remote"];
++const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
+ 
+-const { takeSide, reset } = useAppStore();
++const { takeSide, reset, remote } = useAppStore();
+ 
+ const columns = computed(() =>
+-  SIDES.map((side): Column => ({
+-    side,
+-    header: SIDE_HEADERS[side],
+-    sentence: sideSentence(props.choice.sides[side]),
+-    tooltip: sideTooltip(props.choice.sides[side]),
+-    button: sideButton(props.choice.sides, side),
+-  })),
+-);
+-const resolved = computed(() =>
+-  props.choice.taken === null ? "" : resolvedLine(props.choice.sides, props.choice.taken),
++  SIDES.map((side): Column => {
++    const header = sideHeader(side, remote.value);
++    return {
++      side,
++      header: header.text,
++      headerTooltip: header.tooltip,
++      column: GRID_COLUMN[side],
++      sentence: sideSentence(props.sides[side]),
++      tooltip: sideTooltip(props.sides[side]),
++      button: sideButton(props.sides, side),
++    };
++  }),
+ );
++const result = computed(() => resultLine(props.sides, props.taken));
+ </script>
+ 
+ <template>
+   <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
+-    <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
+-      <span class="ml-3 text-fg-muted" role="status">{{ resolved }}</span>
+-      <button
+-        type="button"
+-        :disabled="choice.taken === null"
+-        class="ml-auto rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        @click="reset(choice.sides.path)"
+-      >
+-        Reset file
+-      </button>
+-    </header>
++    <header class="h-10 shrink-0 border-b border-separator bg-window" />
+     <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-flow-col grid-cols-2 grid-rows-[auto_minmax(0,1fr)] gap-x-px bg-separator"
++      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px bg-separator"
+     >
+       <template v-for="column in columns" :key="column.side">
+-        <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
+-          {{ column.header }}
+-        </h2>
+-        <div class="flex min-w-0 flex-col items-start gap-3 bg-editor p-3">
++        <div
++          class="row-start-1 flex min-w-0 items-center border-b border-separator bg-window px-3 py-1.5"
++          :class="column.column"
++        >
++          <h2 class="min-w-0 truncate text-fg-muted" :title="column.headerTooltip">
++            {{ column.header }}
++          </h2>
++        </div>
++        <div
++          class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-editor p-3"
++          :class="column.column"
++        >
+           <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
+           <button
+-            v-if="choice.taken === null"
++            v-if="taken === null"
+             type="button"
+             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+-            @click="takeSide(choice.sides.path, column.side)"
++            @click="takeSide(sides.path, column.side)"
+           >
+             {{ column.button }}
+           </button>
+         </div>
+       </template>
++      <div
++        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++      >
++        <h2 class="text-fg-muted">Result</h2>
++        <button
++          type="button"
++          :disabled="taken === null"
++          class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @click="reset(sides.path)"
++        >
++          Reset
++        </button>
++      </div>
++      <p class="col-start-2 row-start-2 bg-editor p-3 wrap-break-word" role="status">
++        {{ result }}
++      </p>
+     </section>
+   </div>
+ </template>
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index 6606aa8..29c4ce6 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -1,4 +1,5 @@
+ <script setup lang="ts">
++import { computed, shallowRef, useTemplateRef } from "vue";
+ import Check from "~icons/lucide/check";
+ 
+ import type { FileEntry } from "../ipc";
+@@ -6,10 +7,31 @@ import { fileIcon } from "./fileIcon";
+ 
+ defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+ const emit = defineEmits<{ select: [path: string] }>();
++
++const list = useTemplateRef<HTMLElement>("list");
++const handle = useTemplateRef<HTMLDivElement>("handle");
++const width = shallowRef<number | null>(null);
++
++const widthStyle = computed(() => (width.value === null ? {} : { width: `${width.value}px` }));
++
++function startResize(event: PointerEvent): void {
++  event.preventDefault();
++  handle.value?.setPointerCapture(event.pointerId);
++}
++
++function resize(event: PointerEvent): void {
++  if (list.value !== null && handle.value?.hasPointerCapture(event.pointerId) === true) {
++    width.value = event.clientX - list.value.getBoundingClientRect().left;
++  }
++}
+ </script>
+ 
+ <template>
+-  <aside class="flex w-60 shrink-0 flex-col border-r border-separator bg-window">
++  <aside
++    ref="list"
++    class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col border-r border-separator bg-window"
++    :style="widthStyle"
++  >
+     <h2 class="px-3 py-2 font-semibold">Files</h2>
+     <ul role="listbox" aria-label="Conflicted files" class="flex-1 overflow-y-auto">
+       <li
+@@ -33,5 +55,14 @@ const emit = defineEmits<{ select: [path: string] }>();
+         </span>
+       </li>
+     </ul>
++    <div
++      ref="handle"
++      role="separator"
++      aria-orientation="vertical"
++      aria-label="File list width"
++      class="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize"
++      @pointerdown="startResize"
++      @pointermove="resize"
++    />
+   </aside>
+ </template>
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index d02fc3c..efc4b20 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -5,6 +5,7 @@ import ChevronsRight from "~icons/lucide/chevrons-right";
+ import Redo2 from "~icons/lucide/redo-2";
+ import Undo2 from "~icons/lucide/undo-2";
+ 
++import { finishMustAsk } from "./question";
+ import { summaryLabel } from "./summaryLabel";
+ import type { MergeSummary } from "./useMergeController";
+ 
+@@ -16,7 +17,6 @@ const emit = defineEmits<{
+   applyRight: [];
+   undo: [];
+   redo: [];
+-  reset: [];
+   finish: [];
+ }>();
+ 
+@@ -52,10 +52,24 @@ const ICON_BUTTONS: readonly IconButton[] = [
+ ];
+ 
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
++const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+ </script>
+ 
+ <template>
+   <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
++    <button
++      type="button"
++      :disabled="summary === null"
++      class="mr-2 rounded border px-3.5 py-1"
++      :class="
++        nothingLeft
++          ? 'border-primary bg-primary text-on-primary hover:brightness-110'
++          : 'border-control-border hover:bg-hover'
++      "
++      @click="emit('finish')"
++    >
++      Mark resolved
++    </button>
+     <button
+       v-for="button in ICON_BUTTONS"
+       :key="button.label"
+@@ -69,23 +83,5 @@ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(pro
+       <component :is="button.icon" class="size-4" aria-hidden="true" />
+     </button>
+     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
+-    <div class="ml-auto flex gap-2">
+-      <button
+-        type="button"
+-        :disabled="summary === null"
+-        class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+-        @click="emit('reset')"
+-      >
+-        Reset file
+-      </button>
+-      <button
+-        type="button"
+-        :disabled="summary === null"
+-        class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110"
+-        @click="emit('finish')"
+-      >
+-        Mark resolved
+-      </button>
+-    </div>
+   </header>
+ </template>
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 230c8ff..2cc6d78 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -1,14 +1,27 @@
+ <script setup lang="ts">
+-import { onUnmounted, useTemplateRef } from "vue";
++import { computed, onUnmounted, useTemplateRef, watch } from "vue";
+ 
+-import type { FileMergeData } from "../ipc";
++import type { FileMergeData, Side } from "../ipc";
++import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP } from "./choiceText";
+ import MergeToolbar from "./MergeToolbar.vue";
+-import { SIDE_HEADERS } from "./sideHeaders";
++import { sideHeader } from "./sideHeaders";
+ import { useAppStore, type FileWork } from "./store";
+ import { useMergeController } from "./useMergeController";
+ 
++type Column = {
++  readonly side: Side;
++  readonly text: string;
++  readonly tooltip: string;
++  readonly column: string;
++  readonly keep: boolean;
++  readonly deleted: boolean;
++};
++
+ const props = defineProps<{ data: FileMergeData; shown: boolean }>();
+ 
++const SIDES: readonly Side[] = ["local", "remote"];
++const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
++
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+@@ -16,9 +29,45 @@ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+ const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
+   useMergeController(() => props.data, { left, center, right, strips: [leftStrip, rightStrip] });
+-const { track, untrack, finish, reset } = useAppStore();
++const { track, untrack, finish, reset, takeSide, taken, remote } = useAppStore();
+ const work: FileWork = { unsaved, markSaved };
+-track(props.data.path, work);
++if (props.data.deleted === null) {
++  track(props.data.path, work);
++}
++
++const sideTaken = computed(() => taken.value.get(props.data.path) ?? null);
++const kept = computed(() => {
++  const { deleted } = props.data;
++  return deleted === null ? null : (SIDES.find((side) => side !== deleted) ?? null);
++});
++const deletedTaken = computed(
++  () => sideTaken.value !== null && sideTaken.value === props.data.deleted,
++);
++const columns = computed(() =>
++  SIDES.map((side): Column => ({
++    side,
++    ...sideHeader(side, remote.value),
++    column: GRID_COLUMN[side],
++    keep: side === kept.value && sideTaken.value === null,
++    deleted: side === props.data.deleted,
++  })),
++);
++const keptShown = computed(
++  () => kept.value !== null && sideTaken.value === kept.value && summary.value !== null,
++);
++const resettable = computed(() =>
++  props.data.deleted === null ? summary.value !== null : sideTaken.value !== null,
++);
++
++watch(
++  keptShown,
++  (shownNow) => {
++    if (shownNow && kept.value !== null) {
++      applyAllNonConflicting(kept.value);
++    }
++  },
++  { immediate: true },
++);
+ 
+ onUnmounted(() => {
+   untrack(props.data.path, work);
+@@ -35,32 +84,93 @@ function markResolved(): void {
+ <template>
+   <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
+     <MergeToolbar
++      v-if="data.deleted === null"
+       :summary="summary"
+       @apply-left="applyAllNonConflicting('local')"
+       @apply-right="applyAllNonConflicting('remote')"
+       @undo="undo"
+       @redo="redo"
+-      @reset="reset(data.path)"
+       @finish="markResolved"
+     />
++    <header v-else class="h-10 shrink-0 border-b border-separator bg-window" />
+     <section
+       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
+     >
+-      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
+-        {{ SIDE_HEADERS.local }}
+-      </h2>
+-      <div class="border-b border-separator bg-window" />
+-      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">Result</h2>
+-      <div class="border-b border-separator bg-window" />
+-      <h2 class="border-b border-separator bg-window px-3 py-1.5 text-fg-muted">
+-        {{ SIDE_HEADERS.remote }}
+-      </h2>
++      <div
++        v-for="column in columns"
++        :key="column.side"
++        class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++        :class="column.column"
++      >
++        <h2 class="min-w-0 truncate text-fg-muted" :title="column.tooltip">{{ column.text }}</h2>
++        <button
++          v-if="column.keep"
++          type="button"
++          class="shrink-0 rounded border border-control-border px-3.5 py-0.5 hover:bg-hover"
++          @click="takeSide(data.path, column.side)"
++        >
++          {{ KEEP }}
++        </button>
++      </div>
++      <div class="col-start-2 row-start-1 border-b border-separator bg-window" />
++      <div
++        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++      >
++        <h2 class="text-fg-muted">Result</h2>
++        <button
++          type="button"
++          :disabled="!resettable"
++          class="rounded border border-control-border px-3.5 py-0.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @click="reset(data.path)"
++        >
++          Reset
++        </button>
++      </div>
++      <div class="col-start-4 row-start-1 border-b border-separator bg-window" />
+ 
+-      <div ref="left" class="min-h-0 min-w-0" />
+-      <svg ref="leftStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+-      <div ref="center" class="min-h-0 min-w-0" />
+-      <svg ref="rightStrip" aria-hidden="true" class="h-full w-full border-x border-separator" />
+-      <div ref="right" class="min-h-0 min-w-0" />
++      <div
++        ref="left"
++        class="col-start-1 row-start-2 min-h-0 min-w-0"
++        :class="{ invisible: data.deleted === 'local' }"
++      />
++      <svg
++        ref="leftStrip"
++        aria-hidden="true"
++        class="col-start-2 row-start-2 h-full w-full border-x border-separator"
++      />
++      <div
++        ref="center"
++        class="col-start-3 row-start-2 min-h-0 min-w-0"
++        :class="{ invisible: deletedTaken }"
++      />
++      <p v-if="deletedTaken" class="col-start-3 row-start-2 p-3">{{ DELETED_LINE }}</p>
++      <svg
++        ref="rightStrip"
++        aria-hidden="true"
++        class="col-start-4 row-start-2 h-full w-full border-x border-separator"
++      />
++      <div
++        ref="right"
++        class="col-start-5 row-start-2 min-h-0 min-w-0"
++        :class="{ invisible: data.deleted === 'remote' }"
++      />
++      <template v-for="column in columns" :key="column.side">
++        <div
++          v-if="column.deleted"
++          class="row-start-2 flex min-w-0 flex-col items-start gap-3 p-3"
++          :class="column.column"
++        >
++          <p>{{ DELETED_SENTENCE }}</p>
++          <button
++            v-if="sideTaken === null"
++            type="button"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++            @click="takeSide(data.path, column.side)"
++          >
++            {{ DELETE }}
++          </button>
++        </div>
++      </template>
+     </section>
+   </div>
+ </template>
+diff --git a/frontend/src/ui/asking.ts b/frontend/src/ui/asking.ts
+new file mode 100644
+index 0000000..e830058
+--- /dev/null
++++ b/frontend/src/ui/asking.ts
+@@ -0,0 +1,31 @@
++import { computed, shallowRef, type ComputedRef } from "vue";
++
++import type { Question } from "./question";
++
++type Waiting = { readonly question: Question; readonly answer: (yes: boolean) => void };
++
++export type Asking = {
++  readonly question: ComputedRef<Question | null>;
++  readonly ask: (question: Question) => Promise<boolean>;
++  readonly answer: (yes: boolean) => void;
++};
++
++export function createAsking(): Asking {
++  const waiting = shallowRef<Waiting | null>(null);
++  return {
++    question: computed(() => waiting.value?.question ?? null),
++    ask: (question) => {
++      if (waiting.value !== null) {
++        return Promise.resolve(false);
++      }
++      return new Promise((resolve) => {
++        waiting.value = { question, answer: resolve };
++      });
++    },
++    answer: (yes) => {
++      const current = waiting.value;
++      waiting.value = null;
++      current?.answer(yes);
++    },
++  };
++}
+diff --git a/frontend/src/ui/choiceText.test.ts b/frontend/src/ui/choiceText.test.ts
+index f707c9e..f73ebc7 100644
+--- a/frontend/src/ui/choiceText.test.ts
++++ b/frontend/src/ui/choiceText.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type { FileSides, SideContent } from "../ipc";
+-import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+ 
+ const COMMIT = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
+ const MISSING: SideContent = { kind: "Missing" };
+@@ -63,12 +63,20 @@ test.each([
+   },
+ );
+ 
+-test("the resolved line names the side taken, or the deletion", () => {
++test("after a choice the Result column names the side taken, or the deletion", () => {
+   const both = sides(BINARY, { kind: "Text", lines: 2 });
+   const deletedRemotely = sides(BINARY, MISSING);
+ 
+-  expect(resolvedLine(both, "local")).toBe("Resolved with the left version.");
+-  expect(resolvedLine(both, "remote")).toBe("Resolved with the right version.");
+-  expect(resolvedLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
+-  expect(resolvedLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
++  expect(resultLine(both, "local")).toBe("Resolved with the left version.");
++  expect(resultLine(both, "remote")).toBe("Resolved with the right version.");
++  expect(resultLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
++  expect(resultLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
++});
++
++test("before a choice the Result column says what there is to choose", () => {
++  expect(resultLine(sides(BINARY, { kind: "Link", target: "a" }), null)).toBe(
++    "Take the left or the right version.",
++  );
++  expect(resultLine(sides(BINARY, MISSING), null)).toBe("Keep the file or delete it.");
++  expect(resultLine(sides(MISSING, BINARY), null)).toBe("Keep the file or delete it.");
+ });
+diff --git a/frontend/src/ui/choiceText.ts b/frontend/src/ui/choiceText.ts
+index b2419a0..1a250b3 100644
+--- a/frontend/src/ui/choiceText.ts
++++ b/frontend/src/ui/choiceText.ts
+@@ -3,6 +3,11 @@ import type { FileSides, Side, SideContent } from "../ipc";
+ const BYTES_PER_KB = 1024;
+ const SHORT_COMMIT_LENGTH = 7;
+ 
++export const DELETED_SENTENCE = "Deleted in this branch.";
++export const KEEP = "Keep";
++export const DELETE = "Delete";
++export const DELETED_LINE = "Resolved by deleting the file.";
++
+ function oneDecimal(value: number): string {
+   const rounded = value.toFixed(1);
+   return rounded.endsWith(".0") ? rounded.slice(0, -".0".length) : rounded;
+@@ -22,7 +27,7 @@ function sizeText(bytes: number): string {
+ export function sideSentence(content: SideContent): string {
+   switch (content.kind) {
+     case "Missing":
+-      return "Deleted in this branch.";
++      return DELETED_SENTENCE;
+     case "Text":
+       return `A text file, ${content.lines} ${content.lines === 1 ? "line" : "lines"}.`;
+     case "Binary":
+@@ -48,18 +53,27 @@ export function sideTooltip(content: SideContent): string | undefined {
+ 
+ export function sideButton(sides: FileSides, side: Side): string {
+   if (sides[side].kind === "Missing") {
+-    return "Delete";
++    return DELETE;
+   }
+   const other = side === "local" ? "remote" : "local";
+   if (sides[other].kind === "Missing") {
+-    return "Keep";
++    return KEEP;
+   }
+   return side === "local" ? "Take left" : "Take right";
+ }
+ 
+-export function resolvedLine(sides: FileSides, taken: Side): string {
++function resolvedLine(sides: FileSides, taken: Side): string {
+   if (sides[taken].kind === "Missing") {
+-    return "Resolved by deleting the file.";
++    return DELETED_LINE;
+   }
+   return taken === "local" ? "Resolved with the left version." : "Resolved with the right version.";
+ }
++
++export function resultLine(sides: FileSides, taken: Side | null): string {
++  if (taken !== null) {
++    return resolvedLine(sides, taken);
++  }
++  return sides.local.kind === "Missing" || sides.remote.kind === "Missing"
++    ? "Keep the file or delete it."
++    : "Take the left or the right version.";
++}
+diff --git a/frontend/src/ui/nextFile.test.ts b/frontend/src/ui/nextFile.test.ts
+new file mode 100644
+index 0000000..800986a
+--- /dev/null
++++ b/frontend/src/ui/nextFile.test.ts
+@@ -0,0 +1,44 @@
++import { expect, test } from "vitest";
++
++import type { FileEntry } from "../ipc";
++import { nextUnresolved } from "./nextFile";
++
++function file(path: string, status: FileEntry["status"]): FileEntry {
++  return { path, status, unsupported: null };
++}
++
++const FILES: readonly FileEntry[] = [
++  file("a.ts", "Unresolved"),
++  file("b.ts", "Resolved"),
++  file("c.ts", "Resolved"),
++  file("d.ts", "Unresolved"),
++  file("e.ts", "Resolved"),
++];
++
++test("the next unresolved file after the active one, skipping resolved ones", () => {
++  expect(nextUnresolved(FILES, "b.ts")).toBe("d.ts");
++  expect(nextUnresolved(FILES, "a.ts")).toBe("d.ts");
++});
++
++test("past the end it wraps to the top", () => {
++  expect(nextUnresolved(FILES, "d.ts")).toBe("a.ts");
++  expect(nextUnresolved(FILES, "e.ts")).toBe("a.ts");
++});
++
++test("none left is null", () => {
++  const resolved = FILES.map((entry): FileEntry => ({ ...entry, status: "Resolved" }));
++
++  expect(nextUnresolved(resolved, "b.ts")).toBeNull();
++  expect(nextUnresolved([], null)).toBeNull();
++});
++
++test("the active file as the only unresolved one is null, not itself", () => {
++  const only = [file("a.ts", "Resolved"), file("b.ts", "Unresolved"), file("c.ts", "Resolved")];
++
++  expect(nextUnresolved(only, "b.ts")).toBeNull();
++});
++
++test("an active file not in the list, or none, starts from the top", () => {
++  expect(nextUnresolved(FILES, "gone.ts")).toBe("a.ts");
++  expect(nextUnresolved(FILES, null)).toBe("a.ts");
++});
+diff --git a/frontend/src/ui/nextFile.ts b/frontend/src/ui/nextFile.ts
+new file mode 100644
+index 0000000..4f043e3
+--- /dev/null
++++ b/frontend/src/ui/nextFile.ts
+@@ -0,0 +1,8 @@
++import type { FileEntry } from "../ipc";
++
++export function nextUnresolved(files: readonly FileEntry[], active: string | null): string | null {
++  const at = files.findIndex((file) => file.path === active);
++  const wrapped = [...files.slice(at + 1), ...files.slice(0, at + 1)];
++  const next = wrapped.find((file) => file.status === "Unresolved" && file.path !== active);
++  return next?.path ?? null;
++}
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 398b5e2..64fe719 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -5,7 +5,7 @@ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+ export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type Problem =
+-  | { readonly action: "list"; readonly cause: Unexpected }
++  | { readonly action: "list"; readonly cause: ProblemCause }
+   | {
+       readonly action: "open" | "finish" | "take" | "reset";
+       readonly path: string;
+diff --git a/frontend/src/ui/sideHeaders.test.ts b/frontend/src/ui/sideHeaders.test.ts
+new file mode 100644
+index 0000000..76b4dbf
+--- /dev/null
++++ b/frontend/src/ui/sideHeaders.test.ts
+@@ -0,0 +1,39 @@
++import { expect, test } from "vitest";
++
++import type { RemoteName } from "../ipc";
++import { sideHeader } from "./sideHeaders";
++
++const COMMIT: RemoteName = {
++  kind: "Commit",
++  short_id: "1a2b3c4",
++  subject: "Fix parser crash",
++  message: "Fix parser crash\n\nThe lexer read past the end of the input.",
++};
++
++test("the left header is the same whatever is merged in", () => {
++  const local = { text: "Local (yours)", tooltip: "Local (yours)" };
++
++  expect(sideHeader("local", null)).toEqual(local);
++  expect(sideHeader("local", COMMIT)).toEqual(local);
++});
++
++test("a branch names the right header, the same text on hover", () => {
++  expect(sideHeader("remote", { kind: "Branch", name: "minor" })).toEqual({
++    text: "Remote (theirs): minor",
++    tooltip: "Remote (theirs): minor",
++  });
++});
++
++test("a commit shows its short id and subject; hovering shows the full message", () => {
++  expect(sideHeader("remote", COMMIT)).toEqual({
++    text: "Remote (theirs): 1a2b3c4 Fix parser crash",
++    tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
++  });
++});
++
++test("no name leaves the plain right header", () => {
++  expect(sideHeader("remote", null)).toEqual({
++    text: "Remote (theirs)",
++    tooltip: "Remote (theirs)",
++  });
++});
+diff --git a/frontend/src/ui/sideHeaders.ts b/frontend/src/ui/sideHeaders.ts
+index 6f0f5d6..6e7daa8 100644
+--- a/frontend/src/ui/sideHeaders.ts
++++ b/frontend/src/ui/sideHeaders.ts
+@@ -1,6 +1,28 @@
+-import type { Side } from "../ipc";
++import type { RemoteName, Side } from "../ipc";
+ 
+-export const SIDE_HEADERS: Readonly<Record<Side, string>> = {
+-  local: "Local (yours)",
+-  remote: "Remote (theirs)",
+-};
++export type SideHeader = { readonly text: string; readonly tooltip: string };
++
++const LOCAL = "Local (yours)";
++const REMOTE = "Remote (theirs)";
++
++function remoteHeader(remote: RemoteName | null): SideHeader {
++  if (remote === null) {
++    return { text: REMOTE, tooltip: REMOTE };
++  }
++  switch (remote.kind) {
++    case "Branch": {
++      const text = `${REMOTE}: ${remote.name}`;
++      return { text, tooltip: text };
++    }
++    case "Commit":
++      return { text: `${REMOTE}: ${remote.short_id} ${remote.subject}`, tooltip: remote.message };
++    default: {
++      const _exhaustive: never = remote;
++      return _exhaustive;
++    }
++  }
++}
++
++export function sideHeader(side: Side, remote: RemoteName | null): SideHeader {
++  return side === "local" ? { text: LOCAL, tooltip: LOCAL } : remoteHeader(remote);
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 27be08a..8b7dc27 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -9,7 +9,7 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
+-import { createAppStore, useAppStore, type AppStore, type Choice, type FileWork } from "./store";
++import { createAppStore, useAppStore, type AppStore, type FileWork } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -45,7 +45,7 @@ async function dataFor(path: string): Promise<FileMergeData> {
+ function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
+   const pending: PendingLoad[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(files),
++    listFiles: () => Promise.resolve(ok(files)),
+     loadFile: (path) =>
+       new Promise((resolve, reject) => {
+         pending.push({ path, resolve, reject });
+@@ -54,6 +54,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     resetFile: () => Promise.reject(new Error("not used")),
+     describeFile: () => Promise.reject(new Error("not used")),
+     takeSide: () => Promise.reject(new Error("not used")),
++    remoteName: () => Promise.resolve(null),
+   };
+   return { source, pending };
+ }
+@@ -323,30 +324,37 @@ test("a rejected load is an Unexpected problem and keeps the previous file", asy
+   ]);
+ });
+ 
+-test("a finish with nothing left sends the text without asking, keeps the file opened and saved", async () => {
++test("a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file", async () => {
+   spyConsole();
+   const sent: [string, string][] = [];
++  const listed = [entry("0.ts"), resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
+   const { store, pending } = await openedStore({
+     finishFile: (path, text) => {
+       sent.push([path, text]);
+-      return Promise.resolve(ok([resolvedEntry("a.ts"), entry("b.ts")]));
++      return Promise.resolve(ok(listed));
+     },
+   });
+   const view = fakeView(store, "a.ts", "loaded\n");
+   const failed = store.open("gone.ts");
+   pending[1]?.resolve({ ok: false, failure: { kind: "UnknownPath", path: "gone.ts" } });
+   await failed;
+-  const shown = store.opened.value;
++  const [shownA] = store.opened.value;
+   view.text = "merged\r\n";
+   expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ 
+-  await store.finish({ path: "a.ts", text: "merged\r\n", summary: NOTHING_LEFT });
++  const finishing = store.finish({ path: "a.ts", text: "merged\r\n", summary: NOTHING_LEFT });
++  await vi.waitFor(() => {
++    expect(pending.map((load) => load.path)).toEqual(["a.ts", "gone.ts", "c.ts"]);
++  });
++  pending[2]?.resolve(ok(await dataFor("c.ts")));
++  await finishing;
+ 
+   expect(store.question.value).toBeNull();
+   expect(sent).toEqual([["a.ts", "merged\r\n"]]);
+-  expect(store.files.value).toEqual([resolvedEntry("a.ts"), entry("b.ts")]);
+-  expect(store.opened.value).toBe(shown);
+-  expect(store.active.value).toBe("a.ts");
++  expect(store.files.value).toEqual(listed);
++  expect(store.opened.value[0]).toBe(shownA);
++  expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts", "c.ts"]);
++  expect(store.active.value).toBe("c.ts");
+   expect(store.problem.value).toBeNull();
+   expect(view.saved).toBe("merged\r\n");
+   expect(store.unsavedFiles()).toEqual([]);
+@@ -355,6 +363,22 @@ test("a finish with nothing left sends the text without asking, keeps the file o
+   expect(store.unsavedFiles()).toEqual(["a.ts"]);
+ });
+ 
++test("a finish of a file no longer shown does not switch files", async () => {
++  spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore({
++    ...source,
++    finishFile: () => Promise.resolve(ok([resolvedEntry("a.ts"), entry("b.ts")])),
++  });
++  await openNow(store, pending, "a.ts");
++  await openNow(store, pending, "b.ts");
++
++  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT });
++
++  expect(store.active.value).toBe("b.ts");
++  expect(pending).toHaveLength(2);
++});
++
+ test("a finish with work left asks; Back writes nothing, Save writes the text", async () => {
+   spyConsole();
+   const sent: string[] = [];
+@@ -380,13 +404,14 @@ test("a finish with work left asks; Back writes nothing, Save writes the text",
+ 
+   expect(sent).toEqual(["second"]);
+   expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
++  expect(store.active.value).toBe("a.ts");
+ });
+ 
+-test("a failed finish keeps the list unresolved and the old saved text; dismissProblem clears it", async () => {
++test("a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it", async () => {
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
+   const { store, pending, a } = await openedStore({
+-    listFiles: () => Promise.resolve([entry("a.ts")]),
++    listFiles: () => Promise.resolve(ok([entry("a.ts"), entry("b.ts")])),
+     finishFile: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const view = fakeView(store, "a.ts", "loaded\n");
+@@ -399,7 +424,9 @@ test("a failed finish keeps the list unresolved and the old saved text; dismissP
+   await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT });
+ 
+   expect(store.files.value).toBe(before);
+-  expect(store.files.value).toEqual([entry("a.ts")]);
++  expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
++  expect(store.active.value).toBe("a.ts");
++  expect(pending).toHaveLength(1);
+   expect(store.opened.value).toBe(shown);
+   expect(store.opened.value).toEqual([a]);
+   expect(view.saved).toBe("loaded\n");
+@@ -710,7 +737,7 @@ function choiceSource(
+ ): { source: ChunkSource; calls: string[] } {
+   const calls: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(files),
++    listFiles: () => Promise.resolve(ok(files)),
+     loadFile: async (path) => {
+       calls.push(`loadFile ${path}`);
+       return ok(await dataFor(path));
+@@ -731,6 +758,7 @@ function choiceSource(
+       );
+       return Promise.resolve(ok(taken));
+     },
++    remoteName: () => Promise.resolve(null),
+     ...overrides,
+   };
+   return { source, calls };
+@@ -739,7 +767,7 @@ function choiceSource(
+ test("a list of files the editor cannot show opens the first one's choice and loads nothing", async () => {
+   spyConsole();
+   const { source, calls } = choiceSource({
+-    listFiles: () => Promise.resolve([LOGO_ENTRY, REMOVED_ENTRY]),
++    listFiles: () => Promise.resolve(ok([LOGO_ENTRY, REMOVED_ENTRY])),
+   });
+   const store = createAppStore(source);
+ 
+@@ -747,7 +775,8 @@ test("a list of files the editor cannot show opens the first one's choice and lo
+ 
+   expect(calls).toEqual([`describeFile ${LOGO}`]);
+   expect(store.active.value).toBe(LOGO);
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([LOGO_SIDES]);
++  expect(store.taken.value).toEqual(new Map());
+   expect(store.opened.value).toEqual([]);
+ });
+ 
+@@ -761,7 +790,7 @@ test("opening a file the editor cannot show describes it once and never loads it
+ 
+   expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`]);
+   expect(store.active.value).toBe(LOGO);
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([LOGO_SIDES]);
+   expect(store.opened.value.map((file) => file.path)).toEqual(["a.ts"]);
+ 
+   await store.open("a.ts");
+@@ -790,7 +819,7 @@ test("a failed describe is a failed open of that file and shows no choice", asyn
+ 
+ async function twoChoices(
+   overrides: Partial<ChunkSource>,
+-): Promise<{ store: AppStore; calls: string[]; removed: Choice | undefined }> {
++): Promise<{ store: AppStore; calls: string[]; removed: FileSides | undefined }> {
+   const { source, calls } = choiceSource(overrides, [LOGO_ENTRY, REMOVED_ENTRY]);
+   const store = createAppStore(source);
+   await store.loadFiles();
+@@ -819,10 +848,8 @@ test("taking a side updates the list, marks only that file taken, and clears a p
+ 
+   expect(takes).toEqual([`${LOGO} remote`, `${LOGO} remote`]);
+   expect(store.files.value).toEqual([{ ...LOGO_ENTRY, status: "Resolved" }, REMOVED_ENTRY]);
+-  expect(store.choices.value).toEqual([
+-    { sides: LOGO_SIDES, taken: "remote" },
+-    { sides: REMOVED_SIDES, taken: null },
+-  ]);
++  expect(store.choices.value).toEqual([LOGO_SIDES, REMOVED_SIDES]);
++  expect(store.taken.value).toEqual(new Map([[LOGO, "remote"]]));
+   expect(store.choices.value[1]).toBe(removed);
+   expect(store.problem.value).toBeNull();
+ });
+@@ -842,7 +869,7 @@ test("a take keeps a problem about another file", async () => {
+ 
+   await store.takeSide(LOGO, "remote");
+ 
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: "remote" }]);
++  expect(store.taken.value).toEqual(new Map([[LOGO, "remote"]]));
+   expect(store.problem.value).toBe(gone);
+ });
+ 
+@@ -850,7 +877,7 @@ test("a failed take keeps the list and the choice and names the file", async ()
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git rm failed" };
+   const { source } = choiceSource({
+-    listFiles: () => Promise.resolve([LOGO_ENTRY]),
++    listFiles: () => Promise.resolve(ok([LOGO_ENTRY, REMOVED_ENTRY])),
+     takeSide: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const store = createAppStore(source);
+@@ -860,7 +887,9 @@ test("a failed take keeps the list and the choice and names the file", async ()
+   await store.takeSide(LOGO, "local");
+ 
+   expect(store.files.value).toBe(files);
+-  expect(store.choices.value).toEqual([{ sides: LOGO_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([LOGO_SIDES]);
++  expect(store.taken.value).toEqual(new Map());
++  expect(store.active.value).toBe(LOGO);
+   expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: git });
+   expect(lines.error).toEqual([
+     `[error] store.take_failed {path: "${LOGO}", kind: "Git", message: "git rm failed"}`,
+@@ -887,7 +916,7 @@ async function takenChoice(): Promise<{
+   store: AppStore;
+   calls: string[];
+   describes: ((result: SourceResult<FileSides>) => void)[];
+-  removed: Choice | undefined;
++  removed: FileSides | undefined;
+ }> {
+   const { source, calls, describes } = describedLater();
+   const store = createAppStore(source);
+@@ -914,7 +943,8 @@ test("reset of a taken choice forgets only its side at once and describes the fi
+     expect(describes).toHaveLength(3);
+   });
+ 
+-  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([REMOVED_SIDES]);
++  expect(store.taken.value).toEqual(new Map());
+   expect(store.files.value).toEqual([LOGO_ENTRY, REMOVED_ENTRY]);
+ 
+   describes[2]?.(ok(fresh));
+@@ -927,10 +957,7 @@ test("reset of a taken choice forgets only its side at once and describes the fi
+     `resetFile ${LOGO}`,
+     `describeFile ${LOGO}`,
+   ]);
+-  expect(store.choices.value).toEqual([
+-    { sides: REMOVED_SIDES, taken: null },
+-    { sides: fresh, taken: null },
+-  ]);
++  expect(store.choices.value).toEqual([REMOVED_SIDES, fresh]);
+   expect(store.choices.value[0]).toBe(removed);
+   expect(store.active.value).toBe(REMOVED);
+ });
+@@ -948,17 +975,15 @@ test("a failed describe after a reset is a failed open; opening the file again d
+   await resetting;
+ 
+   expect(store.problem.value).toEqual({ action: "open", path: LOGO, cause: unknown });
+-  expect(store.choices.value).toEqual([{ sides: REMOVED_SIDES, taken: null }]);
++  expect(store.choices.value).toEqual([REMOVED_SIDES]);
+   expect(store.choices.value[0]).toBe(removed);
+ 
+   const opening = store.open(LOGO);
+   describes[3]?.(ok(LOGO_SIDES));
+   await opening;
+ 
+-  expect(store.choices.value).toEqual([
+-    { sides: REMOVED_SIDES, taken: null },
+-    { sides: LOGO_SIDES, taken: null },
+-  ]);
++  expect(store.choices.value).toEqual([REMOVED_SIDES, LOGO_SIDES]);
++  expect(store.taken.value).toEqual(new Map());
+   expect(store.problem.value).toBeNull();
+ });
+ 
+@@ -973,3 +998,126 @@ test("choices count toward everything resolved", async () => {
+ 
+   expect(store.allResolved.value).toBe(true);
+ });
++
++test("a take on the shown file opens the next unresolved file, wrapping to the top", async () => {
++  spyConsole();
++  const files: FileEntry[] = [entry("a.ts"), LOGO_ENTRY, { ...REMOVED_ENTRY, status: "Resolved" }];
++  const { source, calls } = choiceSource({}, files);
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await store.open(LOGO);
++
++  await store.takeSide(LOGO, "local");
++
++  expect(calls).toEqual(["loadFile a.ts", `describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.taken.value).toEqual(new Map([[LOGO, "local"]]));
++});
++
++const REMOVED_TEXT = "docs/removed-text.md";
++
++test("a deleted-side text file keeps the side taken next to the choices' until its reset", async () => {
++  spyConsole();
++  const { source, calls } = choiceSource({}, [entry(REMOVED_TEXT)]);
++  const store = createAppStore(source);
++  await store.loadFiles();
++  const [shown] = store.opened.value;
++
++  await store.takeSide(REMOVED_TEXT, "remote");
++
++  expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, "remote"]]));
++  expect(store.choices.value).toEqual([]);
++  expect(store.opened.value).toEqual([shown]);
++  expect(store.active.value).toBe(REMOVED_TEXT);
++
++  await store.reset(REMOVED_TEXT);
++
++  expect(calls).toEqual([
++    `loadFile ${REMOVED_TEXT}`,
++    `takeSide ${REMOVED_TEXT} remote`,
++    `resetFile ${REMOVED_TEXT}`,
++    `loadFile ${REMOVED_TEXT}`,
++  ]);
++  expect(store.taken.value).toEqual(new Map());
++  expect(store.opened.value[0]).not.toBe(shown);
++});
++
++test("a list refresh changes the marks only: same file shown, same views, another file's problem kept", async () => {
++  spyConsole();
++  let listed = [entry("a.ts"), entry("b.ts"), LOGO_ENTRY];
++  const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
++  const { source } = choiceSource({ listFiles: () => Promise.resolve(ok(listed)) });
++  const store = createAppStore({
++    ...source,
++    loadFile: async (path) =>
++      path === "gone.ts" ? { ok: false, failure: unknown } : ok(await dataFor(path)),
++  });
++  await store.loadFiles();
++  await store.open(LOGO);
++  await store.open("gone.ts");
++  const { opened, choices, problem } = store;
++  const [shownOpened, shownChoices, gone] = [opened.value, choices.value, problem.value];
++  listed = [entry("a.ts"), resolvedEntry("b.ts"), { ...LOGO_ENTRY, status: "Resolved" }];
++
++  await store.refreshFiles();
++
++  expect(store.files.value).toEqual(listed);
++  expect(store.active.value).toBe(LOGO);
++  expect(store.opened.value).toBe(shownOpened);
++  expect(store.choices.value).toBe(shownChoices);
++  expect(store.problem.value).toBe(gone);
++});
++
++test("a failed refresh is a list problem and keeps the marks; the next good one clears only that", async () => {
++  const lines = spyConsole();
++  const git: SourceFailure = { kind: "Git", message: "git ls-files failed" };
++  let answer: SourceResult<FileEntry[]> = ok([entry("a.ts")]);
++  const { source, pending } = handSource([]);
++  const store = createAppStore({ ...source, listFiles: () => Promise.resolve(answer) });
++  await openNow(store, pending, "a.ts");
++  await store.refreshFiles();
++  const marks = store.files.value;
++  answer = { ok: false, failure: git };
++
++  await store.refreshFiles();
++
++  expect(store.files.value).toBe(marks);
++  expect(store.problem.value).toEqual({ action: "list", cause: git });
++  expect(lines.error).toEqual([
++    '[error] store.list_failed {kind: "Git", message: "git ls-files failed"}',
++  ]);
++
++  answer = ok([resolvedEntry("a.ts")]);
++  await store.refreshFiles();
++
++  expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
++  expect(store.problem.value).toBeNull();
++  expect(store.active.value).toBe("a.ts");
++});
++
++test("the remote name is asked for once; a failure leaves none and logs a warning", async () => {
++  const warnings: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    warnings.push(line);
++  });
++  const { source } = handSource([]);
++  const named = createAppStore({
++    ...source,
++    remoteName: () => Promise.resolve({ kind: "Branch", name: "minor" }),
++  });
++  await named.loadRemoteName();
++
++  expect(named.remote.value).toEqual({ kind: "Branch", name: "minor" });
++
++  const failing = createAppStore({
++    ...source,
++    remoteName: () => Promise.reject(new Error("ipc down")),
++  });
++  await expect(failing.loadRemoteName()).resolves.toBeUndefined();
++
++  expect(failing.remote.value).toBeNull();
++  expect(failing.problem.value).toBeNull();
++  expect(warnings).toEqual([
++    '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',
++  ]);
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 9a8c198..e876e2d 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -7,45 +7,44 @@ import {
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
++  type RemoteName,
+   type Side,
+ } from "../ipc";
++import { createAsking, type Asking } from "./asking";
++import { nextUnresolved } from "./nextFile";
+ import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
+ import { exitMustAsk, finishMustAsk, type Question } from "./question";
+ import type { MergeSummary } from "./useMergeController";
+ 
+ export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
+ 
+-export type Choice = { readonly sides: FileSides; readonly taken: Side | null };
+-
+ type FinishRequest = {
+   readonly path: string;
+   readonly text: string;
+   readonly summary: MergeSummary;
+ };
+ 
+-type Asking = { readonly question: Question; readonly answer: (yes: boolean) => void };
+-
+-type State = {
+-  readonly source: ChunkSource;
++type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+-  readonly choices: ShallowRef<readonly Choice[]>;
++  readonly choices: ShallowRef<readonly FileSides[]>;
++  readonly taken: ShallowRef<ReadonlyMap<string, Side>>;
++  readonly remote: ShallowRef<RemoteName | null>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+-  readonly asking: ShallowRef<Asking | null>;
++};
++
++type State = Refs & {
++  readonly source: ChunkSource;
++  readonly asking: Asking;
+   readonly work: Map<string, FileWork>;
+   latestLoad: number;
+ };
+ 
+-export type AppStore = {
+-  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+-  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
+-  readonly choices: Readonly<ShallowRef<readonly Choice[]>>;
+-  readonly active: Readonly<ShallowRef<string | null>>;
+-  readonly problem: Readonly<ShallowRef<Problem | null>>;
+-  readonly question: ComputedRef<Question | null>;
+-  readonly allResolved: ComputedRef<boolean>;
++type Actions = {
+   loadFiles(): Promise<void>;
++  refreshFiles(): Promise<void>;
++  loadRemoteName(): Promise<void>;
+   open(path: string): Promise<void>;
+   finish(request: FinishRequest): Promise<void>;
+   takeSide(path: string, side: Side): Promise<void>;
+@@ -59,45 +58,64 @@ export type AppStore = {
+   watchWindowClose(): Promise<void>;
+ };
+ 
++export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
++  readonly question: ComputedRef<Question | null>;
++  readonly allResolved: ComputedRef<boolean>;
++} & Actions;
++
+ let store: AppStore | null = null;
+ 
+ export function createAppStore(source: ChunkSource): AppStore {
+-  const state: State = {
+-    source,
++  const refs: Refs = {
+     files: shallowRef<readonly FileEntry[]>([]),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+-    choices: shallowRef<readonly Choice[]>([]),
++    choices: shallowRef<readonly FileSides[]>([]),
++    taken: shallowRef<ReadonlyMap<string, Side>>(new Map()),
++    remote: shallowRef<RemoteName | null>(null),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+-    asking: shallowRef<Asking | null>(null),
+-    work: new Map(),
+-    latestLoad: 0,
+   };
+-  const { files, opened, choices, active, problem } = state;
++  const asking = createAsking();
++  const state: State = { ...refs, source, asking, work: new Map(), latestLoad: 0 };
++  const { files } = refs;
+   store = {
+-    files,
+-    opened,
+-    choices,
+-    active,
+-    problem,
+-    question: computed(() => state.asking.value?.question ?? null),
++    ...refs,
++    question: asking.question,
+     allResolved: computed(
+       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+     ),
++    ...actions(state),
++  };
++  return store;
++}
++
++function actions(state: State): Actions {
++  return {
+     loadFiles: () => loadFiles(state),
++    refreshFiles: async () => {
++      await refreshFiles(state);
++    },
++    loadRemoteName: () => loadRemoteName(state),
+     open: (path) => open(state, path),
+     finish: (request) => finish(state, request),
+     takeSide: (path, side) => takeSide(state, path, side),
+     reset: (path) => reset(state, path),
+-    dismissProblem: () => dismissProblem(state),
+-    answer: (yes) => answer(state, yes),
+-    track: (path, work) => track(state, path, work),
+-    untrack: (path, work) => untrack(state, path, work),
++    dismissProblem: () => {
++      state.problem.value = null;
++    },
++    answer: state.asking.answer,
++    track: (path, work) => {
++      state.work.set(path, work);
++    },
++    untrack: (path, work) => {
++      if (state.work.get(path) === work) {
++        state.work.delete(path);
++      }
++    },
+     unsavedFiles: () => unsavedFiles(state),
+     mayClose: () => mayClose(state),
+     watchWindowClose: () => watchWindowClose(state),
+   };
+-  return store;
+ }
+ 
+ function report(state: State, failure: Problem): void {
+@@ -105,10 +123,6 @@ function report(state: State, failure: Problem): void {
+   state.problem.value = failure;
+ }
+ 
+-function dismissProblem(state: State): void {
+-  state.problem.value = null;
+-}
+-
+ function clearProblemAbout(state: State, path: string): void {
+   const problem = state.problem.value;
+   if (problem !== null && problem.action !== "list" && problem.path === path) {
+@@ -116,36 +130,39 @@ function clearProblemAbout(state: State, path: string): void {
+   }
+ }
+ 
+-function track(state: State, path: string, work: FileWork): void {
+-  state.work.set(path, work);
+-}
+-
+-function untrack(state: State, path: string, work: FileWork): void {
+-  if (state.work.get(path) === work) {
+-    state.work.delete(path);
+-  }
+-}
+-
+ async function loadFiles(state: State): Promise<void> {
+-  let listed: FileEntry[];
+-  try {
+-    listed = await state.source.listFiles();
+-  } catch (error) {
+-    report(state, { action: "list", cause: unexpected(error) });
+-    return;
+-  }
+-  state.files.value = listed;
+-  state.problem.value = null;
+-  const first = listed.find((file) => file.unsupported === null) ?? listed[0];
++  const listed = await refreshFiles(state);
++  const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
+   if (first !== undefined) {
+     await open(state, first.path);
+   }
+ }
+ 
++async function refreshFiles(state: State): Promise<readonly FileEntry[] | null> {
++  const listed = await attempt(() => state.source.listFiles());
++  if (!listed.ok) {
++    report(state, { action: "list", cause: listed.cause });
++    return null;
++  }
++  state.files.value = listed.value;
++  if (state.problem.value?.action === "list") {
++    state.problem.value = null;
++  }
++  return listed.value;
++}
++
++async function loadRemoteName(state: State): Promise<void> {
++  try {
++    state.remote.value = await state.source.remoteName();
++  } catch (error) {
++    log.warn("store.remote_name_failed", { ...unexpected(error) });
++  }
++}
++
+ async function open(state: State, path: string): Promise<void> {
+   const shown =
+     state.opened.value.some((file) => file.path === path) ||
+-    state.choices.value.some((choice) => choice.sides.path === path);
++    state.choices.value.some((sides) => sides.path === path);
+   if (!shown) {
+     await load(state, path);
+     return;
+@@ -199,12 +216,20 @@ function putOpened(state: State, data: FileMergeData): void {
+ }
+ 
+ function putChoice(state: State, sides: FileSides): void {
+-  const others = state.choices.value.filter((choice) => choice.sides.path !== sides.path);
+-  state.choices.value = [...others, { sides, taken: null }];
++  const others = state.choices.value.filter((shown) => shown.path !== sides.path);
++  state.choices.value = [...others, sides];
++}
++
++async function moveOn(state: State, path: string): Promise<void> {
++  const next = state.active.value === path ? nextUnresolved(state.files.value, path) : null;
++  if (next !== null) {
++    await open(state, next);
++  }
+ }
+ 
+ async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
+-  if (finishMustAsk(summary) && !(await ask(state, { kind: "unprocessed", summary }))) {
++  const unprocessed: Question = { kind: "unprocessed", summary };
++  if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
+     return;
+   }
+   const outcome = await attempt(() => state.source.finishFile(path, text));
+@@ -215,6 +240,7 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
+   state.files.value = outcome.value;
+   state.work.get(path)?.markSaved(text);
+   state.problem.value = null;
++  await moveOn(state, path);
+ }
+ 
+ async function takeSide(state: State, path: string, side: Side): Promise<void> {
+@@ -224,10 +250,9 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
+     return;
+   }
+   state.files.value = outcome.value;
+-  state.choices.value = state.choices.value.map((choice) =>
+-    choice.sides.path === path ? { ...choice, taken: side } : choice,
+-  );
++  state.taken.value = new Map([...state.taken.value, [path, side]]);
+   clearProblemAbout(state, path);
++  await moveOn(state, path);
+ }
+ 
+ async function reset(state: State, path: string): Promise<void> {
+@@ -237,7 +262,8 @@ async function reset(state: State, path: string): Promise<void> {
+     return;
+   }
+   state.files.value = files.value;
+-  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
++  state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
++  state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
+   const view = await fetchView(state, path);
+   if (!view.ok) {
+     report(state, { action: "open", path, cause: view.cause });
+@@ -247,21 +273,6 @@ async function reset(state: State, path: string): Promise<void> {
+   clearProblemAbout(state, path);
+ }
+ 
+-function ask(state: State, question: Question): Promise<boolean> {
+-  if (state.asking.value !== null) {
+-    return Promise.resolve(false);
+-  }
+-  return new Promise((resolve) => {
+-    state.asking.value = { question, answer: resolve };
+-  });
+-}
+-
+-function answer(state: State, yes: boolean): void {
+-  const asking = state.asking.value;
+-  state.asking.value = null;
+-  asking?.answer(yes);
+-}
+-
+ function unsavedFiles(state: State): string[] {
+   return state.opened.value
+     .map((file) => file.path)
+@@ -270,7 +281,7 @@ function unsavedFiles(state: State): string[] {
+ 
+ async function mayClose(state: State): Promise<boolean> {
+   const files = unsavedFiles(state);
+-  return exitMustAsk(files) ? ask(state, { kind: "exit", files }) : true;
++  return exitMustAsk(files) ? state.asking.ask({ kind: "exit", files }) : true;
+ }
+ 
+ async function watchWindowClose(state: State): Promise<void> {
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index cc99e4b..ed680ae 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -5,11 +5,12 @@ import { loadFixture, type FileMergeData } from "../ipc";
+ import { useMergeController, type MergeHandle } from "./useMergeController";
+ 
+ const editor = vi.hoisted(() => {
+-  const state = { text: "", built: 0, destroyed: 0 };
++  const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
+   class MergeController {
+-    constructor(data: FileMergeData) {
++    constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
+       state.text = data.base;
+       state.built += 1;
++      state.readOnly.push(options.readOnly);
+     }
+     summary(): { conflicts: number; changes: number } {
+       return { conflicts: 0, changes: 0 };
+@@ -28,7 +29,7 @@ const editor = vi.hoisted(() => {
+ vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
+ 
+ afterEach(() => {
+-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0 });
++  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [] });
+ });
+ 
+ function host<T>(present: boolean): ShallowRef<T | null> {
+@@ -79,7 +80,12 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
+   data.value = await fileData("reloaded\n");
+   await nextTick();
+ 
+-  expect(editor.state).toEqual({ text: "reloaded\n", built: 2, destroyed: 1 });
++  expect(editor.state).toEqual({
++    text: "reloaded\n",
++    built: 2,
++    destroyed: 1,
++    readOnly: [false, false],
++  });
+   expect(handle.unsaved()).toBe(false);
+ 
+   scope.stop();
+@@ -100,3 +106,16 @@ test("without data or hosts there is no editor: no text, nothing unsaved, markSa
+   }
+   expect(editor.state.built).toBe(0);
+ });
++
++test("a file deleted on one side gets a read-only editor", async () => {
++  const data = shallowRef<FileMergeData | null>({ ...(await fileData("b\n")), deleted: "remote" });
++  mount(data);
++  await nextTick();
++
++  data.value = { ...(await fileData("b\n")), deleted: "local" };
++  await nextTick();
++  data.value = await fileData("b\n");
++  await nextTick();
++
++  expect(editor.state.readOnly).toEqual([true, true, false]);
++});
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index 927ae8d..51d1099 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -55,7 +55,11 @@ function createController(
+   ) {
+     return null;
+   }
+-  return new MergeController(data, { left, center, right, strips: [leftStrip, rightStrip] });
++  return new MergeController(
++    data,
++    { left, center, right, strips: [leftStrip, rightStrip] },
++    { readOnly: data.deleted !== null },
++  );
+ }
+ 
+ export function useMergeController(
