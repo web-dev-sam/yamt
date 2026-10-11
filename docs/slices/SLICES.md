@@ -129,7 +129,8 @@ Wave 2's per-file-state task removes the oxlint `max-lines-per-function` overrid
 **Handoff 2026-10-11 (owner asked to hand off after the panel and release jobs).** Everything
 below up to 2.R is implemented and committed; registry `{}`; nothing running. Next session, in
 order: (1) reviews of 2.C' (`.omp/run/patches/V0ChoicePanel.patch`, `git diff c35d00e 40066d5`)
-and 2.R (`.omp/run/patches/V0Release.patch`, `git diff 4fe7ce2 <2.R commit>`), one pair at a time;
+and 2.R (`.omp/run/patches/V0Release.patch`, `git diff 4fe7ce2 5b6f4ef`; plus the orchestrator's
+license fields in `616de7f`), one pair at a time;
 (2) reworks as needed (max 2 rounds); (3) **one verifier run over all of v0** — `just check` +
 `just mutants 030d2ff` (last verified M1 state) + the tauri smoke recipe — none of v0 has been
 through `just check` yet; (4) row 4 (macOS build, the owner's second machine) and C' (owner's own
