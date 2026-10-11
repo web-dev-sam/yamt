@@ -5,6 +5,7 @@ import ChevronsRight from "~icons/lucide/chevrons-right";
 import Redo2 from "~icons/lucide/redo-2";
 import Undo2 from "~icons/lucide/undo-2";
 
+import { finishMustAsk } from "./question";
 import { summaryLabel } from "./summaryLabel";
 import type { MergeSummary } from "./useMergeController";
 
@@ -16,7 +17,6 @@ const emit = defineEmits<{
   applyRight: [];
   undo: [];
   redo: [];
-  reset: [];
   finish: [];
 }>();
 
@@ -52,10 +52,24 @@ const ICON_BUTTONS: readonly IconButton[] = [
 ];
 
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
 </script>
 
 <template>
   <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
+    <button
+      type="button"
+      :disabled="summary === null"
+      class="mr-2 rounded border px-3.5 py-1"
+      :class="
+        nothingLeft
+          ? 'border-primary bg-primary text-on-primary hover:brightness-110'
+          : 'border-control-border hover:bg-hover'
+      "
+      @click="emit('finish')"
+    >
+      Mark resolved
+    </button>
     <button
       v-for="button in ICON_BUTTONS"
       :key="button.label"
@@ -69,23 +83,5 @@ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(pro
       <component :is="button.icon" class="size-4" aria-hidden="true" />
     </button>
     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
-    <div class="ml-auto flex gap-2">
-      <button
-        type="button"
-        :disabled="summary === null"
-        class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
-        @click="emit('reset')"
-      >
-        Reset file
-      </button>
-      <button
-        type="button"
-        :disabled="summary === null"
-        class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110"
-        @click="emit('finish')"
-      >
-        Mark resolved
-      </button>
-    </div>
   </header>
 </template>

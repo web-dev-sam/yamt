@@ -5,11 +5,12 @@ import { loadFixture, type FileMergeData } from "../ipc";
 import { useMergeController, type MergeHandle } from "./useMergeController";
 
 const editor = vi.hoisted(() => {
-  const state = { text: "", built: 0, destroyed: 0 };
+  const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
   class MergeController {
-    constructor(data: FileMergeData) {
+    constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
       state.text = data.base;
       state.built += 1;
+      state.readOnly.push(options.readOnly);
     }
     summary(): { conflicts: number; changes: number } {
       return { conflicts: 0, changes: 0 };
@@ -28,7 +29,7 @@ const editor = vi.hoisted(() => {
 vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
 
 afterEach(() => {
-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0 });
+  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [] });
 });
 
 function host<T>(present: boolean): ShallowRef<T | null> {
@@ -79,7 +80,12 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
   data.value = await fileData("reloaded\n");
   await nextTick();
 
-  expect(editor.state).toEqual({ text: "reloaded\n", built: 2, destroyed: 1 });
+  expect(editor.state).toEqual({
+    text: "reloaded\n",
+    built: 2,
+    destroyed: 1,
+    readOnly: [false, false],
+  });
   expect(handle.unsaved()).toBe(false);
 
   scope.stop();
@@ -99,4 +105,17 @@ test("without data or hosts there is no editor: no text, nothing unsaved, markSa
     expect(handle.summary.value).toBeNull();
   }
   expect(editor.state.built).toBe(0);
+});
+
+test("a file deleted on one side gets a read-only editor", async () => {
+  const data = shallowRef<FileMergeData | null>({ ...(await fileData("b\n")), deleted: "remote" });
+  mount(data);
+  await nextTick();
+
+  data.value = { ...(await fileData("b\n")), deleted: "local" };
+  await nextTick();
+  data.value = await fileData("b\n");
+  await nextTick();
+
+  expect(editor.state.readOnly).toEqual([true, true, false]);
 });

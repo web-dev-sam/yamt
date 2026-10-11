@@ -49,7 +49,7 @@ authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u
 
 ## Frontend side
 
-- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`; load/finish/reset return `SourceResult`, failure =
+- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`; list/load/finish/reset/describe/take return `SourceResult`, failure =
   the generated `IpcError`) is the interface the app talks to. Two implementations: `createTauriSource`
   (`ipc/tauri.ts`, maps the generated `commands`; `forwardLog` stringifies non-finite numbers) and
   the fixture source (`ipc/fixture.ts`, valibot over `fixtures/{golden,showcase}/*.json`, the only

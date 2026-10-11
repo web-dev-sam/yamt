@@ -50,8 +50,8 @@ frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry �
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
                     useMergeController (only ../editor importer), store.ts singleton; problem.ts (Problem types, attempt) + ProblemBar + problemText.ts (failures in words, 2.1);
                     QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible`);
-                    ChoiceView + choiceText.ts (two-button choice for files the editor cannot show: sentences, labels, resolved line, plan §2 #36);
-                    sideHeaders.ts (the "Local (yours)" / "Remote (theirs)" column headers, read by MergeView and ChoiceView)
+                    ChoiceView + choiceText.ts (two-button choice for files the editor cannot show, with a Result column; also the deleted-side view's words: sentences, labels, Result lines, plan §2 #36, #47);
+                    sideHeaders.ts (`sideHeader(side, remote)`: "Local (yours)" / "Remote (theirs): <name>", plan §2 #50); nextFile.ts (`nextUnresolved`, #48); asking.ts (one question at a time, owned by the store)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), creates the store, loads the file list, mounts App
 frontend/src/style.css   the one colour palette: Tailwind `@theme static` with stock colours reset (`--color-*: initial`), plan §2 row 24
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself
@@ -84,22 +84,24 @@ connectors ◄── editor                 (model/ is empty and unused)
 
 ## State ownership (vision 2)
 
-| state                                                              | owner                                                                                                                                                             |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| document text (all three panes)                                    | CodeMirror `EditorState`                                                                                                                                          |
-| chunk current positions (center)                                   | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
-| chunk apply status                                                 | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
-| left/right decorations                                             | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
-| drag over the icons (press, covered highlight)                     | press in `editor/internal/drag.ts`; highlight in a side-pane field (`covered.ts`) pushed by the controller (no history, plan §2 #45)                              |
-| scroll positions                                                   | DOM, driven by `editor/scrollSync`                                                                                                                                |
-| connector geometry                                                 | derived per frame, never stored                                                                                                                                   |
-| file list, opened files, active file                               | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`         |
-| saved baseline per opened file                                     | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                   |
-| choice per file the editor cannot show (its sides, the side taken) | `choices` shallowRef in `ui/store.ts`: set by describe, `taken` set by `takeSide`, dropped and described again by reset; Rust's index is the truth for "resolved" |
-| failure shown in the window                                        | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
-| question waiting for an answer                                     | `asking` shallowRef in `ui/store.ts`; words in `ui/question.ts`                                                                                                   |
-| summary counts of the open file                                    | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
-| captured index stages (for reset)                                  | `session::FileState.stages`, captured at `open()`                                                                                                                 |
+| state                                                 | owner                                                                                                                                                             |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| document text (all three panes)                       | CodeMirror `EditorState`                                                                                                                                          |
+| chunk current positions (center)                      | `editor/chunkField` StateField, mapped per CM1 (applied span pushes later ones; `to` capped at the next `from`); restored on undo by an `invertedEffects` effect  |
+| chunk apply status                                    | same StateField: per-side status (`pending\|applied\|ignored`, plan §2 #33), changed only by a `StateEffect` registered with `invertedEffects` (undo restores it) |
+| left/right decorations                                | fixed side ranges + a read-only status mirror pushed by the controller (no history)                                                                               |
+| drag over the icons (press, covered highlight)        | press in `editor/internal/drag.ts`; highlight in a side-pane field (`covered.ts`) pushed by the controller (no history, plan §2 #45)                              |
+| scroll positions                                      | DOM, driven by `editor/scrollSync`                                                                                                                                |
+| connector geometry                                    | derived per frame, never stored                                                                                                                                   |
+| file list, opened files, active file                  | `ui/store.ts` singleton via `useAppStore()`; each opened file's `MergeView` owns its controller and registers `{ unsaved, markSaved }` with `store.track`         |
+| saved baseline per opened file                        | non-reactive `let` in `useMergeController`: set when the controller is built, replaced by `markSaved` after a successful finish                                   |
+| choice per file the editor cannot show (its sides)    | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; Rust's index is the truth for "resolved"                            |
+| side taken (choice files and deleted-side text files) | one `taken` map in `ui/store.ts`: set by `takeSide`, deleted by reset (plan §2 #47)                                                                               |
+| marks in the file list                                | git's view: `files` re-read by `refreshFiles` on window focus (`useWindowFocus` in App.vue) and returned by each action (plan §2 #49)                             |
+| failure shown in the window                           | `problem` shallowRef in `ui/store.ts`; cleared by the next success or `dismissProblem()`; words only in `ui/problemText.ts`                                       |
+| question waiting for an answer                        | `ui/asking.ts` (`createAsking`, held by the store state); words in `ui/question.ts`                                                                               |
+| summary counts of the open file                       | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                    |
+| captured index stages (for reset)                     | `session::FileState.stages`, captured at `open()`                                                                                                                 |
 
 Vue state never holds an `EditorView`, a position, or document text.
 

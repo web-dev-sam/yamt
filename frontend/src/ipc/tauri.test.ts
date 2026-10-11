@@ -10,6 +10,7 @@ const commands = vi.hoisted(() => ({
   resetFile: vi.fn(),
   describeFile: vi.fn(),
   takeSide: vi.fn(),
+  remoteName: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ const DTO: Generated.FileMergeData = {
   base: "b\n",
   local: "l\n",
   remote: "r\n",
+  deleted: "local",
   eol: "CrLf",
   chunks: [{ id: 0, kind: "Conflict", base: LINE, local: LINE, remote: LINE }],
   word_changes: [
@@ -42,10 +44,37 @@ beforeEach(() => {
   vi.resetAllMocks();
 });
 
-test("listFiles returns the app's entries", async () => {
-  commands.listFiles.mockResolvedValue(ENTRIES);
+test("listFiles returns the app's entries and its failure unchanged", async () => {
+  const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
+  commands.listFiles.mockResolvedValueOnce({ status: "ok", data: ENTRIES });
+  commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
+  const source = createTauriSource();
 
-  expect(await createTauriSource().listFiles()).toEqual(ENTRIES);
+  expect(await source.listFiles()).toEqual({ ok: true, value: ENTRIES });
+  expect(await source.listFiles()).toEqual({ ok: false, failure: git });
+});
+
+test("a string error from listFiles rejects the call with that message", async () => {
+  commands.listFiles.mockResolvedValue({ status: "error", error: "list_files not allowed" });
+
+  await expect(createTauriSource().listFiles()).rejects.toThrow(
+    new Error("list_files not allowed"),
+  );
+});
+
+test("remoteName returns the app's answer", async () => {
+  const name: Generated.RemoteName = {
+    kind: "Commit",
+    short_id: "1a2b3c4",
+    subject: "Fix parser crash",
+    message: "Fix parser crash\n\nThe lexer read past the end.",
+  };
+  commands.remoteName.mockResolvedValueOnce(name);
+  commands.remoteName.mockResolvedValueOnce(null);
+  const source = createTauriSource();
+
+  expect(await source.remoteName()).toEqual(name);
+  expect(await source.remoteName()).toBeNull();
 });
 
 test("loadFile turns the app's data into domain data", async () => {
@@ -61,6 +90,7 @@ test("loadFile turns the app's data into domain data", async () => {
       base: "b\n",
       local: "l\n",
       remote: "r\n",
+      deleted: "local",
       eol: "CrLf",
       chunks: [
         {

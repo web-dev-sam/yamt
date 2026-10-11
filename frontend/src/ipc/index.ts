@@ -8,6 +8,7 @@ export type {
   FileEntry,
   FileMergeData,
   FileSides,
+  RemoteName,
   Side,
   SideContent,
   SourceFailure,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { useWindowFocus } from "@vueuse/core";
+import { onMounted, watch } from "vue";
 
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
@@ -12,15 +13,25 @@ const {
   files,
   opened,
   choices,
+  taken,
   active,
   problem,
   question,
   allResolved,
   open,
+  refreshFiles,
   dismissProblem,
   answer,
   watchWindowClose,
 } = useAppStore();
+
+const focused = useWindowFocus();
+
+watch(focused, (now) => {
+  if (now) {
+    void refreshFiles();
+  }
+});
 
 onMounted(() => {
   void watchWindowClose();
@@ -47,10 +58,11 @@ onMounted(() => {
           :shown="file.path === active"
         />
         <ChoiceView
-          v-for="choice in choices"
-          :key="choice.sides.path"
-          :choice="choice"
-          :shown="choice.sides.path === active"
+          v-for="sides in choices"
+          :key="sides.path"
+          :sides="sides"
+          :taken="taken.get(sides.path) ?? null"
+          :shown="sides.path === active"
         />
       </div>
     </div>

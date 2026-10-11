@@ -22,8 +22,8 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
 
 export function createTauriSource(): ChunkSource {
   return {
-    listFiles() {
-      return commands.listFiles();
+    async listFiles() {
+      return toResult(await commands.listFiles());
     },
     async loadFile(path) {
       const result = toResult(await commands.loadFile(path));
@@ -40,6 +40,9 @@ export function createTauriSource(): ChunkSource {
     },
     async takeSide(path, side) {
       return toResult(await commands.takeSide(path, side));
+    },
+    remoteName() {
+      return commands.remoteName();
     },
   };
 }

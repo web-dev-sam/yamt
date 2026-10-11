@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { FileSides, SideContent } from "../ipc";
-import { resolvedLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
 
 const COMMIT = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
 const MISSING: SideContent = { kind: "Missing" };
@@ -63,12 +63,20 @@ test.each([
   },
 );
 
-test("the resolved line names the side taken, or the deletion", () => {
+test("after a choice the Result column names the side taken, or the deletion", () => {
   const both = sides(BINARY, { kind: "Text", lines: 2 });
   const deletedRemotely = sides(BINARY, MISSING);
 
-  expect(resolvedLine(both, "local")).toBe("Resolved with the left version.");
-  expect(resolvedLine(both, "remote")).toBe("Resolved with the right version.");
-  expect(resolvedLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
-  expect(resolvedLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
+  expect(resultLine(both, "local")).toBe("Resolved with the left version.");
+  expect(resultLine(both, "remote")).toBe("Resolved with the right version.");
+  expect(resultLine(deletedRemotely, "remote")).toBe("Resolved by deleting the file.");
+  expect(resultLine(deletedRemotely, "local")).toBe("Resolved with the left version.");
+});
+
+test("before a choice the Result column says what there is to choose", () => {
+  expect(resultLine(sides(BINARY, { kind: "Link", target: "a" }), null)).toBe(
+    "Take the left or the right version.",
+  );
+  expect(resultLine(sides(BINARY, MISSING), null)).toBe("Keep the file or delete it.");
+  expect(resultLine(sides(MISSING, BINARY), null)).toBe("Keep the file or delete it.");
 });

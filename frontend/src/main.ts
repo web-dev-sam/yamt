@@ -10,4 +10,5 @@ const source =
   import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
 const store = createAppStore(source);
 void store.loadFiles();
+void store.loadRemoteName();
 createApp(App).mount("#app");

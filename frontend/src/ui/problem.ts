@@ -5,7 +5,7 @@ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
 export type ProblemCause = SourceFailure | Unexpected;
 
 export type Problem =
-  | { readonly action: "list"; readonly cause: Unexpected }
+  | { readonly action: "list"; readonly cause: ProblemCause }
   | {
       readonly action: "open" | "finish" | "take" | "reset";
       readonly path: string;

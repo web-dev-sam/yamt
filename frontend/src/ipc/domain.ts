@@ -30,11 +30,14 @@ export type SideContent = Generated.SideContent;
 
 export type Side = Generated.Side;
 
+export type RemoteName = Generated.RemoteName;
+
 export type FileMergeData = {
   readonly path: string;
   readonly base: string;
   readonly local: string;
   readonly remote: string;
+  readonly deleted: Side | null;
   readonly eol: Generated.Eol;
   readonly chunks: readonly Chunk[];
 };
@@ -210,6 +213,7 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
     base: dto.base,
     local: dto.local,
     remote: dto.remote,
+    deleted: dto.deleted,
     eol: dto.eol,
     chunks: toChunks(dto),
   };

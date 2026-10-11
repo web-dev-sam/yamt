@@ -35,6 +35,8 @@ const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {
 
 const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
 
+const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
+
 function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
   return v.custom<T>(
     (input) => typeof input === "string" && Object.hasOwn(members, input),
@@ -82,6 +84,7 @@ const FILE_MERGE_DATA = v.object({
   base: v.string(),
   local: v.string(),
   remote: v.string(),
+  deleted: v.nullable(memberOf(SIDES)),
   eol: memberOf(EOLS),
   chunks: v.array(CHUNK),
   word_changes: v.array(WORD_CHANGES),
@@ -164,7 +167,7 @@ export function createFixtureSource(
 
   return {
     async listFiles() {
-      return entries(records);
+      return { ok: true, value: entries(records) };
     },
     async loadFile(path) {
       const data = records.fixtures.get(path);
@@ -189,6 +192,9 @@ export function createFixtureSource(
         records.finished.add(path);
         log.info("fixture.take", { path, side });
       });
+    },
+    async remoteName() {
+      return null;
     },
   };
 }

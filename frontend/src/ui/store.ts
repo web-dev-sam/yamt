@@ -7,15 +7,16 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type RemoteName,
   type Side,
 } from "../ipc";
+import { createAsking, type Asking } from "./asking";
+import { nextUnresolved } from "./nextFile";
 import { attempt, logProblem, unexpected, type Outcome, type Problem } from "./problem";
 import { exitMustAsk, finishMustAsk, type Question } from "./question";
 import type { MergeSummary } from "./useMergeController";
 
 export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
-
-export type Choice = { readonly sides: FileSides; readonly taken: Side | null };
 
 type FinishRequest = {
   readonly path: string;
@@ -23,29 +24,27 @@ type FinishRequest = {
   readonly summary: MergeSummary;
 };
 
-type Asking = { readonly question: Question; readonly answer: (yes: boolean) => void };
-
-type State = {
-  readonly source: ChunkSource;
+type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
-  readonly choices: ShallowRef<readonly Choice[]>;
+  readonly choices: ShallowRef<readonly FileSides[]>;
+  readonly taken: ShallowRef<ReadonlyMap<string, Side>>;
+  readonly remote: ShallowRef<RemoteName | null>;
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
-  readonly asking: ShallowRef<Asking | null>;
+};
+
+type State = Refs & {
+  readonly source: ChunkSource;
+  readonly asking: Asking;
   readonly work: Map<string, FileWork>;
   latestLoad: number;
 };
 
-export type AppStore = {
-  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
-  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
-  readonly choices: Readonly<ShallowRef<readonly Choice[]>>;
-  readonly active: Readonly<ShallowRef<string | null>>;
-  readonly problem: Readonly<ShallowRef<Problem | null>>;
-  readonly question: ComputedRef<Question | null>;
-  readonly allResolved: ComputedRef<boolean>;
+type Actions = {
   loadFiles(): Promise<void>;
+  refreshFiles(): Promise<void>;
+  loadRemoteName(): Promise<void>;
   open(path: string): Promise<void>;
   finish(request: FinishRequest): Promise<void>;
   takeSide(path: string, side: Side): Promise<void>;
@@ -59,54 +58,69 @@ export type AppStore = {
   watchWindowClose(): Promise<void>;
 };
 
+export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+  readonly question: ComputedRef<Question | null>;
+  readonly allResolved: ComputedRef<boolean>;
+} & Actions;
+
 let store: AppStore | null = null;
 
 export function createAppStore(source: ChunkSource): AppStore {
-  const state: State = {
-    source,
+  const refs: Refs = {
     files: shallowRef<readonly FileEntry[]>([]),
     opened: shallowRef<readonly FileMergeData[]>([]),
-    choices: shallowRef<readonly Choice[]>([]),
+    choices: shallowRef<readonly FileSides[]>([]),
+    taken: shallowRef<ReadonlyMap<string, Side>>(new Map()),
+    remote: shallowRef<RemoteName | null>(null),
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
-    asking: shallowRef<Asking | null>(null),
-    work: new Map(),
-    latestLoad: 0,
   };
-  const { files, opened, choices, active, problem } = state;
+  const asking = createAsking();
+  const state: State = { ...refs, source, asking, work: new Map(), latestLoad: 0 };
+  const { files } = refs;
   store = {
-    files,
-    opened,
-    choices,
-    active,
-    problem,
-    question: computed(() => state.asking.value?.question ?? null),
+    ...refs,
+    question: asking.question,
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
     ),
+    ...actions(state),
+  };
+  return store;
+}
+
+function actions(state: State): Actions {
+  return {
     loadFiles: () => loadFiles(state),
+    refreshFiles: async () => {
+      await refreshFiles(state);
+    },
+    loadRemoteName: () => loadRemoteName(state),
     open: (path) => open(state, path),
     finish: (request) => finish(state, request),
     takeSide: (path, side) => takeSide(state, path, side),
     reset: (path) => reset(state, path),
-    dismissProblem: () => dismissProblem(state),
-    answer: (yes) => answer(state, yes),
-    track: (path, work) => track(state, path, work),
-    untrack: (path, work) => untrack(state, path, work),
+    dismissProblem: () => {
+      state.problem.value = null;
+    },
+    answer: state.asking.answer,
+    track: (path, work) => {
+      state.work.set(path, work);
+    },
+    untrack: (path, work) => {
+      if (state.work.get(path) === work) {
+        state.work.delete(path);
+      }
+    },
     unsavedFiles: () => unsavedFiles(state),
     mayClose: () => mayClose(state),
     watchWindowClose: () => watchWindowClose(state),
   };
-  return store;
 }
 
 function report(state: State, failure: Problem): void {
   logProblem(failure);
   state.problem.value = failure;
-}
-
-function dismissProblem(state: State): void {
-  state.problem.value = null;
 }
 
 function clearProblemAbout(state: State, path: string): void {
@@ -116,36 +130,39 @@ function clearProblemAbout(state: State, path: string): void {
   }
 }
 
-function track(state: State, path: string, work: FileWork): void {
-  state.work.set(path, work);
-}
-
-function untrack(state: State, path: string, work: FileWork): void {
-  if (state.work.get(path) === work) {
-    state.work.delete(path);
-  }
-}
-
 async function loadFiles(state: State): Promise<void> {
-  let listed: FileEntry[];
-  try {
-    listed = await state.source.listFiles();
-  } catch (error) {
-    report(state, { action: "list", cause: unexpected(error) });
-    return;
-  }
-  state.files.value = listed;
-  state.problem.value = null;
-  const first = listed.find((file) => file.unsupported === null) ?? listed[0];
+  const listed = await refreshFiles(state);
+  const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
   if (first !== undefined) {
     await open(state, first.path);
+  }
+}
+
+async function refreshFiles(state: State): Promise<readonly FileEntry[] | null> {
+  const listed = await attempt(() => state.source.listFiles());
+  if (!listed.ok) {
+    report(state, { action: "list", cause: listed.cause });
+    return null;
+  }
+  state.files.value = listed.value;
+  if (state.problem.value?.action === "list") {
+    state.problem.value = null;
+  }
+  return listed.value;
+}
+
+async function loadRemoteName(state: State): Promise<void> {
+  try {
+    state.remote.value = await state.source.remoteName();
+  } catch (error) {
+    log.warn("store.remote_name_failed", { ...unexpected(error) });
   }
 }
 
 async function open(state: State, path: string): Promise<void> {
   const shown =
     state.opened.value.some((file) => file.path === path) ||
-    state.choices.value.some((choice) => choice.sides.path === path);
+    state.choices.value.some((sides) => sides.path === path);
   if (!shown) {
     await load(state, path);
     return;
@@ -199,12 +216,20 @@ function putOpened(state: State, data: FileMergeData): void {
 }
 
 function putChoice(state: State, sides: FileSides): void {
-  const others = state.choices.value.filter((choice) => choice.sides.path !== sides.path);
-  state.choices.value = [...others, { sides, taken: null }];
+  const others = state.choices.value.filter((shown) => shown.path !== sides.path);
+  state.choices.value = [...others, sides];
+}
+
+async function moveOn(state: State, path: string): Promise<void> {
+  const next = state.active.value === path ? nextUnresolved(state.files.value, path) : null;
+  if (next !== null) {
+    await open(state, next);
+  }
 }
 
 async function finish(state: State, { path, text, summary }: FinishRequest): Promise<void> {
-  if (finishMustAsk(summary) && !(await ask(state, { kind: "unprocessed", summary }))) {
+  const unprocessed: Question = { kind: "unprocessed", summary };
+  if (finishMustAsk(summary) && !(await state.asking.ask(unprocessed))) {
     return;
   }
   const outcome = await attempt(() => state.source.finishFile(path, text));
@@ -215,6 +240,7 @@ async function finish(state: State, { path, text, summary }: FinishRequest): Pro
   state.files.value = outcome.value;
   state.work.get(path)?.markSaved(text);
   state.problem.value = null;
+  await moveOn(state, path);
 }
 
 async function takeSide(state: State, path: string, side: Side): Promise<void> {
@@ -224,10 +250,9 @@ async function takeSide(state: State, path: string, side: Side): Promise<void> {
     return;
   }
   state.files.value = outcome.value;
-  state.choices.value = state.choices.value.map((choice) =>
-    choice.sides.path === path ? { ...choice, taken: side } : choice,
-  );
+  state.taken.value = new Map([...state.taken.value, [path, side]]);
   clearProblemAbout(state, path);
+  await moveOn(state, path);
 }
 
 async function reset(state: State, path: string): Promise<void> {
@@ -237,7 +262,8 @@ async function reset(state: State, path: string): Promise<void> {
     return;
   }
   state.files.value = files.value;
-  state.choices.value = state.choices.value.filter((choice) => choice.sides.path !== path);
+  state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
+  state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
   const view = await fetchView(state, path);
   if (!view.ok) {
     report(state, { action: "open", path, cause: view.cause });
@@ -245,21 +271,6 @@ async function reset(state: State, path: string): Promise<void> {
   }
   view.value();
   clearProblemAbout(state, path);
-}
-
-function ask(state: State, question: Question): Promise<boolean> {
-  if (state.asking.value !== null) {
-    return Promise.resolve(false);
-  }
-  return new Promise((resolve) => {
-    state.asking.value = { question, answer: resolve };
-  });
-}
-
-function answer(state: State, yes: boolean): void {
-  const asking = state.asking.value;
-  state.asking.value = null;
-  asking?.answer(yes);
 }
 
 function unsavedFiles(state: State): string[] {
@@ -270,7 +281,7 @@ function unsavedFiles(state: State): string[] {
 
 async function mayClose(state: State): Promise<boolean> {
   const files = unsavedFiles(state);
-  return exitMustAsk(files) ? ask(state, { kind: "exit", files }) : true;
+  return exitMustAsk(files) ? state.asking.ask({ kind: "exit", files }) : true;
 }
 
 async function watchWindowClose(state: State): Promise<void> {

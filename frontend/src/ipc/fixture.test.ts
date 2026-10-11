@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { SourceResult } from "./domain";
+import type { Side, SourceResult } from "./domain";
 import { createFixtureSource, loadFixture } from "./fixture";
 import { createLog, type Log, type LogEntry } from "./log";
 
@@ -56,6 +56,7 @@ function record(
     base: "b\n",
     local: "l\n",
     remote: "r\n",
+    deleted: null,
     eol: "Lf",
     chunks: [{ ...CHUNK, ...chunk }],
     word_changes: [{ chunk: 0, ...WORDS, ...words }],
@@ -68,6 +69,7 @@ function loaded(path: string): Record<string, unknown> {
     base: "b\n",
     local: "l\n",
     remote: "r\n",
+    deleted: null,
     eol: "Lf",
     chunks: [{ ...CHUNK, words: DOMAIN_WORDS }],
   };
@@ -84,7 +86,7 @@ afterEach(() => {
 test("the committed fixtures list 11 files, sorted by path, all unresolved", async () => {
   const source = createFixtureSource(quietLog().log);
 
-  const files = await source.listFiles();
+  const files = valueOf(await source.listFiles());
 
   expect(files.map((file) => file.path)).toEqual([
     "language-tools-script-setup.ts",
@@ -157,11 +159,26 @@ test("in-memory records are listed sorted by path and keep every field", async (
     "a.json": { ...record("a.ts"), eol: "CrLf" },
   });
 
-  expect((await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+  expect(valueOf(await source.listFiles()).map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
   expect(await source.loadFile("a.ts")).toEqual({
     ok: true,
     value: { ...loaded("a.ts"), eol: "CrLf" },
   });
+});
+
+test.each<Side>(["local", "remote"])(
+  "a record deleted on the %s side keeps that side",
+  async (deleted) => {
+    const source = createFixtureSource(quietLog().log, {
+      "a.json": { ...record("a.ts"), deleted },
+    });
+
+    expect(valueOf(await source.loadFile("a.ts")).deleted).toBe(deleted);
+  },
+);
+
+test("the fixture source names nothing merged in", async () => {
+  expect(await createFixtureSource(quietLog().log).remoteName()).toBeNull();
 });
 
 test.each([
@@ -171,6 +188,12 @@ test.each([
     "expected one of LocalOnly, RemoteOnly, BothSame, Conflict",
   ],
   ["an unknown eol", { ...record("x.ts"), eol: "Cr" }, "expected one of Lf, CrLf, Mixed"],
+  [
+    "an unknown deleted side",
+    { ...record("x.ts"), deleted: "base" },
+    "expected one of local, remote",
+  ],
+  ["missing deleted", without(record("x.ts"), "deleted"), 'Invalid key: Expected "deleted"'],
   ["missing chunks", without(record("x.ts"), "chunks"), 'Invalid key: Expected "chunks"'],
   [
     "missing word_changes",
@@ -328,7 +351,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   expect(await source.resetFile("nope.ts")).toEqual(failure);
   expect(await source.describeFile("nope.ts")).toEqual(failure);
   expect(await source.takeSide("nope.ts", "remote")).toEqual(failure);
-  expect(await source.listFiles()).toEqual([
+  expect(valueOf(await source.listFiles())).toEqual([
     { path: "a.ts", status: "Unresolved", unsupported: null },
   ]);
   expect(entries).toEqual([]);
@@ -356,7 +379,7 @@ test("finish marks the file resolved and logs its text once; reset returns it un
     { path: "b.ts", status: "Unresolved", unsupported: null },
   ];
   expect(await source.resetFile("a.ts")).toEqual({ ok: true, value: unresolved });
-  expect(await source.listFiles()).toEqual(unresolved);
+  expect(valueOf(await source.listFiles())).toEqual(unresolved);
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
 });
@@ -378,7 +401,7 @@ test("takeSide marks the file resolved and logs the side; reset returns it unres
 
   await source.resetFile("b.ts");
 
-  expect((await source.listFiles()).map((file) => file.status)).toEqual([
+  expect(valueOf(await source.listFiles()).map((file) => file.status)).toEqual([
     "Unresolved",
     "Unresolved",
   ]);

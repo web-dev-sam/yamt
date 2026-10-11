@@ -55,7 +55,11 @@ function createController(
   ) {
     return null;
   }
-  return new MergeController(data, { left, center, right, strips: [leftStrip, rightStrip] });
+  return new MergeController(
+    data,
+    { left, center, right, strips: [leftStrip, rightStrip] },
+    { readOnly: data.deleted !== null },
+  );
 }
 
 export function useMergeController(

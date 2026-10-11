@@ -3,6 +3,11 @@ import type { FileSides, Side, SideContent } from "../ipc";
 const BYTES_PER_KB = 1024;
 const SHORT_COMMIT_LENGTH = 7;
 
+export const DELETED_SENTENCE = "Deleted in this branch.";
+export const KEEP = "Keep";
+export const DELETE = "Delete";
+export const DELETED_LINE = "Resolved by deleting the file.";
+
 function oneDecimal(value: number): string {
   const rounded = value.toFixed(1);
   return rounded.endsWith(".0") ? rounded.slice(0, -".0".length) : rounded;
@@ -22,7 +27,7 @@ function sizeText(bytes: number): string {
 export function sideSentence(content: SideContent): string {
   switch (content.kind) {
     case "Missing":
-      return "Deleted in this branch.";
+      return DELETED_SENTENCE;
     case "Text":
       return `A text file, ${content.lines} ${content.lines === 1 ? "line" : "lines"}.`;
     case "Binary":
@@ -48,18 +53,27 @@ export function sideTooltip(content: SideContent): string | undefined {
 
 export function sideButton(sides: FileSides, side: Side): string {
   if (sides[side].kind === "Missing") {
-    return "Delete";
+    return DELETE;
   }
   const other = side === "local" ? "remote" : "local";
   if (sides[other].kind === "Missing") {
-    return "Keep";
+    return KEEP;
   }
   return side === "local" ? "Take left" : "Take right";
 }
 
-export function resolvedLine(sides: FileSides, taken: Side): string {
+function resolvedLine(sides: FileSides, taken: Side): string {
   if (sides[taken].kind === "Missing") {
-    return "Resolved by deleting the file.";
+    return DELETED_LINE;
   }
   return taken === "local" ? "Resolved with the left version." : "Resolved with the right version.";
+}
+
+export function resultLine(sides: FileSides, taken: Side | null): string {
+  if (taken !== null) {
+    return resolvedLine(sides, taken);
+  }
+  return sides.local.kind === "Missing" || sides.remote.kind === "Missing"
+    ? "Keep the file or delete it."
+    : "Take the left or the right version.";
 }
