@@ -1,6 +1,1 @@
-{
-  "V0ScrollSmoothR2": {
-    "owned": ["frontend/src/editor/internal/gap.test.ts"],
-    "readonly": ["frontend/src/**", "docs/**"]
-  }
-}
+{}
