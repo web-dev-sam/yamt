@@ -45,11 +45,15 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   2. the action as one transaction `{ changes?, effects: setStatus…, userEvent: "yamt.apply" | "yamt.ignore" }`;
   3. a recorded selection step, which history keeps as the action's `selectionsAfter`: redo shows
      the block, and typing afterwards is its own undo step.
-     The replacement range is the chunk's current mapped range. The replacement text is
+     The replacement range is the chunk's current mapped range (in an action over several changes:
+     its span after the earlier changes of the same action). The replacement text is
      `data.local`/`data.remote` sliced by the chunk's fixed side range (lines → string once, at
      load, via `Text.of(lines)`; never re-split per apply).
-- [CM7] Bulk apply builds all changes in **original** coordinates and passes them together as
-  `state.changes([...])` in its action step (CM composes them), so the whole bulk is one undo step.
+- [CM7] An action over several changes (a drag over icons, bulk apply) builds each change on the
+  document the previous ones produced (a throwaway `state.update` per change with its `setStatus`, so
+  `chunkField` maps the spans exactly as a click would; `chainedChanges` in `apply.ts`), composed into
+  one ChangeSet in its action step: text and spans equal clicking one by one, and the whole action is
+  one undo step (plan §2 #45; composing in original coordinates lost a line break, #435).
 - [CM8] A block whose current range the user deleted, while a side was still open (fresh or
   half-applied), becomes ignored on both sides in the same update cycle; its arrows disappear.
   Test: `sides.test.ts` 'deleting a whole open or half-applied conflict in the middle pane ignores every side'.

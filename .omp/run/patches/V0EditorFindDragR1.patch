@@ -1,0 +1,529 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 651ea35..001a5f3 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -15,7 +15,7 @@ import {
+   type VisibleLines,
+ } from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+-import { coveredDecorations, sameCovered, showCovered } from "./internal/covered";
++import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
+ import { centerDecorations, sideDecorations } from "./internal/decorations";
+ import { coveredAction, IconDrag } from "./internal/drag";
+ import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
+@@ -50,7 +50,6 @@ export class MergeController {
+   readonly #strips: MergeHosts["strips"];
+   readonly #scroll: ScrollSync;
+   readonly #drag: IconDrag;
+-  #covered: ChunkAction | null = null;
+   #frameId: number | null = null;
+   #summaryListener: ((summary: MergeSummary) => void) | null = null;
+   #destroyed = false;
+@@ -210,10 +209,9 @@ export class MergeController {
+   }
+ 
+   #showCovered(covered: ChunkAction | null): void {
+-    if (sameCovered(covered, this.#covered)) {
++    if (sameCovered(covered, this.#views.left.state.field(coveredField))) {
+       return;
+     }
+-    this.#covered = covered;
+     this.#views.left.dispatch({ effects: showCovered.of(covered) });
+     this.#views.right.dispatch({ effects: showCovered.of(covered) });
+   }
+diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
+index fda9704..4f93554 100644
+--- a/frontend/src/editor/internal/apply.ts
++++ b/frontend/src/editor/internal/apply.ts
+@@ -1,4 +1,5 @@
+ import {
++  ChangeSet,
+   EditorSelection,
+   Text,
+   Transaction,
+@@ -59,6 +60,24 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
+   return wholeLines(target.state.doc, { from, to: span.to }, lines);
+ }
+ 
++function chainedChanges(target: ApplyTarget, spans: readonly ChunkSpan[], side: Side): ChangeSet {
++  let state = target.state;
++  let changes = ChangeSet.empty(state.doc.length);
++  for (const { chunk } of spans) {
++    const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
++    if (span === undefined) {
++      throw new Error(`chunk ${chunk.id} is not in the chunk field`);
++    }
++    const click = state.update({
++      changes: applyChange({ ...target, state }, span, side),
++      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(chunk, span.status, side) }),
++    });
++    changes = changes.compose(click.changes);
++    state = click.state;
++  }
++  return changes;
++}
++
+ function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
+   const ids = new Set(chunks.map((chunk) => chunk.id));
+   return target.state
+@@ -112,9 +131,10 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
+   if (last === undefined) {
+     return [];
+   }
+-  const changes = target.state.changes(
+-    action.kind === "apply" ? spans.map((span) => applyChange(target, span, action.side)) : [],
+-  );
++  const changes =
++    action.kind === "apply"
++      ? chainedChanges(target, spans, action.side)
++      : ChangeSet.empty(target.state.doc.length);
+   return [
+     moveCursor(last.from),
+     {
+@@ -143,7 +163,7 @@ export function bulkApplySteps({
+   if (spans.length === 0) {
+     return [];
+   }
+-  const changes = target.state.changes(spans.map((span) => applyChange(target, span, side)));
++  const changes = chainedChanges(target, spans, side);
+   const action = {
+     changes,
+     effects: spans.map((span) =>
+diff --git a/frontend/src/editor/internal/covered.ts b/frontend/src/editor/internal/covered.ts
+index 480b95b..9fb6468 100644
+--- a/frontend/src/editor/internal/covered.ts
++++ b/frontend/src/editor/internal/covered.ts
+@@ -6,7 +6,7 @@ import type { Side } from "./side";
+ 
+ export const showCovered = StateEffect.define<ChunkAction | null>();
+ 
+-const coveredField = StateField.define<ChunkAction | null>({
++export const coveredField = StateField.define<ChunkAction | null>({
+   create: () => null,
+   update(covered, tr) {
+     const shown = tr.effects.findLast((effect) => effect.is(showCovered));
+diff --git a/frontend/src/editor/internal/find.test.ts b/frontend/src/editor/internal/find.test.ts
+index 5f3e3d1..6a085b9 100644
+--- a/frontend/src/editor/internal/find.test.ts
++++ b/frontend/src/editor/internal/find.test.ts
+@@ -1,8 +1,8 @@
+-import { SearchQuery } from "@codemirror/search";
++import { search, SearchQuery, setSearchQuery } from "@codemirror/search";
+ import { EditorSelection, EditorState } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+-import { findLabel, stepMatch } from "./find";
++import { findLabel, labelOutdated, stepMatch } from "./find";
+ 
+ const DOC = "foo bar\nFoo baz\nqux FOO\n";
+ const FIRST = { from: 0, to: 3 };
+@@ -47,10 +47,22 @@ test("a selection on a match shows its place; next from the last wraps to the fi
+   expect(findLabel(step(selected({ from: 0, to: 0 }), "next"), query("foo"))).toBe("1 of 3");
+ });
+ 
+-test("the count follows edits", () => {
+-  const state = selected(FIRST);
++test("the count is recomputed after a document, selection or query change and only then", () => {
++  const state = EditorState.create({
++    doc: DOC,
++    selection: EditorSelection.single(FIRST.from, FIRST.to),
++    extensions: search({ literal: true }),
++  });
++  const transactions = {
++    edit: state.update({ changes: { from: DOC.length, insert: "foo\n" } }),
++    select: state.update({ selection: EditorSelection.single(LAST.from, LAST.to) }),
++    query: state.update({ effects: setSearchQuery.of(query("bar")) }),
++    none: state.update({}),
++  };
+ 
+-  const edited = state.update({ changes: { from: DOC.length, insert: "foo\n" } }).state;
+-
+-  expect(findLabel(edited, query("foo"))).toBe("1 of 4");
++  expect(labelOutdated(state, transactions.edit.state)).toBe(true);
++  expect(labelOutdated(state, transactions.select.state)).toBe(true);
++  expect(labelOutdated(state, transactions.query.state)).toBe(true);
++  expect(labelOutdated(state, transactions.none.state)).toBe(false);
++  expect(findLabel(transactions.edit.state, query("foo"))).toBe("1 of 4");
+ });
+diff --git a/frontend/src/editor/internal/find.ts b/frontend/src/editor/internal/find.ts
+index 2a1de93..d4a2716 100644
+--- a/frontend/src/editor/internal/find.ts
++++ b/frontend/src/editor/internal/find.ts
+@@ -51,6 +51,14 @@ export function findLabel(state: EditorState, query: SearchQuery): string {
+   return found.length === 1 ? "1 result" : `${found.length} results`;
+ }
+ 
++export function labelOutdated(before: EditorState, after: EditorState): boolean {
++  return (
++    before.doc !== after.doc ||
++    !before.selection.eq(after.selection) ||
++    !getSearchQuery(before).eq(getSearchQuery(after))
++  );
++}
++
+ function matchFrom(found: readonly Match[], pos: number): Match | undefined {
+   return found.find((match) => match.from >= pos) ?? found[0];
+ }
+@@ -112,13 +120,21 @@ function closeFind(view: EditorView): boolean {
+   return true;
+ }
+ 
+-function iconButton(markup: string, title: string, run: () => void): HTMLButtonElement {
++function iconButton({
++  icon,
++  title,
++  run,
++}: {
++  readonly icon: string;
++  readonly title: string;
++  readonly run: () => void;
++}): HTMLButtonElement {
+   const button = document.createElement("button");
+   button.type = "button";
+   button.className = "find-button";
+   button.title = title;
+   button.setAttribute("aria-label", title);
+-  button.innerHTML = markup;
++  button.innerHTML = icon;
+   button.addEventListener("mousedown", (event) => {
+     event.preventDefault();
+   });
+@@ -143,6 +159,8 @@ class FindPanel implements Panel {
+     this.#field.type = "text";
+     this.#field.placeholder = "Find";
+     this.#field.spellcheck = false;
++    // Mod-f on an open bar refocuses the element carrying this attribute
++    // (@codemirror/search openSearchPanel → getSearchInput).
+     this.#field.setAttribute("main-field", "true");
+     this.#field.setAttribute("aria-label", "Find");
+     this.#field.value = getSearchQuery(view.state).search;
+@@ -155,9 +173,17 @@ class FindPanel implements Panel {
+       icon,
+       this.#field,
+       this.#count,
+-      iconButton(arrowUpIcon, "Previous Occurrence (Shift+Enter)", () => findPrevious(view)),
+-      iconButton(arrowDownIcon, "Next Occurrence (Enter)", () => findNext(view)),
+-      iconButton(xIcon, "Close (Escape)", () => closeFind(view)),
++      iconButton({
++        icon: arrowUpIcon,
++        title: "Previous Occurrence (Shift+Enter)",
++        run: () => findPrevious(view),
++      }),
++      iconButton({
++        icon: arrowDownIcon,
++        title: "Next Occurrence (Enter)",
++        run: () => findNext(view),
++      }),
++      iconButton({ icon: xIcon, title: "Close (Escape)", run: () => closeFind(view) }),
+     );
+   }
+ 
+@@ -168,11 +194,10 @@ class FindPanel implements Panel {
+ 
+   update(update: ViewUpdate): void {
+     const query = getSearchQuery(update.state);
+-    const queryChanged = !query.eq(getSearchQuery(update.startState));
+-    if (queryChanged && query.search !== this.#field.value) {
++    if (!query.eq(getSearchQuery(update.startState)) && query.search !== this.#field.value) {
+       this.#field.value = query.search;
+     }
+-    if (queryChanged || update.docChanged || update.selectionSet) {
++    if (labelOutdated(update.startState, update.state)) {
+       this.#count.textContent = findLabel(update.state, query);
+     }
+   }
+@@ -197,7 +222,7 @@ class FindPanel implements Panel {
+ }
+ 
+ export const find = [
+-  search({ top: true, literal: true, createPanel: (view) => new FindPanel(view) }),
++  search({ literal: true, createPanel: (view) => new FindPanel(view) }),
+   keymap.of([
+     { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
+     {
+diff --git a/frontend/src/editor/internal/modClick.test.ts b/frontend/src/editor/internal/modClick.test.ts
+index 5c60c2e..721aba0 100644
+--- a/frontend/src/editor/internal/modClick.test.ts
++++ b/frontend/src/editor/internal/modClick.test.ts
+@@ -1,50 +1,86 @@
++import { Text } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+ import { loadFixture } from "../../ipc";
+-import { openBlockAt } from "./modClick";
++import { isModClick, openBlockAt } from "./modClick";
+ import type { Side } from "./side";
+ import { PENDING, type ChunkState, type ChunkStatus } from "./status";
+ 
++type Magic = { readonly states: ChunkState[]; readonly docs: Readonly<Record<Side, Text>> };
++
+ const APPLIED_LEFT: ChunkStatus = { local: "applied", remote: "pending" };
+ const IGNORED_RIGHT: ChunkStatus = { local: "pending", remote: "ignored" };
++const MAC = "MacIntel";
++const LINUX = "Linux x86_64";
++const WINDOWS = "Win32";
+ 
+-async function magicStates(
+-  statuses: Readonly<Record<number, ChunkStatus>> = {},
+-): Promise<ChunkState[]> {
++async function magic(statuses: Readonly<Record<number, ChunkStatus>> = {}): Promise<Magic> {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+-  return data.chunks.map((chunk) => ({ chunk, status: statuses[chunk.id] ?? PENDING }));
++  return {
++    states: data.chunks.map((chunk) => ({ chunk, status: statuses[chunk.id] ?? PENDING })),
++    docs: { local: Text.of(data.local.split("\n")), remote: Text.of(data.remote.split("\n")) },
++  };
+ }
+ 
+-function blockAt(states: readonly ChunkState[], side: Side, line: number): number | null {
+-  return openBlockAt(states, { side, line })?.id ?? null;
++function blockAt({ states, docs }: Magic, side: Side, pos: number): number | null {
++  return openBlockAt(states, { side, doc: docs[side], pos })?.id ?? null;
+ }
+ 
+-test("a line inside an open block of that side maps to its change", async () => {
+-  const states = await magicStates();
++function lineStart({ docs }: Magic, side: Side, line: number): number {
++  return docs[side].line(line).from;
++}
+ 
+-  expect(blockAt(states, "local", 128)).toBe(8);
+-  expect(blockAt(states, "local", 135)).toBe(8);
+-  expect(blockAt(states, "remote", 140)).toBe(8);
+-  expect(blockAt(states, "remote", 153)).toBe(8);
+-  expect(blockAt(states, "remote", 86)).toBe(3);
+-  expect(blockAt(states, "local", 2)).toBe(0);
++function lineEnd({ docs }: Magic, side: Side, line: number): number {
++  return docs[side].line(line).to;
++}
++
++test("a block's first character and the end of its last line map to its change; the next line does not", async () => {
++  const merge = await magic();
++
++  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBe(8);
++  expect(blockAt(merge, "local", lineEnd(merge, "local", 136))).toBe(8);
++  expect(blockAt(merge, "local", lineStart(merge, "local", 137))).toBeNull();
++  expect(blockAt(merge, "local", lineEnd(merge, "local", 128))).toBeNull();
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
++  expect(blockAt(merge, "remote", lineEnd(merge, "remote", 154))).toBe(8);
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 155))).toBeNull();
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBe(3);
++  expect(blockAt(merge, "local", lineStart(merge, "local", 3))).toBe(0);
+ });
+ 
+-test("lines outside every block, unchanged sides and empty side ranges map to nothing", async () => {
+-  const states = await magicStates();
++test("unchanged sides and empty side ranges map to nothing", async () => {
++  const merge = await magic();
+ 
+-  expect(blockAt(states, "local", 127)).toBeNull();
+-  expect(blockAt(states, "local", 136)).toBeNull();
+-  expect(blockAt(states, "remote", 154)).toBeNull();
+-  expect(blockAt(states, "remote", 126)).toBeNull();
+-  expect(blockAt(states, "local", 86)).toBeNull();
+-  expect(blockAt(states, "remote", 2)).toBeNull();
++  expect(blockAt(merge, "local", lineStart(merge, "local", 87))).toBeNull();
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 3))).toBeNull();
+ });
+ 
+ test("a side that is already applied or ignored maps to nothing; the other side still does", async () => {
+-  const states = await magicStates({ 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
++  const merge = await magic({ 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
+ 
+-  expect(blockAt(states, "local", 128)).toBeNull();
+-  expect(blockAt(states, "remote", 140)).toBe(8);
+-  expect(blockAt(states, "remote", 86)).toBeNull();
++  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBeNull();
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
++  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBeNull();
++});
++
++test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
++  const ctrl = { ctrlKey: true, metaKey: false };
++  const meta = { ctrlKey: false, metaKey: true };
++  const both = { ctrlKey: true, metaKey: true };
++  const none = { ctrlKey: false, metaKey: false };
++
++  expect([ctrl, meta, both, none].map((keys) => isModClick(keys, MAC))).toEqual([
++    false,
++    true,
++    false,
++    false,
++  ]);
++  for (const platform of [LINUX, WINDOWS]) {
++    expect([ctrl, meta, both, none].map((keys) => isModClick(keys, platform))).toEqual([
++      true,
++      false,
++      false,
++      false,
++    ]);
++  }
+ });
+diff --git a/frontend/src/editor/internal/modClick.ts b/frontend/src/editor/internal/modClick.ts
+index 8319d6c..0624314 100644
+--- a/frontend/src/editor/internal/modClick.ts
++++ b/frontend/src/editor/internal/modClick.ts
+@@ -1,14 +1,23 @@
+-import type { Extension, StateField } from "@codemirror/state";
++import type { Extension, StateField, Text } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ 
+ import type { Chunk } from "../../ipc";
+ import type { Side } from "./side";
+ import { isSideOpen, type ChunkState } from "./status";
+ 
++type Modifiers = Pick<MouseEvent, "ctrlKey" | "metaKey">;
++
++export function isModClick({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
++  // The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
++  // Ctrl+click is the system's secondary click.
++  return /Mac/.test(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
++}
++
+ export function openBlockAt(
+   states: readonly ChunkState[],
+-  { side, line }: { readonly side: Side; readonly line: number },
++  { side, doc, pos }: { readonly side: Side; readonly doc: Text; readonly pos: number },
+ ): Chunk | null {
++  const line = doc.lineAt(pos).number - 1;
+   const hit = states.find(
+     ({ chunk, status }) =>
+       isSideOpen(chunk, status, side) &&
+@@ -23,20 +32,20 @@ export function applyOnModClick(
+   side: Side,
+   apply: (chunk: Chunk) => void,
+ ): Extension {
++  const platform = navigator.platform;
+   return EditorView.domEventHandlers({
+     mousedown(event, view) {
+       const height = event.clientY - view.documentTop;
+       if (
+         event.button !== 0 ||
+-        !(event.ctrlKey || event.metaKey) ||
++        !isModClick(event, platform) ||
+         height < 0 ||
+         height >= view.lineBlockAt(view.state.doc.length).bottom
+       ) {
+         return false;
+       }
+-      const block = view.lineBlockAtHeight(height);
+-      const line = view.state.doc.lineAt(block.from).number - 1;
+-      const chunk = openBlockAt(view.state.field(statuses), { side, line });
++      const pos = view.lineBlockAtHeight(height).from;
++      const chunk = openBlockAt(view.state.field(statuses), { side, doc: view.state.doc, pos });
+       if (chunk === null) {
+         return false;
+       }
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index 5d238ee..ac7584c 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -54,8 +54,16 @@ const darkTheme = EditorView.theme(
+       color: "var(--color-gutter-active)",
+     },
+     ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
+-    ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--color-separator)" },
+-    ".cm-searchMatch": { backgroundColor: "var(--color-success-border)" },
++    ".cm-panels.cm-panels-top": {
++      position: "absolute",
++      left: "auto",
++      right: "16px",
++      maxWidth: "calc(100% - 32px)",
++      border: "1px solid var(--color-control-border)",
++      borderTop: "none",
++      borderRadius: "0 0 6px 6px",
++    },
++    ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
+     ".cm-searchMatch.cm-searchMatch-selected": {
+       backgroundColor: "var(--color-selection)",
+       outline: "1px solid var(--color-primary)",
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index aacbb37..0211b70 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -154,6 +154,11 @@ function sideText(merge: Merge, id: number, side: Side): string {
+   return doc.sliceString(from, to);
+ }
+ 
++function spanRange(merge: Merge, id: number): [from: number, to: number] {
++  const { from, to } = spanAt(merge, id);
++  return [from, to];
++}
++
+ function decoratedLines(state: EditorState): number[] {
+   const lines = new Set<number>();
+   for (const source of state.facet(EditorView.decorations)) {
+@@ -331,6 +336,9 @@ test("a drag over several icons applies or ignores them as clicking each top to
+     const clicked = clicks(rightApplied, ids, how);
+ 
+     expect(dragged.center.sliceDoc()).toBe(clicked.center.sliceDoc());
++    expect(ids.map((id) => spanRange(dragged, id))).toEqual(
++      ids.map((id) => spanRange(clicked, id)),
++    );
+     expect(ids.map((id) => status(dragged, id))).toEqual(ids.map((id) => status(clicked, id)));
+     expect(decoratedLines(dragged.left)).toEqual(decoratedLines(clicked.left));
+     expect(dragged.center.selection.main.head).toBe(clicked.center.selection.main.head);
+@@ -343,3 +351,24 @@ test("a drag over several icons applies or ignores them as clicking each top to
+     "applied ignored",
+   ]);
+ });
++
++test("touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves", async () => {
++  const start = open(
++    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc" }, [
++      { kind: "LocalOnly", base: [1, 1], local: [1, 1], remote: [1, 1] },
++      { kind: "LocalOnly", base: [2, 1], local: [2, 0], remote: [2, 1] },
++    ]),
++  );
++  const ids = [0, 1];
++  const how: Click = { kind: "apply", side: "local" };
++
++  const dragged = act(start, ids, how);
++  const clicked = clicks(start, ids, how);
++
++  expect(spanRange(start, 0)[1]).toBe(spanRange(start, 1)[0]);
++  expect(clicked.center.sliceDoc()).toBe("a\nB");
++  expect(dragged.center.sliceDoc()).toBe("a\nB");
++  expect(ids.map((id) => spanRange(dragged, id))).toEqual(ids.map((id) => spanRange(clicked, id)));
++  expect(ids.map((id) => status(dragged, id))).toEqual(ids.map((id) => status(clicked, id)));
++  expectOneUndoStep(start, dragged);
++});
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index a8dd354..10e6f18 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -21,8 +21,8 @@ export type IconPress = {
+ };
+ 
+ type OnPress = (press: IconPress, event: PointerEvent) => void;
+-type Icons = { readonly covered: ChunkAction | null; readonly onPress: OnPress };
+-export type StripPaint = { readonly covered: ChunkAction | null; readonly onPress: OnPress | null };
++type StripPaint = { readonly covered: ChunkAction | null; readonly onPress: OnPress | null };
++type Icons = StripPaint & { readonly onPress: OnPress };
+ type ToneBand = Band & { readonly tone: Tone };
+ type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
+ type ArrowPane = {
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 0dde23e..f78dc1b 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -137,6 +137,7 @@ path.chunk-band {
+ }
+ 
+ .find-field {
++  width: 200px;
+   min-width: 0;
+   flex: 1;
+   padding: 2px 6px;
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 650c9a7..dec3b16 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -26,6 +26,7 @@
+   --color-problem-border: #5e3838;
+   --color-success: #253627;
+   --color-success-border: #375239;
++  --color-search-match: #2d543f;
+ 
+   --color-syntax-keyword: #cf8e6d;
+   --color-syntax-string: #6aab73;
