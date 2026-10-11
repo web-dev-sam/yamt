@@ -227,7 +227,9 @@ impl Repo {
     pub fn add(&self, path: &Path) -> Result<()>;                 // add -- <path>
     pub fn resolve_with(&self, entry: &StageEntry) -> Result<()>; // update-index --index-info: one stage-0 record replaces every stage
     pub fn remove_from_index(&self, path: &Path) -> Result<()>;   // update-index --force-remove -- <path>
-    pub fn checkout_from_index(&self, path: &Path) -> Result<()>; // checkout-index --force -- <path> (links, exec bit, filters)
+    pub fn checkout_from_index(&self, path: &Path) -> Result<()>; // checkout-index -u --force -- <path> (links, exec bit, filters, fresh stat)
+    pub fn index_records(&self, path: &Path) -> Result<Vec<u8>>;  // ls-files -s -z -- <path>: opaque snapshot before a take
+    pub fn restore_index_records(&self, path: &Path, records: Vec<u8>) -> Result<()>; // puts that snapshot back (or --force-remove when empty)
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
