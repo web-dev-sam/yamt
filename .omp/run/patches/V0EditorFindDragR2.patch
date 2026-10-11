@@ -1,0 +1,424 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 001a5f3..d85aba4 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -1,5 +1,6 @@
+ import { redo, undo } from "@codemirror/commands";
+ import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
++import { searchPanelOpen } from "@codemirror/search";
+ import type { Extension, StateField } from "@codemirror/state";
+ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+@@ -18,6 +19,7 @@ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+ import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
+ import { centerDecorations, sideDecorations } from "./internal/decorations";
+ import { coveredAction, IconDrag } from "./internal/drag";
++import { findSpace, showFindSpace } from "./internal/find";
+ import { chunkRows, type ChunkRow, type PaneViews } from "./internal/geometry";
+ import { languageOf } from "./internal/language";
+ import { applyOnModClick } from "./internal/modClick";
+@@ -104,7 +106,11 @@ export class MergeController {
+   }
+ 
+   readonly #repaint = EditorView.updateListener.of((update) => {
+-    if (update.docChanged || update.geometryChanged) {
++    if (
++      update.docChanged ||
++      update.geometryChanged ||
++      searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
++    ) {
+       this.#requestFrame();
+     }
+   });
+@@ -216,6 +222,16 @@ export class MergeController {
+     this.#views.right.dispatch({ effects: showCovered.of(covered) });
+   }
+ 
++  #showFindSpace(): void {
++    const views = [this.#views.left, this.#views.center, this.#views.right];
++    const shown = views.some((view) => searchPanelOpen(view.state));
++    for (const view of views) {
++      if (view.state.field(findSpace) !== shown) {
++        view.dispatch({ effects: showFindSpace.of(shown) });
++      }
++    }
++  }
++
+   readonly #press = (press: IconPress, event: PointerEvent): void => {
+     this.#drag.start(press, event);
+   };
+@@ -223,6 +239,7 @@ export class MergeController {
+   #requestFrame(): void {
+     this.#frameId ??= requestAnimationFrame(() => {
+       this.#frameId = null;
++      this.#showFindSpace();
+       const rows = this.#rows();
+       this.#scroll.sync(rows);
+       const press = this.#drag.press;
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 4412690..98e34d7 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -26,18 +26,26 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
+ 
+ async function synthetic(
+   texts: { base: string; local: string; remote: string; eol: FileMergeData["eol"] },
+-  chunks: readonly { kind: Chunk["kind"]; base: [number, number]; side: [number, number] }[],
++  chunks: readonly {
++    kind: Chunk["kind"];
++    base: [number, number];
++    side: [number, number];
++    remote?: [number, number];
++  }[],
+ ): Promise<FileMergeData> {
+   const record = {
+     path: "synthetic.ts",
+     ...texts,
+-    chunks: chunks.map((chunk, id) => ({
+-      id,
+-      kind: chunk.kind,
+-      base: { start: chunk.base[0], len: chunk.base[1] },
+-      local: { start: chunk.side[0], len: chunk.side[1] },
+-      remote: { start: chunk.side[0], len: chunk.side[1] },
+-    })),
++    chunks: chunks.map((chunk, id) => {
++      const [remoteStart, remoteLen] = chunk.remote ?? chunk.side;
++      return {
++        id,
++        kind: chunk.kind,
++        base: { start: chunk.base[0], len: chunk.base[1] },
++        local: { start: chunk.side[0], len: chunk.side[1] },
++        remote: { start: remoteStart, len: remoteLen },
++      };
++    }),
+     word_changes: chunks.map((_chunk, id) => ({
+       chunk: id,
+       local: { changed: [], removed_at: [] },
+@@ -431,6 +439,36 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
+   expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
+ });
+ 
++test("bulk apply over touching spans whose last deletes an unterminated final line equals clicking each", async () => {
++  const start = open(
++    await synthetic({ base: "a\nb\nc", local: "a\nB", remote: "a\nb\nc", eol: "Lf" }, [
++      { kind: "LocalOnly", base: [1, 1], side: [1, 1], remote: [1, 1] },
++      { kind: "LocalOnly", base: [2, 1], side: [2, 0], remote: [2, 1] },
++    ]),
++  );
++  function spans(merge: ApplyTarget): [number, number][] {
++    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
++  }
++
++  const bulk = run(
++    start,
++    bulkApplySteps({ target: start, side: "local", visible: allVisible(start) }),
++  );
++  const first = run(start, applyOne(start, chunkAt(start, 0), "local"));
++  const clicked = run(first, applyOne(first, chunkAt(first, 1), "local"));
++  const undone = command(bulk, undo);
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(clicked.state.sliceDoc()).toBe("a\nB");
++  expect(bulk.state.sliceDoc()).toBe("a\nB");
++  expect(spans(bulk)).toEqual(spans(clicked));
++  expect(statuses(bulk)).toEqual(statuses(clicked));
++  expect(undoDepth(bulk.state)).toBe(undoDepth(start.state) + 1);
++  expect(undone.state.sliceDoc()).toBe(start.state.sliceDoc());
++  expect(statuses(undone)).toEqual(statuses(start));
++  expect(spans(undone)).toEqual(spans(start));
++});
++
+ test("deleting all of a change's lines in the middle pane ignores it", async () => {
+   const start = await magicKeys();
+   const line = start.state.doc.line(3);
+diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
+index 4f93554..e8b1313 100644
+--- a/frontend/src/editor/internal/apply.ts
++++ b/frontend/src/editor/internal/apply.ts
+@@ -5,6 +5,7 @@ import {
+   Transaction,
+   type ChangeSpec,
+   type EditorState,
++  type StateEffect,
+   type StateField,
+   type TransactionSpec,
+ } from "@codemirror/state";
+@@ -12,14 +13,7 @@ import {
+ import type { Chunk } from "../../ipc";
+ import { setStatus, type ChunkSpan } from "./chunkField";
+ import type { Side } from "./side";
+-import {
+-  applyMode,
+-  canBulkApply,
+-  isSideOpen,
+-  statusAfterApply,
+-  statusAfterIgnore,
+-  type ChunkStatus,
+-} from "./status";
++import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
+ 
+ export type ChunkAction = {
+   readonly kind: "apply" | "ignore";
+@@ -60,22 +54,33 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
+   return wholeLines(target.state.doc, { from, to: span.to }, lines);
+ }
+ 
+-function chainedChanges(target: ApplyTarget, spans: readonly ChunkSpan[], side: Side): ChangeSet {
++type ChainedAction = {
++  readonly changes: ChangeSet;
++  readonly effects: readonly StateEffect<unknown>[];
++};
++
++function chainedChanges(target: ApplyTarget, chunks: readonly Chunk[], side: Side): ChainedAction {
+   let state = target.state;
+   let changes = ChangeSet.empty(state.doc.length);
+-  for (const { chunk } of spans) {
++  const effects: StateEffect<unknown>[] = [];
++  for (const chunk of chunks) {
+     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
+     if (span === undefined) {
+       throw new Error(`chunk ${chunk.id} is not in the chunk field`);
+     }
++    const effect = setStatus.of({
++      id: chunk.id,
++      status: statusAfterApply(chunk, span.status, side),
++    });
+     const click = state.update({
+       changes: applyChange({ ...target, state }, span, side),
+-      effects: setStatus.of({ id: chunk.id, status: statusAfterApply(chunk, span.status, side) }),
++      effects: effect,
+     });
+     changes = changes.compose(click.changes);
++    effects.push(effect);
+     state = click.state;
+   }
+-  return changes;
++  return { changes, effects };
+ }
+ 
+ function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
+@@ -85,19 +90,6 @@ function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkS
+     .filter((span) => ids.has(span.chunk.id) && isSideOpen(span.chunk, span.status, side));
+ }
+ 
+-function statusAfter(span: ChunkSpan, { kind, side }: ChunkAction): ChunkStatus {
+-  switch (kind) {
+-    case "apply":
+-      return statusAfterApply(span.chunk, span.status, side);
+-    case "ignore":
+-      return statusAfterIgnore(span.chunk, span.status, side);
+-    default: {
+-      const _exhaustive: never = kind;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+ // History restores the selection from before the action's transaction, so the cursor moves in a
+ // transaction of its own (@codemirror/commands history: HistEvent.startSelection).
+ function moveCursor(pos: number): TransactionSpec {
+@@ -125,25 +117,46 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps:
+   }
+ }
+ 
++function chosenAction(
++  target: ApplyTarget,
++  spans: readonly ChunkSpan[],
++  action: ChunkAction,
++): ChainedAction {
++  const { kind, side } = action;
++  switch (kind) {
++    case "apply":
++      return chainedChanges(
++        target,
++        spans.map((span) => span.chunk),
++        side,
++      );
++    case "ignore":
++      return {
++        changes: ChangeSet.empty(target.state.doc.length),
++        effects: spans.map((span) =>
++          setStatus.of({
++            id: span.chunk.id,
++            status: statusAfterIgnore(span.chunk, span.status, side),
++          }),
++        ),
++      };
++    default: {
++      const _exhaustive: never = kind;
++      return _exhaustive;
++    }
++  }
++}
++
+ export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
+   const spans = chosenSpans(target, action);
+   const last = spans.at(-1);
+   if (last === undefined) {
+     return [];
+   }
+-  const changes =
+-    action.kind === "apply"
+-      ? chainedChanges(target, spans, action.side)
+-      : ChangeSet.empty(target.state.doc.length);
++  const { changes, effects } = chosenAction(target, spans, action);
+   return [
+     moveCursor(last.from),
+-    {
+-      changes,
+-      effects: spans.map((span) =>
+-        setStatus.of({ id: span.chunk.id, status: statusAfter(span, action) }),
+-      ),
+-      userEvent: `yamt.${action.kind}`,
+-    },
++    { changes, effects, userEvent: `yamt.${action.kind}` },
+     recordSelection(EditorSelection.single(last.from).map(changes)),
+   ];
+ }
+@@ -157,20 +170,15 @@ export function bulkApplySteps({
+   readonly side: Side;
+   readonly visible: VisibleLines;
+ }): Steps {
+-  const spans = target.state
++  const chunks = target.state
+     .field(target.field)
+-    .filter((span) => canBulkApply(span.chunk, span.status, side));
+-  if (spans.length === 0) {
++    .filter((span) => canBulkApply(span.chunk, span.status, side))
++    .map((span) => span.chunk);
++  if (chunks.length === 0) {
+     return [];
+   }
+-  const changes = chainedChanges(target, spans, side);
+-  const action = {
+-    changes,
+-    effects: spans.map((span) =>
+-      setStatus.of({ id: span.chunk.id, status: statusAfterApply(span.chunk, span.status, side) }),
+-    ),
+-    userEvent: "yamt.apply",
+-  };
++  const { changes, effects } = chainedChanges(target, chunks, side);
++  const action = { changes, effects, userEvent: "yamt.apply" };
+   const cursor = bulkCursorTarget(target.state, visible);
+   if (cursor === null) {
+     return [action, recordSelection(target.state.selection.map(changes))];
+diff --git a/frontend/src/editor/internal/find.test.ts b/frontend/src/editor/internal/find.test.ts
+index 6a085b9..87babc6 100644
+--- a/frontend/src/editor/internal/find.test.ts
++++ b/frontend/src/editor/internal/find.test.ts
+@@ -1,8 +1,9 @@
+ import { search, SearchQuery, setSearchQuery } from "@codemirror/search";
+ import { EditorSelection, EditorState } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { findLabel, labelOutdated, stepMatch } from "./find";
++import { find, findLabel, labelOutdated, showFindSpace, stepMatch } from "./find";
+ 
+ const DOC = "foo bar\nFoo baz\nqux FOO\n";
+ const FIRST = { from: 0, to: 3 };
+@@ -66,3 +67,23 @@ test("the count is recomputed after a document, selection or query change and on
+   expect(labelOutdated(state, transactions.none.state)).toBe(false);
+   expect(findLabel(transactions.edit.state, query("foo"))).toBe("1 of 4");
+ });
++
++test("the space above the first line stays from show to hide, across edits; the last effect wins", () => {
++  function spaced(state: EditorState): boolean {
++    return state
++      .facet(EditorView.editorAttributes)
++      .some((attrs) => typeof attrs !== "function" && attrs["class"] === "find-space");
++  }
++  const state = EditorState.create({ doc: DOC, extensions: find });
++  const shown = state.update({ effects: showFindSpace.of(true) }).state;
++  const edited = shown.update({ changes: { from: 0, insert: "x" } }).state;
++  const hidden = edited.update({ effects: [showFindSpace.of(false)] }).state;
++
++  expect(spaced(state)).toBe(false);
++  expect(spaced(shown)).toBe(true);
++  expect(spaced(edited)).toBe(true);
++  expect(spaced(hidden)).toBe(false);
++  expect(
++    spaced(state.update({ effects: [showFindSpace.of(true), showFindSpace.of(false)] }).state),
++  ).toBe(false);
++});
+diff --git a/frontend/src/editor/internal/find.ts b/frontend/src/editor/internal/find.ts
+index d4a2716..68a1f57 100644
+--- a/frontend/src/editor/internal/find.ts
++++ b/frontend/src/editor/internal/find.ts
+@@ -7,7 +7,13 @@ import {
+   SearchQuery,
+   setSearchQuery,
+ } from "@codemirror/search";
+-import { EditorSelection, type EditorState, type TransactionSpec } from "@codemirror/state";
++import {
++  EditorSelection,
++  StateEffect,
++  StateField,
++  type EditorState,
++  type TransactionSpec,
++} from "@codemirror/state";
+ import {
+   EditorView,
+   keymap,
+@@ -23,6 +29,32 @@ import xIcon from "~icons/lucide/x?raw";
+ type Match = { readonly from: number; readonly to: number };
+ type Direction = "next" | "previous";
+ 
++const FIND_BAR_HEIGHT_PX = 29;
++const FIND_BAR_INSET_PX = 16;
++
++const findTheme = EditorView.theme({
++  ".cm-panels.cm-panels-top": {
++    position: "absolute",
++    left: "auto",
++    right: `${FIND_BAR_INSET_PX}px`,
++    maxWidth: `calc(100% - ${FIND_BAR_INSET_PX}px - ${FIND_BAR_INSET_PX}px)`,
++    height: `${FIND_BAR_HEIGHT_PX}px`,
++    border: "1px solid var(--color-control-border)",
++    borderTop: "none",
++    borderRadius: "0 0 6px 6px",
++  },
++  "&.find-space .cm-content": { paddingTop: `${FIND_BAR_HEIGHT_PX}px` },
++});
++
++export const showFindSpace = StateEffect.define<boolean>();
++
++export const findSpace = StateField.define<boolean>({
++  create: () => false,
++  update: (shown, tr) => tr.effects.findLast((effect) => effect.is(showFindSpace))?.value ?? shown,
++  provide: (field) =>
++    EditorView.editorAttributes.from(field, (shown) => (shown ? { class: "find-space" } : {})),
++});
++
+ function matches(state: EditorState, query: SearchQuery): Match[] {
+   const found: Match[] = [];
+   if (!query.valid) {
+@@ -222,6 +254,8 @@ class FindPanel implements Panel {
+ }
+ 
+ export const find = [
++  findTheme,
++  findSpace,
+   search({ literal: true, createPanel: (view) => new FindPanel(view) }),
+   keymap.of([
+     { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index ac7584c..e38a220 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -54,15 +54,6 @@ const darkTheme = EditorView.theme(
+       color: "var(--color-gutter-active)",
+     },
+     ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
+-    ".cm-panels.cm-panels-top": {
+-      position: "absolute",
+-      left: "auto",
+-      right: "16px",
+-      maxWidth: "calc(100% - 32px)",
+-      border: "1px solid var(--color-control-border)",
+-      borderTop: "none",
+-      borderRadius: "0 0 6px 6px",
+-    },
+     ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
+     ".cm-searchMatch.cm-searchMatch-selected": {
+       backgroundColor: "var(--color-selection)",

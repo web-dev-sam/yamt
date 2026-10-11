@@ -15,6 +15,7 @@ async function synthetic(
 ): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
+    deleted: null,
     base,
     local: "",
     remote: "",

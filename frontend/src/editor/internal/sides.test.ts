@@ -37,6 +37,7 @@ async function synthetic(
 ): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
+    deleted: null,
     ...texts,
     eol: "Lf",
     chunks: chunks.map(({ kind, base, local, remote }, id) => ({

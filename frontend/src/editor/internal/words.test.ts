@@ -42,6 +42,7 @@ function words(ranges: readonly Columns[], points: readonly Point[]): object {
 async function synthetic(): Promise<FileMergeData> {
   const record = {
     path: "synthetic.ts",
+    deleted: null,
     base: texts("old", "1"),
     local: texts("mine", "2"),
     remote: texts("theirs", "1"),

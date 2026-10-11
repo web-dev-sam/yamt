@@ -9,6 +9,7 @@ async function chunkWith(
 ): Promise<Chunk> {
   const record = {
     path: "synthetic.ts",
+    deleted: null,
     base: "",
     local: "",
     remote: "",

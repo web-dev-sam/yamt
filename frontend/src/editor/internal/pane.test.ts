@@ -119,6 +119,7 @@ async function tintedLeft(): Promise<EditorState> {
   const data = await loadFixture("selection.ts", {
     "selection.json": {
       path: "selection.ts",
+      deleted: null,
       base: "const a = old;\n",
       local: "const a = mine;\n",
       remote: "const a = theirs;\n",
