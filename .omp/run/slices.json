@@ -2,5 +2,14 @@
   "V0EditorFindDrag": {
     "owned": ["frontend/src/editor/**"],
     "readonly": ["frontend/src/ui/**", "frontend/src/ipc/**", "frontend/package.json", "docs/**"]
+  },
+  "V0RustGitView": {
+    "owned": [
+      "crates/**",
+      "src-tauri/**",
+      "frontend/fixtures/golden/**",
+      "frontend/fixtures/showcase/**"
+    ],
+    "readonly": ["frontend/src/**", "docs/**", "tests/golden/**"]
   }
 }
