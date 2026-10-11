@@ -26,6 +26,8 @@
       "docs/screenshot.png",
       "src-tauri/tauri.conf.json",
       "src-tauri/src/window.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/appimage.rs",
       "frontend/src/main.ts"
     ]
   }
