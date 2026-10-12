@@ -117,7 +117,7 @@ function arrowRow(
   layout: ButtonLayout,
   onPress: OnPress,
 ): ArrowRow {
-  const { chunk, mode, otherWaits } = arrow;
+  const { chunk, mode, decidesOther } = arrow;
   const { applyX, ignoreX, lineHeight } = layout;
   const titles = arrowTitles(arrow, platform);
   const apply: IconPress = { kind: "apply", chunk, side };
@@ -131,7 +131,7 @@ function arrowRow(
   return {
     node,
     mode,
-    otherWaits,
+    decidesOther,
     layout,
     buttons: [
       [applyButton, apply],

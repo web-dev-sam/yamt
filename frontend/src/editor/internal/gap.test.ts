@@ -235,7 +235,7 @@ test("an icon row built while the other side waited is rebuilt once that side is
     return arrow;
   }
   const built = await conflictArrow(PENDING);
-  const row = { mode: built.mode, otherWaits: built.otherWaits, layout };
+  const row = { mode: built.mode, decidesOther: built.decidesOther, layout };
 
   const ignored = await conflictArrow({ local: "pending", remote: "ignored" });
 

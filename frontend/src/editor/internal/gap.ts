@@ -11,7 +11,7 @@ export type Arrow = {
   readonly top: number;
   readonly chunk: Chunk;
   readonly mode: ApplyMode;
-  readonly otherWaits: boolean;
+  readonly decidesOther: boolean;
 };
 export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
 export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
@@ -20,7 +20,7 @@ export type ButtonLayout = {
   readonly ignoreX: number;
   readonly lineHeight: number;
 };
-export type ArrowShape = Pick<Arrow, "mode" | "otherWaits"> & { readonly layout: ButtonLayout };
+export type ArrowShape = Pick<Arrow, "mode" | "decidesOther"> & { readonly layout: ButtonLayout };
 
 const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
   replace: "Apply",
@@ -38,12 +38,12 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
       top: row[SIDE_PANE[side]].top,
       chunk: row.chunk,
       mode: applyMode(row.status, side),
-      otherWaits: decidesOtherSide(row.chunk, row.status, side),
+      decidesOther: decidesOtherSide(row.chunk, row.status, side),
     }));
 }
 
-export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): ArrowTitles {
-  if (!otherWaits) {
+export function arrowTitles({ mode, decidesOther }: Arrow, platform: string): ArrowTitles {
+  if (!decidesOther) {
     return { apply: APPLY_TITLE[mode], ignore: "Ignore" };
   }
   const click = `${modKeyName(platform)}+click`;
@@ -55,12 +55,12 @@ export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): Arro
 
 export function keepsArrowRow(
   row: ArrowShape,
-  { mode, otherWaits }: Pick<Arrow, "mode" | "otherWaits">,
+  { mode, decidesOther }: Pick<Arrow, "mode" | "decidesOther">,
   layout: ButtonLayout,
 ): boolean {
   return (
     row.mode === mode &&
-    row.otherWaits === otherWaits &&
+    row.decidesOther === decidesOther &&
     row.layout.applyX === layout.applyX &&
     row.layout.ignoreX === layout.ignoreX &&
     row.layout.lineHeight === layout.lineHeight

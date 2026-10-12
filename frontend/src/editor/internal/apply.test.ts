@@ -460,9 +460,6 @@ test("bulk apply over touching spans whose last deletes an unterminated final li
       { kind: "LocalOnly", middle: [2, 1], side: [2, 0], remote: [2, 1] },
     ]),
   );
-  function spans(merge: ApplyTarget): [number, number][] {
-    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
-  }
 
   const bulk = run(
     start,
@@ -475,12 +472,12 @@ test("bulk apply over touching spans whose last deletes an unterminated final li
   expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
   expect(clicked.state.sliceDoc()).toBe("a\nB");
   expect(bulk.state.sliceDoc()).toBe("a\nB");
-  expect(spans(bulk)).toEqual(spans(clicked));
+  expect(spanPairs(bulk)).toEqual(spanPairs(clicked));
   expect(statuses(bulk)).toEqual(statuses(clicked));
   expect(undoDepth(bulk.state)).toBe(undoDepth(start.state) + 1);
   expect(undone.state.sliceDoc()).toBe(start.state.sliceDoc());
   expect(statuses(undone)).toEqual(statuses(start));
-  expect(spans(undone)).toEqual(spans(start));
+  expect(spanPairs(undone)).toEqual(spanPairs(start));
 });
 
 test("deleting all of a change's lines in the middle pane ignores it", async () => {
@@ -951,9 +948,6 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
       ],
     ),
   );
-  function spans(merge: ApplyTarget): [number, number][] {
-    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
-  }
   const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
 
   const dragged = run(
@@ -968,7 +962,7 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
 
   expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
   expect(paneText(dragged.state)).toBe("a\nb\nR\nc\n");
-  expect(spans(dragged)).toEqual(spans(clicked));
+  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
   expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
 });
 

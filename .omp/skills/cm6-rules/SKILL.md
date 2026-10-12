@@ -23,12 +23,13 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   - Every other `to` is capped at the next span's `from`.
     So spans stay sorted and disjoint (RK14), typing on a chunk's lines stays inside, and typing on
     the next line stays outside.
-- [CM2] Within a transaction status changes only through `setStatus`, a
-  `StateEffect<{ id: ChunkId; status: ChunkStatus }>` whose status is per side:
-  `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2 #33). Spans and statuses are
-  set wholesale only by `placeSpans`, which `invertedEffects` from `@codemirror/commands` also uses
-  to snapshot the field before each action, so **undo restores status together with text**. Test:
-  apply → undo ⇒ both sides `pending`.
+- [CM2] Status is per side: `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2
+  #33). `setStatus` (`StateEffect<{ id: ChunkId; status: ChunkStatus }>`) changes it only inside the
+  throwaway steps of an action's chain (CM7); a dispatched transaction changes it only through
+  `placeSpans` (an action's final spans, or undo/redo's snapshot) or CM8's collapse of a deleted
+  block. `invertedEffects` from `@codemirror/commands` snapshots the field as `placeSpans` on every
+  text change or `placeSpans`, so **undo restores status together with text** — a dispatched
+  status-only `setStatus` would not be undoable. Test: apply → undo ⇒ both sides `pending`.
 - [CM3] Left and right panes: `EditorState.readOnly.of(true)` + `EditorView.editable.of(false)`;
   no `history()`. Their decorations come from the fixed `local`/`remote` ranges (never remapped)
   plus a read-only status mirror the controller pushes after each center transaction (1.4).

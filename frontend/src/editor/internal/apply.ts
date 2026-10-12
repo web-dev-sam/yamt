@@ -65,7 +65,7 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
 
 type ChainedAction = {
   readonly changes: ChangeSet;
-  readonly effects: readonly StateEffect<unknown>[];
+  readonly effect: StateEffect<readonly ChunkSpan[]>;
 };
 
 type SideDecision = {
@@ -82,7 +82,6 @@ const OPPOSITE: Readonly<Record<ChunkAction["kind"], ChunkAction["kind"]>> = {
 function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[]): ChainedAction {
   let state = target.state;
   let changes = ChangeSet.empty(state.doc.length);
-  const effects: StateEffect<unknown>[] = [];
   for (const { chunk, kind, side } of decisions) {
     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
     if (span === undefined) {
@@ -93,17 +92,15 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
         kind === "apply"
           ? statusAfterApply(chunk, span.status, side)
           : statusAfterIgnore(chunk, span.status, side);
-      const effect = setStatus.of({ id: chunk.id, status });
       const click = state.update({
         changes: kind === "apply" ? applyChange({ ...target, state }, span, side) : [],
-        effects: effect,
+        effects: setStatus.of({ id: chunk.id, status }),
       });
       changes = changes.compose(click.changes);
-      effects.push(effect);
       state = click.state;
     }
   }
-  return { changes, effects: [...effects, placeSpans.of(state.field(target.field))] };
+  return { changes, effect: placeSpans.of(state.field(target.field)) };
 }
 
 function sideDecisions(
@@ -157,13 +154,13 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Rea
   if (last === undefined) {
     return [];
   }
-  const { changes, effects } = chainedChanges(
+  const { changes, effect } = chainedChanges(
     target,
     spans.flatMap((span) => sideDecisions(span, action, reach)),
   );
   return [
     moveCursor(last.from),
-    { changes, effects, userEvent: `yamt.${action.kind}` },
+    { changes, effects: effect, userEvent: `yamt.${action.kind}` },
     recordSelection(EditorSelection.single(last.from).map(changes)),
   ];
 }
@@ -184,8 +181,8 @@ export function bulkApplySteps({
   if (decisions.length === 0) {
     return [];
   }
-  const { changes, effects } = chainedChanges(target, decisions);
-  const action = { changes, effects, userEvent: "yamt.apply" };
+  const { changes, effect } = chainedChanges(target, decisions);
+  const action = { changes, effects: effect, userEvent: "yamt.apply" };
   const cursor = bulkCursorTarget(target.state, visible);
   if (cursor === null) {
     return [action, recordSelection(target.state.selection.map(changes))];

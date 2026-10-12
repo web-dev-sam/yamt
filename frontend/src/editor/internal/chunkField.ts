@@ -119,7 +119,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
     },
     provide: (field) =>
       invertedEffects.of((tr) =>
-        tr.docChanged || tr.effects.some((effect) => effect.is(setStatus) || effect.is(placeSpans))
+        tr.docChanged || tr.effects.some((effect) => effect.is(placeSpans))
           ? [placeSpans.of(tr.startState.field(field))]
           : [],
       ),
