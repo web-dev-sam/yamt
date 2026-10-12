@@ -3,8 +3,8 @@ import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import { SIDE_PANE, type ChunkRow } from "./geometry";
 import { modKeyName } from "./modClick";
-import { otherSide, type Side } from "./side";
-import { applyMode, isSideOpen, type ApplyMode } from "./status";
+import type { Side } from "./side";
+import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
 export type Arrow = {
@@ -15,6 +15,12 @@ export type Arrow = {
 };
 export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
 export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
+export type ButtonLayout = {
+  readonly applyX: number;
+  readonly ignoreX: number;
+  readonly lineHeight: number;
+};
+export type ArrowShape = Pick<Arrow, "mode" | "otherWaits"> & { readonly layout: ButtonLayout };
 
 const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
   replace: "Apply",
@@ -32,8 +38,7 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
       top: row[SIDE_PANE[side]].top,
       chunk: row.chunk,
       mode: applyMode(row.status, side),
-      otherWaits:
-        row.chunk.kind === "Conflict" && isSideOpen(row.chunk, row.status, otherSide(side)),
+      otherWaits: decidesOtherSide(row.chunk, row.status, side),
     }));
 }
 
@@ -46,6 +51,20 @@ export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): Arro
     apply: `${APPLY_TITLE[mode]}\n${click}: also ignore the other side`,
     ignore: `Ignore\n${click}: also take the other side`,
   };
+}
+
+export function keepsArrowRow(
+  row: ArrowShape,
+  { mode, otherWaits }: Pick<Arrow, "mode" | "otherWaits">,
+  layout: ButtonLayout,
+): boolean {
+  return (
+    row.mode === mode &&
+    row.otherWaits === otherWaits &&
+    row.layout.applyX === layout.applyX &&
+    row.layout.ignoreX === layout.ignoreX &&
+    row.layout.lineHeight === layout.lineHeight
+  );
 }
 
 export function bandPaints(

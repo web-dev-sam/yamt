@@ -3,7 +3,7 @@ import { keymap, type EditorView } from "@codemirror/view";
 
 import type { ChunkAction } from "./apply";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
-import { isModHeld } from "./modClick";
+import { isModHeld, modClickAction } from "./modClick";
 import {
   afterDecisionFocus,
   alone,
@@ -219,10 +219,15 @@ export class SideFocus {
     if (event.button !== 0 || event.target === view.scrollDOM) {
       return;
     }
-    const id = changeAt(this.#sources.rows(), side, event.clientY - view.documentTop);
-    if (id !== null && !this.#sources.readOnly && isModHeld(event, platform)) {
+    const rows = this.#sources.rows();
+    const y = event.clientY - view.documentTop;
+    if (
+      !this.#sources.readOnly &&
+      modClickAction(rows, { side, y, click: event, platform }) !== null
+    ) {
       return;
     }
+    const id = changeAt(rows, side, y);
     const mark: SideMark = id === null ? alone(this.#mark(side)) : { kind: "change", id };
     view.dispatch({ effects: setMark.of(mark) });
   }

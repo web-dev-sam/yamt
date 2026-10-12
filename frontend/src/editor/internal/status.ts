@@ -27,6 +27,10 @@ export function canBulkApply(chunk: Chunk, status: ChunkStatus, side: Side): boo
   return chunk.kind !== "Conflict" && isSideOpen(chunk, status, side);
 }
 
+export function decidesOtherSide(chunk: Chunk, status: ChunkStatus, side: Side): boolean {
+  return chunk.kind === "Conflict" && isSideOpen(chunk, status, otherSide(side));
+}
+
 export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
   return status[otherSide(side)] === "applied" ? "append" : "replace";
 }

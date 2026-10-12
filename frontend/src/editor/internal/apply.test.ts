@@ -971,3 +971,75 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
   expect(spans(dragged)).toEqual(spans(clicked));
   expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
 });
+
+function spanPairs(merge: ApplyTarget): [number, number][] {
+  return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
+}
+
+test("a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each", async () => {
+  const start = open(
+    await synthetic(
+      {
+        middle: "a\nb\nc\n",
+        local: "a\nL1\nL2\nc\n",
+        remote: "a\nR1\nR2\nc\n",
+        eol: "Lf",
+      },
+      [
+        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
+        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
+      ],
+    ),
+  );
+  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
+
+  const dragged = run(
+    start,
+    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
+  );
+  const first = run(
+    start,
+    modOne(start, { kind: "ignore", chunk: chunkAt(start, 0), side: "local" }),
+  );
+  const clicked = run(
+    first,
+    modOne(first, { kind: "ignore", chunk: chunkAt(first, 1), side: "local" }),
+  );
+
+  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+  expect(paneText(clicked.state)).toBe("a\nR1\nR2\nc\n");
+  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
+  expect(spanPairs(clicked)).toEqual([
+    [2, 5],
+    [5, 8],
+  ]);
+  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
+  expect(statuses(dragged)).toEqual(statuses(clicked));
+});
+
+test("an apply drag over a change and a touching zero-line conflict equals clicking each", async () => {
+  const start = open(
+    await synthetic(
+      { middle: "a\nb\nc\n", local: "a\nB\nL\nc\n", remote: "a\nb\nR\nc\n", eol: "Lf" },
+      [
+        { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
+        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
+      ],
+    ),
+  );
+  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
+
+  const dragged = run(start, actionSteps(start, { kind: "apply", side: "local", chunks }, "side"));
+  const first = run(start, applyOne(start, chunkAt(start, 0), "local"));
+  const clicked = run(first, applyOne(first, chunkAt(first, 1), "local"));
+
+  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+  expect(paneText(clicked.state)).toBe("a\nB\nL\nc\n");
+  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
+  expect(spanPairs(clicked)).toEqual([
+    [2, 4],
+    [4, 6],
+  ]);
+  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
+  expect(statuses(dragged)).toEqual(statuses(clicked));
+});

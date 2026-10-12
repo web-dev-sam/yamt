@@ -16,13 +16,13 @@ const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
   [SECONDARY_BUTTON]: "ignore",
 };
 
-// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
-// Ctrl+click is the system's secondary click.
+// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
 function isMac(platform: string): boolean {
   return /Mac/.test(platform);
 }
 
 export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
+  // On macOS Ctrl+click is the system's secondary click.
   return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
 }
 

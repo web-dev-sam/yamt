@@ -2,7 +2,15 @@ import { expect, test } from "vitest";
 
 import { bandPath } from "../../connectors";
 import { loadFixture, type Chunk } from "../../ipc";
-import { arrowTitles, bandPaints, crossesStrip, gapArrows, type ArrowTitles } from "./gap";
+import {
+  arrowTitles,
+  bandPaints,
+  crossesStrip,
+  gapArrows,
+  keepsArrowRow,
+  type Arrow,
+  type ArrowTitles,
+} from "./gap";
 import type { ChunkRow } from "./geometry";
 import type { Side } from "./side";
 import { PENDING, type ChunkStatus } from "./status";
@@ -213,4 +221,25 @@ test("a change that is not a conflict never has the hint, even when both sides c
       expect(title).toEqual({ apply: "Apply", ignore: "Ignore" });
     }
   }
+});
+
+test("an icon row built while the other side waited is rebuilt once that side is ignored", async () => {
+  const layout = { applyX: 0, ignoreX: 16, lineHeight: LINE_PX };
+  async function conflictArrow(conflictStatus: ChunkStatus): Promise<Arrow> {
+    const arrow = gapArrows(await magicRows(conflictStatus), "local").find(
+      ({ chunk }) => chunk.id === CONFLICT_ID,
+    );
+    if (arrow === undefined) {
+      throw new Error("no arrow for the conflict");
+    }
+    return arrow;
+  }
+  const built = await conflictArrow(PENDING);
+  const row = { mode: built.mode, otherWaits: built.otherWaits, layout };
+
+  const ignored = await conflictArrow({ local: "pending", remote: "ignored" });
+
+  expect(ignored.mode).toBe(row.mode);
+  expect(keepsArrowRow(row, await conflictArrow(PENDING), { ...layout })).toBe(true);
+  expect(keepsArrowRow(row, ignored, layout)).toBe(false);
 });

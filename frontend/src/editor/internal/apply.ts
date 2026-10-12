@@ -11,9 +11,16 @@ import {
 } from "@codemirror/state";
 
 import type { Chunk } from "../../ipc";
-import { setStatus, type ChunkSpan } from "./chunkField";
+import { placeSpans, setStatus, type ChunkSpan } from "./chunkField";
 import { otherSide, type Side } from "./side";
-import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
+import {
+  applyMode,
+  canBulkApply,
+  decidesOtherSide,
+  isSideOpen,
+  statusAfterApply,
+  statusAfterIgnore,
+} from "./status";
 
 export type ChunkAction = {
   readonly kind: "apply" | "ignore";
@@ -96,12 +103,16 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
       state = click.state;
     }
   }
-  return { changes, effects };
+  return { changes, effects: [...effects, placeSpans.of(state.field(target.field))] };
 }
 
-function sideDecisions(chunk: Chunk, { kind, side }: ChunkAction, reach: Reach): SideDecision[] {
+function sideDecisions(
+  { chunk, status }: ChunkSpan,
+  { kind, side }: ChunkAction,
+  reach: Reach,
+): SideDecision[] {
   const own = { chunk, kind, side };
-  return reach === "conflict" && chunk.kind === "Conflict"
+  return reach === "conflict" && decidesOtherSide(chunk, status, side)
     ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
     : [own];
 }
@@ -148,7 +159,7 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Rea
   }
   const { changes, effects } = chainedChanges(
     target,
-    spans.flatMap((span) => sideDecisions(span.chunk, action, reach)),
+    spans.flatMap((span) => sideDecisions(span, action, reach)),
   );
   return [
     moveCursor(last.from),

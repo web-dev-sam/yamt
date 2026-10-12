@@ -13,9 +13,11 @@ import {
   bandPaints,
   crossesStrip,
   gapArrows,
+  keepsArrowRow,
   type Arrow,
-  type ArrowTitles,
+  type ArrowShape,
   type BandPaint,
+  type ButtonLayout,
 } from "./gap";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import type { Side } from "./side";
@@ -29,23 +31,15 @@ export type IconPress = {
 
 type OnPress = (press: IconPress, event: PointerEvent) => void;
 type GapPanes = { readonly left: EditorView; readonly right: EditorView };
-type ButtonLayout = {
-  readonly applyX: number;
-  readonly ignoreX: number;
-  readonly lineHeight: number;
-};
-type PlacedArrow = { readonly arrow: Arrow; readonly titles: ArrowTitles; readonly y: number };
+type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
 type ArrowPaint = {
   readonly placed: readonly PlacedArrow[];
   readonly layout: ButtonLayout;
   readonly onPress: OnPress;
 };
 type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
-type ArrowRow = {
+type ArrowRow = ArrowShape & {
   readonly node: SVGGElement;
-  readonly mode: ApplyMode;
-  readonly titles: ArrowTitles;
-  readonly layout: ButtonLayout;
   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
 };
 
@@ -115,12 +109,17 @@ function actionButton(
 }
 
 function arrowRow(
-  { arrow, titles, side }: Pick<PlacedArrow, "arrow" | "titles"> & { readonly side: Side },
+  {
+    arrow,
+    side,
+    platform,
+  }: { readonly arrow: Arrow; readonly side: Side; readonly platform: string },
   layout: ButtonLayout,
   onPress: OnPress,
 ): ArrowRow {
-  const { chunk, mode } = arrow;
+  const { chunk, mode, otherWaits } = arrow;
   const { applyX, ignoreX, lineHeight } = layout;
+  const titles = arrowTitles(arrow, platform);
   const apply: IconPress = { kind: "apply", chunk, side };
   const ignore: IconPress = { kind: "ignore", chunk, side };
   const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
@@ -132,24 +131,13 @@ function arrowRow(
   return {
     node,
     mode,
-    titles,
+    otherWaits,
     layout,
     buttons: [
       [applyButton, apply],
       [ignoreButton, ignore],
     ],
   };
-}
-
-function sameShape(row: ArrowRow, { arrow, titles }: PlacedArrow, layout: ButtonLayout): boolean {
-  return (
-    row.mode === arrow.mode &&
-    row.titles.apply === titles.apply &&
-    row.titles.ignore === titles.ignore &&
-    row.layout.applyX === layout.applyX &&
-    row.layout.ignoreX === layout.ignoreX &&
-    row.layout.lineHeight === layout.lineHeight
-  );
 }
 
 function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
@@ -214,8 +202,7 @@ class GapStrip {
     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
     const placed = gapArrows(rows, this.#side)
       .map((arrow) => ({ arrow, y: arrow.top + shift }))
-      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height))
-      .map((at) => ({ ...at, titles: arrowTitles(at.arrow, this.#platform) }));
+      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
     const layout = { applyX, ignoreX, lineHeight };
     return { bands, arrows: { placed, layout, onPress: this.#onPress } };
   }
@@ -248,12 +235,11 @@ class GapStrip {
     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
       row.node.remove();
     });
-    const nodes = placed.map((at) => {
-      const { arrow, y } = at;
+    const nodes = placed.map(({ arrow, y }) => {
       let row = this.#arrows.get(arrow.chunk.id);
-      if (row === undefined || !sameShape(row, at, layout)) {
+      if (row === undefined || !keepsArrowRow(row, arrow, layout)) {
         row?.node.remove();
-        row = arrowRow({ ...at, side: this.#side }, layout, onPress);
+        row = arrowRow({ arrow, side: this.#side, platform: this.#platform }, layout, onPress);
         this.#arrows.set(arrow.chunk.id, row);
       }
       row.node.setAttribute("transform", `translate(0 ${y})`);
