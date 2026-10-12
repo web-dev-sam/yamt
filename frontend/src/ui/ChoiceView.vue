@@ -42,14 +42,17 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
 </script>
 
 <template>
-  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
-    <header class="h-10 shrink-0 border-b border-separator bg-window" />
+  <div
+    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+    :class="{ invisible: !shown }"
+  >
+    <header class="h-10 shrink-0" />
     <section
-      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px bg-separator"
+      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
     >
       <template v-for="column in columns" :key="column.side">
         <div
-          class="row-start-1 flex min-w-0 items-center border-b border-separator bg-window px-3 py-1.5"
+          class="row-start-1 flex min-w-0 items-center border-b border-separator bg-panel px-3 py-1.5"
           :class="column.gridColumn"
         >
           <h2 class="min-w-0 truncate text-fg-muted" :title="column.headerTooltip">
@@ -57,7 +60,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
           </h2>
         </div>
         <div
-          class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-editor p-3"
+          class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-panel p-3"
           :class="column.gridColumn"
         >
           <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
@@ -72,7 +75,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
         </div>
       </template>
       <div
-        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
+        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
       >
         <h2 class="text-fg-muted">Result</h2>
         <button
@@ -84,7 +87,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
           Reset
         </button>
       </div>
-      <p class="col-start-2 row-start-2 bg-editor p-3 wrap-break-word" role="status">
+      <p class="col-start-2 row-start-2 bg-panel p-3 wrap-break-word" role="status">
         {{ result }}
       </p>
     </section>

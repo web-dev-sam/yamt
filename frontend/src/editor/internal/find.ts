@@ -42,7 +42,7 @@ const findTheme = EditorView.theme({
     right: `${FIND_BAR_INSET_PX}px`,
     maxWidth: `calc(100% - ${FIND_BAR_INSET_PX}px - ${FIND_BAR_INSET_PX}px)`,
     height: `${FIND_BAR_HEIGHT_PX}px`,
-    border: "1px solid var(--color-control-border)",
+    border: "1px solid var(--color-separator)",
     borderTop: "none",
     borderRadius: "0 0 6px 6px",
   },

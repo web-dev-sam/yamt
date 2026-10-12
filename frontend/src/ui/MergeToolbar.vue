@@ -56,7 +56,7 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
 </script>
 
 <template>
-  <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
+  <header class="flex h-10 shrink-0 items-center gap-1 px-2">
     <button
       type="button"
       :disabled="summary === null"

@@ -1,0 +1,349 @@
+diff --git i/frontend/src/editor/internal/find.ts w/frontend/src/editor/internal/find.ts
+index 68a1f57..bcaf664 100644
+--- i/frontend/src/editor/internal/find.ts
++++ w/frontend/src/editor/internal/find.ts
+@@ -39,7 +39,7 @@ const findTheme = EditorView.theme({
+     right: `${FIND_BAR_INSET_PX}px`,
+     maxWidth: `calc(100% - ${FIND_BAR_INSET_PX}px - ${FIND_BAR_INSET_PX}px)`,
+     height: `${FIND_BAR_HEIGHT_PX}px`,
+-    border: "1px solid var(--color-control-border)",
++    border: "1px solid var(--color-separator)",
+     borderTop: "none",
+     borderRadius: "0 0 6px 6px",
+   },
+diff --git i/frontend/src/editor/internal/pane.ts w/frontend/src/editor/internal/pane.ts
+index 2b16460..ad721c5 100644
+--- i/frontend/src/editor/internal/pane.ts
++++ w/frontend/src/editor/internal/pane.ts
+@@ -30,7 +30,7 @@ const darkTheme = EditorView.theme(
+   {
+     "&": {
+       height: "100%",
+-      backgroundColor: "var(--color-editor)",
++      backgroundColor: "var(--color-panel)",
+       color: "var(--color-code)",
+       fontSize: "13px",
+     },
+@@ -45,7 +45,7 @@ const darkTheme = EditorView.theme(
+       { backgroundColor: "var(--color-selection)" },
+     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
+     ".cm-gutters": {
+-      backgroundColor: "var(--color-editor)",
++      backgroundColor: "var(--color-panel)",
+       color: "var(--color-gutter)",
+       border: "none",
+     },
+@@ -53,7 +53,7 @@ const darkTheme = EditorView.theme(
+       backgroundColor: "var(--color-active-line)",
+       color: "var(--color-gutter-active)",
+     },
+-    ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
++    ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
+     ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
+     ".cm-searchMatch.cm-searchMatch-selected": {
+       backgroundColor: "var(--color-selection)",
+diff --git i/frontend/src/style.css w/frontend/src/style.css
+index d18eaa1..fb91fce 100644
+--- i/frontend/src/style.css
++++ w/frontend/src/style.css
+@@ -6,28 +6,33 @@
+   --font-sans: system-ui, sans-serif;
+   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+ 
+-  --color-window: #2b2d30;
+-  --color-editor: #1e1f22;
+-  --color-separator: #393b40;
+-  --color-control-border: #4e5157;
+-  --color-fg: #dfe1e5;
+-  --color-fg-muted: #868a91;
++  --radius-island: 10px;
++  --spacing-island: 5px;
++
++  --color-window: #26282c;
++  --color-panel: #191a1c;
++  --color-panel-inline: #212326;
++  --color-separator: #26282c;
++  --color-control-border: #40434a;
++  --color-fg: #d1d3d9;
++  --color-fg-muted: #73767c;
+   --color-code: #bcbec4;
+   --color-gutter: #4b5059;
+   --color-gutter-active: #a1a3ab;
+-  --color-active-line: #26282e;
++  --color-active-line: #1f2024;
+   --color-selection: #214283;
+   --color-caret: #ced0d6;
+-  --color-hover: #393b40;
+-  --color-row-selected: #2e436e;
+-  --color-primary: #3574f0;
++  --color-hover: #ffffff17;
++  --color-row-hover: #ffffff10;
++  --color-row-selected: #2a4371;
++  --color-primary: #3871e1;
+   --color-on-primary: #ffffff;
+-  --color-problem: #402929;
+-  --color-problem-border: #5e3838;
+-  --color-success: #253627;
+-  --color-success-border: #375239;
+-  --color-info: #25324d;
+-  --color-info-border: #35538f;
++  --color-problem: #56272b;
++  --color-problem-border: #80383e;
++  --color-success: #203b2a;
++  --color-success-border: #29583c;
++  --color-info: #233558;
++  --color-info-border: #2e4d89;
+   --color-search-match: #2d543f;
+ 
+   --color-syntax-keyword: #cf8e6d;
+diff --git i/frontend/src/ui/App.vue w/frontend/src/ui/App.vue
+index 4e86329..946963e 100644
+--- i/frontend/src/ui/App.vue
++++ w/frontend/src/ui/App.vue
+@@ -41,15 +41,15 @@ onMounted(() => {
+ </script>
+ 
+ <template>
+-  <div class="flex h-full">
++  <div class="flex h-full gap-island p-island">
+     <FileList :files="files" :active="active" @select="open" />
+-    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
++    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+       <p
+         v-else-if="allResolved"
+         role="status"
+-        class="shrink-0 border-b border-success-border bg-success px-3 py-2 text-fg"
++        class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
+       >
+         All files are resolved. Close the window to finish the merge.
+       </p>
+diff --git i/frontend/src/ui/ChoiceView.vue w/frontend/src/ui/ChoiceView.vue
+index 2d1894d..64f8cbe 100644
+--- i/frontend/src/ui/ChoiceView.vue
++++ w/frontend/src/ui/ChoiceView.vue
+@@ -42,14 +42,17 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+ </script>
+ 
+ <template>
+-  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col" :class="{ invisible: !shown }">
+-    <header class="h-10 shrink-0 border-b border-separator bg-window" />
++  <div
++    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
++    :class="{ invisible: !shown }"
++  >
++    <header class="h-10 shrink-0" />
+     <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px bg-separator"
++      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
+     >
+       <template v-for="column in columns" :key="column.side">
+         <div
+-          class="row-start-1 flex min-w-0 items-center border-b border-separator bg-window px-3 py-1.5"
++          class="row-start-1 flex min-w-0 items-center border-b border-separator bg-panel px-3 py-1.5"
+           :class="column.gridColumn"
+         >
+           <h2 class="min-w-0 truncate text-fg-muted" :title="column.headerTooltip">
+@@ -57,7 +60,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+           </h2>
+         </div>
+         <div
+-          class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-editor p-3"
++          class="row-start-2 flex min-w-0 flex-col items-start gap-3 bg-panel p-3"
+           :class="column.gridColumn"
+         >
+           <p class="wrap-break-word" :title="column.tooltip">{{ column.sentence }}</p>
+@@ -72,7 +75,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+         </div>
+       </template>
+       <div
+-        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
+       >
+         <h2 class="text-fg-muted">Result</h2>
+         <button
+@@ -84,7 +87,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+           Reset
+         </button>
+       </div>
+-      <p class="col-start-2 row-start-2 bg-editor p-3 wrap-break-word" role="status">
++      <p class="col-start-2 row-start-2 bg-panel p-3 wrap-break-word" role="status">
+         {{ result }}
+       </p>
+     </section>
+diff --git i/frontend/src/ui/FileList.vue w/frontend/src/ui/FileList.vue
+index 29c4ce6..86f1ab0 100644
+--- i/frontend/src/ui/FileList.vue
++++ w/frontend/src/ui/FileList.vue
+@@ -11,17 +11,21 @@ const emit = defineEmits<{ select: [path: string] }>();
+ const list = useTemplateRef<HTMLElement>("list");
+ const handle = useTemplateRef<HTMLDivElement>("handle");
+ const width = shallowRef<number | null>(null);
++let grabOffset = 0;
+ 
+ const widthStyle = computed(() => (width.value === null ? {} : { width: `${width.value}px` }));
+ 
+ function startResize(event: PointerEvent): void {
+   event.preventDefault();
++  if (list.value !== null) {
++    grabOffset = event.clientX - list.value.getBoundingClientRect().right;
++  }
+   handle.value?.setPointerCapture(event.pointerId);
+ }
+ 
+ function resize(event: PointerEvent): void {
+   if (list.value !== null && handle.value?.hasPointerCapture(event.pointerId) === true) {
+-    width.value = event.clientX - list.value.getBoundingClientRect().left;
++    width.value = event.clientX - grabOffset - list.value.getBoundingClientRect().left;
+   }
+ }
+ </script>
+@@ -29,17 +33,17 @@ function resize(event: PointerEvent): void {
+ <template>
+   <aside
+     ref="list"
+-    class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col border-r border-separator bg-window"
++    class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col rounded-island bg-panel pb-1"
+     :style="widthStyle"
+   >
+     <h2 class="px-3 py-2 font-semibold">Files</h2>
+-    <ul role="listbox" aria-label="Conflicted files" class="flex-1 overflow-y-auto">
++    <ul role="listbox" aria-label="Conflicted files" class="mr-0.5 flex-1 overflow-y-auto">
+       <li
+         v-for="file in files"
+         :key="file.path"
+         role="option"
+         :aria-selected="file.path === active"
+-        class="mx-1 flex cursor-default items-center gap-2 rounded px-2 py-1 hover:bg-hover aria-selected:bg-row-selected"
++        class="mx-1 flex cursor-default items-center gap-2 rounded px-2 py-1 hover:bg-row-hover aria-selected:bg-row-selected"
+         @click="emit('select', file.path)"
+       >
+         <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
+@@ -60,7 +64,7 @@ function resize(event: PointerEvent): void {
+       role="separator"
+       aria-orientation="vertical"
+       aria-label="File list width"
+-      class="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize"
++      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
+       @pointerdown="startResize"
+       @pointermove="resize"
+     />
+diff --git i/frontend/src/ui/MergeToolbar.vue w/frontend/src/ui/MergeToolbar.vue
+index efc4b20..b1ec683 100644
+--- i/frontend/src/ui/MergeToolbar.vue
++++ w/frontend/src/ui/MergeToolbar.vue
+@@ -56,7 +56,7 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
+ </script>
+ 
+ <template>
+-  <header class="flex h-10 shrink-0 items-center gap-1 border-b border-separator bg-window px-2">
++  <header class="flex h-10 shrink-0 items-center gap-1 px-2">
+     <button
+       type="button"
+       :disabled="summary === null"
+diff --git i/frontend/src/ui/MergeView.vue w/frontend/src/ui/MergeView.vue
+index b3f05ce..6acaf3d 100644
+--- i/frontend/src/ui/MergeView.vue
++++ w/frontend/src/ui/MergeView.vue
+@@ -101,7 +101,7 @@ function markResolved(): void {
+ 
+ <template>
+   <div
+-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
++    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+     :class="{ 'invisible [content-visibility:hidden]': !shown }"
+   >
+     <MergeToolbar
+@@ -113,14 +113,15 @@ function markResolved(): void {
+       @redo="redo"
+       @finish="markResolved"
+     />
+-    <header v-else class="h-10 shrink-0 border-b border-separator bg-window" />
++    <header v-else class="h-10 shrink-0" />
++    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
+     <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
++      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+     >
+       <div
+         v-for="column in columns"
+         :key="column.side"
+-        class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++        class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
+         :class="column.gridColumn"
+       >
+         <h2 class="min-w-0 truncate text-fg-muted" :title="column.tooltip">{{ column.text }}</h2>
+@@ -133,9 +134,9 @@ function markResolved(): void {
+           {{ KEEP }}
+         </button>
+       </div>
+-      <div class="col-start-2 row-start-1 border-b border-separator bg-window" />
++      <div class="col-start-2 row-start-1 border-b border-separator" />
+       <div
+-        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
++        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
+       >
+         <h2 class="text-fg-muted">Result</h2>
+         <button
+@@ -147,7 +148,7 @@ function markResolved(): void {
+           Reset
+         </button>
+       </div>
+-      <div class="col-start-4 row-start-1 border-b border-separator bg-window" />
++      <div class="col-start-4 row-start-1 border-b border-separator" />
+ 
+       <div
+         ref="left"
+diff --git i/frontend/src/ui/NoticeBar.vue w/frontend/src/ui/NoticeBar.vue
+index 03ae452..8f54d3d 100644
+--- i/frontend/src/ui/NoticeBar.vue
++++ w/frontend/src/ui/NoticeBar.vue
+@@ -17,7 +17,7 @@ const rows = computed(() =>
+ </script>
+ 
+ <template>
+-  <ul role="status" class="shrink-0 border-b border-info-border bg-info text-fg">
++  <ul role="status" class="shrink-0 rounded-md border border-info-border bg-info text-fg">
+     <li v-for="row in rows" :key="row.path" class="flex items-start gap-2 px-3 py-2">
+       <p class="min-w-0 flex-1 wrap-break-word">{{ row.text }}</p>
+       <button
+diff --git i/frontend/src/ui/ProblemBar.vue w/frontend/src/ui/ProblemBar.vue
+index f9178aa..72d365a 100644
+--- i/frontend/src/ui/ProblemBar.vue
++++ w/frontend/src/ui/ProblemBar.vue
+@@ -14,7 +14,7 @@ const text = computed(() => problemText(props.problem));
+ <template>
+   <div
+     role="alert"
+-    class="flex shrink-0 items-start gap-2 border-b border-problem-border bg-problem px-3 py-2 text-fg"
++    class="flex shrink-0 items-start gap-2 rounded-md border border-problem-border bg-problem px-3 py-2 text-fg"
+   >
+     <p class="min-w-0 flex-1 wrap-break-word whitespace-pre-line">{{ text }}</p>
+     <button
+diff --git i/frontend/src/ui/QuestionDialog.vue w/frontend/src/ui/QuestionDialog.vue
+index 96bac44..c4112b5 100644
+--- i/frontend/src/ui/QuestionDialog.vue
++++ w/frontend/src/ui/QuestionDialog.vue
+@@ -24,7 +24,7 @@ function cancel(event: Event): void {
+   <dialog
+     ref="dialog"
+     aria-labelledby="question-title"
+-    class="m-auto w-[30rem] rounded-lg border border-separator bg-window p-5 text-fg"
++    class="m-auto w-[30rem] rounded-lg border border-control-border bg-panel p-5 text-fg"
+     @cancel="cancel"
+   >
+     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
+diff --git i/src-tauri/src/window.rs w/src-tauri/src/window.rs
+index 3ce11a2..0a4c6f6 100644
+--- i/src-tauri/src/window.rs
++++ w/src-tauri/src/window.rs
+@@ -17,7 +17,7 @@ const HEIGHT: f64 = 1000.0;
+ const MIN_WIDTH: f64 = 900.0;
+ const MIN_HEIGHT: f64 = 600.0;
+ // `--color-window` in frontend/src/style.css.
+-const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
++const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);
+ const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
+ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+ const PAGE_PING: &str = "true";

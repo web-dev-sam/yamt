@@ -24,7 +24,7 @@ function cancel(event: Event): void {
   <dialog
     ref="dialog"
     aria-labelledby="question-title"
-    class="m-auto w-[30rem] rounded-lg border border-separator bg-window p-5 text-fg"
+    class="m-auto w-[30rem] rounded-lg border border-control-border bg-panel p-5 text-fg"
     @cancel="cancel"
   >
     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>

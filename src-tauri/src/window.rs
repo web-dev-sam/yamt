@@ -17,7 +17,7 @@ const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
 // `--color-window` in frontend/src/style.css.
-const BACKGROUND: Color = Color(0x2b, 0x2d, 0x30, 0xff);
+const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);
 const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
