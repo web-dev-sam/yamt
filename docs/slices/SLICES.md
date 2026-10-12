@@ -195,6 +195,24 @@ configurable keys, toolbar changes.
 | 1'  | build 3.K (`briefs/3.K-keyboard-focus.md`; `frontend/src/editor/**`, `frontend/src/ui/**`)                                             | web-impl | running | `KeyboardFocusBuild`, base `7637790`+brief commit                                                                                                                                                                                                                                                                                                                                                         |
 | 1'' | verifier: `just check`, `just mutants 7844ebd`, WebKit run with pointer clicks and key presses on the shown file                       | verifier | waiting |                                                                                                                                                                                                                                                                                                                                                                                                           |
 
+## Theme — WebStorm's Islands Dark (session 7, branch `theme/islands-dark`)
+
+Intent (owner 2026-10-12, #592): on a new branch, copy WebStorm's dark theme whose editor
+background is #191A1C — WebStorm 2026.2's "Islands Dark", values read from the owner's installed
+IDE. Owner answer #593: colours plus the island shapes (lighter frame, rounded dark panels, small
+gaps). Plan §2 #24 amended. Another agent works on a copy in `../yamt` (#594); its keyboard work
+(row 1' above) is not live in this copy.
+
+Acceptance: in WebKit, the window shows Islands Dark's colours (panels #191A1C on a #26282C frame,
+text #D1D3D9) with the file list and the merge view as 10 px rounded panels 5 px apart; syntax and
+change colours unchanged; scrolling no slower than before (scroll timing before/after).
+Non-goals: light theme, inactive-window dimming, toolbar gradient, styled scrollbars, behaviour.
+
+| row | slice                                                                     | owner    | status  | evidence                                       |
+| --- | ------------------------------------------------------------------------- | -------- | ------- | ---------------------------------------------- |
+| 1   | 3.T Islands Dark palette and island shapes (`briefs/3.T-islands-dark.md`) | web-impl | running | `IslandsDarkTheme`, base `19bf6ef`+docs commit |
+| 1'  | verifier: `just check`, `just mutants <base>`, WebKit screenshots         | verifier | waiting |                                                |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
