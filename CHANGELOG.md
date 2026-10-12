@@ -5,6 +5,19 @@ All notable changes to yamt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Keyboard focus in the side panes: click a side or one of its changes (an outline shows which), then
+  Enter or Space applies the change, Backspace, Delete or x ignores it, Up and Down move between the
+  changes still waiting on that side, Left and Right switch sides (onto the other half of the same
+  conflict when it is still waiting). After a decision the next waiting change is focused; when a
+  side has nothing left, the other side takes the keyboard. Ctrl+scroll (Cmd+scroll on macOS) over a
+  side steps through its changes.
+- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS) undo and redo from anywhere in the window, not only
+  in the result pane.
+
 ## [0.1.0] - 2026-10-11
 
 ### Added
@@ -40,4 +53,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
+[Unreleased]: ../../compare/v0.1.1...HEAD
 [0.1.0]: ../../releases/tag/v0.1.0
