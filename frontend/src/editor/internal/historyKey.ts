@@ -7,7 +7,7 @@ type HistoryKey = Pick<
 
 const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
 const LATIN_LETTER = /^[a-z]$/i;
-const ANY_LETTER = /^\p{L}$/u;
+const LETTER_OR_VOWEL_SIGN = /^[\p{L}\p{M}]$/u;
 const LETTER_CODE = /^Key([A-Z])$/;
 
 function inTextField(target: EventTarget | null): boolean {
@@ -26,7 +26,7 @@ function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
   if (LATIN_LETTER.test(key)) {
     return key.toLowerCase();
   }
-  if (!ANY_LETTER.test(key)) {
+  if (!LETTER_OR_VOWEL_SIGN.test(key)) {
     return "";
   }
   return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";

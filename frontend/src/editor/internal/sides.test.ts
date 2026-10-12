@@ -110,7 +110,7 @@ function act(merge: Merge, ids: readonly number[], { kind, side }: Click): Merge
   const sides = { local: merge.left.doc, remote: merge.right.doc };
   const target: ApplyTarget = { state: merge.center, field: merge.field, sides };
   const chunks = ids.map((id) => spanAt(merge, id).chunk);
-  const steps = actionSteps(target, { kind, side, chunks });
+  const steps = actionSteps(target, { kind, side, chunks }, "side");
   if (steps.length === 0) {
     throw new Error("expected a transaction");
   }

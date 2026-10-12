@@ -90,7 +90,7 @@ export function handoverTo(
   return other === hidden ? null : other;
 }
 
-type AfterDecision =
+type FocusAfterDecision =
   | { readonly kind: "handover"; readonly side: Side }
   | { readonly kind: "reveal" }
   | { readonly kind: "stay" };
@@ -103,7 +103,7 @@ export function afterDecisionFocus({
   readonly beforeMark: SideMark;
   readonly afterMark: SideMark;
   readonly handover: Side | null;
-}): AfterDecision {
+}): FocusAfterDecision {
   if (handover !== null) {
     return { kind: "handover", side: handover };
   }

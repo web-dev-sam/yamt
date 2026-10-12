@@ -8,7 +8,15 @@ import xIcon from "~icons/lucide/x?raw";
 
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
-import { bandPaints, crossesStrip, gapArrows, type Arrow, type BandPaint } from "./gap";
+import {
+  arrowTitles,
+  bandPaints,
+  crossesStrip,
+  gapArrows,
+  type Arrow,
+  type ArrowTitles,
+  type BandPaint,
+} from "./gap";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import type { Side } from "./side";
 import type { ApplyMode } from "./status";
@@ -26,7 +34,7 @@ type ButtonLayout = {
   readonly ignoreX: number;
   readonly lineHeight: number;
 };
-type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
+type PlacedArrow = { readonly arrow: Arrow; readonly titles: ArrowTitles; readonly y: number };
 type ArrowPaint = {
   readonly placed: readonly PlacedArrow[];
   readonly layout: ButtonLayout;
@@ -36,6 +44,7 @@ type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPa
 type ArrowRow = {
   readonly node: SVGGElement;
   readonly mode: ApplyMode;
+  readonly titles: ArrowTitles;
   readonly layout: ButtonLayout;
   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
 };
@@ -47,10 +56,6 @@ const HALF = 0.5;
 const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
   local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
   remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
-};
-const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
-  replace: "Apply",
-  append: "Apply after the other side",
 };
 const parsedIcons = new Map<string, SVGSVGElement>();
 
@@ -110,7 +115,7 @@ function actionButton(
 }
 
 function arrowRow(
-  { arrow, side }: { readonly arrow: Arrow; readonly side: Side },
+  { arrow, titles, side }: Pick<PlacedArrow, "arrow" | "titles"> & { readonly side: Side },
   layout: ButtonLayout,
   onPress: OnPress,
 ): ArrowRow {
@@ -118,15 +123,16 @@ function arrowRow(
   const { applyX, ignoreX, lineHeight } = layout;
   const apply: IconPress = { kind: "apply", chunk, side };
   const ignore: IconPress = { kind: "ignore", chunk, side };
-  const applyIcon = { icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] };
+  const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
   const applyButton = actionButton({ x: applyX, lineHeight, ...applyIcon }, apply, onPress);
-  const ignoreTitle = { icon: xIcon, title: "Ignore" };
-  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreTitle }, ignore, onPress);
+  const ignoreIcon = { icon: xIcon, title: titles.ignore };
+  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreIcon }, ignore, onPress);
   const node = document.createElementNS(SVG_NS, "g");
   node.append(applyButton, ignoreButton);
   return {
     node,
     mode,
+    titles,
     layout,
     buttons: [
       [applyButton, apply],
@@ -135,9 +141,11 @@ function arrowRow(
   };
 }
 
-function sameShape(row: ArrowRow, mode: ApplyMode, layout: ButtonLayout): boolean {
+function sameShape(row: ArrowRow, { arrow, titles }: PlacedArrow, layout: ButtonLayout): boolean {
   return (
-    row.mode === mode &&
+    row.mode === arrow.mode &&
+    row.titles.apply === titles.apply &&
+    row.titles.ignore === titles.ignore &&
     row.layout.applyX === layout.applyX &&
     row.layout.ignoreX === layout.ignoreX &&
     row.layout.lineHeight === layout.lineHeight
@@ -176,6 +184,7 @@ class GapStrip {
   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
+  readonly #platform = navigator.platform;
 
   constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null) {
     this.#strip = strip;
@@ -205,7 +214,8 @@ class GapStrip {
     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
     const placed = gapArrows(rows, this.#side)
       .map((arrow) => ({ arrow, y: arrow.top + shift }))
-      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
+      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height))
+      .map((at) => ({ ...at, titles: arrowTitles(at.arrow, this.#platform) }));
     const layout = { applyX, ignoreX, lineHeight };
     return { bands, arrows: { placed, layout, onPress: this.#onPress } };
   }
@@ -238,11 +248,12 @@ class GapStrip {
     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
       row.node.remove();
     });
-    const nodes = placed.map(({ arrow, y }) => {
+    const nodes = placed.map((at) => {
+      const { arrow, y } = at;
       let row = this.#arrows.get(arrow.chunk.id);
-      if (row === undefined || !sameShape(row, arrow.mode, layout)) {
+      if (row === undefined || !sameShape(row, at, layout)) {
         row?.node.remove();
-        row = arrowRow({ arrow, side: this.#side }, layout, onPress);
+        row = arrowRow({ ...at, side: this.#side }, layout, onPress);
         this.#arrows.set(arrow.chunk.id, row);
       }
       row.node.setAttribute("transform", `translate(0 ${y})`);

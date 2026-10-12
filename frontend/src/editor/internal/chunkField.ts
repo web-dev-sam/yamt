@@ -9,6 +9,7 @@ import {
 
 import type { Chunk } from "../../ipc";
 import { lineSpan } from "./lineSpan";
+import { SIDES } from "./side";
 import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
@@ -45,7 +46,7 @@ function mapSpans(
   spans: readonly ChunkSpan[],
   changes: ChangeDesc,
   doc: Text | null,
-  applied: StatusChanges,
+  applied: ReadonlySet<Chunk["id"]>,
 ): readonly ChunkSpan[] {
   let floor = 0;
   const mapped = spans.map((span) => {
@@ -75,6 +76,16 @@ function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boole
   );
 }
 
+function newlyApplied(spans: readonly ChunkSpan[], changed: StatusChanges): Set<Chunk["id"]> {
+  const ids = spans
+    .filter(({ chunk, status }) => {
+      const next = changed.get(chunk.id);
+      return SIDES.some((side) => next?.[side] === "applied" && status[side] !== "applied");
+    })
+    .map(({ chunk }) => chunk.id);
+  return new Set(ids);
+}
+
 function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
   const changed = new Map<Chunk["id"], ChunkStatus>();
   for (const effect of tr.effects) {
@@ -85,7 +96,9 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
   if (!tr.docChanged && changed.size === 0) {
     return spans;
   }
-  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
+  const mapped = tr.docChanged
+    ? mapSpans(spans, tr.changes, tr.startState.doc, newlyApplied(spans, changed))
+    : spans;
   return mapped.map((span, index) => {
     const status =
       changed.get(span.chunk.id) ??
@@ -95,7 +108,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
 }
 
 const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
-  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
+  map: (spans, changes) => mapSpans(spans, changes, null, new Set()),
 });
 
 export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {

@@ -269,23 +269,27 @@ test("a resolved block loses its word marks and bars on every side pane and undo
 
   const applied = run(
     start,
-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, MODIFIED)] }),
+    actionSteps(
+      target(start),
+      { kind: "apply", side: "local", chunks: [chunk(start, MODIFIED)] },
+      "side",
+    ),
   );
   const leftIgnored = run(
     applied,
-    actionSteps(target(applied), {
-      kind: "ignore",
-      side: "local",
-      chunks: [chunk(applied, CONFLICT)],
-    }),
+    actionSteps(
+      target(applied),
+      { kind: "ignore", side: "local", chunks: [chunk(applied, CONFLICT)] },
+      "side",
+    ),
   );
   const resolved = run(
     leftIgnored,
-    actionSteps(target(leftIgnored), {
-      kind: "ignore",
-      side: "remote",
-      chunks: [chunk(leftIgnored, CONFLICT)],
-    }),
+    actionSteps(
+      target(leftIgnored),
+      { kind: "ignore", side: "remote", chunks: [chunk(leftIgnored, CONFLICT)] },
+      "side",
+    ),
   );
 
   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
@@ -309,7 +313,11 @@ test("applying one side of a conflict drops that side's tint, word marks and bar
 
   const applied = run(
     start,
-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] }),
+    actionSteps(
+      target(start),
+      { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] },
+      "side",
+    ),
   );
 
   expect(painted(applied.left)).toEqual([
@@ -329,15 +337,19 @@ test("the middle pane tints its blocks without word marks or bars: open, half-ap
 
   const halfApplied = run(
     start,
-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] }),
+    actionSteps(
+      target(start),
+      { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] },
+      "side",
+    ),
   );
   const applied = run(
     halfApplied,
-    actionSteps(target(halfApplied), {
-      kind: "apply",
-      side: "local",
-      chunks: [chunk(halfApplied, MODIFIED)],
-    }),
+    actionSteps(
+      target(halfApplied),
+      { kind: "apply", side: "local", chunks: [chunk(halfApplied, MODIFIED)] },
+      "side",
+    ),
   );
   const undoneOnce = undone(applied);
   const undoneTwice = undone(undoneOnce);

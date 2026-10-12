@@ -12,7 +12,7 @@ import {
 
 import type { Chunk } from "../../ipc";
 import { setStatus, type ChunkSpan } from "./chunkField";
-import type { Side } from "./side";
+import { otherSide, type Side } from "./side";
 import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
 
 export type ChunkAction = {
@@ -20,6 +20,8 @@ export type ChunkAction = {
   readonly side: Side;
   readonly chunks: readonly Chunk[];
 };
+
+export type Reach = "side" | "conflict";
 
 export type SideDocs = Readonly<Record<Side, Text>>;
 
@@ -59,28 +61,49 @@ type ChainedAction = {
   readonly effects: readonly StateEffect<unknown>[];
 };
 
-function chainedChanges(target: ApplyTarget, chunks: readonly Chunk[], side: Side): ChainedAction {
+type SideDecision = {
+  readonly chunk: Chunk;
+  readonly kind: ChunkAction["kind"];
+  readonly side: Side;
+};
+
+const OPPOSITE: Readonly<Record<ChunkAction["kind"], ChunkAction["kind"]>> = {
+  apply: "ignore",
+  ignore: "apply",
+};
+
+function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[]): ChainedAction {
   let state = target.state;
   let changes = ChangeSet.empty(state.doc.length);
   const effects: StateEffect<unknown>[] = [];
-  for (const chunk of chunks) {
+  for (const { chunk, kind, side } of decisions) {
     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
     if (span === undefined) {
       throw new Error(`chunk ${chunk.id} is not in the chunk field`);
     }
-    const effect = setStatus.of({
-      id: chunk.id,
-      status: statusAfterApply(chunk, span.status, side),
-    });
-    const click = state.update({
-      changes: applyChange({ ...target, state }, span, side),
-      effects: effect,
-    });
-    changes = changes.compose(click.changes);
-    effects.push(effect);
-    state = click.state;
+    if (isSideOpen(chunk, span.status, side)) {
+      const status =
+        kind === "apply"
+          ? statusAfterApply(chunk, span.status, side)
+          : statusAfterIgnore(chunk, span.status, side);
+      const effect = setStatus.of({ id: chunk.id, status });
+      const click = state.update({
+        changes: kind === "apply" ? applyChange({ ...target, state }, span, side) : [],
+        effects: effect,
+      });
+      changes = changes.compose(click.changes);
+      effects.push(effect);
+      state = click.state;
+    }
   }
   return { changes, effects };
+}
+
+function sideDecisions(chunk: Chunk, { kind, side }: ChunkAction, reach: Reach): SideDecision[] {
+  const own = { chunk, kind, side };
+  return reach === "conflict" && chunk.kind === "Conflict"
+    ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
+    : [own];
 }
 
 function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
@@ -117,43 +140,16 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps: 
   }
 }
 
-function chosenAction(
-  target: ApplyTarget,
-  spans: readonly ChunkSpan[],
-  action: ChunkAction,
-): ChainedAction {
-  const { kind, side } = action;
-  switch (kind) {
-    case "apply":
-      return chainedChanges(
-        target,
-        spans.map((span) => span.chunk),
-        side,
-      );
-    case "ignore":
-      return {
-        changes: ChangeSet.empty(target.state.doc.length),
-        effects: spans.map((span) =>
-          setStatus.of({
-            id: span.chunk.id,
-            status: statusAfterIgnore(span.chunk, span.status, side),
-          }),
-        ),
-      };
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
-}
-
-export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
+export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Reach): Steps {
   const spans = chosenSpans(target, action);
   const last = spans.at(-1);
   if (last === undefined) {
     return [];
   }
-  const { changes, effects } = chosenAction(target, spans, action);
+  const { changes, effects } = chainedChanges(
+    target,
+    spans.flatMap((span) => sideDecisions(span.chunk, action, reach)),
+  );
   return [
     moveCursor(last.from),
     { changes, effects, userEvent: `yamt.${action.kind}` },
@@ -170,14 +166,14 @@ export function bulkApplySteps({
   readonly side: Side;
   readonly visible: VisibleLines;
 }): Steps {
-  const chunks = target.state
+  const decisions = target.state
     .field(target.field)
     .filter((span) => canBulkApply(span.chunk, span.status, side))
-    .map((span) => span.chunk);
-  if (chunks.length === 0) {
+    .map((span): SideDecision => ({ chunk: span.chunk, kind: "apply", side }));
+  if (decisions.length === 0) {
     return [];
   }
-  const { changes, effects } = chainedChanges(target, chunks, side);
+  const { changes, effects } = chainedChanges(target, decisions);
   const action = { changes, effects, userEvent: "yamt.apply" };
   const cursor = bulkCursorTarget(target.state, visible);
   if (cursor === null) {

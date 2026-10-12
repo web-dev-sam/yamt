@@ -8,7 +8,7 @@ export type WheelSum = {
 
 type Wheel = Pick<WheelEvent, "deltaMode" | "deltaX" | "deltaY" | "timeStamp">;
 
-export const WHEEL_STEP_PX = 100;
+export const WHEEL_STEP_PX = 90;
 export const WHEEL_IDLE_MS = 250;
 
 const DOM_DELTA_PIXEL = 0;

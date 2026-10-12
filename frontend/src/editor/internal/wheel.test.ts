@@ -63,6 +63,18 @@ test("one 500 px event gives one step, not five", () => {
   ).toEqual(["down", "down", null]);
 });
 
+test("WebKitGTK's X11 mouse notches of 96 px step once each, also inside one fast burst", () => {
+  const X11_NOTCH_PX = 96;
+
+  expect(
+    steps([
+      { deltaY: X11_NOTCH_PX, at: 0 },
+      { deltaY: X11_NOTCH_PX, at: 16 },
+      { deltaY: X11_NOTCH_PX, at: 32 },
+    ]),
+  ).toEqual(["down", "down", "down"]);
+});
+
 test("events that scroll more sideways than up or down never step", () => {
   expect(
     steps([

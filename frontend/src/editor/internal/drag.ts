@@ -1,14 +1,15 @@
 import type { Chunk } from "../../ipc";
-import type { ChunkAction } from "./apply";
+import type { ChunkAction, Reach } from "./apply";
 import { gapArrows } from "./gap";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+import { isModHeld } from "./modClick";
 import type { IconPress } from "./strips";
 
 type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
 
 type DragEvents = {
   readonly changed: () => void;
-  readonly released: (press: Press) => void;
+  readonly released: (press: Press, reach: Reach) => void;
 };
 
 type IconRow = { readonly top: number; readonly chunk: Chunk };
@@ -51,6 +52,7 @@ export class IconDrag {
   readonly #strips: readonly [SVGSVGElement, SVGSVGElement];
   readonly #events: DragEvents;
   #press: Press | null = null;
+  readonly #platform = navigator.platform;
 
   constructor(strips: readonly [SVGSVGElement, SVGSVGElement], events: DragEvents) {
     this.#strips = strips;
@@ -87,7 +89,10 @@ export class IconDrag {
     const press = this.#press;
     if (press?.pointerId === event.pointerId) {
       this.#press = null;
-      this.#events.released({ ...press, clientY: event.clientY });
+      this.#events.released(
+        { ...press, clientY: event.clientY },
+        isModHeld(event, this.#platform) ? "conflict" : "side",
+      );
       this.#events.changed();
     }
   };

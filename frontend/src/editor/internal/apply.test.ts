@@ -121,11 +121,18 @@ function run(merge: ApplyTarget, steps: Steps, time = Date.now()): ApplyTarget {
 }
 
 function applyOne(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
-  return actionSteps(target, { kind: "apply", side, chunks: [chunk] });
+  return actionSteps(target, { kind: "apply", side, chunks: [chunk] }, "side");
 }
 
 function ignoreOne(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
-  return actionSteps(target, { kind: "ignore", side, chunks: [chunk] });
+  return actionSteps(target, { kind: "ignore", side, chunks: [chunk] }, "side");
+}
+
+function modOne(
+  target: ApplyTarget,
+  { kind, chunk, side }: { kind: "apply" | "ignore"; chunk: Chunk; side: Side },
+): Steps {
+  return actionSteps(target, { kind, side, chunks: [chunk] }, "conflict");
 }
 
 function allVisible(merge: ApplyTarget): VisibleLines {
@@ -786,4 +793,181 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
     lines(["L0", "L1", ...SHARED, "L2", "L3", "L4", "L5", "R5", "R6", "R7", "}"], "Lf"),
   );
   expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
+});
+
+test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step", async () => {
+  const start = await magicKeys();
+  const conflict = chunkAt(start, 8);
+
+  const both = run(start, modOne(start, { kind: "apply", chunk: conflict, side: "local" }));
+  const local = run(start, applyOne(start, conflict, "local"));
+  const plain = run(local, ignoreOne(local, conflict, "remote"));
+  const undone = command(both, undo);
+
+  expect(statuses(both)[8]).toBe("applied ignored");
+  expect(centerText(both, 8)).toBe(sideText(both, 8, "local"));
+  expect(paneText(both.state)).toBe(paneText(plain.state));
+  expect(statuses(both)).toEqual(statuses(plain));
+  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
+  expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
+  expect(paneText(undone.state)).toBe(paneText(start.state));
+  expect(statuses(undone)).toEqual(statuses(start));
+});
+
+test("Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step", async () => {
+  const start = await magicKeys();
+  const conflict = chunkAt(start, 8);
+
+  const both = run(start, modOne(start, { kind: "ignore", chunk: conflict, side: "local" }));
+  const ignored = run(start, ignoreOne(start, conflict, "local"));
+  const plain = run(ignored, applyOne(ignored, conflict, "remote"));
+  const undone = command(both, undo);
+
+  expect(statuses(both)[8]).toBe("ignored applied");
+  expect(centerText(both, 8)).toBe(sideText(both, 8, "remote"));
+  expect(paneText(both.state)).toBe(paneText(plain.state));
+  expect(statuses(both)).toEqual(statuses(plain));
+  expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
+  expect(paneText(undone.state)).toBe(paneText(start.state));
+  expect(statuses(undone)).toEqual(statuses(start));
+});
+
+test("Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied", async () => {
+  const start = await magicKeys();
+  const conflict = chunkAt(start, 8);
+  const remoteApplied = run(start, applyOne(start, conflict, "remote"));
+
+  const appended = run(
+    remoteApplied,
+    modOne(remoteApplied, { kind: "apply", chunk: conflict, side: "local" }),
+  );
+  const plain = run(remoteApplied, applyOne(remoteApplied, conflict, "local"));
+
+  expect(statuses(appended)[8]).toBe("applied applied");
+  expect(centerText(appended, 8)).toBe(
+    sideText(appended, 8, "remote") + sideText(appended, 8, "local"),
+  );
+  expect(paneText(appended.state)).toBe(paneText(plain.state));
+});
+
+test("Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is", async () => {
+  const start = await magicKeys();
+  const conflict = chunkAt(start, 8);
+  const remoteIgnored = run(start, ignoreOne(start, conflict, "remote"));
+
+  const kept = run(
+    remoteIgnored,
+    modOne(remoteIgnored, { kind: "ignore", chunk: conflict, side: "local" }),
+  );
+
+  expect(paneText(kept.state)).toBe(paneText(start.state));
+  expect(statuses(kept)[8]).toBe("ignored ignored");
+});
+
+test("Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome", async () => {
+  const start = await magicKeys();
+  const cases = [
+    { kind: "apply", id: 0, side: "local" },
+    { kind: "ignore", id: 1, side: "local" },
+    { kind: "apply", id: 3, side: "remote" },
+  ] satisfies { kind: "apply" | "ignore"; id: number; side: Side }[];
+
+  for (const { kind, id, side } of cases) {
+    const chunk = chunkAt(start, id);
+    const withMod = run(start, modOne(start, { kind, chunk, side }));
+    const plain = run(start, actionSteps(start, { kind, side, chunks: [chunk] }, "side"));
+
+    expect(paneText(withMod.state)).toBe(paneText(plain.state));
+    expect(statuses(withMod)).toEqual(statuses(plain));
+  }
+});
+
+async function conflictLocalConflict(): Promise<ApplyTarget> {
+  return open(
+    await synthetic(
+      {
+        middle: "a\nb\nc\nd\ne\nf\ng\n",
+        local: "a\nL1\nc\nL3\ne\nL5\ng\n",
+        remote: "a\nR1\nc\nd\ne\nR5\ng\n",
+        eol: "Lf",
+      },
+      [
+        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
+        { kind: "LocalOnly", middle: [3, 1], side: [3, 1] },
+        { kind: "Conflict", middle: [5, 1], side: [5, 1] },
+      ],
+    ),
+  );
+}
+
+test("a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step", async () => {
+  const start = await conflictLocalConflict();
+  const chunks = [0, 1, 2].map((id) => chunkAt(start, id));
+
+  const applied = run(
+    start,
+    actionSteps(start, { kind: "apply", side: "local", chunks }, "conflict"),
+  );
+  const ignored = run(
+    start,
+    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
+  );
+  const undone = command(applied, undo);
+
+  expect(paneText(applied.state)).toBe("a\nL1\nc\nL3\ne\nL5\ng\n");
+  expect(statuses(applied)).toEqual(["applied ignored", "applied pending", "applied ignored"]);
+  expect(paneText(ignored.state)).toBe("a\nR1\nc\nd\ne\nR5\ng\n");
+  expect(statuses(ignored)).toEqual(["ignored applied", "ignored pending", "ignored applied"]);
+  expect(undoDepth(applied.state)).toBe(undoDepth(start.state) + 1);
+  expect(undoDepth(ignored.state)).toBe(undoDepth(start.state) + 1);
+  expect(paneText(undone.state)).toBe(paneText(start.state));
+  expect(statuses(undone)).toEqual(statuses(start));
+});
+
+test("Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it", async () => {
+  const start = open(
+    await synthetic({ middle: "a\nb\nc\n", local: "a\nL\nc\n", remote: "a\nc\n", eol: "Lf" }, [
+      { kind: "Conflict", middle: [1, 1], side: [1, 1], remote: [1, 0] },
+    ]),
+  );
+
+  const done = run(
+    start,
+    modOne(start, { kind: "ignore", chunk: chunkAt(start, 0), side: "local" }),
+  );
+
+  expect(paneText(done.state)).toBe("a\nc\n");
+  expect(statuses(done)).toEqual(["ignored applied"]);
+  expect(summarize(done.state.field(done.field))).toEqual({ changes: 0, conflicts: 0 });
+});
+
+test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each", async () => {
+  const start = open(
+    await synthetic(
+      { middle: "a\nb\nc\n", local: "a\nB\nL\nc\n", remote: "a\nb\nR\nc\n", eol: "Lf" },
+      [
+        { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
+        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
+      ],
+    ),
+  );
+  function spans(merge: ApplyTarget): [number, number][] {
+    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
+  }
+  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
+
+  const dragged = run(
+    start,
+    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
+  );
+  const first = run(start, ignoreOne(start, chunkAt(start, 0), "local"));
+  const clicked = run(
+    first,
+    modOne(first, { kind: "ignore", chunk: chunkAt(first, 1), side: "local" }),
+  );
+
+  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+  expect(paneText(dragged.state)).toBe("a\nb\nR\nc\n");
+  expect(spans(dragged)).toEqual(spans(clicked));
+  expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
 });

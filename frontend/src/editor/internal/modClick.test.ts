@@ -1,69 +1,118 @@
-import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { loadFixture } from "../../ipc";
-import { isModHeld, openBlockAt } from "./modClick";
+import type { Span } from "../../connectors";
+import { loadFixture, type FileMergeData } from "../../ipc";
+import type { ChunkRow } from "./geometry";
+import { isModHeld, modClickAction, modKeyName } from "./modClick";
 import type { Side } from "./side";
-import { PENDING, type ChunkState, type ChunkStatus } from "./status";
+import { PENDING, type ChunkStatus } from "./status";
 
-type Magic = { readonly states: ChunkState[]; readonly docs: Readonly<Record<Side, Text>> };
-
+const LINE_PX = 10;
 const APPLIED_LEFT: ChunkStatus = { local: "applied", remote: "pending" };
 const IGNORED_RIGHT: ChunkStatus = { local: "pending", remote: "ignored" };
 const MAC = "MacIntel";
 const LINUX = "Linux x86_64";
 const WINDOWS = "Win32";
+const MAIN = 0;
+const MIDDLE = 1;
+const SECONDARY = 2;
+const CTRL = { ctrlKey: true, metaKey: false };
 
-async function magic(statuses: Readonly<Record<number, ChunkStatus>> = {}): Promise<Magic> {
-  const data = await loadFixture("vueuse-use-magic-keys.ts");
-  return {
-    states: data.chunks.map((chunk) => ({ chunk, status: statuses[chunk.id] ?? PENDING })),
-    docs: { local: Text.of(data.local.split("\n")), remote: Text.of(data.remote.split("\n")) },
-  };
+const MAGIC = await loadFixture("vueuse-use-magic-keys.ts");
+const VON = await loadFixture("vue-core-compiler-von.ts");
+
+function span({ start, len }: { readonly start: number; readonly len: number }): Span {
+  return { top: start * LINE_PX, bottom: (start + len) * LINE_PX };
 }
 
-function blockAt({ states, docs }: Magic, side: Side, pos: number): number | null {
-  return openBlockAt(states, { side, doc: docs[side], pos })?.id ?? null;
+function rowsOf(
+  data: FileMergeData,
+  statuses: Readonly<Record<number, ChunkStatus>> = {},
+): ChunkRow[] {
+  return data.chunks.map((chunk) => ({
+    chunk,
+    status: statuses[chunk.id] ?? PENDING,
+    left: span(chunk.local),
+    center: span(chunk.middle),
+    right: span(chunk.remote),
+  }));
 }
 
-function lineStart({ docs }: Magic, side: Side, line: number): number {
-  return docs[side].line(line).from;
+function lineTop(line: number): number {
+  return (line - 1) * LINE_PX;
 }
 
-function lineEnd({ docs }: Magic, side: Side, line: number): number {
-  return docs[side].line(line).to;
+function clicked(
+  rows: readonly ChunkRow[],
+  {
+    side,
+    y,
+    button = MAIN,
+    keys = CTRL,
+  }: {
+    side: Side;
+    y: number;
+    button?: number;
+    keys?: { ctrlKey: boolean; metaKey: boolean };
+  },
+): string | null {
+  const action = modClickAction(rows, { side, y, click: { button, ...keys }, platform: LINUX });
+  return action === null
+    ? null
+    : `${action.kind} ${action.side} ${action.chunks.map(({ id }) => id).join()}`;
 }
 
-test("a block's first character and the end of its last line map to its change; the next line does not", async () => {
-  const merge = await magic();
+test("Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not", () => {
+  const rows = rowsOf(MAGIC);
 
-  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBe(8);
-  expect(blockAt(merge, "local", lineEnd(merge, "local", 136))).toBe(8);
-  expect(blockAt(merge, "local", lineStart(merge, "local", 137))).toBeNull();
-  expect(blockAt(merge, "local", lineEnd(merge, "local", 128))).toBeNull();
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
-  expect(blockAt(merge, "remote", lineEnd(merge, "remote", 154))).toBe(8);
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 155))).toBeNull();
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBe(3);
-  expect(blockAt(merge, "local", lineStart(merge, "local", 3))).toBe(0);
+  expect(clicked(rows, { side: "local", y: lineTop(129) })).toBe("apply local 8");
+  expect(clicked(rows, { side: "local", y: lineTop(137) - 1 })).toBe("apply local 8");
+  expect(clicked(rows, { side: "local", y: lineTop(137) })).toBeNull();
+  expect(clicked(rows, { side: "local", y: lineTop(129) - 1 })).toBeNull();
+  expect(clicked(rows, { side: "local", y: lineTop(131), button: SECONDARY })).toBe(
+    "ignore local 8",
+  );
+  expect(clicked(rows, { side: "remote", y: lineTop(141), button: SECONDARY })).toBe(
+    "ignore remote 8",
+  );
+  expect(clicked(rows, { side: "remote", y: lineTop(155) - 1 })).toBe("apply remote 8");
+  expect(clicked(rows, { side: "remote", y: lineTop(87) })).toBe("apply remote 3");
 });
 
-test("unchanged sides and empty side ranges map to nothing", async () => {
-  const merge = await magic();
+test("without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens", () => {
+  const none = { ctrlKey: false, metaKey: false };
+  const rows = rowsOf(MAGIC);
+  const decided = rowsOf(MAGIC, { 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
 
-  expect(blockAt(merge, "local", lineStart(merge, "local", 87))).toBeNull();
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 3))).toBeNull();
+  expect(clicked(rows, { side: "local", y: lineTop(129), keys: none })).toBeNull();
+  expect(
+    clicked(rows, { side: "local", y: lineTop(129), button: SECONDARY, keys: none }),
+  ).toBeNull();
+  expect(clicked(rows, { side: "local", y: lineTop(129), button: MIDDLE })).toBeNull();
+  expect(clicked(rows, { side: "local", y: lineTop(87) })).toBeNull();
+  expect(clicked(decided, { side: "local", y: lineTop(129), button: SECONDARY })).toBeNull();
+  expect(clicked(decided, { side: "remote", y: lineTop(141), button: SECONDARY })).toBe(
+    "ignore remote 8",
+  );
+  expect(clicked(decided, { side: "remote", y: lineTop(87) })).toBeNull();
 });
 
-test("a side that is already applied or ignored maps to nothing; the other side still does", async () => {
-  const merge = await magic({ 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
+test("Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't", () => {
+  const rows = rowsOf(VON);
+  const bar = 18 * LINE_PX;
 
-  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBeNull();
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBeNull();
+  expect(VON.chunks[1]?.remote).toEqual({ start: 18, len: 0 });
+  for (const y of [bar - 3, bar + 3]) {
+    expect(clicked(rows, { side: "remote", y })).toBe("apply remote 1");
+    expect(clicked(rows, { side: "remote", y, button: SECONDARY })).toBe("ignore remote 1");
+  }
+  for (const y of [bar - 5, bar + 5]) {
+    expect(clicked(rows, { side: "remote", y })).toBeNull();
+    expect(clicked(rows, { side: "remote", y, button: SECONDARY })).toBeNull();
+  }
 });
 
-test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
+test("only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key", () => {
   const ctrl = { ctrlKey: true, metaKey: false };
   const meta = { ctrlKey: false, metaKey: true };
   const both = { ctrlKey: true, metaKey: true };
@@ -75,6 +124,7 @@ test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
     false,
     false,
   ]);
+  expect(modKeyName(MAC)).toBe("⌘");
   for (const platform of [LINUX, WINDOWS]) {
     expect([ctrl, meta, both, none].map((keys) => isModHeld(keys, platform))).toEqual([
       true,
@@ -82,5 +132,6 @@ test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
       false,
       false,
     ]);
+    expect(modKeyName(platform)).toBe("Ctrl");
   }
 });

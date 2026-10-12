@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { bandPath } from "../../connectors";
 import { loadFixture, type Chunk } from "../../ipc";
-import { bandPaints, crossesStrip } from "./gap";
+import { arrowTitles, bandPaints, crossesStrip, gapArrows, type ArrowTitles } from "./gap";
 import type { ChunkRow } from "./geometry";
 import type { Side } from "./side";
 import { PENDING, type ChunkStatus } from "./status";
@@ -150,4 +150,67 @@ test("each strip paints a chunk in its own side's tone", async () => {
       tone,
     ]),
   ).toEqual([[1, "deleted"]]);
+});
+
+async function conflictTitles(
+  conflictStatus: ChunkStatus,
+  { side, platform }: { side: Side; platform: string },
+): Promise<{ mode: string; titles: ArrowTitles } | null> {
+  const rows = await magicRows(conflictStatus);
+  const arrow = gapArrows(rows, side).find(({ chunk }) => chunk.id === CONFLICT_ID);
+  return arrow === undefined ? null : { mode: arrow.mode, titles: arrowTitles(arrow, platform) };
+}
+
+const LINUX = "Linux x86_64";
+
+test("a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided", async () => {
+  const linux: { side: Side; platform: string } = { side: "local", platform: LINUX };
+
+  expect(await conflictTitles(PENDING, linux)).toEqual({
+    mode: "replace",
+    titles: {
+      apply: "Apply\nCtrl+click: also ignore the other side",
+      ignore: "Ignore\nCtrl+click: also take the other side",
+    },
+  });
+  expect(await conflictTitles({ local: "pending", remote: "ignored" }, linux)).toEqual({
+    mode: "replace",
+    titles: { apply: "Apply", ignore: "Ignore" },
+  });
+  expect(await conflictTitles({ local: "pending", remote: "applied" }, linux)).toEqual({
+    mode: "append",
+    titles: { apply: "Apply after the other side", ignore: "Ignore" },
+  });
+  expect(
+    await conflictTitles({ local: "ignored", remote: "pending" }, { ...linux, side: "remote" }),
+  ).toEqual({ mode: "replace", titles: { apply: "Apply", ignore: "Ignore" } });
+});
+
+test("on macOS the hint says ⌘+click", async () => {
+  expect(await conflictTitles(PENDING, { side: "remote", platform: "MacIntel" })).toEqual({
+    mode: "replace",
+    titles: {
+      apply: "Apply\n⌘+click: also ignore the other side",
+      ignore: "Ignore\n⌘+click: also take the other side",
+    },
+  });
+});
+
+test("a change that is not a conflict never has the hint, even when both sides changed it", async () => {
+  const rows = await magicRows(PENDING);
+  const first = rows[0]?.chunk;
+  if (first === undefined) {
+    throw new Error("no chunk 0");
+  }
+  const bothSame = rowOf({ ...first, kind: "BothSame" }, PENDING);
+
+  for (const side of ["local", "remote"] satisfies Side[]) {
+    const titles = gapArrows([...rows, bothSame], side)
+      .filter(({ chunk }) => chunk.id !== CONFLICT_ID)
+      .map((arrow) => arrowTitles(arrow, LINUX));
+    expect(titles.length).toBeGreaterThan(0);
+    for (const title of titles) {
+      expect(title).toEqual({ apply: "Apply", ignore: "Ignore" });
+    }
+  }
 });

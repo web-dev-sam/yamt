@@ -6,7 +6,7 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { log, type FileMergeData } from "../ipc";
 import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
-import type { ChunkAction, SideDocs, Steps } from "./internal/apply";
+import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
 import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
@@ -15,7 +15,7 @@ import { syncFindSpace } from "./internal/find";
 import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf } from "./internal/language";
-import { applyOnModClick } from "./internal/modClick";
+import { modClicks } from "./internal/modClick";
 import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
@@ -68,7 +68,7 @@ export class MergeController {
       views: this.#views,
       states: () => this.#views.center.state.field(this.#field),
       rows: () => this.#layout().rows,
-      decide: (action) => this.#decide(action),
+      decide: (action) => this.#decide(action, "side"),
       readOnly: this.#readOnly,
       hidden: data.deleted,
     });
@@ -78,8 +78,8 @@ export class MergeController {
       changed: () => {
         this.#requestFrame();
       },
-      released: (press) => {
-        this.#act(coveredAction(press, this.#layout().rows, this.#views));
+      released: (press, reach) => {
+        this.#act(coveredAction(press, this.#layout().rows, this.#views), reach);
       },
     });
     this.#scroll = new ScrollSync(this.#views, () => {
@@ -168,8 +168,11 @@ export class MergeController {
       this.#repaint,
       this.#readOnly
         ? []
-        : applyOnModClick(statuses, side, (chunk) => {
-            this.#act({ kind: "apply", side, chunks: [chunk] });
+        : modClicks(side, {
+            rows: () => this.#layout().rows,
+            act: (action) => {
+              this.#act(action, "side");
+            },
           }),
     ];
   }
@@ -184,14 +187,14 @@ export class MergeController {
     }, steps);
   }
 
-  #decide(action: ChunkAction): void {
+  #decide(action: ChunkAction, reach: Reach): void {
     this.#focus.deciding(() => {
-      this.#dispatch(actionSteps(this.#target(), action));
+      this.#dispatch(actionSteps(this.#target(), action, reach));
     });
   }
 
-  #act(action: ChunkAction): void {
-    this.#decide(action);
+  #act(action: ChunkAction, reach: Reach): void {
+    this.#decide(action, reach);
     const { left, center, right } = this.#views;
     if (!left.hasFocus && !center.hasFocus && !right.hasFocus) {
       center.focus();

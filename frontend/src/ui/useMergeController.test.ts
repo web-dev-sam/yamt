@@ -125,3 +125,17 @@ test("the editor is read-only as the view says, and is rebuilt when that changes
   expect(editor.state.readOnly).toEqual([true, false]);
   expect(editor.state.built).toBe(2);
 });
+
+test("while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing", async () => {
+  const { handle } = mount(shallowRef<FileMergeData | null>(null));
+  const ctrlZ: KeyboardEvent = Object.create(null);
+  await nextTick();
+
+  expect(editor.state.built).toBe(0);
+  expect(() => {
+    handle.applyAllNonConflicting("local");
+    handle.undo();
+    handle.redo();
+  }).not.toThrow();
+  expect(handle.historyKey(ctrlZ)).toBe(false);
+});

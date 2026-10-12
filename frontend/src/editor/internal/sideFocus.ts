@@ -74,15 +74,19 @@ export class SideFocus {
     const platform = navigator.platform;
     const signal = this.#listeners.signal;
     for (const side of SIDES) {
-      const { scrollDOM } = this.#view(side);
+      const { scrollDOM, contentDOM } = this.#view(side);
       const pressed = (event: MouseEvent): void => {
         this.#pressed(side, event, platform);
       };
       const wheel = (event: WheelEvent): void => {
         this.#wheel(side, event, platform);
       };
+      function scrollerFocused(): void {
+        contentDOM.focus({ preventScroll: true });
+      }
       scrollDOM.addEventListener("mousedown", pressed, { capture: true, signal });
       scrollDOM.addEventListener("wheel", wheel, { passive: false, signal });
+      scrollDOM.addEventListener("focus", scrollerFocused, { signal });
     }
   }
 

@@ -1,12 +1,25 @@
 import { bandPath } from "../../connectors";
 import type { Chunk } from "../../ipc";
+import type { ChunkAction } from "./apply";
 import { SIDE_PANE, type ChunkRow } from "./geometry";
-import type { Side } from "./side";
+import { modKeyName } from "./modClick";
+import { otherSide, type Side } from "./side";
 import { applyMode, isSideOpen, type ApplyMode } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
-export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
+export type Arrow = {
+  readonly top: number;
+  readonly chunk: Chunk;
+  readonly mode: ApplyMode;
+  readonly otherWaits: boolean;
+};
 export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
+
+const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+  replace: "Apply",
+  append: "Apply after the other side",
+};
 
 export function crossesStrip(top: number, bottom: number, height: number): boolean {
   return top <= height && bottom >= 0;
@@ -19,7 +32,20 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
       top: row[SIDE_PANE[side]].top,
       chunk: row.chunk,
       mode: applyMode(row.status, side),
+      otherWaits:
+        row.chunk.kind === "Conflict" && isSideOpen(row.chunk, row.status, otherSide(side)),
     }));
+}
+
+export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): ArrowTitles {
+  if (!otherWaits) {
+    return { apply: APPLY_TITLE[mode], ignore: "Ignore" };
+  }
+  const click = `${modKeyName(platform)}+click`;
+  return {
+    apply: `${APPLY_TITLE[mode]}\n${click}: also ignore the other side`,
+    ignore: `Ignore\n${click}: also take the other side`,
+  };
 }
 
 export function bandPaints(

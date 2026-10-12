@@ -1,56 +1,75 @@
-import type { Extension, StateField, Text } from "@codemirror/state";
+import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import type { Chunk } from "../../ipc";
+import type { ChunkAction } from "./apply";
+import type { ChunkRow } from "./geometry";
+import { changeAt } from "./navigation";
 import type { Side } from "./side";
-import { isSideOpen, type ChunkState } from "./status";
 
 type Modifiers = Pick<MouseEvent, "ctrlKey" | "metaKey">;
+type Click = Modifiers & Pick<MouseEvent, "button">;
+
+const MAIN_BUTTON = 0;
+const SECONDARY_BUTTON = 2;
+const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
+  [MAIN_BUTTON]: "apply",
+  [SECONDARY_BUTTON]: "ignore",
+};
+
+// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
+// Ctrl+click is the system's secondary click.
+function isMac(platform: string): boolean {
+  return /Mac/.test(platform);
+}
 
 export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
-  // The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
-  // Ctrl+click is the system's secondary click.
-  return /Mac/.test(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
+  return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
 }
 
-export function openBlockAt(
-  states: readonly ChunkState[],
-  { side, doc, pos }: { readonly side: Side; readonly doc: Text; readonly pos: number },
-): Chunk | null {
-  const line = doc.lineAt(pos).number - 1;
-  const hit = states.find(
-    ({ chunk, status }) =>
-      isSideOpen(chunk, status, side) &&
-      line >= chunk[side].start &&
-      line < chunk[side].start + chunk[side].len,
-  );
-  return hit?.chunk ?? null;
+export function modKeyName(platform: string): string {
+  return isMac(platform) ? "⌘" : "Ctrl";
 }
 
-export function applyOnModClick(
-  statuses: StateField<readonly ChunkState[]>,
+export function modClickAction(
+  rows: readonly ChunkRow[],
+  { side, y, click, platform }: { side: Side; y: number; click: Click; platform: string },
+): ChunkAction | null {
+  const kind = BUTTON_ACTION[click.button];
+  if (kind === undefined || !isModHeld(click, platform)) {
+    return null;
+  }
+  const id = changeAt(rows, side, y);
+  const row = rows.find(({ chunk }) => chunk.id === id);
+  return row === undefined ? null : { kind, side, chunks: [row.chunk] };
+}
+
+export function modClicks(
   side: Side,
-  apply: (chunk: Chunk) => void,
+  { rows, act }: { rows: () => readonly ChunkRow[]; act: (action: ChunkAction) => void },
 ): Extension {
   const platform = navigator.platform;
+  function actionAt(click: MouseEvent, view: EditorView): ChunkAction | null {
+    return modClickAction(rows(), { side, y: click.clientY - view.documentTop, click, platform });
+  }
   return EditorView.domEventHandlers({
     mousedown(event, view) {
-      const height = event.clientY - view.documentTop;
-      if (
-        event.button !== 0 ||
-        !isModHeld(event, platform) ||
-        height < 0 ||
-        height >= view.lineBlockAt(view.state.doc.length).bottom
-      ) {
-        return false;
-      }
-      const pos = view.lineBlockAtHeight(height).from;
-      const chunk = openBlockAt(view.state.field(statuses), { side, doc: view.state.doc, pos });
-      if (chunk === null) {
+      const action = actionAt(event, view);
+      if (action === null) {
         return false;
       }
       event.preventDefault();
-      apply(chunk);
+      if (action.kind === "apply") {
+        act(action);
+      }
+      return true;
+    },
+    contextmenu(event, view) {
+      const action = actionAt(event, view);
+      if (action?.kind !== "ignore") {
+        return false;
+      }
+      event.preventDefault();
+      act(action);
       return true;
     },
   });

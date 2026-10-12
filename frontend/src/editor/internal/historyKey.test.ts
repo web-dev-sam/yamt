@@ -68,6 +68,10 @@ test("a non-Latin layout undoes and redoes by the physical key", () => {
   expect(command(LINUX, { key: "ф", code: "KeyA", ctrl: true })).toBeNull();
 });
 
+test("a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript", () => {
+  expect(command(LINUX, { key: "ॆ", code: "KeyZ", ctrl: true })).toBe("undo");
+});
+
 test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes", () => {
   expect(command(LINUX, { key: "z", code: "KeyY", ctrl: true })).toBe("undo");
   expect(command(LINUX, { key: "y", code: "KeyZ", ctrl: true })).toBe("redo");
@@ -76,5 +80,5 @@ test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoe
 test("a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing", () => {
   expect(command(LINUX, { key: ";", code: "KeyZ", ctrl: true })).toBeNull();
   expect(command(LINUX, { key: ":", code: "KeyZ", ctrl: true, shift: true })).toBeNull();
-  expect(command(LINUX, { key: "f", code: "KeyY", ctrl: true })).toBeNull();
+  expect(command(LINUX, { key: "-", code: "KeyY", ctrl: true })).toBeNull();
 });
