@@ -1,0 +1,200 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index b8888ff..db228e3 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -185,9 +185,9 @@ export class MergeController {
+   }
+ 
+   #decide(action: ChunkAction): void {
+-    const before = this.#views.center.state.field(this.#field);
+-    this.#dispatch(actionSteps(this.#target(), action));
+-    this.#focus.decided(before);
++    this.#focus.deciding(() => {
++      this.#dispatch(actionSteps(this.#target(), action));
++    });
+   }
+ 
+   #act(action: ChunkAction): void {
+diff --git a/frontend/src/editor/internal/historyKey.test.ts b/frontend/src/editor/internal/historyKey.test.ts
+index 0dc9cc1..390a8d4 100644
+--- a/frontend/src/editor/internal/historyKey.test.ts
++++ b/frontend/src/editor/internal/historyKey.test.ts
+@@ -72,3 +72,9 @@ test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoe
+   expect(command(LINUX, { key: "z", code: "KeyY", ctrl: true })).toBe("undo");
+   expect(command(LINUX, { key: "y", code: "KeyZ", ctrl: true })).toBe("redo");
+ });
++
++test("a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing", () => {
++  expect(command(LINUX, { key: ";", code: "KeyZ", ctrl: true })).toBeNull();
++  expect(command(LINUX, { key: ":", code: "KeyZ", ctrl: true, shift: true })).toBeNull();
++  expect(command(LINUX, { key: "f", code: "KeyY", ctrl: true })).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/historyKey.ts b/frontend/src/editor/internal/historyKey.ts
+index 9f96c17..0bd71b7 100644
+--- a/frontend/src/editor/internal/historyKey.ts
++++ b/frontend/src/editor/internal/historyKey.ts
+@@ -7,6 +7,7 @@ type HistoryKey = Pick<
+ 
+ const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
+ const LATIN_LETTER = /^[a-z]$/i;
++const ANY_LETTER = /^\p{L}$/u;
+ const LETTER_CODE = /^Key([A-Z])$/;
+ 
+ function inTextField(target: EventTarget | null): boolean {
+@@ -19,11 +20,15 @@ function inTextField(target: EventTarget | null): boolean {
+ }
+ 
+ // A non-Latin layout gives `key` 'я' for Ctrl+Z; like CodeMirror's runHandlers (keyCode fallback,
+-// @codemirror/view keymap.ts), the physical key decides then.
++// @codemirror/view keymap.ts: keyCode follows a Latin layout, so Dvorak's ';' on KeyZ stays ';'),
++// the physical key decides only then.
+ function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
+   if (LATIN_LETTER.test(key)) {
+     return key.toLowerCase();
+   }
++  if (!ANY_LETTER.test(key)) {
++    return "";
++  }
+   return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
+ }
+ 
+diff --git a/frontend/src/editor/internal/navigation.test.ts b/frontend/src/editor/internal/navigation.test.ts
+index 2790242..b39d7d5 100644
+--- a/frontend/src/editor/internal/navigation.test.ts
++++ b/frontend/src/editor/internal/navigation.test.ts
+@@ -5,6 +5,7 @@ import { loadFixture, type Chunk } from "../../ipc";
+ import type { ChunkRow } from "./geometry";
+ import {
+   afterDecision,
++  afterDecisionFocus,
+   changeAt,
+   crossTo,
+   fromScreen,
+@@ -226,3 +227,36 @@ test("a decision on the other side never moves the keyboard off a side that was
+     handoverTo({ before: doneLocal, after: remoteDecided }, { focused: "local", hidden: null }),
+   ).toBeNull();
+ });
++
++test("after a decision that moved the focused side's mark on, the view reveals its new change", () => {
++  expect(
++    afterDecisionFocus({ beforeMark: change(2), afterMark: change(5), handover: null }),
++  ).toEqual({ kind: "reveal" });
++  expect(
++    afterDecisionFocus({ beforeMark: remembering(2), afterMark: change(5), handover: null }),
++  ).toEqual({ kind: "reveal" });
++});
++
++test("after a decision on another change the mark stays and the view does not move", () => {
++  expect(
++    afterDecisionFocus({ beforeMark: change(2), afterMark: change(2), handover: null }),
++  ).toEqual({ kind: "stay" });
++});
++
++test("after a decision that left the focused side alone the view does not move", () => {
++  expect(afterDecisionFocus({ beforeMark: change(8), afterMark: ALONE, handover: null })).toEqual({
++    kind: "stay",
++  });
++  expect(
++    afterDecisionFocus({ beforeMark: remembering(2), afterMark: remembering(5), handover: null }),
++  ).toEqual({ kind: "stay" });
++});
++
++test("a handover wins over revealing on the emptied side", () => {
++  expect(
++    afterDecisionFocus({ beforeMark: change(8), afterMark: ALONE, handover: "remote" }),
++  ).toEqual({ kind: "handover", side: "remote" });
++  expect(
++    afterDecisionFocus({ beforeMark: change(2), afterMark: change(5), handover: "remote" }),
++  ).toEqual({ kind: "handover", side: "remote" });
++});
+diff --git a/frontend/src/editor/internal/navigation.ts b/frontend/src/editor/internal/navigation.ts
+index 784c1d7..94ffa5c 100644
+--- a/frontend/src/editor/internal/navigation.ts
++++ b/frontend/src/editor/internal/navigation.ts
+@@ -90,6 +90,28 @@ export function handoverTo(
+   return other === hidden ? null : other;
+ }
+ 
++type AfterDecision =
++  | { readonly kind: "handover"; readonly side: Side }
++  | { readonly kind: "reveal" }
++  | { readonly kind: "stay" };
++
++export function afterDecisionFocus({
++  beforeMark,
++  afterMark,
++  handover,
++}: {
++  readonly beforeMark: SideMark;
++  readonly afterMark: SideMark;
++  readonly handover: Side | null;
++}): AfterDecision {
++  if (handover !== null) {
++    return { kind: "handover", side: handover };
++  }
++  return afterMark.kind === "change" && afterMark.id !== markedId(beforeMark)
++    ? { kind: "reveal" }
++    : { kind: "stay" };
++}
++
+ export function fromScreen(
+   rows: readonly ChunkRow[],
+   {
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 566ced9..6393986 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -5,6 +5,7 @@ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+ import { isModHeld } from "./modClick";
+ import {
++  afterDecisionFocus,
+   alone,
+   changeAt,
+   crossTo,
+@@ -103,16 +104,36 @@ export class SideFocus {
+     }
+   }
+ 
+-  decided(before: readonly ChunkState[]): void {
++  deciding(dispatch: () => void): void {
++    const before = this.#sources.states();
+     const focused = SIDES.find((side) => this.#view(side).hasFocus) ?? null;
+-    const next = handoverTo(
+-      { before, after: this.#sources.states() },
+-      { focused, hidden: this.#sources.hidden },
+-    );
+-    if (next !== null) {
+-      this.#focusOn(next, alone(this.#mark(next)));
+-    } else if (focused !== null) {
+-      this.#reveal(focused);
++    if (focused === null) {
++      dispatch();
++      return;
++    }
++    const beforeMark = this.#mark(focused);
++    dispatch();
++    const next = afterDecisionFocus({
++      beforeMark,
++      afterMark: this.#mark(focused),
++      handover: handoverTo(
++        { before, after: this.#sources.states() },
++        { focused, hidden: this.#sources.hidden },
++      ),
++    });
++    switch (next.kind) {
++      case "handover":
++        this.#focusOn(next.side, alone(this.#mark(next.side)));
++        return;
++      case "reveal":
++        this.#reveal(focused);
++        return;
++      case "stay":
++        return;
++      default: {
++        const _exhaustive: never = next;
++        return _exhaustive;
++      }
+     }
+   }
+ 

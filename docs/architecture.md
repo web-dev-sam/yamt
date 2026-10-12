@@ -512,15 +512,16 @@ Internals (`editor/internal/`, not importable from `ui/`):
 - `navigation.ts`, `sideMark.ts`, `sideFocus.ts`, `viewport.ts`, `wheel.ts`, `historyKey.ts` — keyboard
   focus in the side panes (plan §2 #54). `navigation.ts` holds the rules as pure functions over the
   chunk states and rows (step to the next/previous change still waiting on a side, cross to the other
-  side, the pick after a decision, the first change on screen, the click hit test, handover when a
-  decision empties the focused side). `sideMark.ts` is each side's `SideMark` field. `sideFocus.ts`
+  side, the pick after a decision, the first change on screen, the click hit test, and what follows a
+  decision: hand over when it emptied the focused side, otherwise reveal a newly focused change, otherwise
+  stay). `sideMark.ts` is each side's `SideMark` field. `sideFocus.ts`
   binds the side-only keymap (Enter/Space apply, Backspace/Delete/x ignore, arrows), the press that
   sets a mark (scrollbar presses excluded), Ctrl/Cmd+wheel over a side, and the reveal: only the
   focused side's `scrollTop` is written, with WebStorm's placement from `viewport.ts`
   (`SyncScrollSupport.getTargetOffsets`), nothing when the change is fully visible; the other panes
   follow through the sync. `wheel.ts` turns wheel bursts into steps (the first event of a burst steps
   at once). `historyKey.ts` maps the undo/redo shortcut, falling back to the physical key only when
-  the layout gives no Latin letter; `ui/MergeView.vue` calls `historyKey` from a window `keydown`
+  the layout gives a single non-Latin letter; `ui/MergeView.vue` calls `historyKey` from a window `keydown`
   only while its file is shown and no question is open.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
   interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
