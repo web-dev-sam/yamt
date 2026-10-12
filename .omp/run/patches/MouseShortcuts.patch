@@ -74,7 +74,7 @@ index db228e3..0db6433 100644
      if (!left.hasFocus && !center.hasFocus && !right.hasFocus) {
        center.focus();
 diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
-index 5aebe1f..d17d7c8 100644
+index 5aebe1f..bd9e0da 100644
 --- a/frontend/src/editor/internal/apply.test.ts
 +++ b/frontend/src/editor/internal/apply.test.ts
 @@ -121,11 +121,18 @@ function run(merge: ApplyTarget, steps: Steps, time = Date.now()): ApplyTarget {
@@ -98,7 +98,7 @@ index 5aebe1f..d17d7c8 100644
  }
  
  function allVisible(merge: ApplyTarget): VisibleLines {
-@@ -787,3 +794,180 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
+@@ -787,3 +794,252 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
    );
    expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
  });
@@ -279,20 +279,103 @@ index 5aebe1f..d17d7c8 100644
 +  expect(spans(dragged)).toEqual(spans(clicked));
 +  expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
 +});
++
++function spanPairs(merge: ApplyTarget): [number, number][] {
++  return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
++}
++
++test("a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each", async () => {
++  const start = open(
++    await synthetic(
++      {
++        middle: "a\nb\nc\n",
++        local: "a\nL1\nL2\nc\n",
++        remote: "a\nR1\nR2\nc\n",
++        eol: "Lf",
++      },
++      [
++        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
++        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
++      ],
++    ),
++  );
++  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
++
++  const dragged = run(
++    start,
++    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
++  );
++  const first = run(
++    start,
++    modOne(start, { kind: "ignore", chunk: chunkAt(start, 0), side: "local" }),
++  );
++  const clicked = run(
++    first,
++    modOne(first, { kind: "ignore", chunk: chunkAt(first, 1), side: "local" }),
++  );
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(paneText(clicked.state)).toBe("a\nR1\nR2\nc\n");
++  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
++  expect(spanPairs(clicked)).toEqual([
++    [2, 5],
++    [5, 8],
++  ]);
++  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
++  expect(statuses(dragged)).toEqual(statuses(clicked));
++});
++
++test("an apply drag over a change and a touching zero-line conflict equals clicking each", async () => {
++  const start = open(
++    await synthetic(
++      { middle: "a\nb\nc\n", local: "a\nB\nL\nc\n", remote: "a\nb\nR\nc\n", eol: "Lf" },
++      [
++        { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
++        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
++      ],
++    ),
++  );
++  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
++
++  const dragged = run(start, actionSteps(start, { kind: "apply", side: "local", chunks }, "side"));
++  const first = run(start, applyOne(start, chunkAt(start, 0), "local"));
++  const clicked = run(first, applyOne(first, chunkAt(first, 1), "local"));
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(paneText(clicked.state)).toBe("a\nB\nL\nc\n");
++  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
++  expect(spanPairs(clicked)).toEqual([
++    [2, 4],
++    [4, 6],
++  ]);
++  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
++  expect(statuses(dragged)).toEqual(statuses(clicked));
++});
 diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
-index e8b1313..75db2bb 100644
+index e8b1313..9a81c19 100644
 --- a/frontend/src/editor/internal/apply.ts
 +++ b/frontend/src/editor/internal/apply.ts
-@@ -12,7 +12,7 @@ import {
+@@ -11,9 +11,16 @@ import {
+ } from "@codemirror/state";
  
  import type { Chunk } from "../../ipc";
- import { setStatus, type ChunkSpan } from "./chunkField";
+-import { setStatus, type ChunkSpan } from "./chunkField";
 -import type { Side } from "./side";
+-import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
++import { placeSpans, setStatus, type ChunkSpan } from "./chunkField";
 +import { otherSide, type Side } from "./side";
- import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
++import {
++  applyMode,
++  canBulkApply,
++  decidesOtherSide,
++  isSideOpen,
++  statusAfterApply,
++  statusAfterIgnore,
++} from "./status";
  
  export type ChunkAction = {
-@@ -21,6 +21,8 @@ export type ChunkAction = {
+   readonly kind: "apply" | "ignore";
+@@ -21,6 +28,8 @@ export type ChunkAction = {
    readonly chunks: readonly Chunk[];
  };
  
@@ -301,7 +384,7 @@ index e8b1313..75db2bb 100644
  export type SideDocs = Readonly<Record<Side, Text>>;
  
  export type ApplyTarget = {
-@@ -59,30 +61,51 @@ type ChainedAction = {
+@@ -59,28 +68,53 @@ type ChainedAction = {
    readonly effects: readonly StateEffect<unknown>[];
  };
  
@@ -353,20 +436,23 @@ index e8b1313..75db2bb 100644
 +      state = click.state;
 +    }
    }
-   return { changes, effects };
- }
- 
-+function sideDecisions(chunk: Chunk, { kind, side }: ChunkAction, reach: Reach): SideDecision[] {
-+  const own = { chunk, kind, side };
-+  return reach === "conflict" && chunk.kind === "Conflict"
-+    ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
-+    : [own];
+-  return { changes, effects };
++  return { changes, effects: [...effects, placeSpans.of(state.field(target.field))] };
 +}
 +
++function sideDecisions(
++  { chunk, status }: ChunkSpan,
++  { kind, side }: ChunkAction,
++  reach: Reach,
++): SideDecision[] {
++  const own = { chunk, kind, side };
++  return reach === "conflict" && decidesOtherSide(chunk, status, side)
++    ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
++    : [own];
+ }
+ 
  function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
-   const ids = new Set(chunks.map((chunk) => chunk.id));
-   return target.state
-@@ -117,43 +140,16 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps:
+@@ -117,43 +151,16 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps:
    }
  }
  
@@ -410,12 +496,12 @@ index e8b1313..75db2bb 100644
 -  const { changes, effects } = chosenAction(target, spans, action);
 +  const { changes, effects } = chainedChanges(
 +    target,
-+    spans.flatMap((span) => sideDecisions(span.chunk, action, reach)),
++    spans.flatMap((span) => sideDecisions(span, action, reach)),
 +  );
    return [
      moveCursor(last.from),
      { changes, effects, userEvent: `yamt.${action.kind}` },
-@@ -170,14 +166,14 @@ export function bulkApplySteps({
+@@ -170,14 +177,14 @@ export function bulkApplySteps({
    readonly side: Side;
    readonly visible: VisibleLines;
  }): Steps {
@@ -435,63 +521,37 @@ index e8b1313..75db2bb 100644
    const cursor = bulkCursorTarget(target.state, visible);
    if (cursor === null) {
 diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
-index e7a7c56..efd2dad 100644
+index e7a7c56..d950494 100644
 --- a/frontend/src/editor/internal/chunkField.ts
 +++ b/frontend/src/editor/internal/chunkField.ts
-@@ -9,6 +9,7 @@ import {
- 
- import type { Chunk } from "../../ipc";
- import { lineSpan } from "./lineSpan";
-+import { SIDES } from "./side";
- import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
- import { chunkTone, type Tone } from "./tone";
- 
-@@ -45,7 +46,7 @@ function mapSpans(
-   spans: readonly ChunkSpan[],
-   changes: ChangeDesc,
-   doc: Text | null,
--  applied: StatusChanges,
-+  applied: ReadonlySet<Chunk["id"]>,
- ): readonly ChunkSpan[] {
-   let floor = 0;
-   const mapped = spans.map((span) => {
-@@ -75,6 +76,16 @@ function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boole
-   );
+@@ -94,7 +94,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
+   });
  }
  
-+function newlyApplied(spans: readonly ChunkSpan[], changed: StatusChanges): Set<Chunk["id"]> {
-+  const ids = spans
-+    .filter(({ chunk, status }) => {
-+      const next = changed.get(chunk.id);
-+      return SIDES.some((side) => next?.[side] === "applied" && status[side] !== "applied");
-+    })
-+    .map(({ chunk }) => chunk.id);
-+  return new Set(ids);
-+}
-+
- function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
-   const changed = new Map<Chunk["id"], ChunkStatus>();
-   for (const effect of tr.effects) {
-@@ -85,7 +96,9 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
-   if (!tr.docChanged && changed.size === 0) {
-     return spans;
-   }
--  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
-+  const mapped = tr.docChanged
-+    ? mapSpans(spans, tr.changes, tr.startState.doc, newlyApplied(spans, changed))
-+    : spans;
-   return mapped.map((span, index) => {
-     const status =
-       changed.get(span.chunk.id) ??
-@@ -95,7 +108,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
- }
- 
- const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
--  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
-+  map: (spans, changes) => mapSpans(spans, changes, null, new Set()),
+-const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
++export const placeSpans = StateEffect.define<readonly ChunkSpan[]>({
+   map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
  });
  
- export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
+@@ -114,14 +114,13 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+     update(spans, tr) {
+       // History appends a merged event's older inverted effects after the newer ones
+       // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
+-      const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
+-      return restore === undefined ? updateSpans(spans, tr) : restore.value;
++      const placed = tr.effects.findLast((effect) => effect.is(placeSpans));
++      return placed === undefined ? updateSpans(spans, tr) : placed.value;
+     },
+     provide: (field) =>
+       invertedEffects.of((tr) =>
+-        tr.docChanged ||
+-        tr.effects.some((effect) => effect.is(setStatus) || effect.is(restoreSpans))
+-          ? [restoreSpans.of(tr.startState.field(field))]
++        tr.docChanged || tr.effects.some((effect) => effect.is(setStatus) || effect.is(placeSpans))
++          ? [placeSpans.of(tr.startState.field(field))]
+           : [],
+       ),
+   });
 diff --git a/frontend/src/editor/internal/drag.ts b/frontend/src/editor/internal/drag.ts
 index 4897395..ac34a73 100644
 --- a/frontend/src/editor/internal/drag.ts
@@ -535,19 +595,27 @@ index 4897395..ac34a73 100644
      }
    };
 diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
-index 64efd1a..d164755 100644
+index 64efd1a..5227fe8 100644
 --- a/frontend/src/editor/internal/gap.test.ts
 +++ b/frontend/src/editor/internal/gap.test.ts
-@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+@@ -2,7 +2,15 @@ import { expect, test } from "vitest";
  
  import { bandPath } from "../../connectors";
  import { loadFixture, type Chunk } from "../../ipc";
 -import { bandPaints, crossesStrip } from "./gap";
-+import { arrowTitles, bandPaints, crossesStrip, gapArrows, type ArrowTitles } from "./gap";
++import {
++  arrowTitles,
++  bandPaints,
++  crossesStrip,
++  gapArrows,
++  keepsArrowRow,
++  type Arrow,
++  type ArrowTitles,
++} from "./gap";
  import type { ChunkRow } from "./geometry";
  import type { Side } from "./side";
  import { PENDING, type ChunkStatus } from "./status";
-@@ -151,3 +151,66 @@ test("each strip paints a chunk in its own side's tone", async () => {
+@@ -151,3 +159,87 @@ test("each strip paints a chunk in its own side's tone", async () => {
      ]),
    ).toEqual([[1, "deleted"]]);
  });
@@ -614,19 +682,40 @@ index 64efd1a..d164755 100644
 +    }
 +  }
 +});
++
++test("an icon row built while the other side waited is rebuilt once that side is ignored", async () => {
++  const layout = { applyX: 0, ignoreX: 16, lineHeight: LINE_PX };
++  async function conflictArrow(conflictStatus: ChunkStatus): Promise<Arrow> {
++    const arrow = gapArrows(await magicRows(conflictStatus), "local").find(
++      ({ chunk }) => chunk.id === CONFLICT_ID,
++    );
++    if (arrow === undefined) {
++      throw new Error("no arrow for the conflict");
++    }
++    return arrow;
++  }
++  const built = await conflictArrow(PENDING);
++  const row = { mode: built.mode, otherWaits: built.otherWaits, layout };
++
++  const ignored = await conflictArrow({ local: "pending", remote: "ignored" });
++
++  expect(ignored.mode).toBe(row.mode);
++  expect(keepsArrowRow(row, await conflictArrow(PENDING), { ...layout })).toBe(true);
++  expect(keepsArrowRow(row, ignored, layout)).toBe(false);
++});
 diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
-index 745ab23..41aa847 100644
+index 745ab23..244b3ca 100644
 --- a/frontend/src/editor/internal/gap.ts
 +++ b/frontend/src/editor/internal/gap.ts
-@@ -1,12 +1,25 @@
+@@ -1,12 +1,31 @@
  import { bandPath } from "../../connectors";
  import type { Chunk } from "../../ipc";
 +import type { ChunkAction } from "./apply";
  import { SIDE_PANE, type ChunkRow } from "./geometry";
--import type { Side } from "./side";
 +import { modKeyName } from "./modClick";
-+import { otherSide, type Side } from "./side";
- import { applyMode, isSideOpen, type ApplyMode } from "./status";
+ import type { Side } from "./side";
+-import { applyMode, isSideOpen, type ApplyMode } from "./status";
++import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
  import { chunkTone, type Tone } from "./tone";
  
 -export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
@@ -638,6 +727,12 @@ index 745ab23..41aa847 100644
 +};
  export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
 +export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
++export type ButtonLayout = {
++  readonly applyX: number;
++  readonly ignoreX: number;
++  readonly lineHeight: number;
++};
++export type ArrowShape = Pick<Arrow, "mode" | "otherWaits"> & { readonly layout: ButtonLayout };
 +
 +const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
 +  replace: "Apply",
@@ -646,12 +741,11 @@ index 745ab23..41aa847 100644
  
  export function crossesStrip(top: number, bottom: number, height: number): boolean {
    return top <= height && bottom >= 0;
-@@ -19,9 +32,22 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+@@ -19,9 +38,35 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
        top: row[SIDE_PANE[side]].top,
        chunk: row.chunk,
        mode: applyMode(row.status, side),
-+      otherWaits:
-+        row.chunk.kind === "Conflict" && isSideOpen(row.chunk, row.status, otherSide(side)),
++      otherWaits: decidesOtherSide(row.chunk, row.status, side),
      }));
  }
  
@@ -664,6 +758,20 @@ index 745ab23..41aa847 100644
 +    apply: `${APPLY_TITLE[mode]}\n${click}: also ignore the other side`,
 +    ignore: `Ignore\n${click}: also take the other side`,
 +  };
++}
++
++export function keepsArrowRow(
++  row: ArrowShape,
++  { mode, otherWaits }: Pick<Arrow, "mode" | "otherWaits">,
++  layout: ButtonLayout,
++): boolean {
++  return (
++    row.mode === mode &&
++    row.otherWaits === otherWaits &&
++    row.layout.applyX === layout.applyX &&
++    row.layout.ignoreX === layout.ignoreX &&
++    row.layout.lineHeight === layout.lineHeight
++  );
 +}
 +
  export function bandPaints(
@@ -692,7 +800,7 @@ index 390a8d4..0482be3 100644
 +  expect(command(LINUX, { key: "-", code: "KeyY", ctrl: true })).toBeNull();
  });
 diff --git a/frontend/src/editor/internal/historyKey.ts b/frontend/src/editor/internal/historyKey.ts
-index 0bd71b7..7781955 100644
+index 0bd71b7..0f76b79 100644
 --- a/frontend/src/editor/internal/historyKey.ts
 +++ b/frontend/src/editor/internal/historyKey.ts
 @@ -7,7 +7,7 @@ type HistoryKey = Pick<
@@ -700,7 +808,7 @@ index 0bd71b7..7781955 100644
  const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
  const LATIN_LETTER = /^[a-z]$/i;
 -const ANY_LETTER = /^\p{L}$/u;
-+const LETTER_OR_VOWEL_SIGN = /^[\p{L}\p{M}]$/u;
++const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
  const LETTER_CODE = /^Key([A-Z])$/;
  
  function inTextField(target: EventTarget | null): boolean {
@@ -709,7 +817,7 @@ index 0bd71b7..7781955 100644
      return key.toLowerCase();
    }
 -  if (!ANY_LETTER.test(key)) {
-+  if (!LETTER_OR_VOWEL_SIGN.test(key)) {
++  if (!LETTER_OR_MARK.test(key)) {
      return "";
    }
    return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
@@ -891,7 +999,7 @@ index e486aac..67adb13 100644
    }
  });
 diff --git a/frontend/src/editor/internal/modClick.ts b/frontend/src/editor/internal/modClick.ts
-index 369f8e7..6ffeb0a 100644
+index 369f8e7..bb675f8 100644
 --- a/frontend/src/editor/internal/modClick.ts
 +++ b/frontend/src/editor/internal/modClick.ts
 @@ -1,56 +1,75 @@
@@ -916,8 +1024,7 @@ index 369f8e7..6ffeb0a 100644
 +  [SECONDARY_BUTTON]: "ignore",
 +};
 +
-+// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
-+// Ctrl+click is the system's secondary click.
++// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
 +function isMac(platform: string): boolean {
 +  return /Mac/.test(platform);
 +}
@@ -926,6 +1033,7 @@ index 369f8e7..6ffeb0a 100644
 -  // The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
 -  // Ctrl+click is the system's secondary click.
 -  return /Mac/.test(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
++  // On macOS Ctrl+click is the system's secondary click.
 +  return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
  }
  
@@ -1027,9 +1135,18 @@ index 94ffa5c..1862232 100644
      return { kind: "handover", side: handover };
    }
 diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
-index 6393986..9934e8c 100644
+index 6393986..7115f27 100644
 --- a/frontend/src/editor/internal/sideFocus.ts
 +++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -3,7 +3,7 @@ import { keymap, type EditorView } from "@codemirror/view";
+ 
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+-import { isModHeld } from "./modClick";
++import { isModHeld, modClickAction } from "./modClick";
+ import {
+   afterDecisionFocus,
+   alone,
 @@ -74,15 +74,19 @@ export class SideFocus {
      const platform = navigator.platform;
      const signal = this.#listeners.signal;
@@ -1051,6 +1168,24 @@ index 6393986..9934e8c 100644
      }
    }
  
+@@ -215,10 +219,15 @@ export class SideFocus {
+     if (event.button !== 0 || event.target === view.scrollDOM) {
+       return;
+     }
+-    const id = changeAt(this.#sources.rows(), side, event.clientY - view.documentTop);
+-    if (id !== null && !this.#sources.readOnly && isModHeld(event, platform)) {
++    const rows = this.#sources.rows();
++    const y = event.clientY - view.documentTop;
++    if (
++      !this.#sources.readOnly &&
++      modClickAction(rows, { side, y, click: event, platform }) !== null
++    ) {
+       return;
+     }
++    const id = changeAt(rows, side, y);
+     const mark: SideMark = id === null ? alone(this.#mark(side)) : { kind: "change", id };
+     view.dispatch({ effects: setMark.of(mark) });
+   }
 diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
 index 100b7f8..9682cfa 100644
 --- a/frontend/src/editor/internal/sides.test.ts
@@ -1064,11 +1199,26 @@ index 100b7f8..9682cfa 100644
    if (steps.length === 0) {
      throw new Error("expected a transaction");
    }
+diff --git a/frontend/src/editor/internal/status.ts b/frontend/src/editor/internal/status.ts
+index 519671d..be5f8c0 100644
+--- a/frontend/src/editor/internal/status.ts
++++ b/frontend/src/editor/internal/status.ts
+@@ -27,6 +27,10 @@ export function canBulkApply(chunk: Chunk, status: ChunkStatus, side: Side): boo
+   return chunk.kind !== "Conflict" && isSideOpen(chunk, status, side);
+ }
+ 
++export function decidesOtherSide(chunk: Chunk, status: ChunkStatus, side: Side): boolean {
++  return chunk.kind === "Conflict" && isSideOpen(chunk, status, otherSide(side));
++}
++
+ export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
+   return status[otherSide(side)] === "applied" ? "append" : "replace";
+ }
 diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
-index 6d4ae31..89d77f9 100644
+index 6d4ae31..d5b9f89 100644
 --- a/frontend/src/editor/internal/strips.ts
 +++ b/frontend/src/editor/internal/strips.ts
-@@ -8,7 +8,15 @@ import xIcon from "~icons/lucide/x?raw";
+@@ -8,7 +8,17 @@ import xIcon from "~icons/lucide/x?raw";
  
  import type { Chunk } from "../../ipc";
  import type { ChunkAction } from "./apply";
@@ -1078,31 +1228,40 @@ index 6d4ae31..89d77f9 100644
 +  bandPaints,
 +  crossesStrip,
 +  gapArrows,
++  keepsArrowRow,
 +  type Arrow,
-+  type ArrowTitles,
++  type ArrowShape,
 +  type BandPaint,
++  type ButtonLayout,
 +} from "./gap";
  import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
  import type { Side } from "./side";
  import type { ApplyMode } from "./status";
-@@ -26,7 +34,7 @@ type ButtonLayout = {
-   readonly ignoreX: number;
-   readonly lineHeight: number;
- };
--type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
-+type PlacedArrow = { readonly arrow: Arrow; readonly titles: ArrowTitles; readonly y: number };
+@@ -21,11 +31,6 @@ export type IconPress = {
+ 
+ type OnPress = (press: IconPress, event: PointerEvent) => void;
+ type GapPanes = { readonly left: EditorView; readonly right: EditorView };
+-type ButtonLayout = {
+-  readonly applyX: number;
+-  readonly ignoreX: number;
+-  readonly lineHeight: number;
+-};
+ type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
  type ArrowPaint = {
    readonly placed: readonly PlacedArrow[];
-   readonly layout: ButtonLayout;
-@@ -36,6 +44,7 @@ type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPa
- type ArrowRow = {
+@@ -33,10 +38,8 @@ type ArrowPaint = {
+   readonly onPress: OnPress;
+ };
+ type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
+-type ArrowRow = {
++type ArrowRow = ArrowShape & {
    readonly node: SVGGElement;
-   readonly mode: ApplyMode;
-+  readonly titles: ArrowTitles;
-   readonly layout: ButtonLayout;
+-  readonly mode: ApplyMode;
+-  readonly layout: ButtonLayout;
    readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
  };
-@@ -48,10 +57,6 @@ const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> =
+ 
+@@ -48,10 +51,6 @@ const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> =
    local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
    remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
  };
@@ -1113,17 +1272,23 @@ index 6d4ae31..89d77f9 100644
  const parsedIcons = new Map<string, SVGSVGElement>();
  
  function parsedIcon(markup: string): SVGSVGElement {
-@@ -110,7 +115,7 @@ function actionButton(
+@@ -110,23 +109,29 @@ function actionButton(
  }
  
  function arrowRow(
 -  { arrow, side }: { readonly arrow: Arrow; readonly side: Side },
-+  { arrow, titles, side }: Pick<PlacedArrow, "arrow" | "titles"> & { readonly side: Side },
++  {
++    arrow,
++    side,
++    platform,
++  }: { readonly arrow: Arrow; readonly side: Side; readonly platform: string },
    layout: ButtonLayout,
    onPress: OnPress,
  ): ArrowRow {
-@@ -118,15 +123,16 @@ function arrowRow(
+-  const { chunk, mode } = arrow;
++  const { chunk, mode, otherWaits } = arrow;
    const { applyX, ignoreX, lineHeight } = layout;
++  const titles = arrowTitles(arrow, platform);
    const apply: IconPress = { kind: "apply", chunk, side };
    const ignore: IconPress = { kind: "ignore", chunk, side };
 -  const applyIcon = { icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] };
@@ -1138,25 +1303,27 @@ index 6d4ae31..89d77f9 100644
    return {
      node,
      mode,
-+    titles,
++    otherWaits,
      layout,
      buttons: [
        [applyButton, apply],
-@@ -135,9 +141,11 @@ function arrowRow(
+@@ -135,15 +140,6 @@ function arrowRow(
    };
  }
  
 -function sameShape(row: ArrowRow, mode: ApplyMode, layout: ButtonLayout): boolean {
-+function sameShape(row: ArrowRow, { arrow, titles }: PlacedArrow, layout: ButtonLayout): boolean {
-   return (
+-  return (
 -    row.mode === mode &&
-+    row.mode === arrow.mode &&
-+    row.titles.apply === titles.apply &&
-+    row.titles.ignore === titles.ignore &&
-     row.layout.applyX === layout.applyX &&
-     row.layout.ignoreX === layout.ignoreX &&
-     row.layout.lineHeight === layout.lineHeight
-@@ -176,6 +184,7 @@ class GapStrip {
+-    row.layout.applyX === layout.applyX &&
+-    row.layout.ignoreX === layout.ignoreX &&
+-    row.layout.lineHeight === layout.lineHeight
+-  );
+-}
+-
+ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   let next = parent.firstElementChild;
+   for (const node of nodes) {
+@@ -176,6 +172,7 @@ class GapStrip {
    readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
    readonly #bands = new Map<Chunk["id"], SVGPathElement>();
    readonly #arrows = new Map<Chunk["id"], ArrowRow>();
@@ -1164,29 +1331,15 @@ index 6d4ae31..89d77f9 100644
  
    constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null) {
      this.#strip = strip;
-@@ -205,7 +214,8 @@ class GapStrip {
-     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
-     const placed = gapArrows(rows, this.#side)
-       .map((arrow) => ({ arrow, y: arrow.top + shift }))
--      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
-+      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height))
-+      .map((at) => ({ ...at, titles: arrowTitles(at.arrow, this.#platform) }));
-     const layout = { applyX, ignoreX, lineHeight };
-     return { bands, arrows: { placed, layout, onPress: this.#onPress } };
-   }
-@@ -238,11 +248,12 @@ class GapStrip {
-     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
-       row.node.remove();
+@@ -240,9 +237,9 @@ class GapStrip {
      });
--    const nodes = placed.map(({ arrow, y }) => {
-+    const nodes = placed.map((at) => {
-+      const { arrow, y } = at;
+     const nodes = placed.map(({ arrow, y }) => {
        let row = this.#arrows.get(arrow.chunk.id);
 -      if (row === undefined || !sameShape(row, arrow.mode, layout)) {
-+      if (row === undefined || !sameShape(row, at, layout)) {
++      if (row === undefined || !keepsArrowRow(row, arrow, layout)) {
          row?.node.remove();
 -        row = arrowRow({ arrow, side: this.#side }, layout, onPress);
-+        row = arrowRow({ ...at, side: this.#side }, layout, onPress);
++        row = arrowRow({ arrow, side: this.#side, platform: this.#platform }, layout, onPress);
          this.#arrows.set(arrow.chunk.id, row);
        }
        row.node.setAttribute("transform", `translate(0 ${y})`);

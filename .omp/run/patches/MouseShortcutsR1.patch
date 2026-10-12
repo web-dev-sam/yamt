@@ -1,0 +1,520 @@
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index d17d7c8..bd9e0da 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -971,3 +971,75 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
+   expect(spans(dragged)).toEqual(spans(clicked));
+   expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
+ });
++
++function spanPairs(merge: ApplyTarget): [number, number][] {
++  return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
++}
++
++test("a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each", async () => {
++  const start = open(
++    await synthetic(
++      {
++        middle: "a\nb\nc\n",
++        local: "a\nL1\nL2\nc\n",
++        remote: "a\nR1\nR2\nc\n",
++        eol: "Lf",
++      },
++      [
++        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
++        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
++      ],
++    ),
++  );
++  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
++
++  const dragged = run(
++    start,
++    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
++  );
++  const first = run(
++    start,
++    modOne(start, { kind: "ignore", chunk: chunkAt(start, 0), side: "local" }),
++  );
++  const clicked = run(
++    first,
++    modOne(first, { kind: "ignore", chunk: chunkAt(first, 1), side: "local" }),
++  );
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(paneText(clicked.state)).toBe("a\nR1\nR2\nc\n");
++  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
++  expect(spanPairs(clicked)).toEqual([
++    [2, 5],
++    [5, 8],
++  ]);
++  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
++  expect(statuses(dragged)).toEqual(statuses(clicked));
++});
++
++test("an apply drag over a change and a touching zero-line conflict equals clicking each", async () => {
++  const start = open(
++    await synthetic(
++      { middle: "a\nb\nc\n", local: "a\nB\nL\nc\n", remote: "a\nb\nR\nc\n", eol: "Lf" },
++      [
++        { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
++        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
++      ],
++    ),
++  );
++  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
++
++  const dragged = run(start, actionSteps(start, { kind: "apply", side: "local", chunks }, "side"));
++  const first = run(start, applyOne(start, chunkAt(start, 0), "local"));
++  const clicked = run(first, applyOne(first, chunkAt(first, 1), "local"));
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(paneText(clicked.state)).toBe("a\nB\nL\nc\n");
++  expect(paneText(dragged.state)).toBe(paneText(clicked.state));
++  expect(spanPairs(clicked)).toEqual([
++    [2, 4],
++    [4, 6],
++  ]);
++  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
++  expect(statuses(dragged)).toEqual(statuses(clicked));
++});
+diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
+index 75db2bb..9a81c19 100644
+--- a/frontend/src/editor/internal/apply.ts
++++ b/frontend/src/editor/internal/apply.ts
+@@ -11,9 +11,16 @@ import {
+ } from "@codemirror/state";
+ 
+ import type { Chunk } from "../../ipc";
+-import { setStatus, type ChunkSpan } from "./chunkField";
++import { placeSpans, setStatus, type ChunkSpan } from "./chunkField";
+ import { otherSide, type Side } from "./side";
+-import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
++import {
++  applyMode,
++  canBulkApply,
++  decidesOtherSide,
++  isSideOpen,
++  statusAfterApply,
++  statusAfterIgnore,
++} from "./status";
+ 
+ export type ChunkAction = {
+   readonly kind: "apply" | "ignore";
+@@ -96,12 +103,16 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
+       state = click.state;
+     }
+   }
+-  return { changes, effects };
++  return { changes, effects: [...effects, placeSpans.of(state.field(target.field))] };
+ }
+ 
+-function sideDecisions(chunk: Chunk, { kind, side }: ChunkAction, reach: Reach): SideDecision[] {
++function sideDecisions(
++  { chunk, status }: ChunkSpan,
++  { kind, side }: ChunkAction,
++  reach: Reach,
++): SideDecision[] {
+   const own = { chunk, kind, side };
+-  return reach === "conflict" && chunk.kind === "Conflict"
++  return reach === "conflict" && decidesOtherSide(chunk, status, side)
+     ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
+     : [own];
+ }
+@@ -148,7 +159,7 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Rea
+   }
+   const { changes, effects } = chainedChanges(
+     target,
+-    spans.flatMap((span) => sideDecisions(span.chunk, action, reach)),
++    spans.flatMap((span) => sideDecisions(span, action, reach)),
+   );
+   return [
+     moveCursor(last.from),
+diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
+index efd2dad..d950494 100644
+--- a/frontend/src/editor/internal/chunkField.ts
++++ b/frontend/src/editor/internal/chunkField.ts
+@@ -9,7 +9,6 @@ import {
+ 
+ import type { Chunk } from "../../ipc";
+ import { lineSpan } from "./lineSpan";
+-import { SIDES } from "./side";
+ import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+@@ -46,7 +45,7 @@ function mapSpans(
+   spans: readonly ChunkSpan[],
+   changes: ChangeDesc,
+   doc: Text | null,
+-  applied: ReadonlySet<Chunk["id"]>,
++  applied: StatusChanges,
+ ): readonly ChunkSpan[] {
+   let floor = 0;
+   const mapped = spans.map((span) => {
+@@ -76,16 +75,6 @@ function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boole
+   );
+ }
+ 
+-function newlyApplied(spans: readonly ChunkSpan[], changed: StatusChanges): Set<Chunk["id"]> {
+-  const ids = spans
+-    .filter(({ chunk, status }) => {
+-      const next = changed.get(chunk.id);
+-      return SIDES.some((side) => next?.[side] === "applied" && status[side] !== "applied");
+-    })
+-    .map(({ chunk }) => chunk.id);
+-  return new Set(ids);
+-}
+-
+ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
+   const changed = new Map<Chunk["id"], ChunkStatus>();
+   for (const effect of tr.effects) {
+@@ -96,9 +85,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
+   if (!tr.docChanged && changed.size === 0) {
+     return spans;
+   }
+-  const mapped = tr.docChanged
+-    ? mapSpans(spans, tr.changes, tr.startState.doc, newlyApplied(spans, changed))
+-    : spans;
++  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
+   return mapped.map((span, index) => {
+     const status =
+       changed.get(span.chunk.id) ??
+@@ -107,8 +94,8 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
+   });
+ }
+ 
+-const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
+-  map: (spans, changes) => mapSpans(spans, changes, null, new Set()),
++export const placeSpans = StateEffect.define<readonly ChunkSpan[]>({
++  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
+ });
+ 
+ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
+@@ -127,14 +114,13 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+     update(spans, tr) {
+       // History appends a merged event's older inverted effects after the newer ones
+       // (@codemirror/commands HistoryState.addChanges), so the last snapshot is the oldest state.
+-      const restore = tr.effects.findLast((effect) => effect.is(restoreSpans));
+-      return restore === undefined ? updateSpans(spans, tr) : restore.value;
++      const placed = tr.effects.findLast((effect) => effect.is(placeSpans));
++      return placed === undefined ? updateSpans(spans, tr) : placed.value;
+     },
+     provide: (field) =>
+       invertedEffects.of((tr) =>
+-        tr.docChanged ||
+-        tr.effects.some((effect) => effect.is(setStatus) || effect.is(restoreSpans))
+-          ? [restoreSpans.of(tr.startState.field(field))]
++        tr.docChanged || tr.effects.some((effect) => effect.is(setStatus) || effect.is(placeSpans))
++          ? [placeSpans.of(tr.startState.field(field))]
+           : [],
+       ),
+   });
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+index d164755..5227fe8 100644
+--- a/frontend/src/editor/internal/gap.test.ts
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -2,7 +2,15 @@ import { expect, test } from "vitest";
+ 
+ import { bandPath } from "../../connectors";
+ import { loadFixture, type Chunk } from "../../ipc";
+-import { arrowTitles, bandPaints, crossesStrip, gapArrows, type ArrowTitles } from "./gap";
++import {
++  arrowTitles,
++  bandPaints,
++  crossesStrip,
++  gapArrows,
++  keepsArrowRow,
++  type Arrow,
++  type ArrowTitles,
++} from "./gap";
+ import type { ChunkRow } from "./geometry";
+ import type { Side } from "./side";
+ import { PENDING, type ChunkStatus } from "./status";
+@@ -214,3 +222,24 @@ test("a change that is not a conflict never has the hint, even when both sides c
+     }
+   }
+ });
++
++test("an icon row built while the other side waited is rebuilt once that side is ignored", async () => {
++  const layout = { applyX: 0, ignoreX: 16, lineHeight: LINE_PX };
++  async function conflictArrow(conflictStatus: ChunkStatus): Promise<Arrow> {
++    const arrow = gapArrows(await magicRows(conflictStatus), "local").find(
++      ({ chunk }) => chunk.id === CONFLICT_ID,
++    );
++    if (arrow === undefined) {
++      throw new Error("no arrow for the conflict");
++    }
++    return arrow;
++  }
++  const built = await conflictArrow(PENDING);
++  const row = { mode: built.mode, otherWaits: built.otherWaits, layout };
++
++  const ignored = await conflictArrow({ local: "pending", remote: "ignored" });
++
++  expect(ignored.mode).toBe(row.mode);
++  expect(keepsArrowRow(row, await conflictArrow(PENDING), { ...layout })).toBe(true);
++  expect(keepsArrowRow(row, ignored, layout)).toBe(false);
++});
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 41aa847..244b3ca 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -3,8 +3,8 @@ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow } from "./geometry";
+ import { modKeyName } from "./modClick";
+-import { otherSide, type Side } from "./side";
+-import { applyMode, isSideOpen, type ApplyMode } from "./status";
++import type { Side } from "./side";
++import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+ export type Arrow = {
+@@ -15,6 +15,12 @@ export type Arrow = {
+ };
+ export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+ export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
++export type ButtonLayout = {
++  readonly applyX: number;
++  readonly ignoreX: number;
++  readonly lineHeight: number;
++};
++export type ArrowShape = Pick<Arrow, "mode" | "otherWaits"> & { readonly layout: ButtonLayout };
+ 
+ const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+   replace: "Apply",
+@@ -32,8 +38,7 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+       top: row[SIDE_PANE[side]].top,
+       chunk: row.chunk,
+       mode: applyMode(row.status, side),
+-      otherWaits:
+-        row.chunk.kind === "Conflict" && isSideOpen(row.chunk, row.status, otherSide(side)),
++      otherWaits: decidesOtherSide(row.chunk, row.status, side),
+     }));
+ }
+ 
+@@ -48,6 +53,20 @@ export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): Arro
+   };
+ }
+ 
++export function keepsArrowRow(
++  row: ArrowShape,
++  { mode, otherWaits }: Pick<Arrow, "mode" | "otherWaits">,
++  layout: ButtonLayout,
++): boolean {
++  return (
++    row.mode === mode &&
++    row.otherWaits === otherWaits &&
++    row.layout.applyX === layout.applyX &&
++    row.layout.ignoreX === layout.ignoreX &&
++    row.layout.lineHeight === layout.lineHeight
++  );
++}
++
+ export function bandPaints(
+   { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
+   shifts: { readonly left: number; readonly right: number },
+diff --git a/frontend/src/editor/internal/historyKey.ts b/frontend/src/editor/internal/historyKey.ts
+index 7781955..0f76b79 100644
+--- a/frontend/src/editor/internal/historyKey.ts
++++ b/frontend/src/editor/internal/historyKey.ts
+@@ -7,7 +7,7 @@ type HistoryKey = Pick<
+ 
+ const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
+ const LATIN_LETTER = /^[a-z]$/i;
+-const LETTER_OR_VOWEL_SIGN = /^[\p{L}\p{M}]$/u;
++const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
+ const LETTER_CODE = /^Key([A-Z])$/;
+ 
+ function inTextField(target: EventTarget | null): boolean {
+@@ -26,7 +26,7 @@ function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
+   if (LATIN_LETTER.test(key)) {
+     return key.toLowerCase();
+   }
+-  if (!LETTER_OR_VOWEL_SIGN.test(key)) {
++  if (!LETTER_OR_MARK.test(key)) {
+     return "";
+   }
+   return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
+diff --git a/frontend/src/editor/internal/modClick.ts b/frontend/src/editor/internal/modClick.ts
+index 6ffeb0a..bb675f8 100644
+--- a/frontend/src/editor/internal/modClick.ts
++++ b/frontend/src/editor/internal/modClick.ts
+@@ -16,13 +16,13 @@ const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
+   [SECONDARY_BUTTON]: "ignore",
+ };
+ 
+-// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
+-// Ctrl+click is the system's secondary click.
++// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
+ function isMac(platform: string): boolean {
+   return /Mac/.test(platform);
+ }
+ 
+ export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
++  // On macOS Ctrl+click is the system's secondary click.
+   return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
+ }
+ 
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 9934e8c..7115f27 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -3,7 +3,7 @@ import { keymap, type EditorView } from "@codemirror/view";
+ 
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+-import { isModHeld } from "./modClick";
++import { isModHeld, modClickAction } from "./modClick";
+ import {
+   afterDecisionFocus,
+   alone,
+@@ -219,10 +219,15 @@ export class SideFocus {
+     if (event.button !== 0 || event.target === view.scrollDOM) {
+       return;
+     }
+-    const id = changeAt(this.#sources.rows(), side, event.clientY - view.documentTop);
+-    if (id !== null && !this.#sources.readOnly && isModHeld(event, platform)) {
++    const rows = this.#sources.rows();
++    const y = event.clientY - view.documentTop;
++    if (
++      !this.#sources.readOnly &&
++      modClickAction(rows, { side, y, click: event, platform }) !== null
++    ) {
+       return;
+     }
++    const id = changeAt(rows, side, y);
+     const mark: SideMark = id === null ? alone(this.#mark(side)) : { kind: "change", id };
+     view.dispatch({ effects: setMark.of(mark) });
+   }
+diff --git a/frontend/src/editor/internal/status.ts b/frontend/src/editor/internal/status.ts
+index 519671d..be5f8c0 100644
+--- a/frontend/src/editor/internal/status.ts
++++ b/frontend/src/editor/internal/status.ts
+@@ -27,6 +27,10 @@ export function canBulkApply(chunk: Chunk, status: ChunkStatus, side: Side): boo
+   return chunk.kind !== "Conflict" && isSideOpen(chunk, status, side);
+ }
+ 
++export function decidesOtherSide(chunk: Chunk, status: ChunkStatus, side: Side): boolean {
++  return chunk.kind === "Conflict" && isSideOpen(chunk, status, otherSide(side));
++}
++
+ export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
+   return status[otherSide(side)] === "applied" ? "append" : "replace";
+ }
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 89d77f9..d5b9f89 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -13,9 +13,11 @@ import {
+   bandPaints,
+   crossesStrip,
+   gapArrows,
++  keepsArrowRow,
+   type Arrow,
+-  type ArrowTitles,
++  type ArrowShape,
+   type BandPaint,
++  type ButtonLayout,
+ } from "./gap";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+ import type { Side } from "./side";
+@@ -29,23 +31,15 @@ export type IconPress = {
+ 
+ type OnPress = (press: IconPress, event: PointerEvent) => void;
+ type GapPanes = { readonly left: EditorView; readonly right: EditorView };
+-type ButtonLayout = {
+-  readonly applyX: number;
+-  readonly ignoreX: number;
+-  readonly lineHeight: number;
+-};
+-type PlacedArrow = { readonly arrow: Arrow; readonly titles: ArrowTitles; readonly y: number };
++type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
+ type ArrowPaint = {
+   readonly placed: readonly PlacedArrow[];
+   readonly layout: ButtonLayout;
+   readonly onPress: OnPress;
+ };
+ type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
+-type ArrowRow = {
++type ArrowRow = ArrowShape & {
+   readonly node: SVGGElement;
+-  readonly mode: ApplyMode;
+-  readonly titles: ArrowTitles;
+-  readonly layout: ButtonLayout;
+   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
+ };
+ 
+@@ -115,12 +109,17 @@ function actionButton(
+ }
+ 
+ function arrowRow(
+-  { arrow, titles, side }: Pick<PlacedArrow, "arrow" | "titles"> & { readonly side: Side },
++  {
++    arrow,
++    side,
++    platform,
++  }: { readonly arrow: Arrow; readonly side: Side; readonly platform: string },
+   layout: ButtonLayout,
+   onPress: OnPress,
+ ): ArrowRow {
+-  const { chunk, mode } = arrow;
++  const { chunk, mode, otherWaits } = arrow;
+   const { applyX, ignoreX, lineHeight } = layout;
++  const titles = arrowTitles(arrow, platform);
+   const apply: IconPress = { kind: "apply", chunk, side };
+   const ignore: IconPress = { kind: "ignore", chunk, side };
+   const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
+@@ -132,7 +131,7 @@ function arrowRow(
+   return {
+     node,
+     mode,
+-    titles,
++    otherWaits,
+     layout,
+     buttons: [
+       [applyButton, apply],
+@@ -141,17 +140,6 @@ function arrowRow(
+   };
+ }
+ 
+-function sameShape(row: ArrowRow, { arrow, titles }: PlacedArrow, layout: ButtonLayout): boolean {
+-  return (
+-    row.mode === arrow.mode &&
+-    row.titles.apply === titles.apply &&
+-    row.titles.ignore === titles.ignore &&
+-    row.layout.applyX === layout.applyX &&
+-    row.layout.ignoreX === layout.ignoreX &&
+-    row.layout.lineHeight === layout.lineHeight
+-  );
+-}
+-
+ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   let next = parent.firstElementChild;
+   for (const node of nodes) {
+@@ -214,8 +202,7 @@ class GapStrip {
+     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
+     const placed = gapArrows(rows, this.#side)
+       .map((arrow) => ({ arrow, y: arrow.top + shift }))
+-      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height))
+-      .map((at) => ({ ...at, titles: arrowTitles(at.arrow, this.#platform) }));
++      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
+     const layout = { applyX, ignoreX, lineHeight };
+     return { bands, arrows: { placed, layout, onPress: this.#onPress } };
+   }
+@@ -248,12 +235,11 @@ class GapStrip {
+     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
+       row.node.remove();
+     });
+-    const nodes = placed.map((at) => {
+-      const { arrow, y } = at;
++    const nodes = placed.map(({ arrow, y }) => {
+       let row = this.#arrows.get(arrow.chunk.id);
+-      if (row === undefined || !sameShape(row, at, layout)) {
++      if (row === undefined || !keepsArrowRow(row, arrow, layout)) {
+         row?.node.remove();
+-        row = arrowRow({ ...at, side: this.#side }, layout, onPress);
++        row = arrowRow({ arrow, side: this.#side, platform: this.#platform }, layout, onPress);
+         this.#arrows.set(arrow.chunk.id, row);
+       }
+       row.node.setAttribute("transform", `translate(0 ${y})`);
