@@ -1,0 +1,1332 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index db228e3..0db6433 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -6,7 +6,7 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+ import { log, type FileMergeData } from "../ipc";
+ import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
+-import type { ChunkAction, SideDocs, Steps } from "./internal/apply";
++import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+ import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
+ import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
+@@ -15,7 +15,7 @@ import { syncFindSpace } from "./internal/find";
+ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf } from "./internal/language";
+-import { applyOnModClick } from "./internal/modClick";
++import { modClicks } from "./internal/modClick";
+ import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+@@ -68,7 +68,7 @@ export class MergeController {
+       views: this.#views,
+       states: () => this.#views.center.state.field(this.#field),
+       rows: () => this.#layout().rows,
+-      decide: (action) => this.#decide(action),
++      decide: (action) => this.#decide(action, "side"),
+       readOnly: this.#readOnly,
+       hidden: data.deleted,
+     });
+@@ -78,8 +78,8 @@ export class MergeController {
+       changed: () => {
+         this.#requestFrame();
+       },
+-      released: (press) => {
+-        this.#act(coveredAction(press, this.#layout().rows, this.#views));
++      released: (press, reach) => {
++        this.#act(coveredAction(press, this.#layout().rows, this.#views), reach);
+       },
+     });
+     this.#scroll = new ScrollSync(this.#views, () => {
+@@ -168,8 +168,11 @@ export class MergeController {
+       this.#repaint,
+       this.#readOnly
+         ? []
+-        : applyOnModClick(statuses, side, (chunk) => {
+-            this.#act({ kind: "apply", side, chunks: [chunk] });
++        : modClicks(side, {
++            rows: () => this.#layout().rows,
++            act: (action) => {
++              this.#act(action, "side");
++            },
+           }),
+     ];
+   }
+@@ -184,14 +187,14 @@ export class MergeController {
+     }, steps);
+   }
+ 
+-  #decide(action: ChunkAction): void {
++  #decide(action: ChunkAction, reach: Reach): void {
+     this.#focus.deciding(() => {
+-      this.#dispatch(actionSteps(this.#target(), action));
++      this.#dispatch(actionSteps(this.#target(), action, reach));
+     });
+   }
+ 
+-  #act(action: ChunkAction): void {
+-    this.#decide(action);
++  #act(action: ChunkAction, reach: Reach): void {
++    this.#decide(action, reach);
+     const { left, center, right } = this.#views;
+     if (!left.hasFocus && !center.hasFocus && !right.hasFocus) {
+       center.focus();
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 5aebe1f..d17d7c8 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -121,11 +121,18 @@ function run(merge: ApplyTarget, steps: Steps, time = Date.now()): ApplyTarget {
+ }
+ 
+ function applyOne(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
+-  return actionSteps(target, { kind: "apply", side, chunks: [chunk] });
++  return actionSteps(target, { kind: "apply", side, chunks: [chunk] }, "side");
+ }
+ 
+ function ignoreOne(target: ApplyTarget, chunk: Chunk, side: Side): Steps {
+-  return actionSteps(target, { kind: "ignore", side, chunks: [chunk] });
++  return actionSteps(target, { kind: "ignore", side, chunks: [chunk] }, "side");
++}
++
++function modOne(
++  target: ApplyTarget,
++  { kind, chunk, side }: { kind: "apply" | "ignore"; chunk: Chunk; side: Side },
++): Steps {
++  return actionSteps(target, { kind, side, chunks: [chunk] }, "conflict");
+ }
+ 
+ function allVisible(merge: ApplyTarget): VisibleLines {
+@@ -787,3 +794,180 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
+   );
+   expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
+ });
++
++test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step", async () => {
++  const start = await magicKeys();
++  const conflict = chunkAt(start, 8);
++
++  const both = run(start, modOne(start, { kind: "apply", chunk: conflict, side: "local" }));
++  const local = run(start, applyOne(start, conflict, "local"));
++  const plain = run(local, ignoreOne(local, conflict, "remote"));
++  const undone = command(both, undo);
++
++  expect(statuses(both)[8]).toBe("applied ignored");
++  expect(centerText(both, 8)).toBe(sideText(both, 8, "local"));
++  expect(paneText(both.state)).toBe(paneText(plain.state));
++  expect(statuses(both)).toEqual(statuses(plain));
++  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
++  expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
++  expect(paneText(undone.state)).toBe(paneText(start.state));
++  expect(statuses(undone)).toEqual(statuses(start));
++});
++
++test("Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step", async () => {
++  const start = await magicKeys();
++  const conflict = chunkAt(start, 8);
++
++  const both = run(start, modOne(start, { kind: "ignore", chunk: conflict, side: "local" }));
++  const ignored = run(start, ignoreOne(start, conflict, "local"));
++  const plain = run(ignored, applyOne(ignored, conflict, "remote"));
++  const undone = command(both, undo);
++
++  expect(statuses(both)[8]).toBe("ignored applied");
++  expect(centerText(both, 8)).toBe(sideText(both, 8, "remote"));
++  expect(paneText(both.state)).toBe(paneText(plain.state));
++  expect(statuses(both)).toEqual(statuses(plain));
++  expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
++  expect(paneText(undone.state)).toBe(paneText(start.state));
++  expect(statuses(undone)).toEqual(statuses(start));
++});
++
++test("Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied", async () => {
++  const start = await magicKeys();
++  const conflict = chunkAt(start, 8);
++  const remoteApplied = run(start, applyOne(start, conflict, "remote"));
++
++  const appended = run(
++    remoteApplied,
++    modOne(remoteApplied, { kind: "apply", chunk: conflict, side: "local" }),
++  );
++  const plain = run(remoteApplied, applyOne(remoteApplied, conflict, "local"));
++
++  expect(statuses(appended)[8]).toBe("applied applied");
++  expect(centerText(appended, 8)).toBe(
++    sideText(appended, 8, "remote") + sideText(appended, 8, "local"),
++  );
++  expect(paneText(appended.state)).toBe(paneText(plain.state));
++});
++
++test("Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is", async () => {
++  const start = await magicKeys();
++  const conflict = chunkAt(start, 8);
++  const remoteIgnored = run(start, ignoreOne(start, conflict, "remote"));
++
++  const kept = run(
++    remoteIgnored,
++    modOne(remoteIgnored, { kind: "ignore", chunk: conflict, side: "local" }),
++  );
++
++  expect(paneText(kept.state)).toBe(paneText(start.state));
++  expect(statuses(kept)[8]).toBe("ignored ignored");
++});
++
++test("Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome", async () => {
++  const start = await magicKeys();
++  const cases = [
++    { kind: "apply", id: 0, side: "local" },
++    { kind: "ignore", id: 1, side: "local" },
++    { kind: "apply", id: 3, side: "remote" },
++  ] satisfies { kind: "apply" | "ignore"; id: number; side: Side }[];
++
++  for (const { kind, id, side } of cases) {
++    const chunk = chunkAt(start, id);
++    const withMod = run(start, modOne(start, { kind, chunk, side }));
++    const plain = run(start, actionSteps(start, { kind, side, chunks: [chunk] }, "side"));
++
++    expect(paneText(withMod.state)).toBe(paneText(plain.state));
++    expect(statuses(withMod)).toEqual(statuses(plain));
++  }
++});
++
++async function conflictLocalConflict(): Promise<ApplyTarget> {
++  return open(
++    await synthetic(
++      {
++        middle: "a\nb\nc\nd\ne\nf\ng\n",
++        local: "a\nL1\nc\nL3\ne\nL5\ng\n",
++        remote: "a\nR1\nc\nd\ne\nR5\ng\n",
++        eol: "Lf",
++      },
++      [
++        { kind: "Conflict", middle: [1, 1], side: [1, 1] },
++        { kind: "LocalOnly", middle: [3, 1], side: [3, 1] },
++        { kind: "Conflict", middle: [5, 1], side: [5, 1] },
++      ],
++    ),
++  );
++}
++
++test("a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step", async () => {
++  const start = await conflictLocalConflict();
++  const chunks = [0, 1, 2].map((id) => chunkAt(start, id));
++
++  const applied = run(
++    start,
++    actionSteps(start, { kind: "apply", side: "local", chunks }, "conflict"),
++  );
++  const ignored = run(
++    start,
++    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
++  );
++  const undone = command(applied, undo);
++
++  expect(paneText(applied.state)).toBe("a\nL1\nc\nL3\ne\nL5\ng\n");
++  expect(statuses(applied)).toEqual(["applied ignored", "applied pending", "applied ignored"]);
++  expect(paneText(ignored.state)).toBe("a\nR1\nc\nd\ne\nR5\ng\n");
++  expect(statuses(ignored)).toEqual(["ignored applied", "ignored pending", "ignored applied"]);
++  expect(undoDepth(applied.state)).toBe(undoDepth(start.state) + 1);
++  expect(undoDepth(ignored.state)).toBe(undoDepth(start.state) + 1);
++  expect(paneText(undone.state)).toBe(paneText(start.state));
++  expect(statuses(undone)).toEqual(statuses(start));
++});
++
++test("Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it", async () => {
++  const start = open(
++    await synthetic({ middle: "a\nb\nc\n", local: "a\nL\nc\n", remote: "a\nc\n", eol: "Lf" }, [
++      { kind: "Conflict", middle: [1, 1], side: [1, 1], remote: [1, 0] },
++    ]),
++  );
++
++  const done = run(
++    start,
++    modOne(start, { kind: "ignore", chunk: chunkAt(start, 0), side: "local" }),
++  );
++
++  expect(paneText(done.state)).toBe("a\nc\n");
++  expect(statuses(done)).toEqual(["ignored applied"]);
++  expect(summarize(done.state.field(done.field))).toEqual({ changes: 0, conflicts: 0 });
++});
++
++test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each", async () => {
++  const start = open(
++    await synthetic(
++      { middle: "a\nb\nc\n", local: "a\nB\nL\nc\n", remote: "a\nb\nR\nc\n", eol: "Lf" },
++      [
++        { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
++        { kind: "Conflict", middle: [2, 0], side: [2, 1] },
++      ],
++    ),
++  );
++  function spans(merge: ApplyTarget): [number, number][] {
++    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
++  }
++  const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
++
++  const dragged = run(
++    start,
++    actionSteps(start, { kind: "ignore", side: "local", chunks }, "conflict"),
++  );
++  const first = run(start, ignoreOne(start, chunkAt(start, 0), "local"));
++  const clicked = run(
++    first,
++    modOne(first, { kind: "ignore", chunk: chunkAt(first, 1), side: "local" }),
++  );
++
++  expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
++  expect(paneText(dragged.state)).toBe("a\nb\nR\nc\n");
++  expect(spans(dragged)).toEqual(spans(clicked));
++  expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
++});
+diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
+index e8b1313..75db2bb 100644
+--- a/frontend/src/editor/internal/apply.ts
++++ b/frontend/src/editor/internal/apply.ts
+@@ -12,7 +12,7 @@ import {
+ 
+ import type { Chunk } from "../../ipc";
+ import { setStatus, type ChunkSpan } from "./chunkField";
+-import type { Side } from "./side";
++import { otherSide, type Side } from "./side";
+ import { applyMode, canBulkApply, isSideOpen, statusAfterApply, statusAfterIgnore } from "./status";
+ 
+ export type ChunkAction = {
+@@ -21,6 +21,8 @@ export type ChunkAction = {
+   readonly chunks: readonly Chunk[];
+ };
+ 
++export type Reach = "side" | "conflict";
++
+ export type SideDocs = Readonly<Record<Side, Text>>;
+ 
+ export type ApplyTarget = {
+@@ -59,30 +61,51 @@ type ChainedAction = {
+   readonly effects: readonly StateEffect<unknown>[];
+ };
+ 
+-function chainedChanges(target: ApplyTarget, chunks: readonly Chunk[], side: Side): ChainedAction {
++type SideDecision = {
++  readonly chunk: Chunk;
++  readonly kind: ChunkAction["kind"];
++  readonly side: Side;
++};
++
++const OPPOSITE: Readonly<Record<ChunkAction["kind"], ChunkAction["kind"]>> = {
++  apply: "ignore",
++  ignore: "apply",
++};
++
++function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[]): ChainedAction {
+   let state = target.state;
+   let changes = ChangeSet.empty(state.doc.length);
+   const effects: StateEffect<unknown>[] = [];
+-  for (const chunk of chunks) {
++  for (const { chunk, kind, side } of decisions) {
+     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
+     if (span === undefined) {
+       throw new Error(`chunk ${chunk.id} is not in the chunk field`);
+     }
+-    const effect = setStatus.of({
+-      id: chunk.id,
+-      status: statusAfterApply(chunk, span.status, side),
+-    });
+-    const click = state.update({
+-      changes: applyChange({ ...target, state }, span, side),
+-      effects: effect,
+-    });
+-    changes = changes.compose(click.changes);
+-    effects.push(effect);
+-    state = click.state;
++    if (isSideOpen(chunk, span.status, side)) {
++      const status =
++        kind === "apply"
++          ? statusAfterApply(chunk, span.status, side)
++          : statusAfterIgnore(chunk, span.status, side);
++      const effect = setStatus.of({ id: chunk.id, status });
++      const click = state.update({
++        changes: kind === "apply" ? applyChange({ ...target, state }, span, side) : [],
++        effects: effect,
++      });
++      changes = changes.compose(click.changes);
++      effects.push(effect);
++      state = click.state;
++    }
+   }
+   return { changes, effects };
+ }
+ 
++function sideDecisions(chunk: Chunk, { kind, side }: ChunkAction, reach: Reach): SideDecision[] {
++  const own = { chunk, kind, side };
++  return reach === "conflict" && chunk.kind === "Conflict"
++    ? [own, { chunk, kind: OPPOSITE[kind], side: otherSide(side) }]
++    : [own];
++}
++
+ function chosenSpans(target: ApplyTarget, { side, chunks }: ChunkAction): ChunkSpan[] {
+   const ids = new Set(chunks.map((chunk) => chunk.id));
+   return target.state
+@@ -117,43 +140,16 @@ export function dispatchSteps(dispatch: (spec: TransactionSpec) => void, steps:
+   }
+ }
+ 
+-function chosenAction(
+-  target: ApplyTarget,
+-  spans: readonly ChunkSpan[],
+-  action: ChunkAction,
+-): ChainedAction {
+-  const { kind, side } = action;
+-  switch (kind) {
+-    case "apply":
+-      return chainedChanges(
+-        target,
+-        spans.map((span) => span.chunk),
+-        side,
+-      );
+-    case "ignore":
+-      return {
+-        changes: ChangeSet.empty(target.state.doc.length),
+-        effects: spans.map((span) =>
+-          setStatus.of({
+-            id: span.chunk.id,
+-            status: statusAfterIgnore(span.chunk, span.status, side),
+-          }),
+-        ),
+-      };
+-    default: {
+-      const _exhaustive: never = kind;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-export function actionSteps(target: ApplyTarget, action: ChunkAction): Steps {
++export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Reach): Steps {
+   const spans = chosenSpans(target, action);
+   const last = spans.at(-1);
+   if (last === undefined) {
+     return [];
+   }
+-  const { changes, effects } = chosenAction(target, spans, action);
++  const { changes, effects } = chainedChanges(
++    target,
++    spans.flatMap((span) => sideDecisions(span.chunk, action, reach)),
++  );
+   return [
+     moveCursor(last.from),
+     { changes, effects, userEvent: `yamt.${action.kind}` },
+@@ -170,14 +166,14 @@ export function bulkApplySteps({
+   readonly side: Side;
+   readonly visible: VisibleLines;
+ }): Steps {
+-  const chunks = target.state
++  const decisions = target.state
+     .field(target.field)
+     .filter((span) => canBulkApply(span.chunk, span.status, side))
+-    .map((span) => span.chunk);
+-  if (chunks.length === 0) {
++    .map((span): SideDecision => ({ chunk: span.chunk, kind: "apply", side }));
++  if (decisions.length === 0) {
+     return [];
+   }
+-  const { changes, effects } = chainedChanges(target, chunks, side);
++  const { changes, effects } = chainedChanges(target, decisions);
+   const action = { changes, effects, userEvent: "yamt.apply" };
+   const cursor = bulkCursorTarget(target.state, visible);
+   if (cursor === null) {
+diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
+index e7a7c56..efd2dad 100644
+--- a/frontend/src/editor/internal/chunkField.ts
++++ b/frontend/src/editor/internal/chunkField.ts
+@@ -9,6 +9,7 @@ import {
+ 
+ import type { Chunk } from "../../ipc";
+ import { lineSpan } from "./lineSpan";
++import { SIDES } from "./side";
+ import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+@@ -45,7 +46,7 @@ function mapSpans(
+   spans: readonly ChunkSpan[],
+   changes: ChangeDesc,
+   doc: Text | null,
+-  applied: StatusChanges,
++  applied: ReadonlySet<Chunk["id"]>,
+ ): readonly ChunkSpan[] {
+   let floor = 0;
+   const mapped = spans.map((span) => {
+@@ -75,6 +76,16 @@ function collapsedByUser(before: ChunkSpan | undefined, after: ChunkSpan): boole
+   );
+ }
+ 
++function newlyApplied(spans: readonly ChunkSpan[], changed: StatusChanges): Set<Chunk["id"]> {
++  const ids = spans
++    .filter(({ chunk, status }) => {
++      const next = changed.get(chunk.id);
++      return SIDES.some((side) => next?.[side] === "applied" && status[side] !== "applied");
++    })
++    .map(({ chunk }) => chunk.id);
++  return new Set(ids);
++}
++
+ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly ChunkSpan[] {
+   const changed = new Map<Chunk["id"], ChunkStatus>();
+   for (const effect of tr.effects) {
+@@ -85,7 +96,9 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
+   if (!tr.docChanged && changed.size === 0) {
+     return spans;
+   }
+-  const mapped = tr.docChanged ? mapSpans(spans, tr.changes, tr.startState.doc, changed) : spans;
++  const mapped = tr.docChanged
++    ? mapSpans(spans, tr.changes, tr.startState.doc, newlyApplied(spans, changed))
++    : spans;
+   return mapped.map((span, index) => {
+     const status =
+       changed.get(span.chunk.id) ??
+@@ -95,7 +108,7 @@ function updateSpans(spans: readonly ChunkSpan[], tr: Transaction): readonly Chu
+ }
+ 
+ const restoreSpans = StateEffect.define<readonly ChunkSpan[]>({
+-  map: (spans, changes) => mapSpans(spans, changes, null, new Map()),
++  map: (spans, changes) => mapSpans(spans, changes, null, new Set()),
+ });
+ 
+ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkSpan[]> {
+diff --git a/frontend/src/editor/internal/drag.ts b/frontend/src/editor/internal/drag.ts
+index 4897395..ac34a73 100644
+--- a/frontend/src/editor/internal/drag.ts
++++ b/frontend/src/editor/internal/drag.ts
+@@ -1,14 +1,15 @@
+ import type { Chunk } from "../../ipc";
+-import type { ChunkAction } from "./apply";
++import type { ChunkAction, Reach } from "./apply";
+ import { gapArrows } from "./gap";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
++import { isModHeld } from "./modClick";
+ import type { IconPress } from "./strips";
+ 
+ type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
+ 
+ type DragEvents = {
+   readonly changed: () => void;
+-  readonly released: (press: Press) => void;
++  readonly released: (press: Press, reach: Reach) => void;
+ };
+ 
+ type IconRow = { readonly top: number; readonly chunk: Chunk };
+@@ -51,6 +52,7 @@ export class IconDrag {
+   readonly #strips: readonly [SVGSVGElement, SVGSVGElement];
+   readonly #events: DragEvents;
+   #press: Press | null = null;
++  readonly #platform = navigator.platform;
+ 
+   constructor(strips: readonly [SVGSVGElement, SVGSVGElement], events: DragEvents) {
+     this.#strips = strips;
+@@ -87,7 +89,10 @@ export class IconDrag {
+     const press = this.#press;
+     if (press?.pointerId === event.pointerId) {
+       this.#press = null;
+-      this.#events.released({ ...press, clientY: event.clientY });
++      this.#events.released(
++        { ...press, clientY: event.clientY },
++        isModHeld(event, this.#platform) ? "conflict" : "side",
++      );
+       this.#events.changed();
+     }
+   };
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+index 64efd1a..d164755 100644
+--- a/frontend/src/editor/internal/gap.test.ts
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import { bandPath } from "../../connectors";
+ import { loadFixture, type Chunk } from "../../ipc";
+-import { bandPaints, crossesStrip } from "./gap";
++import { arrowTitles, bandPaints, crossesStrip, gapArrows, type ArrowTitles } from "./gap";
+ import type { ChunkRow } from "./geometry";
+ import type { Side } from "./side";
+ import { PENDING, type ChunkStatus } from "./status";
+@@ -151,3 +151,66 @@ test("each strip paints a chunk in its own side's tone", async () => {
+     ]),
+   ).toEqual([[1, "deleted"]]);
+ });
++
++async function conflictTitles(
++  conflictStatus: ChunkStatus,
++  { side, platform }: { side: Side; platform: string },
++): Promise<{ mode: string; titles: ArrowTitles } | null> {
++  const rows = await magicRows(conflictStatus);
++  const arrow = gapArrows(rows, side).find(({ chunk }) => chunk.id === CONFLICT_ID);
++  return arrow === undefined ? null : { mode: arrow.mode, titles: arrowTitles(arrow, platform) };
++}
++
++const LINUX = "Linux x86_64";
++
++test("a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided", async () => {
++  const linux: { side: Side; platform: string } = { side: "local", platform: LINUX };
++
++  expect(await conflictTitles(PENDING, linux)).toEqual({
++    mode: "replace",
++    titles: {
++      apply: "Apply\nCtrl+click: also ignore the other side",
++      ignore: "Ignore\nCtrl+click: also take the other side",
++    },
++  });
++  expect(await conflictTitles({ local: "pending", remote: "ignored" }, linux)).toEqual({
++    mode: "replace",
++    titles: { apply: "Apply", ignore: "Ignore" },
++  });
++  expect(await conflictTitles({ local: "pending", remote: "applied" }, linux)).toEqual({
++    mode: "append",
++    titles: { apply: "Apply after the other side", ignore: "Ignore" },
++  });
++  expect(
++    await conflictTitles({ local: "ignored", remote: "pending" }, { ...linux, side: "remote" }),
++  ).toEqual({ mode: "replace", titles: { apply: "Apply", ignore: "Ignore" } });
++});
++
++test("on macOS the hint says ⌘+click", async () => {
++  expect(await conflictTitles(PENDING, { side: "remote", platform: "MacIntel" })).toEqual({
++    mode: "replace",
++    titles: {
++      apply: "Apply\n⌘+click: also ignore the other side",
++      ignore: "Ignore\n⌘+click: also take the other side",
++    },
++  });
++});
++
++test("a change that is not a conflict never has the hint, even when both sides changed it", async () => {
++  const rows = await magicRows(PENDING);
++  const first = rows[0]?.chunk;
++  if (first === undefined) {
++    throw new Error("no chunk 0");
++  }
++  const bothSame = rowOf({ ...first, kind: "BothSame" }, PENDING);
++
++  for (const side of ["local", "remote"] satisfies Side[]) {
++    const titles = gapArrows([...rows, bothSame], side)
++      .filter(({ chunk }) => chunk.id !== CONFLICT_ID)
++      .map((arrow) => arrowTitles(arrow, LINUX));
++    expect(titles.length).toBeGreaterThan(0);
++    for (const title of titles) {
++      expect(title).toEqual({ apply: "Apply", ignore: "Ignore" });
++    }
++  }
++});
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 745ab23..41aa847 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -1,12 +1,25 @@
+ import { bandPath } from "../../connectors";
+ import type { Chunk } from "../../ipc";
++import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow } from "./geometry";
+-import type { Side } from "./side";
++import { modKeyName } from "./modClick";
++import { otherSide, type Side } from "./side";
+ import { applyMode, isSideOpen, type ApplyMode } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+-export type Arrow = { readonly top: number; readonly chunk: Chunk; readonly mode: ApplyMode };
++export type Arrow = {
++  readonly top: number;
++  readonly chunk: Chunk;
++  readonly mode: ApplyMode;
++  readonly otherWaits: boolean;
++};
+ export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
++export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
++
++const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
++  replace: "Apply",
++  append: "Apply after the other side",
++};
+ 
+ export function crossesStrip(top: number, bottom: number, height: number): boolean {
+   return top <= height && bottom >= 0;
+@@ -19,9 +32,22 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+       top: row[SIDE_PANE[side]].top,
+       chunk: row.chunk,
+       mode: applyMode(row.status, side),
++      otherWaits:
++        row.chunk.kind === "Conflict" && isSideOpen(row.chunk, row.status, otherSide(side)),
+     }));
+ }
+ 
++export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): ArrowTitles {
++  if (!otherWaits) {
++    return { apply: APPLY_TITLE[mode], ignore: "Ignore" };
++  }
++  const click = `${modKeyName(platform)}+click`;
++  return {
++    apply: `${APPLY_TITLE[mode]}\n${click}: also ignore the other side`,
++    ignore: `Ignore\n${click}: also take the other side`,
++  };
++}
++
+ export function bandPaints(
+   { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
+   shifts: { readonly left: number; readonly right: number },
+diff --git a/frontend/src/editor/internal/historyKey.test.ts b/frontend/src/editor/internal/historyKey.test.ts
+index 390a8d4..0482be3 100644
+--- a/frontend/src/editor/internal/historyKey.test.ts
++++ b/frontend/src/editor/internal/historyKey.test.ts
+@@ -68,6 +68,10 @@ test("a non-Latin layout undoes and redoes by the physical key", () => {
+   expect(command(LINUX, { key: "ф", code: "KeyA", ctrl: true })).toBeNull();
+ });
+ 
++test("a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript", () => {
++  expect(command(LINUX, { key: "ॆ", code: "KeyZ", ctrl: true })).toBe("undo");
++});
++
+ test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes", () => {
+   expect(command(LINUX, { key: "z", code: "KeyY", ctrl: true })).toBe("undo");
+   expect(command(LINUX, { key: "y", code: "KeyZ", ctrl: true })).toBe("redo");
+@@ -76,5 +80,5 @@ test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoe
+ test("a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing", () => {
+   expect(command(LINUX, { key: ";", code: "KeyZ", ctrl: true })).toBeNull();
+   expect(command(LINUX, { key: ":", code: "KeyZ", ctrl: true, shift: true })).toBeNull();
+-  expect(command(LINUX, { key: "f", code: "KeyY", ctrl: true })).toBeNull();
++  expect(command(LINUX, { key: "-", code: "KeyY", ctrl: true })).toBeNull();
+ });
+diff --git a/frontend/src/editor/internal/historyKey.ts b/frontend/src/editor/internal/historyKey.ts
+index 0bd71b7..7781955 100644
+--- a/frontend/src/editor/internal/historyKey.ts
++++ b/frontend/src/editor/internal/historyKey.ts
+@@ -7,7 +7,7 @@ type HistoryKey = Pick<
+ 
+ const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
+ const LATIN_LETTER = /^[a-z]$/i;
+-const ANY_LETTER = /^\p{L}$/u;
++const LETTER_OR_VOWEL_SIGN = /^[\p{L}\p{M}]$/u;
+ const LETTER_CODE = /^Key([A-Z])$/;
+ 
+ function inTextField(target: EventTarget | null): boolean {
+@@ -26,7 +26,7 @@ function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
+   if (LATIN_LETTER.test(key)) {
+     return key.toLowerCase();
+   }
+-  if (!ANY_LETTER.test(key)) {
++  if (!LETTER_OR_VOWEL_SIGN.test(key)) {
+     return "";
+   }
+   return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
+diff --git a/frontend/src/editor/internal/modClick.test.ts b/frontend/src/editor/internal/modClick.test.ts
+index e486aac..67adb13 100644
+--- a/frontend/src/editor/internal/modClick.test.ts
++++ b/frontend/src/editor/internal/modClick.test.ts
+@@ -1,69 +1,118 @@
+-import { Text } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+-import { loadFixture } from "../../ipc";
+-import { isModHeld, openBlockAt } from "./modClick";
++import type { Span } from "../../connectors";
++import { loadFixture, type FileMergeData } from "../../ipc";
++import type { ChunkRow } from "./geometry";
++import { isModHeld, modClickAction, modKeyName } from "./modClick";
+ import type { Side } from "./side";
+-import { PENDING, type ChunkState, type ChunkStatus } from "./status";
+-
+-type Magic = { readonly states: ChunkState[]; readonly docs: Readonly<Record<Side, Text>> };
++import { PENDING, type ChunkStatus } from "./status";
+ 
++const LINE_PX = 10;
+ const APPLIED_LEFT: ChunkStatus = { local: "applied", remote: "pending" };
+ const IGNORED_RIGHT: ChunkStatus = { local: "pending", remote: "ignored" };
+ const MAC = "MacIntel";
+ const LINUX = "Linux x86_64";
+ const WINDOWS = "Win32";
++const MAIN = 0;
++const MIDDLE = 1;
++const SECONDARY = 2;
++const CTRL = { ctrlKey: true, metaKey: false };
+ 
+-async function magic(statuses: Readonly<Record<number, ChunkStatus>> = {}): Promise<Magic> {
+-  const data = await loadFixture("vueuse-use-magic-keys.ts");
+-  return {
+-    states: data.chunks.map((chunk) => ({ chunk, status: statuses[chunk.id] ?? PENDING })),
+-    docs: { local: Text.of(data.local.split("\n")), remote: Text.of(data.remote.split("\n")) },
+-  };
++const MAGIC = await loadFixture("vueuse-use-magic-keys.ts");
++const VON = await loadFixture("vue-core-compiler-von.ts");
++
++function span({ start, len }: { readonly start: number; readonly len: number }): Span {
++  return { top: start * LINE_PX, bottom: (start + len) * LINE_PX };
+ }
+ 
+-function blockAt({ states, docs }: Magic, side: Side, pos: number): number | null {
+-  return openBlockAt(states, { side, doc: docs[side], pos })?.id ?? null;
++function rowsOf(
++  data: FileMergeData,
++  statuses: Readonly<Record<number, ChunkStatus>> = {},
++): ChunkRow[] {
++  return data.chunks.map((chunk) => ({
++    chunk,
++    status: statuses[chunk.id] ?? PENDING,
++    left: span(chunk.local),
++    center: span(chunk.middle),
++    right: span(chunk.remote),
++  }));
+ }
+ 
+-function lineStart({ docs }: Magic, side: Side, line: number): number {
+-  return docs[side].line(line).from;
++function lineTop(line: number): number {
++  return (line - 1) * LINE_PX;
+ }
+ 
+-function lineEnd({ docs }: Magic, side: Side, line: number): number {
+-  return docs[side].line(line).to;
++function clicked(
++  rows: readonly ChunkRow[],
++  {
++    side,
++    y,
++    button = MAIN,
++    keys = CTRL,
++  }: {
++    side: Side;
++    y: number;
++    button?: number;
++    keys?: { ctrlKey: boolean; metaKey: boolean };
++  },
++): string | null {
++  const action = modClickAction(rows, { side, y, click: { button, ...keys }, platform: LINUX });
++  return action === null
++    ? null
++    : `${action.kind} ${action.side} ${action.chunks.map(({ id }) => id).join()}`;
+ }
+ 
+-test("a block's first character and the end of its last line map to its change; the next line does not", async () => {
+-  const merge = await magic();
++test("Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not", () => {
++  const rows = rowsOf(MAGIC);
+ 
+-  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBe(8);
+-  expect(blockAt(merge, "local", lineEnd(merge, "local", 136))).toBe(8);
+-  expect(blockAt(merge, "local", lineStart(merge, "local", 137))).toBeNull();
+-  expect(blockAt(merge, "local", lineEnd(merge, "local", 128))).toBeNull();
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
+-  expect(blockAt(merge, "remote", lineEnd(merge, "remote", 154))).toBe(8);
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 155))).toBeNull();
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBe(3);
+-  expect(blockAt(merge, "local", lineStart(merge, "local", 3))).toBe(0);
++  expect(clicked(rows, { side: "local", y: lineTop(129) })).toBe("apply local 8");
++  expect(clicked(rows, { side: "local", y: lineTop(137) - 1 })).toBe("apply local 8");
++  expect(clicked(rows, { side: "local", y: lineTop(137) })).toBeNull();
++  expect(clicked(rows, { side: "local", y: lineTop(129) - 1 })).toBeNull();
++  expect(clicked(rows, { side: "local", y: lineTop(131), button: SECONDARY })).toBe(
++    "ignore local 8",
++  );
++  expect(clicked(rows, { side: "remote", y: lineTop(141), button: SECONDARY })).toBe(
++    "ignore remote 8",
++  );
++  expect(clicked(rows, { side: "remote", y: lineTop(155) - 1 })).toBe("apply remote 8");
++  expect(clicked(rows, { side: "remote", y: lineTop(87) })).toBe("apply remote 3");
+ });
+ 
+-test("unchanged sides and empty side ranges map to nothing", async () => {
+-  const merge = await magic();
++test("without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens", () => {
++  const none = { ctrlKey: false, metaKey: false };
++  const rows = rowsOf(MAGIC);
++  const decided = rowsOf(MAGIC, { 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
+ 
+-  expect(blockAt(merge, "local", lineStart(merge, "local", 87))).toBeNull();
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 3))).toBeNull();
++  expect(clicked(rows, { side: "local", y: lineTop(129), keys: none })).toBeNull();
++  expect(
++    clicked(rows, { side: "local", y: lineTop(129), button: SECONDARY, keys: none }),
++  ).toBeNull();
++  expect(clicked(rows, { side: "local", y: lineTop(129), button: MIDDLE })).toBeNull();
++  expect(clicked(rows, { side: "local", y: lineTop(87) })).toBeNull();
++  expect(clicked(decided, { side: "local", y: lineTop(129), button: SECONDARY })).toBeNull();
++  expect(clicked(decided, { side: "remote", y: lineTop(141), button: SECONDARY })).toBe(
++    "ignore remote 8",
++  );
++  expect(clicked(decided, { side: "remote", y: lineTop(87) })).toBeNull();
+ });
+ 
+-test("a side that is already applied or ignored maps to nothing; the other side still does", async () => {
+-  const merge = await magic({ 8: APPLIED_LEFT, 3: IGNORED_RIGHT });
++test("Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't", () => {
++  const rows = rowsOf(VON);
++  const bar = 18 * LINE_PX;
+ 
+-  expect(blockAt(merge, "local", lineStart(merge, "local", 129))).toBeNull();
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 141))).toBe(8);
+-  expect(blockAt(merge, "remote", lineStart(merge, "remote", 87))).toBeNull();
++  expect(VON.chunks[1]?.remote).toEqual({ start: 18, len: 0 });
++  for (const y of [bar - 3, bar + 3]) {
++    expect(clicked(rows, { side: "remote", y })).toBe("apply remote 1");
++    expect(clicked(rows, { side: "remote", y, button: SECONDARY })).toBe("ignore remote 1");
++  }
++  for (const y of [bar - 5, bar + 5]) {
++    expect(clicked(rows, { side: "remote", y })).toBeNull();
++    expect(clicked(rows, { side: "remote", y, button: SECONDARY })).toBeNull();
++  }
+ });
+ 
+-test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
++test("only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key", () => {
+   const ctrl = { ctrlKey: true, metaKey: false };
+   const meta = { ctrlKey: false, metaKey: true };
+   const both = { ctrlKey: true, metaKey: true };
+@@ -75,6 +124,7 @@ test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
+     false,
+     false,
+   ]);
++  expect(modKeyName(MAC)).toBe("⌘");
+   for (const platform of [LINUX, WINDOWS]) {
+     expect([ctrl, meta, both, none].map((keys) => isModHeld(keys, platform))).toEqual([
+       true,
+@@ -82,5 +132,6 @@ test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
+       false,
+       false,
+     ]);
++    expect(modKeyName(platform)).toBe("Ctrl");
+   }
+ });
+diff --git a/frontend/src/editor/internal/modClick.ts b/frontend/src/editor/internal/modClick.ts
+index 369f8e7..6ffeb0a 100644
+--- a/frontend/src/editor/internal/modClick.ts
++++ b/frontend/src/editor/internal/modClick.ts
+@@ -1,56 +1,75 @@
+-import type { Extension, StateField, Text } from "@codemirror/state";
++import type { Extension } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ 
+-import type { Chunk } from "../../ipc";
++import type { ChunkAction } from "./apply";
++import type { ChunkRow } from "./geometry";
++import { changeAt } from "./navigation";
+ import type { Side } from "./side";
+-import { isSideOpen, type ChunkState } from "./status";
+ 
+ type Modifiers = Pick<MouseEvent, "ctrlKey" | "metaKey">;
++type Click = Modifiers & Pick<MouseEvent, "button">;
++
++const MAIN_BUTTON = 0;
++const SECONDARY_BUTTON = 2;
++const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
++  [MAIN_BUTTON]: "apply",
++  [SECONDARY_BUTTON]: "ignore",
++};
++
++// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
++// Ctrl+click is the system's secondary click.
++function isMac(platform: string): boolean {
++  return /Mac/.test(platform);
++}
+ 
+ export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
+-  // The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
+-  // Ctrl+click is the system's secondary click.
+-  return /Mac/.test(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
++  return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
+ }
+ 
+-export function openBlockAt(
+-  states: readonly ChunkState[],
+-  { side, doc, pos }: { readonly side: Side; readonly doc: Text; readonly pos: number },
+-): Chunk | null {
+-  const line = doc.lineAt(pos).number - 1;
+-  const hit = states.find(
+-    ({ chunk, status }) =>
+-      isSideOpen(chunk, status, side) &&
+-      line >= chunk[side].start &&
+-      line < chunk[side].start + chunk[side].len,
+-  );
+-  return hit?.chunk ?? null;
++export function modKeyName(platform: string): string {
++  return isMac(platform) ? "⌘" : "Ctrl";
+ }
+ 
+-export function applyOnModClick(
+-  statuses: StateField<readonly ChunkState[]>,
++export function modClickAction(
++  rows: readonly ChunkRow[],
++  { side, y, click, platform }: { side: Side; y: number; click: Click; platform: string },
++): ChunkAction | null {
++  const kind = BUTTON_ACTION[click.button];
++  if (kind === undefined || !isModHeld(click, platform)) {
++    return null;
++  }
++  const id = changeAt(rows, side, y);
++  const row = rows.find(({ chunk }) => chunk.id === id);
++  return row === undefined ? null : { kind, side, chunks: [row.chunk] };
++}
++
++export function modClicks(
+   side: Side,
+-  apply: (chunk: Chunk) => void,
++  { rows, act }: { rows: () => readonly ChunkRow[]; act: (action: ChunkAction) => void },
+ ): Extension {
+   const platform = navigator.platform;
++  function actionAt(click: MouseEvent, view: EditorView): ChunkAction | null {
++    return modClickAction(rows(), { side, y: click.clientY - view.documentTop, click, platform });
++  }
+   return EditorView.domEventHandlers({
+     mousedown(event, view) {
+-      const height = event.clientY - view.documentTop;
+-      if (
+-        event.button !== 0 ||
+-        !isModHeld(event, platform) ||
+-        height < 0 ||
+-        height >= view.lineBlockAt(view.state.doc.length).bottom
+-      ) {
+-        return false;
+-      }
+-      const pos = view.lineBlockAtHeight(height).from;
+-      const chunk = openBlockAt(view.state.field(statuses), { side, doc: view.state.doc, pos });
+-      if (chunk === null) {
++      const action = actionAt(event, view);
++      if (action === null) {
+         return false;
+       }
+       event.preventDefault();
+-      apply(chunk);
++      if (action.kind === "apply") {
++        act(action);
++      }
++      return true;
++    },
++    contextmenu(event, view) {
++      const action = actionAt(event, view);
++      if (action?.kind !== "ignore") {
++        return false;
++      }
++      event.preventDefault();
++      act(action);
+       return true;
+     },
+   });
+diff --git a/frontend/src/editor/internal/navigation.ts b/frontend/src/editor/internal/navigation.ts
+index 94ffa5c..1862232 100644
+--- a/frontend/src/editor/internal/navigation.ts
++++ b/frontend/src/editor/internal/navigation.ts
+@@ -90,7 +90,7 @@ export function handoverTo(
+   return other === hidden ? null : other;
+ }
+ 
+-type AfterDecision =
++type FocusAfterDecision =
+   | { readonly kind: "handover"; readonly side: Side }
+   | { readonly kind: "reveal" }
+   | { readonly kind: "stay" };
+@@ -103,7 +103,7 @@ export function afterDecisionFocus({
+   readonly beforeMark: SideMark;
+   readonly afterMark: SideMark;
+   readonly handover: Side | null;
+-}): AfterDecision {
++}): FocusAfterDecision {
+   if (handover !== null) {
+     return { kind: "handover", side: handover };
+   }
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 6393986..9934e8c 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -74,15 +74,19 @@ export class SideFocus {
+     const platform = navigator.platform;
+     const signal = this.#listeners.signal;
+     for (const side of SIDES) {
+-      const { scrollDOM } = this.#view(side);
++      const { scrollDOM, contentDOM } = this.#view(side);
+       const pressed = (event: MouseEvent): void => {
+         this.#pressed(side, event, platform);
+       };
+       const wheel = (event: WheelEvent): void => {
+         this.#wheel(side, event, platform);
+       };
++      function scrollerFocused(): void {
++        contentDOM.focus({ preventScroll: true });
++      }
+       scrollDOM.addEventListener("mousedown", pressed, { capture: true, signal });
+       scrollDOM.addEventListener("wheel", wheel, { passive: false, signal });
++      scrollDOM.addEventListener("focus", scrollerFocused, { signal });
+     }
+   }
+ 
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index 100b7f8..9682cfa 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -110,7 +110,7 @@ function act(merge: Merge, ids: readonly number[], { kind, side }: Click): Merge
+   const sides = { local: merge.left.doc, remote: merge.right.doc };
+   const target: ApplyTarget = { state: merge.center, field: merge.field, sides };
+   const chunks = ids.map((id) => spanAt(merge, id).chunk);
+-  const steps = actionSteps(target, { kind, side, chunks });
++  const steps = actionSteps(target, { kind, side, chunks }, "side");
+   if (steps.length === 0) {
+     throw new Error("expected a transaction");
+   }
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 6d4ae31..89d77f9 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -8,7 +8,15 @@ import xIcon from "~icons/lucide/x?raw";
+ 
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+-import { bandPaints, crossesStrip, gapArrows, type Arrow, type BandPaint } from "./gap";
++import {
++  arrowTitles,
++  bandPaints,
++  crossesStrip,
++  gapArrows,
++  type Arrow,
++  type ArrowTitles,
++  type BandPaint,
++} from "./gap";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+ import type { Side } from "./side";
+ import type { ApplyMode } from "./status";
+@@ -26,7 +34,7 @@ type ButtonLayout = {
+   readonly ignoreX: number;
+   readonly lineHeight: number;
+ };
+-type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
++type PlacedArrow = { readonly arrow: Arrow; readonly titles: ArrowTitles; readonly y: number };
+ type ArrowPaint = {
+   readonly placed: readonly PlacedArrow[];
+   readonly layout: ButtonLayout;
+@@ -36,6 +44,7 @@ type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPa
+ type ArrowRow = {
+   readonly node: SVGGElement;
+   readonly mode: ApplyMode;
++  readonly titles: ArrowTitles;
+   readonly layout: ButtonLayout;
+   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
+ };
+@@ -48,10 +57,6 @@ const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> =
+   local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
+   remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
+ };
+-const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+-  replace: "Apply",
+-  append: "Apply after the other side",
+-};
+ const parsedIcons = new Map<string, SVGSVGElement>();
+ 
+ function parsedIcon(markup: string): SVGSVGElement {
+@@ -110,7 +115,7 @@ function actionButton(
+ }
+ 
+ function arrowRow(
+-  { arrow, side }: { readonly arrow: Arrow; readonly side: Side },
++  { arrow, titles, side }: Pick<PlacedArrow, "arrow" | "titles"> & { readonly side: Side },
+   layout: ButtonLayout,
+   onPress: OnPress,
+ ): ArrowRow {
+@@ -118,15 +123,16 @@ function arrowRow(
+   const { applyX, ignoreX, lineHeight } = layout;
+   const apply: IconPress = { kind: "apply", chunk, side };
+   const ignore: IconPress = { kind: "ignore", chunk, side };
+-  const applyIcon = { icon: APPLY_ICON[side][mode], title: APPLY_TITLE[mode] };
++  const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
+   const applyButton = actionButton({ x: applyX, lineHeight, ...applyIcon }, apply, onPress);
+-  const ignoreTitle = { icon: xIcon, title: "Ignore" };
+-  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreTitle }, ignore, onPress);
++  const ignoreIcon = { icon: xIcon, title: titles.ignore };
++  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreIcon }, ignore, onPress);
+   const node = document.createElementNS(SVG_NS, "g");
+   node.append(applyButton, ignoreButton);
+   return {
+     node,
+     mode,
++    titles,
+     layout,
+     buttons: [
+       [applyButton, apply],
+@@ -135,9 +141,11 @@ function arrowRow(
+   };
+ }
+ 
+-function sameShape(row: ArrowRow, mode: ApplyMode, layout: ButtonLayout): boolean {
++function sameShape(row: ArrowRow, { arrow, titles }: PlacedArrow, layout: ButtonLayout): boolean {
+   return (
+-    row.mode === mode &&
++    row.mode === arrow.mode &&
++    row.titles.apply === titles.apply &&
++    row.titles.ignore === titles.ignore &&
+     row.layout.applyX === layout.applyX &&
+     row.layout.ignoreX === layout.ignoreX &&
+     row.layout.lineHeight === layout.lineHeight
+@@ -176,6 +184,7 @@ class GapStrip {
+   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
+   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
+   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
++  readonly #platform = navigator.platform;
+ 
+   constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null) {
+     this.#strip = strip;
+@@ -205,7 +214,8 @@ class GapStrip {
+     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
+     const placed = gapArrows(rows, this.#side)
+       .map((arrow) => ({ arrow, y: arrow.top + shift }))
+-      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
++      .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height))
++      .map((at) => ({ ...at, titles: arrowTitles(at.arrow, this.#platform) }));
+     const layout = { applyX, ignoreX, lineHeight };
+     return { bands, arrows: { placed, layout, onPress: this.#onPress } };
+   }
+@@ -238,11 +248,12 @@ class GapStrip {
+     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
+       row.node.remove();
+     });
+-    const nodes = placed.map(({ arrow, y }) => {
++    const nodes = placed.map((at) => {
++      const { arrow, y } = at;
+       let row = this.#arrows.get(arrow.chunk.id);
+-      if (row === undefined || !sameShape(row, arrow.mode, layout)) {
++      if (row === undefined || !sameShape(row, at, layout)) {
+         row?.node.remove();
+-        row = arrowRow({ arrow, side: this.#side }, layout, onPress);
++        row = arrowRow({ ...at, side: this.#side }, layout, onPress);
+         this.#arrows.set(arrow.chunk.id, row);
+       }
+       row.node.setAttribute("transform", `translate(0 ${y})`);
+diff --git a/frontend/src/editor/internal/wheel.test.ts b/frontend/src/editor/internal/wheel.test.ts
+index a46769c..e8a969f 100644
+--- a/frontend/src/editor/internal/wheel.test.ts
++++ b/frontend/src/editor/internal/wheel.test.ts
+@@ -63,6 +63,18 @@ test("one 500 px event gives one step, not five", () => {
+   ).toEqual(["down", "down", null]);
+ });
+ 
++test("WebKitGTK's X11 mouse notches of 96 px step once each, also inside one fast burst", () => {
++  const X11_NOTCH_PX = 96;
++
++  expect(
++    steps([
++      { deltaY: X11_NOTCH_PX, at: 0 },
++      { deltaY: X11_NOTCH_PX, at: 16 },
++      { deltaY: X11_NOTCH_PX, at: 32 },
++    ]),
++  ).toEqual(["down", "down", "down"]);
++});
++
+ test("events that scroll more sideways than up or down never step", () => {
+   expect(
+     steps([
+diff --git a/frontend/src/editor/internal/wheel.ts b/frontend/src/editor/internal/wheel.ts
+index 603620e..d8e21ba 100644
+--- a/frontend/src/editor/internal/wheel.ts
++++ b/frontend/src/editor/internal/wheel.ts
+@@ -8,7 +8,7 @@ export type WheelSum = {
+ 
+ type Wheel = Pick<WheelEvent, "deltaMode" | "deltaX" | "deltaY" | "timeStamp">;
+ 
+-export const WHEEL_STEP_PX = 100;
++export const WHEEL_STEP_PX = 90;
+ export const WHEEL_IDLE_MS = 250;
+ 
+ const DOM_DELTA_PIXEL = 0;
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index 207157d..bab5275 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -269,23 +269,27 @@ test("a resolved block loses its word marks and bars on every side pane and undo
+ 
+   const applied = run(
+     start,
+-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, MODIFIED)] }),
++    actionSteps(
++      target(start),
++      { kind: "apply", side: "local", chunks: [chunk(start, MODIFIED)] },
++      "side",
++    ),
+   );
+   const leftIgnored = run(
+     applied,
+-    actionSteps(target(applied), {
+-      kind: "ignore",
+-      side: "local",
+-      chunks: [chunk(applied, CONFLICT)],
+-    }),
++    actionSteps(
++      target(applied),
++      { kind: "ignore", side: "local", chunks: [chunk(applied, CONFLICT)] },
++      "side",
++    ),
+   );
+   const resolved = run(
+     leftIgnored,
+-    actionSteps(target(leftIgnored), {
+-      kind: "ignore",
+-      side: "remote",
+-      chunks: [chunk(leftIgnored, CONFLICT)],
+-    }),
++    actionSteps(
++      target(leftIgnored),
++      { kind: "ignore", side: "remote", chunks: [chunk(leftIgnored, CONFLICT)] },
++      "side",
++    ),
+   );
+ 
+   expect(marks(applied.left)).toEqual(["2 chunk-word-conflict mine"]);
+@@ -309,7 +313,11 @@ test("applying one side of a conflict drops that side's tint, word marks and bar
+ 
+   const applied = run(
+     start,
+-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] }),
++    actionSteps(
++      target(start),
++      { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] },
++      "side",
++    ),
+   );
+ 
+   expect(painted(applied.left)).toEqual([
+@@ -329,15 +337,19 @@ test("the middle pane tints its blocks without word marks or bars: open, half-ap
+ 
+   const halfApplied = run(
+     start,
+-    actionSteps(target(start), { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] }),
++    actionSteps(
++      target(start),
++      { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] },
++      "side",
++    ),
+   );
+   const applied = run(
+     halfApplied,
+-    actionSteps(target(halfApplied), {
+-      kind: "apply",
+-      side: "local",
+-      chunks: [chunk(halfApplied, MODIFIED)],
+-    }),
++    actionSteps(
++      target(halfApplied),
++      { kind: "apply", side: "local", chunks: [chunk(halfApplied, MODIFIED)] },
++      "side",
++    ),
+   );
+   const undoneOnce = undone(applied);
+   const undoneTwice = undone(undoneOnce);
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index cf34052..f371507 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -125,3 +125,17 @@ test("the editor is read-only as the view says, and is rebuilt when that changes
+   expect(editor.state.readOnly).toEqual([true, false]);
+   expect(editor.state.built).toBe(2);
+ });
++
++test("while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing", async () => {
++  const { handle } = mount(shallowRef<FileMergeData | null>(null));
++  const ctrlZ: KeyboardEvent = Object.create(null);
++  await nextTick();
++
++  expect(editor.state.built).toBe(0);
++  expect(() => {
++    handle.applyAllNonConflicting("local");
++    handle.undo();
++    handle.redo();
++  }).not.toThrow();
++  expect(handle.historyKey(ctrlZ)).toBe(false);
++});
