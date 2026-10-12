@@ -197,11 +197,32 @@ test("a click hits a band by its px span and a zero-line change near its bar, ne
   expect(changeAt(ignored, "remote", 180)).toBeNull();
 });
 
-test("the keyboard moves to the other side only when the focused side has nothing waiting, never to the hidden side", () => {
+test("the keyboard moves to the other side only when the decision emptied the focused side, never to the hidden side", () => {
+  const lastOnLocal = magic({ 0: DONE, 1: DONE, 2: DONE, 5: DONE, 7: DONE });
   const doneLocal = magic({ 0: DONE, 1: DONE, 2: DONE, 5: DONE, 7: DONE, 8: APPLIED_LOCAL });
+  const emptied = { before: lastOnLocal, after: doneLocal };
 
-  expect(handoverTo(doneLocal, { focused: "local", hidden: null })).toBe("remote");
-  expect(handoverTo(magic(), { focused: "local", hidden: null })).toBeNull();
-  expect(handoverTo(doneLocal, { focused: null, hidden: null })).toBeNull();
-  expect(handoverTo(doneLocal, { focused: "local", hidden: "remote" })).toBeNull();
+  expect(handoverTo(emptied, { focused: "local", hidden: null })).toBe("remote");
+  expect(
+    handoverTo({ before: magic(), after: magic({ 0: DONE }) }, { focused: "local", hidden: null }),
+  ).toBeNull();
+  expect(handoverTo(emptied, { focused: null, hidden: null })).toBeNull();
+  expect(handoverTo(emptied, { focused: "local", hidden: "remote" })).toBeNull();
+});
+
+test("a decision on the other side never moves the keyboard off a side that was already empty", () => {
+  const doneLocal = magic({ 0: DONE, 1: DONE, 2: DONE, 5: DONE, 7: DONE, 8: APPLIED_LOCAL });
+  const remoteDecided = magic({
+    0: DONE,
+    1: DONE,
+    2: DONE,
+    3: DONE,
+    5: DONE,
+    7: DONE,
+    8: APPLIED_LOCAL,
+  });
+
+  expect(
+    handoverTo({ before: doneLocal, after: remoteDecided }, { focused: "local", hidden: null }),
+  ).toBeNull();
 });

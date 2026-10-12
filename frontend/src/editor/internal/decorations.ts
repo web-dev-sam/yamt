@@ -2,6 +2,7 @@ import "../theme.css";
 import {
   RangeSetBuilder,
   type Extension,
+  type Line,
   type Range,
   type StateField,
   type Text,
@@ -19,12 +20,16 @@ import { sideWordDecorations } from "./words";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
+function pointEdge(line: Line, from: number): "above" | "below" {
+  return line.from === from ? "above" : "below";
+}
+
 function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to, tone } of bands) {
     let line = doc.lineAt(from);
     if (from === to) {
-      const edge = line.from === from ? "chunk-point-above" : "chunk-point-below";
+      const edge = `chunk-point-${pointEdge(line, from)}`;
       builder.add(line.from, line.from, Decoration.line({ class: `chunk-marker-${tone} ${edge}` }));
       continue;
     }
@@ -59,8 +64,7 @@ function focusLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): Range<D
   if (range.len === 0) {
     const { from } = lineSpan(doc, range);
     const line = doc.lineAt(from);
-    const edge = line.from === from ? "above" : "below";
-    const point = `chunk-focus-point chunk-focus-point-${edge}`;
+    const point = `chunk-focus-point-${pointEdge(line, from)}`;
     return [Decoration.line({ class: point }).range(line.from)];
   }
   const last = Math.min(range.start + range.len, doc.lines);

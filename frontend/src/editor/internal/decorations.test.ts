@@ -297,7 +297,7 @@ test("a focused 8-line change is outlined on every line, with its first and last
   ]);
 });
 
-test("a focused zero-line change outlines the line carrying its bar, on the bar's edge", async () => {
+test("a focused zero-line change outlines the line carrying its bar, on the band's own edge", async () => {
   const above = await synthetic({ middle: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
     { kind: "RemoteOnly", middle: [0, 2], local: [0, 2], remote: [0, 0] },
   ]);
@@ -306,12 +306,17 @@ test("a focused zero-line change outlines the line carrying its bar, on the bar'
   ]);
   const mark = { kind: "change", index: 0 } as const;
 
-  expect(focusRuns({ doc: above.remote, chunks: above.chunks }, "remote", mark)).toEqual([
-    "1 chunk-focus-point chunk-focus-point-above",
-  ]);
-  expect(focusRuns({ doc: below.remote, chunks: below.chunks }, "remote", mark)).toEqual([
-    "2 chunk-focus-point chunk-focus-point-below",
-  ]);
+  for (const [data, line, edge] of [
+    [above, 1, "above"],
+    [below, 2, "below"],
+  ] as const) {
+    expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([
+      `${line} chunk-marker-deleted chunk-point-${edge}`,
+    ]);
+    expect(focusRuns({ doc: data.remote, chunks: data.chunks }, "remote", mark)).toEqual([
+      `${line} chunk-focus-point-${edge}`,
+    ]);
+  }
 });
 
 test("a side alone draws no outline on any change", async () => {

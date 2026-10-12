@@ -1,6 +1,6 @@
 import { bandPath } from "../../connectors";
 import type { Chunk } from "../../ipc";
-import type { ChunkRow } from "./geometry";
+import { SIDE_PANE, type ChunkRow } from "./geometry";
 import type { Side } from "./side";
 import { applyMode, isSideOpen, type ApplyMode } from "./status";
 import { chunkTone, type Tone } from "./tone";
@@ -16,7 +16,7 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
   return rows
     .filter((row) => isSideOpen(row.chunk, row.status, side))
     .map((row) => ({
-      top: (side === "local" ? row.left : row.right).top,
+      top: row[SIDE_PANE[side]].top,
       chunk: row.chunk,
       mode: applyMode(row.status, side),
     }));

@@ -1,6 +1,6 @@
 import { StateEffect, StateField } from "@codemirror/state";
 
-import { afterDecision, alone, type SideMark } from "./navigation";
+import { afterDecision, markedId, type SideMark } from "./navigation";
 import type { Side } from "./side";
 import { showStatuses } from "./sideStatus";
 import { isSideOpen, type ChunkState } from "./status";
@@ -8,7 +8,7 @@ import { isSideOpen, type ChunkState } from "./status";
 export const setMark = StateEffect.define<SideMark>();
 
 function settled(mark: SideMark, states: readonly ChunkState[], side: Side): SideMark {
-  const id = alone(mark).remembered;
+  const id = markedId(mark);
   const state = states.find(({ chunk }) => chunk.id === id);
   if (id === null || state === undefined || isSideOpen(state.chunk, state.status, side)) {
     return mark;

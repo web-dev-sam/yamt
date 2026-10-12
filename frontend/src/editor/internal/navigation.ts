@@ -54,8 +54,12 @@ export function hasWaiting(states: readonly ChunkState[], side: Side): boolean {
   return states.some((state) => waits(state, side));
 }
 
+export function markedId(mark: SideMark): Chunk["id"] | null {
+  return mark.kind === "change" ? mark.id : mark.remembered;
+}
+
 export function alone(mark: SideMark): SideMark & { readonly kind: "alone" } {
-  return { kind: "alone", remembered: mark.kind === "change" ? mark.id : mark.remembered };
+  return { kind: "alone", remembered: markedId(mark) };
 }
 
 export function crossTo(
@@ -73,10 +77,13 @@ export function crossTo(
 }
 
 export function handoverTo(
-  states: readonly ChunkState[],
+  {
+    before,
+    after,
+  }: { readonly before: readonly ChunkState[]; readonly after: readonly ChunkState[] },
   { focused, hidden }: { readonly focused: Side | null; readonly hidden: Side | null },
 ): Side | null {
-  if (focused === null || hasWaiting(states, focused)) {
+  if (focused === null || !hasWaiting(before, focused) || hasWaiting(after, focused)) {
     return null;
   }
   const other = otherSide(focused);

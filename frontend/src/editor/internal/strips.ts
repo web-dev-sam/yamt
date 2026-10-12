@@ -9,7 +9,7 @@ import xIcon from "~icons/lucide/x?raw";
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import { bandPaints, crossesStrip, gapArrows, type Arrow, type BandPaint } from "./gap";
-import type { ChunkRow, PaneViews } from "./geometry";
+import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import type { Side } from "./side";
 import type { ApplyMode } from "./status";
 
@@ -198,8 +198,9 @@ class GapStrip {
       return { bands, arrows: null };
     }
     const local = this.#side === "local";
-    const shift = local ? shifts.left : shifts.right;
-    const lineHeight = (local ? panes.left : panes.right).defaultLineHeight;
+    const pane = SIDE_PANE[this.#side];
+    const shift = shifts[pane];
+    const lineHeight = panes[pane].defaultLineHeight;
     const applyX = local ? 0 : size.width - ACTION_WIDTH_PX;
     const ignoreX = local ? ACTION_WIDTH_PX : applyX - ACTION_WIDTH_PX;
     const placed = gapArrows(rows, this.#side)

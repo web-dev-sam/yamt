@@ -1,7 +1,7 @@
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import { gapArrows } from "./gap";
-import type { ChunkRow, PaneViews } from "./geometry";
+import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import type { IconPress } from "./strips";
 
 type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
@@ -35,7 +35,7 @@ export function coveredAction(
   rows: readonly ChunkRow[],
   views: PaneViews,
 ): ChunkAction {
-  const view = press.side === "local" ? views.left : views.right;
+  const view = views[SIDE_PANE[press.side]];
   return {
     kind: press.kind,
     side: press.side,

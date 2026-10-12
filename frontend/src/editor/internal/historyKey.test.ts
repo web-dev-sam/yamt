@@ -7,6 +7,7 @@ const MAC = "MacIntel";
 
 type Press = {
   key: string;
+  code?: string;
   ctrl?: boolean;
   meta?: boolean;
   shift?: boolean;
@@ -19,6 +20,7 @@ function command(platform: string, press: Press): "undo" | "redo" | null {
   return historyCommand(
     {
       key: press.key,
+      code: press.code ?? "",
       ctrlKey: press.ctrl ?? false,
       metaKey: press.meta ?? false,
       shiftKey: press.shift ?? false,
@@ -56,4 +58,17 @@ test("Alt, a key someone already handled and a text field never undo here", () =
   expect(command(LINUX, { key: "z", ctrl: true, target: field })).toBeNull();
   expect(command(LINUX, { key: "y", ctrl: true, target: area })).toBeNull();
   expect(command(LINUX, { key: "z", ctrl: true, target: pane })).toBe("undo");
+});
+
+test("a non-Latin layout undoes and redoes by the physical key", () => {
+  expect(command(LINUX, { key: "я", code: "KeyZ", ctrl: true })).toBe("undo");
+  expect(command(LINUX, { key: "Я", code: "KeyZ", ctrl: true, shift: true })).toBe("redo");
+  expect(command(LINUX, { key: "н", code: "KeyY", ctrl: true })).toBe("redo");
+  expect(command(MAC, { key: "я", code: "KeyZ", meta: true })).toBe("undo");
+  expect(command(LINUX, { key: "ф", code: "KeyA", ctrl: true })).toBeNull();
+});
+
+test("a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes", () => {
+  expect(command(LINUX, { key: "z", code: "KeyY", ctrl: true })).toBe("undo");
+  expect(command(LINUX, { key: "y", code: "KeyZ", ctrl: true })).toBe("redo");
 });

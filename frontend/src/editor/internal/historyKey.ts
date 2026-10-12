@@ -2,10 +2,12 @@ import { isModHeld } from "./modClick";
 
 type HistoryKey = Pick<
   KeyboardEvent,
-  "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey" | "defaultPrevented" | "target"
+  "key" | "code" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey" | "defaultPrevented" | "target"
 >;
 
 const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
+const LATIN_LETTER = /^[a-z]$/i;
+const LETTER_CODE = /^Key([A-Z])$/;
 
 function inTextField(target: EventTarget | null): boolean {
   return (
@@ -14,6 +16,15 @@ function inTextField(target: EventTarget | null): boolean {
     typeof target.tagName === "string" &&
     Object.hasOwn(TEXT_FIELDS, target.tagName)
   );
+}
+
+// A non-Latin layout gives `key` 'я' for Ctrl+Z; like CodeMirror's runHandlers (keyCode fallback,
+// @codemirror/view keymap.ts), the physical key decides then.
+function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
+  if (LATIN_LETTER.test(key)) {
+    return key.toLowerCase();
+  }
+  return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
 }
 
 export function historyCommand(event: HistoryKey, platform: string): "undo" | "redo" | null {
@@ -25,7 +36,7 @@ export function historyCommand(event: HistoryKey, platform: string): "undo" | "r
   ) {
     return null;
   }
-  switch (event.key.toLowerCase()) {
+  switch (letterOf(event)) {
     case "z":
       return event.shiftKey ? "redo" : "undo";
     case "y":

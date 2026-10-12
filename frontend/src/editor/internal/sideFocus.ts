@@ -103,11 +103,16 @@ export class SideFocus {
     }
   }
 
-  decided(): void {
+  decided(before: readonly ChunkState[]): void {
     const focused = SIDES.find((side) => this.#view(side).hasFocus) ?? null;
-    const next = handoverTo(this.#sources.states(), { focused, hidden: this.#sources.hidden });
+    const next = handoverTo(
+      { before, after: this.#sources.states() },
+      { focused, hidden: this.#sources.hidden },
+    );
     if (next !== null) {
-      this.#show(next, alone(this.#mark(next)));
+      this.#focusOn(next, alone(this.#mark(next)));
+    } else if (focused !== null) {
+      this.#reveal(focused);
     }
   }
 
@@ -123,7 +128,7 @@ export class SideFocus {
     return this.#view(side).state.field(sideMarks[side]);
   }
 
-  #show(side: Side, mark: SideMark): void {
+  #focusOn(side: Side, mark: SideMark): void {
     const view = this.#view(side);
     view.dispatch({ effects: setMark.of(mark) });
     if (!view.hasFocus) {
@@ -145,9 +150,6 @@ export class SideFocus {
       return;
     }
     this.#sources.decide({ kind: decision, side, chunks: [state.chunk] });
-    if (this.#view(side).hasFocus) {
-      this.#reveal(side);
-    }
   }
 
   #step(side: Side, direction: Direction): void {
@@ -169,7 +171,7 @@ export class SideFocus {
       });
     }
     if (target !== null) {
-      this.#show(target.side, { kind: "change", id: target.id });
+      this.#focusOn(target.side, { kind: "change", id: target.id });
       this.#reveal(target.side);
     }
   }
@@ -183,16 +185,19 @@ export class SideFocus {
       to: this.#mark(toSide),
       toSide,
     });
-    this.#show(toSide, mark);
+    this.#focusOn(toSide, mark);
     this.#reveal(toSide);
   }
 
   #pressed(side: Side, event: MouseEvent, platform: string): void {
-    if (event.button !== 0 || (!this.#sources.readOnly && isModHeld(event, platform))) {
+    const view = this.#view(side);
+    if (event.button !== 0 || event.target === view.scrollDOM) {
       return;
     }
-    const view = this.#view(side);
     const id = changeAt(this.#sources.rows(), side, event.clientY - view.documentTop);
+    if (id !== null && !this.#sources.readOnly && isModHeld(event, platform)) {
+      return;
+    }
     const mark: SideMark = id === null ? alone(this.#mark(side)) : { kind: "change", id };
     view.dispatch({ effects: setMark.of(mark) });
   }
@@ -203,7 +208,7 @@ export class SideFocus {
     }
     event.preventDefault();
     if (!this.#view(side).hasFocus) {
-      this.#show(side, alone(this.#mark(side)));
+      this.#focusOn(side, alone(this.#mark(side)));
     }
     const { sum, step } = wheelStep(this.#wheelSum, event);
     this.#wheelSum = sum;
