@@ -101,7 +101,7 @@ function markResolved(): void {
 
 <template>
   <div
-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
+    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
     :class="{ 'invisible [content-visibility:hidden]': !shown }"
   >
     <MergeToolbar
@@ -113,14 +113,15 @@ function markResolved(): void {
       @redo="redo"
       @finish="markResolved"
     />
-    <header v-else class="h-10 shrink-0 border-b border-separator bg-window" />
+    <header v-else class="h-10 shrink-0" />
+    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
     <section
-      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-editor"
+      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
     >
       <div
         v-for="column in columns"
         :key="column.side"
-        class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
+        class="row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
         :class="column.gridColumn"
       >
         <h2 class="min-w-0 truncate text-fg-muted" :title="column.tooltip">{{ column.text }}</h2>
@@ -133,9 +134,9 @@ function markResolved(): void {
           {{ KEEP }}
         </button>
       </div>
-      <div class="col-start-2 row-start-1 border-b border-separator bg-window" />
+      <div class="col-start-2 row-start-1 border-b border-separator" />
       <div
-        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-window px-3 py-1.5"
+        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
       >
         <h2 class="text-fg-muted">Result</h2>
         <button
@@ -147,7 +148,7 @@ function markResolved(): void {
           Reset
         </button>
       </div>
-      <div class="col-start-4 row-start-1 border-b border-separator bg-window" />
+      <div class="col-start-4 row-start-1 border-b border-separator" />
 
       <div
         ref="left"

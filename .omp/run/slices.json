@@ -1,11 +1,1 @@
-{
-  "IslandsDarkTheme": {
-    "owned": [
-      "frontend/src/style.css",
-      "frontend/src/ui/**",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/find.ts"
-    ]
-  }
-}
+{}

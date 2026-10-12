@@ -14,7 +14,7 @@ const text = computed(() => problemText(props.problem));
 <template>
   <div
     role="alert"
-    class="flex shrink-0 items-start gap-2 border-b border-problem-border bg-problem px-3 py-2 text-fg"
+    class="flex shrink-0 items-start gap-2 rounded-md border border-problem-border bg-problem px-3 py-2 text-fg"
   >
     <p class="min-w-0 flex-1 wrap-break-word whitespace-pre-line">{{ text }}</p>
     <button

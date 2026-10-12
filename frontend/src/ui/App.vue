@@ -41,15 +41,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full gap-island p-island">
     <FileList :files="files" :active="active" @select="open" />
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
       <p
         v-else-if="allResolved"
         role="status"
-        class="shrink-0 border-b border-success-border bg-success px-3 py-2 text-fg"
+        class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
       >
         All files are resolved. Close the window to finish the merge.
       </p>

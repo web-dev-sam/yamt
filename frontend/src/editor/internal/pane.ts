@@ -30,7 +30,7 @@ const darkTheme = EditorView.theme(
   {
     "&": {
       height: "100%",
-      backgroundColor: "var(--color-editor)",
+      backgroundColor: "var(--color-panel)",
       color: "var(--color-code)",
       fontSize: "13px",
     },
@@ -45,7 +45,7 @@ const darkTheme = EditorView.theme(
       { backgroundColor: "var(--color-selection)" },
     ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
     ".cm-gutters": {
-      backgroundColor: "var(--color-editor)",
+      backgroundColor: "var(--color-panel)",
       color: "var(--color-gutter)",
       border: "none",
     },
@@ -53,7 +53,7 @@ const darkTheme = EditorView.theme(
       backgroundColor: "var(--color-active-line)",
       color: "var(--color-gutter-active)",
     },
-    ".cm-panels": { backgroundColor: "var(--color-window)", color: "var(--color-fg)" },
+    ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
     ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
     ".cm-searchMatch.cm-searchMatch-selected": {
       backgroundColor: "var(--color-selection)",

@@ -18,6 +18,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS) undo and redo from anywhere in the window, not only
   in the result pane.
 
+### Changed
+
+- The dark look follows WebStorm's Islands Dark: darker panes (#191A1C), the file list and the open
+  file as rounded panels on a lighter frame, notices as rounded boxes; syntax and change colours are
+  unchanged.
+
 ## [0.1.0] - 2026-10-11
 
 ### Added
