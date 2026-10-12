@@ -1,0 +1,217 @@
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index bd9e0da..87ba53b 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -460,9 +460,6 @@ test("bulk apply over touching spans whose last deletes an unterminated final li
+       { kind: "LocalOnly", middle: [2, 1], side: [2, 0], remote: [2, 1] },
+     ]),
+   );
+-  function spans(merge: ApplyTarget): [number, number][] {
+-    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
+-  }
+ 
+   const bulk = run(
+     start,
+@@ -475,12 +472,12 @@ test("bulk apply over touching spans whose last deletes an unterminated final li
+   expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+   expect(clicked.state.sliceDoc()).toBe("a\nB");
+   expect(bulk.state.sliceDoc()).toBe("a\nB");
+-  expect(spans(bulk)).toEqual(spans(clicked));
++  expect(spanPairs(bulk)).toEqual(spanPairs(clicked));
+   expect(statuses(bulk)).toEqual(statuses(clicked));
+   expect(undoDepth(bulk.state)).toBe(undoDepth(start.state) + 1);
+   expect(undone.state.sliceDoc()).toBe(start.state.sliceDoc());
+   expect(statuses(undone)).toEqual(statuses(start));
+-  expect(spans(undone)).toEqual(spans(start));
++  expect(spanPairs(undone)).toEqual(spanPairs(start));
+ });
+ 
+ test("deleting all of a change's lines in the middle pane ignores it", async () => {
+@@ -951,9 +948,6 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
+       ],
+     ),
+   );
+-  function spans(merge: ApplyTarget): [number, number][] {
+-    return merge.state.field(merge.field).map(({ from, to }) => [from, to]);
+-  }
+   const chunks = [chunkAt(start, 0), chunkAt(start, 1)];
+ 
+   const dragged = run(
+@@ -968,7 +962,7 @@ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals
+ 
+   expect(spanAt(start, 0).to).toBe(spanAt(start, 1).from);
+   expect(paneText(dragged.state)).toBe("a\nb\nR\nc\n");
+-  expect(spans(dragged)).toEqual(spans(clicked));
++  expect(spanPairs(dragged)).toEqual(spanPairs(clicked));
+   expect(statuses(dragged)).toEqual(["ignored pending", "ignored applied"]);
+ });
+ 
+diff --git a/frontend/src/editor/internal/apply.ts b/frontend/src/editor/internal/apply.ts
+index 9a81c19..56273c8 100644
+--- a/frontend/src/editor/internal/apply.ts
++++ b/frontend/src/editor/internal/apply.ts
+@@ -65,7 +65,7 @@ function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSp
+ 
+ type ChainedAction = {
+   readonly changes: ChangeSet;
+-  readonly effects: readonly StateEffect<unknown>[];
++  readonly effect: StateEffect<readonly ChunkSpan[]>;
+ };
+ 
+ type SideDecision = {
+@@ -82,7 +82,6 @@ const OPPOSITE: Readonly<Record<ChunkAction["kind"], ChunkAction["kind"]>> = {
+ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[]): ChainedAction {
+   let state = target.state;
+   let changes = ChangeSet.empty(state.doc.length);
+-  const effects: StateEffect<unknown>[] = [];
+   for (const { chunk, kind, side } of decisions) {
+     const span = state.field(target.field).find((current) => current.chunk.id === chunk.id);
+     if (span === undefined) {
+@@ -93,17 +92,15 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
+         kind === "apply"
+           ? statusAfterApply(chunk, span.status, side)
+           : statusAfterIgnore(chunk, span.status, side);
+-      const effect = setStatus.of({ id: chunk.id, status });
+       const click = state.update({
+         changes: kind === "apply" ? applyChange({ ...target, state }, span, side) : [],
+-        effects: effect,
++        effects: setStatus.of({ id: chunk.id, status }),
+       });
+       changes = changes.compose(click.changes);
+-      effects.push(effect);
+       state = click.state;
+     }
+   }
+-  return { changes, effects: [...effects, placeSpans.of(state.field(target.field))] };
++  return { changes, effect: placeSpans.of(state.field(target.field)) };
+ }
+ 
+ function sideDecisions(
+@@ -157,13 +154,13 @@ export function actionSteps(target: ApplyTarget, action: ChunkAction, reach: Rea
+   if (last === undefined) {
+     return [];
+   }
+-  const { changes, effects } = chainedChanges(
++  const { changes, effect } = chainedChanges(
+     target,
+     spans.flatMap((span) => sideDecisions(span, action, reach)),
+   );
+   return [
+     moveCursor(last.from),
+-    { changes, effects, userEvent: `yamt.${action.kind}` },
++    { changes, effects: effect, userEvent: `yamt.${action.kind}` },
+     recordSelection(EditorSelection.single(last.from).map(changes)),
+   ];
+ }
+@@ -184,8 +181,8 @@ export function bulkApplySteps({
+   if (decisions.length === 0) {
+     return [];
+   }
+-  const { changes, effects } = chainedChanges(target, decisions);
+-  const action = { changes, effects, userEvent: "yamt.apply" };
++  const { changes, effect } = chainedChanges(target, decisions);
++  const action = { changes, effects: effect, userEvent: "yamt.apply" };
+   const cursor = bulkCursorTarget(target.state, visible);
+   if (cursor === null) {
+     return [action, recordSelection(target.state.selection.map(changes))];
+diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
+index d950494..3f25ec3 100644
+--- a/frontend/src/editor/internal/chunkField.ts
++++ b/frontend/src/editor/internal/chunkField.ts
+@@ -119,7 +119,7 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
+     },
+     provide: (field) =>
+       invertedEffects.of((tr) =>
+-        tr.docChanged || tr.effects.some((effect) => effect.is(setStatus) || effect.is(placeSpans))
++        tr.docChanged || tr.effects.some((effect) => effect.is(placeSpans))
+           ? [placeSpans.of(tr.startState.field(field))]
+           : [],
+       ),
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+index 5227fe8..ab955d7 100644
+--- a/frontend/src/editor/internal/gap.test.ts
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -235,7 +235,7 @@ test("an icon row built while the other side waited is rebuilt once that side is
+     return arrow;
+   }
+   const built = await conflictArrow(PENDING);
+-  const row = { mode: built.mode, otherWaits: built.otherWaits, layout };
++  const row = { mode: built.mode, decidesOther: built.decidesOther, layout };
+ 
+   const ignored = await conflictArrow({ local: "pending", remote: "ignored" });
+ 
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 244b3ca..6a22e08 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -11,7 +11,7 @@ export type Arrow = {
+   readonly top: number;
+   readonly chunk: Chunk;
+   readonly mode: ApplyMode;
+-  readonly otherWaits: boolean;
++  readonly decidesOther: boolean;
+ };
+ export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+ export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
+@@ -20,7 +20,7 @@ export type ButtonLayout = {
+   readonly ignoreX: number;
+   readonly lineHeight: number;
+ };
+-export type ArrowShape = Pick<Arrow, "mode" | "otherWaits"> & { readonly layout: ButtonLayout };
++export type ArrowShape = Pick<Arrow, "mode" | "decidesOther"> & { readonly layout: ButtonLayout };
+ 
+ const APPLY_TITLE: Readonly<Record<ApplyMode, string>> = {
+   replace: "Apply",
+@@ -38,12 +38,12 @@ export function gapArrows(rows: readonly ChunkRow[], side: Side): Arrow[] {
+       top: row[SIDE_PANE[side]].top,
+       chunk: row.chunk,
+       mode: applyMode(row.status, side),
+-      otherWaits: decidesOtherSide(row.chunk, row.status, side),
++      decidesOther: decidesOtherSide(row.chunk, row.status, side),
+     }));
+ }
+ 
+-export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): ArrowTitles {
+-  if (!otherWaits) {
++export function arrowTitles({ mode, decidesOther }: Arrow, platform: string): ArrowTitles {
++  if (!decidesOther) {
+     return { apply: APPLY_TITLE[mode], ignore: "Ignore" };
+   }
+   const click = `${modKeyName(platform)}+click`;
+@@ -55,12 +55,12 @@ export function arrowTitles({ mode, otherWaits }: Arrow, platform: string): Arro
+ 
+ export function keepsArrowRow(
+   row: ArrowShape,
+-  { mode, otherWaits }: Pick<Arrow, "mode" | "otherWaits">,
++  { mode, decidesOther }: Pick<Arrow, "mode" | "decidesOther">,
+   layout: ButtonLayout,
+ ): boolean {
+   return (
+     row.mode === mode &&
+-    row.otherWaits === otherWaits &&
++    row.decidesOther === decidesOther &&
+     row.layout.applyX === layout.applyX &&
+     row.layout.ignoreX === layout.ignoreX &&
+     row.layout.lineHeight === layout.lineHeight
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index d5b9f89..0e6d2a8 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -117,7 +117,7 @@ function arrowRow(
+   layout: ButtonLayout,
+   onPress: OnPress,
+ ): ArrowRow {
+-  const { chunk, mode, otherWaits } = arrow;
++  const { chunk, mode, decidesOther } = arrow;
+   const { applyX, ignoreX, lineHeight } = layout;
+   const titles = arrowTitles(arrow, platform);
+   const apply: IconPress = { kind: "apply", chunk, side };
+@@ -131,7 +131,7 @@ function arrowRow(
+   return {
+     node,
+     mode,
+-    otherWaits,
++    decidesOther,
+     layout,
+     buttons: [
+       [applyButton, apply],
