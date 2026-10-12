@@ -66,7 +66,7 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   word marks and `Decoration.widget` removal bars (`words.ts`; `ignoreEvent()` false). Apply/ignore
   arrows are SVG groups in the gap strips, acting on release and draggable over several changes as one
   undo step (plan §2 #45); each strip's `mousedown` calls
-  `preventDefault`, so the middle pane keeps focus (a CM gutter on the inner edge missed clicks in
+  `preventDefault`, so the pane holding the keyboard keeps it (a side under keyboard focus, plan §2 #54; a CM gutter on the inner edge missed clicks in
   WebKit; 1.4). Compute with `RangeSetBuilder` over `view.visibleRanges` only when the set depends
   on the viewport.
 - [CM11] Connector endpoints come from `view.lineBlockAt(pos)` / `view.coordsAtPos`; subtract

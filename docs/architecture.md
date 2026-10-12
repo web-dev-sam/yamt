@@ -431,6 +431,8 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | left/right decorations                                                                                  | derived from the pane's fixed ranges + the mirrored status                                                                                                                                                                                                                                                 | immutable docs                                                                                                                      |
 | find space above line 1 (while any pane's find bar is open)                                             | `findSpace` field in every pane (`editor/internal/find.ts`), pushed by the controller each frame from "any pane's bar open"                                                                                                                                                                                | no history; same space in all three panes keeps them aligned (plan §2 #44)                                                          |
 | drag over the icons: the press, the covered changes' highlight                                          | the press in `editor/internal/drag.ts` (`IconDrag`); the highlight in a side-pane field (`covered.ts`), pushed by the controller                                                                                                                                                                           | no history; derived from the press and the pointer each frame                                                                       |
+| which side pane has the keyboard                                                                        | the browser's focus (CodeMirror's `cm-focused` on that pane), never copied                                                                                                                                                                                                                                 | an outline drawn only under it can never show where keys do not go; it hides while another app has focus (plan §2 #54)              |
+| each side's focused or remembered change                                                                | `sideMarks[side]` field in that side pane's own state (`editor/internal/sideMark.ts`, `SideMark` = `change{id}` \| `alone{remembered}`), set by `setMark`, moved on by the controller's `showStatuses` push when its change stops waiting                                                                  | no history; chunk ids are fixed, so middle edits never invalidate it (plan §2 #54)                                                  |
 | scroll positions                                                                                        | DOM (`scrollDOM.scrollTop`), driven by `editor/scrollSync`                                                                                                                                                                                                                                                 | not state, derived                                                                                                                  |
 | chunk rows and scroll anchors                                                                           | one cache in `MergeController` (rows from `lineBlockAt` + the sync's anchors), dropped by `rowsChanged`: doc change, measured heights (`geometryChanged`), statuses; the strips move their kept nodes per frame                                                                                            | derived, cached (plan §2 #51)                                                                                                       |
 | file list, opened files, active file, the shown failure, notices about disk changes                     | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`; the marks are git's view, re-read on window focus (plan §2 #49); `notices` (one per path) set by `ui/diskChanges.ts` from Rust's `DiskChange`s (#52) | chrome only; what the disk looked like lives in Rust's `MergeSession`                                                               |
@@ -450,6 +452,7 @@ export class MergeController {
   applyAllNonConflicting(side: Side): void; // one undo step
   undo(): boolean;
   redo(): boolean;
+  historyKey(event: KeyboardEvent): boolean; // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y from anywhere in the shown file's window, unless already handled (the middle's own keymap) or typed in a text field (plan §2 #54)
   resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
   summary(): MergeSummary; // { changes, conflicts } still to decide
   onSummaryChange(listener: (s: MergeSummary) => void): void;
@@ -458,7 +461,7 @@ export class MergeController {
 ```
 
 Per-change apply/ignore is internal: its callers are the icons in the strips (a click or a drag over
-several, plan §2 #45) and Ctrl/Cmd+click on a side block (#46).
+several, plan §2 #45), Ctrl/Cmd+click on a side block (#46) and the side-pane keys (#54).
 
 Internals (`editor/internal/`, not importable from `ui/`):
 
@@ -478,8 +481,8 @@ Internals (`editor/internal/`, not importable from `ui/`):
   there; (2) the action: current mapped range from `chunkField`, replacement text from
   `data.local/remote` sliced by the chunk's fixed side range, plus the status effect; (3) the same
   cursor again as a selection step history records — redo returns there, and typing right after
-  an apply starts its own undo step. After a strip action the middle pane takes focus if it had
-  none, without scrolling.
+  an apply starts its own undo step. After a strip action or a Ctrl/Cmd+click the middle pane takes
+  focus only when no pane has it (a side holding the keyboard keeps it, plan §2 #54), without scrolling.
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
   rule per side pane (that side still open) decides which blocks are tinted and feeds the line
   bands, the word marks and the removal bars; the middle pane draws bands only, until both sides
@@ -506,6 +509,19 @@ Internals (`editor/internal/`, not importable from `ui/`):
   ("k of N" / "N results" / "No results"), next/previous with wrap; while any pane's bar is open all
   three panes get the bar's height as space above line 1 (`findSpace`), so a match on line 1 shows
   below the bar and the panes stay aligned.
+- `navigation.ts`, `sideMark.ts`, `sideFocus.ts`, `viewport.ts`, `wheel.ts`, `historyKey.ts` — keyboard
+  focus in the side panes (plan §2 #54). `navigation.ts` holds the rules as pure functions over the
+  chunk states and rows (step to the next/previous change still waiting on a side, cross to the other
+  side, the pick after a decision, the first change on screen, the click hit test, handover when a
+  decision empties the focused side). `sideMark.ts` is each side's `SideMark` field. `sideFocus.ts`
+  binds the side-only keymap (Enter/Space apply, Backspace/Delete/x ignore, arrows), the press that
+  sets a mark (scrollbar presses excluded), Ctrl/Cmd+wheel over a side, and the reveal: only the
+  focused side's `scrollTop` is written, with WebStorm's placement from `viewport.ts`
+  (`SyncScrollSupport.getTargetOffsets`), nothing when the change is fully visible; the other panes
+  follow through the sync. `wheel.ts` turns wheel bursts into steps (the first event of a burst steps
+  at once). `historyKey.ts` maps the undo/redo shortcut, falling back to the physical key only when
+  the layout gives no Latin letter; `ui/MergeView.vue` calls `historyKey` from a window `keydown`
+  only while its file is shown and no question is open.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
   interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
   of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan
@@ -563,6 +579,7 @@ export function useMergeController(
   applyAllNonConflicting;
   undo;
   redo;
+  historyKey; // MergeView's window keydown, only while its file is shown and no question is open (plan §2 #54)
   resultText;
 };
 ```
