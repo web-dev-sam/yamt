@@ -1,5 +1,5 @@
 import type { Chunk } from "../../ipc";
-import { sideChanged, type Side } from "./side";
+import { otherSide, sideChanged, SIDES, type Side } from "./side";
 
 export type SideStatus = "pending" | "applied" | "ignored";
 
@@ -10,9 +10,6 @@ export type ChunkState = { readonly chunk: Chunk; readonly status: ChunkStatus }
 export type MergeSummary = { readonly changes: number; readonly conflicts: number };
 
 export type ApplyMode = "replace" | "append";
-
-const SIDES: readonly Side[] = ["local", "remote"];
-const OTHER: Readonly<Record<Side, Side>> = { local: "remote", remote: "local" };
 
 export const PENDING: ChunkStatus = { local: "pending", remote: "pending" };
 
@@ -31,7 +28,7 @@ export function canBulkApply(chunk: Chunk, status: ChunkStatus, side: Side): boo
 }
 
 export function applyMode(status: ChunkStatus, side: Side): ApplyMode {
-  return status[OTHER[side]] === "applied" ? "append" : "replace";
+  return status[otherSide(side)] === "applied" ? "append" : "replace";
 }
 
 type SideMark = {
@@ -51,7 +48,7 @@ function markConflictSideOrChange({ chunk, status, side, value }: SideMark): Chu
 
 export function statusAfterApply(chunk: Chunk, status: ChunkStatus, side: Side): ChunkStatus {
   const applied = markConflictSideOrChange({ chunk, status, side, value: "applied" });
-  const other = OTHER[side];
+  const other = otherSide(side);
   return chunk.kind === "Conflict" && applied[other] === "pending" && chunk[other].len === 0
     ? markConflictSideOrChange({ chunk, status: applied, side: other, value: "ignored" })
     : applied;

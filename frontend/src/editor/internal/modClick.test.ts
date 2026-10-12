@@ -2,7 +2,7 @@ import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { loadFixture } from "../../ipc";
-import { isModClick, openBlockAt } from "./modClick";
+import { isModHeld, openBlockAt } from "./modClick";
 import type { Side } from "./side";
 import { PENDING, type ChunkState, type ChunkStatus } from "./status";
 
@@ -69,14 +69,14 @@ test("only Cmd counts on macOS and only Ctrl elsewhere", () => {
   const both = { ctrlKey: true, metaKey: true };
   const none = { ctrlKey: false, metaKey: false };
 
-  expect([ctrl, meta, both, none].map((keys) => isModClick(keys, MAC))).toEqual([
+  expect([ctrl, meta, both, none].map((keys) => isModHeld(keys, MAC))).toEqual([
     false,
     true,
     false,
     false,
   ]);
   for (const platform of [LINUX, WINDOWS]) {
-    expect([ctrl, meta, both, none].map((keys) => isModClick(keys, platform))).toEqual([
+    expect([ctrl, meta, both, none].map((keys) => isModHeld(keys, platform))).toEqual([
       true,
       false,
       false,

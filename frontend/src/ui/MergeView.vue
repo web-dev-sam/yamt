@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useEventListener } from "@vueuse/core";
 import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 
 import type { FileMergeData, Side } from "../ipc";
@@ -31,17 +32,18 @@ const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
-const { summary, applyAllNonConflicting, undo, redo, resultText, unsaved, markSaved } =
+const { summary, applyAllNonConflicting, undo, redo, historyKey, resultText, unsaved, markSaved } =
   useMergeController(
     () => props.data,
     { left, center, right, strips: [leftStrip, rightStrip] },
     () => !isEditable(props.data),
   );
-const { track, untrack, finish, reset, takeSide, taken, remoteName } = useAppStore();
+const { track, untrack, finish, reset, takeSide, taken, remoteName, question } = useAppStore();
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {
   track(props.data.path, work);
 }
+useEventListener(window, "keydown", historyKeyInShownFile);
 
 const deletedView = computed(() => {
   const { deleted, path, middle } = props.data;
@@ -95,6 +97,12 @@ function markResolved(): void {
       summary: summary.value,
       diskVersion: props.data.diskVersion,
     });
+  }
+}
+
+function historyKeyInShownFile(event: KeyboardEvent): void {
+  if (props.shown && question.value === null) {
+    historyKey(event);
   }
 }
 </script>

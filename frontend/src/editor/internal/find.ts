@@ -5,6 +5,7 @@ import {
   openSearchPanel,
   search,
   SearchQuery,
+  searchPanelOpen,
   setSearchQuery,
 } from "@codemirror/search";
 import {
@@ -25,6 +26,8 @@ import arrowDownIcon from "~icons/lucide/arrow-down?raw";
 import arrowUpIcon from "~icons/lucide/arrow-up?raw";
 import searchIcon from "~icons/lucide/search?raw";
 import xIcon from "~icons/lucide/x?raw";
+
+import type { PaneViews } from "./geometry";
 
 type Match = { readonly from: number; readonly to: number };
 type Direction = "next" | "previous";
@@ -48,12 +51,22 @@ const findTheme = EditorView.theme({
 
 export const showFindSpace = StateEffect.define<boolean>();
 
-export const findSpace = StateField.define<boolean>({
+const findSpace = StateField.define<boolean>({
   create: () => false,
   update: (shown, tr) => tr.effects.findLast((effect) => effect.is(showFindSpace))?.value ?? shown,
   provide: (field) =>
     EditorView.editorAttributes.from(field, (shown) => (shown ? { class: "find-space" } : {})),
 });
+
+export function syncFindSpace(views: PaneViews): void {
+  const panes = [views.left, views.center, views.right];
+  const shown = panes.some((view) => searchPanelOpen(view.state));
+  for (const view of panes) {
+    if (view.state.field(findSpace) !== shown) {
+      view.dispatch({ effects: showFindSpace.of(shown) });
+    }
+  }
+}
 
 function matches(state: EditorState, query: SearchQuery): Match[] {
   const found: Match[] = [];

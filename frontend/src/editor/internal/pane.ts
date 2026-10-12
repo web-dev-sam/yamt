@@ -104,6 +104,10 @@ const selectionOverTints = Prec.highest(
   ),
 );
 
+const sideFocusOutline = EditorView.theme({
+  "&.cm-focused": { outline: "1px solid var(--color-primary)", outlineOffset: "-1px" },
+});
+
 function centerExtensions(doc: string): Extension {
   return [
     history(),
@@ -121,6 +125,7 @@ function kindExtensions(kind: PaneKind, doc: string): Extension {
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
         EditorView.contentAttributes.of({ tabindex: "0" }),
+        sideFocusOutline,
       ];
     case "center":
       return centerExtensions(doc);
@@ -167,7 +172,7 @@ export function paneText(state: EditorState): string {
   return state.sliceDoc();
 }
 
-export type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: string };
+type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: string };
 
 export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
   return {

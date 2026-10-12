@@ -26,6 +26,7 @@ export type MergeHandle = {
   applyAllNonConflicting(side: Side): void;
   undo(): void;
   redo(): void;
+  historyKey(event: KeyboardEvent): boolean;
   resultText(): string | null;
   unsaved(): boolean;
   markSaved(text: string): void;
@@ -63,6 +64,27 @@ function createController(
   );
 }
 
+function handleOf(summary: MergeHandle["summary"], current: () => Loaded | null): MergeHandle {
+  return {
+    summary,
+    applyAllNonConflicting: (side) => current()?.controller.applyAllNonConflicting(side),
+    undo: () => current()?.controller.undo(),
+    redo: () => current()?.controller.redo(),
+    historyKey: (event) => current()?.controller.historyKey(event) ?? false,
+    resultText: () => current()?.controller.resultText() ?? null,
+    unsaved: () => {
+      const loaded = current();
+      return loaded !== null && loaded.controller.resultText() !== loaded.saved;
+    },
+    markSaved: (text) => {
+      const loaded = current();
+      if (loaded !== null) {
+        loaded.saved = text;
+      }
+    },
+  };
+}
+
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: Hosts,
@@ -93,17 +115,5 @@ export function useMergeController(
 
   onScopeDispose(destroyController);
 
-  return {
-    summary,
-    applyAllNonConflicting: (side) => loaded?.controller.applyAllNonConflicting(side),
-    undo: () => loaded?.controller.undo(),
-    redo: () => loaded?.controller.redo(),
-    resultText: () => loaded?.controller.resultText() ?? null,
-    unsaved: () => loaded !== null && loaded.controller.resultText() !== loaded.saved,
-    markSaved: (text) => {
-      if (loaded !== null) {
-        loaded.saved = text;
-      }
-    },
-  };
+  return handleOf(summary, () => loaded);
 }

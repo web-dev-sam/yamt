@@ -4,9 +4,11 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
-import { centerDecorations, sideDecorations } from "./decorations";
+import { centerDecorations, focusDecorations, sideDecorations } from "./decorations";
+import type { SideMark } from "./navigation";
 import { centerPane } from "./pane";
 import type { Side } from "./side";
+import { setMark } from "./sideMark";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import { PENDING, type ChunkState } from "./status";
 
@@ -263,4 +265,58 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
     "1 chunk-marker-deleted chunk-point-above",
   ]);
   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([]);
+});
+
+function focusRuns(
+  { doc, chunks }: { readonly doc: string; readonly chunks: readonly Chunk[] },
+  side: Side,
+  { kind, index }: { readonly kind: SideMark["kind"]; readonly index: number },
+): string[] {
+  const statuses = sideStatusField(chunks.map((chunk) => ({ chunk, status: PENDING })));
+  const state = EditorState.create({
+    doc,
+    extensions: [statuses, focusDecorations(statuses, side)],
+  });
+  const id = chunks[index]?.id ?? null;
+  const mark: SideMark =
+    kind === "change" && id !== null ? { kind, id } : { kind: "alone", remembered: id };
+  return runsOf(state.update({ effects: setMark.of(mark) }).state);
+}
+
+test("a focused 8-line change is outlined on every line, with its first and last lines marked", async () => {
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
+  const local = { doc: data.local, chunks: data.chunks };
+
+  expect(focusRuns(local, "local", { kind: "change", index: 8 })).toEqual([
+    "129 chunk-focus chunk-focus-first",
+    "130-135 chunk-focus",
+    "136 chunk-focus chunk-focus-last",
+  ]);
+  expect(focusRuns(local, "local", { kind: "change", index: 0 })).toEqual([
+    "3 chunk-focus chunk-focus-first chunk-focus-last",
+  ]);
+});
+
+test("a focused zero-line change outlines the line carrying its bar, on the bar's edge", async () => {
+  const above = await synthetic({ middle: "a\nb\nc\n", local: "a\nb\nc\n", remote: "c\n" }, [
+    { kind: "RemoteOnly", middle: [0, 2], local: [0, 2], remote: [0, 0] },
+  ]);
+  const below = await synthetic({ middle: "a\nb\nc", local: "a\nb\nc", remote: "a\nb" }, [
+    { kind: "RemoteOnly", middle: [2, 1], local: [2, 1], remote: [2, 0] },
+  ]);
+  const mark = { kind: "change", index: 0 } as const;
+
+  expect(focusRuns({ doc: above.remote, chunks: above.chunks }, "remote", mark)).toEqual([
+    "1 chunk-focus-point chunk-focus-point-above",
+  ]);
+  expect(focusRuns({ doc: below.remote, chunks: below.chunks }, "remote", mark)).toEqual([
+    "2 chunk-focus-point chunk-focus-point-below",
+  ]);
+});
+
+test("a side alone draws no outline on any change", async () => {
+  const data = await loadFixture("vueuse-use-magic-keys.ts");
+  const local = { doc: data.local, chunks: data.chunks };
+
+  expect(focusRuns(local, "local", { kind: "alone", index: 8 })).toEqual([]);
 });

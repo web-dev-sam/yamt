@@ -4,11 +4,17 @@ import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { Span } from "../../connectors";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
+import type { Side } from "./side";
 import type { ChunkState } from "./status";
 
 export type Pane = "left" | "center" | "right";
 export type PaneViews = Readonly<Record<Pane, EditorView>>;
 export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+
+export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+  local: "left",
+  remote: "right",
+};
 
 export function rangeSpan(
   doc: Text,

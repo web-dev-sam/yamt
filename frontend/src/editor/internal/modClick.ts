@@ -7,7 +7,7 @@ import { isSideOpen, type ChunkState } from "./status";
 
 type Modifiers = Pick<MouseEvent, "ctrlKey" | "metaKey">;
 
-export function isModClick({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
+export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
   // The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac); on macOS
   // Ctrl+click is the system's secondary click.
   return /Mac/.test(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
@@ -38,7 +38,7 @@ export function applyOnModClick(
       const height = event.clientY - view.documentTop;
       if (
         event.button !== 0 ||
-        !isModClick(event, platform) ||
+        !isModHeld(event, platform) ||
         height < 0 ||
         height >= view.lineBlockAt(view.state.doc.length).bottom
       ) {

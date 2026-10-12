@@ -1,10 +1,18 @@
 import "../theme.css";
-import { RangeSetBuilder, type Extension, type StateField, type Text } from "@codemirror/state";
+import {
+  RangeSetBuilder,
+  type Extension,
+  type Range,
+  type StateField,
+  type Text,
+} from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
+import type { Chunk } from "../../ipc";
 import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
 import type { Side } from "./side";
+import { sideMarks } from "./sideMark";
 import { isResolved, isSideOpen, type ChunkState } from "./status";
 import { chunkTone, type Tone } from "./tone";
 import { sideWordDecorations } from "./words";
@@ -45,6 +53,46 @@ export function sideDecorations(
     }));
     return [bandDecorations(state.doc, bands), sideWordDecorations(state.doc, tinted, side)];
   });
+}
+
+function focusLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): Range<Decoration>[] {
+  if (range.len === 0) {
+    const { from } = lineSpan(doc, range);
+    const line = doc.lineAt(from);
+    const edge = line.from === from ? "above" : "below";
+    const point = `chunk-focus-point chunk-focus-point-${edge}`;
+    return [Decoration.line({ class: point }).range(line.from)];
+  }
+  const last = Math.min(range.start + range.len, doc.lines);
+  return Array.from({ length: last - range.start }, (_, index) => {
+    const number = range.start + 1 + index;
+    const ends = [
+      number === range.start + 1 ? " chunk-focus-first" : "",
+      number === last ? " chunk-focus-last" : "",
+    ];
+    return Decoration.line({ class: `chunk-focus${ends.join("")}` }).range(doc.line(number).from);
+  });
+}
+
+export function focusDecorations(
+  statuses: StateField<readonly ChunkState[]>,
+  side: Side,
+): Extension {
+  const marks = sideMarks[side];
+  return [
+    marks,
+    EditorView.decorations.compute([marks, statuses], (state) => {
+      const mark = state.field(marks);
+      const focused =
+        mark.kind === "change"
+          ? state.field(statuses).find(({ chunk }) => chunk.id === mark.id)
+          : undefined;
+      if (focused === undefined) {
+        return Decoration.none;
+      }
+      return Decoration.set(focusLines(state.doc, focused.chunk[side]));
+    }),
+  ];
 }
 
 export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Extension {
