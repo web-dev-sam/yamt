@@ -12,7 +12,9 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
 
 - [CM1] Chunk positions and per-side status live in **one** `StateField<readonly ChunkSpan[]>` on
   the center pane. A range is `from` = start of its first line, `to` = start of the line after, or
-  the document end (an insertion point is `from === to`). Mapping:
+  the document end (an insertion point is `from === to`). A transaction carrying `placeSpans` (an
+  action's chained final spans, CM7, or undo/redo's snapshot) sets the spans as given; every other
+  transaction, each throwaway step of a chain included, is mapped:
   - `from` maps with `mapPos(pos, -1)`.
   - `to` maps with `-1` when it is a line start or the range is empty, and `+1` when a non-empty
     range ends mid-line.
@@ -21,10 +23,12 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   - Every other `to` is capped at the next span's `from`.
     So spans stay sorted and disjoint (RK14), typing on a chunk's lines stays inside, and typing on
     the next line stays outside.
-- [CM2] Status changes only through `setStatus`, a `StateEffect<{ id: ChunkId; status: ChunkStatus }>`
-  whose status is per side: `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2 #33).
-  The effect is registered with `invertedEffects` from `@codemirror/commands`, so **undo restores
-  status together with text**. Test: apply → undo ⇒ both sides `pending`.
+- [CM2] Within a transaction status changes only through `setStatus`, a
+  `StateEffect<{ id: ChunkId; status: ChunkStatus }>` whose status is per side:
+  `Readonly<Record<Side, "pending" | "applied" | "ignored">>` (plan §2 #33). Spans and statuses are
+  set wholesale only by `placeSpans`, which `invertedEffects` from `@codemirror/commands` also uses
+  to snapshot the field before each action, so **undo restores status together with text**. Test:
+  apply → undo ⇒ both sides `pending`.
 - [CM3] Left and right panes: `EditorState.readOnly.of(true)` + `EditorView.editable.of(false)`;
   no `history()`. Their decorations come from the fixed `local`/`remote` ranges (never remapped)
   plus a read-only status mirror the controller pushes after each center transaction (1.4).
@@ -42,18 +46,20 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   `dispatchSteps`, never merged into one `dispatch(...steps)`. The steps are:
   1. a cursor move annotated `Transaction.addToHistory.of(false)` (left out by a bulk apply when
      the cursor is already visible);
-  2. the action as one transaction `{ changes?, effects: setStatus…, userEvent: "yamt.apply" | "yamt.ignore" }`;
+  2. the action as one transaction `{ changes?, effects: placeSpans, userEvent: "yamt.apply" | "yamt.ignore" }`;
   3. a recorded selection step, which history keeps as the action's `selectionsAfter`: redo shows
      the block, and typing afterwards is its own undo step.
      The replacement range is the chunk's current mapped range (in an action over several changes:
      its span after the earlier changes of the same action). The replacement text is
      `data.local`/`data.remote` sliced by the chunk's fixed side range (lines → string once, at
      load, via `Text.of(lines)`; never re-split per apply).
-- [CM7] An action over several changes (a drag over icons, bulk apply) builds each change on the
-  document the previous ones produced (a throwaway `state.update` per change with its `setStatus`, so
-  `chunkField` maps the spans exactly as a click would; `chainedChanges` in `apply.ts`), composed into
-  one ChangeSet in its action step: text and spans equal clicking one by one, and the whole action is
-  one undo step (plan §2 #45; composing in original coordinates lost a line break, #435).
+- [CM7] An action (a click, a Ctrl/Cmd click deciding both sides of a conflict, a drag over icons,
+  bulk apply, a side-pane key) builds each change on the document the previous ones produced (a
+  throwaway `state.update` per change with its `setStatus`, so `chunkField` maps the spans exactly as
+  a click would; `chainedChanges` in `apply.ts`), composed into one ChangeSet in its action step
+  together with the chain's final spans as `placeSpans`: text, spans and statuses equal clicking one
+  by one, and the whole action is one undo step (plan §2 #45, #55; composing in original coordinates
+  lost a line break, #435; re-mapping the composed ChangeSet moved a touching zero-line span, #636).
 - [CM8] A block whose current range the user deleted, while a side was still open (fresh or
   half-applied), becomes ignored on both sides in the same update cycle; its arrows disappear.
   Test: `sides.test.ts` 'deleting a whole open or half-applied conflict in the middle pane ignores every side'.

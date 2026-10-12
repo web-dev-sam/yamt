@@ -17,6 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side steps through its changes.
 - Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS) undo and redo from anywhere in the window, not only
   in the result pane.
+- Ctrl+right-click (Cmd+right-click on macOS) on a highlighted change in a side pane ignores it.
+  Ctrl+click and Ctrl+right-click also work on the thin bar of a change with no lines on that side.
+- Ctrl+click (Cmd+click) on a conflict's apply arrow also ignores the other side; on its × it also
+  takes the other side. Holding Ctrl (Cmd) when releasing a drag over several icons does the same
+  for every conflict it covers. The icons' hover hint names the shortcut. One undo step either way.
 
 ### Changed
 
