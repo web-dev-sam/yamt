@@ -1,5 +1,5 @@
 {
-  "KeyboardFocusBuildR1": {
+  "KeyboardFocusBuildR2": {
     "owned": ["frontend/src/editor/**", "frontend/src/ui/**"]
   }
 }
