@@ -90,6 +90,28 @@ export function handoverTo(
   return other === hidden ? null : other;
 }
 
+type AfterDecision =
+  | { readonly kind: "handover"; readonly side: Side }
+  | { readonly kind: "reveal" }
+  | { readonly kind: "stay" };
+
+export function afterDecisionFocus({
+  beforeMark,
+  afterMark,
+  handover,
+}: {
+  readonly beforeMark: SideMark;
+  readonly afterMark: SideMark;
+  readonly handover: Side | null;
+}): AfterDecision {
+  if (handover !== null) {
+    return { kind: "handover", side: handover };
+  }
+  return afterMark.kind === "change" && afterMark.id !== markedId(beforeMark)
+    ? { kind: "reveal" }
+    : { kind: "stay" };
+}
+
 export function fromScreen(
   rows: readonly ChunkRow[],
   {

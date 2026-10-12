@@ -5,6 +5,7 @@ import { loadFixture, type Chunk } from "../../ipc";
 import type { ChunkRow } from "./geometry";
 import {
   afterDecision,
+  afterDecisionFocus,
   changeAt,
   crossTo,
   fromScreen,
@@ -225,4 +226,37 @@ test("a decision on the other side never moves the keyboard off a side that was 
   expect(
     handoverTo({ before: doneLocal, after: remoteDecided }, { focused: "local", hidden: null }),
   ).toBeNull();
+});
+
+test("after a decision that moved the focused side's mark on, the view reveals its new change", () => {
+  expect(
+    afterDecisionFocus({ beforeMark: change(2), afterMark: change(5), handover: null }),
+  ).toEqual({ kind: "reveal" });
+  expect(
+    afterDecisionFocus({ beforeMark: remembering(2), afterMark: change(5), handover: null }),
+  ).toEqual({ kind: "reveal" });
+});
+
+test("after a decision on another change the mark stays and the view does not move", () => {
+  expect(
+    afterDecisionFocus({ beforeMark: change(2), afterMark: change(2), handover: null }),
+  ).toEqual({ kind: "stay" });
+});
+
+test("after a decision that left the focused side alone the view does not move", () => {
+  expect(afterDecisionFocus({ beforeMark: change(8), afterMark: ALONE, handover: null })).toEqual({
+    kind: "stay",
+  });
+  expect(
+    afterDecisionFocus({ beforeMark: remembering(2), afterMark: remembering(5), handover: null }),
+  ).toEqual({ kind: "stay" });
+});
+
+test("a handover wins over revealing on the emptied side", () => {
+  expect(
+    afterDecisionFocus({ beforeMark: change(8), afterMark: ALONE, handover: "remote" }),
+  ).toEqual({ kind: "handover", side: "remote" });
+  expect(
+    afterDecisionFocus({ beforeMark: change(2), afterMark: change(5), handover: "remote" }),
+  ).toEqual({ kind: "handover", side: "remote" });
 });

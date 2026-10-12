@@ -5,6 +5,7 @@ import type { ChunkAction } from "./apply";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import { isModHeld } from "./modClick";
 import {
+  afterDecisionFocus,
   alone,
   changeAt,
   crossTo,
@@ -103,16 +104,36 @@ export class SideFocus {
     }
   }
 
-  decided(before: readonly ChunkState[]): void {
+  deciding(dispatch: () => void): void {
+    const before = this.#sources.states();
     const focused = SIDES.find((side) => this.#view(side).hasFocus) ?? null;
-    const next = handoverTo(
-      { before, after: this.#sources.states() },
-      { focused, hidden: this.#sources.hidden },
-    );
-    if (next !== null) {
-      this.#focusOn(next, alone(this.#mark(next)));
-    } else if (focused !== null) {
-      this.#reveal(focused);
+    if (focused === null) {
+      dispatch();
+      return;
+    }
+    const beforeMark = this.#mark(focused);
+    dispatch();
+    const next = afterDecisionFocus({
+      beforeMark,
+      afterMark: this.#mark(focused),
+      handover: handoverTo(
+        { before, after: this.#sources.states() },
+        { focused, hidden: this.#sources.hidden },
+      ),
+    });
+    switch (next.kind) {
+      case "handover":
+        this.#focusOn(next.side, alone(this.#mark(next.side)));
+        return;
+      case "reveal":
+        this.#reveal(focused);
+        return;
+      case "stay":
+        return;
+      default: {
+        const _exhaustive: never = next;
+        return _exhaustive;
+      }
     }
   }
 

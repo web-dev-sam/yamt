@@ -185,9 +185,9 @@ export class MergeController {
   }
 
   #decide(action: ChunkAction): void {
-    const before = this.#views.center.state.field(this.#field);
-    this.#dispatch(actionSteps(this.#target(), action));
-    this.#focus.decided(before);
+    this.#focus.deciding(() => {
+      this.#dispatch(actionSteps(this.#target(), action));
+    });
   }
 
   #act(action: ChunkAction): void {

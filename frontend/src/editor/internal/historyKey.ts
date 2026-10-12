@@ -7,6 +7,7 @@ type HistoryKey = Pick<
 
 const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
 const LATIN_LETTER = /^[a-z]$/i;
+const ANY_LETTER = /^\p{L}$/u;
 const LETTER_CODE = /^Key([A-Z])$/;
 
 function inTextField(target: EventTarget | null): boolean {
@@ -19,10 +20,14 @@ function inTextField(target: EventTarget | null): boolean {
 }
 
 // A non-Latin layout gives `key` 'я' for Ctrl+Z; like CodeMirror's runHandlers (keyCode fallback,
-// @codemirror/view keymap.ts), the physical key decides then.
+// @codemirror/view keymap.ts: keyCode follows a Latin layout, so Dvorak's ';' on KeyZ stays ';'),
+// the physical key decides only then.
 function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
   if (LATIN_LETTER.test(key)) {
     return key.toLowerCase();
+  }
+  if (!ANY_LETTER.test(key)) {
+    return "";
   }
   return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
 }
