@@ -125,7 +125,9 @@ mutants base:
     fi
     web_files=$(git diff --name-only --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     if [ -n "$web_files" ]; then
-        pnpm -C frontend exec stryker run --plugins @stryker-mutator/vitest-runner --testRunner vitest --mutate "$web_files" --reporters clear-text --tempDirName ../target/stryker-tmp
+        # --ignoreStatic: module-level mutants are not re-evaluated under the vitest runner, so they survive
+        # whatever the tests assert (#732: 134 false survivors).
+        pnpm -C frontend exec stryker run --plugins @stryker-mutator/vitest-runner --testRunner vitest --mutate "$web_files" --reporters clear-text --tempDirName ../target/stryker-tmp --ignoreStatic
     else
         echo "mutants: no TypeScript changes since {{ base }}"
     fi
