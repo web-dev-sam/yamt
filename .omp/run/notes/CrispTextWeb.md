@@ -31,3 +31,11 @@ should #798 (promoted). Mutants 91.54 %, survivors only on unchanged lines (#799
 ## Final comparison image
 
 `/tmp/yamt-crisp/final-compare-s1.png`: WebStorm | yamt before (grey, 18.2 px) | yamt after (Subpixel, 20 px), 400 %.
+
+## Rework 1 (`b45f6aa`)
+
+#794 `rounded-b-island` on FileList's `<ul>` (corner pixels outside the curve 4 → 0 of 425, both themes); #795
+`@utility opaque-scroller` in style.css (FileList, QuestionDialog, SettingsView scrollers); #796 `SettingsSource` once
+in ChunkSource.ts; #797 `ui/ChoiceButtons.vue` (Theme + Antialiasing, pixel-identical); #798 `showsAntialiasing` +
+`ui/settings.test.ts`. 643 tests; Chromium dsf 1.5 unchanged (file list 0.74, settings 0.67, panes 0.50). Both scoped
+re-checks pass.
