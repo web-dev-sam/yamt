@@ -1,1 +1,33 @@
-{ "SettingsDesktopR2": { "owned": ["crates/settings/**"] } }
+{
+  "SettingsDesktopR2": { "owned": ["crates/settings/**"] },
+  "SettingsWeb": {
+    "owned": [
+      "frontend/index.html",
+      "frontend/src/style.css",
+      "frontend/src/main.ts",
+      "frontend/scripts/palette.ts",
+      "frontend/scripts/palette.test.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ipc/ChunkSource*",
+      "frontend/src/ipc/domain*",
+      "frontend/src/ipc/fixture*",
+      "frontend/src/ipc/index*",
+      "frontend/src/ipc/keys*",
+      "frontend/src/ipc/log*",
+      "frontend/src/ipc/tauri*",
+      "frontend/src/ipc/window*",
+      "frontend/src/ipc/settings*",
+      "frontend/src/editor/**",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/ChoiceView.vue",
+      "frontend/src/ui/MergeView.vue",
+      "frontend/src/ui/FileList.vue",
+      "frontend/src/ui/QuestionDialog.vue",
+      "frontend/src/ui/ProblemBar.vue",
+      "frontend/src/ui/NoticeBar.vue",
+      "frontend/src/ui/SettingsButton.vue",
+      "frontend/src/ui/*.ts"
+    ]
+  }
+}
