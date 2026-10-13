@@ -1,0 +1,288 @@
+diff --git c/frontend/src/ipc/ChunkSource.ts i/frontend/src/ipc/ChunkSource.ts
+index c73ab58..e80973d 100644
+--- c/frontend/src/ipc/ChunkSource.ts
++++ i/frontend/src/ipc/ChunkSource.ts
+@@ -38,3 +38,8 @@ export interface ChunkSource {
+   ): Promise<SourceResult<SettingsRead>>;
+   moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
+ }
++
++export type SettingsSource = Pick<
++  ChunkSource,
++  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
++>;
+diff --git c/frontend/src/ipc/fixtureSettings.ts i/frontend/src/ipc/fixtureSettings.ts
+index 2df632d..e91f8d5 100644
+--- c/frontend/src/ipc/fixtureSettings.ts
++++ i/frontend/src/ipc/fixtureSettings.ts
+@@ -1,11 +1,6 @@
+-import type { ChunkSource } from "./ChunkSource";
++import type { SettingsSource } from "./ChunkSource";
+ import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
+ 
+-type FixtureSettings = Pick<
+-  ChunkSource,
+-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+->;
+-
+ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
+ 
+ const DEFAULT_PATH = "/fixture/settings.json";
+@@ -62,7 +57,7 @@ function expanded(path: string): string | null {
+   return path.startsWith("/") ? path : null;
+ }
+ 
+-export function createFixtureSettings(): FixtureSettings {
++export function createFixtureSettings(): SettingsSource {
+   const files: Files = { stored: new Map(), inUse: DEFAULT_PATH };
+   return {
+     async loadSettings(current) {
+diff --git c/frontend/src/ipc/index.ts i/frontend/src/ipc/index.ts
+index e26f987..87d8eda 100644
+--- c/frontend/src/ipc/index.ts
++++ i/frontend/src/ipc/index.ts
+@@ -2,7 +2,7 @@ import { createLog } from "./log";
+ import { forwardLog } from "./tauri";
+ import { guardWindowClose } from "./window";
+ 
+-export type { ChunkSource } from "./ChunkSource";
++export type { ChunkSource, SettingsSource } from "./ChunkSource";
+ export type {
+   Antialiasing,
+   Chunk,
+diff --git c/frontend/src/ipc/tauri.ts i/frontend/src/ipc/tauri.ts
+index e8293ad..c8ab318 100644
+--- c/frontend/src/ipc/tauri.ts
++++ i/frontend/src/ipc/tauri.ts
+@@ -1,5 +1,5 @@
+ import { commands, type LogValue, type SettingsRead as SettingsReadDto } from "./bindings";
+-import type { ChunkSource } from "./ChunkSource";
++import type { ChunkSource, SettingsSource } from "./ChunkSource";
+ import {
+   toDomain,
+   toFileList,
+@@ -33,10 +33,7 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
+   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
+ }
+ 
+-function createTauriSettings(): Pick<
+-  ChunkSource,
+-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+-> {
++function createTauriSettings(): SettingsSource {
+   return {
+     async loadSettings(current) {
+       return toSettingsResult(await commands.loadSettings(current));
+diff --git c/frontend/src/style.css i/frontend/src/style.css
+index 5c74292..cb46369 100644
+--- c/frontend/src/style.css
++++ i/frontend/src/style.css
+@@ -106,6 +106,11 @@
+   --color-chunk-conflict-removal: #8060db;
+ }
+ 
++/* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */
++@utility opaque-scroller {
++  background-color: var(--color-panel);
++}
++
+ @layer base {
+   :root {
+     color-scheme: dark;
+diff --git c/frontend/src/ui/ChoiceButtons.vue i/frontend/src/ui/ChoiceButtons.vue
+new file mode 100644
+index 0000000..dd2af32
+--- /dev/null
++++ i/frontend/src/ui/ChoiceButtons.vue
+@@ -0,0 +1,19 @@
++<script setup lang="ts" generic="T extends string">
++defineProps<{ options: readonly { readonly value: T; readonly label: string }[]; pressed: T }>();
++const emit = defineEmits<{ pick: [value: T] }>();
++</script>
++
++<template>
++  <div class="flex gap-2">
++    <button
++      v-for="{ value, label } in options"
++      :key="value"
++      type="button"
++      :aria-pressed="pressed === value"
++      class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
++      @click="emit('pick', value)"
++    >
++      {{ label }}
++    </button>
++  </div>
++</template>
+diff --git c/frontend/src/ui/FileList.vue i/frontend/src/ui/FileList.vue
+index 440075a..d7a10fe 100644
+--- c/frontend/src/ui/FileList.vue
++++ i/frontend/src/ui/FileList.vue
+@@ -37,7 +37,11 @@ function resize(event: PointerEvent): void {
+     :style="widthStyle"
+   >
+     <h2 class="px-3 py-2 font-semibold">Files</h2>
+-    <ul role="listbox" aria-label="Conflicted files" class="mr-0.5 flex-1 overflow-y-auto bg-panel">
++    <ul
++      role="listbox"
++      aria-label="Conflicted files"
++      class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
++    >
+       <li
+         v-for="file in files"
+         :key="file.path"
+diff --git c/frontend/src/ui/QuestionDialog.vue i/frontend/src/ui/QuestionDialog.vue
+index def426d..b95490f 100644
+--- c/frontend/src/ui/QuestionDialog.vue
++++ i/frontend/src/ui/QuestionDialog.vue
+@@ -29,7 +29,10 @@ function cancel(event: Event): void {
+   >
+     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
+     <p>{{ text.message }}</p>
+-    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto bg-panel font-mono">
++    <ul
++      v-if="text.files.length > 0"
++      class="mt-2 max-h-40 overflow-y-auto opaque-scroller font-mono"
++    >
+       <li v-for="file in text.files" :key="file" class="truncate">{{ file }}</li>
+     </ul>
+     <div class="mt-5 flex justify-end gap-2">
+diff --git c/frontend/src/ui/SettingsView.vue i/frontend/src/ui/SettingsView.vue
+index eafb7fa..b02330f 100644
+--- c/frontend/src/ui/SettingsView.vue
++++ i/frontend/src/ui/SettingsView.vue
+@@ -3,19 +3,21 @@ import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ 
+ import type { Antialiasing, Theme } from "../ipc";
++import ChoiceButtons from "./ChoiceButtons.vue";
+ import KeymapList from "./KeymapList.vue";
++import { showsAntialiasing } from "./settings";
+ import { useAppStore } from "./store";
+ 
+-const THEMES: readonly { readonly theme: Theme; readonly label: string }[] = [
+-  { theme: "dark", label: "Dark" },
+-  { theme: "light", label: "Light" },
++const THEMES: readonly { readonly value: Theme; readonly label: string }[] = [
++  { value: "dark", label: "Dark" },
++  { value: "light", label: "Light" },
+ ];
+ 
+-const ANTIALIASINGS: readonly { readonly antialiasing: Antialiasing; readonly label: string }[] = [
+-  { antialiasing: "subpixel", label: "Subpixel" },
+-  { antialiasing: "greyscale", label: "Greyscale" },
++const ANTIALIASINGS: readonly { readonly value: Antialiasing; readonly label: string }[] = [
++  { value: "subpixel", label: "Subpixel" },
++  { value: "greyscale", label: "Greyscale" },
+ ];
+-const ON_LINUX = navigator.platform.startsWith("Linux");
++const ON_LINUX = showsAntialiasing(navigator.platform);
+ 
+ const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useAppStore();
+ const back = useTemplateRef<HTMLButtonElement>("back");
+@@ -59,7 +61,7 @@ async function moveToDefault(): Promise<void> {
+ <template>
+   <section
+     aria-label="Settings"
+-    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island bg-panel"
++    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island opaque-scroller"
+   >
+     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
+       <button
+@@ -73,33 +75,15 @@ async function moveToDefault(): Promise<void> {
+       </button>
+       <section aria-labelledby="settings-theme">
+         <h3 id="settings-theme" class="mb-2 font-semibold">Theme</h3>
+-        <div class="flex gap-2">
+-          <button
+-            v-for="{ theme, label } in THEMES"
+-            :key="theme"
+-            type="button"
+-            :aria-pressed="settings.theme === theme"
+-            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
+-            @click="setTheme(theme)"
+-          >
+-            {{ label }}
+-          </button>
+-        </div>
++        <ChoiceButtons :options="THEMES" :pressed="settings.theme" @pick="setTheme" />
+       </section>
+       <section v-if="ON_LINUX" aria-labelledby="settings-antialiasing">
+         <h3 id="settings-antialiasing" class="mb-2 font-semibold">Antialiasing</h3>
+-        <div class="flex gap-2">
+-          <button
+-            v-for="{ antialiasing, label } in ANTIALIASINGS"
+-            :key="antialiasing"
+-            type="button"
+-            :aria-pressed="settings.antialiasing === antialiasing"
+-            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
+-            @click="setAntialiasing(antialiasing)"
+-          >
+-            {{ label }}
+-          </button>
+-        </div>
++        <ChoiceButtons
++          :options="ANTIALIASINGS"
++          :pressed="settings.antialiasing"
++          @pick="setAntialiasing"
++        />
+         <p class="mt-1 text-fg-muted">Takes effect the next time yamt starts.</p>
+       </section>
+       <section aria-labelledby="settings-keymap">
+diff --git c/frontend/src/ui/settings.test.ts i/frontend/src/ui/settings.test.ts
+new file mode 100644
+index 0000000..fedcb52
+--- /dev/null
++++ i/frontend/src/ui/settings.test.ts
+@@ -0,0 +1,12 @@
++import { expect, test } from "vitest";
++
++import { showsAntialiasing } from "./settings";
++
++test("antialiasing is shown on Linux platforms only", () => {
++  expect(showsAntialiasing("Linux x86_64")).toBe(true);
++  expect(showsAntialiasing("Linux aarch64")).toBe(true);
++  expect(showsAntialiasing("MacIntel")).toBe(false);
++  expect(showsAntialiasing("Win32")).toBe(false);
++  expect(showsAntialiasing("")).toBe(false);
++  expect(showsAntialiasing("FreeBSD amd64 Linux")).toBe(false);
++});
+diff --git c/frontend/src/ui/settings.ts i/frontend/src/ui/settings.ts
+index 77cc8bb..ced0d08 100644
+--- c/frontend/src/ui/settings.ts
++++ i/frontend/src/ui/settings.ts
+@@ -57,6 +57,10 @@ export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
+   return { theme, keys: keys.bindings };
+ }
+ 
++export function showsAntialiasing(platform: string): boolean {
++  return platform.startsWith("Linux");
++}
++
+ function storedSettings({ theme, antialiasing, keys }: SettingsInUse): StoredSettings {
+   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
+   return {
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index 9857fd9..31a604c 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -14,6 +14,7 @@ import {
+   type FileSides,
+   type Key,
+   type SettingsRead,
++  type SettingsSource,
+   type SourceFailure,
+   type SourceResult,
+   type StoredSettings,
+@@ -33,10 +34,7 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+ const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+-const NO_SETTINGS: Pick<
+-  ChunkSource,
+-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+-> = {
++const NO_SETTINGS: SettingsSource = {
+   loadSettings: () => Promise.reject(new Error("not used")),
+   setTheme: () => Promise.reject(new Error("not used")),
+   setAntialiasing: () => Promise.reject(new Error("not used")),

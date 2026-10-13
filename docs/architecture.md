@@ -631,8 +631,10 @@ at first, shown from the right-click menu, #58 —, counts, finish, reset — `M
 `finish`/`reset`), `SettingsButton.vue` (the gear at the
 right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
 (the settings screen in the files' grid cell: a centred column with "Back", then Theme (Dark/Light),
+Antialiasing (Subpixel/Greyscale, Linux only by `showsAntialiasing`, applied at the next start, #60),
 Keymap and the settings file field with Use/Default; keyboard to "Back" on open and back to its
-opener on "Back", plan §2 #56, #57), `KeymapList.vue` (the actions' rows by group with their key
+opener on "Back", plan §2 #56, #57), `ChoiceButtons.vue` (one pressed-choice button group: Theme and
+Antialiasing), `KeymapList.vue` (the actions' rows by group with their key
 labels, WebStorm's Keymap edit menu per row) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
 dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Already used by" line),
 `ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button in `TOOLBAR_BUTTONS`

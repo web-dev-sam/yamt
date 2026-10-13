@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `65ab7d9` (settings feature: crate `settings`, the settings view, keys and themes; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `b45f6aa` (crisp code text and the Windows build, plan §2 #59/#60; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
@@ -58,7 +58,7 @@ frontend/src/editor CodeMirror 6 integration; public surface = MergeController(F
 frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (Vue component, ui/); plan §2 #34
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits move/applyLeft/applyRight/undo/redo/reset/finish), summaryLabel.ts, MergeView,
-                    SettingsButton (the gear in every file's header row) + SettingsView (settings screen in the files' grid cell, `settingsOpen` in the store, #56: Theme, Keymap, Settings file, #57)
+                    SettingsButton (the gear in every file's header row) + SettingsView (settings screen in the files' grid cell, `settingsOpen` in the store, #56: Theme, Antialiasing (Linux only, `showsAntialiasing`, #60), Keymap, Settings file, #57) + ChoiceButtons (one pressed-choice button group: Theme, Antialiasing)
                     + KeymapList (the actions' rows, WebStorm's Keymap edit menu) + KeyRecorder (WebStorm's Keyboard Shortcut dialog); menuKeys.ts (`stepMenuItem`: both menus' Up/Down/Escape/Tab);
                     keyField.ts (`fieldKey`: what a key does in the dialog's field — record, confirm, cancel, leave, ignore, after WebStorm's ShortcutTextField);
                     ToolbarMenu (MergeToolbar's right-click menu: check per icon button, teleported to body, closing and focus rules) + menuPosition.ts (pure placement inside the window) + toolbarButtons.ts (`TOOLBAR_BUTTONS`, `createHiddenButtons`: the hidden set in localStorage `yamt.toolbar.hidden`, Undo/Redo hidden at first, held by the store, plan §2 #58);
@@ -72,7 +72,7 @@ frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via 
                     settings.ts (the store's settings actions: load on mount/focus, theme, key edits, move; adopt a reply, #57); keymapEdit.ts (pure key-edit rules, the clash question);
                     keyText.ts (action names, places, groups; the Keymap edit menu `keymapMenu`, the + menu `setKeyMenu`, the conflict line `usedByText`)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app through Vite's mode file `frontend/.env.tauri`, fixtures otherwise; typed in src/env.d.ts), reads the start theme from `<html data-theme>`, creates the store, loads the file list, mounts App
-frontend/src/style.css   the colour palettes: Tailwind `@theme static` (Islands Dark) with stock colours reset (`--color-*: initial`), plan §2 row 24, and `:root[data-theme="light"]` (Islands Light, #57) redefining every token
+frontend/src/style.css   the colour palettes: Tailwind `@theme static` (Islands Dark) with stock colours reset (`--color-*: initial`), plan §2 row 24, and `:root[data-theme="light"]` (Islands Light, #57) redefining every token; `@utility opaque-scroller` (every scrolling text container paints its own background, #60)
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself;
                     app-session.ts (`just app-session`: the shared CLI driving the real app on a private Xvfb through tauri-driver, or the fixture page through `just webdriver`) + app-session/:
                     args, argv, keys, find, placement, colours, state, folders, json (pure, tested); start, fixture, drive, focus, video, stop, processes, session, webdriver (thin)
