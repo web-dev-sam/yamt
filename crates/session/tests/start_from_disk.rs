@@ -1,24 +1,22 @@
 #![cfg(test)]
-// Unix only: most tests merge `FILES`, which holds a symlink (scripted on unix only).
-#![cfg(unix)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
 };
-use yamt_session::{DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle};
+use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
 
 const TEXT: &str = "f.txt";
 const DELETED: &str = "gone.txt";
 const BINARY: &str = "logo.bin";
+#[cfg(unix)]
 const LINK: &str = "link";
 
 mod samples;
 use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
 
-const FILES: [ConflictFile<'static>; 4] = [
+const FILES: &[ConflictFile<'static>] = &[
     ConflictFile {
         path: TEXT,
         kind: FileKind::Regular,
@@ -40,6 +38,7 @@ const FILES: [ConflictFile<'static>; 4] = [
         local: Some(b"\0local"),
         remote: Some(b"\0remote"),
     },
+    #[cfg(unix)]
     ConflictFile {
         path: LINK,
         kind: FileKind::Symlink,
@@ -51,7 +50,7 @@ const FILES: [ConflictFile<'static>; 4] = [
 
 fn merged(config: &[(&str, &str)], attributes: Option<&str>) -> TempDir {
     let setup = Setup { config, attributes };
-    conflict_repo_with(&FILES, &setup).unwrap()
+    conflict_repo_with(FILES, &setup).unwrap()
 }
 
 fn zdiff3() -> TempDir {
@@ -267,6 +266,7 @@ fn a_binary_file_is_untouched_as_ours_and_staged_once_replaced_by_theirs() {
     assert_eq!(changes(&list), [(BINARY, &DiskResult::Staged)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
     let dir = merged(&[], Some("f.txt -merge\n"));
@@ -334,8 +334,11 @@ fn a_file_merge_ort_aligned_with_histogram_is_untouched() {
     assert_eq!(list.disk_changes, []);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
+    use std::os::unix::fs::PermissionsExt;
+    use yamt_session::{DiskVersion, Error};
     const NO_ACCESS: u32 = 0o000;
     const READ_WRITE: u32 = 0o644;
     let dir = zdiff3();

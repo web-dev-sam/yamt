@@ -1,14 +1,13 @@
 //! A merge stopped on every kind of conflicted path, and a file against a link.
 
-use std::fs;
-
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 
 pub const TEXT: &str = "a_text.txt";
 pub const LOCAL_DELETED: &str = "b_local_deleted.txt";
 pub const REMOTE_DELETED: &str = "c_remote_deleted.txt";
 pub const BINARY: &str = "d_binary.bin";
 pub const LATIN1: &str = "e_latin1.txt";
+#[cfg(unix)]
 pub const SYMLINK: &str = "f_symlink";
 pub const SUBMODULE: &str = "g_submodule";
 
@@ -30,9 +29,9 @@ pub const fn conflict(
     }
 }
 
-const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
-    use FileKind::{Regular, Submodule, Symlink};
-    [
+const EVERY_KIND_OF_CONFLICT: &[ConflictFile<'static>] = {
+    use FileKind::{Regular, Submodule};
+    &[
         conflict(
             TEXT,
             Regular,
@@ -66,9 +65,10 @@ const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
                 Some(b"caf\xe9 remote\n"),
             ],
         ),
+        #[cfg(unix)]
         conflict(
             SYMLINK,
-            Symlink,
+            FileKind::Symlink,
             [
                 Some(b"base-target"),
                 Some(b"local-target"),
@@ -88,15 +88,20 @@ const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
 };
 
 pub fn every_kind_of_conflict() -> TempDir {
-    conflict_repo(&EVERY_KIND_OF_CONFLICT).unwrap()
+    conflict_repo(EVERY_KIND_OF_CONFLICT).unwrap()
 }
 
+#[cfg(unix)]
 pub const FILE_OR_LINK: &str = "readme";
+#[cfg(unix)]
 pub const FILE_OR_LINK_RENAMED: &str = "readme~HEAD";
 
 // git's ort merge records a file against a symlink as two paths: "CONFLICT (distinct types): …
 // renamed one of them so each can be recorded somewhere" (observed on git 2.56).
+#[cfg(unix)]
 pub fn file_against_link() -> TempDir {
+    use std::fs;
+    use yamt_conflict_repo::{git, git_ok};
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     let commit = |message: &str| {

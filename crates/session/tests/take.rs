@@ -1,8 +1,7 @@
 #![cfg(test)]
-// Unix only: almost every test takes from `every_kind`, which scripts symlinks (unix only).
-#![cfg(unix)]
 
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 
 use yamt_conflict_repo::{FileKind, TempDir, conflict_repo, git, git_ok};
@@ -10,9 +9,11 @@ use yamt_session::{DiskVersion, FileStatus, MergeSession, Side, WriteReply};
 
 mod every_kind;
 use every_kind::{
-    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
-    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, conflict, every_kind_of_conflict, file_against_link,
+    BINARY, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT, REMOTE_DELETED, SUBMODULE, TEXT,
+    conflict, every_kind_of_conflict,
 };
+#[cfg(unix)]
+use every_kind::{FILE_OR_LINK, FILE_OR_LINK_RENAMED, SYMLINK, file_against_link};
 
 fn unmerged(dir: &TempDir) -> String {
     String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
@@ -95,6 +96,7 @@ fn take_of_a_binary_file_stages_and_writes_the_chosen_side_with_fresh_stat_data(
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
     for (side, target) in [
@@ -109,6 +111,7 @@ fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
     let dir = file_against_link();
@@ -201,6 +204,7 @@ fn reset_after_take_brings_back_the_stages_of_every_kind() {
         (REMOTE_DELETED, Side::Local),
         (BINARY, Side::Remote),
         (LATIN1, Side::Local),
+        #[cfg(unix)]
         (SYMLINK, Side::Remote),
         (SUBMODULE, Side::Local),
     ];

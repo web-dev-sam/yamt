@@ -13,6 +13,7 @@ const REMOTE_DELETED: &str = "b_remote_deleted.ts";
 const KEPT_BINARY: &str = "c_kept_binary.bin";
 const BASE_BINARY: &str = "d_base_binary.txt";
 const KEPT_LATIN1: &str = "e_kept_latin1.txt";
+#[cfg(unix)]
 const KEPT_LINK: &str = "f_kept_link";
 const EMPTY_BASE_CRLF: &str = "g_empty_base_crlf.ts";
 const BASE: &[u8] = b"one\ntwo\nthree\nfour\n";
@@ -34,17 +35,18 @@ const fn deleted(
     }
 }
 
-const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
-    use FileKind::{Regular, Symlink};
-    [
+const DELETED_ON_ONE_SIDE: &[ConflictFile<'static>] = {
+    use FileKind::Regular;
+    &[
         deleted(LOCAL_DELETED, Regular, BASE, None, Some(KEPT)),
         deleted(REMOTE_DELETED, Regular, BASE, Some(KEPT), None),
         deleted(KEPT_BINARY, Regular, b"base\n", Some(b"\0kept"), None),
         deleted(BASE_BINARY, Regular, b"\0base", None, Some(b"kept\n")),
         deleted(KEPT_LATIN1, Regular, b"base\n", None, Some(b"caf\xe9\n")),
+        #[cfg(unix)]
         deleted(
             KEPT_LINK,
-            Symlink,
+            FileKind::Symlink,
             b"base-target",
             Some(b"kept-target"),
             None,
@@ -60,7 +62,7 @@ const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
 };
 
 fn deleted_on_one_side() -> TempDir {
-    conflict_repo(&DELETED_ON_ONE_SIDE).unwrap()
+    conflict_repo(DELETED_ON_ONE_SIDE).unwrap()
 }
 
 fn unmerged(dir: &TempDir) -> String {
@@ -122,6 +124,7 @@ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason(
         (KEPT_BINARY, Some(UnsupportedReason::RemoteDeleted)),
         (BASE_BINARY, Some(UnsupportedReason::LocalDeleted)),
         (KEPT_LATIN1, Some(UnsupportedReason::LocalDeleted)),
+        #[cfg(unix)]
         (KEPT_LINK, Some(UnsupportedReason::Symlink)),
         (EMPTY_BASE_CRLF, None),
     ]

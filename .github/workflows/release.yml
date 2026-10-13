@@ -41,34 +41,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - name: Linux system packages
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
-
-      - name: Rust toolchain from rust-toolchain.toml
-        run: |
-          rustup toolchain install
-          rustup show active-toolchain
+      - uses: ./.github/actions/setup
 
       - name: macOS targets for the universal build
         if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-
-      - name: Tauri CLI
-        run: cargo install tauri-cli --version 2.12.1 --locked
-
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: 24
-
-      - uses: pnpm/action-setup@v6.1.0
-        with:
-          package_json_file: frontend/package.json
-
-      - name: Frontend packages
-        run: pnpm -C frontend install --frozen-lockfile
 
       - name: THIRD_PARTY_LICENSES.txt is current
         run: |

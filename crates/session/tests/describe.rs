@@ -1,13 +1,14 @@
 #![cfg(test)]
-// Unix only: `every_kind` scripts symlinks (scripted on unix only).
-#![cfg(unix)]
 
 use yamt_session::{MergeSession, SideContent, UnsupportedReason};
 
 mod every_kind;
 use every_kind::{
-    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
-    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, every_kind_of_conflict, file_against_link,
+    BINARY, LATIN1, LOCAL_DELETED, REMOTE_DELETED, SUBMODULE, TEXT, every_kind_of_conflict,
+};
+#[cfg(unix)]
+use every_kind::{
+    FILE_OR_LINK, FILE_OR_LINK_RENAMED, LOCAL_COMMIT, REMOTE_COMMIT, SYMLINK, file_against_link,
 };
 
 fn described_sides(session: &mut MergeSession, path: &str) -> (SideContent, SideContent) {
@@ -27,6 +28,7 @@ fn describe_counts_the_lines_of_text_sides_and_names_a_deleted_side_missing() {
     assert_eq!(described(REMOTE_DELETED), (Text { lines: 3 }, Missing));
 }
 
+#[cfg(unix)]
 #[test]
 fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
     use SideContent::{Binary, Commit, Link, NonUtf8};
@@ -65,6 +67,7 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
         (REMOTE_DELETED, None),
         (BINARY, Some(UnsupportedReason::Binary)),
         (LATIN1, Some(UnsupportedReason::NonUtf8)),
+        #[cfg(unix)]
         (SYMLINK, Some(UnsupportedReason::Symlink)),
         (SUBMODULE, Some(UnsupportedReason::Submodule)),
     ];
@@ -73,6 +76,7 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
     use SideContent::{Link, Missing, Text};

@@ -1,20 +1,20 @@
 #![cfg(test)]
-// Unix only: every test merges `FILES`, which holds a symlink (scripted on unix only).
-#![cfg(unix)]
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
 };
 use yamt_session::{
-    DiskChange, DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle,
-    NotText, Side, WriteReply,
+    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
+    WriteReply,
 };
 
 const TEXT: &str = "f.txt";
 const BINARY: &str = "logo.bin";
+#[cfg(unix)]
 const LINK: &str = "link";
 const SUBMODULE: &str = "vendor/lib";
 
@@ -23,7 +23,7 @@ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
 
 const USER_TEXT: &[u8] = b"written by the user\n";
 
-const FILES: [ConflictFile<'static>; 4] = [
+const FILES: &[ConflictFile<'static>] = &[
     ConflictFile {
         path: TEXT,
         kind: FileKind::Regular,
@@ -38,6 +38,7 @@ const FILES: [ConflictFile<'static>; 4] = [
         local: Some(b"\0local"),
         remote: Some(b"\0remote"),
     },
+    #[cfg(unix)]
     ConflictFile {
         path: LINK,
         kind: FileKind::Symlink,
@@ -61,7 +62,7 @@ fn merged_in(style: &str, config: &[(&str, &str)]) -> TempDir {
         config: &all_config,
         ..Setup::default()
     };
-    conflict_repo_with(&FILES, &setup).unwrap()
+    conflict_repo_with(FILES, &setup).unwrap()
 }
 
 fn merged() -> TempDir {
@@ -281,8 +282,10 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missing_file() {
+    use yamt_session::Error;
     let dir = merged();
     let mut session = opened(&dir);
     let outside = TempDir::new().unwrap();
@@ -313,6 +316,7 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
     assert_eq!(read(&dir, TEXT), b"merged\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
     let dir = merged();

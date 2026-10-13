@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -40,6 +40,8 @@ pub struct ConflictFile<'a> {
 #[derive(Clone, Copy, Debug)]
 pub enum FileKind {
     Regular,
+    /// Unix only: Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`).
+    #[cfg(unix)]
     Symlink,
     Submodule,
 }
@@ -192,6 +194,7 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
             fs::write(&worktree_file, bytes)?;
             git_ok(root, &["add", "--", file.path])?;
         }
+        #[cfg(unix)]
         FileKind::Symlink => {
             if worktree_file.symlink_metadata().is_ok() {
                 fs::remove_file(&worktree_file)?;
@@ -210,19 +213,9 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn link_to(target: &[u8], link: &Path) -> io::Result<()> {
+fn link_to(target: &[u8], link: &Path) -> std::io::Result<()> {
     use std::os::unix::ffi::OsStrExt;
     std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), link)
-}
-
-// Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`), so
-// tests that script one run on unix only.
-#[cfg(not(unix))]
-fn link_to(_target: &[u8], _link: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "scripted symlinks are unix-only",
-    ))
 }
 
 #[cfg(test)]
