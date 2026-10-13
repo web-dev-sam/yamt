@@ -66,7 +66,8 @@ frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via 
                     closeGuard.ts (unsaved work per opened file and the window-close question, held by the store); sides.ts (`otherSide`, `Taken`: by a side or by the disk); deletedSide.ts (`deletedSideView`: what the deleted-side view shows, #47);
                     diskChanges.ts (`applyDiskChanges`: notices, dropped edits, refetch of shown files, plan §2 #52/#53); views.ts (shown views: fetch, put, reload; `takesASide`: choice file; `isEditable`: the middle is writable for this data);
                     NoticeBar + noticeText.ts (closable notices about files changed on disk, words only there);
-                    settings.ts (the store's settings actions: load on mount/focus, theme, key edits, move; adopt a reply, #57); keymapEdit.ts (pure key-edit rules, the clash question); keyText.ts (action names, places, groups)
+                    settings.ts (the store's settings actions: load on mount/focus, theme, key edits, move; adopt a reply, #57); keymapEdit.ts (pure key-edit rules, the clash question);
+                    keyText.ts (action names, places, groups; the Keymap edit menu `keymapMenu`, the + menu `setKeyMenu`, the conflict line `usedByText`)
 frontend/src/main.ts     picks the source by `VITE_CHUNK_SOURCE` (`"tauri"` in the app, fixtures otherwise; typed in src/env.d.ts), reads the start theme from `<html data-theme>`, creates the store, loads the file list, mounts App
 frontend/src/style.css   the colour palettes: Tailwind `@theme static` (Islands Dark) with stock colours reset (`--color-*: initial`), plan §2 row 24, and `:root[data-theme="light"]` (Islands Light, #57) redefining every token
 frontend/scripts    check-sfc-order.ts (VU2); fences.ts (PM2/PM3/PM5, plus `~icons/*` without `?raw` in framework-free modules); palette.ts (VU17) — each with a .test.ts that reads src/ itself

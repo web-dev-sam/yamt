@@ -1,18 +1,21 @@
 {
-  "SettingsView": {
+  "SettingsViewR1": {
     "owned": [
       "frontend/src/ui/SettingsView.vue",
-      "frontend/src/ui/MergeToolbar.vue",
       "frontend/src/ui/KeymapList.vue",
       "frontend/src/ui/KeyRecorder.vue",
+      "frontend/src/ui/MergeToolbar.vue",
       "frontend/src/ui/keyText.ts",
       "frontend/src/ui/keyText.test.ts",
-      "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/pane.test.ts",
-      "frontend/src/editor/internal/sideKeys.ts",
-      "frontend/src/editor/internal/sideKeys.test.ts",
-      "frontend/src/ui/settings.ts",
-      "frontend/src/ui/store.test.ts"
+      "frontend/src/ui/keymapEdit.ts",
+      "frontend/src/ui/keymapEdit.test.ts",
+      "frontend/src/ui/menuKeys.ts",
+      "frontend/src/ui/menuKeys.test.ts",
+      "frontend/src/ui/keyField.ts",
+      "frontend/src/ui/keyField.test.ts",
+      "frontend/src/ui/keyDialog.ts",
+      "frontend/src/ui/keyDialog.test.ts",
+      "frontend/src/editor/internal/pane.ts"
     ]
   }
 }

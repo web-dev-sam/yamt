@@ -643,7 +643,9 @@ settings, the window-close check, and the settings actions in `settings.ts` (loa
 window focus, set the theme, add/change/remove/remove all/reset an action's keys, move the file;
 each sends the settings in use and adopts the reply; a failure keeps them). `keymapEdit.ts` holds the
 pure key-edit rules (a key another action holds → the "Key Already in Use" question, Move/Cancel;
-a list equal to the defaults is sent as `null`); `keyText.ts` the actions' names, places and groups.
+a list equal to the defaults is sent as `null`); `keyText.ts` the actions' names, places and groups,
+and the words built from data: the Keymap edit menu (`keymapMenu`), the "+" menu (`setKeyMenu`) and
+the conflict line (`usedByText`).
 
 The Vue↔editor seam is one adaptable composable:
 
