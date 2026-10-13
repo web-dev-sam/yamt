@@ -1,5 +1,1 @@
-{
-  "AppSessionR1": {
-    "owned": ["frontend/scripts/app-session.ts", "frontend/scripts/app-session/**"]
-  }
-}
+{}
