@@ -12,7 +12,6 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 &nbsp;
 
 ## Why does this exist?
-
 1. PhpStorm's three-pane merge window is the only merge tool I find usable. VS Code's merge editor, its extensions and the TUI mergetools all felt unintuitive.
 2. They all start from the `<<<<<<<` conflict markers. Once git has collapsed a merge into markers the base is gone, so you can see _that_ two sides differ but not _what each side changed_. yamt never parses a conflict marker: it reads the base, your side and theirs from git's index and diffs them itself.
 3. `git mergetool` opens one file at a time, and real merges touch many files. yamt takes over the whole merge: every conflicted file in one window, your side on the left, theirs on the right, the result in the middle.
@@ -25,13 +24,13 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 
 Download from the [releases page](../../releases):
 
-- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.1.0_amd64.deb`)
+- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.2.0_amd64.deb`)
   puts `yamt` on your PATH. For the AppImage, put it there yourself.
 
   Without AppImageLauncher:
 
   ```sh
-  install -Dm755 yamt_0.1.0_amd64.AppImage ~/.local/bin/yamt
+  install -Dm755 yamt_0.2.0_amd64.AppImage ~/.local/bin/yamt
   ```
 
   With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the
@@ -39,8 +38,8 @@ Download from the [releases page](../../releases):
   file:
 
   ```sh
-  ail-cli integrate yamt_0.1.0_amd64.AppImage
-  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.1.0_amd64_*.AppImage ~/.local/bin/yamt
+  ail-cli integrate yamt_0.2.0_amd64.AppImage
+  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.2.0_amd64_*.AppImage ~/.local/bin/yamt
   ```
 
   If `yamt` is then not found, `~/.local/bin` is not on your PATH: add
@@ -71,7 +70,7 @@ When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `y
 - Each change has an arrow that applies it to the result and a × that ignores it; press one and drag up or down to apply or ignore several at once (one undo step). On a conflict, Ctrl+click (Cmd+click on macOS) on the arrow also ignores the other side, and on the × also takes the other side; holding Ctrl (Cmd) when releasing a drag does the same for every conflict it covers. Ctrl+click (Cmd+click) a highlighted change applies it, Ctrl+right-click (Cmd+right-click) ignores it. The toolbar applies all non-conflicting changes from the left or from the right in one click.
 - From the keyboard: click a side or one of its changes (an outline shows which), then Enter or Space applies the change, Backspace, Delete or x ignores it, Up and Down move between the changes still waiting on that side, and Left and Right switch sides. The toolbar's up and down arrows do the same as Up and Down (on the left side when no side has the keyboard). Ctrl+scroll (Cmd+scroll on macOS) over a side steps through its changes. Ctrl+Z / Ctrl+Shift+Z (Cmd on macOS) undo and redo from anywhere in the window. These are the default keys; settings can change them.
 - The result pane is a normal editor: type, Tab / Shift+Tab indent and outdent, undo and redo. Ctrl+F (Cmd+F) finds text in whichever pane you clicked.
-- The gear at the toolbar's right end opens settings: **Dark** or **Light** colours, and every yamt shortcut — add, change or remove a key per action, or reset it (a key another action uses asks before moving). Settings are saved per user in `~/.config/yamt/settings.json` (`~/Library/Application Support/yamt/settings.json` on macOS) and hold only what you changed; point the settings page at another file, for example in your dotfiles, and yamt reads and writes that one, picking up your edits whenever its window gets focus.
+- The gear at the toolbar's right end opens settings: **Dark** or **Light** colours, on Linux **Subpixel** (colour-edged text like WebStorm's, the default) or **Greyscale** antialiasing, and every yamt shortcut — add, change or remove a key per action, or reset it (a key another action uses asks before moving). Settings are saved per user in `~/.config/yamt/settings.json` (`~/Library/Application Support/yamt/settings.json` on macOS, `%APPDATA%\yamt\settings.json` on Windows) and hold only what you changed; point the settings page at another file, for example in your dotfiles, and yamt reads and writes that one, picking up your edits whenever its window gets focus.
 - **Mark resolved** writes the result, stages the file and opens the next unresolved one. It turns blue once nothing is left to process. **Reset**, next to "Result", brings the conflict back as git left it.
 - Right-click the toolbar to choose which of its icon buttons show (previous/next change, apply all from either side, undo, redo; Undo and Redo start hidden). The choice applies to every file and is remembered after a restart; the keys work either way.
 - A file deleted on one side and changed on the other shows the changed side with its changes, and two buttons: **Keep** and **Delete**. Other files the editor cannot show (binary, symlinks, submodules) get a choice between the two sides.

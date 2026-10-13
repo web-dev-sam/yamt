@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-13
+
 ### Added
 
 - Keyboard focus in the side panes: click a side or one of its changes (an outline shows which), then
@@ -92,5 +94,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.1.1...HEAD
+[Unreleased]: ../../compare/v0.2.0...HEAD
+[0.2.0]: ../../compare/v0.1.1...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0
