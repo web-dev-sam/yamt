@@ -316,14 +316,16 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
     assert_eq!(read(&dir, TEXT), b"merged\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
     let dir = merged();
     let mut session = opened(&dir);
     write(&dir, BINARY, b"\0new");
-    fs::remove_file(dir.path().join(LINK)).unwrap();
-    symlink("new-target", dir.path().join(LINK)).unwrap();
+    #[cfg(unix)]
+    {
+        fs::remove_file(dir.path().join(LINK)).unwrap();
+        symlink("new-target", dir.path().join(LINK)).unwrap();
+    }
     let submodule = dir.path().join(SUBMODULE);
     git_ok(&submodule, &["init", "--quiet"]).unwrap();
     git_ok(
@@ -335,20 +337,23 @@ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
 
     let list = session.refresh().unwrap();
 
-    let staged_paths: Vec<&str> = changes(&list).into_iter().map(|(path, _)| path).collect();
-    assert_eq!(staged_paths, [LINK, BINARY, SUBMODULE]);
-    assert!(
-        changes(&list)
-            .iter()
-            .all(|(_, result)| **result == DiskResult::Staged)
-    );
+    let expected = [
+        #[cfg(unix)]
+        (LINK, &DiskResult::Staged),
+        (BINARY, &DiskResult::Staged),
+        (SUBMODULE, &DiskResult::Staged),
+    ];
+    assert_eq!(changes(&list), expected);
     let binary_oid = hash_object(dir.path(), b"\0new").unwrap();
     assert_eq!(
         staged(&dir, BINARY),
         format!("100644 {binary_oid} 0\t{BINARY}\n")
     );
-    let link_oid = hash_object(dir.path(), b"new-target").unwrap();
-    assert_eq!(staged(&dir, LINK), format!("120000 {link_oid} 0\t{LINK}\n"));
+    #[cfg(unix)]
+    {
+        let link_oid = hash_object(dir.path(), b"new-target").unwrap();
+        assert_eq!(staged(&dir, LINK), format!("120000 {link_oid} 0\t{LINK}\n"));
+    }
     let head = head.trim_end();
     assert_eq!(
         staged(&dir, SUBMODULE),

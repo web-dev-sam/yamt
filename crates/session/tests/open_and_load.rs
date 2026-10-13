@@ -14,7 +14,6 @@ const REMOTE_DELETED: &str = "d_remote_deleted.txt";
 const BINARY: &str = "e_binary.bin";
 const LATIN1: &str = "f_latin1.txt";
 const CRLF: &str = "g_crlf.txt";
-#[cfg(unix)]
 const SUBMODULE: &str = "h_submodule";
 #[cfg(unix)]
 const SYMLINK: &str = "i_symlink";
@@ -245,9 +244,7 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
     assert_eq!(data.eol, Eol::CrLf);
 }
 
-// Unix only: holds a symlink (scripted on unix only).
-#[cfg(unix)]
-const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+const NON_REGULAR_NEXT_TO_TEXT: &[ConflictFile<'static>] = &[
     ConflictFile {
         path: MODIFY_TS,
         kind: FileKind::Regular,
@@ -262,6 +259,7 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
         local: Some(b"2222222222222222222222222222222222222222"),
         remote: Some(b"3333333333333333333333333333333333333333"),
     },
+    #[cfg(unix)]
     ConflictFile {
         path: SYMLINK,
         kind: FileKind::Symlink,
@@ -271,10 +269,22 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
     },
 ];
 
-#[cfg(unix)]
+fn assert_load_and_finish_refused(
+    session: &mut MergeSession,
+    path: &str,
+    reason: UnsupportedReason,
+) {
+    assert_eq!(unsupported_error(session, path), reason);
+    let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
+    assert!(
+        matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
+        "{error:?}"
+    );
+}
+
 #[test]
 fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads() {
-    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+    let dir = conflict_repo(NON_REGULAR_NEXT_TO_TEXT).unwrap();
 
     let mut session = MergeSession::open(dir.path()).unwrap();
 
@@ -286,27 +296,19 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
     let expected = [
         (MODIFY_TS.to_owned(), None),
         (SUBMODULE.to_owned(), Some(UnsupportedReason::Submodule)),
+        #[cfg(unix)]
         (SYMLINK.to_owned(), Some(UnsupportedReason::Symlink)),
     ];
     assert_eq!(listed, expected);
-    for (path, reason) in [
-        (SUBMODULE, UnsupportedReason::Submodule),
-        (SYMLINK, UnsupportedReason::Symlink),
-    ] {
-        assert_eq!(unsupported_error(&mut session, path), reason);
-        let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
-        assert!(
-            matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
-            "{error:?}"
-        );
-    }
+    assert_load_and_finish_refused(&mut session, SUBMODULE, UnsupportedReason::Submodule);
+    #[cfg(unix)]
+    assert_load_and_finish_refused(&mut session, SYMLINK, UnsupportedReason::Symlink);
     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
 }
 
-#[cfg(unix)]
 #[test]
 fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
-    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+    let dir = conflict_repo(NON_REGULAR_NEXT_TO_TEXT).unwrap();
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
 

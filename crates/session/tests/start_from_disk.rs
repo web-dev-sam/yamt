@@ -5,12 +5,13 @@ use std::fs;
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
 };
-use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
+use yamt_session::{
+    DiskResult, FileList, FileStatus, MergeSession, Middle, SideContent, UnsupportedReason,
+};
 
 const TEXT: &str = "f.txt";
 const DELETED: &str = "gone.txt";
 const BINARY: &str = "logo.bin";
-#[cfg(unix)]
 const LINK: &str = "link";
 
 mod samples;
@@ -275,6 +276,61 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
     assert_eq!(list.disk_changes, []);
     let target = fs::read_link(dir.path().join(LINK)).unwrap();
     assert_eq!(target.to_str(), Some("local-target"));
+}
+
+// git-config(1) `core.symlinks`: "If false, symbolic links are checked out as small plain files
+// that contain the link text" (the default of Git for Windows); `git add` keeps such a file's
+// symlink mode.
+fn link_conflict_written_as_a_plain_file() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let run = |args: &[&str]| git_ok(root, args).unwrap();
+    let commit = |target: &str, message: &str| {
+        fs::write(root.join(LINK), target).unwrap();
+        run(&["add", "--", LINK]);
+        run(&["commit", "--quiet", "-m", message]);
+    };
+    run(&["init", "--quiet"]);
+    run(&["config", "core.symlinks", "false"]);
+    fs::write(root.join(LINK), "base-target").unwrap();
+    let oid = text(run(&["hash-object", "-w", "--", LINK]));
+    let cacheinfo = format!("120000,{},{LINK}", oid.trim_end());
+    run(&["update-index", "--add", "--cacheinfo", &cacheinfo]);
+    run(&["commit", "--quiet", "-m", "base"]);
+    run(&["checkout", "--quiet", "-b", "local"]);
+    commit("local-target", "local");
+    run(&["checkout", "--quiet", "-b", "remote", "main"]);
+    commit("remote-target", "remote");
+    run(&["checkout", "--quiet", "local"]);
+    let merge = git(root, &["merge", "--quiet", "remote"]).unwrap();
+    assert!(!merge.status.success());
+    dir
+}
+
+#[test]
+fn a_link_git_wrote_as_a_plain_file_is_untouched_and_stays_an_unresolved_link() {
+    let dir = link_conflict_written_as_a_plain_file();
+    let unmerged_before = unmerged(&dir);
+    assert!(unmerged_before.starts_with("120000 "), "{unmerged_before}");
+
+    let (mut session, list) = first_list(&dir);
+
+    assert_eq!(list.disk_changes, []);
+    assert_eq!(unmerged(&dir), unmerged_before);
+    assert!(dir.path().join(LINK).symlink_metadata().unwrap().is_file());
+    assert_eq!(read(&dir, LINK), "local-target");
+    let files = session.files();
+    let link = files.iter().find(|file| file.path == LINK).unwrap();
+    assert_eq!(link.status, FileStatus::Unresolved);
+    assert_eq!(link.unsupported, Some(UnsupportedReason::Symlink));
+    let sides = session.describe(LINK).unwrap();
+    let target = |target: &str| SideContent::Link {
+        target: target.to_owned(),
+    };
+    assert_eq!(
+        (sides.local, sides.remote),
+        (target("local-target"), target("remote-target"))
+    );
 }
 
 // gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a

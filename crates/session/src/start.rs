@@ -279,18 +279,17 @@ fn compare_stage(
     let is_link = entry.mode == SYMLINK_MODE;
     let look = match file.disk {
         OnDisk::Link(target) if is_link => same(&blobs.read(&entry.oid)?, target),
+        // git-config(1) `core.symlinks`: "If false, symbolic links are checked out as small plain
+        // files that contain the link text" (the default of Git for Windows).
+        OnDisk::File(bytes) if is_link => same(&blobs.read(&entry.oid)?, bytes),
         // git-hash-object(1) `--stdin-paths` reads one path per line.
-        OnDisk::File(bytes)
-            if !is_link && file.path.as_os_str().as_encoded_bytes().contains(&b'\n') =>
-        {
+        OnDisk::File(bytes) if file.path.as_os_str().as_encoded_bytes().contains(&b'\n') => {
             same(&blobs.read(&entry.oid)?, bytes)
         }
-        OnDisk::File(_) if !is_link => StartLook::BlobOf(entry.oid.clone()),
-        OnDisk::Missing
-        | OnDisk::File(_)
-        | OnDisk::Link(_)
-        | OnDisk::Submodule(_)
-        | OnDisk::Other => StartLook::Changed,
+        OnDisk::File(_) => StartLook::BlobOf(entry.oid.clone()),
+        OnDisk::Missing | OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => {
+            StartLook::Changed
+        }
     };
     Ok(look)
 }
