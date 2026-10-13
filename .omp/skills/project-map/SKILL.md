@@ -45,7 +45,7 @@ scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, no
 scripts/third-party-licenses.sh  `just third-party-licenses`: THIRD_PARTY_LICENSES.txt from `cargo metadata` + `pnpm licenses list --prod` + licence files on disk (jq);
                     `ubuntu-versions` appends the AppImage's library versions and the GNU GPL/LGPL texts (Linux job); both release jobs regenerate and `git diff --exit-code` it
 root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
-                    (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints], .cargo/mutants.toml, .gitattributes (`* -text`: no line-ending conversion, #59)
+                    (disallowed_*; shadows root, keys duplicated), deny.toml, rust-toolchain.toml, Cargo.toml [workspace.lints], .cargo/mutants.toml, .gitattributes (`* -text`: no line-ending conversion, #59), .config/nextest.toml (profile `ci`: no fail-fast)
 frontend/src/ipc    index.ts (public surface + the one app logger); domain.ts (brands by type guard, toDomain); ChunkSource.ts; fixture.ts (fixture mode (browser without the app): valibot over
                     fixtures/{golden,showcase}/*.json); fixtureSettings.ts (fixture mode's settings, in memory); bindings.ts (GENERATED); log.ts; tauri.ts (`createTauriSource` over `commands`);
                     window.ts (close-request guard, the only `@tauri-apps/api/window` importer); keys.ts (the one source of what keys mean, #57: actions, defaults, file text incl. `MacCtrl-`, labels, keyOfEvent, bindingsOf)

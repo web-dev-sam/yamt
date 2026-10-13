@@ -38,6 +38,8 @@ jobs:
 
       - name: Rust tests without the runner's git config (RK19)
         id: tests
+        env:
+          NEXTEST_PROFILE: ci
         run: |
           mkdir -p target
           just test 2>&1 | tee target/ci-test.log

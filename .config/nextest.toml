@@ -1,0 +1,4 @@
+# `ci` (NEXTEST_PROFILE=ci in .github/workflows/ci.yml): run every test, so one CI run shows every failure; job logs
+# need a token, the failure annotations built from this output do not.
+[profile.ci]
+fail-fast = false
