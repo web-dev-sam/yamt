@@ -1,0 +1,20 @@
+name: failure-annotations
+description: A failed step's log as error annotations, readable without a token (job logs are not).
+
+inputs:
+  log:
+    description: The log file the failed step wrote with tee.
+    required: true
+  title:
+    description: The annotations' title, without ':' or ','.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Failing lines and log tail as annotations
+      shell: bash
+      env:
+        LOG: ${{ inputs.log }}
+        TITLE: ${{ inputs.title }}
+      run: bash "$GITHUB_ACTION_PATH/annotate.sh" "$LOG" "$TITLE"

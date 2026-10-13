@@ -37,10 +37,28 @@ jobs:
           tool: nextest,just
 
       - name: Rust tests without the runner's git config (RK19)
-        run: just test
+        id: tests
+        run: |
+          mkdir -p target
+          just test 2>&1 | tee target/ci-test.log
 
       - name: App build
-        run: cargo tauri build ${{ matrix.app }}
+        id: app
+        run: cargo tauri build ${{ matrix.app }} 2>&1 | tee target/ci-app-build.log
+
+      - name: Rust test failures as annotations
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: ./.github/actions/failure-annotations
+        with:
+          log: target/ci-test.log
+          title: Rust tests on ${{ matrix.runner }}
+
+      - name: App build failure as annotations
+        if: failure() && steps.app.outcome == 'failure'
+        uses: ./.github/actions/failure-annotations
+        with:
+          log: target/ci-app-build.log
+          title: App build on ${{ matrix.runner }}
 
       - name: Windows installer
         if: runner.os == 'Windows'
