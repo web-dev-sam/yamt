@@ -1,0 +1,739 @@
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index e1cedf3..77ade32 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -77,7 +77,10 @@ const paneTheme = EditorView.theme({
+   ".cm-scroller": {
+     fontFamily: "var(--font-mono)",
+     fontVariantLigatures: "none",
+-    lineHeight: "1.4",
++    lineHeight: "20px",
++    // Chromium (WebView2) keeps subpixel text in a scroller it composites only when the
++    // scroller paints an opaque background (plan §2 #60).
++    backgroundColor: "var(--color-panel)",
+   },
+   ".cm-content": { caretColor: "var(--color-caret)" },
+   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
+diff --git c/frontend/src/ipc/ChunkSource.ts i/frontend/src/ipc/ChunkSource.ts
+index 890cd32..c73ab58 100644
+--- c/frontend/src/ipc/ChunkSource.ts
++++ i/frontend/src/ipc/ChunkSource.ts
+@@ -1,4 +1,5 @@
+ import type {
++  Antialiasing,
+   DiskVersion,
+   FileList,
+   FileMergeData,
+@@ -27,6 +28,10 @@ export interface ChunkSource {
+   remoteName(): Promise<RemoteName | null>;
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
++  setAntialiasing(
++    current: StoredSettings,
++    antialiasing: Antialiasing,
++  ): Promise<SourceResult<SettingsRead>>;
+   setKeys(
+     current: StoredSettings,
+     changes: readonly KeysChange[],
+diff --git c/frontend/src/ipc/domain.ts i/frontend/src/ipc/domain.ts
+index 13e9332..833a706 100644
+--- c/frontend/src/ipc/domain.ts
++++ i/frontend/src/ipc/domain.ts
+@@ -45,6 +45,8 @@ export type WriteReply = Generated.WriteReply;
+ 
+ export type Theme = Generated.Theme;
+ 
++export type Antialiasing = Generated.Antialiasing;
++
+ export type StoredSettings = Generated.StoredSettings;
+ 
+ export type KeysChange = Generated.KeysChange;
+diff --git c/frontend/src/ipc/fixtureSettings.test.ts i/frontend/src/ipc/fixtureSettings.test.ts
+index 8b72c77..5ba559c 100644
+--- c/frontend/src/ipc/fixtureSettings.test.ts
++++ i/frontend/src/ipc/fixtureSettings.test.ts
+@@ -4,7 +4,8 @@ import type { StoredSettings } from "./domain";
+ import { createFixtureSettings } from "./fixtureSettings";
+ 
+ const DEFAULT_PATH = "/fixture/settings.json";
+-const IN_USE: StoredSettings = { theme: "dark", keys: { apply: ["a"] } };
++const IN_USE: StoredSettings = { theme: "dark", antialiasing: "subpixel", keys: { apply: ["a"] } };
++const LIGHT: StoredSettings = { theme: "light", antialiasing: "subpixel", keys: {} };
+ 
+ test("the first load creates the file from the settings in use; later loads read the file", async () => {
+   const settings = createFixtureSettings();
+@@ -13,7 +14,7 @@ test("the first load creates the file from the settings in use; later loads read
+     ok: true,
+     value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
+   });
+-  expect(await settings.loadSettings({ theme: "light", keys: {} })).toEqual({
++  expect(await settings.loadSettings(LIGHT)).toEqual({
+     ok: true,
+     value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
+   });
+@@ -21,23 +22,49 @@ test("the first load creates the file from the settings in use; later loads read
+ 
+ test("setTheme replaces the theme and keeps the keys and unknown actions", async () => {
+   const settings = createFixtureSettings();
+-  await settings.loadSettings({ theme: "dark", keys: { "later-action": ["Mod-q"] } });
++  await settings.loadSettings({
++    theme: "dark",
++    antialiasing: "greyscale",
++    keys: { "later-action": ["Mod-q"] },
++  });
+ 
+-  const read = await settings.setTheme({ theme: "dark", keys: {} }, "light");
++  const read = await settings.setTheme(
++    { theme: "dark", antialiasing: "greyscale", keys: {} },
++    "light",
++  );
+ 
+   expect(read).toEqual({
+     ok: true,
+     value: {
+       path: DEFAULT_PATH,
+       defaultPath: DEFAULT_PATH,
+-      stored: { theme: "light", keys: { "later-action": ["Mod-q"] } },
++      stored: { theme: "light", antialiasing: "greyscale", keys: { "later-action": ["Mod-q"] } },
+     },
+   });
+ });
+ 
++test("setAntialiasing replaces the antialiasing, keeps the rest, and the next load reads it", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings({ ...LIGHT, keys: { "later-action": ["Mod-q"] } });
++
++  const read = await settings.setAntialiasing(LIGHT, "greyscale");
++  const load = await settings.loadSettings(IN_USE);
++
++  const stored = { theme: "light", antialiasing: "greyscale", keys: { "later-action": ["Mod-q"] } };
++  expect(read).toEqual({
++    ok: true,
++    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored },
++  });
++  expect(load).toEqual(read);
++});
++
+ test("setKeys sets an entry with a list, removes it with null, and leaves the others", async () => {
+   const settings = createFixtureSettings();
+-  await settings.loadSettings({ theme: "dark", keys: { apply: ["a"], undo: ["Alt-Backspace"] } });
++  await settings.loadSettings({
++    theme: "dark",
++    antialiasing: "subpixel",
++    keys: { apply: ["a"], undo: ["Alt-Backspace"] },
++  });
+ 
+   const read = await settings.setKeys(IN_USE, [
+     { action: "apply", keys: null },
+@@ -57,7 +84,11 @@ test("a change before any load creates the file from the settings in use", async
+ 
+   const read = await settings.setTheme(IN_USE, "light");
+ 
+-  expect(read.ok && read.value.stored).toEqual({ theme: "light", keys: { apply: ["a"] } });
++  expect(read.ok && read.value.stored).toEqual({
++    theme: "light",
++    antialiasing: "subpixel",
++    keys: { apply: ["a"] },
++  });
+ });
+ 
+ test("a reply is a copy: changing it changes nothing stored", async () => {
+@@ -76,21 +107,17 @@ test("moving to an unknown path creates it from the settings in use, a known one
+   const settings = createFixtureSettings();
+   await settings.loadSettings(IN_USE);
+ 
+-  const created = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
+-  await settings.setTheme({ theme: "light", keys: {} }, "dark");
+-  const back = await settings.moveSettings({ theme: "light", keys: {} }, DEFAULT_PATH);
+-  const again = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
++  const created = await settings.moveSettings(LIGHT, "/elsewhere.json");
++  await settings.setTheme(LIGHT, "dark");
++  const back = await settings.moveSettings(LIGHT, DEFAULT_PATH);
++  const again = await settings.moveSettings(LIGHT, "/elsewhere.json");
+ 
+   expect(created).toEqual({
+     ok: true,
+-    value: {
+-      path: "/elsewhere.json",
+-      defaultPath: DEFAULT_PATH,
+-      stored: { theme: "light", keys: {} },
+-    },
++    value: { path: "/elsewhere.json", defaultPath: DEFAULT_PATH, stored: LIGHT },
+   });
+   expect(back.ok && back.value.stored).toEqual(IN_USE);
+-  expect(again.ok && again.value.stored).toEqual({ theme: "dark", keys: {} });
++  expect(again.ok && again.value.stored).toEqual({ ...LIGHT, theme: "dark" });
+ });
+ 
+ test("a move to ~/ goes below the fixture home; a relative path is refused and nothing moves", async () => {
+diff --git c/frontend/src/ipc/fixtureSettings.ts i/frontend/src/ipc/fixtureSettings.ts
+index eb0ce31..2df632d 100644
+--- c/frontend/src/ipc/fixtureSettings.ts
++++ i/frontend/src/ipc/fixtureSettings.ts
+@@ -1,7 +1,10 @@
+ import type { ChunkSource } from "./ChunkSource";
+ import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
+ 
+-type FixtureSettings = Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings">;
++type FixtureSettings = Pick<
++  ChunkSource,
++  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
++>;
+ 
+ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
+ 
+@@ -9,9 +12,10 @@ const DEFAULT_PATH = "/fixture/settings.json";
+ const HOME = "/fixture/home/";
+ const HOME_PREFIX = "~/";
+ 
+-function copied({ theme, keys }: StoredSettings): StoredSettings {
++function copied({ theme, antialiasing, keys }: StoredSettings): StoredSettings {
+   return {
+     theme,
++    antialiasing,
+     keys: Object.fromEntries(Object.entries(keys).map(([action, texts]) => [action, [...texts]])),
+   };
+ }
+@@ -67,6 +71,9 @@ export function createFixtureSettings(): FixtureSettings {
+     async setTheme(current, theme) {
+       return change(files, current, (stored) => ({ ...stored, theme }));
+     },
++    async setAntialiasing(current, antialiasing) {
++      return change(files, current, (stored) => ({ ...stored, antialiasing }));
++    },
+     async setKeys(current, changes) {
+       return change(files, current, (stored) => ({
+         ...stored,
+diff --git c/frontend/src/ipc/index.ts i/frontend/src/ipc/index.ts
+index 11274e5..e26f987 100644
+--- c/frontend/src/ipc/index.ts
++++ i/frontend/src/ipc/index.ts
+@@ -4,6 +4,7 @@ import { guardWindowClose } from "./window";
+ 
+ export type { ChunkSource } from "./ChunkSource";
+ export type {
++  Antialiasing,
+   Chunk,
+   DiskChange,
+   DiskResult,
+diff --git c/frontend/src/ipc/tauri.test.ts i/frontend/src/ipc/tauri.test.ts
+index c353b91..78415d4 100644
+--- c/frontend/src/ipc/tauri.test.ts
++++ i/frontend/src/ipc/tauri.test.ts
+@@ -15,6 +15,7 @@ const commands = vi.hoisted(() => ({
+   log: vi.fn(),
+   loadSettings: vi.fn(),
+   setTheme: vi.fn(),
++  setAntialiasing: vi.fn(),
+   setKeys: vi.fn(),
+   moveSettings: vi.fn(),
+ }));
+@@ -304,7 +305,11 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
+   });
+ });
+ 
+-const STORED: Generated.StoredSettings = { theme: "light", keys: { undo: ["Alt-Backspace"] } };
++const STORED: Generated.StoredSettings = {
++  theme: "light",
++  antialiasing: "subpixel",
++  keys: { undo: ["Alt-Backspace"] },
++};
+ const SETTINGS_DTO: Generated.SettingsRead = {
+   path: "/home/me/.config/yamt/settings.json",
+   default_path: "/home/me/.config/yamt/settings.json",
+@@ -316,10 +321,11 @@ const SETTINGS_READ = {
+   stored: STORED,
+ };
+ 
+-test("the four settings commands send their arguments and return the read with its default path", async () => {
++test("the five settings commands send their arguments and return the read with its default path", async () => {
+   for (const command of [
+     commands.loadSettings,
+     commands.setTheme,
++    commands.setAntialiasing,
+     commands.setKeys,
+     commands.moveSettings,
+   ]) {
+@@ -330,10 +336,15 @@ test("the four settings commands send their arguments and return the read with i
+ 
+   expect(await source.loadSettings(STORED)).toEqual({ ok: true, value: SETTINGS_READ });
+   expect(await source.setTheme(STORED, "dark")).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(await source.setAntialiasing(STORED, "greyscale")).toEqual({
++    ok: true,
++    value: SETTINGS_READ,
++  });
+   expect(await source.setKeys(STORED, changes)).toEqual({ ok: true, value: SETTINGS_READ });
+   expect(await source.moveSettings(STORED, "~/s.json")).toEqual({ ok: true, value: SETTINGS_READ });
+   expect(commands.loadSettings).toHaveBeenCalledWith(STORED);
+   expect(commands.setTheme).toHaveBeenCalledWith(STORED, "dark");
++  expect(commands.setAntialiasing).toHaveBeenCalledWith(STORED, "greyscale");
+   expect(commands.setKeys).toHaveBeenCalledWith(STORED, changes);
+   expect(commands.moveSettings).toHaveBeenCalledWith(STORED, "~/s.json");
+ });
+diff --git c/frontend/src/ipc/tauri.ts i/frontend/src/ipc/tauri.ts
+index 9793bcc..e8293ad 100644
+--- c/frontend/src/ipc/tauri.ts
++++ i/frontend/src/ipc/tauri.ts
+@@ -33,6 +33,29 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
+   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
+ }
+ 
++function createTauriSettings(): Pick<
++  ChunkSource,
++  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
++> {
++  return {
++    async loadSettings(current) {
++      return toSettingsResult(await commands.loadSettings(current));
++    },
++    async setTheme(current, theme) {
++      return toSettingsResult(await commands.setTheme(current, theme));
++    },
++    async setAntialiasing(current, antialiasing) {
++      return toSettingsResult(await commands.setAntialiasing(current, antialiasing));
++    },
++    async setKeys(current, changes) {
++      return toSettingsResult(await commands.setKeys(current, [...changes]));
++    },
++    async moveSettings(current, path) {
++      return toSettingsResult(await commands.moveSettings(current, path));
++    },
++  };
++}
++
+ export function createTauriSource(): ChunkSource {
+   return {
+     async listFiles() {
+@@ -59,18 +82,7 @@ export function createTauriSource(): ChunkSource {
+     remoteName() {
+       return commands.remoteName();
+     },
+-    async loadSettings(current) {
+-      return toSettingsResult(await commands.loadSettings(current));
+-    },
+-    async setTheme(current, theme) {
+-      return toSettingsResult(await commands.setTheme(current, theme));
+-    },
+-    async setKeys(current, changes) {
+-      return toSettingsResult(await commands.setKeys(current, [...changes]));
+-    },
+-    async moveSettings(current, path) {
+-      return toSettingsResult(await commands.moveSettings(current, path));
+-    },
++    ...createTauriSettings(),
+   };
+ }
+ 
+diff --git c/frontend/src/ui/FileList.vue i/frontend/src/ui/FileList.vue
+index 86f1ab0..440075a 100644
+--- c/frontend/src/ui/FileList.vue
++++ i/frontend/src/ui/FileList.vue
+@@ -37,7 +37,7 @@ function resize(event: PointerEvent): void {
+     :style="widthStyle"
+   >
+     <h2 class="px-3 py-2 font-semibold">Files</h2>
+-    <ul role="listbox" aria-label="Conflicted files" class="mr-0.5 flex-1 overflow-y-auto">
++    <ul role="listbox" aria-label="Conflicted files" class="mr-0.5 flex-1 overflow-y-auto bg-panel">
+       <li
+         v-for="file in files"
+         :key="file.path"
+diff --git c/frontend/src/ui/QuestionDialog.vue i/frontend/src/ui/QuestionDialog.vue
+index d90bb90..def426d 100644
+--- c/frontend/src/ui/QuestionDialog.vue
++++ i/frontend/src/ui/QuestionDialog.vue
+@@ -29,7 +29,7 @@ function cancel(event: Event): void {
+   >
+     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
+     <p>{{ text.message }}</p>
+-    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto font-mono">
++    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto bg-panel font-mono">
+       <li v-for="file in text.files" :key="file" class="truncate">{{ file }}</li>
+     </ul>
+     <div class="mt-5 flex justify-end gap-2">
+diff --git c/frontend/src/ui/SettingsView.vue i/frontend/src/ui/SettingsView.vue
+index d7a040e..eafb7fa 100644
+--- c/frontend/src/ui/SettingsView.vue
++++ i/frontend/src/ui/SettingsView.vue
+@@ -2,7 +2,7 @@
+ import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ 
+-import type { Theme } from "../ipc";
++import type { Antialiasing, Theme } from "../ipc";
+ import KeymapList from "./KeymapList.vue";
+ import { useAppStore } from "./store";
+ 
+@@ -11,7 +11,13 @@ const THEMES: readonly { readonly theme: Theme; readonly label: string }[] = [
+   { theme: "light", label: "Light" },
+ ];
+ 
+-const { settings, closeSettings, setTheme, moveSettings } = useAppStore();
++const ANTIALIASINGS: readonly { readonly antialiasing: Antialiasing; readonly label: string }[] = [
++  { antialiasing: "subpixel", label: "Subpixel" },
++  { antialiasing: "greyscale", label: "Greyscale" },
++];
++const ON_LINUX = navigator.platform.startsWith("Linux");
++
++const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useAppStore();
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const pathText = shallowRef("");
+ const focusedBefore = document.activeElement;
+@@ -80,6 +86,22 @@ async function moveToDefault(): Promise<void> {
+           </button>
+         </div>
+       </section>
++      <section v-if="ON_LINUX" aria-labelledby="settings-antialiasing">
++        <h3 id="settings-antialiasing" class="mb-2 font-semibold">Antialiasing</h3>
++        <div class="flex gap-2">
++          <button
++            v-for="{ antialiasing, label } in ANTIALIASINGS"
++            :key="antialiasing"
++            type="button"
++            :aria-pressed="settings.antialiasing === antialiasing"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
++            @click="setAntialiasing(antialiasing)"
++          >
++            {{ label }}
++          </button>
++        </div>
++        <p class="mt-1 text-fg-muted">Takes effect the next time yamt starts.</p>
++      </section>
+       <section aria-labelledby="settings-keymap">
+         <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>
+         <KeymapList />
+diff --git c/frontend/src/ui/settings.ts i/frontend/src/ui/settings.ts
+index 24a3d26..77cc8bb 100644
+--- c/frontend/src/ui/settings.ts
++++ i/frontend/src/ui/settings.ts
+@@ -4,6 +4,7 @@ import {
+   bindingsOf,
+   KEY_ACTIONS,
+   keyText,
++  type Antialiasing,
+   type ChunkSource,
+   type Key,
+   type KeyAction,
+@@ -22,6 +23,7 @@ import type { Preferences } from "./useMergeController";
+ export type SettingsInUse = {
+   readonly read: SettingsRead | null;
+   readonly theme: Theme;
++  readonly antialiasing: Antialiasing;
+   readonly keys: KeysRead;
+ };
+ 
+@@ -36,6 +38,7 @@ type SettingsTarget = {
+ export type SettingsActions = {
+   loadSettings(): Promise<void>;
+   setTheme(theme: Theme): Promise<void>;
++  setAntialiasing(antialiasing: Antialiasing): Promise<void>;
+   addKey(action: KeyAction, key: Key): Promise<void>;
+   changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
+   removeKey(action: KeyAction, key: Key): Promise<void>;
+@@ -47,17 +50,18 @@ export type SettingsActions = {
+ type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
+ 
+ export function startSettings(theme: Theme): SettingsInUse {
+-  return { read: null, theme, keys: bindingsOf({}) };
++  return { read: null, theme, antialiasing: "subpixel", keys: bindingsOf({}) };
+ }
+ 
+ export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
+   return { theme, keys: keys.bindings };
+ }
+ 
+-function storedSettings({ theme, keys }: SettingsInUse): StoredSettings {
++function storedSettings({ theme, antialiasing, keys }: SettingsInUse): StoredSettings {
+   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
+   return {
+     theme,
++    antialiasing,
+     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
+   };
+ }
+@@ -67,7 +71,12 @@ function sameTexts(a: readonly string[], b: readonly string[]): boolean {
+ }
+ 
+ function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
+-  if (inUse === null || inUse.path !== read.path || inUse.stored.theme !== read.stored.theme) {
++  if (
++    inUse === null ||
++    inUse.path !== read.path ||
++    inUse.stored.theme !== read.stored.theme ||
++    inUse.stored.antialiasing !== read.stored.antialiasing
++  ) {
+     return false;
+   }
+   const before = Object.entries(inUse.stored.keys);
+@@ -108,7 +117,8 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
+ function adopt(target: SettingsTarget, read: SettingsRead): void {
+   const before = target.settings.value;
+   if (!sameStored(before.read, read)) {
+-    target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
++    const { theme, antialiasing, keys } = read.stored;
++    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys) };
+   }
+   showKeyProblems(target, read, before);
+ }
+@@ -153,6 +163,8 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
+   return {
+     loadSettings: () => send(target, (current) => source.loadSettings(current)),
+     setTheme: (theme) => send(target, (current) => source.setTheme(current, theme)),
++    setAntialiasing: (antialiasing) =>
++      send(target, (current) => source.setAntialiasing(current, antialiasing)),
+     addKey: (action, key) => editKeys(target, { kind: "add", action, key }),
+     changeKey: (action, from, to) => editKeys(target, { kind: "change", action, from, to }),
+     removeKey: (action, key) => editKeys(target, { kind: "remove", action, key }),
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index 1bd80af..9857fd9 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -33,12 +33,18 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+ const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+-const NO_SETTINGS: Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings"> = {
++const NO_SETTINGS: Pick<
++  ChunkSource,
++  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
++> = {
+   loadSettings: () => Promise.reject(new Error("not used")),
+   setTheme: () => Promise.reject(new Error("not used")),
++  setAntialiasing: () => Promise.reject(new Error("not used")),
+   setKeys: () => Promise.reject(new Error("not used")),
+   moveSettings: () => Promise.reject(new Error("not used")),
+ };
++const DARK = { theme: "dark", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
++const LIGHT = { theme: "light", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -1680,6 +1686,13 @@ function settingsSource(overrides: Partial<ChunkSource>): {
+       sent.push(["setTheme", current, theme]);
+       return overrides.setTheme?.(current, theme) ?? Promise.resolve(read({ ...current, theme }));
+     },
++    setAntialiasing: (current, antialiasing) => {
++      sent.push(["setAntialiasing", current, antialiasing]);
++      return (
++        overrides.setAntialiasing?.(current, antialiasing) ??
++        Promise.resolve(read({ ...current, antialiasing }))
++      );
++    },
+     setKeys: (current, changes) => {
+       sent.push(["setKeys", current, changes]);
+       const keys = { ...current.keys };
+@@ -1706,6 +1719,7 @@ test("settings start with the start theme and the default keys, before any file
+   expect(store.settings.value).toEqual({
+     read: null,
+     theme: "light",
++    antialiasing: "subpixel",
+     keys: { bindings: DEFAULT_KEYS, problems: [] },
+   });
+   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
+@@ -1713,11 +1727,11 @@ test("settings start with the start theme and the default keys, before any file
+ 
+ test("a load on focus applies a file changed by hand since the last load", async () => {
+   const files = [
+-    read({ theme: "dark", keys: {} }),
+-    read({ theme: "light", keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
++    read({ ...DARK, keys: {} }),
++    read({ ...LIGHT, keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
+   ];
+   const { source, sent } = settingsSource({
+-    loadSettings: () => Promise.resolve(files.shift() ?? read({ theme: "dark", keys: {} })),
++    loadSettings: () => Promise.resolve(files.shift() ?? read({ ...DARK, keys: {} })),
+   });
+   const store = createAppStore(source);
+ 
+@@ -1729,14 +1743,14 @@ test("a load on focus applies a file changed by hand since the last load", async
+   expect(store.settings.value.theme).toBe("light");
+   expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
+   expect(sent).toEqual([
+-    ["loadSettings", { theme: "dark", keys: {} }],
+-    ["loadSettings", { theme: "dark", keys: {} }],
++    ["loadSettings", { ...DARK, keys: {} }],
++    ["loadSettings", { ...DARK, keys: {} }],
+   ]);
+ });
+ 
+ test("a loaded file sets the theme and keys every opened file follows", async () => {
+   const { source } = settingsSource({
+-    loadSettings: () => Promise.resolve(read({ theme: "light", keys: { apply: ["a"] } })),
++    loadSettings: () => Promise.resolve(read({ ...LIGHT, keys: { apply: ["a"] } })),
+   });
+   const store = createAppStore(source);
+ 
+@@ -1753,9 +1767,9 @@ test("a failed load or change keeps the settings in use and shows a settings pro
+   spyConsole();
+   const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
+   const failed: SourceResult<SettingsRead> = { ok: false, failure: broken };
+-  const loads = [read({ theme: "light", keys: {} }), failed];
++  const loads = [read({ ...LIGHT, keys: {} }), failed];
+   const { source } = settingsSource({
+-    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
++    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
+     setTheme: () => Promise.resolve({ ok: false, failure: broken }),
+     setKeys: () => Promise.reject(new Error("ipc down")),
+   });
+@@ -1780,11 +1794,11 @@ test("a failed load or change keeps the settings in use and shows a settings pro
+ test("key problems in the file show one settings problem, which a clean read clears", async () => {
+   spyConsole();
+   const loads = [
+-    read({ theme: "dark", keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
+-    read({ theme: "dark", keys: {} }),
++    read({ ...DARK, keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
++    read({ ...DARK, keys: {} }),
+   ];
+   const { source } = settingsSource({
+-    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
++    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
+   });
+   const store = createAppStore(source);
+ 
+@@ -1814,10 +1828,47 @@ test("setTheme sends the settings in use and applies the reply", async () => {
+ 
+   await store.setTheme("light");
+ 
+-  expect(sent).toEqual([["setTheme", { theme: "dark", keys: {} }, "light"]]);
++  expect(sent).toEqual([["setTheme", { ...DARK, keys: {} }, "light"]]);
+   expect(store.settings.value.theme).toBe("light");
+ });
+ 
++test("setAntialiasing sends the settings in use with the new value and applies the reply", async () => {
++  const { source, sent } = settingsSource({});
++  const store = createAppStore(source);
++
++  await store.setAntialiasing("greyscale");
++
++  expect(sent).toEqual([["setAntialiasing", { ...DARK, keys: {} }, "greyscale"]]);
++  expect(store.settings.value.antialiasing).toBe("greyscale");
++
++  await store.setTheme("light");
++
++  expect(sent.at(-1)).toEqual([
++    "setTheme",
++    { theme: "dark", antialiasing: "greyscale", keys: {} },
++    "light",
++  ]);
++});
++
++test("a load whose only difference is the antialiasing is adopted", async () => {
++  const loads = [
++    read({ ...DARK, keys: {} }),
++    read({ ...DARK, antialiasing: "greyscale", keys: {} }),
++  ];
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
++  });
++  const store = createAppStore(source);
++  await store.loadSettings();
++  const before = store.settings.value;
++
++  await store.loadSettings();
++
++  expect(before.antialiasing).toBe("subpixel");
++  expect(store.settings.value.antialiasing).toBe("greyscale");
++  expect(store.settings.value.read?.stored.antialiasing).toBe("greyscale");
++});
++
+ test("a key another action holds asks; Move writes both changes in one call", async () => {
+   const { source, sent } = settingsSource({});
+   const store = createAppStore(source);
+@@ -1837,7 +1888,7 @@ test("a key another action holds asks; Move writes both changes in one call", as
+   expect(sent).toEqual([
+     [
+       "setKeys",
+-      { theme: "dark", keys: {} },
++      { ...DARK, keys: {} },
+       [
+         { action: "undo", keys: ["Mod-z", "Mod-f"] },
+         { action: "find", keys: [] },
+@@ -1873,15 +1924,15 @@ test("each key edit sends only the changed actions, as key texts", async () => {
+   await store.removeKey("apply", parsed("q"));
+ 
+   expect(sent).toEqual([
+-    ["setKeys", { theme: "dark", keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
++    ["setKeys", { ...DARK, keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
+     [
+       "setKeys",
+-      { theme: "dark", keys: { apply: ["Enter", "Space", "a"] } },
++      { ...DARK, keys: { apply: ["Enter", "Space", "a"] } },
+       [{ action: "redo", keys: ["Mod-Shift-z"] }],
+     ],
+     [
+       "setKeys",
+-      { theme: "dark", keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
++      { ...DARK, keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
+       [{ action: "apply", keys: null }],
+     ],
+   ]);
+@@ -1889,7 +1940,7 @@ test("each key edit sends only the changed actions, as key texts", async () => {
+ 
+ test("an identical load keeps the settings object and does not show the same key problems again", async () => {
+   const lines = spyConsole();
+-  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
++  const broken = { ...DARK, keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+   const { source } = settingsSource({
+     loadSettings: () => Promise.resolve(read(broken)),
+     setTheme: (_current, theme) => Promise.resolve(read({ ...broken, theme })),
+@@ -1916,7 +1967,7 @@ test("an identical load keeps the settings object and does not show the same key
+ test("a key problem shown again replaces a settings failure the file no longer has", async () => {
+   spyConsole();
+   const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
+-  const unreadable = read({ theme: "dark", keys: { redo: ["Ctrl+Q"] } });
++  const unreadable = read({ ...DARK, keys: { redo: ["Ctrl+Q"] } });
+   const loads: SourceResult<SettingsRead>[] = [unreadable, { ok: false, failure: broken }];
+   const { source } = settingsSource({
+     loadSettings: () => Promise.resolve(loads.shift() ?? unreadable),
+@@ -1940,7 +1991,7 @@ test("a key problem shown again replaces a settings failure the file no longer h
+ 
+ test("a move to a file with the same broken keys names the new path in the Keys problem", async () => {
+   spyConsole();
+-  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
++  const broken = { ...DARK, keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+   const elsewhere = "/elsewhere.json";
+   const { source } = settingsSource({
+     loadSettings: () => Promise.resolve(read(broken)),
+@@ -1976,7 +2027,7 @@ test("a load that started before a change and answers after it does not put the
+   const loading = store.loadSettings();
+   const failing = store.loadSettings();
+   await store.setTheme("light");
+-  loads[0]?.(read({ theme: "dark", keys: {} }));
++  loads[0]?.(read({ ...DARK, keys: {} }));
+   loads[1]?.({ ok: false, failure: { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" } });
+   await loading;
+   await failing;
+@@ -1988,7 +2039,7 @@ test("a load that started before a change and answers after it does not put the
+ 
+ test("Move after a reload freed the key sends the edit planned on the bindings now in use", async () => {
+   const { source, sent } = settingsSource({
+-    loadSettings: () => Promise.resolve(read({ theme: "dark", keys: { find: ["Mod-g"] } })),
++    loadSettings: () => Promise.resolve(read({ ...DARK, keys: { find: ["Mod-g"] } })),
+   });
+   const store = createAppStore(source);
+ 
+@@ -2002,7 +2053,7 @@ test("Move after a reload freed the key sends the edit planned on the bindings n
+ 
+   expect(sent.at(-1)).toEqual([
+     "setKeys",
+-    { theme: "dark", keys: { find: ["Mod-g"] } },
++    { ...DARK, keys: { find: ["Mod-g"] } },
+     [{ action: "undo", keys: ["Mod-z", "Mod-f"] }],
+   ]);
+   expect(store.preferences.value.keys.find).toEqual([parsed("Mod-g")]);
+@@ -2012,14 +2063,14 @@ test("moveSettings sends the path with the settings in use and uses the file fou
+   const moved: SettingsRead = {
+     path: "/elsewhere.json",
+     defaultPath: SETTINGS_PATH,
+-    stored: { theme: "light", keys: {} },
++    stored: { ...LIGHT, keys: {} },
+   };
+   const { source, sent } = settingsSource({ moveSettings: () => Promise.resolve(ok(moved)) });
+   const store = createAppStore(source);
+ 
+   await store.moveSettings("/elsewhere.json");
+ 
+-  expect(sent).toEqual([["moveSettings", { theme: "dark", keys: {} }, "/elsewhere.json"]]);
++  expect(sent).toEqual([["moveSettings", { ...DARK, keys: {} }, "/elsewhere.json"]]);
+   expect(store.settings.value.read).toEqual(moved);
+   expect(store.settings.value.theme).toBe("light");
+ });
