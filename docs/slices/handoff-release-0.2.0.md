@@ -5,24 +5,23 @@ The owner runs this; publishing to GitHub is the owner's action (the safety hook
 
 ## Where things stand
 
-- **Code.** Local `main` holds everything since `origin/main`: the settings work, the toolbar menu, crisp code text and
-  the Windows build. Version `0.2.0` (workspace `Cargo.toml`); `CHANGELOG.md` has the dated `[0.2.0]` section; the README
-  is regenerated from `.readmer/readme.json` with the new screenshot (`docs/screenshot.png`, 3200×2000, an addition, a
-  deletion, a conflict and two modifications) and the Windows install steps.
-- **Checked here:** the full gate (`just check`, exit 0) on the feature; the release commit adds only version strings,
-  docs and the version test, re-run below. The Windows build is linted for Windows on Linux; it has **never been built
-  on Windows**: the first CI push and this tag are its first runs.
+- **Code.** `main` is on GitHub up to `8ddf740`; one later commit is docs only. Version `0.2.0` (workspace
+  `Cargo.toml`); `CHANGELOG.md` has the dated `[0.2.0]` section; the README is regenerated from `.readmer/readme.json`
+  with the new screenshot (`docs/screenshot.png`, 3200×2000: an addition, a deletion, a conflict, two modifications) and
+  the Windows install steps.
+- **Checked:** `just check` exit 0 here; **CI green on all three systems** at `8ddf740` (run 38462078995: ubuntu-22.04,
+  macos-14, windows-2025, frontend), the Windows installer built as the artifact `yamt-windows-installer` (3.3 MB). It
+  took four CI rounds: macOS link-limit test, the Windows manifest for test binaries, the Windows app origin in tests,
+  Windows path spellings in tests — all test-side except the manifest, which tauri's own example uses.
+- **Tag.** A local annotated tag `v0.2.0` points at `8ddf740`, the commit CI passed. It is not on GitHub yet.
 - **Licences.** `THIRD_PARTY_LICENSES.txt` is current (356 Rust crates incl. the Windows-only ones, 82 JS packages).
 
 ## Steps
 
-1. **Push `main`.** `git push origin main`. This starts the new **ci** workflow for the first time: three jobs
-   (ubuntu-22.04, macos-14, windows-2025), each running the Rust tests and building the app; Windows uploads the
-   installer as the artifact `yamt-windows-installer`. Watch https://github.com/web-dev-sam/yamt/actions. A green Windows
-   job is the first proof the Windows build works (board row 6).
-2. **Tag and push.** `git tag -a v0.2.0 -m "yamt 0.2.0" && git push origin v0.2.0` (skip the `git tag` if it already
-   exists: `git tag -l v0.2.0`). The "release" run has `draft-release` and three `build` jobs (Linux, macOS universal,
-   Windows); they do not cancel each other.
+1. **Push the tag** (and the docs commit): `git push origin main v0.2.0`. The "release" run has `draft-release` and
+   three `build` jobs (Linux, macOS universal, Windows — the first Windows release build); they do not cancel each
+   other. Watch https://github.com/web-dev-sam/yamt/actions.
+2. (merged into 1)
 3. **Check the draft** at https://github.com/web-dev-sam/yamt/releases: `yamt_0.2.0_amd64.AppImage`,
    `yamt_0.2.0_amd64.deb` (the README's install commands use these names), a macOS `.dmg`, and
    `yamt_0.2.0_x64-setup.exe`.
