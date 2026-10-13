@@ -4,6 +4,7 @@ import {
   bindingsOf,
   KEY_ACTIONS,
   keyText,
+  type Antialiasing,
   type ChunkSource,
   type Key,
   type KeyAction,
@@ -22,6 +23,7 @@ import type { Preferences } from "./useMergeController";
 export type SettingsInUse = {
   readonly read: SettingsRead | null;
   readonly theme: Theme;
+  readonly antialiasing: Antialiasing;
   readonly keys: KeysRead;
 };
 
@@ -36,6 +38,7 @@ type SettingsTarget = {
 export type SettingsActions = {
   loadSettings(): Promise<void>;
   setTheme(theme: Theme): Promise<void>;
+  setAntialiasing(antialiasing: Antialiasing): Promise<void>;
   addKey(action: KeyAction, key: Key): Promise<void>;
   changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
   removeKey(action: KeyAction, key: Key): Promise<void>;
@@ -47,17 +50,18 @@ export type SettingsActions = {
 type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
 
 export function startSettings(theme: Theme): SettingsInUse {
-  return { read: null, theme, keys: bindingsOf({}) };
+  return { read: null, theme, antialiasing: "subpixel", keys: bindingsOf({}) };
 }
 
 export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
   return { theme, keys: keys.bindings };
 }
 
-function storedSettings({ theme, keys }: SettingsInUse): StoredSettings {
+function storedSettings({ theme, antialiasing, keys }: SettingsInUse): StoredSettings {
   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
   return {
     theme,
+    antialiasing,
     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
   };
 }
@@ -67,7 +71,12 @@ function sameTexts(a: readonly string[], b: readonly string[]): boolean {
 }
 
 function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
-  if (inUse === null || inUse.path !== read.path || inUse.stored.theme !== read.stored.theme) {
+  if (
+    inUse === null ||
+    inUse.path !== read.path ||
+    inUse.stored.theme !== read.stored.theme ||
+    inUse.stored.antialiasing !== read.stored.antialiasing
+  ) {
     return false;
   }
   const before = Object.entries(inUse.stored.keys);
@@ -108,7 +117,8 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
 function adopt(target: SettingsTarget, read: SettingsRead): void {
   const before = target.settings.value;
   if (!sameStored(before.read, read)) {
-    target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
+    const { theme, antialiasing, keys } = read.stored;
+    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys) };
   }
   showKeyProblems(target, read, before);
 }
@@ -153,6 +163,8 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
   return {
     loadSettings: () => send(target, (current) => source.loadSettings(current)),
     setTheme: (theme) => send(target, (current) => source.setTheme(current, theme)),
+    setAntialiasing: (antialiasing) =>
+      send(target, (current) => source.setAntialiasing(current, antialiasing)),
     addKey: (action, key) => editKeys(target, { kind: "add", action, key }),
     changeKey: (action, from, to) => editKeys(target, { kind: "change", action, from, to }),
     removeKey: (action, key) => editKeys(target, { kind: "remove", action, key }),

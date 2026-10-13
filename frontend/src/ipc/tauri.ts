@@ -33,6 +33,29 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
 }
 
+function createTauriSettings(): Pick<
+  ChunkSource,
+  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+> {
+  return {
+    async loadSettings(current) {
+      return toSettingsResult(await commands.loadSettings(current));
+    },
+    async setTheme(current, theme) {
+      return toSettingsResult(await commands.setTheme(current, theme));
+    },
+    async setAntialiasing(current, antialiasing) {
+      return toSettingsResult(await commands.setAntialiasing(current, antialiasing));
+    },
+    async setKeys(current, changes) {
+      return toSettingsResult(await commands.setKeys(current, [...changes]));
+    },
+    async moveSettings(current, path) {
+      return toSettingsResult(await commands.moveSettings(current, path));
+    },
+  };
+}
+
 export function createTauriSource(): ChunkSource {
   return {
     async listFiles() {
@@ -59,18 +82,7 @@ export function createTauriSource(): ChunkSource {
     remoteName() {
       return commands.remoteName();
     },
-    async loadSettings(current) {
-      return toSettingsResult(await commands.loadSettings(current));
-    },
-    async setTheme(current, theme) {
-      return toSettingsResult(await commands.setTheme(current, theme));
-    },
-    async setKeys(current, changes) {
-      return toSettingsResult(await commands.setKeys(current, [...changes]));
-    },
-    async moveSettings(current, path) {
-      return toSettingsResult(await commands.moveSettings(current, path));
-    },
+    ...createTauriSettings(),
   };
 }
 

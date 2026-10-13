@@ -29,7 +29,7 @@ function cancel(event: Event): void {
   >
     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
     <p>{{ text.message }}</p>
-    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto font-mono">
+    <ul v-if="text.files.length > 0" class="mt-2 max-h-40 overflow-y-auto bg-panel font-mono">
       <li v-for="file in text.files" :key="file" class="truncate">{{ file }}</li>
     </ul>
     <div class="mt-5 flex justify-end gap-2">

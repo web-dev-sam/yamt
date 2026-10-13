@@ -1,7 +1,10 @@
 import type { ChunkSource } from "./ChunkSource";
 import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
 
-type FixtureSettings = Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings">;
+type FixtureSettings = Pick<
+  ChunkSource,
+  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+>;
 
 type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 
@@ -9,9 +12,10 @@ const DEFAULT_PATH = "/fixture/settings.json";
 const HOME = "/fixture/home/";
 const HOME_PREFIX = "~/";
 
-function copied({ theme, keys }: StoredSettings): StoredSettings {
+function copied({ theme, antialiasing, keys }: StoredSettings): StoredSettings {
   return {
     theme,
+    antialiasing,
     keys: Object.fromEntries(Object.entries(keys).map(([action, texts]) => [action, [...texts]])),
   };
 }
@@ -66,6 +70,9 @@ export function createFixtureSettings(): FixtureSettings {
     },
     async setTheme(current, theme) {
       return change(files, current, (stored) => ({ ...stored, theme }));
+    },
+    async setAntialiasing(current, antialiasing) {
+      return change(files, current, (stored) => ({ ...stored, antialiasing }));
     },
     async setKeys(current, changes) {
       return change(files, current, (stored) => ({

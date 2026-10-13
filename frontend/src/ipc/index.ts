@@ -4,6 +4,7 @@ import { guardWindowClose } from "./window";
 
 export type { ChunkSource } from "./ChunkSource";
 export type {
+  Antialiasing,
   Chunk,
   DiskChange,
   DiskResult,

@@ -45,6 +45,8 @@ export type WriteReply = Generated.WriteReply;
 
 export type Theme = Generated.Theme;
 
+export type Antialiasing = Generated.Antialiasing;
+
 export type StoredSettings = Generated.StoredSettings;
 
 export type KeysChange = Generated.KeysChange;

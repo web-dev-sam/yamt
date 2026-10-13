@@ -33,12 +33,18 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 const NOTHING_LEFT = { conflicts: 0, changes: 0 };
-const NO_SETTINGS: Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings"> = {
+const NO_SETTINGS: Pick<
+  ChunkSource,
+  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+> = {
   loadSettings: () => Promise.reject(new Error("not used")),
   setTheme: () => Promise.reject(new Error("not used")),
+  setAntialiasing: () => Promise.reject(new Error("not used")),
   setKeys: () => Promise.reject(new Error("not used")),
   moveSettings: () => Promise.reject(new Error("not used")),
 };
+const DARK = { theme: "dark", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
+const LIGHT = { theme: "light", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1680,6 +1686,13 @@ function settingsSource(overrides: Partial<ChunkSource>): {
       sent.push(["setTheme", current, theme]);
       return overrides.setTheme?.(current, theme) ?? Promise.resolve(read({ ...current, theme }));
     },
+    setAntialiasing: (current, antialiasing) => {
+      sent.push(["setAntialiasing", current, antialiasing]);
+      return (
+        overrides.setAntialiasing?.(current, antialiasing) ??
+        Promise.resolve(read({ ...current, antialiasing }))
+      );
+    },
     setKeys: (current, changes) => {
       sent.push(["setKeys", current, changes]);
       const keys = { ...current.keys };
@@ -1706,6 +1719,7 @@ test("settings start with the start theme and the default keys, before any file 
   expect(store.settings.value).toEqual({
     read: null,
     theme: "light",
+    antialiasing: "subpixel",
     keys: { bindings: DEFAULT_KEYS, problems: [] },
   });
   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
@@ -1713,11 +1727,11 @@ test("settings start with the start theme and the default keys, before any file 
 
 test("a load on focus applies a file changed by hand since the last load", async () => {
   const files = [
-    read({ theme: "dark", keys: {} }),
-    read({ theme: "light", keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
+    read({ ...DARK, keys: {} }),
+    read({ ...LIGHT, keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
   ];
   const { source, sent } = settingsSource({
-    loadSettings: () => Promise.resolve(files.shift() ?? read({ theme: "dark", keys: {} })),
+    loadSettings: () => Promise.resolve(files.shift() ?? read({ ...DARK, keys: {} })),
   });
   const store = createAppStore(source);
 
@@ -1729,14 +1743,14 @@ test("a load on focus applies a file changed by hand since the last load", async
   expect(store.settings.value.theme).toBe("light");
   expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
   expect(sent).toEqual([
-    ["loadSettings", { theme: "dark", keys: {} }],
-    ["loadSettings", { theme: "dark", keys: {} }],
+    ["loadSettings", { ...DARK, keys: {} }],
+    ["loadSettings", { ...DARK, keys: {} }],
   ]);
 });
 
 test("a loaded file sets the theme and keys every opened file follows", async () => {
   const { source } = settingsSource({
-    loadSettings: () => Promise.resolve(read({ theme: "light", keys: { apply: ["a"] } })),
+    loadSettings: () => Promise.resolve(read({ ...LIGHT, keys: { apply: ["a"] } })),
   });
   const store = createAppStore(source);
 
@@ -1753,9 +1767,9 @@ test("a failed load or change keeps the settings in use and shows a settings pro
   spyConsole();
   const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
   const failed: SourceResult<SettingsRead> = { ok: false, failure: broken };
-  const loads = [read({ theme: "light", keys: {} }), failed];
+  const loads = [read({ ...LIGHT, keys: {} }), failed];
   const { source } = settingsSource({
-    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
+    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
     setTheme: () => Promise.resolve({ ok: false, failure: broken }),
     setKeys: () => Promise.reject(new Error("ipc down")),
   });
@@ -1780,11 +1794,11 @@ test("a failed load or change keeps the settings in use and shows a settings pro
 test("key problems in the file show one settings problem, which a clean read clears", async () => {
   spyConsole();
   const loads = [
-    read({ theme: "dark", keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
-    read({ theme: "dark", keys: {} }),
+    read({ ...DARK, keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
+    read({ ...DARK, keys: {} }),
   ];
   const { source } = settingsSource({
-    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
+    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
   });
   const store = createAppStore(source);
 
@@ -1814,8 +1828,45 @@ test("setTheme sends the settings in use and applies the reply", async () => {
 
   await store.setTheme("light");
 
-  expect(sent).toEqual([["setTheme", { theme: "dark", keys: {} }, "light"]]);
+  expect(sent).toEqual([["setTheme", { ...DARK, keys: {} }, "light"]]);
   expect(store.settings.value.theme).toBe("light");
+});
+
+test("setAntialiasing sends the settings in use with the new value and applies the reply", async () => {
+  const { source, sent } = settingsSource({});
+  const store = createAppStore(source);
+
+  await store.setAntialiasing("greyscale");
+
+  expect(sent).toEqual([["setAntialiasing", { ...DARK, keys: {} }, "greyscale"]]);
+  expect(store.settings.value.antialiasing).toBe("greyscale");
+
+  await store.setTheme("light");
+
+  expect(sent.at(-1)).toEqual([
+    "setTheme",
+    { theme: "dark", antialiasing: "greyscale", keys: {} },
+    "light",
+  ]);
+});
+
+test("a load whose only difference is the antialiasing is adopted", async () => {
+  const loads = [
+    read({ ...DARK, keys: {} }),
+    read({ ...DARK, antialiasing: "greyscale", keys: {} }),
+  ];
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(loads.shift() ?? read({ ...DARK, keys: {} })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+  const before = store.settings.value;
+
+  await store.loadSettings();
+
+  expect(before.antialiasing).toBe("subpixel");
+  expect(store.settings.value.antialiasing).toBe("greyscale");
+  expect(store.settings.value.read?.stored.antialiasing).toBe("greyscale");
 });
 
 test("a key another action holds asks; Move writes both changes in one call", async () => {
@@ -1837,7 +1888,7 @@ test("a key another action holds asks; Move writes both changes in one call", as
   expect(sent).toEqual([
     [
       "setKeys",
-      { theme: "dark", keys: {} },
+      { ...DARK, keys: {} },
       [
         { action: "undo", keys: ["Mod-z", "Mod-f"] },
         { action: "find", keys: [] },
@@ -1873,15 +1924,15 @@ test("each key edit sends only the changed actions, as key texts", async () => {
   await store.removeKey("apply", parsed("q"));
 
   expect(sent).toEqual([
-    ["setKeys", { theme: "dark", keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
+    ["setKeys", { ...DARK, keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
     [
       "setKeys",
-      { theme: "dark", keys: { apply: ["Enter", "Space", "a"] } },
+      { ...DARK, keys: { apply: ["Enter", "Space", "a"] } },
       [{ action: "redo", keys: ["Mod-Shift-z"] }],
     ],
     [
       "setKeys",
-      { theme: "dark", keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
+      { ...DARK, keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
       [{ action: "apply", keys: null }],
     ],
   ]);
@@ -1889,7 +1940,7 @@ test("each key edit sends only the changed actions, as key texts", async () => {
 
 test("an identical load keeps the settings object and does not show the same key problems again", async () => {
   const lines = spyConsole();
-  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+  const broken = { ...DARK, keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
   const { source } = settingsSource({
     loadSettings: () => Promise.resolve(read(broken)),
     setTheme: (_current, theme) => Promise.resolve(read({ ...broken, theme })),
@@ -1916,7 +1967,7 @@ test("an identical load keeps the settings object and does not show the same key
 test("a key problem shown again replaces a settings failure the file no longer has", async () => {
   spyConsole();
   const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
-  const unreadable = read({ theme: "dark", keys: { redo: ["Ctrl+Q"] } });
+  const unreadable = read({ ...DARK, keys: { redo: ["Ctrl+Q"] } });
   const loads: SourceResult<SettingsRead>[] = [unreadable, { ok: false, failure: broken }];
   const { source } = settingsSource({
     loadSettings: () => Promise.resolve(loads.shift() ?? unreadable),
@@ -1940,7 +1991,7 @@ test("a key problem shown again replaces a settings failure the file no longer h
 
 test("a move to a file with the same broken keys names the new path in the Keys problem", async () => {
   spyConsole();
-  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+  const broken = { ...DARK, keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
   const elsewhere = "/elsewhere.json";
   const { source } = settingsSource({
     loadSettings: () => Promise.resolve(read(broken)),
@@ -1976,7 +2027,7 @@ test("a load that started before a change and answers after it does not put the 
   const loading = store.loadSettings();
   const failing = store.loadSettings();
   await store.setTheme("light");
-  loads[0]?.(read({ theme: "dark", keys: {} }));
+  loads[0]?.(read({ ...DARK, keys: {} }));
   loads[1]?.({ ok: false, failure: { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" } });
   await loading;
   await failing;
@@ -1988,7 +2039,7 @@ test("a load that started before a change and answers after it does not put the 
 
 test("Move after a reload freed the key sends the edit planned on the bindings now in use", async () => {
   const { source, sent } = settingsSource({
-    loadSettings: () => Promise.resolve(read({ theme: "dark", keys: { find: ["Mod-g"] } })),
+    loadSettings: () => Promise.resolve(read({ ...DARK, keys: { find: ["Mod-g"] } })),
   });
   const store = createAppStore(source);
 
@@ -2002,7 +2053,7 @@ test("Move after a reload freed the key sends the edit planned on the bindings n
 
   expect(sent.at(-1)).toEqual([
     "setKeys",
-    { theme: "dark", keys: { find: ["Mod-g"] } },
+    { ...DARK, keys: { find: ["Mod-g"] } },
     [{ action: "undo", keys: ["Mod-z", "Mod-f"] }],
   ]);
   expect(store.preferences.value.keys.find).toEqual([parsed("Mod-g")]);
@@ -2012,14 +2063,14 @@ test("moveSettings sends the path with the settings in use and uses the file fou
   const moved: SettingsRead = {
     path: "/elsewhere.json",
     defaultPath: SETTINGS_PATH,
-    stored: { theme: "light", keys: {} },
+    stored: { ...LIGHT, keys: {} },
   };
   const { source, sent } = settingsSource({ moveSettings: () => Promise.resolve(ok(moved)) });
   const store = createAppStore(source);
 
   await store.moveSettings("/elsewhere.json");
 
-  expect(sent).toEqual([["moveSettings", { theme: "dark", keys: {} }, "/elsewhere.json"]]);
+  expect(sent).toEqual([["moveSettings", { ...DARK, keys: {} }, "/elsewhere.json"]]);
   expect(store.settings.value.read).toEqual(moved);
   expect(store.settings.value.theme).toBe("light");
 });

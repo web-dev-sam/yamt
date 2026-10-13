@@ -1,4 +1,5 @@
 import type {
+  Antialiasing,
   DiskVersion,
   FileList,
   FileMergeData,
@@ -27,6 +28,10 @@ export interface ChunkSource {
   remoteName(): Promise<RemoteName | null>;
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+  setAntialiasing(
+    current: StoredSettings,
+    antialiasing: Antialiasing,
+  ): Promise<SourceResult<SettingsRead>>;
   setKeys(
     current: StoredSettings,
     changes: readonly KeysChange[],

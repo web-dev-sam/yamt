@@ -15,6 +15,7 @@ const commands = vi.hoisted(() => ({
   log: vi.fn(),
   loadSettings: vi.fn(),
   setTheme: vi.fn(),
+  setAntialiasing: vi.fn(),
   setKeys: vi.fn(),
   moveSettings: vi.fn(),
 }));
@@ -304,7 +305,11 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
   });
 });
 
-const STORED: Generated.StoredSettings = { theme: "light", keys: { undo: ["Alt-Backspace"] } };
+const STORED: Generated.StoredSettings = {
+  theme: "light",
+  antialiasing: "subpixel",
+  keys: { undo: ["Alt-Backspace"] },
+};
 const SETTINGS_DTO: Generated.SettingsRead = {
   path: "/home/me/.config/yamt/settings.json",
   default_path: "/home/me/.config/yamt/settings.json",
@@ -316,10 +321,11 @@ const SETTINGS_READ = {
   stored: STORED,
 };
 
-test("the four settings commands send their arguments and return the read with its default path", async () => {
+test("the five settings commands send their arguments and return the read with its default path", async () => {
   for (const command of [
     commands.loadSettings,
     commands.setTheme,
+    commands.setAntialiasing,
     commands.setKeys,
     commands.moveSettings,
   ]) {
@@ -330,10 +336,15 @@ test("the four settings commands send their arguments and return the read with i
 
   expect(await source.loadSettings(STORED)).toEqual({ ok: true, value: SETTINGS_READ });
   expect(await source.setTheme(STORED, "dark")).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.setAntialiasing(STORED, "greyscale")).toEqual({
+    ok: true,
+    value: SETTINGS_READ,
+  });
   expect(await source.setKeys(STORED, changes)).toEqual({ ok: true, value: SETTINGS_READ });
   expect(await source.moveSettings(STORED, "~/s.json")).toEqual({ ok: true, value: SETTINGS_READ });
   expect(commands.loadSettings).toHaveBeenCalledWith(STORED);
   expect(commands.setTheme).toHaveBeenCalledWith(STORED, "dark");
+  expect(commands.setAntialiasing).toHaveBeenCalledWith(STORED, "greyscale");
   expect(commands.setKeys).toHaveBeenCalledWith(STORED, changes);
   expect(commands.moveSettings).toHaveBeenCalledWith(STORED, "~/s.json");
 });

@@ -77,7 +77,10 @@ const paneTheme = EditorView.theme({
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
     fontVariantLigatures: "none",
-    lineHeight: "1.4",
+    lineHeight: "20px",
+    // Chromium (WebView2) keeps subpixel text in a scroller it composites only when the
+    // scroller paints an opaque background (plan §2 #60).
+    backgroundColor: "var(--color-panel)",
   },
   ".cm-content": { caretColor: "var(--color-caret)" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },

@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 
-import type { Theme } from "../ipc";
+import type { Antialiasing, Theme } from "../ipc";
 import KeymapList from "./KeymapList.vue";
 import { useAppStore } from "./store";
 
@@ -11,7 +11,13 @@ const THEMES: readonly { readonly theme: Theme; readonly label: string }[] = [
   { theme: "light", label: "Light" },
 ];
 
-const { settings, closeSettings, setTheme, moveSettings } = useAppStore();
+const ANTIALIASINGS: readonly { readonly antialiasing: Antialiasing; readonly label: string }[] = [
+  { antialiasing: "subpixel", label: "Subpixel" },
+  { antialiasing: "greyscale", label: "Greyscale" },
+];
+const ON_LINUX = navigator.platform.startsWith("Linux");
+
+const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useAppStore();
 const back = useTemplateRef<HTMLButtonElement>("back");
 const pathText = shallowRef("");
 const focusedBefore = document.activeElement;
@@ -79,6 +85,22 @@ async function moveToDefault(): Promise<void> {
             {{ label }}
           </button>
         </div>
+      </section>
+      <section v-if="ON_LINUX" aria-labelledby="settings-antialiasing">
+        <h3 id="settings-antialiasing" class="mb-2 font-semibold">Antialiasing</h3>
+        <div class="flex gap-2">
+          <button
+            v-for="{ antialiasing, label } in ANTIALIASINGS"
+            :key="antialiasing"
+            type="button"
+            :aria-pressed="settings.antialiasing === antialiasing"
+            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
+            @click="setAntialiasing(antialiasing)"
+          >
+            {{ label }}
+          </button>
+        </div>
+        <p class="mt-1 text-fg-muted">Takes effect the next time yamt starts.</p>
       </section>
       <section aria-labelledby="settings-keymap">
         <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>

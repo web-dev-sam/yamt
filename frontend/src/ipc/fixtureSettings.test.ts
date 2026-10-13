@@ -4,7 +4,8 @@ import type { StoredSettings } from "./domain";
 import { createFixtureSettings } from "./fixtureSettings";
 
 const DEFAULT_PATH = "/fixture/settings.json";
-const IN_USE: StoredSettings = { theme: "dark", keys: { apply: ["a"] } };
+const IN_USE: StoredSettings = { theme: "dark", antialiasing: "subpixel", keys: { apply: ["a"] } };
+const LIGHT: StoredSettings = { theme: "light", antialiasing: "subpixel", keys: {} };
 
 test("the first load creates the file from the settings in use; later loads read the file", async () => {
   const settings = createFixtureSettings();
@@ -13,7 +14,7 @@ test("the first load creates the file from the settings in use; later loads read
     ok: true,
     value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
   });
-  expect(await settings.loadSettings({ theme: "light", keys: {} })).toEqual({
+  expect(await settings.loadSettings(LIGHT)).toEqual({
     ok: true,
     value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
   });
@@ -21,23 +22,49 @@ test("the first load creates the file from the settings in use; later loads read
 
 test("setTheme replaces the theme and keeps the keys and unknown actions", async () => {
   const settings = createFixtureSettings();
-  await settings.loadSettings({ theme: "dark", keys: { "later-action": ["Mod-q"] } });
+  await settings.loadSettings({
+    theme: "dark",
+    antialiasing: "greyscale",
+    keys: { "later-action": ["Mod-q"] },
+  });
 
-  const read = await settings.setTheme({ theme: "dark", keys: {} }, "light");
+  const read = await settings.setTheme(
+    { theme: "dark", antialiasing: "greyscale", keys: {} },
+    "light",
+  );
 
   expect(read).toEqual({
     ok: true,
     value: {
       path: DEFAULT_PATH,
       defaultPath: DEFAULT_PATH,
-      stored: { theme: "light", keys: { "later-action": ["Mod-q"] } },
+      stored: { theme: "light", antialiasing: "greyscale", keys: { "later-action": ["Mod-q"] } },
     },
   });
 });
 
+test("setAntialiasing replaces the antialiasing, keeps the rest, and the next load reads it", async () => {
+  const settings = createFixtureSettings();
+  await settings.loadSettings({ ...LIGHT, keys: { "later-action": ["Mod-q"] } });
+
+  const read = await settings.setAntialiasing(LIGHT, "greyscale");
+  const load = await settings.loadSettings(IN_USE);
+
+  const stored = { theme: "light", antialiasing: "greyscale", keys: { "later-action": ["Mod-q"] } };
+  expect(read).toEqual({
+    ok: true,
+    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored },
+  });
+  expect(load).toEqual(read);
+});
+
 test("setKeys sets an entry with a list, removes it with null, and leaves the others", async () => {
   const settings = createFixtureSettings();
-  await settings.loadSettings({ theme: "dark", keys: { apply: ["a"], undo: ["Alt-Backspace"] } });
+  await settings.loadSettings({
+    theme: "dark",
+    antialiasing: "subpixel",
+    keys: { apply: ["a"], undo: ["Alt-Backspace"] },
+  });
 
   const read = await settings.setKeys(IN_USE, [
     { action: "apply", keys: null },
@@ -57,7 +84,11 @@ test("a change before any load creates the file from the settings in use", async
 
   const read = await settings.setTheme(IN_USE, "light");
 
-  expect(read.ok && read.value.stored).toEqual({ theme: "light", keys: { apply: ["a"] } });
+  expect(read.ok && read.value.stored).toEqual({
+    theme: "light",
+    antialiasing: "subpixel",
+    keys: { apply: ["a"] },
+  });
 });
 
 test("a reply is a copy: changing it changes nothing stored", async () => {
@@ -76,21 +107,17 @@ test("moving to an unknown path creates it from the settings in use, a known one
   const settings = createFixtureSettings();
   await settings.loadSettings(IN_USE);
 
-  const created = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
-  await settings.setTheme({ theme: "light", keys: {} }, "dark");
-  const back = await settings.moveSettings({ theme: "light", keys: {} }, DEFAULT_PATH);
-  const again = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
+  const created = await settings.moveSettings(LIGHT, "/elsewhere.json");
+  await settings.setTheme(LIGHT, "dark");
+  const back = await settings.moveSettings(LIGHT, DEFAULT_PATH);
+  const again = await settings.moveSettings(LIGHT, "/elsewhere.json");
 
   expect(created).toEqual({
     ok: true,
-    value: {
-      path: "/elsewhere.json",
-      defaultPath: DEFAULT_PATH,
-      stored: { theme: "light", keys: {} },
-    },
+    value: { path: "/elsewhere.json", defaultPath: DEFAULT_PATH, stored: LIGHT },
   });
   expect(back.ok && back.value.stored).toEqual(IN_USE);
-  expect(again.ok && again.value.stored).toEqual({ theme: "dark", keys: {} });
+  expect(again.ok && again.value.stored).toEqual({ ...LIGHT, theme: "dark" });
 });
 
 test("a move to ~/ goes below the fixture home; a relative path is refused and nothing moves", async () => {
