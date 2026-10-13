@@ -2,20 +2,15 @@
   "CrispTextProbe": {
     "owned": []
   },
-  "WindowsBuild": {
+  "WindowsBuildR1": {
     "owned": [
-      "crates/gitio/**",
-      "crates/session/**",
       "crates/conflict-repo/**",
-      "crates/cli/**",
-      "crates/settings/**",
+      "crates/session/tests/**",
+      "crates/gitio/tests/**",
+      "crates/cli/tests/**",
       "src-tauri/src/**",
-      "src-tauri/tauri.conf.json",
-      "frontend/.env.tauri",
       ".github/workflows/**",
-      ".gitattributes",
-      "deny.toml",
-      "scripts/third-party-licenses.sh"
+      ".github/actions/**"
     ]
   }
 }

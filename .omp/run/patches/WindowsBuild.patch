@@ -1,0 +1,867 @@
+diff --git c/.gitattributes i/.gitattributes
+new file mode 100644
+index 0000000..9cee6ec
+--- /dev/null
++++ i/.gitattributes
+@@ -0,0 +1,2 @@
++# Goldens, fixtures and test inputs are compared byte for byte: a Windows checkout must equal a Linux one.
++* -text
+diff --git c/.github/workflows/ci.yml i/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..eaee7bc
+--- /dev/null
++++ i/.github/workflows/ci.yml
+@@ -0,0 +1,93 @@
++name: ci
++
++on:
++  push:
++  pull_request:
++
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: true
++
++permissions:
++  contents: read
++
++jobs:
++  rust:
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          - runner: ubuntu-22.04
++            app: --no-bundle
++          - runner: macos-14
++            app: --no-bundle
++          - runner: windows-2025
++            app: --bundles nsis
++    runs-on: ${{ matrix.runner }}
++    defaults:
++      run:
++        shell: bash
++    steps:
++      - uses: actions/checkout@v7.0.1
++
++      - name: Linux system packages
++        if: runner.os == 'Linux'
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
++
++      - name: Rust toolchain from rust-toolchain.toml
++        run: |
++          rustup toolchain install
++          rustup show active-toolchain
++
++      - uses: taiki-e/install-action@v2.87.28
++        with:
++          tool: nextest,just
++
++      - name: Tauri CLI
++        run: cargo install tauri-cli --version 2.12.1 --locked
++
++      - uses: actions/setup-node@v7.1.0
++        with:
++          node-version: 24
++
++      - uses: pnpm/action-setup@v6.1.0
++        with:
++          package_json_file: frontend/package.json
++
++      - name: Frontend packages
++        run: pnpm -C frontend install --frozen-lockfile
++
++      - name: Rust tests without the runner's git config (RK19)
++        run: just test
++
++      - name: App build
++        run: cargo tauri build ${{ matrix.app }}
++
++      - name: Windows installer
++        if: runner.os == 'Windows'
++        uses: actions/upload-artifact@v7.0.2
++        with:
++          name: yamt-windows-installer
++          path: target/release/bundle/nsis/*-setup.exe
++          if-no-files-found: error
++
++  frontend:
++    runs-on: ubuntu-22.04
++    steps:
++      - uses: actions/checkout@v7.0.1
++
++      - uses: actions/setup-node@v7.1.0
++        with:
++          node-version: 24
++
++      - uses: pnpm/action-setup@v6.1.0
++        with:
++          package_json_file: frontend/package.json
++
++      - name: Frontend packages
++        run: pnpm -C frontend install --frozen-lockfile
++
++      - name: Frontend unit tests
++        run: pnpm -C frontend test
+diff --git c/.github/workflows/release.yml i/.github/workflows/release.yml
+index 0fbaab0..453876d 100644
+--- c/.github/workflows/release.yml
++++ i/.github/workflows/release.yml
+@@ -32,7 +32,12 @@ jobs:
+             args: ""
+           - runner: macos-14
+             args: --target universal-apple-darwin
++          - runner: windows-2025
++            args: ""
+     runs-on: ${{ matrix.runner }}
++    defaults:
++      run:
++        shell: bash
+     steps:
+       - uses: actions/checkout@v7.0.1
+ 
+diff --git c/crates/conflict-repo/src/lib.rs i/crates/conflict-repo/src/lib.rs
+index 886a38b..4e4b58e 100644
+--- c/crates/conflict-repo/src/lib.rs
++++ i/crates/conflict-repo/src/lib.rs
+@@ -1,11 +1,8 @@
+ //! Test fixture: real git repositories whose merge stops with scripted conflicts.
+ #![forbid(unsafe_code)]
+ 
+-use std::ffi::OsStr;
+ use std::fs;
+-use std::io::Write;
+-use std::os::unix::ffi::OsStrExt;
+-use std::os::unix::fs::symlink;
++use std::io::{self, Write};
+ use std::path::Path;
+ use std::process::{Command, Output, Stdio};
+ 
+@@ -199,7 +196,7 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+             if worktree_file.symlink_metadata().is_ok() {
+                 fs::remove_file(&worktree_file)?;
+             }
+-            symlink(OsStr::from_bytes(bytes), &worktree_file)?;
++            link_to(bytes, &worktree_file)?;
+             git_ok(root, &["add", "--", file.path])?;
+         }
+         FileKind::Submodule => {
+@@ -212,6 +209,22 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+     Ok(())
+ }
+ 
++#[cfg(unix)]
++fn link_to(target: &[u8], link: &Path) -> io::Result<()> {
++    use std::os::unix::ffi::OsStrExt;
++    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), link)
++}
++
++// Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`), so
++// tests that script one run on unix only.
++#[cfg(not(unix))]
++fn link_to(_target: &[u8], _link: &Path) -> io::Result<()> {
++    Err(io::Error::new(
++        io::ErrorKind::Unsupported,
++        "scripted symlinks are unix-only",
++    ))
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git c/crates/gitio/src/attributes.rs i/crates/gitio/src/attributes.rs
+index 422e156..920a41f 100644
+--- c/crates/gitio/src/attributes.rs
++++ i/crates/gitio/src/attributes.rs
+@@ -1,4 +1,3 @@
+-use std::os::unix::ffi::OsStrExt;
+ use std::path::Path;
+ 
+ use crate::repo::Repo;
+@@ -45,7 +44,7 @@ impl Repo {
+         ];
+         let mut input = Vec::new();
+         for path in paths {
+-            input.extend_from_slice(path.as_os_str().as_bytes());
++            input.extend_from_slice(path.as_os_str().as_encoded_bytes());
+             input.push(b'\0');
+         }
+         let output = run(self.command(Access::Read, &args), Some(input), GIT_TIMEOUT)?;
+@@ -70,8 +69,8 @@ fn parse_attributes(output: &[u8], paths: &[&Path]) -> Option<Vec<MergeAttribute
+     for path in paths {
+         let mut value_of = |name: &str| {
+             let [record_path, attribute, info] = records.next()?;
+-            let matches =
+-                *record_path == path.as_os_str().as_bytes() && *attribute == name.as_bytes();
++            let matches = *record_path == path.as_os_str().as_encoded_bytes()
++                && *attribute == name.as_bytes();
+             matches.then(|| attribute_value(info))
+         };
+         attributes.push(MergeAttributes {
+diff --git c/crates/gitio/src/entry.rs i/crates/gitio/src/entry.rs
+index 09bb33a..d59b70c 100644
+--- c/crates/gitio/src/entry.rs
++++ i/crates/gitio/src/entry.rs
+@@ -1,5 +1,3 @@
+-use std::ffi::OsStr;
+-use std::os::unix::ffi::OsStrExt;
+ use std::path::{Path, PathBuf};
+ 
+ use crate::{Error, Result};
+@@ -95,7 +93,7 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
+     if fields.next().is_some() || path.is_empty() {
+         return None;
+     }
+-    let path = PathBuf::from(OsStr::from_bytes(path));
++    let path = path_from_git(path);
+     Some(StageEntry {
+         mode,
+         oid,
+@@ -139,10 +137,23 @@ fn push_stage_record(input: &mut Vec<u8>, entry: &StageEntry) {
+ }
+ 
+ fn push_path(input: &mut Vec<u8>, path: &Path) {
+-    input.extend_from_slice(path.as_os_str().as_bytes());
++    input.extend_from_slice(path.as_os_str().as_encoded_bytes());
+     input.push(b'\0');
+ }
+ 
++#[cfg(unix)]
++pub(crate) fn path_from_git(bytes: &[u8]) -> PathBuf {
++    use std::os::unix::ffi::OsStrExt;
++    PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
++}
++
++// Git for Windows keeps paths as UTF-8 and cannot check out one that is not, so `-z` output is UTF-8
++// (git-for-windows `compat/mingw.c`, `xutftowcs_path`).
++#[cfg(not(unix))]
++pub(crate) fn path_from_git(bytes: &[u8]) -> PathBuf {
++    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git c/crates/gitio/src/repo.rs i/crates/gitio/src/repo.rs
+index e65cd79..8c0301b 100644
+--- c/crates/gitio/src/repo.rs
++++ i/crates/gitio/src/repo.rs
+@@ -1,17 +1,14 @@
+ use std::ffi::OsStr;
+ use std::fs;
+ use std::io;
+-use std::os::unix::ffi::OsStrExt;
+-use std::os::unix::fs::PermissionsExt;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ 
+ use crate::blob::{BlobReader, CAT_FILE};
+-use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged};
++use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
+ use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+ use crate::{Error, Result, StageEntry};
+ 
+-const ANY_EXECUTE_BIT: u32 = 0o111;
+ const REV_PARSE: &str = "rev-parse";
+ const LOG: &str = "log";
+ const HASH_OBJECT: &str = "hash-object";
+@@ -40,7 +37,7 @@ impl Repo {
+         let git = find_git_on_path()?;
+         let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+         let output = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+-        let root = PathBuf::from(OsStr::from_bytes(&output));
++        let root = path_from_git(&output);
+         Ok(Repo { root, git })
+     }
+ 
+@@ -87,7 +84,7 @@ impl Repo {
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
+         let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+-        let path = self.root.join(OsStr::from_bytes(&git_path));
++        let path = self.root.join(path_from_git(&git_path));
+         match fs::read(&path) {
+             Ok(message) => Ok(Some(message)),
+             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+@@ -165,7 +162,7 @@ impl Repo {
+     pub fn resolve_with(&self, chosen: &StageEntry) -> Result<()> {
+         let (mode, oid) = (chosen.mode, chosen.oid.as_str());
+         let mut record = format!("{mode:o} {oid} 0\t").into_bytes();
+-        record.extend_from_slice(chosen.path.as_os_str().as_bytes());
++        record.extend_from_slice(chosen.path.as_os_str().as_encoded_bytes());
+         record.push(b'\0');
+         let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
+         run(command, Some(record), GIT_TIMEOUT)?;
+@@ -187,7 +184,7 @@ impl Repo {
+         }
+         let mut input = Vec::new();
+         for path in paths {
+-            input.extend_from_slice(path.as_os_str().as_bytes());
++            input.extend_from_slice(path.as_os_str().as_encoded_bytes());
+             input.push(b'\n');
+         }
+         let command = self.command(Access::Read, &[HASH_OBJECT, "--stdin-paths"]);
+@@ -252,17 +249,98 @@ fn without_final_newline(mut output: Vec<u8>) -> Result<Vec<u8>> {
+ 
+ fn find_git_on_path() -> Result<PathBuf> {
+     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+-    for dir in std::env::split_paths(&search_path) {
+-        if !dir.is_absolute() {
+-            continue;
+-        }
+-        let candidate = dir.join("git");
+-        let is_executable = candidate.metadata().is_ok_and(|metadata| {
+-            metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
+-        });
+-        if is_executable {
+-            return Ok(candidate);
+-        }
+-    }
+-    Err(Error::GitNotFound)
++    git_in(&search_path).ok_or(Error::GitNotFound)
++}
++
++fn git_in(search_path: &OsStr) -> Option<PathBuf> {
++    std::env::split_paths(search_path)
++        .filter(|dir| dir.is_absolute())
++        .map(|dir| dir.join(GIT_FILE_NAME))
++        .find(|candidate| is_runnable(candidate))
++}
++
++#[cfg(unix)]
++const GIT_FILE_NAME: &str = "git";
++
++#[cfg(not(unix))]
++const GIT_FILE_NAME: &str = "git.exe";
++
++#[cfg(unix)]
++fn is_runnable(path: &Path) -> bool {
++    use std::os::unix::fs::PermissionsExt;
++    const ANY_EXECUTE_BIT: u32 = 0o111;
++    path.metadata().is_ok_and(|metadata| {
++        metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
++    })
++}
++
++// Windows has no execute bit: the `.exe` name is what makes a file runnable.
++#[cfg(not(unix))]
++fn is_runnable(path: &Path) -> bool {
++    path.is_file()
++}
++
++#[cfg(test)]
++mod tests {
++    use std::ffi::OsString;
++
++    use super::*;
++
++    fn search_path(dirs: &[&Path]) -> OsString {
++        std::env::join_paths(dirs).unwrap()
++    }
++
++    #[cfg(unix)]
++    fn runnable_git_in(dir: &Path) -> PathBuf {
++        use std::os::unix::fs::PermissionsExt;
++        let git = dir.join(GIT_FILE_NAME);
++        fs::write(&git, "").unwrap();
++        fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
++        git
++    }
++
++    #[cfg(not(unix))]
++    fn runnable_git_in(dir: &Path) -> PathBuf {
++        let git = dir.join(GIT_FILE_NAME);
++        fs::write(&git, "").unwrap();
++        git
++    }
++
++    #[test]
++    fn a_relative_path_entry_is_skipped_and_the_same_folder_found_by_its_absolute_path() {
++        let dir = tempfile::tempdir_in(".").unwrap();
++        runnable_git_in(dir.path());
++        let name = dir.path().file_name().unwrap();
++        let (relative, absolute) = (Path::new(name), std::env::current_dir().unwrap().join(name));
++        assert_eq!(git_in(&search_path(&[relative])), None);
++        let found = git_in(&search_path(&[relative, &absolute]));
++        assert_eq!(found, Some(absolute.join(GIT_FILE_NAME)));
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_git_without_an_execute_bit_is_skipped_and_the_next_executable_one_found() {
++        use std::os::unix::fs::PermissionsExt;
++        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        let not_executable = plain.path().join("git");
++        fs::write(&not_executable, "").unwrap();
++        fs::set_permissions(&not_executable, fs::Permissions::from_mode(0o644)).unwrap();
++        let git = runnable_git_in(runnable.path());
++        assert_eq!(
++            git_in(&search_path(&[plain.path(), runnable.path()])),
++            Some(git)
++        );
++    }
++
++    #[cfg(not(unix))]
++    #[test]
++    fn a_git_without_the_exe_name_is_skipped_and_the_next_git_exe_found() {
++        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        fs::write(plain.path().join("git"), "").unwrap();
++        let git = runnable_git_in(runnable.path());
++        assert_eq!(
++            git_in(&search_path(&[plain.path(), runnable.path()])),
++            Some(git)
++        );
++    }
+ }
+diff --git c/crates/session/src/disk.rs i/crates/session/src/disk.rs
+index 02faa0c..3c22c10 100644
+--- c/crates/session/src/disk.rs
++++ i/crates/session/src/disk.rs
+@@ -1,6 +1,5 @@
+ use std::fs;
+ use std::io;
+-use std::os::unix::ffi::OsStringExt;
+ use std::path::Path;
+ 
+ use serde::{Deserialize, Serialize};
+@@ -105,7 +104,8 @@ pub(crate) fn read_on_disk(repo: &Repo, path: &Path, is_submodule: bool) -> Resu
+         Err(source) => return Err(read_failed(source)),
+     };
+     let read = if file_type.is_symlink() {
+-        fs::read_link(&full_path).map(|target| OnDisk::Link(target.into_os_string().into_vec()))
++        fs::read_link(&full_path)
++            .map(|target| OnDisk::Link(target.into_os_string().into_encoded_bytes()))
+     } else if file_type.is_file() {
+         fs::read(&full_path).map(OnDisk::File)
+     } else if file_type.is_dir() && is_submodule {
+diff --git c/crates/session/src/start.rs i/crates/session/src/start.rs
+index e51e6c3..18bcf3a 100644
+--- c/crates/session/src/start.rs
++++ i/crates/session/src/start.rs
+@@ -1,7 +1,5 @@
+ use std::fs;
+ use std::io;
+-use std::os::unix::ffi::OsStrExt;
+-use std::os::unix::fs::DirBuilderExt;
+ use std::path::{Path, PathBuf};
+ use std::time::Instant;
+ 
+@@ -25,6 +23,7 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
+     minor: 44,
+ };
+ const SCRATCH_ATTEMPTS: u32 = 1000;
++#[cfg(unix)]
+ const SCRATCH_MODE: u32 = 0o700;
+ 
+ /// The gitattributes that decide what git wrote to a conflicted path.
+@@ -281,7 +280,9 @@ fn compare_stage(
+     let look = match file.disk {
+         OnDisk::Link(target) if is_link => same(&blobs.read(&entry.oid)?, target),
+         // git-hash-object(1) `--stdin-paths` reads one path per line.
+-        OnDisk::File(bytes) if !is_link && file.path.as_os_str().as_bytes().contains(&b'\n') => {
++        OnDisk::File(bytes)
++            if !is_link && file.path.as_os_str().as_encoded_bytes().contains(&b'\n') =>
++        {
+             same(&blobs.read(&entry.oid)?, bytes)
+         }
+         OnDisk::File(_) if !is_link => StartLook::BlobOf(entry.oid.clone()),
+@@ -308,7 +309,7 @@ impl ScratchDir {
+         let process = std::process::id();
+         for attempt in 0..SCRATCH_ATTEMPTS {
+             let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
+-            match fs::DirBuilder::new().mode(SCRATCH_MODE).create(&dir) {
++            match create_private_dir(&dir) {
+                 Ok(()) => return Ok(ScratchDir(dir)),
+                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                 Err(error) => return Err(error),
+@@ -318,6 +319,19 @@ impl ScratchDir {
+     }
+ }
+ 
++#[cfg(unix)]
++fn create_private_dir(dir: &Path) -> io::Result<()> {
++    use std::os::unix::fs::DirBuilderExt;
++    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
++}
++
++// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
++// system and administrators) may read.
++#[cfg(not(unix))]
++fn create_private_dir(dir: &Path) -> io::Result<()> {
++    fs::create_dir(dir)
++}
++
+ impl Drop for ScratchDir {
+     fn drop(&mut self) {
+         if let Err(error) = fs::remove_dir_all(&self.0) {
+@@ -329,19 +343,24 @@ impl Drop for ScratchDir {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use std::os::unix::fs::PermissionsExt;
+-
+     use super::*;
+ 
+-    const PERMISSION_BITS: u32 = 0o777;
+-
+     #[test]
+-    fn the_scratch_dir_is_readable_by_its_owner_only_and_removed_when_dropped() {
++    fn the_scratch_dir_is_removed_when_dropped() {
+         let scratch = ScratchDir::create().unwrap();
+         let dir = scratch.0.clone();
+-        let mode = fs::metadata(&dir).unwrap().permissions().mode();
+-        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
++        assert!(dir.is_dir());
+         drop(scratch);
+         assert!(!dir.exists());
+     }
++
++    #[cfg(unix)]
++    #[test]
++    fn the_scratch_dir_is_readable_by_its_owner_only() {
++        use std::os::unix::fs::PermissionsExt;
++        const PERMISSION_BITS: u32 = 0o777;
++        let scratch = ScratchDir::create().unwrap();
++        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
++        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
++    }
+ }
+diff --git c/crates/session/tests/all_or_nothing.rs i/crates/session/tests/all_or_nothing.rs
+index a0878de..abaf44d 100644
+--- c/crates/session/tests/all_or_nothing.rs
++++ i/crates/session/tests/all_or_nothing.rs
+@@ -1,7 +1,6 @@
+ #![cfg(test)]
+ 
+ use std::fs;
+-use std::os::unix::fs::PermissionsExt;
+ use std::path::PathBuf;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+@@ -10,7 +9,9 @@ use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Sid
+ const TEXT: &str = "src/cart.ts";
+ const BINARY: &str = "assets/logo.bin";
+ const DELETED: &str = "assets/removed.txt";
++#[cfg(unix)]
+ const READ_ONLY_DIR: u32 = 0o555;
++#[cfg(unix)]
+ const WRITABLE_DIR: u32 = 0o755;
+ 
+ fn mixed_conflict() -> TempDir {
+@@ -122,11 +123,16 @@ fn take_with_a_held_index_lock_changes_nothing() {
+     }
+ }
+ 
++// Unix only: Windows does not honour the read-only attribute on a folder ("File Attribute
++// Constants", `FILE_ATTRIBUTE_READONLY`), so nothing there makes a worktree write fail this way.
++#[cfg(unix)]
+ fn set_assets_mode(dir: &TempDir, mode: u32) {
++    use std::os::unix::fs::PermissionsExt;
+     let assets = dir.path().join("assets");
+     fs::set_permissions(assets, fs::Permissions::from_mode(mode)).unwrap();
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn take_whose_worktree_write_fails_puts_the_conflict_back() {
+     let dir = mixed_conflict();
+@@ -152,6 +158,7 @@ fn staged(dir: &TempDir, path: &str) -> String {
+     String::from_utf8(git_ok(dir.path(), &["ls-files", "-s", "--", path]).unwrap()).unwrap()
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
+     let dir = mixed_conflict();
+diff --git c/crates/session/tests/describe.rs i/crates/session/tests/describe.rs
+index 598208e..b013b49 100644
+--- c/crates/session/tests/describe.rs
++++ i/crates/session/tests/describe.rs
+@@ -1,4 +1,6 @@
+ #![cfg(test)]
++// Unix only: `every_kind` scripts symlinks (scripted on unix only).
++#![cfg(unix)]
+ 
+ use yamt_session::{MergeSession, SideContent, UnsupportedReason};
+ 
+diff --git c/crates/session/tests/disk_is_truth.rs i/crates/session/tests/disk_is_truth.rs
+index 3e37c61..ffc2e97 100644
+--- c/crates/session/tests/disk_is_truth.rs
++++ i/crates/session/tests/disk_is_truth.rs
+@@ -1,4 +1,6 @@
+ #![cfg(test)]
++// Unix only: every test merges `FILES`, which holds a symlink (scripted on unix only).
++#![cfg(unix)]
+ 
+ use std::fs;
+ use std::os::unix::fs::symlink;
+diff --git c/crates/session/tests/open_and_load.rs i/crates/session/tests/open_and_load.rs
+index 9fdb5dd..bbd96bd 100644
+--- c/crates/session/tests/open_and_load.rs
++++ i/crates/session/tests/open_and_load.rs
+@@ -14,7 +14,9 @@ const REMOTE_DELETED: &str = "d_remote_deleted.txt";
+ const BINARY: &str = "e_binary.bin";
+ const LATIN1: &str = "f_latin1.txt";
+ const CRLF: &str = "g_crlf.txt";
++#[cfg(unix)]
+ const SUBMODULE: &str = "h_submodule";
++#[cfg(unix)]
+ const SYMLINK: &str = "i_symlink";
+ 
+ const MODIFY_SIDES: [&str; 3] = [
+@@ -243,6 +245,8 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
+     assert_eq!(data.eol, Eol::CrLf);
+ }
+ 
++// Unix only: holds a symlink (scripted on unix only).
++#[cfg(unix)]
+ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+     ConflictFile {
+         path: MODIFY_TS,
+@@ -267,6 +271,7 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+     },
+ ];
+ 
++#[cfg(unix)]
+ #[test]
+ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads() {
+     let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+@@ -298,6 +303,7 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
+     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
+     let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
+diff --git c/crates/session/tests/start_from_disk.rs i/crates/session/tests/start_from_disk.rs
+index 38141e4..a110624 100644
+--- c/crates/session/tests/start_from_disk.rs
++++ i/crates/session/tests/start_from_disk.rs
+@@ -1,4 +1,6 @@
+ #![cfg(test)]
++// Unix only: most tests merge `FILES`, which holds a symlink (scripted on unix only).
++#![cfg(unix)]
+ 
+ use std::fs;
+ use std::os::unix::fs::PermissionsExt;
+diff --git c/crates/session/tests/take.rs i/crates/session/tests/take.rs
+index ff283ee..3731ca5 100644
+--- c/crates/session/tests/take.rs
++++ i/crates/session/tests/take.rs
+@@ -1,4 +1,6 @@
+ #![cfg(test)]
++// Unix only: almost every test takes from `every_kind`, which scripts symlinks (unix only).
++#![cfg(unix)]
+ 
+ use std::fs;
+ use std::path::Path;
+diff --git c/crates/settings/tests/config/mod.rs i/crates/settings/tests/config/mod.rs
+index 194b407..41a44fc 100644
+--- c/crates/settings/tests/config/mod.rs
++++ i/crates/settings/tests/config/mod.rs
+@@ -21,7 +21,7 @@ impl Config {
+     }
+ 
+     pub fn folder(&self) -> PathBuf {
+-        self.dir.path().join("config/yamt")
++        self.dir.path().join("config").join("yamt")
+     }
+ 
+     pub fn default_file(&self) -> PathBuf {
+diff --git c/crates/settings/tests/relocate.rs i/crates/settings/tests/relocate.rs
+index 090c457..9e0c91b 100644
+--- c/crates/settings/tests/relocate.rs
++++ i/crates/settings/tests/relocate.rs
+@@ -1,5 +1,9 @@
+ #![cfg(test)]
+ 
++#[cfg_attr(
++    not(unix),
++    expect(dead_code, reason = "`names_in` serves the unix-only link test")
++)]
+ mod config;
+ 
+ use std::fs;
+@@ -7,7 +11,9 @@ use std::fs;
+ use serde_json::json;
+ use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
+ 
+-use crate::config::{Config, json_at, light_with_apply, names_in, write};
++#[cfg(unix)]
++use crate::config::names_in;
++use crate::config::{Config, json_at, light_with_apply, write};
+ 
+ #[test]
+ fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
+@@ -105,7 +111,7 @@ fn a_relative_path_is_refused_and_a_home_prefix_is_expanded() {
+     );
+     assert!(!config.location_file().exists());
+     let settings = relocate(&config.places, &StoredSettings::default(), "~/s.json").unwrap();
+-    let in_home = config.dir.path().join("home/s.json");
++    let in_home = config.dir.path().join("home").join("s.json");
+     assert_eq!(settings.path, in_home.display().to_string());
+     assert!(in_home.exists());
+ }
+diff --git c/crates/settings/tests/settings.rs i/crates/settings/tests/settings.rs
+index 0d21d1c..c0db5be 100644
+--- c/crates/settings/tests/settings.rs
++++ i/crates/settings/tests/settings.rs
+@@ -3,7 +3,6 @@
+ mod config;
+ 
+ use std::fs;
+-use std::path::Path;
+ use std::time::{Duration, SystemTime};
+ 
+ use serde_json::json;
+@@ -299,7 +298,7 @@ fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
+ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
+     let config = Config::new();
+     fs::create_dir_all(config.folder()).unwrap();
+-    let relative_target = Path::new("../../elsewhere/dotfiles/settings.json");
++    let relative_target = std::path::Path::new("../../elsewhere/dotfiles/settings.json");
+     std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
+     let dotfile = config.elsewhere("dotfiles/settings.json");
+     read(&config.places, &StoredSettings::default()).unwrap();
+diff --git c/frontend/.env.tauri i/frontend/.env.tauri
+new file mode 100644
+index 0000000..546a33a
+--- /dev/null
++++ i/frontend/.env.tauri
+@@ -0,0 +1 @@
++VITE_CHUNK_SOURCE=tauri
+diff --git c/scripts/third-party-licenses.sh i/scripts/third-party-licenses.sh
+index a9703d8..e1a1aa5 100755
+--- c/scripts/third-party-licenses.sh
++++ i/scripts/third-party-licenses.sh
+@@ -2,20 +2,21 @@
+ # Usage: scripts/third-party-licenses.sh
+ #        scripts/third-party-licenses.sh ubuntu-versions
+ # Without an argument: writes THIRD_PARTY_LICENSES.txt, the copyright lines and licence texts of every
+-# Rust crate the app builds on Linux and macOS (`cargo metadata`, no dev-dependencies), every production
++# Rust crate the app builds on Linux, macOS and Windows (`cargo metadata`, no dev-dependencies), every production
+ # JS package (`pnpm licenses list --prod`) and the two icon sets, quoted from each package's licence files.
+ # A package without licence files gets the standard text of its declared licence with the holder from its
+ # metadata; when the script has no text for that licence it stops, naming the package.
+ # With `ubuntu-versions` (the Linux release job on Ubuntu 22.04, before bundling): appends the installed
+ # versions of the Ubuntu source packages listed for the AppImage, and the GNU GPL and LGPL texts from
+ # /usr/share/common-licenses (LGPLv3 §4(b) requires the GPL next to it).
+-# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's.
++# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's, and on Windows under Git
++# Bash, where a native jq.exe ends its lines with CRLF (jq manual, `--binary`) and paths use `\`.
+ set -euo pipefail
+ export LC_ALL=C
+ 
+ root="$(cd "$(dirname "$0")/.." && pwd)"
+ out="$root/THIRD_PARTY_LICENSES.txt"
+-rust_targets=(x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin)
++rust_targets=(x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc)
+ icon_sets=(lucide vscode-icons)
+ ubuntu_lgpl_sources=(
+     webkit2gtk gtk+3.0 glib2.0 glib-networking libsoup3 pango1.0 gdk-pixbuf atk1.0 at-spi2-atk
+@@ -38,14 +39,15 @@ def reachable($edges): . as $seen
+ | ([.resolve.root] | reachable($edges)) as $ids
+ | .packages[]
+ | select(.source != null and (.id as $id | $ids | index($id)))
+-| [.name, .version, (.license // ""), (.manifest_path | rtrimstr("/Cargo.toml")), (.authors | join(", ")),
++| [.name, .version, (.license // ""), (.manifest_path | gsub("\\\\"; "/") | rtrimstr("/Cargo.toml")),
++   (.authors | join(", ")),
+    (.repository // "")]
+ | join("\u001f")'
+ 
+ # shellcheck disable=SC2016
+ js_packages_jq='
+ to_entries[] | .key as $licence | .value[] | . as $package | range(0; .paths | length)
+-| [$package.name, $package.versions[.], $licence, $package.paths[.], ($package.author // "")]
++| [$package.name, $package.versions[.], $licence, ($package.paths[.] | gsub("\\\\"; "/")), ($package.author // "")]
+ | join("\u001f")'
+ 
+ die() {
+@@ -53,18 +55,23 @@ die() {
+     exit 1
+ }
+ 
++# $@: jq's arguments after `-r`. Prints jq's raw output with LF line ends.
++jq_lines() {
++    jq -r "$@" | tr -d '\r'
++}
++
+ # Prints one line per crate: name, version, licence, directory, authors, repository (separated by $field).
+ rust_crates() {
+     local target
+     for target in "${rust_targets[@]}"; do
+         cargo metadata --format-version 1 --locked --manifest-path "$root/src-tauri/Cargo.toml" \
+-            --filter-platform "$target" | jq -r "$rust_crates_jq"
++            --filter-platform "$target" | jq_lines "$rust_crates_jq"
+     done | sort -u
+ }
+ 
+ # Prints one line per production JS package: name, version, licence, directory, author (separated by $field).
+ js_packages() {
+-    pnpm -C "$root/frontend" licenses list --prod --json | jq -r "$js_packages_jq" | sort -u
++    pnpm -C "$root/frontend" licenses list --prod --json | jq_lines "$js_packages_jq" | sort -u
+ }
+ 
+ # $1: licence expression. Prints its licence ids and operators separated by spaces, without parentheses; the
+@@ -215,8 +222,8 @@ icon_entries() {
+     for set in "${icon_sets[@]}"; do
+         dir="$root/frontend/node_modules/@iconify-json/$set"
+         [ -f "$dir/info.json" ] || die "missing $dir/info.json (run pnpm -C frontend install)"
+-        entry "$set icons" "$(jq -r .version "$dir/package.json")" "$(jq -r .license.spdx "$dir/info.json")" \
+-            "$dir" "$(jq -r .author.name "$dir/info.json")"
++        entry "$set icons" "$(jq_lines .version "$dir/package.json")" "$(jq_lines .license.spdx "$dir/info.json")" \
++            "$dir" "$(jq_lines .author.name "$dir/info.json")"
+     done
+     printf '\nSome Lucide icons are derived from Feather (lucide LICENSE, hand-checked):\n\n'
+     standard_text MIT "2013-present Cole Bemis"
+diff --git c/src-tauri/src/lib.rs i/src-tauri/src/lib.rs
+index e3cd15a..4a1453e 100644
+--- c/src-tauri/src/lib.rs
++++ i/src-tauri/src/lib.rs
+@@ -1,5 +1,6 @@
+ //! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
+ 
++#[cfg(target_os = "linux")]
+ mod appimage;
+ mod args;
+ mod commands;
+@@ -37,7 +38,11 @@ pub fn run() -> ExitCode {
+             println!("yamt {}", env!("CARGO_PKG_VERSION"));
+             ExitCode::SUCCESS
+         }
+-        Ok(Invocation::Merge { repo }) => merge(&appimage::repo_from_start_dir(repo)).report(),
++        Ok(Invocation::Merge { repo }) => {
++            #[cfg(target_os = "linux")]
++            let repo = appimage::repo_from_start_dir(repo);
++            merge(&repo).report()
++        }
+         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
+     }
+ }
+diff --git c/src-tauri/tauri.conf.json i/src-tauri/tauri.conf.json
+index c2d8c9b..ad16e90 100644
+--- c/src-tauri/tauri.conf.json
++++ i/src-tauri/tauri.conf.json
+@@ -3,8 +3,8 @@
+   "productName": "yamt",
+   "identifier": "dev.yamt.merge",
+   "build": {
+-    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm dev --port 5173 --strictPort",
+-    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm build",
++    "beforeDevCommand": "pnpm dev --mode tauri --port 5173 --strictPort",
++    "beforeBuildCommand": "pnpm build --mode tauri",
+     "devUrl": "http://localhost:5173",
+     "frontendDist": "../frontend/dist"
+   },
+@@ -18,7 +18,7 @@
+   },
+   "bundle": {
+     "active": true,
+-    "targets": ["appimage", "deb", "app", "dmg"],
++    "targets": ["appimage", "deb", "app", "dmg", "nsis"],
+     "category": "DeveloperTool",
+     "shortDescription": "Three-way merge window for every conflicted file of a git merge",
+     "longDescription": "yamt opens all conflicted files of a stopped git merge, rebase or cherry-pick in one window: your side on the left, theirs on the right, the result in the middle, with arrows to apply each change. Marking a file resolved stages it.",
