@@ -1,0 +1,316 @@
+diff --git c/crates/session/src/start.rs i/crates/session/src/start.rs
+index 18bcf3a..e94e1db 100644
+--- c/crates/session/src/start.rs
++++ i/crates/session/src/start.rs
+@@ -279,18 +279,17 @@ fn compare_stage(
+     let is_link = entry.mode == SYMLINK_MODE;
+     let look = match file.disk {
+         OnDisk::Link(target) if is_link => same(&blobs.read(&entry.oid)?, target),
++        // git-config(1) `core.symlinks`: "If false, symbolic links are checked out as small plain
++        // files that contain the link text" (the default of Git for Windows).
++        OnDisk::File(bytes) if is_link => same(&blobs.read(&entry.oid)?, bytes),
+         // git-hash-object(1) `--stdin-paths` reads one path per line.
+-        OnDisk::File(bytes)
+-            if !is_link && file.path.as_os_str().as_encoded_bytes().contains(&b'\n') =>
+-        {
++        OnDisk::File(bytes) if file.path.as_os_str().as_encoded_bytes().contains(&b'\n') => {
+             same(&blobs.read(&entry.oid)?, bytes)
+         }
+-        OnDisk::File(_) if !is_link => StartLook::BlobOf(entry.oid.clone()),
+-        OnDisk::Missing
+-        | OnDisk::File(_)
+-        | OnDisk::Link(_)
+-        | OnDisk::Submodule(_)
+-        | OnDisk::Other => StartLook::Changed,
++        OnDisk::File(_) => StartLook::BlobOf(entry.oid.clone()),
++        OnDisk::Missing | OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => {
++            StartLook::Changed
++        }
+     };
+     Ok(look)
+ }
+diff --git c/crates/session/tests/describe.rs i/crates/session/tests/describe.rs
+index 5577239..29797ad 100644
+--- c/crates/session/tests/describe.rs
++++ i/crates/session/tests/describe.rs
+@@ -4,12 +4,11 @@ use yamt_session::{MergeSession, SideContent, UnsupportedReason};
+ 
+ mod every_kind;
+ use every_kind::{
+-    BINARY, LATIN1, LOCAL_DELETED, REMOTE_DELETED, SUBMODULE, TEXT, every_kind_of_conflict,
++    BINARY, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT, REMOTE_DELETED, SUBMODULE, TEXT,
++    every_kind_of_conflict,
+ };
+ #[cfg(unix)]
+-use every_kind::{
+-    FILE_OR_LINK, FILE_OR_LINK_RENAMED, LOCAL_COMMIT, REMOTE_COMMIT, SYMLINK, file_against_link,
+-};
++use every_kind::{FILE_OR_LINK, FILE_OR_LINK_RENAMED, SYMLINK, file_against_link};
+ 
+ fn described_sides(session: &mut MergeSession, path: &str) -> (SideContent, SideContent) {
+     let sides = session.describe(path).unwrap();
+@@ -28,16 +27,12 @@ fn describe_counts_the_lines_of_text_sides_and_names_a_deleted_side_missing() {
+     assert_eq!(described(REMOTE_DELETED), (Text { lines: 3 }, Missing));
+ }
+ 
+-#[cfg(unix)]
+ #[test]
+ fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
+-    use SideContent::{Binary, Commit, Link, NonUtf8};
++    use SideContent::{Binary, Commit, NonUtf8};
+     let dir = every_kind_of_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let mut described = |path| described_sides(&mut session, path);
+-    let link = |target: &str| Link {
+-        target: target.to_owned(),
+-    };
+     let commit = |id: &str| Commit { id: id.to_owned() };
+     assert_eq!(
+         described(BINARY),
+@@ -47,9 +42,17 @@ fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
+         described(LATIN1),
+         (NonUtf8 { bytes: 6 }, NonUtf8 { bytes: 12 })
+     );
++    #[cfg(unix)]
+     assert_eq!(
+         described(SYMLINK),
+-        (link("local-target"), link("remote-target"))
++        (
++            SideContent::Link {
++                target: "local-target".to_owned()
++            },
++            SideContent::Link {
++                target: "remote-target".to_owned()
++            }
++        )
+     );
+     assert_eq!(
+         described(SUBMODULE),
+diff --git c/crates/session/tests/disk_is_truth.rs i/crates/session/tests/disk_is_truth.rs
+index a4a488f..2b7af22 100644
+--- c/crates/session/tests/disk_is_truth.rs
++++ i/crates/session/tests/disk_is_truth.rs
+@@ -316,14 +316,16 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
+     assert_eq!(read(&dir, TEXT), b"merged\n");
+ }
+ 
+-#[cfg(unix)]
+ #[test]
+ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
+     let dir = merged();
+     let mut session = opened(&dir);
+     write(&dir, BINARY, b"\0new");
+-    fs::remove_file(dir.path().join(LINK)).unwrap();
+-    symlink("new-target", dir.path().join(LINK)).unwrap();
++    #[cfg(unix)]
++    {
++        fs::remove_file(dir.path().join(LINK)).unwrap();
++        symlink("new-target", dir.path().join(LINK)).unwrap();
++    }
+     let submodule = dir.path().join(SUBMODULE);
+     git_ok(&submodule, &["init", "--quiet"]).unwrap();
+     git_ok(
+@@ -335,20 +337,23 @@ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
+ 
+     let list = session.refresh().unwrap();
+ 
+-    let staged_paths: Vec<&str> = changes(&list).into_iter().map(|(path, _)| path).collect();
+-    assert_eq!(staged_paths, [LINK, BINARY, SUBMODULE]);
+-    assert!(
+-        changes(&list)
+-            .iter()
+-            .all(|(_, result)| **result == DiskResult::Staged)
+-    );
++    let expected = [
++        #[cfg(unix)]
++        (LINK, &DiskResult::Staged),
++        (BINARY, &DiskResult::Staged),
++        (SUBMODULE, &DiskResult::Staged),
++    ];
++    assert_eq!(changes(&list), expected);
+     let binary_oid = hash_object(dir.path(), b"\0new").unwrap();
+     assert_eq!(
+         staged(&dir, BINARY),
+         format!("100644 {binary_oid} 0\t{BINARY}\n")
+     );
+-    let link_oid = hash_object(dir.path(), b"new-target").unwrap();
+-    assert_eq!(staged(&dir, LINK), format!("120000 {link_oid} 0\t{LINK}\n"));
++    #[cfg(unix)]
++    {
++        let link_oid = hash_object(dir.path(), b"new-target").unwrap();
++        assert_eq!(staged(&dir, LINK), format!("120000 {link_oid} 0\t{LINK}\n"));
++    }
+     let head = head.trim_end();
+     assert_eq!(
+         staged(&dir, SUBMODULE),
+diff --git c/crates/session/tests/open_and_load.rs i/crates/session/tests/open_and_load.rs
+index bbd96bd..d3bcefd 100644
+--- c/crates/session/tests/open_and_load.rs
++++ i/crates/session/tests/open_and_load.rs
+@@ -14,7 +14,6 @@ const REMOTE_DELETED: &str = "d_remote_deleted.txt";
+ const BINARY: &str = "e_binary.bin";
+ const LATIN1: &str = "f_latin1.txt";
+ const CRLF: &str = "g_crlf.txt";
+-#[cfg(unix)]
+ const SUBMODULE: &str = "h_submodule";
+ #[cfg(unix)]
+ const SYMLINK: &str = "i_symlink";
+@@ -245,9 +244,7 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
+     assert_eq!(data.eol, Eol::CrLf);
+ }
+ 
+-// Unix only: holds a symlink (scripted on unix only).
+-#[cfg(unix)]
+-const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
++const NON_REGULAR_NEXT_TO_TEXT: &[ConflictFile<'static>] = &[
+     ConflictFile {
+         path: MODIFY_TS,
+         kind: FileKind::Regular,
+@@ -262,6 +259,7 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+         local: Some(b"2222222222222222222222222222222222222222"),
+         remote: Some(b"3333333333333333333333333333333333333333"),
+     },
++    #[cfg(unix)]
+     ConflictFile {
+         path: SYMLINK,
+         kind: FileKind::Symlink,
+@@ -271,10 +269,22 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
+     },
+ ];
+ 
+-#[cfg(unix)]
++fn assert_load_and_finish_refused(
++    session: &mut MergeSession,
++    path: &str,
++    reason: UnsupportedReason,
++) {
++    assert_eq!(unsupported_error(session, path), reason);
++    let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
++    assert!(
++        matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
++        "{error:?}"
++    );
++}
++
+ #[test]
+ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads() {
+-    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
++    let dir = conflict_repo(NON_REGULAR_NEXT_TO_TEXT).unwrap();
+ 
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+@@ -286,27 +296,19 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
+     let expected = [
+         (MODIFY_TS.to_owned(), None),
+         (SUBMODULE.to_owned(), Some(UnsupportedReason::Submodule)),
++        #[cfg(unix)]
+         (SYMLINK.to_owned(), Some(UnsupportedReason::Symlink)),
+     ];
+     assert_eq!(listed, expected);
+-    for (path, reason) in [
+-        (SUBMODULE, UnsupportedReason::Submodule),
+-        (SYMLINK, UnsupportedReason::Symlink),
+-    ] {
+-        assert_eq!(unsupported_error(&mut session, path), reason);
+-        let error = session.finish(path, "text\n", DiskVersion(0)).unwrap_err();
+-        assert!(
+-            matches!(&error, Error::Unsupported { reason: refused, .. } if *refused == reason),
+-            "{error:?}"
+-        );
+-    }
++    assert_load_and_finish_refused(&mut session, SUBMODULE, UnsupportedReason::Submodule);
++    #[cfg(unix)]
++    assert_load_and_finish_refused(&mut session, SYMLINK, UnsupportedReason::Symlink);
+     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
+ }
+ 
+-#[cfg(unix)]
+ #[test]
+ fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
+-    let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
++    let dir = conflict_repo(NON_REGULAR_NEXT_TO_TEXT).unwrap();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     let before = git_ok(dir.path(), &["ls-files", "-u"]).unwrap();
+ 
+diff --git c/crates/session/tests/start_from_disk.rs i/crates/session/tests/start_from_disk.rs
+index 2ede054..340f32d 100644
+--- c/crates/session/tests/start_from_disk.rs
++++ i/crates/session/tests/start_from_disk.rs
+@@ -5,12 +5,13 @@ use std::fs;
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
+ };
+-use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
++use yamt_session::{
++    DiskResult, FileList, FileStatus, MergeSession, Middle, SideContent, UnsupportedReason,
++};
+ 
+ const TEXT: &str = "f.txt";
+ const DELETED: &str = "gone.txt";
+ const BINARY: &str = "logo.bin";
+-#[cfg(unix)]
+ const LINK: &str = "link";
+ 
+ mod samples;
+@@ -277,6 +278,61 @@ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
+     assert_eq!(target.to_str(), Some("local-target"));
+ }
+ 
++// git-config(1) `core.symlinks`: "If false, symbolic links are checked out as small plain files
++// that contain the link text" (the default of Git for Windows); `git add` keeps such a file's
++// symlink mode.
++fn link_conflict_written_as_a_plain_file() -> TempDir {
++    let dir = TempDir::new().unwrap();
++    let root = dir.path();
++    let run = |args: &[&str]| git_ok(root, args).unwrap();
++    let commit = |target: &str, message: &str| {
++        fs::write(root.join(LINK), target).unwrap();
++        run(&["add", "--", LINK]);
++        run(&["commit", "--quiet", "-m", message]);
++    };
++    run(&["init", "--quiet"]);
++    run(&["config", "core.symlinks", "false"]);
++    fs::write(root.join(LINK), "base-target").unwrap();
++    let oid = text(run(&["hash-object", "-w", "--", LINK]));
++    let cacheinfo = format!("120000,{},{LINK}", oid.trim_end());
++    run(&["update-index", "--add", "--cacheinfo", &cacheinfo]);
++    run(&["commit", "--quiet", "-m", "base"]);
++    run(&["checkout", "--quiet", "-b", "local"]);
++    commit("local-target", "local");
++    run(&["checkout", "--quiet", "-b", "remote", "main"]);
++    commit("remote-target", "remote");
++    run(&["checkout", "--quiet", "local"]);
++    let merge = git(root, &["merge", "--quiet", "remote"]).unwrap();
++    assert!(!merge.status.success());
++    dir
++}
++
++#[test]
++fn a_link_git_wrote_as_a_plain_file_is_untouched_and_stays_an_unresolved_link() {
++    let dir = link_conflict_written_as_a_plain_file();
++    let unmerged_before = unmerged(&dir);
++    assert!(unmerged_before.starts_with("120000 "), "{unmerged_before}");
++
++    let (mut session, list) = first_list(&dir);
++
++    assert_eq!(list.disk_changes, []);
++    assert_eq!(unmerged(&dir), unmerged_before);
++    assert!(dir.path().join(LINK).symlink_metadata().unwrap().is_file());
++    assert_eq!(read(&dir, LINK), "local-target");
++    let files = session.files();
++    let link = files.iter().find(|file| file.path == LINK).unwrap();
++    assert_eq!(link.status, FileStatus::Unresolved);
++    assert_eq!(link.unsupported, Some(UnsupportedReason::Symlink));
++    let sides = session.describe(LINK).unwrap();
++    let target = |target: &str| SideContent::Link {
++        target: target.to_owned(),
++    };
++    assert_eq!(
++        (sides.local, sides.remote),
++        (target("local-target"), target("remote-target"))
++    );
++}
++
+ // gitattributes(5) "Defining a custom merge driver": `%A` is the file to leave the result in, and a
+ // non-zero exit marks a conflict.
+ const TEXT_MERGING_DRIVER: &str = "git merge-file -L ours -L base -L theirs %A %O %B; exit 1";

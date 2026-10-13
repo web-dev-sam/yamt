@@ -15,7 +15,7 @@
       "frontend/src/ipc/domain.ts"
     ]
   },
-  "WindowsBuildR2": {
-    "owned": ["crates/session/**", "crates/conflict-repo/**"]
+  "AntialiasingDesktopR1": {
+    "owned": ["crates/settings/tests/**", "src-tauri/AGENTS.md"]
   }
 }
