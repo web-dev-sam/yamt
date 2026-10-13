@@ -25,6 +25,7 @@ const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = use
 const list = useTemplateRef<HTMLDivElement>("list");
 const menu = useTemplateRef<HTMLUListElement[]>("menu");
 const menuFor = shallowRef<KeyAction | null>(null);
+const menuAbove = shallowRef(false);
 const recording = shallowRef<Recording | null>(null);
 
 const bindings = computed(() => settings.value.keys.bindings);
@@ -87,8 +88,24 @@ async function toggleMenu(action: KeyAction): Promise<void> {
     return;
   }
   menuFor.value = action;
+  menuAbove.value = false;
   await nextTick();
-  menu.value?.[0]?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  const opened = menu.value?.[0];
+  if (opened === undefined) {
+    return;
+  }
+  menuAbove.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+  await nextTick();
+  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+}
+
+function visibleBottom(element: HTMLElement): number {
+  for (let box = element.parentElement; box !== null; box = box.parentElement) {
+    if (getComputedStyle(box).overflowY !== "visible") {
+      return box.getBoundingClientRect().bottom;
+    }
+  }
+  return window.innerHeight;
 }
 
 function stepRow(event: KeyboardEvent): void {
@@ -208,7 +225,8 @@ async function recorded(key: Key): Promise<void> {
             ref="menu"
             role="menu"
             :aria-label="ACTION_NAMES[row.action]"
-            class="absolute top-full left-2 z-10 min-w-56 rounded border border-control-border bg-panel py-1"
+            class="absolute left-2 z-10 min-w-56 rounded border border-control-border bg-panel py-1"
+            :class="menuAbove ? 'bottom-full' : 'top-full'"
             @keydown="menuKey"
           >
             <template v-for="(entry, index) in menuEntries" :key="index">

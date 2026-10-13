@@ -28,12 +28,16 @@ function pressed(
   };
 }
 
-test("Tab and Shift+Tab leave the field; with Ctrl they are recorded", () => {
+test("Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded", () => {
   expect(fieldKey(pressed("Tab"), null, LINUX)).toEqual({ kind: "leave" });
   expect(fieldKey(pressed("Tab", { shiftKey: true }), null, LINUX)).toEqual({ kind: "leave" });
   expect(fieldKey(pressed("Tab", { ctrlKey: true }), null, LINUX)).toEqual({
     kind: "record",
     key: key("Mod-Tab"),
+  });
+  expect(fieldKey(pressed("Tab", { altKey: true }), null, LINUX)).toEqual({
+    kind: "record",
+    key: key("Alt-Tab"),
   });
 });
 
@@ -47,13 +51,21 @@ test("plain Enter confirms the shown key, and is recorded when no key is shown",
     kind: "record",
     key: key("Shift-Enter"),
   });
+  expect(fieldKey(pressed("Enter", { ctrlKey: true }), key("Mod-f"), LINUX)).toEqual({
+    kind: "record",
+    key: key("Mod-Enter"),
+  });
 });
 
-test("plain Escape cancels; with Shift it is recorded", () => {
+test("plain Escape cancels; with Shift or Ctrl it is recorded", () => {
   expect(fieldKey(pressed("Escape"), key("Mod-f"), LINUX)).toEqual({ kind: "cancel" });
   expect(fieldKey(pressed("Escape", { shiftKey: true }), null, LINUX)).toEqual({
     kind: "record",
     key: key("Shift-Escape"),
+  });
+  expect(fieldKey(pressed("Escape", { ctrlKey: true }), key("Mod-f"), LINUX)).toEqual({
+    kind: "record",
+    key: key("Mod-Escape"),
   });
 });
 

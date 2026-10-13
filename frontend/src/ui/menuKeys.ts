@@ -1,6 +1,6 @@
 export const ARROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
 
-export type MenuStep =
+type MenuStep =
   | { readonly kind: "close" }
   | { readonly kind: "focus"; readonly index: number }
   | { readonly kind: "ignore" };

@@ -1,0 +1,119 @@
+diff --git c/frontend/src/ui/KeymapList.vue i/frontend/src/ui/KeymapList.vue
+index ad8dad9..9916b4f 100644
+--- c/frontend/src/ui/KeymapList.vue
++++ i/frontend/src/ui/KeymapList.vue
+@@ -25,6 +25,7 @@ const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = use
+ const list = useTemplateRef<HTMLDivElement>("list");
+ const menu = useTemplateRef<HTMLUListElement[]>("menu");
+ const menuFor = shallowRef<KeyAction | null>(null);
++const menuAbove = shallowRef(false);
+ const recording = shallowRef<Recording | null>(null);
+ 
+ const bindings = computed(() => settings.value.keys.bindings);
+@@ -87,8 +88,24 @@ async function toggleMenu(action: KeyAction): Promise<void> {
+     return;
+   }
+   menuFor.value = action;
++  menuAbove.value = false;
+   await nextTick();
+-  menu.value?.[0]?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++  const opened = menu.value?.[0];
++  if (opened === undefined) {
++    return;
++  }
++  menuAbove.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
++  await nextTick();
++  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++}
++
++function visibleBottom(element: HTMLElement): number {
++  for (let box = element.parentElement; box !== null; box = box.parentElement) {
++    if (getComputedStyle(box).overflowY !== "visible") {
++      return box.getBoundingClientRect().bottom;
++    }
++  }
++  return window.innerHeight;
+ }
+ 
+ function stepRow(event: KeyboardEvent): void {
+@@ -208,7 +225,8 @@ async function recorded(key: Key): Promise<void> {
+             ref="menu"
+             role="menu"
+             :aria-label="ACTION_NAMES[row.action]"
+-            class="absolute top-full left-2 z-10 min-w-56 rounded border border-control-border bg-panel py-1"
++            class="absolute left-2 z-10 min-w-56 rounded border border-control-border bg-panel py-1"
++            :class="menuAbove ? 'bottom-full' : 'top-full'"
+             @keydown="menuKey"
+           >
+             <template v-for="(entry, index) in menuEntries" :key="index">
+diff --git c/frontend/src/ui/keyField.test.ts i/frontend/src/ui/keyField.test.ts
+index 7e5dbe2..7eceb55 100644
+--- c/frontend/src/ui/keyField.test.ts
++++ i/frontend/src/ui/keyField.test.ts
+@@ -28,13 +28,17 @@ function pressed(
+   };
+ }
+ 
+-test("Tab and Shift+Tab leave the field; with Ctrl they are recorded", () => {
++test("Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded", () => {
+   expect(fieldKey(pressed("Tab"), null, LINUX)).toEqual({ kind: "leave" });
+   expect(fieldKey(pressed("Tab", { shiftKey: true }), null, LINUX)).toEqual({ kind: "leave" });
+   expect(fieldKey(pressed("Tab", { ctrlKey: true }), null, LINUX)).toEqual({
+     kind: "record",
+     key: key("Mod-Tab"),
+   });
++  expect(fieldKey(pressed("Tab", { altKey: true }), null, LINUX)).toEqual({
++    kind: "record",
++    key: key("Alt-Tab"),
++  });
+ });
+ 
+ test("plain Enter confirms the shown key, and is recorded when no key is shown", () => {
+@@ -47,14 +51,22 @@ test("plain Enter confirms the shown key, and is recorded when no key is shown",
+     kind: "record",
+     key: key("Shift-Enter"),
+   });
++  expect(fieldKey(pressed("Enter", { ctrlKey: true }), key("Mod-f"), LINUX)).toEqual({
++    kind: "record",
++    key: key("Mod-Enter"),
++  });
+ });
+ 
+-test("plain Escape cancels; with Shift it is recorded", () => {
++test("plain Escape cancels; with Shift or Ctrl it is recorded", () => {
+   expect(fieldKey(pressed("Escape"), key("Mod-f"), LINUX)).toEqual({ kind: "cancel" });
+   expect(fieldKey(pressed("Escape", { shiftKey: true }), null, LINUX)).toEqual({
+     kind: "record",
+     key: key("Shift-Escape"),
+   });
++  expect(fieldKey(pressed("Escape", { ctrlKey: true }), key("Mod-f"), LINUX)).toEqual({
++    kind: "record",
++    key: key("Mod-Escape"),
++  });
+ });
+ 
+ test("a key with its modifiers replaces the shown one; a modifier alone changes nothing", () => {
+diff --git c/frontend/src/ui/keyField.ts i/frontend/src/ui/keyField.ts
+index a23f1ed..f3e5912 100644
+--- c/frontend/src/ui/keyField.ts
++++ i/frontend/src/ui/keyField.ts
+@@ -1,6 +1,6 @@
+ import { keyOfEvent, type Key } from "../ipc";
+ 
+-export type FieldKey =
++type FieldKey =
+   | { readonly kind: "leave" }
+   | { readonly kind: "cancel" }
+   | { readonly kind: "confirm"; readonly key: Key }
+diff --git c/frontend/src/ui/menuKeys.ts i/frontend/src/ui/menuKeys.ts
+index 6aff66f..c64e249 100644
+--- c/frontend/src/ui/menuKeys.ts
++++ i/frontend/src/ui/menuKeys.ts
+@@ -1,6 +1,6 @@
+ export const ARROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
+ 
+-export type MenuStep =
++type MenuStep =
+   | { readonly kind: "close" }
+   | { readonly kind: "focus"; readonly index: number }
+   | { readonly kind: "ignore" };

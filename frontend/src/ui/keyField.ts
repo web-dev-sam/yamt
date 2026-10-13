@@ -1,6 +1,6 @@
 import { keyOfEvent, type Key } from "../ipc";
 
-export type FieldKey =
+type FieldKey =
   | { readonly kind: "leave" }
   | { readonly kind: "cancel" }
   | { readonly kind: "confirm"; readonly key: Key }
