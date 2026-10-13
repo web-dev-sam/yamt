@@ -37,7 +37,11 @@ function resize(event: PointerEvent): void {
     :style="widthStyle"
   >
     <h2 class="px-3 py-2 font-semibold">Files</h2>
-    <ul role="listbox" aria-label="Conflicted files" class="mr-0.5 flex-1 overflow-y-auto bg-panel">
+    <ul
+      role="listbox"
+      aria-label="Conflicted files"
+      class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
+    >
       <li
         v-for="file in files"
         :key="file.path"

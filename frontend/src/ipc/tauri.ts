@@ -1,5 +1,5 @@
 import { commands, type LogValue, type SettingsRead as SettingsReadDto } from "./bindings";
-import type { ChunkSource } from "./ChunkSource";
+import type { ChunkSource, SettingsSource } from "./ChunkSource";
 import {
   toDomain,
   toFileList,
@@ -33,10 +33,7 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
 }
 
-function createTauriSettings(): Pick<
-  ChunkSource,
-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
-> {
+function createTauriSettings(): SettingsSource {
   return {
     async loadSettings(current) {
       return toSettingsResult(await commands.loadSettings(current));

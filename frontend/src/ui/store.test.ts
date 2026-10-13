@@ -14,6 +14,7 @@ import {
   type FileSides,
   type Key,
   type SettingsRead,
+  type SettingsSource,
   type SourceFailure,
   type SourceResult,
   type StoredSettings,
@@ -33,10 +34,7 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 const NOTHING_LEFT = { conflicts: 0, changes: 0 };
-const NO_SETTINGS: Pick<
-  ChunkSource,
-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
-> = {
+const NO_SETTINGS: SettingsSource = {
   loadSettings: () => Promise.reject(new Error("not used")),
   setTheme: () => Promise.reject(new Error("not used")),
   setAntialiasing: () => Promise.reject(new Error("not used")),

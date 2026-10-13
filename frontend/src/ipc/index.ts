@@ -2,7 +2,7 @@ import { createLog } from "./log";
 import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
-export type { ChunkSource } from "./ChunkSource";
+export type { ChunkSource, SettingsSource } from "./ChunkSource";
 export type {
   Antialiasing,
   Chunk,

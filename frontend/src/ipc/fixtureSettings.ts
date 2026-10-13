@@ -1,10 +1,5 @@
-import type { ChunkSource } from "./ChunkSource";
+import type { SettingsSource } from "./ChunkSource";
 import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
-
-type FixtureSettings = Pick<
-  ChunkSource,
-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
->;
 
 type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 
@@ -62,7 +57,7 @@ function expanded(path: string): string | null {
   return path.startsWith("/") ? path : null;
 }
 
-export function createFixtureSettings(): FixtureSettings {
+export function createFixtureSettings(): SettingsSource {
   const files: Files = { stored: new Map(), inUse: DEFAULT_PATH };
   return {
     async loadSettings(current) {

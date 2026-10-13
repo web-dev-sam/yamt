@@ -57,6 +57,10 @@ export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
   return { theme, keys: keys.bindings };
 }
 
+export function showsAntialiasing(platform: string): boolean {
+  return platform.startsWith("Linux");
+}
+
 function storedSettings({ theme, antialiasing, keys }: SettingsInUse): StoredSettings {
   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
   return {

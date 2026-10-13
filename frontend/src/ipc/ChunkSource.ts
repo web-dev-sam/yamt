@@ -38,3 +38,8 @@ export interface ChunkSource {
   ): Promise<SourceResult<SettingsRead>>;
   moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
 }
+
+export type SettingsSource = Pick<
+  ChunkSource,
+  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+>;
