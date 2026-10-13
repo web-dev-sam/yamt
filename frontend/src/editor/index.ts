@@ -1,10 +1,10 @@
 import { redo, undo } from "@codemirror/commands";
-import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
+import type { Language } from "@codemirror/language";
 import { searchPanelOpen } from "@codemirror/search";
 import type { Extension, StateField } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
-import { log, type FileMergeData } from "../ipc";
+import type { FileMergeData } from "../ipc";
 import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
 import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
@@ -14,19 +14,22 @@ import { coveredAction, IconDrag } from "./internal/drag";
 import { syncFindSpace } from "./internal/find";
 import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
-import { languageOf } from "./internal/language";
+import { languageOf, loadLanguage } from "./internal/language";
 import { modClicks } from "./internal/modClick";
 import type { Direction } from "./internal/navigation";
-import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
+import { centerPane, createPane, paneText, showPreferences } from "./internal/pane";
+import type { PaneSettings, Preferences } from "./internal/pane";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
-import { sideKeys, SideFocus } from "./internal/sideFocus";
+import { SideFocus } from "./internal/sideFocus";
+import { sideKeys, sideKeysCompartment } from "./internal/sideKeys";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
 import { Strips, type IconPress } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
 export type { Direction } from "./internal/navigation";
+export type { Preferences } from "./internal/pane";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 
@@ -37,7 +40,7 @@ export type MergeHosts = {
   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
 };
 
-export type MergeOptions = { readonly readOnly: boolean };
+export type MergeOptions = { readonly readOnly: boolean; readonly preferences: Preferences };
 
 type ViewSources = {
   data: FileMergeData;
@@ -49,6 +52,7 @@ type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly A
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
   readonly #readOnly: boolean;
+  #settings: PaneSettings;
   readonly #views: PaneViews;
   readonly #sides: SideDocs;
   readonly #strips: Strips;
@@ -60,10 +64,11 @@ export class MergeController {
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
-  constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions) {
+  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
     const description = languageOf(data.path);
     this.#field = chunkField(data.chunks);
-    this.#readOnly = options?.readOnly ?? false;
+    this.#readOnly = options.readOnly;
+    this.#settings = { preferences: options.preferences, platform: navigator.platform };
     const language = description?.support?.language ?? null;
     this.#views = this.#createViews({ data, hosts, language });
     this.#focus = new SideFocus({
@@ -89,25 +94,7 @@ export class MergeController {
     });
     this.#requestFrame();
     if (description !== null && description.support === undefined) {
-      void this.#loadLanguage(description, data.path);
-    }
-  }
-
-  async #loadLanguage(description: LanguageDescription, path: string): Promise<void> {
-    let support: LanguageSupport;
-    try {
-      support = await description.load();
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      log.warn("language.load_failed", { path, language: description.name, reason });
-      return;
-    }
-    if (this.#destroyed) {
-      return;
-    }
-    const effects = languageCompartment.reconfigure(support.language);
-    for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
-      view.dispatch({ effects });
+      void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
     }
   }
 
@@ -129,7 +116,7 @@ export class MergeController {
     const statusSync = EditorView.updateListener.of((update) => {
       this.#statusesChanged(update);
     });
-    const shared = { eol: data.eol, language };
+    const shared = { eol: data.eol, language, settings: this.#settings };
     const center = createPane({
       ...shared,
       ...centerPane(data.middle, this.#readOnly),
@@ -158,15 +145,23 @@ export class MergeController {
     };
   }
 
+  #sideKeys(side: Side): Extension {
+    return sideKeys(
+      (command) => {
+        this.#focus.run(side, command);
+      },
+      this.#settings.preferences.keys,
+      this.#settings.platform,
+    );
+  }
+
   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
     return [
       statuses,
       sideDecorations(statuses, side),
       focusDecorations(statuses, side),
       coveredDecorations(side),
-      sideKeys((command) => {
-        this.#focus.run(side, command);
-      }),
+      sideKeysCompartment.of(this.#sideKeys(side)),
       this.#repaint,
       this.#readOnly
         ? []
@@ -251,6 +246,11 @@ export class MergeController {
     this.#focus.moveToChange(direction);
   }
 
+  setPreferences(preferences: Preferences): void {
+    this.#settings = { ...this.#settings, preferences };
+    showPreferences(this.#views, this.#settings, (side) => this.#sideKeys(side));
+  }
+
   undo(): boolean {
     return undo(this.#views.center);
   }
@@ -260,7 +260,8 @@ export class MergeController {
   }
 
   historyKey(event: KeyboardEvent): boolean {
-    const command = historyCommand(event, navigator.platform);
+    const { preferences, platform } = this.#settings;
+    const command = historyCommand(event, platform, preferences.keys);
     if (command === null) {
       return false;
     }

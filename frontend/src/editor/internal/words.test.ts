@@ -3,11 +3,11 @@ import type { EditorState, StateField } from "@codemirror/state";
 import { EditorView, WidgetType } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { actionSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
-import { centerPane, paneState } from "./pane";
+import { centerPane, paneState, type PaneSettings } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
@@ -23,6 +23,10 @@ type Merge = {
 
 const CONFLICT = 0;
 const MODIFIED = 1;
+const SETTINGS: PaneSettings = {
+  preferences: { theme: "dark", keys: DEFAULT_KEYS },
+  platform: "Linux x86_64",
+};
 
 function texts(word: string, value: string): string {
   return `keep\r\nconst 😀 = ${word};\r\na = ${value};\r\nend\r\n`;
@@ -101,6 +105,7 @@ function sidePane(
   return paneState({
     eol: data.eol,
     language: null,
+    settings: SETTINGS,
     kind: "side",
     doc: data[side],
     extensions: [statuses, sideDecorations(statuses, side)],
@@ -112,6 +117,7 @@ function open(data: FileMergeData): Merge {
   const center = paneState({
     eol: data.eol,
     language: null,
+    settings: SETTINGS,
     ...centerPane(data.middle, false),
     extensions: [field, centerDecorations(field)],
   });

@@ -1,6 +1,14 @@
-import { commands, type LogValue } from "./bindings";
+import { commands, type LogValue, type SettingsRead as SettingsReadDto } from "./bindings";
 import type { ChunkSource } from "./ChunkSource";
-import { toDomain, toFileList, toSides, type SourceFailure, type SourceResult } from "./domain";
+import {
+  toDomain,
+  toFileList,
+  toSettingsRead,
+  toSides,
+  type SettingsRead,
+  type SourceFailure,
+  type SourceResult,
+} from "./domain";
 import type { LogEntry } from "./log";
 
 // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
@@ -18,6 +26,11 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
     throw new Error(String(result.error));
   }
   return { ok: false, failure: result.error };
+}
+
+function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<SettingsRead> {
+  const settings = toResult(result);
+  return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
 }
 
 export function createTauriSource(): ChunkSource {
@@ -45,6 +58,18 @@ export function createTauriSource(): ChunkSource {
     },
     remoteName() {
       return commands.remoteName();
+    },
+    async loadSettings(current) {
+      return toSettingsResult(await commands.loadSettings(current));
+    },
+    async setTheme(current, theme) {
+      return toSettingsResult(await commands.setTheme(current, theme));
+    },
+    async setKeys(current, changes) {
+      return toSettingsResult(await commands.setKeys(current, [...changes]));
+    },
+    async moveSettings(current, path) {
+      return toSettingsResult(await commands.moveSettings(current, path));
     },
   };
 }

@@ -43,6 +43,18 @@ export type DiskChange = Generated.DiskChange;
 
 export type WriteReply = Generated.WriteReply;
 
+export type Theme = Generated.Theme;
+
+export type StoredSettings = Generated.StoredSettings;
+
+export type KeysChange = Generated.KeysChange;
+
+export type SettingsRead = {
+  readonly path: string;
+  readonly defaultPath: string;
+  readonly stored: StoredSettings;
+};
+
 export type FileList = {
   readonly files: readonly FileEntry[];
   readonly diskChanges: readonly DiskChange[];
@@ -234,4 +246,8 @@ export function toSides(dto: Generated.FileSides): FileSides {
 
 export function toFileList(dto: Generated.FileList): FileList {
   return { files: dto.files, diskChanges: dto.disk_changes };
+}
+
+export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
+  return { path: dto.path, defaultPath: dto.default_path, stored: dto.stored };
 }

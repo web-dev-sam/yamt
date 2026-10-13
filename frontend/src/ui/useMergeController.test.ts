@@ -1,21 +1,35 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
 
-import { loadFixture, type FileMergeData } from "../ipc";
-import { useMergeController, type MergeHandle } from "./useMergeController";
+import { bindingsOf, DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
+import { useMergeController, type MergeHandle, type Preferences } from "./useMergeController";
 
 const editor = vi.hoisted(() => {
-  const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
+  const state = {
+    text: "",
+    built: 0,
+    destroyed: 0,
+    readOnly: new Array<boolean>(),
+    themes: new Array<string>(),
+  };
   class MergeController {
-    constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
+    constructor(
+      data: FileMergeData,
+      _hosts: unknown,
+      options: { readOnly: boolean; preferences: { theme: string } },
+    ) {
       state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
       state.built += 1;
       state.readOnly.push(options.readOnly);
+      state.themes.push(`built ${options.preferences.theme}`);
     }
     summary(): { conflicts: number; changes: number } {
       return { conflicts: 0, changes: 0 };
     }
     onSummaryChange(): void {}
+    setPreferences(preferences: { theme: string }): void {
+      state.themes.push(`set ${preferences.theme}`);
+    }
     resultText(): string {
       return state.text;
     }
@@ -28,8 +42,10 @@ const editor = vi.hoisted(() => {
 
 vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
 
+const DARK: Preferences = { theme: "dark", keys: DEFAULT_KEYS };
+
 afterEach(() => {
-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [] });
+  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [], themes: [] });
 });
 
 function host<T>(present: boolean): ShallowRef<T | null> {
@@ -38,7 +54,7 @@ function host<T>(present: boolean): ShallowRef<T | null> {
 
 function mount(
   data: ShallowRef<FileMergeData | null>,
-  { present = true, readOnly = shallowRef(false) } = {},
+  { present = true, readOnly = shallowRef(false), preferences = shallowRef(DARK) } = {},
 ): { scope: EffectScope; handle: MergeHandle } {
   const scope = effectScope();
   const handle = scope.run(() =>
@@ -51,6 +67,7 @@ function mount(
         strips: [host(present), host(present)],
       },
       readOnly,
+      preferences,
     ),
   );
   if (handle === undefined) {
@@ -84,7 +101,7 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
   data.value = await fileData("changed on disk\n");
   await nextTick();
 
-  expect(editor.state).toEqual({
+  expect(editor.state).toMatchObject({
     text: "changed on disk\n",
     built: 2,
     destroyed: 1,
@@ -124,6 +141,32 @@ test("the editor is read-only as the view says, and is rebuilt when that changes
 
   expect(editor.state.readOnly).toEqual([true, false]);
   expect(editor.state.built).toBe(2);
+});
+
+test("the editor is built with the preferences in use and follows a change without a rebuild", async () => {
+  const preferences = shallowRef<Preferences>({ theme: "light", keys: DEFAULT_KEYS });
+  mount(shallowRef<FileMergeData | null>(await fileData("b\n")), { preferences });
+  await nextTick();
+
+  preferences.value = { theme: "dark", keys: bindingsOf({ apply: ["a"] }).bindings };
+  await nextTick();
+
+  expect(editor.state.themes).toEqual(["built light", "set dark"]);
+  expect(editor.state.built).toBe(1);
+  expect(editor.state.destroyed).toBe(0);
+});
+
+test("a preferences change before the file loaded reaches the editor built later", async () => {
+  const data = shallowRef<FileMergeData | null>(null);
+  const preferences = shallowRef<Preferences>(DARK);
+  mount(data, { preferences });
+  await nextTick();
+
+  preferences.value = { theme: "light", keys: DEFAULT_KEYS };
+  data.value = await fileData("b\n");
+  await nextTick();
+
+  expect(editor.state.themes).toEqual(["built light"]);
 });
 
 test("while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing", async () => {

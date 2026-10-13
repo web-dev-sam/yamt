@@ -1,5 +1,4 @@
-import type { Extension } from "@codemirror/state";
-import { keymap, type EditorView } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
 
 import type { ChunkAction } from "./apply";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
@@ -17,15 +16,11 @@ import {
   type Target,
 } from "./navigation";
 import { otherSide, SIDES, type Side } from "./side";
+import type { SideCommand } from "./sideKeys";
 import { setMark, sideMarks } from "./sideMark";
 import { isSideOpen, type ChunkState } from "./status";
 import { revealScrollTop, visibleArea } from "./viewport";
 import { wheelStep, type WheelSum } from "./wheel";
-
-export type SideCommand =
-  | { readonly kind: "decide"; readonly decision: "apply" | "ignore" }
-  | { readonly kind: "step"; readonly direction: Direction }
-  | { readonly kind: "toward"; readonly side: Side };
 
 type FocusSources = {
   readonly views: PaneViews;
@@ -35,34 +30,6 @@ type FocusSources = {
   readonly readOnly: boolean;
   readonly hidden: Side | null;
 };
-
-const APPLY: SideCommand = { kind: "decide", decision: "apply" };
-const IGNORE: SideCommand = { kind: "decide", decision: "ignore" };
-
-export const SIDE_KEYS: Readonly<Record<string, SideCommand>> = {
-  Enter: APPLY,
-  Space: APPLY,
-  Backspace: IGNORE,
-  Delete: IGNORE,
-  x: IGNORE,
-  ArrowDown: { kind: "step", direction: "down" },
-  ArrowUp: { kind: "step", direction: "up" },
-  ArrowLeft: { kind: "toward", side: "local" },
-  ArrowRight: { kind: "toward", side: "remote" },
-};
-
-export function sideKeys(run: (command: SideCommand) => void): Extension {
-  return keymap.of(
-    Object.entries(SIDE_KEYS).map(([key, command]) => ({
-      key,
-      preventDefault: true,
-      run: () => {
-        run(command);
-        return true;
-      },
-    })),
-  );
-}
 
 export class SideFocus {
   readonly #sources: FocusSources;

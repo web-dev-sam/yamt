@@ -1,0 +1,4536 @@
+diff --git c/frontend/index.html i/frontend/index.html
+index 845a0d3..53c34af 100644
+--- c/frontend/index.html
++++ i/frontend/index.html
+@@ -3,7 +3,6 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-    <meta name="color-scheme" content="dark" />
+     <title>yamt</title>
+   </head>
+   <body>
+diff --git c/frontend/scripts/palette.test.ts i/frontend/scripts/palette.test.ts
+index 6fcd15e..31ae88e 100644
+--- c/frontend/scripts/palette.test.ts
++++ i/frontend/scripts/palette.test.ts
+@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
+ 
+ import { expect, test } from "vitest";
+ 
+-import { findPaletteViolations, readPaletteSources } from "./palette";
++import { findPaletteViolations, readPaletteSources, WINDOW_FILE } from "./palette";
+ 
+ const FRONTEND_ROOT = fileURLToPath(new URL("..", import.meta.url));
+ 
+@@ -14,8 +14,102 @@ const PALETTE = {
+   text: `@theme static {\n  --color-*: initial;\n  --color-editor: #1e1f22;\n}\n`,
+ };
+ 
+-test("the real source tree has no palette violations", () => {
+-  expect(findPaletteViolations(readPaletteSources(FRONTEND_ROOT))).toEqual([]);
++test("the real source tree has no palette violations, the native window colours included", () => {
++  const sources = readPaletteSources(FRONTEND_ROOT);
++
++  expect(sources.map(({ path }) => path)).toContain(WINDOW_FILE);
++  expect(findPaletteViolations(sources)).toEqual([]);
++});
++
++const TWO_PALETTES = {
++  path: "src/style.css",
++  text: [
++    "@theme static {",
++    "  --color-*: initial;",
++    "  --color-window: #26282c;",
++    "  --color-editor: #1e1f22;",
++    "}",
++    "",
++    ':root[data-theme="light"] {',
++    "  color-scheme: light;",
++    "  --color-window: #E9EAEE;",
++    "  --color-editor: #ffffff;",
++    "}",
++    "",
++  ].join("\n"),
++};
++
++function shell(dark: string, light: string): { path: string; text: string } {
++  return {
++    path: WINDOW_FILE,
++    text: [
++      "// `--color-window` in frontend/src/style.css, dark and light palettes.",
++      `const BACKGROUND_DARK: Color = Color(${dark}, 0xff);`,
++      `const BACKGROUND_LIGHT: Color = Color(${light}, 0xff);`,
++      "",
++    ].join("\n"),
++  };
++}
++
++test("colour literals inside the light block are allowed", () => {
++  expect(findPaletteViolations([TWO_PALETTES])).toEqual([]);
++});
++
++test("the light block must define exactly the dark block's colour tokens", () => {
++  const palette = {
++    path: "src/style.css",
++    text: [
++      "@theme static {",
++      "  --color-window: #26282c;",
++      "  --color-editor: #1e1f22;",
++      "}",
++      ':root[data-theme="light"] {',
++      "  --color-window: #e9eaee;",
++      "  --color-extra: #123456;",
++      "}",
++      "",
++    ].join("\n"),
++  };
++
++  expect(findPaletteViolations([palette])).toEqual([
++    { rule: "light-missing", file: "src/style.css", line: 5, match: "--color-editor" },
++    { rule: "light-extra", file: "src/style.css", line: 7, match: "--color-extra" },
++  ]);
++});
++
++test("a light block outside src/style.css exempts nothing", () => {
++  const file = {
++    path: "src/ui/extra.css",
++    text: `:root[data-theme="light"] {\n  color: #fff;\n}\n`,
++  };
++
++  expect(findPaletteViolations([TWO_PALETTES, file])).toEqual([
++    { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#fff" },
++  ]);
++});
++
++test("the native window backgrounds equal each palette's --color-window", () => {
++  expect(
++    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xe9, 0xea, 0xee")]),
++  ).toEqual([]);
++  expect(
++    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2d", "0xe9, 0xea, 0xee")]),
++  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 2, match: "BACKGROUND_DARK" }]);
++  expect(
++    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xff, 0xff, 0xff")]),
++  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 3, match: "BACKGROUND_LIGHT" }]);
++});
++
++test("a window file without one of the backgrounds is reported", () => {
++  const missing = {
++    path: WINDOW_FILE,
++    text: "const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);\n",
++  };
++
++  expect(findPaletteViolations([TWO_PALETTES, missing])).toEqual([
++    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_DARK" },
++    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_LIGHT" },
++  ]);
+ });
+ 
+ test("readPaletteSources reports ts, vue and css literals on disk and skips src/ipc/bindings.ts", () => {
+diff --git c/frontend/scripts/palette.ts i/frontend/scripts/palette.ts
+index 82a0f81..997edf7 100644
+--- c/frontend/scripts/palette.ts
++++ i/frontend/scripts/palette.ts
+@@ -1,25 +1,38 @@
+-import { globSync, readFileSync } from "node:fs";
++import { existsSync, globSync, readFileSync } from "node:fs";
+ import { join } from "node:path";
+ 
+ import { readSourceTree, type SourceFile } from "./fences";
+ 
+ export type PaletteViolation = {
+-  readonly rule: "literal" | "unknown-token";
++  readonly rule:
++    | "literal"
++    | "unknown-token"
++    | "light-missing"
++    | "light-extra"
++    | "window-background";
+   readonly file: string;
+   readonly line: number;
+   readonly match: string;
+ };
+ 
+ type Span = { readonly start: number; readonly end: number };
++type Definition = { readonly name: string; readonly value: string; readonly index: number };
++type Background = { readonly hex: string; readonly index: number };
+ 
+ const PALETTE_FILE = "src/style.css";
++export const WINDOW_FILE = "../src-tauri/src/window.rs";
+ const THEME_OPENER = /@theme(?:\s+(?:static|inline))?\s*\{/g;
++const LIGHT_OPENER = /:root\[data-theme="light"\]\s*\{/g;
+ const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
++const TOKEN_VALUE = /--color-([\w-]+)\s*:\s*([^;]+);/g;
+ const TOKEN_USE = /--color-([\w-]+)/g;
+ const VAR_OPENER = /var\(\s*$/;
+ const HEX_COLOUR =
+   /(?<![A-Za-z0-9])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![A-Za-z0-9-])/g;
+ const FUNCTIONAL_COLOUR = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/gi;
++const WINDOW_BACKGROUND =
++  /const (BACKGROUND_DARK|BACKGROUND_LIGHT): Color = Color\(0x([0-9a-f]{2}), 0x([0-9a-f]{2}), 0x([0-9a-f]{2}), 0xff\);/gi;
++const WINDOW_TOKEN = "window";
+ 
+ function blockEnd(text: string, afterOpener: number): number {
+   let depth = 1;
+@@ -31,18 +44,31 @@ function blockEnd(text: string, afterOpener: number): number {
+   return text.length;
+ }
+ 
+-function themeSpans(file: SourceFile): Span[] {
++function blockSpans(file: SourceFile, opener: RegExp): Span[] {
+   if (file.path !== PALETTE_FILE) return [];
+-  return [...file.text.matchAll(THEME_OPENER)].map((opener) => {
+-    const afterOpener = opener.index + opener[0].length;
+-    return { start: opener.index, end: blockEnd(file.text, afterOpener) };
++  return [...file.text.matchAll(opener)].map((found) => {
++    const afterOpener = found.index + found[0].length;
++    return { start: found.index, end: blockEnd(file.text, afterOpener) };
+   });
+ }
+ 
++function paletteSpans(file: SourceFile): Span[] {
++  return [...blockSpans(file, THEME_OPENER), ...blockSpans(file, LIGHT_OPENER)];
++}
++
++function definitionsIn(file: SourceFile, spans: readonly Span[]): Definition[] {
++  return spans.flatMap(({ start, end }) =>
++    [...file.text.slice(start, end).matchAll(TOKEN_VALUE)].map((found) => {
++      const [, name = "", value = ""] = found;
++      return { name, value: value.trim().toLowerCase(), index: start + found.index };
++    }),
++  );
++}
++
+ function definedTokens(files: readonly SourceFile[]): Set<string> {
+   const names = new Set<string>();
+   for (const file of files) {
+-    for (const span of themeSpans(file)) {
++    for (const span of blockSpans(file, THEME_OPENER)) {
+       for (const definition of file.text.slice(span.start, span.end).matchAll(TOKEN_DEFINITION)) {
+         names.add(definition[1] ?? "");
+       }
+@@ -55,10 +81,14 @@ function lineAt(text: string, offset: number): number {
+   return text.slice(0, offset).split("\n").length;
+ }
+ 
+-function literalFindings(file: SourceFile, theme: readonly Span[]): PaletteViolation[] {
++function inside(spans: readonly Span[], index: number): boolean {
++  return spans.some(({ start, end }) => index >= start && index < end);
++}
++
++function literalFindings(file: SourceFile, palette: readonly Span[]): PaletteViolation[] {
+   const matches = [...file.text.matchAll(HEX_COLOUR), ...file.text.matchAll(FUNCTIONAL_COLOUR)];
+   return matches
+-    .filter((match) => !theme.some(({ start, end }) => match.index >= start && match.index < end))
++    .filter((match) => !inside(palette, match.index))
+     .map((match) => ({
+       rule: "literal",
+       file: file.path,
+@@ -69,16 +99,12 @@ function literalFindings(file: SourceFile, theme: readonly Span[]): PaletteViola
+ 
+ function tokenFindings(
+   file: SourceFile,
+-  theme: readonly Span[],
++  palette: readonly Span[],
+   defined: Set<string>,
+ ): PaletteViolation[] {
+   return [...file.text.matchAll(TOKEN_USE)]
+     .filter((use) => !defined.has(use[1] ?? ""))
+-    .filter(
+-      (use) =>
+-        !theme.some(({ start, end }) => use.index >= start && use.index < end) ||
+-        VAR_OPENER.test(file.text.slice(0, use.index)),
+-    )
++    .filter((use) => !inside(palette, use.index) || VAR_OPENER.test(file.text.slice(0, use.index)))
+     .map((use) => ({
+       rule: "unknown-token",
+       file: file.path,
+@@ -87,19 +113,82 @@ function tokenFindings(
+     }));
+ }
+ 
+-export function findPaletteViolations(files: readonly SourceFile[]): PaletteViolation[] {
+-  const defined = definedTokens(files);
+-  return files.flatMap((file) => {
+-    const theme = themeSpans(file);
+-    return [...literalFindings(file, theme), ...tokenFindings(file, theme, defined)].toSorted(
+-      (left, right) => left.line - right.line,
+-    );
++function lightFindings(file: SourceFile): PaletteViolation[] {
++  const dark = definitionsIn(file, blockSpans(file, THEME_OPENER));
++  const darkNames = new Set(dark.map(({ name }) => name));
++  return blockSpans(file, LIGHT_OPENER).flatMap((span) => {
++    const lightNames = new Set(definitionsIn(file, [span]).map(({ name }) => name));
++    const missing = dark
++      .filter(({ name }) => !lightNames.has(name))
++      .map(({ name }): PaletteViolation => ({
++        rule: "light-missing",
++        file: file.path,
++        line: lineAt(file.text, span.start),
++        match: `--color-${name}`,
++      }));
++    const extra = definitionsIn(file, [span])
++      .filter(({ name }) => !darkNames.has(name))
++      .map(({ name, index }): PaletteViolation => ({
++        rule: "light-extra",
++        file: file.path,
++        line: lineAt(file.text, index),
++        match: `--color-${name}`,
++      }));
++    return [...missing, ...extra];
+   });
+ }
+ 
++function windowColour(file: SourceFile, opener: RegExp): string | undefined {
++  return definitionsIn(file, blockSpans(file, opener)).find(({ name }) => name === WINDOW_TOKEN)
++    ?.value;
++}
++
++function windowFindings(palette: SourceFile, shell: SourceFile): PaletteViolation[] {
++  const expected: Readonly<Record<string, string | undefined>> = {
++    BACKGROUND_DARK: windowColour(palette, THEME_OPENER),
++    BACKGROUND_LIGHT: windowColour(palette, LIGHT_OPENER),
++  };
++  const found = new Map(
++    [...shell.text.matchAll(WINDOW_BACKGROUND)].map((constant): [string, Background] => {
++      const [, name = "", red = "", green = "", blue = ""] = constant;
++      return [name, { hex: `#${red}${green}${blue}`.toLowerCase(), index: constant.index }];
++    }),
++  );
++  return Object.entries(expected).flatMap(([name, colour]): PaletteViolation[] => {
++    const constant = found.get(name);
++    if (constant !== undefined && constant.hex === colour) return [];
++    const line = constant === undefined ? 1 : lineAt(shell.text, constant.index);
++    return [{ rule: "window-background", file: shell.path, line, match: name }];
++  });
++}
++
++export function findPaletteViolations(files: readonly SourceFile[]): PaletteViolation[] {
++  const sources = files.filter((file) => file.path !== WINDOW_FILE);
++  const defined = definedTokens(sources);
++  const palette = sources.find((file) => file.path === PALETTE_FILE);
++  const shell = files.find((file) => file.path === WINDOW_FILE);
++  const native = palette === undefined || shell === undefined ? [] : windowFindings(palette, shell);
++  return [
++    ...sources.flatMap((file) => {
++      const spans = paletteSpans(file);
++      const light = file.path === PALETTE_FILE ? lightFindings(file) : [];
++      return [
++        ...literalFindings(file, spans),
++        ...tokenFindings(file, spans, defined),
++        ...light,
++      ].toSorted((left, right) => left.line - right.line);
++    }),
++    ...native,
++  ];
++}
++
+ export function readPaletteSources(frontendRoot: string): SourceFile[] {
+   const styles = globSync("src/**/*.css", { cwd: frontendRoot })
+     .toSorted()
+     .map((path) => ({ path, text: readFileSync(join(frontendRoot, path), "utf8") }));
+-  return [...readSourceTree(frontendRoot), ...styles];
++  const windowPath = join(frontendRoot, WINDOW_FILE);
++  const shell = existsSync(windowPath)
++    ? [{ path: WINDOW_FILE, text: readFileSync(windowPath, "utf8") }]
++    : [];
++  return [...readSourceTree(frontendRoot), ...styles, ...shell];
+ }
+diff --git c/frontend/src/editor/index.ts i/frontend/src/editor/index.ts
+index 0be9d2b..f9393bf 100644
+--- c/frontend/src/editor/index.ts
++++ i/frontend/src/editor/index.ts
+@@ -1,10 +1,10 @@
+ import { redo, undo } from "@codemirror/commands";
+-import type { Language, LanguageDescription, LanguageSupport } from "@codemirror/language";
++import type { Language } from "@codemirror/language";
+ import { searchPanelOpen } from "@codemirror/search";
+ import type { Extension, StateField } from "@codemirror/state";
+ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+-import { log, type FileMergeData } from "../ipc";
++import type { FileMergeData } from "../ipc";
+ import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
+ import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+@@ -14,19 +14,22 @@ import { coveredAction, IconDrag } from "./internal/drag";
+ import { syncFindSpace } from "./internal/find";
+ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
+ import { historyCommand } from "./internal/historyKey";
+-import { languageOf } from "./internal/language";
++import { languageOf, loadLanguage } from "./internal/language";
+ import { modClicks } from "./internal/modClick";
+ import type { Direction } from "./internal/navigation";
+-import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
++import { centerPane, createPane, paneText, showPreferences } from "./internal/pane";
++import type { PaneSettings, Preferences } from "./internal/pane";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+-import { sideKeys, SideFocus } from "./internal/sideFocus";
++import { SideFocus } from "./internal/sideFocus";
++import { sideKeys, sideKeysCompartment } from "./internal/sideKeys";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+ import { Strips, type IconPress } from "./internal/strips";
+ import { visibleLines } from "./internal/viewport";
+ 
+ export type { Direction } from "./internal/navigation";
++export type { Preferences } from "./internal/pane";
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+ 
+@@ -37,7 +40,7 @@ export type MergeHosts = {
+   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
+ };
+ 
+-export type MergeOptions = { readonly readOnly: boolean };
++export type MergeOptions = { readonly readOnly: boolean; readonly preferences: Preferences };
+ 
+ type ViewSources = {
+   data: FileMergeData;
+@@ -49,6 +52,7 @@ type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly A
+ export class MergeController {
+   readonly #field: StateField<readonly ChunkSpan[]>;
+   readonly #readOnly: boolean;
++  #settings: PaneSettings;
+   readonly #views: PaneViews;
+   readonly #sides: SideDocs;
+   readonly #strips: Strips;
+@@ -60,10 +64,11 @@ export class MergeController {
+   #summaryListener: ((summary: MergeSummary) => void) | null = null;
+   #destroyed = false;
+ 
+-  constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions) {
++  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
+     const description = languageOf(data.path);
+     this.#field = chunkField(data.chunks);
+-    this.#readOnly = options?.readOnly ?? false;
++    this.#readOnly = options.readOnly;
++    this.#settings = { preferences: options.preferences, platform: navigator.platform };
+     const language = description?.support?.language ?? null;
+     this.#views = this.#createViews({ data, hosts, language });
+     this.#focus = new SideFocus({
+@@ -89,25 +94,7 @@ export class MergeController {
+     });
+     this.#requestFrame();
+     if (description !== null && description.support === undefined) {
+-      void this.#loadLanguage(description, data.path);
+-    }
+-  }
+-
+-  async #loadLanguage(description: LanguageDescription, path: string): Promise<void> {
+-    let support: LanguageSupport;
+-    try {
+-      support = await description.load();
+-    } catch (error) {
+-      const reason = error instanceof Error ? error.message : String(error);
+-      log.warn("language.load_failed", { path, language: description.name, reason });
+-      return;
+-    }
+-    if (this.#destroyed) {
+-      return;
+-    }
+-    const effects = languageCompartment.reconfigure(support.language);
+-    for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
+-      view.dispatch({ effects });
++      void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
+     }
+   }
+ 
+@@ -129,7 +116,7 @@ export class MergeController {
+     const statusSync = EditorView.updateListener.of((update) => {
+       this.#statusesChanged(update);
+     });
+-    const shared = { eol: data.eol, language };
++    const shared = { eol: data.eol, language, settings: this.#settings };
+     const center = createPane({
+       ...shared,
+       ...centerPane(data.middle, this.#readOnly),
+@@ -158,15 +145,23 @@ export class MergeController {
+     };
+   }
+ 
++  #sideKeys(side: Side): Extension {
++    return sideKeys(
++      (command) => {
++        this.#focus.run(side, command);
++      },
++      this.#settings.preferences.keys,
++      this.#settings.platform,
++    );
++  }
++
+   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
+     return [
+       statuses,
+       sideDecorations(statuses, side),
+       focusDecorations(statuses, side),
+       coveredDecorations(side),
+-      sideKeys((command) => {
+-        this.#focus.run(side, command);
+-      }),
++      sideKeysCompartment.of(this.#sideKeys(side)),
+       this.#repaint,
+       this.#readOnly
+         ? []
+@@ -251,6 +246,11 @@ export class MergeController {
+     this.#focus.moveToChange(direction);
+   }
+ 
++  setPreferences(preferences: Preferences): void {
++    this.#settings = { ...this.#settings, preferences };
++    showPreferences(this.#views, this.#settings, (side) => this.#sideKeys(side));
++  }
++
+   undo(): boolean {
+     return undo(this.#views.center);
+   }
+@@ -260,7 +260,8 @@ export class MergeController {
+   }
+ 
+   historyKey(event: KeyboardEvent): boolean {
+-    const command = historyCommand(event, navigator.platform);
++    const { preferences, platform } = this.#settings;
++    const command = historyCommand(event, platform, preferences.keys);
+     if (command === null) {
+       return false;
+     }
+diff --git c/frontend/src/editor/internal/apply.test.ts i/frontend/src/editor/internal/apply.test.ts
+index 87ba53b..4c0ecf9 100644
+--- c/frontend/src/editor/internal/apply.test.ts
++++ i/frontend/src/editor/internal/apply.test.ts
+@@ -3,7 +3,7 @@ import { Transaction, type EditorState, type StateCommand } from "@codemirror/st
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
++import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import {
+   actionSteps,
+   bulkApplySteps,
+@@ -16,11 +16,15 @@ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations } from "./decorations";
+ import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+-import { centerPane, paneState, paneText } from "./pane";
++import { centerPane, paneState, paneText, type PaneSettings } from "./pane";
+ import type { Side } from "./side";
+ import { summarize } from "./status";
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
+ 
+ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
+ 
+@@ -65,7 +69,7 @@ async function synthetic(
+ 
+ function open(data: FileMergeData, readOnly = false): ApplyTarget {
+   const field = chunkField(data.chunks);
+-  const pane = { eol: data.eol, language: null };
++  const pane = { eol: data.eol, language: null, settings: SETTINGS };
+   return {
+     state: paneState({
+       ...pane,
+diff --git c/frontend/src/editor/internal/find.test.ts i/frontend/src/editor/internal/find.test.ts
+index 87babc6..23190dd 100644
+--- c/frontend/src/editor/internal/find.test.ts
++++ i/frontend/src/editor/internal/find.test.ts
+@@ -3,7 +3,9 @@ import { EditorSelection, EditorState } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { find, findLabel, labelOutdated, showFindSpace, stepMatch } from "./find";
++import { DEFAULT_KEYS, parseKey } from "../../ipc";
++import { closeButtonTitle, find, showFindSpace } from "./find";
++import { findLabel, labelOutdated, stepMatch } from "./findMatch";
+ 
+ const DOC = "foo bar\nFoo baz\nqux FOO\n";
+ const FIRST = { from: 0, to: 3 };
+@@ -87,3 +89,17 @@ test("the space above the first line stays from show to hide, across edits; the
+     spaced(state.update({ effects: [showFindSpace.of(true), showFindSpace.of(false)] }).state),
+   ).toBe(false);
+ });
++
++test("the Close button's title names the first Close find key, or none", () => {
++  const f10 = parseKey("F10");
++  if (f10 === null) {
++    throw new Error("F10 does not parse");
++  }
++
++  expect(closeButtonTitle(DEFAULT_KEYS, "Linux x86_64")).toBe("Close (Escape)");
++  expect(closeButtonTitle({ ...DEFAULT_KEYS, "close-find": [f10] }, "Linux x86_64")).toBe(
++    "Close (F10)",
++  );
++  expect(closeButtonTitle(DEFAULT_KEYS, "MacIntel")).toBe("Close (⎋)");
++  expect(closeButtonTitle({ ...DEFAULT_KEYS, "close-find": [] }, "Linux x86_64")).toBe("Close");
++});
+diff --git c/frontend/src/editor/internal/find.ts i/frontend/src/editor/internal/find.ts
+index d187a18..a221874 100644
+--- c/frontend/src/editor/internal/find.ts
++++ i/frontend/src/editor/internal/find.ts
+@@ -8,17 +8,13 @@ import {
+   searchPanelOpen,
+   setSearchQuery,
+ } from "@codemirror/search";
+-import {
+-  EditorSelection,
+-  StateEffect,
+-  StateField,
+-  type EditorState,
+-  type TransactionSpec,
+-} from "@codemirror/state";
++import { Compartment, Facet, StateEffect, StateField, type Extension } from "@codemirror/state";
+ import {
+   EditorView,
+   keymap,
+   runScopeHandlers,
++  type Command,
++  type KeyBinding,
+   type Panel,
+   type ViewUpdate,
+ } from "@codemirror/view";
+@@ -27,13 +23,16 @@ import arrowUpIcon from "~icons/lucide/arrow-up?raw";
+ import searchIcon from "~icons/lucide/search?raw";
+ import xIcon from "~icons/lucide/x?raw";
+ 
++import { keyLabel, type KeyAction, type KeyBindings } from "../../ipc";
++import { findLabel, labelOutdated, matches, matchFrom, selectMatch, stepMatch } from "./findMatch";
++import type { FindDirection } from "./findMatch";
+ import type { PaneViews } from "./geometry";
+-
+-type Match = { readonly from: number; readonly to: number };
+-type Direction = "next" | "previous";
++import { cmKeys } from "./keys";
+ 
+ const FIND_BAR_HEIGHT_PX = 29;
+ const FIND_BAR_INSET_PX = 16;
++const CLOSE = "Close";
++const FIND_SCOPE = "editor search-panel";
+ 
+ const findTheme = EditorView.theme({
+   ".cm-panels.cm-panels-top": {
+@@ -68,69 +67,16 @@ export function syncFindSpace(views: PaneViews): void {
+   }
+ }
+ 
+-function matches(state: EditorState, query: SearchQuery): Match[] {
+-  const found: Match[] = [];
+-  if (!query.valid) {
+-    return found;
+-  }
+-  const cursor = query.getCursor(state);
+-  for (let next = cursor.next(); next.done !== true; next = cursor.next()) {
+-    found.push({ from: next.value.from, to: next.value.to });
+-  }
+-  return found;
++const closeTitle = Facet.define<string, string>({
++  combine: (titles) => titles[0] ?? CLOSE,
++});
++
++export function closeButtonTitle(keys: KeyBindings, platform: string): string {
++  const [first] = keys["close-find"];
++  return first === undefined ? CLOSE : `${CLOSE} (${keyLabel(first, platform)})`;
+ }
+ 
+-export function findLabel(state: EditorState, query: SearchQuery): string {
+-  if (query.search === "") {
+-    return "";
+-  }
+-  const found = matches(state, query);
+-  if (found.length === 0) {
+-    return "No results";
+-  }
+-  const { from, to } = state.selection.main;
+-  const current = found.findIndex((match) => match.from === from && match.to === to);
+-  if (current >= 0) {
+-    return `${current + 1} of ${found.length}`;
+-  }
+-  return found.length === 1 ? "1 result" : `${found.length} results`;
+-}
+-
+-export function labelOutdated(before: EditorState, after: EditorState): boolean {
+-  return (
+-    before.doc !== after.doc ||
+-    !before.selection.eq(after.selection) ||
+-    !getSearchQuery(before).eq(getSearchQuery(after))
+-  );
+-}
+-
+-function matchFrom(found: readonly Match[], pos: number): Match | undefined {
+-  return found.find((match) => match.from >= pos) ?? found[0];
+-}
+-
+-export function stepMatch(
+-  state: EditorState,
+-  { query, direction }: { readonly query: SearchQuery; readonly direction: Direction },
+-): TransactionSpec | null {
+-  const found = matches(state, query);
+-  const { from, to } = state.selection.main;
+-  const match =
+-    direction === "next"
+-      ? matchFrom(found, to)
+-      : (found.findLast((candidate) => candidate.to <= from) ?? found.at(-1));
+-  return match === undefined ? null : selectMatch(match);
+-}
+-
+-function selectMatch({ from, to }: Match): TransactionSpec {
+-  const selection = EditorSelection.single(from, to);
+-  return {
+-    selection,
+-    effects: EditorView.scrollIntoView(selection.main, { y: "center" }),
+-    userEvent: "select.search",
+-  };
+-}
+-
+-function step(view: EditorView, direction: Direction): boolean {
++function step(view: EditorView, direction: FindDirection): boolean {
+   const spec = stepMatch(view.state, { query: getSearchQuery(view.state), direction });
+   if (spec !== null) {
+     view.dispatch(spec);
+@@ -193,6 +139,7 @@ class FindPanel implements Panel {
+   readonly #view: EditorView;
+   readonly #field = document.createElement("input");
+   readonly #count = document.createElement("span");
++  readonly #close: HTMLButtonElement;
+ 
+   constructor(view: EditorView) {
+     this.#view = view;
+@@ -214,6 +161,11 @@ class FindPanel implements Panel {
+     this.#count.className = "find-count";
+     this.#count.setAttribute("aria-live", "polite");
+     this.#count.textContent = findLabel(view.state, getSearchQuery(view.state));
++    this.#close = iconButton({
++      icon: xIcon,
++      title: view.state.facet(closeTitle),
++      run: () => closeFind(view),
++    });
+     this.dom.append(
+       icon,
+       this.#field,
+@@ -228,7 +180,7 @@ class FindPanel implements Panel {
+         title: "Next Occurrence (Enter)",
+         run: () => findNext(view),
+       }),
+-      iconButton({ icon: xIcon, title: "Close (Escape)", run: () => closeFind(view) }),
++      this.#close,
+     );
+   }
+ 
+@@ -245,6 +197,11 @@ class FindPanel implements Panel {
+     if (labelOutdated(update.startState, update.state)) {
+       this.#count.textContent = findLabel(update.state, query);
+     }
++    const title = update.state.facet(closeTitle);
++    if (title !== update.startState.facet(closeTitle)) {
++      this.#close.title = title;
++      this.#close.setAttribute("aria-label", title);
++    }
+   }
+ 
+   readonly #typed = (): void => {
+@@ -270,15 +227,26 @@ export const find = [
+   findTheme,
+   findSpace,
+   search({ literal: true, createPanel: (view) => new FindPanel(view) }),
+-  keymap.of([
+-    { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
+-    {
+-      key: "F3",
+-      run: findNext,
+-      shift: findPrevious,
+-      scope: "editor search-panel",
+-      preventDefault: true,
+-    },
+-    { key: "Escape", run: closeFind, scope: "editor search-panel" },
+-  ]),
+ ];
++
++export const findKeysCompartment = new Compartment();
++
++export function findKeys(keys: KeyBindings, platform: string): Extension {
++  function bind(action: KeyAction, run: Command, preventDefault: boolean): KeyBinding[] {
++    return cmKeys(keys[action], platform).map((key) => ({
++      key,
++      run,
++      scope: FIND_SCOPE,
++      preventDefault,
++    }));
++  }
++  return [
++    closeTitle.of(closeButtonTitle(keys, platform)),
++    keymap.of([
++      ...bind("find", openFind, true),
++      ...bind("find-next", findNext, true),
++      ...bind("find-previous", findPrevious, true),
++      ...bind("close-find", closeFind, false),
++    ]),
++  ];
++}
+diff --git c/frontend/src/editor/internal/findMatch.ts i/frontend/src/editor/internal/findMatch.ts
+new file mode 100644
+index 0000000..07d0436
+--- /dev/null
++++ i/frontend/src/editor/internal/findMatch.ts
+@@ -0,0 +1,68 @@
++import { getSearchQuery, type SearchQuery } from "@codemirror/search";
++import { EditorSelection, type EditorState, type TransactionSpec } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++
++type Match = { readonly from: number; readonly to: number };
++export type FindDirection = "next" | "previous";
++
++export function matches(state: EditorState, query: SearchQuery): Match[] {
++  const found: Match[] = [];
++  if (!query.valid) {
++    return found;
++  }
++  const cursor = query.getCursor(state);
++  for (let next = cursor.next(); next.done !== true; next = cursor.next()) {
++    found.push({ from: next.value.from, to: next.value.to });
++  }
++  return found;
++}
++
++export function findLabel(state: EditorState, query: SearchQuery): string {
++  if (query.search === "") {
++    return "";
++  }
++  const found = matches(state, query);
++  if (found.length === 0) {
++    return "No results";
++  }
++  const { from, to } = state.selection.main;
++  const current = found.findIndex((match) => match.from === from && match.to === to);
++  if (current >= 0) {
++    return `${current + 1} of ${found.length}`;
++  }
++  return found.length === 1 ? "1 result" : `${found.length} results`;
++}
++
++export function labelOutdated(before: EditorState, after: EditorState): boolean {
++  return (
++    before.doc !== after.doc ||
++    !before.selection.eq(after.selection) ||
++    !getSearchQuery(before).eq(getSearchQuery(after))
++  );
++}
++
++export function matchFrom(found: readonly Match[], pos: number): Match | undefined {
++  return found.find((match) => match.from >= pos) ?? found[0];
++}
++
++export function stepMatch(
++  state: EditorState,
++  { query, direction }: { readonly query: SearchQuery; readonly direction: FindDirection },
++): TransactionSpec | null {
++  const found = matches(state, query);
++  const { from, to } = state.selection.main;
++  const match =
++    direction === "next"
++      ? matchFrom(found, to)
++      : (found.findLast((candidate) => candidate.to <= from) ?? found.at(-1));
++  return match === undefined ? null : selectMatch(match);
++}
++
++export function selectMatch({ from, to }: Match): TransactionSpec {
++  const selection = EditorSelection.single(from, to);
++  return {
++    selection,
++    effects: EditorView.scrollIntoView(selection.main, { y: "center" }),
++    userEvent: "select.search",
++  };
++}
+diff --git c/frontend/src/editor/internal/historyKey.test.ts i/frontend/src/editor/internal/historyKey.test.ts
+index 0482be3..d837f66 100644
+--- c/frontend/src/editor/internal/historyKey.test.ts
++++ i/frontend/src/editor/internal/historyKey.test.ts
+@@ -1,5 +1,6 @@
+ import { expect, test } from "vitest";
+ 
++import { DEFAULT_KEYS, parseKey, type Key, type KeyBindings } from "../../ipc";
+ import { historyCommand } from "./historyKey";
+ 
+ const LINUX = "Linux x86_64";
+@@ -16,7 +17,11 @@ type Press = {
+   target?: EventTarget | null;
+ };
+ 
+-function command(platform: string, press: Press): "undo" | "redo" | null {
++function command(
++  platform: string,
++  press: Press,
++  keys: KeyBindings = DEFAULT_KEYS,
++): "undo" | "redo" | null {
+   return historyCommand(
+     {
+       key: press.key,
+@@ -29,9 +34,18 @@ function command(platform: string, press: Press): "undo" | "redo" | null {
+       target: press.target ?? null,
+     },
+     platform,
++    keys,
+   );
+ }
+ 
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
+ test("Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing", () => {
+   expect(command(LINUX, { key: "z", ctrl: true })).toBe("undo");
+   expect(command(LINUX, { key: "Z", ctrl: true, shift: true })).toBe("redo");
+@@ -82,3 +96,20 @@ test("a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ct
+   expect(command(LINUX, { key: ":", code: "KeyZ", ctrl: true, shift: true })).toBeNull();
+   expect(command(LINUX, { key: "-", code: "KeyY", ctrl: true })).toBeNull();
+ });
++
++test("a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing", () => {
++  const keys = { ...DEFAULT_KEYS, undo: [key("Alt-Backspace")] };
++  const side = Object.assign(new EventTarget(), { tagName: "DIV" });
++
++  expect(command(LINUX, { key: "Backspace", alt: true, target: side }, keys)).toBe("undo");
++  expect(command(LINUX, { key: "z", ctrl: true }, keys)).toBeNull();
++  expect(command(LINUX, { key: "Backspace" }, keys)).toBeNull();
++  expect(command(LINUX, { key: "Y", ctrl: true, shift: true })).toBeNull();
++});
++
++test("a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only", () => {
++  const keys = { ...DEFAULT_KEYS, redo: [key("Mod-Shift-z")] };
++
++  expect(command(LINUX, { key: "Я", code: "KeyZ", ctrl: true, shift: true }, keys)).toBe("redo");
++  expect(command(LINUX, { key: "н", code: "KeyY", ctrl: true }, keys)).toBeNull();
++});
+diff --git c/frontend/src/editor/internal/historyKey.ts i/frontend/src/editor/internal/historyKey.ts
+index 0f76b79..f29d94e 100644
+--- c/frontend/src/editor/internal/historyKey.ts
++++ i/frontend/src/editor/internal/historyKey.ts
+@@ -1,4 +1,4 @@
+-import { isModHeld } from "./modClick";
++import { keyOfEvent, sameKey, type KeyBindings } from "../../ipc";
+ 
+ type HistoryKey = Pick<
+   KeyboardEvent,
+@@ -6,9 +6,6 @@ type HistoryKey = Pick<
+ >;
+ 
+ const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
+-const LATIN_LETTER = /^[a-z]$/i;
+-const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
+-const LETTER_CODE = /^Key([A-Z])$/;
+ 
+ function inTextField(target: EventTarget | null): boolean {
+   return (
+@@ -19,34 +16,20 @@ function inTextField(target: EventTarget | null): boolean {
+   );
+ }
+ 
+-// A non-Latin layout gives `key` 'я' for Ctrl+Z; like CodeMirror's runHandlers (keyCode fallback,
+-// @codemirror/view keymap.ts: keyCode follows a Latin layout, so Dvorak's ';' on KeyZ stays ';'),
+-// the physical key decides only then.
+-function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
+-  if (LATIN_LETTER.test(key)) {
+-    return key.toLowerCase();
+-  }
+-  if (!LETTER_OR_MARK.test(key)) {
+-    return "";
+-  }
+-  return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
+-}
+-
+-export function historyCommand(event: HistoryKey, platform: string): "undo" | "redo" | null {
+-  if (
+-    event.defaultPrevented ||
+-    event.altKey ||
+-    !isModHeld(event, platform) ||
+-    inTextField(event.target)
+-  ) {
++export function historyCommand(
++  event: HistoryKey,
++  platform: string,
++  keys: KeyBindings,
++): "undo" | "redo" | null {
++  if (event.defaultPrevented || inTextField(event.target)) {
+     return null;
+   }
+-  switch (letterOf(event)) {
+-    case "z":
+-      return event.shiftKey ? "redo" : "undo";
+-    case "y":
+-      return "redo";
+-    default:
+-      return null;
++  const pressed = keyOfEvent(event, platform);
++  if (pressed === null) {
++    return null;
+   }
++  if (keys.undo.some((key) => sameKey(key, pressed))) {
++    return "undo";
++  }
++  return keys.redo.some((key) => sameKey(key, pressed)) ? "redo" : null;
+ }
+diff --git c/frontend/src/editor/internal/keys.test.ts i/frontend/src/editor/internal/keys.test.ts
+new file mode 100644
+index 0000000..f25dcda
+--- /dev/null
++++ i/frontend/src/editor/internal/keys.test.ts
+@@ -0,0 +1,41 @@
++import { expect, test } from "vitest";
++
++import { parseKey, type Key } from "../../ipc";
++import { cmKey, cmKeys } from "./keys";
++
++const LINUX = "Linux x86_64";
++const MAC = "MacIntel";
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
++test("Shift with a letter alone is the upper-case letter, as CodeMirror matches it", () => {
++  expect(cmKey(key("Shift-x"), LINUX)).toBe("X");
++  expect(cmKey(key("Shift-я"), LINUX)).toBe("Я");
++});
++
++test("Shift with Mod, Alt or a named key keeps the Shift- prefix", () => {
++  expect(cmKey(key("Mod-Shift-z"), LINUX)).toBe("Mod-Shift-z");
++  expect(cmKey(key("Alt-Shift-x"), LINUX)).toBe("Alt-Shift-x");
++  expect(cmKey(key("Shift-F3"), LINUX)).toBe("Shift-F3");
++  expect(cmKey(key("Shift-Space"), LINUX)).toBe("Shift-Space");
++});
++
++test("named keys and plain characters pass through", () => {
++  expect(cmKey(key("Space"), LINUX)).toBe("Space");
++  expect(cmKey(key("Mod-Alt-ArrowUp"), LINUX)).toBe("Mod-Alt-ArrowUp");
++  expect(cmKey(key("Mod--"), LINUX)).toBe("Mod--");
++  expect(cmKey(key("x"), LINUX)).toBe("x");
++});
++
++test("a macOS Ctrl key is not bound on Linux and is Ctrl- on macOS", () => {
++  expect(cmKey(key("MacCtrl-x"), LINUX)).toBeNull();
++  expect(cmKey(key("MacCtrl-x"), MAC)).toBe("Ctrl-x");
++  expect(cmKey(key("Mod-MacCtrl-Shift-x"), MAC)).toBe("Mod-Ctrl-Shift-x");
++  expect(cmKeys([key("MacCtrl-x"), key("Enter")], LINUX)).toEqual(["Enter"]);
++});
+diff --git c/frontend/src/editor/internal/keys.ts i/frontend/src/editor/internal/keys.ts
+new file mode 100644
+index 0000000..e1ef23f
+--- /dev/null
++++ i/frontend/src/editor/internal/keys.ts
+@@ -0,0 +1,25 @@
++import { isLetter, isMac, type Key } from "../../ipc";
++
++// CodeMirror matches Shift with a character only through the character itself: Shift+x arrives as
++// "X" and is looked up without "Shift-" (@codemirror/view keymap.ts runHandlers, `modifiers(name,
++// event, !isChar)`); with Ctrl, Cmd or Alt held it falls back to "Shift-…-x".
++export function cmKey(key: Key, platform: string): string | null {
++  if (key.macCtrl && !isMac(platform)) {
++    return null;
++  }
++  const alone = !key.mod && !key.macCtrl && !key.alt;
++  if (key.shift && alone && isLetter(key.name)) {
++    return key.name.toUpperCase();
++  }
++  const prefixes = [
++    key.mod ? "Mod-" : "",
++    key.macCtrl ? "Ctrl-" : "",
++    key.alt ? "Alt-" : "",
++    key.shift ? "Shift-" : "",
++  ];
++  return `${prefixes.join("")}${key.name}`;
++}
++
++export function cmKeys(keys: readonly Key[], platform: string): string[] {
++  return keys.flatMap((key) => cmKey(key, platform) ?? []);
++}
+diff --git c/frontend/src/editor/internal/language.ts i/frontend/src/editor/internal/language.ts
+index d326e4a..6b30736 100644
+--- c/frontend/src/editor/internal/language.ts
++++ i/frontend/src/editor/internal/language.ts
+@@ -1,7 +1,34 @@
+-import { LanguageDescription } from "@codemirror/language";
++import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
+ import { languages } from "@codemirror/language-data";
+ 
++import { log } from "../../ipc";
++import type { PaneViews } from "./geometry";
++import { languageCompartment } from "./pane";
++
+ export function languageOf(path: string): LanguageDescription | null {
+   const basename = path.slice(path.lastIndexOf("/") + 1);
+   return LanguageDescription.matchFilename(languages, basename);
+ }
++
++export async function loadLanguage(
++  description: LanguageDescription,
++  path: string,
++  views: PaneViews,
++  destroyed: () => boolean,
++): Promise<void> {
++  let support: LanguageSupport;
++  try {
++    support = await description.load();
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    log.warn("language.load_failed", { path, language: description.name, reason });
++    return;
++  }
++  if (destroyed()) {
++    return;
++  }
++  const effects = languageCompartment.reconfigure(support.language);
++  for (const view of [views.left, views.center, views.right]) {
++    view.dispatch({ effects });
++  }
++}
+diff --git c/frontend/src/editor/internal/modClick.ts i/frontend/src/editor/internal/modClick.ts
+index bb675f8..4e3ea19 100644
+--- c/frontend/src/editor/internal/modClick.ts
++++ i/frontend/src/editor/internal/modClick.ts
+@@ -1,6 +1,7 @@
+ import type { Extension } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ 
++import { isMac } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+ import type { ChunkRow } from "./geometry";
+ import { changeAt } from "./navigation";
+@@ -16,11 +17,6 @@ const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
+   [SECONDARY_BUTTON]: "ignore",
+ };
+ 
+-// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
+-function isMac(platform: string): boolean {
+-  return /Mac/.test(platform);
+-}
+-
+ export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
+   // On macOS Ctrl+click is the system's secondary click.
+   return isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
+diff --git c/frontend/src/editor/internal/pane.test.ts i/frontend/src/editor/internal/pane.test.ts
+index 78cb404..ba2801e 100644
+--- c/frontend/src/editor/internal/pane.test.ts
++++ i/frontend/src/editor/internal/pane.test.ts
+@@ -1,19 +1,38 @@
+-import { indentLess, indentMore, undo, undoDepth } from "@codemirror/commands";
++import {
++  indentLess,
++  indentMore,
++  redo,
++  selectParentSyntax,
++  undo,
++  undoDepth,
++  undoSelection,
++} from "@codemirror/commands";
+ import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
+ import type { EditorState, StateCommand } from "@codemirror/state";
+-import { EditorView } from "@codemirror/view";
++import { EditorView, keymap } from "@codemirror/view";
+ import { highlightTree } from "@lezer/highlight";
+ import { expect, test } from "vitest";
+ 
+-import { loadFixture } from "../../ipc";
++import { DEFAULT_KEYS, loadFixture, parseKey, type Key, type KeyBindings } from "../../ipc";
+ import { chunkField } from "./chunkField";
+ import { sideDecorations } from "./decorations";
+ import { languageOf } from "./language";
+-import { centerPane, languageCompartment, paletteHighlight, paneState } from "./pane";
++import {
++  centerPane,
++  languageCompartment,
++  paletteHighlight,
++  paneState,
++  type PaneSettings,
++} from "./pane";
+ import { sideStatusField } from "./sideStatus";
+ 
+ const PARSE_BUDGET_MS = 5000;
+ const COLOUR = /(?:^|[{ ])color: ([^;]+);/;
++const LINUX = "Linux x86_64";
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: LINUX,
++};
+ 
+ const VUE_SFC = `<template>
+   <div class="app">{{ msg }}</div>
+@@ -58,8 +77,31 @@ async function loaded(path: string): Promise<Language> {
+   return (await description.load()).language;
+ }
+ 
+-function center(doc: string, language: Language | null): EditorState {
+-  return paneState({ kind: "center", doc, eol: "Lf", language, extensions: [] });
++function center(doc: string, language: Language | null, settings = SETTINGS): EditorState {
++  return paneState({ kind: "center", doc, eol: "Lf", language, settings, extensions: [] });
++}
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
++function withKeys(keys: Partial<KeyBindings>): PaneSettings {
++  return { preferences: { theme: "dark", keys: { ...DEFAULT_KEYS, ...keys } }, platform: LINUX };
++}
++
++// CodeMirror runs the commands bound to a key in the keymap facet's order (precedence first) until
++// one returns true (@codemirror/view keymap.ts buildKeymap, runHandlers).
++function commandsOn(state: EditorState, name: string): unknown[] {
++  return state
++    .facet(keymap)
++    .flat()
++    .filter((binding) => (binding.linux ?? binding.key) === name)
++    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"))
++    .map(({ run: command }) => command);
+ }
+ 
+ function run(command: StateCommand, state: EditorState): EditorState {
+@@ -146,6 +188,7 @@ async function tintedLeft(): Promise<EditorState> {
+     doc: data.local,
+     eol: data.eol,
+     language: null,
++    settings: SETTINGS,
+     extensions: [statuses, sideDecorations(statuses, "local")],
+   });
+ }
+@@ -191,6 +234,7 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
+     ...centerPane(data.middle, false),
+     eol: data.eol,
+     language: null,
++    settings: SETTINGS,
+     extensions: [field],
+   });
+   expect(colourAt(plain, "<template>")).toBeNull();
+@@ -264,3 +308,42 @@ test("one undo takes back a whole Tab on three lines", () => {
+   expect(undoDepth(indented)).toBe(1);
+   expect(run(undo, indented).doc.toString()).toBe(PHP);
+ });
++
++test("the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults", () => {
++  const state = center(PHP, null);
++
++  expect(commandsOn(state, "Mod-z")).toEqual([undo]);
++  expect(commandsOn(state, "Mod-Shift-z")).toEqual([redo]);
++  expect(commandsOn(state, "Mod-y")).toEqual([redo]);
++  expect(commandsOn(state, "Ctrl-Shift-z")).toEqual([]);
++  expect(commandsOn(state, "Tab")).toEqual([indentMore]);
++  expect(commandsOn(state, "Shift-Tab")).toEqual([indentLess]);
++});
++
++test("Indent on Mod-i runs before the default keymap's selectParentSyntax", () => {
++  const state = center(PHP, null, withKeys({ indent: [key("Mod-i")] }));
++
++  expect(commandsOn(state, "Mod-i")).toEqual([indentMore, selectParentSyntax]);
++});
++
++test("Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection", () => {
++  const state = center(PHP, null, withKeys({ undo: [key("Alt-Backspace")] }));
++
++  expect(commandsOn(state, "Mod-z")).toEqual([]);
++  expect(commandsOn(state, "Alt-Backspace")).toEqual([undo]);
++  expect(commandsOn(state, "Mod-u")).toEqual([undoSelection]);
++});
++
++test("Indent without keys: Tab indents nothing in the middle", () => {
++  const state = center(PHP, null, withKeys({ indent: [] }));
++
++  expect(commandsOn(state, "Tab")).toEqual([]);
++  expect(commandsOn(state, "Shift-Tab")).toEqual([indentLess]);
++});
++
++test("CodeMirror's dark flag follows the theme", () => {
++  const light: PaneSettings = { ...SETTINGS, preferences: { theme: "light", keys: DEFAULT_KEYS } };
++
++  expect(center(PHP, null).facet(EditorView.darkTheme)).toBe(true);
++  expect(center(PHP, null, light).facet(EditorView.darkTheme)).toBe(false);
++});
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index df0f675..a978313 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -1,12 +1,28 @@
+ import "@fontsource/jetbrains-mono/400.css";
+-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
++import {
++  defaultKeymap,
++  history,
++  historyKeymap,
++  indentLess,
++  indentMore,
++  redo,
++  redoSelection,
++  undo,
++  undoSelection,
++} from "@codemirror/commands";
+ import {
+   HighlightStyle,
+   indentUnit,
+   syntaxHighlighting,
+   type Language,
+ } from "@codemirror/language";
+-import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
++import {
++  Compartment,
++  EditorState,
++  Prec,
++  type Extension,
++  type StateCommand,
++} from "@codemirror/state";
+ import {
+   Decoration,
+   drawSelection,
+@@ -18,51 +34,69 @@ import {
+ } from "@codemirror/view";
+ import { tags } from "@lezer/highlight";
+ 
+-import type { FileMergeData } from "../../ipc";
+-import { find } from "./find";
++import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
++import { find, findKeys, findKeysCompartment } from "./find";
++import { SIDE_PANE, type PaneViews } from "./geometry";
+ import { indentUnitOf } from "./indent";
++import { cmKeys } from "./keys";
++import { SIDES, type Side } from "./side";
++import { sideKeysCompartment } from "./sideKeys";
+ 
+ type PaneKind = "side" | "center" | "readOnlyCenter";
+ 
+-export const languageCompartment = new Compartment();
++export type Preferences = { readonly theme: Theme; readonly keys: KeyBindings };
+ 
+-const darkTheme = EditorView.theme(
+-  {
+-    "&": {
+-      height: "100%",
+-      backgroundColor: "var(--color-panel)",
+-      color: "var(--color-code)",
+-      fontSize: "13px",
+-    },
+-    ".cm-scroller": {
+-      fontFamily: "var(--font-mono)",
+-      fontVariantLigatures: "none",
+-      lineHeight: "1.4",
+-    },
+-    ".cm-content": { caretColor: "var(--color-caret)" },
+-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
+-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
+-      { backgroundColor: "var(--color-selection)" },
+-    ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
+-    ".cm-gutters": {
+-      backgroundColor: "var(--color-panel)",
+-      color: "var(--color-gutter)",
+-      border: "none",
+-    },
+-    ".cm-activeLineGutter": {
+-      backgroundColor: "var(--color-active-line)",
+-      color: "var(--color-gutter-active)",
+-    },
+-    ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
+-    ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
+-    ".cm-searchMatch.cm-searchMatch-selected": {
+-      backgroundColor: "var(--color-selection)",
+-      outline: "1px solid var(--color-primary)",
+-    },
+-  },
+-  { dark: true },
++export type PaneSettings = { readonly preferences: Preferences; readonly platform: string };
++
++export const languageCompartment = new Compartment();
++const themeCompartment = new Compartment();
++const middleKeysCompartment = new Compartment();
++
++const MIDDLE_COMMANDS: readonly { readonly action: KeyAction; readonly run: StateCommand }[] = [
++  { action: "undo", run: undo },
++  { action: "redo", run: redo },
++  { action: "indent", run: indentMore },
++  { action: "outdent", run: indentLess },
++];
++
++const selectionHistoryKeymap = historyKeymap.filter(
++  ({ run }) => run === undoSelection || run === redoSelection,
+ );
+ 
++const paneTheme = EditorView.theme({
++  "&": {
++    height: "100%",
++    backgroundColor: "var(--color-panel)",
++    color: "var(--color-code)",
++    fontSize: "13px",
++  },
++  ".cm-scroller": {
++    fontFamily: "var(--font-mono)",
++    fontVariantLigatures: "none",
++    lineHeight: "1.4",
++  },
++  ".cm-content": { caretColor: "var(--color-caret)" },
++  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
++  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
++    { backgroundColor: "var(--color-selection)" },
++  ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
++  ".cm-gutters": {
++    backgroundColor: "var(--color-panel)",
++    color: "var(--color-gutter)",
++    border: "none",
++  },
++  ".cm-activeLineGutter": {
++    backgroundColor: "var(--color-active-line)",
++    color: "var(--color-gutter-active)",
++  },
++  ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
++  ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
++  ".cm-searchMatch.cm-searchMatch-selected": {
++    backgroundColor: "var(--color-selection)",
++    outline: "1px solid var(--color-primary)",
++  },
++});
++
+ export const paletteHighlight = HighlightStyle.define([
+   {
+     tag: [tags.keyword, tags.bool, tags.null, tags.self, tags.atom],
+@@ -108,17 +142,51 @@ const sideFocusOutline = EditorView.theme({
+   "&.cm-focused": { outline: "1px solid var(--color-primary)", outlineOffset: "-1px" },
+ });
+ 
+-function centerExtensions(doc: string): Extension {
++function darkFlag(theme: Theme): Extension {
++  return EditorView.darkTheme.of(theme === "dark");
++}
++
++function middleKeys(keys: KeyBindings, platform: string): Extension {
++  return Prec.high(
++    keymap.of(
++      MIDDLE_COMMANDS.flatMap(({ action, run }) =>
++        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault: true })),
++      ),
++    ),
++  );
++}
++
++export function showPreferences(
++  views: PaneViews,
++  { preferences, platform }: PaneSettings,
++  sideKeys: (side: Side) => Extension,
++): void {
++  const { theme, keys } = preferences;
++  const shared = [
++    themeCompartment.reconfigure(darkFlag(theme)),
++    findKeysCompartment.reconfigure(findKeys(keys, platform)),
++  ];
++  views.center.dispatch({
++    effects: [...shared, middleKeysCompartment.reconfigure(middleKeys(keys, platform))],
++  });
++  for (const side of SIDES) {
++    const effects = [...shared, sideKeysCompartment.reconfigure(sideKeys(side))];
++    views[SIDE_PANE[side]].dispatch({ effects });
++  }
++}
++
++function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
+   return [
+     history(),
+     indentUnit.of(indentUnitOf(doc)),
+-    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
++    middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
++    keymap.of([...defaultKeymap, ...selectionHistoryKeymap]),
+     highlightActiveLine(),
+     highlightActiveLineGutter(),
+   ];
+ }
+ 
+-function kindExtensions(kind: PaneKind, doc: string): Extension {
++function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Extension {
+   switch (kind) {
+     case "side":
+       return [
+@@ -128,9 +196,9 @@ function kindExtensions(kind: PaneKind, doc: string): Extension {
+         sideFocusOutline,
+       ];
+     case "center":
+-      return centerExtensions(doc);
++      return centerExtensions(doc, settings);
+     case "readOnlyCenter":
+-      return [centerExtensions(doc), EditorState.readOnly.of(true)];
++      return [centerExtensions(doc, settings), EditorState.readOnly.of(true)];
+     default: {
+       const _exhaustive: never = kind;
+       return _exhaustive;
+@@ -143,8 +211,10 @@ export function paneState(pane: {
+   doc: string;
+   eol: FileMergeData["eol"];
+   language: Language | null;
++  settings: PaneSettings;
+   extensions: Extension;
+ }): EditorState {
++  const { preferences, platform } = pane.settings;
+   return EditorState.create({
+     doc: pane.doc,
+     extensions: [
+@@ -152,11 +222,13 @@ export function paneState(pane: {
+       pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
+       drawSelection(),
+       selectionOverTints,
+-      darkTheme,
++      paneTheme,
++      themeCompartment.of(darkFlag(preferences.theme)),
+       syntaxHighlighting(paletteHighlight),
+       languageCompartment.of(pane.language ?? []),
+       find,
+-      kindExtensions(pane.kind, pane.doc),
++      findKeysCompartment.of(findKeys(preferences.keys, platform)),
++      kindExtensions(pane.kind, pane.doc, pane.settings),
+       pane.extensions,
+     ],
+   });
+diff --git c/frontend/src/editor/internal/sideFocus.test.ts i/frontend/src/editor/internal/sideFocus.test.ts
+index 03761c6..2f8648a 100644
+--- c/frontend/src/editor/internal/sideFocus.test.ts
++++ i/frontend/src/editor/internal/sideFocus.test.ts
+@@ -1,17 +1,57 @@
+ import { expect, test } from "vitest";
+ 
+-import { SIDE_KEYS } from "./sideFocus";
++import { DEFAULT_KEYS, parseKey, type Key } from "../../ipc";
++import { sideKeyCommands } from "./sideKeys";
++
++const LINUX = "Linux x86_64";
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
+ 
+ test("a focused side applies with Enter and Space, ignores with Backspace (macOS Delete), Delete and x, and moves with the arrows", () => {
+-  expect(SIDE_KEYS).toEqual({
+-    Enter: { kind: "decide", decision: "apply" },
+-    Space: { kind: "decide", decision: "apply" },
+-    Backspace: { kind: "decide", decision: "ignore" },
+-    Delete: { kind: "decide", decision: "ignore" },
+-    x: { kind: "decide", decision: "ignore" },
+-    ArrowDown: { kind: "step", direction: "down" },
+-    ArrowUp: { kind: "step", direction: "up" },
+-    ArrowLeft: { kind: "toward", side: "local" },
+-    ArrowRight: { kind: "toward", side: "remote" },
+-  });
++  expect(sideKeyCommands(DEFAULT_KEYS, LINUX)).toEqual([
++    { key: "Enter", command: { kind: "decide", decision: "apply" } },
++    { key: "Space", command: { kind: "decide", decision: "apply" } },
++    { key: "Backspace", command: { kind: "decide", decision: "ignore" } },
++    { key: "Delete", command: { kind: "decide", decision: "ignore" } },
++    { key: "x", command: { kind: "decide", decision: "ignore" } },
++    { key: "ArrowDown", command: { kind: "step", direction: "down" } },
++    { key: "ArrowUp", command: { kind: "step", direction: "up" } },
++    { key: "ArrowLeft", command: { kind: "toward", side: "local" } },
++    { key: "ArrowRight", command: { kind: "toward", side: "remote" } },
++  ]);
++});
++
++test("Apply rebound to a: a applies and Enter is bound to nothing", () => {
++  const commands = sideKeyCommands({ ...DEFAULT_KEYS, apply: [key("a")] }, LINUX);
++
++  expect(commands.filter(({ key: name }) => name === "a")).toEqual([
++    { key: "a", command: { kind: "decide", decision: "apply" } },
++  ]);
++  expect(commands.some(({ key: name }) => name === "Enter" || name === "Space")).toBe(false);
++});
++
++test("a side action without keys binds nothing, and a macOS-only key is not bound on Linux", () => {
++  const commands = sideKeyCommands(
++    { ...DEFAULT_KEYS, ignore: [], "next-change": [key("MacCtrl-n")] },
++    LINUX,
++  );
++
++  expect(commands.map(({ key: name }) => name)).toEqual([
++    "Enter",
++    "Space",
++    "ArrowUp",
++    "ArrowLeft",
++    "ArrowRight",
++  ]);
++  expect(
++    sideKeyCommands({ ...DEFAULT_KEYS, "next-change": [key("MacCtrl-n")] }, "MacIntel").find(
++      ({ key: name }) => name === "Ctrl-n",
++    ),
++  ).toEqual({ key: "Ctrl-n", command: { kind: "step", direction: "down" } });
+ });
+diff --git c/frontend/src/editor/internal/sideFocus.ts i/frontend/src/editor/internal/sideFocus.ts
+index a5d0027..21b0567 100644
+--- c/frontend/src/editor/internal/sideFocus.ts
++++ i/frontend/src/editor/internal/sideFocus.ts
+@@ -1,5 +1,4 @@
+-import type { Extension } from "@codemirror/state";
+-import { keymap, type EditorView } from "@codemirror/view";
++import type { EditorView } from "@codemirror/view";
+ 
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+@@ -17,16 +16,12 @@ import {
+   type Target,
+ } from "./navigation";
+ import { otherSide, SIDES, type Side } from "./side";
++import type { SideCommand } from "./sideKeys";
+ import { setMark, sideMarks } from "./sideMark";
+ import { isSideOpen, type ChunkState } from "./status";
+ import { revealScrollTop, visibleArea } from "./viewport";
+ import { wheelStep, type WheelSum } from "./wheel";
+ 
+-export type SideCommand =
+-  | { readonly kind: "decide"; readonly decision: "apply" | "ignore" }
+-  | { readonly kind: "step"; readonly direction: Direction }
+-  | { readonly kind: "toward"; readonly side: Side };
+-
+ type FocusSources = {
+   readonly views: PaneViews;
+   readonly states: () => readonly ChunkState[];
+@@ -36,34 +31,6 @@ type FocusSources = {
+   readonly hidden: Side | null;
+ };
+ 
+-const APPLY: SideCommand = { kind: "decide", decision: "apply" };
+-const IGNORE: SideCommand = { kind: "decide", decision: "ignore" };
+-
+-export const SIDE_KEYS: Readonly<Record<string, SideCommand>> = {
+-  Enter: APPLY,
+-  Space: APPLY,
+-  Backspace: IGNORE,
+-  Delete: IGNORE,
+-  x: IGNORE,
+-  ArrowDown: { kind: "step", direction: "down" },
+-  ArrowUp: { kind: "step", direction: "up" },
+-  ArrowLeft: { kind: "toward", side: "local" },
+-  ArrowRight: { kind: "toward", side: "remote" },
+-};
+-
+-export function sideKeys(run: (command: SideCommand) => void): Extension {
+-  return keymap.of(
+-    Object.entries(SIDE_KEYS).map(([key, command]) => ({
+-      key,
+-      preventDefault: true,
+-      run: () => {
+-        run(command);
+-        return true;
+-      },
+-    })),
+-  );
+-}
+-
+ export class SideFocus {
+   readonly #sources: FocusSources;
+   readonly #listeners = new AbortController();
+diff --git c/frontend/src/editor/internal/sideKeys.ts i/frontend/src/editor/internal/sideKeys.ts
+new file mode 100644
+index 0000000..78667f3
+--- /dev/null
++++ i/frontend/src/editor/internal/sideKeys.ts
+@@ -0,0 +1,58 @@
++import { Compartment, type Extension } from "@codemirror/state";
++import { keymap } from "@codemirror/view";
++
++import { KEY_ACTIONS, type KeyAction, type KeyBindings } from "../../ipc";
++import { cmKeys } from "./keys";
++import type { Direction } from "./navigation";
++import type { Side } from "./side";
++
++export type SideCommand =
++  | { readonly kind: "decide"; readonly decision: "apply" | "ignore" }
++  | { readonly kind: "step"; readonly direction: Direction }
++  | { readonly kind: "toward"; readonly side: Side };
++
++type SideAction = Extract<
++  KeyAction,
++  "apply" | "ignore" | "next-change" | "previous-change" | "left-side" | "right-side"
++>;
++
++const SIDE_COMMANDS: Readonly<Record<SideAction, SideCommand>> = {
++  apply: { kind: "decide", decision: "apply" },
++  ignore: { kind: "decide", decision: "ignore" },
++  "next-change": { kind: "step", direction: "down" },
++  "previous-change": { kind: "step", direction: "up" },
++  "left-side": { kind: "toward", side: "local" },
++  "right-side": { kind: "toward", side: "remote" },
++};
++
++export const sideKeysCompartment = new Compartment();
++
++function isSideAction(action: KeyAction): action is SideAction {
++  return Object.hasOwn(SIDE_COMMANDS, action);
++}
++
++export function sideKeyCommands(
++  keys: KeyBindings,
++  platform: string,
++): { readonly key: string; readonly command: SideCommand }[] {
++  return KEY_ACTIONS.filter(isSideAction).flatMap((action) =>
++    cmKeys(keys[action], platform).map((key) => ({ key, command: SIDE_COMMANDS[action] })),
++  );
++}
++
++export function sideKeys(
++  run: (command: SideCommand) => void,
++  keys: KeyBindings,
++  platform: string,
++): Extension {
++  return keymap.of(
++    sideKeyCommands(keys, platform).map(({ key, command }) => ({
++      key,
++      preventDefault: true,
++      run: () => {
++        run(command);
++        return true;
++      },
++    })),
++  );
++}
+diff --git c/frontend/src/editor/internal/sides.test.ts i/frontend/src/editor/internal/sides.test.ts
+index 9682cfa..85cf5f9 100644
+--- c/frontend/src/editor/internal/sides.test.ts
++++ i/frontend/src/editor/internal/sides.test.ts
+@@ -3,13 +3,13 @@ import type { EditorState, StateCommand, StateField } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
++import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+ import { gapArrows } from "./gap";
+ import { lineSpan } from "./lineSpan";
+-import { centerPane, paneState } from "./pane";
++import { centerPane, paneState, type PaneSettings } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
+@@ -25,6 +25,10 @@ type Range = [start: number, len: number];
+ type Lines = { readonly first: number; readonly last: number };
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
+ const CONFLICT = 8;
+ const LOCAL_ONLY = 0;
+ const CONFLICT_LEFT_LINES: Lines = { first: 129, last: 136 };
+@@ -67,7 +71,7 @@ async function synthetic(
+ 
+ function open(data: FileMergeData): Merge {
+   const field = chunkField(data.chunks);
+-  const pane = { eol: data.eol, language: null };
++  const pane = { eol: data.eol, language: null, settings: SETTINGS };
+   const center = paneState({
+     ...pane,
+     ...centerPane(data.middle, false),
+diff --git c/frontend/src/editor/internal/words.test.ts i/frontend/src/editor/internal/words.test.ts
+index bab5275..7bff2b6 100644
+--- c/frontend/src/editor/internal/words.test.ts
++++ i/frontend/src/editor/internal/words.test.ts
+@@ -3,11 +3,11 @@ import type { EditorState, StateField } from "@codemirror/state";
+ import { EditorView, WidgetType } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
++import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+ import { actionSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
+ import { chunkField, type ChunkSpan } from "./chunkField";
+ import { centerDecorations, sideDecorations } from "./decorations";
+-import { centerPane, paneState } from "./pane";
++import { centerPane, paneState, type PaneSettings } from "./pane";
+ import type { Side } from "./side";
+ import { showStatuses, sideStatusField } from "./sideStatus";
+ import type { ChunkState } from "./status";
+@@ -23,6 +23,10 @@ type Merge = {
+ 
+ const CONFLICT = 0;
+ const MODIFIED = 1;
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
+ 
+ function texts(word: string, value: string): string {
+   return `keep\r\nconst 😀 = ${word};\r\na = ${value};\r\nend\r\n`;
+@@ -101,6 +105,7 @@ function sidePane(
+   return paneState({
+     eol: data.eol,
+     language: null,
++    settings: SETTINGS,
+     kind: "side",
+     doc: data[side],
+     extensions: [statuses, sideDecorations(statuses, side)],
+@@ -112,6 +117,7 @@ function open(data: FileMergeData): Merge {
+   const center = paneState({
+     eol: data.eol,
+     language: null,
++    settings: SETTINGS,
+     ...centerPane(data.middle, false),
+     extensions: [field, centerDecorations(field)],
+   });
+diff --git c/frontend/src/ipc/ChunkSource.ts i/frontend/src/ipc/ChunkSource.ts
+index ab3be0e..890cd32 100644
+--- c/frontend/src/ipc/ChunkSource.ts
++++ i/frontend/src/ipc/ChunkSource.ts
+@@ -3,9 +3,13 @@ import type {
+   FileList,
+   FileMergeData,
+   FileSides,
++  KeysChange,
+   RemoteName,
++  SettingsRead,
+   Side,
+   SourceResult,
++  StoredSettings,
++  Theme,
+   WriteReply,
+ } from "./domain";
+ 
+@@ -21,4 +25,11 @@ export interface ChunkSource {
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   remoteName(): Promise<RemoteName | null>;
++  loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
++  setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
++  setKeys(
++    current: StoredSettings,
++    changes: readonly KeysChange[],
++  ): Promise<SourceResult<SettingsRead>>;
++  moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
+ }
+diff --git c/frontend/src/ipc/domain.ts i/frontend/src/ipc/domain.ts
+index 07afb7a..13e9332 100644
+--- c/frontend/src/ipc/domain.ts
++++ i/frontend/src/ipc/domain.ts
+@@ -43,6 +43,18 @@ export type DiskChange = Generated.DiskChange;
+ 
+ export type WriteReply = Generated.WriteReply;
+ 
++export type Theme = Generated.Theme;
++
++export type StoredSettings = Generated.StoredSettings;
++
++export type KeysChange = Generated.KeysChange;
++
++export type SettingsRead = {
++  readonly path: string;
++  readonly defaultPath: string;
++  readonly stored: StoredSettings;
++};
++
+ export type FileList = {
+   readonly files: readonly FileEntry[];
+   readonly diskChanges: readonly DiskChange[];
+@@ -235,3 +247,7 @@ export function toSides(dto: Generated.FileSides): FileSides {
+ export function toFileList(dto: Generated.FileList): FileList {
+   return { files: dto.files, diskChanges: dto.disk_changes };
+ }
++
++export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
++  return { path: dto.path, defaultPath: dto.default_path, stored: dto.stored };
++}
+diff --git c/frontend/src/ipc/fixture.ts i/frontend/src/ipc/fixture.ts
+index 8771d2b..1f39317 100644
+--- c/frontend/src/ipc/fixture.ts
++++ i/frontend/src/ipc/fixture.ts
+@@ -11,6 +11,7 @@ import {
+   type SourceResult,
+   type WriteReply,
+ } from "./domain";
++import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ 
+ type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
+@@ -220,5 +221,6 @@ export function createFixtureSource(
+     async remoteName() {
+       return null;
+     },
++    ...createFixtureSettings(),
+   };
+ }
+diff --git c/frontend/src/ipc/fixtureSettings.test.ts i/frontend/src/ipc/fixtureSettings.test.ts
+new file mode 100644
+index 0000000..8b72c77
+--- /dev/null
++++ i/frontend/src/ipc/fixtureSettings.test.ts
+@@ -0,0 +1,106 @@
++import { expect, test } from "vitest";
++
++import type { StoredSettings } from "./domain";
++import { createFixtureSettings } from "./fixtureSettings";
++
++const DEFAULT_PATH = "/fixture/settings.json";
++const IN_USE: StoredSettings = { theme: "dark", keys: { apply: ["a"] } };
++
++test("the first load creates the file from the settings in use; later loads read the file", async () => {
++  const settings = createFixtureSettings();
++
++  expect(await settings.loadSettings(IN_USE)).toEqual({
++    ok: true,
++    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
++  });
++  expect(await settings.loadSettings({ theme: "light", keys: {} })).toEqual({
++    ok: true,
++    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: IN_USE },
++  });
++});
++
++test("setTheme replaces the theme and keeps the keys and unknown actions", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings({ theme: "dark", keys: { "later-action": ["Mod-q"] } });
++
++  const read = await settings.setTheme({ theme: "dark", keys: {} }, "light");
++
++  expect(read).toEqual({
++    ok: true,
++    value: {
++      path: DEFAULT_PATH,
++      defaultPath: DEFAULT_PATH,
++      stored: { theme: "light", keys: { "later-action": ["Mod-q"] } },
++    },
++  });
++});
++
++test("setKeys sets an entry with a list, removes it with null, and leaves the others", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings({ theme: "dark", keys: { apply: ["a"], undo: ["Alt-Backspace"] } });
++
++  const read = await settings.setKeys(IN_USE, [
++    { action: "apply", keys: null },
++    { action: "find", keys: [] },
++    { action: "redo", keys: ["Mod-y"] },
++  ]);
++
++  expect(read.ok && read.value.stored.keys).toEqual({
++    undo: ["Alt-Backspace"],
++    find: [],
++    redo: ["Mod-y"],
++  });
++});
++
++test("a change before any load creates the file from the settings in use", async () => {
++  const settings = createFixtureSettings();
++
++  const read = await settings.setTheme(IN_USE, "light");
++
++  expect(read.ok && read.value.stored).toEqual({ theme: "light", keys: { apply: ["a"] } });
++});
++
++test("a reply is a copy: changing it changes nothing stored", async () => {
++  const settings = createFixtureSettings();
++  const first = await settings.loadSettings(IN_USE);
++  if (first.ok) {
++    first.value.stored.keys["apply"]?.push("b");
++  }
++
++  const again = await settings.loadSettings(IN_USE);
++
++  expect(again.ok && again.value.stored.keys).toEqual({ apply: ["a"] });
++});
++
++test("moving to an unknown path creates it from the settings in use, a known one is used", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings(IN_USE);
++
++  const created = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
++  await settings.setTheme({ theme: "light", keys: {} }, "dark");
++  const back = await settings.moveSettings({ theme: "light", keys: {} }, DEFAULT_PATH);
++  const again = await settings.moveSettings({ theme: "light", keys: {} }, "/elsewhere.json");
++
++  expect(created).toEqual({
++    ok: true,
++    value: {
++      path: "/elsewhere.json",
++      defaultPath: DEFAULT_PATH,
++      stored: { theme: "light", keys: {} },
++    },
++  });
++  expect(back.ok && back.value.stored).toEqual(IN_USE);
++  expect(again.ok && again.value.stored).toEqual({ theme: "dark", keys: {} });
++});
++
++test("a move to ~/ goes below the fixture home; a relative path is refused and nothing moves", async () => {
++  const settings = createFixtureSettings();
++
++  const home = await settings.moveSettings(IN_USE, "~/yamt.json");
++  const refused = await settings.moveSettings(IN_USE, "yamt.json");
++  const load = await settings.loadSettings(IN_USE);
++
++  expect(home.ok && home.value.path).toBe("/fixture/home/yamt.json");
++  expect(refused).toEqual({ ok: false, failure: { kind: "NotAbsolute", path: "yamt.json" } });
++  expect(load.ok && load.value.path).toBe("/fixture/home/yamt.json");
++});
+diff --git c/frontend/src/ipc/fixtureSettings.ts i/frontend/src/ipc/fixtureSettings.ts
+new file mode 100644
+index 0000000..2b5f61c
+--- /dev/null
++++ i/frontend/src/ipc/fixtureSettings.ts
+@@ -0,0 +1,89 @@
++import type { ChunkSource } from "./ChunkSource";
++import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
++
++export type FixtureSettings = Pick<
++  ChunkSource,
++  "loadSettings" | "setTheme" | "setKeys" | "moveSettings"
++>;
++
++type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
++
++const DEFAULT_PATH = "/fixture/settings.json";
++const HOME = "/fixture/home/";
++const HOME_PREFIX = "~/";
++
++function copied({ theme, keys }: StoredSettings): StoredSettings {
++  return {
++    theme,
++    keys: Object.fromEntries(Object.entries(keys).map(([action, texts]) => [action, [...texts]])),
++  };
++}
++
++function replied(path: string, stored: StoredSettings): SourceResult<SettingsRead> {
++  return { ok: true, value: { path, defaultPath: DEFAULT_PATH, stored: copied(stored) } };
++}
++
++function readOrCreate(files: Files, path: string, current: StoredSettings): StoredSettings {
++  const stored = files.stored.get(path) ?? copied(current);
++  files.stored.set(path, stored);
++  return stored;
++}
++
++function withKeys(
++  keys: StoredSettings["keys"],
++  changes: readonly KeysChange[],
++): StoredSettings["keys"] {
++  const changed = { ...keys };
++  for (const { action, keys: texts } of changes) {
++    if (texts === null) {
++      delete changed[action];
++    } else {
++      changed[action] = [...texts];
++    }
++  }
++  return changed;
++}
++
++function change(
++  files: Files,
++  current: StoredSettings,
++  edit: (stored: StoredSettings) => StoredSettings,
++): SourceResult<SettingsRead> {
++  const stored = edit(files.stored.get(files.inUse) ?? copied(current));
++  files.stored.set(files.inUse, stored);
++  return replied(files.inUse, stored);
++}
++
++function expanded(path: string): string | null {
++  if (path.startsWith(HOME_PREFIX)) {
++    return `${HOME}${path.slice(HOME_PREFIX.length)}`;
++  }
++  return path.startsWith("/") ? path : null;
++}
++
++export function createFixtureSettings(): FixtureSettings {
++  const files: Files = { stored: new Map(), inUse: DEFAULT_PATH };
++  return {
++    async loadSettings(current) {
++      return replied(files.inUse, readOrCreate(files, files.inUse, current));
++    },
++    async setTheme(current, theme) {
++      return change(files, current, (stored) => ({ ...stored, theme }));
++    },
++    async setKeys(current, changes) {
++      return change(files, current, (stored) => ({
++        ...stored,
++        keys: withKeys(stored.keys, changes),
++      }));
++    },
++    async moveSettings(current, path) {
++      const target = expanded(path);
++      if (target === null) {
++        return { ok: false, failure: { kind: "NotAbsolute", path } };
++      }
++      const stored = readOrCreate(files, target, current);
++      files.inUse = target;
++      return replied(target, stored);
++    },
++  };
++}
+diff --git c/frontend/src/ipc/index.ts i/frontend/src/ipc/index.ts
+index e8122de..a3ab60b 100644
+--- c/frontend/src/ipc/index.ts
++++ i/frontend/src/ipc/index.ts
+@@ -12,15 +12,36 @@ export type {
+   FileList,
+   FileMergeData,
+   FileSides,
++  KeysChange,
+   NotText,
+   RemoteName,
++  SettingsRead,
+   Side,
+   SideContent,
+   SourceFailure,
+   SourceResult,
++  StoredSettings,
++  Theme,
+   WriteReply,
+ } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
++export {
++  bindingsOf,
++  DEFAULT_KEYS,
++  isLetter,
++  isMac,
++  KEY_ACTIONS,
++  keyLabel,
++  keyOfEvent,
++  keyText,
++  parseKey,
++  sameKey,
++  type Key,
++  type KeyAction,
++  type KeyBindings,
++  type KeyProblem,
++  type KeysRead,
++} from "./keys";
+ export { createTauriSource } from "./tauri";
+ 
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
+diff --git c/frontend/src/ipc/keys.test.ts i/frontend/src/ipc/keys.test.ts
+new file mode 100644
+index 0000000..6b0af1d
+--- /dev/null
++++ i/frontend/src/ipc/keys.test.ts
+@@ -0,0 +1,270 @@
++import { expect, test } from "vitest";
++
++import {
++  bindingsOf,
++  DEFAULT_KEYS,
++  KEY_ACTIONS,
++  keyLabel,
++  keyOfEvent,
++  keyText,
++  parseKey,
++  sameKey,
++  type Key,
++} from "./keys";
++
++const LINUX = "Linux x86_64";
++const MAC = "MacIntel";
++
++type Press = {
++  key: string;
++  code?: string;
++  ctrl?: boolean;
++  meta?: boolean;
++  alt?: boolean;
++  shift?: boolean;
++};
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
++function texts(keys: readonly Key[]): string[] {
++  return keys.map(keyText);
++}
++
++function pressed(platform: string, press: Press): string | null {
++  const found = keyOfEvent(
++    {
++      key: press.key,
++      code: press.code ?? "",
++      ctrlKey: press.ctrl ?? false,
++      metaKey: press.meta ?? false,
++      altKey: press.alt ?? false,
++      shiftKey: press.shift ?? false,
++    },
++    platform,
++  );
++  return found === null ? null : keyText(found);
++}
++
++test("the actions are listed in the settings order", () => {
++  expect(KEY_ACTIONS).toEqual([
++    "apply",
++    "ignore",
++    "next-change",
++    "previous-change",
++    "left-side",
++    "right-side",
++    "undo",
++    "redo",
++    "find",
++    "find-next",
++    "find-previous",
++    "close-find",
++    "indent",
++    "outdent",
++  ]);
++});
++
++test("the defaults are the keys yamt bound before settings existed", () => {
++  const defaults = Object.fromEntries(
++    KEY_ACTIONS.map((action) => [action, texts(DEFAULT_KEYS[action])]),
++  );
++
++  expect(defaults).toEqual({
++    // editor/internal/sideFocus.ts SIDE_KEYS (plan §2 #54)
++    apply: ["Enter", "Space"],
++    ignore: ["Backspace", "Delete", "x"],
++    "next-change": ["ArrowDown"],
++    "previous-change": ["ArrowUp"],
++    "left-side": ["ArrowLeft"],
++    "right-side": ["ArrowRight"],
++    // editor/internal/historyKey.ts and the middle pane's historyKeymap
++    undo: ["Mod-z"],
++    redo: ["Mod-Shift-z", "Mod-y"],
++    // editor/internal/find.ts keymap (plan §2 #44)
++    find: ["Mod-f"],
++    "find-next": ["F3"],
++    "find-previous": ["Shift-F3"],
++    "close-find": ["Escape"],
++    // the middle pane's indentWithTab (plan §2 #35)
++    indent: ["Tab"],
++    outdent: ["Shift-Tab"],
++  });
++});
++
++test("the file form reads modifiers in order, a named key or one character, and prints back exactly", () => {
++  for (const text of [
++    "Mod-MacCtrl-Alt-Shift-z",
++    "Mod-Shift-z",
++    "MacCtrl-x",
++    "Alt-Backspace",
++    "Shift-F12",
++    "F1",
++    "PageDown",
++    "Mod--",
++    "-",
++    "?",
++    "я",
++    "Space",
++  ]) {
++    expect(keyText(key(text))).toBe(text);
++  }
++  expect(parseKey("Mod-MacCtrl-Alt-Shift-z")).toEqual({
++    mod: true,
++    macCtrl: true,
++    alt: true,
++    shift: true,
++    name: "z",
++  });
++});
++
++test("anything else is refused", () => {
++  for (const text of [
++    "",
++    "Z",
++    "Я",
++    "Shift-Mod-z",
++    "Alt-Mod-z",
++    "Mod-Mod-z",
++    "Ctrl-z",
++    "Cmd-z",
++    "Mod-",
++    "Mod",
++    " ",
++    "\t",
++    "F13",
++    "F0",
++    "enter",
++    "Up",
++    "ab",
++    "Mod-zz",
++  ]) {
++    expect(parseKey(text)).toBeNull();
++  }
++});
++
++test("sameKey compares every modifier and the name", () => {
++  const base = key("Mod-z");
++
++  expect(sameKey(base, key("Mod-z"))).toBe(true);
++  for (const other of ["z", "Mod-y", "MacCtrl-z", "Mod-Alt-z", "Mod-Shift-z", "Mod-MacCtrl-z"]) {
++    expect(sameKey(base, key(other))).toBe(false);
++  }
++});
++
++test("Linux labels: Ctrl, Alt, Shift and WebStorm's key names", () => {
++  expect(keyLabel(key("Mod-Shift-z"), LINUX)).toBe("Ctrl+Shift+Z");
++  expect(keyLabel(key("Mod-Alt-Shift-x"), LINUX)).toBe("Ctrl+Alt+Shift+X");
++  expect(keyLabel(key("Shift-F3"), LINUX)).toBe("Shift+F3");
++  expect(keyLabel(key("Space"), LINUX)).toBe("Space");
++  expect(keyLabel(key("ArrowUp"), LINUX)).toBe("↑");
++  expect(keyLabel(key("PageDown"), LINUX)).toBe("Page Down");
++  expect(keyLabel(key("Escape"), LINUX)).toBe("Escape");
++  expect(keyLabel(key("Mod-/"), LINUX)).toBe("Ctrl+/");
++});
++
++test("macOS labels: Apple's order ⌃⌥⇧⌘ and its key symbols", () => {
++  expect(keyLabel(key("Mod-Shift-z"), MAC)).toBe("⇧⌘Z");
++  expect(keyLabel(key("MacCtrl-Alt-x"), MAC)).toBe("⌃⌥X");
++  expect(keyLabel(key("Mod-MacCtrl-Alt-Shift-z"), MAC)).toBe("⌃⌥⇧⌘Z");
++  expect(keyLabel(key("Enter"), MAC)).toBe("⏎");
++  expect(keyLabel(key("Backspace"), MAC)).toBe("⌫");
++  expect(keyLabel(key("Escape"), MAC)).toBe("⎋");
++  expect(keyLabel(key("Space"), MAC)).toBe("Space");
++  expect(keyLabel(key("Shift-F3"), MAC)).toBe("⇧F3");
++});
++
++test("a macOS Ctrl key on Linux is shown the macOS way and marked as macOS", () => {
++  expect(keyLabel(key("MacCtrl-x"), LINUX)).toBe("⌃X (macOS)");
++  expect(keyLabel(key("Mod-MacCtrl-x"), LINUX)).toBe("⌃⌘X (macOS)");
++});
++
++test("a modifier pressed alone is no key", () => {
++  for (const name of ["Control", "Shift", "Alt", "Meta", "AltGraph", "CapsLock"]) {
++    expect(pressed(LINUX, { key: name, ctrl: name === "Control", shift: name === "Shift" })).toBe(
++      null,
++    );
++  }
++  expect(pressed(LINUX, { key: "Dead", code: "Quote" })).toBeNull();
++});
++
++test("Linux: Ctrl is Mod and Meta is no key; macOS: Cmd is Mod and Ctrl is MacCtrl", () => {
++  expect(pressed(LINUX, { key: "z", ctrl: true })).toBe("Mod-z");
++  expect(pressed(LINUX, { key: "z", meta: true })).toBeNull();
++  expect(pressed(MAC, { key: "z", meta: true })).toBe("Mod-z");
++  expect(pressed(MAC, { key: "z", ctrl: true })).toBe("MacCtrl-z");
++  expect(pressed(MAC, { key: "z", ctrl: true, meta: true })).toBe("Mod-MacCtrl-z");
++  expect(pressed(LINUX, { key: "Backspace", alt: true })).toBe("Alt-Backspace");
++});
++
++test("a non-Latin layout falls back to the physical letter only with a modifier", () => {
++  expect(pressed(LINUX, { key: "я", code: "KeyZ", ctrl: true })).toBe("Mod-z");
++  expect(pressed(LINUX, { key: "Я", code: "KeyZ", ctrl: true, shift: true })).toBe("Mod-Shift-z");
++  expect(pressed(MAC, { key: "я", code: "KeyZ", meta: true })).toBe("Mod-z");
++  expect(pressed(LINUX, { key: "ॆ", code: "KeyZ", ctrl: true })).toBe("Mod-z");
++  expect(pressed(LINUX, { key: "я", code: "KeyZ" })).toBe("я");
++  expect(pressed(LINUX, { key: "Я", code: "KeyZ", shift: true })).toBe("Shift-я");
++});
++
++test("a Latin key wins over the physical one, and a non-letter stays as typed: Dvorak's ; on KeyZ", () => {
++  expect(pressed(LINUX, { key: "z", code: "KeyY", ctrl: true })).toBe("Mod-z");
++  expect(pressed(LINUX, { key: ";", code: "KeyZ", ctrl: true })).toBe("Mod-;");
++  expect(pressed(MAC, { key: "≈", code: "KeyX", alt: true })).toBe("Alt-≈");
++});
++
++test("a shifted symbol carries no Shift, a shifted letter or named key does, and a space is Space", () => {
++  expect(pressed(LINUX, { key: "?", code: "Slash", shift: true })).toBe("?");
++  expect(pressed(LINUX, { key: ":", code: "Semicolon", ctrl: true, shift: true })).toBe("Mod-:");
++  expect(pressed(LINUX, { key: "X", code: "KeyX", shift: true })).toBe("Shift-x");
++  expect(pressed(LINUX, { key: "X", code: "KeyX" })).toBe("x");
++  expect(pressed(LINUX, { key: "F3", code: "F3", shift: true })).toBe("Shift-F3");
++  expect(pressed(LINUX, { key: " ", code: "Space" })).toBe("Space");
++  expect(pressed(LINUX, { key: " ", code: "Space", shift: true })).toBe("Shift-Space");
++});
++
++test("bindingsOf: no entry keeps the defaults, an entry replaces them, [] leaves no key", () => {
++  const { bindings, problems } = bindingsOf({
++    apply: ["a"],
++    undo: [],
++    "some-later-action": ["Mod-q"],
++  });
++
++  expect(texts(bindings.apply)).toEqual(["a"]);
++  expect(bindings.undo).toEqual([]);
++  expect(texts(bindings.redo)).toEqual(["Mod-Shift-z", "Mod-y"]);
++  expect(problems).toEqual([]);
++  expect(bindingsOf({}).bindings).toEqual(DEFAULT_KEYS);
++});
++
++test("bindingsOf: a malformed key keeps that action's defaults and is reported", () => {
++  const { bindings, problems } = bindingsOf({ redo: ["Mod-y", "Ctrl+Q"], find: ["Mod-g"] });
++
++  expect(texts(bindings.redo)).toEqual(["Mod-Shift-z", "Mod-y"]);
++  expect(texts(bindings.find)).toEqual(["Mod-g"]);
++  expect(problems).toEqual([{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }]);
++});
++
++test("bindingsOf: a key on two actions stays with the first in list order and is reported", () => {
++  const { bindings, problems } = bindingsOf({ indent: ["Mod-f"], "find-next": ["Enter"] });
++
++  expect(texts(bindings.find)).toEqual(["Mod-f"]);
++  expect(bindings.indent).toEqual([]);
++  expect(texts(bindings.apply)).toEqual(["Enter", "Space"]);
++  expect(bindings["find-next"]).toEqual([]);
++  expect(problems).toEqual([
++    { kind: "twice", key: key("Enter"), actions: ["apply", "find-next"] },
++    { kind: "twice", key: key("Mod-f"), actions: ["find", "indent"] },
++  ]);
++});
++
++test("bindingsOf: the same key twice in one entry counts once", () => {
++  const { bindings, problems } = bindingsOf({ apply: ["a", "a"] });
++
++  expect(texts(bindings.apply)).toEqual(["a"]);
++  expect(problems).toEqual([]);
++});
+diff --git c/frontend/src/ipc/keys.ts i/frontend/src/ipc/keys.ts
+new file mode 100644
+index 0000000..fbeca30
+--- /dev/null
++++ i/frontend/src/ipc/keys.ts
+@@ -0,0 +1,296 @@
++import type { StoredSettings } from "./domain";
++
++export type KeyAction =
++  | "apply"
++  | "ignore"
++  | "next-change"
++  | "previous-change"
++  | "left-side"
++  | "right-side"
++  | "undo"
++  | "redo"
++  | "find"
++  | "find-next"
++  | "find-previous"
++  | "close-find"
++  | "indent"
++  | "outdent";
++
++export const KEY_ACTIONS: readonly KeyAction[] = [
++  "apply",
++  "ignore",
++  "next-change",
++  "previous-change",
++  "left-side",
++  "right-side",
++  "undo",
++  "redo",
++  "find",
++  "find-next",
++  "find-previous",
++  "close-find",
++  "indent",
++  "outdent",
++];
++
++type KeyName = string & { readonly __brand: "KeyName" };
++
++export type Key = {
++  readonly mod: boolean;
++  readonly macCtrl: boolean;
++  readonly alt: boolean;
++  readonly shift: boolean;
++  readonly name: KeyName;
++};
++
++export type KeyBindings = Readonly<Record<KeyAction, readonly Key[]>>;
++
++export type KeyProblem =
++  | { readonly kind: "unreadable"; readonly action: KeyAction; readonly text: string }
++  | {
++      readonly kind: "twice";
++      readonly key: Key;
++      readonly actions: readonly [KeyAction, KeyAction];
++    };
++
++export type KeysRead = { readonly bindings: KeyBindings; readonly problems: readonly KeyProblem[] };
++
++type Modifier = "mod" | "macCtrl" | "alt" | "shift";
++
++const MODIFIERS: readonly { readonly modifier: Modifier; readonly prefix: string }[] = [
++  { modifier: "mod", prefix: "Mod-" },
++  { modifier: "macCtrl", prefix: "MacCtrl-" },
++  { modifier: "alt", prefix: "Alt-" },
++  { modifier: "shift", prefix: "Shift-" },
++];
++
++const FUNCTION_KEY_COUNT = 12;
++
++const NAMED_KEYS: Readonly<Record<string, true>> = Object.fromEntries(
++  [
++    "Enter",
++    "Space",
++    "Tab",
++    "Escape",
++    "Backspace",
++    "Delete",
++    "Insert",
++    "Home",
++    "End",
++    "PageUp",
++    "PageDown",
++    "ArrowUp",
++    "ArrowDown",
++    "ArrowLeft",
++    "ArrowRight",
++    ...Array.from({ length: FUNCTION_KEY_COUNT }, (_, index) => `F${index + 1}`),
++  ].map((name) => [name, true]),
++);
++
++const ONE_CHARACTER = /^.$/su;
++const WHITESPACE = /^\s$/u;
++const LATIN_LETTER = /^[a-z]$/i;
++const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++const LETTER_CODE = /^Key([A-Z])$/;
++
++export function isLetter(name: string): boolean {
++  return ONE_CHARACTER.test(name) && name.toLowerCase() !== name.toUpperCase();
++}
++
++function isKeyName(text: string): text is KeyName {
++  if (Object.hasOwn(NAMED_KEYS, text)) {
++    return true;
++  }
++  return ONE_CHARACTER.test(text) && !WHITESPACE.test(text) && text === text.toLowerCase();
++}
++
++// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
++export function isMac(platform: string): boolean {
++  return /Mac/.test(platform);
++}
++
++export function parseKey(text: string): Key | null {
++  let rest = text;
++  const held: Record<Modifier, boolean> = { mod: false, macCtrl: false, alt: false, shift: false };
++  for (const { modifier, prefix } of MODIFIERS) {
++    if (rest.startsWith(prefix) && rest.length > prefix.length) {
++      held[modifier] = true;
++      rest = rest.slice(prefix.length);
++    }
++  }
++  return isKeyName(rest) ? { ...held, name: rest } : null;
++}
++
++export function keyText(key: Key): string {
++  const prefixes = MODIFIERS.filter(({ modifier }) => key[modifier]).map(({ prefix }) => prefix);
++  return `${prefixes.join("")}${key.name}`;
++}
++
++const LINUX_NAMES: Readonly<Record<string, string>> = {
++  PageUp: "Page Up",
++  PageDown: "Page Down",
++  ArrowUp: "↑",
++  ArrowDown: "↓",
++  ArrowLeft: "←",
++  ArrowRight: "→",
++};
++
++// IntelliJ's MacKeymapUtil symbols (intellij.platform.ide.jar, com/intellij/openapi/keymap).
++const MAC_NAMES: Readonly<Record<string, string>> = {
++  Enter: "⏎",
++  Tab: "⇥",
++  Escape: "⎋",
++  Backspace: "⌫",
++  Delete: "⌦",
++  Home: "↖",
++  End: "↘",
++  PageUp: "⇞",
++  PageDown: "⇟",
++  ArrowUp: "↑",
++  ArrowDown: "↓",
++  ArrowLeft: "←",
++  ArrowRight: "→",
++};
++
++function nameLabel(name: KeyName, names: Readonly<Record<string, string>>): string {
++  if (Object.hasOwn(NAMED_KEYS, name)) {
++    return names[name] ?? name;
++  }
++  return name.toUpperCase();
++}
++
++function macLabel(key: Key): string {
++  const symbols = [
++    key.macCtrl ? "⌃" : "",
++    key.alt ? "⌥" : "",
++    key.shift ? "⇧" : "",
++    key.mod ? "⌘" : "",
++  ];
++  return `${symbols.join("")}${nameLabel(key.name, MAC_NAMES)}`;
++}
++
++export function keyLabel(key: Key, platform: string): string {
++  if (isMac(platform)) {
++    return macLabel(key);
++  }
++  if (key.macCtrl) {
++    return `${macLabel(key)} (macOS)`;
++  }
++  const held = [key.mod ? "Ctrl" : "", key.alt ? "Alt" : "", key.shift ? "Shift" : ""];
++  return [...held.filter((word) => word !== ""), nameLabel(key.name, LINUX_NAMES)].join("+");
++}
++
++export function sameKey(a: Key, b: Key): boolean {
++  return (
++    a.name === b.name &&
++    a.mod === b.mod &&
++    a.macCtrl === b.macCtrl &&
++    a.alt === b.alt &&
++    a.shift === b.shift
++  );
++}
++
++function defaultKeys(...texts: string[]): readonly Key[] {
++  return texts.map((text) => {
++    const key = parseKey(text);
++    if (key === null) {
++      throw new Error(`default key ${text} does not parse`);
++    }
++    return key;
++  });
++}
++
++export const DEFAULT_KEYS: KeyBindings = {
++  apply: defaultKeys("Enter", "Space"),
++  ignore: defaultKeys("Backspace", "Delete", "x"),
++  "next-change": defaultKeys("ArrowDown"),
++  "previous-change": defaultKeys("ArrowUp"),
++  "left-side": defaultKeys("ArrowLeft"),
++  "right-side": defaultKeys("ArrowRight"),
++  undo: defaultKeys("Mod-z"),
++  redo: defaultKeys("Mod-Shift-z", "Mod-y"),
++  find: defaultKeys("Mod-f"),
++  "find-next": defaultKeys("F3"),
++  "find-previous": defaultKeys("Shift-F3"),
++  "close-find": defaultKeys("Escape"),
++  indent: defaultKeys("Tab"),
++  outdent: defaultKeys("Shift-Tab"),
++};
++
++type Pressed = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;
++
++// Like CodeMirror's runHandlers (@codemirror/view keymap.ts: with Ctrl, Cmd or Alt held, a typed
++// character other than the Latin layout's falls back to the physical key; never for macOS Alt alone,
++// which types characters), but only for letters, so Dvorak's ';' on KeyZ stays ';'.
++function characterOf({ key, code }: Pressed, physical: boolean): string {
++  if (physical && !LATIN_LETTER.test(key) && LETTER_OR_MARK.test(key)) {
++    const letter = LETTER_CODE.exec(code)?.[1];
++    if (letter !== undefined) {
++      return letter.toLowerCase();
++    }
++  }
++  return key.toLowerCase();
++}
++
++export function keyOfEvent(event: Pressed, platform: string): Key | null {
++  const mac = isMac(platform);
++  if (event.metaKey && !mac) {
++    return null;
++  }
++  const mod = mac ? event.metaKey : event.ctrlKey;
++  const macCtrl = mac && event.ctrlKey;
++  const alt = event.altKey;
++  const named = event.key === " " ? "Space" : event.key;
++  if (Object.hasOwn(NAMED_KEYS, named)) {
++    return isKeyName(named) ? { mod, macCtrl, alt, shift: event.shiftKey, name: named } : null;
++  }
++  if (!ONE_CHARACTER.test(event.key)) {
++    return null;
++  }
++  const character = characterOf(event, mod || macCtrl || (alt && !mac));
++  const shift = event.shiftKey && isLetter(character);
++  return isKeyName(character) ? { mod, macCtrl, alt, shift, name: character } : null;
++}
++
++function storedKeys(
++  action: KeyAction,
++  stored: StoredSettings["keys"],
++): { readonly keys: readonly Key[]; readonly problem: KeyProblem | null } {
++  const texts = stored[action];
++  if (texts === undefined) {
++    return { keys: DEFAULT_KEYS[action], problem: null };
++  }
++  const keys: Key[] = [];
++  for (const text of texts) {
++    const key = parseKey(text);
++    if (key === null) {
++      return { keys: DEFAULT_KEYS[action], problem: { kind: "unreadable", action, text } };
++    }
++    if (!keys.some((known) => sameKey(known, key))) {
++      keys.push(key);
++    }
++  }
++  return { keys, problem: null };
++}
++
++export function bindingsOf(stored: StoredSettings["keys"]): KeysRead {
++  const problems: KeyProblem[] = [];
++  const owners: { readonly key: Key; readonly action: KeyAction }[] = [];
++  const read: Record<KeyAction, readonly Key[]> = { ...DEFAULT_KEYS };
++  for (const action of KEY_ACTIONS) {
++    const { keys, problem } = storedKeys(action, stored);
++    if (problem !== null) {
++      problems.push(problem);
++    }
++    read[action] = keys.filter((key) => {
++      const owner = owners.find((claimed) => sameKey(claimed.key, key));
++      if (owner === undefined) {
++        owners.push({ key, action });
++        return true;
++      }
++      problems.push({ kind: "twice", key, actions: [owner.action, action] });
++      return false;
++    });
++  }
++  return { bindings: read, problems };
++}
+diff --git c/frontend/src/ipc/tauri.test.ts i/frontend/src/ipc/tauri.test.ts
+index a9515e3..c353b91 100644
+--- c/frontend/src/ipc/tauri.test.ts
++++ i/frontend/src/ipc/tauri.test.ts
+@@ -13,6 +13,10 @@ const commands = vi.hoisted(() => ({
+   takeSide: vi.fn(),
+   remoteName: vi.fn(),
+   log: vi.fn(),
++  loadSettings: vi.fn(),
++  setTheme: vi.fn(),
++  setKeys: vi.fn(),
++  moveSettings: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -299,3 +303,48 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
+     fields: { nan: "NaN", up: "Infinity", down: "-Infinity", lines: 3.5, ok: true, name: "a" },
+   });
+ });
++
++const STORED: Generated.StoredSettings = { theme: "light", keys: { undo: ["Alt-Backspace"] } };
++const SETTINGS_DTO: Generated.SettingsRead = {
++  path: "/home/me/.config/yamt/settings.json",
++  default_path: "/home/me/.config/yamt/settings.json",
++  stored: STORED,
++};
++const SETTINGS_READ = {
++  path: SETTINGS_DTO.path,
++  defaultPath: SETTINGS_DTO.default_path,
++  stored: STORED,
++};
++
++test("the four settings commands send their arguments and return the read with its default path", async () => {
++  for (const command of [
++    commands.loadSettings,
++    commands.setTheme,
++    commands.setKeys,
++    commands.moveSettings,
++  ]) {
++    command.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
++  }
++  const source = createTauriSource();
++  const changes = [{ action: "undo", keys: null }];
++
++  expect(await source.loadSettings(STORED)).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(await source.setTheme(STORED, "dark")).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(await source.setKeys(STORED, changes)).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(await source.moveSettings(STORED, "~/s.json")).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(commands.loadSettings).toHaveBeenCalledWith(STORED);
++  expect(commands.setTheme).toHaveBeenCalledWith(STORED, "dark");
++  expect(commands.setKeys).toHaveBeenCalledWith(STORED, changes);
++  expect(commands.moveSettings).toHaveBeenCalledWith(STORED, "~/s.json");
++});
++
++test("a settings failure comes back as the app's error", async () => {
++  const broken = {
++    kind: "SettingsBroken",
++    path: SETTINGS_DTO.path,
++    message: "x at line 3 column 7",
++  };
++  commands.loadSettings.mockResolvedValue({ status: "error", error: broken });
++
++  expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
++});
+diff --git c/frontend/src/ipc/tauri.ts i/frontend/src/ipc/tauri.ts
+index 04ef84a..9793bcc 100644
+--- c/frontend/src/ipc/tauri.ts
++++ i/frontend/src/ipc/tauri.ts
+@@ -1,6 +1,14 @@
+-import { commands, type LogValue } from "./bindings";
++import { commands, type LogValue, type SettingsRead as SettingsReadDto } from "./bindings";
+ import type { ChunkSource } from "./ChunkSource";
+-import { toDomain, toFileList, toSides, type SourceFailure, type SourceResult } from "./domain";
++import {
++  toDomain,
++  toFileList,
++  toSettingsRead,
++  toSides,
++  type SettingsRead,
++  type SourceFailure,
++  type SourceResult,
++} from "./domain";
+ import type { LogEntry } from "./log";
+ 
+ // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
+@@ -20,6 +28,11 @@ function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+   return { ok: false, failure: result.error };
+ }
+ 
++function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<SettingsRead> {
++  const settings = toResult(result);
++  return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
++}
++
+ export function createTauriSource(): ChunkSource {
+   return {
+     async listFiles() {
+@@ -46,6 +59,18 @@ export function createTauriSource(): ChunkSource {
+     remoteName() {
+       return commands.remoteName();
+     },
++    async loadSettings(current) {
++      return toSettingsResult(await commands.loadSettings(current));
++    },
++    async setTheme(current, theme) {
++      return toSettingsResult(await commands.setTheme(current, theme));
++    },
++    async setKeys(current, changes) {
++      return toSettingsResult(await commands.setKeys(current, [...changes]));
++    },
++    async moveSettings(current, path) {
++      return toSettingsResult(await commands.moveSettings(current, path));
++    },
+   };
+ }
+ 
+diff --git c/frontend/src/main.ts i/frontend/src/main.ts
+index 00dac88..6c7209e 100644
+--- c/frontend/src/main.ts
++++ i/frontend/src/main.ts
+@@ -8,7 +8,8 @@ import "./style.css";
+ 
+ const source =
+   import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
+-const store = createAppStore(source);
++const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
++const store = createAppStore(source, startTheme);
+ void store.loadFiles();
+ void store.loadRemoteName();
+ createApp(App).mount("#app");
+diff --git c/frontend/src/style.css i/frontend/src/style.css
+index fb91fce..5c74292 100644
+--- c/frontend/src/style.css
++++ i/frontend/src/style.css
+@@ -56,7 +56,61 @@
+   --color-chunk-conflict-removal: #b589ec;
+ }
+ 
++:root[data-theme="light"] {
++  color-scheme: light;
++
++  --color-window: #e9eaee;
++  --color-panel: #ffffff;
++  --color-panel-inline: #f7f8f9;
++  --color-separator: #e9eaee;
++  --color-control-border: #d1d3d9;
++  --color-fg: #000000;
++  --color-fg-muted: #73767c;
++  --color-code: #080808;
++  --color-gutter: #aeb3c2;
++  --color-gutter-active: #767a8a;
++  --color-active-line: #f5f8fe;
++  --color-selection: #a6d2ff;
++  --color-caret: #000000;
++  --color-hover: #00000012;
++  --color-row-hover: #00000008;
++  --color-row-selected: #d0dffe;
++  --color-primary: #3871e1;
++  --color-on-primary: #ffffff;
++  --color-problem: #fff6f5;
++  --color-problem-border: #ffc4c5;
++  --color-success: #f5faf3;
++  --color-success-border: #bbdbc2;
++  --color-info: #f7f8ff;
++  --color-info-border: #bdd3ff;
++  --color-search-match: #ccccff;
++
++  --color-syntax-keyword: #0033b3;
++  --color-syntax-string: #067d17;
++  --color-syntax-number: #1750eb;
++  --color-syntax-comment: #8c8c8c;
++  --color-syntax-function: #00627a;
++  --color-syntax-property: #871094;
++  --color-syntax-decorator: #9e880d;
++  --color-syntax-tag: #0033b3;
++  --color-syntax-regexp: #264eff;
++  --color-syntax-link: #006dcc;
++
++  --color-chunk-inserted: #4e9d6c5c;
++  --color-chunk-modified: #538af95c;
++  --color-chunk-deleted: #8b8e945c;
++  --color-chunk-conflict: #967bef6b;
++  --color-chunk-modified-word: #538af9a6;
++  --color-chunk-conflict-word: #967befa6;
++  --color-chunk-modified-removal: #3871e1;
++  --color-chunk-conflict-removal: #8060db;
++}
++
+ @layer base {
++  :root {
++    color-scheme: dark;
++  }
++
+   html,
+   body,
+   #app {
+diff --git c/frontend/src/ui/App.vue i/frontend/src/ui/App.vue
+index 9c950f5..d40e727 100644
+--- c/frontend/src/ui/App.vue
++++ i/frontend/src/ui/App.vue
+@@ -23,6 +23,8 @@ const {
+   allResolved,
+   pick,
+   refreshFiles,
++  loadSettings,
++  settings,
+   dismissProblem,
+   dismissNotice,
+   answer,
+@@ -34,11 +36,20 @@ const focused = useWindowFocus();
+ watch(focused, (now) => {
+   if (now) {
+     void refreshFiles();
++    void loadSettings();
+   }
+ });
++watch(
++  () => settings.value.theme,
++  (theme) => {
++    document.documentElement.dataset["theme"] = theme;
++  },
++  { immediate: true },
++);
+ 
+ onMounted(() => {
+   void watchWindowClose();
++  void loadSettings();
+ });
+ </script>
+ 
+diff --git c/frontend/src/ui/MergeView.vue i/frontend/src/ui/MergeView.vue
+index 52820a1..75386fb 100644
+--- c/frontend/src/ui/MergeView.vue
++++ i/frontend/src/ui/MergeView.vue
+@@ -33,6 +33,8 @@ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
++const { track, untrack, finish, reset, takeSide, taken, remoteName, question, preferences } =
++  useAppStore();
+ const {
+   summary,
+   applyAllNonConflicting,
+@@ -47,8 +49,8 @@ const {
+   () => props.data,
+   { left, center, right, strips: [leftStrip, rightStrip] },
+   () => !isEditable(props.data),
++  preferences,
+ );
+-const { track, untrack, finish, reset, takeSide, taken, remoteName, question } = useAppStore();
+ const work: FileWork = { unsaved, markSaved };
+ if (props.data.deleted === null) {
+   track(props.data.path, work);
+diff --git c/frontend/src/ui/ProblemBar.vue i/frontend/src/ui/ProblemBar.vue
+index 72d365a..a8b72f1 100644
+--- c/frontend/src/ui/ProblemBar.vue
++++ i/frontend/src/ui/ProblemBar.vue
+@@ -8,7 +8,7 @@ import { problemText } from "./problemText";
+ const props = defineProps<{ problem: Problem }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+-const text = computed(() => problemText(props.problem));
++const text = computed(() => problemText(props.problem, navigator.platform));
+ </script>
+ 
+ <template>
+diff --git c/frontend/src/ui/QuestionDialog.vue i/frontend/src/ui/QuestionDialog.vue
+index c4112b5..d90bb90 100644
+--- c/frontend/src/ui/QuestionDialog.vue
++++ i/frontend/src/ui/QuestionDialog.vue
+@@ -8,7 +8,7 @@ const emit = defineEmits<{ answer: [yes: boolean] }>();
+ 
+ const dialog = useTemplateRef<HTMLDialogElement>("dialog");
+ 
+-const text = computed(() => questionText(props.question));
++const text = computed(() => questionText(props.question, navigator.platform));
+ 
+ onMounted(() => {
+   dialog.value?.showModal();
+diff --git c/frontend/src/ui/keyText.test.ts i/frontend/src/ui/keyText.test.ts
+new file mode 100644
+index 0000000..fb200de
+--- /dev/null
++++ i/frontend/src/ui/keyText.test.ts
+@@ -0,0 +1,21 @@
++import { expect, test } from "vitest";
++
++import { KEY_ACTIONS } from "../ipc";
++import { ACTION_PLACES, KEYMAP_GROUPS } from "./keyText";
++
++test("the keymap groups list every action once, in the settings order", () => {
++  expect(KEYMAP_GROUPS.flatMap(({ actions }) => actions)).toEqual(KEY_ACTIONS);
++  expect(KEYMAP_GROUPS.map(({ title }) => title)).toEqual([
++    "Side panes",
++    "Anywhere in the file",
++    "Find",
++    "Result pane",
++  ]);
++});
++
++test("each action says where it acts, matching its group", () => {
++  expect(ACTION_PLACES.apply).toContain("side pane");
++  expect(ACTION_PLACES.undo).toBe("anywhere in the shown file");
++  expect(ACTION_PLACES["close-find"]).toContain("find box");
++  expect(ACTION_PLACES.indent).toBe("in the Result pane");
++});
+diff --git c/frontend/src/ui/keyText.ts i/frontend/src/ui/keyText.ts
+new file mode 100644
+index 0000000..25614a6
+--- /dev/null
++++ i/frontend/src/ui/keyText.ts
+@@ -0,0 +1,48 @@
++import type { KeyAction } from "../ipc";
++
++export const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
++  apply: "Apply",
++  ignore: "Ignore",
++  "next-change": "Next change",
++  "previous-change": "Previous change",
++  "left-side": "Left side",
++  "right-side": "Right side",
++  undo: "Undo",
++  redo: "Redo",
++  find: "Find",
++  "find-next": "Find next",
++  "find-previous": "Find previous",
++  "close-find": "Close find",
++  indent: "Indent",
++  outdent: "Outdent",
++};
++
++export const ACTION_PLACES: Readonly<Record<KeyAction, string>> = {
++  apply: "on the focused change of a side pane",
++  ignore: "on the focused change of a side pane",
++  "next-change": "in a side pane",
++  "previous-change": "in a side pane",
++  "left-side": "in a side pane",
++  "right-side": "in a side pane",
++  undo: "anywhere in the shown file",
++  redo: "anywhere in the shown file",
++  find: "in any pane",
++  "find-next": "in a pane or its find box",
++  "find-previous": "in a pane or its find box",
++  "close-find": "in a pane or its find box",
++  indent: "in the Result pane",
++  outdent: "in the Result pane",
++};
++
++export const KEYMAP_GROUPS: readonly {
++  readonly title: string;
++  readonly actions: readonly KeyAction[];
++}[] = [
++  {
++    title: "Side panes",
++    actions: ["apply", "ignore", "next-change", "previous-change", "left-side", "right-side"],
++  },
++  { title: "Anywhere in the file", actions: ["undo", "redo"] },
++  { title: "Find", actions: ["find", "find-next", "find-previous", "close-find"] },
++  { title: "Result pane", actions: ["indent", "outdent"] },
++];
+diff --git c/frontend/src/ui/keymapEdit.test.ts i/frontend/src/ui/keymapEdit.test.ts
+new file mode 100644
+index 0000000..f03dc99
+--- /dev/null
++++ i/frontend/src/ui/keymapEdit.test.ts
+@@ -0,0 +1,155 @@
++import { expect, test } from "vitest";
++
++import { bindingsOf, DEFAULT_KEYS, parseKey, type Key, type KeyBindings } from "../ipc";
++import { isDefault, planKeyEdit } from "./keymapEdit";
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
++function bound(keys: Record<string, string[]>): KeyBindings {
++  return bindingsOf(keys).bindings;
++}
++
++test("adding a key the action already has does nothing", () => {
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "add", action: "apply", key: key("Enter") })).toEqual({
++    kind: "nothing",
++  });
++});
++
++test("adding a free key sends the action's whole list", () => {
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "add", action: "apply", key: key("a") })).toEqual({
++    kind: "send",
++    changes: [{ action: "apply", keys: ["Enter", "Space", "a"] }],
++  });
++});
++
++test("adding a key another action holds asks, and Move takes it from the owner in the same changes", () => {
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "add", action: "undo", key: key("Mod-f") })).toEqual({
++    kind: "ask",
++    clash: { key: key("Mod-f"), action: "undo", owner: "find" },
++    changes: [
++      { action: "undo", keys: ["Mod-z", "Mod-f"] },
++      { action: "find", keys: [] },
++    ],
++  });
++});
++
++test("an owner left with exactly its defaults is sent back to them as null", () => {
++  const bindings = bound({ find: ["Mod-f", "Mod-g"] });
++
++  expect(planKeyEdit(bindings, { kind: "add", action: "undo", key: key("Mod-g") })).toEqual({
++    kind: "ask",
++    clash: { key: key("Mod-g"), action: "undo", owner: "find" },
++    changes: [
++      { action: "undo", keys: ["Mod-z", "Mod-g"] },
++      { action: "find", keys: null },
++    ],
++  });
++});
++
++test("changing a key replaces it in place", () => {
++  expect(
++    planKeyEdit(DEFAULT_KEYS, {
++      kind: "change",
++      action: "ignore",
++      from: key("Delete"),
++      to: key("d"),
++    }),
++  ).toEqual({ kind: "send", changes: [{ action: "ignore", keys: ["Backspace", "d", "x"] }] });
++});
++
++test("changing to a key another action holds asks first", () => {
++  expect(
++    planKeyEdit(DEFAULT_KEYS, {
++      kind: "change",
++      action: "find",
++      from: key("Mod-f"),
++      to: key("Mod-z"),
++    }),
++  ).toEqual({
++    kind: "ask",
++    clash: { key: key("Mod-z"), action: "find", owner: "undo" },
++    changes: [
++      { action: "find", keys: ["Mod-z"] },
++      { action: "undo", keys: [] },
++    ],
++  });
++});
++
++test("changing to a key the action already has drops the old one; to itself or from a missing key does nothing", () => {
++  expect(
++    planKeyEdit(DEFAULT_KEYS, {
++      kind: "change",
++      action: "apply",
++      from: key("Enter"),
++      to: key("Space"),
++    }),
++  ).toEqual({ kind: "send", changes: [{ action: "apply", keys: ["Space"] }] });
++  expect(
++    planKeyEdit(DEFAULT_KEYS, {
++      kind: "change",
++      action: "apply",
++      from: key("Enter"),
++      to: key("Enter"),
++    }),
++  ).toEqual({ kind: "nothing" });
++  expect(
++    planKeyEdit(DEFAULT_KEYS, { kind: "change", action: "apply", from: key("q"), to: key("w") }),
++  ).toEqual({ kind: "nothing" });
++});
++
++test("changing back to the defaults sends null", () => {
++  const bindings = bound({ "find-next": ["F4"] });
++
++  expect(
++    planKeyEdit(bindings, { kind: "change", action: "find-next", from: key("F4"), to: key("F3") }),
++  ).toEqual({ kind: "send", changes: [{ action: "find-next", keys: null }] });
++});
++
++test("removing a key sends the rest; removing a key the action lacks does nothing", () => {
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "remove", action: "redo", key: key("Mod-y") })).toEqual({
++    kind: "send",
++    changes: [{ action: "redo", keys: ["Mod-Shift-z"] }],
++  });
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "remove", action: "redo", key: key("Mod-z") })).toEqual({
++    kind: "nothing",
++  });
++});
++
++test("removing the one added key goes back to the defaults as null", () => {
++  const bindings = bound({ apply: ["Enter", "Space", "a"] });
++
++  expect(planKeyEdit(bindings, { kind: "remove", action: "apply", key: key("a") })).toEqual({
++    kind: "send",
++    changes: [{ action: "apply", keys: null }],
++  });
++});
++
++test("remove all sends an empty list, unless there is nothing left to remove", () => {
++  expect(planKeyEdit(DEFAULT_KEYS, { kind: "removeAll", action: "indent" })).toEqual({
++    kind: "send",
++    changes: [{ action: "indent", keys: [] }],
++  });
++  expect(planKeyEdit(bound({ indent: [] }), { kind: "removeAll", action: "indent" })).toEqual({
++    kind: "nothing",
++  });
++});
++
++test("reset sends null", () => {
++  expect(planKeyEdit(bound({ undo: [] }), { kind: "reset", action: "undo" })).toEqual({
++    kind: "send",
++    changes: [{ action: "undo", keys: null }],
++  });
++});
++
++test("a list is the defaults when it holds exactly the default keys, in any order", () => {
++  expect(isDefault("redo", [key("Mod-y"), key("Mod-Shift-z")])).toBe(true);
++  expect(isDefault("redo", [key("Mod-y")])).toBe(false);
++  expect(isDefault("redo", [key("Mod-y"), key("Mod-Shift-z"), key("Mod-r")])).toBe(false);
++  expect(isDefault("redo", [key("Mod-y"), key("Mod-r")])).toBe(false);
++});
+diff --git c/frontend/src/ui/keymapEdit.ts i/frontend/src/ui/keymapEdit.ts
+new file mode 100644
+index 0000000..0a368e0
+--- /dev/null
++++ i/frontend/src/ui/keymapEdit.ts
+@@ -0,0 +1,95 @@
++import {
++  DEFAULT_KEYS,
++  KEY_ACTIONS,
++  keyText,
++  sameKey,
++  type Key,
++  type KeyAction,
++  type KeyBindings,
++  type KeysChange,
++} from "../ipc";
++
++export type KeyEdit =
++  | { readonly kind: "add"; readonly action: KeyAction; readonly key: Key }
++  | { readonly kind: "change"; readonly action: KeyAction; readonly from: Key; readonly to: Key }
++  | { readonly kind: "remove"; readonly action: KeyAction; readonly key: Key }
++  | { readonly kind: "removeAll"; readonly action: KeyAction }
++  | { readonly kind: "reset"; readonly action: KeyAction };
++
++export type Clash = { readonly key: Key; readonly action: KeyAction; readonly owner: KeyAction };
++
++export type KeyEditPlan =
++  | { readonly kind: "nothing" }
++  | { readonly kind: "send"; readonly changes: readonly KeysChange[] }
++  | { readonly kind: "ask"; readonly clash: Clash; readonly changes: readonly KeysChange[] };
++
++const NOTHING: KeyEditPlan = { kind: "nothing" };
++
++function holds(keys: readonly Key[], key: Key): boolean {
++  return keys.some((held) => sameKey(held, key));
++}
++
++export function isDefault(action: KeyAction, keys: readonly Key[]): boolean {
++  const defaults = DEFAULT_KEYS[action];
++  return keys.length === defaults.length && defaults.every((key) => holds(keys, key));
++}
++
++function keysChange(action: KeyAction, keys: readonly Key[]): KeysChange {
++  return { action, keys: isDefault(action, keys) ? null : keys.map(keyText) };
++}
++
++function placed(
++  bindings: KeyBindings,
++  clash: Omit<Clash, "owner">,
++  keys: readonly Key[],
++): KeyEditPlan {
++  const { action, key } = clash;
++  const owner = KEY_ACTIONS.find((other) => other !== action && holds(bindings[other], key));
++  const change = keysChange(action, keys);
++  if (owner === undefined) {
++    return { kind: "send", changes: [change] };
++  }
++  const left = bindings[owner].filter((held) => !sameKey(held, key));
++  return { kind: "ask", clash: { ...clash, owner }, changes: [change, keysChange(owner, left)] };
++}
++
++function changed(keys: readonly Key[], from: Key, to: Key): readonly Key[] {
++  return holds(keys, to)
++    ? keys.filter((key) => !sameKey(key, from))
++    : keys.map((key) => (sameKey(key, from) ? to : key));
++}
++
++export function planKeyEdit(bindings: KeyBindings, edit: KeyEdit): KeyEditPlan {
++  const { action } = edit;
++  const keys = bindings[action];
++  switch (edit.kind) {
++    case "add":
++      return holds(keys, edit.key)
++        ? NOTHING
++        : placed(bindings, { action, key: edit.key }, [...keys, edit.key]);
++    case "change":
++      return !holds(keys, edit.from) || sameKey(edit.from, edit.to)
++        ? NOTHING
++        : placed(bindings, { action, key: edit.to }, changed(keys, edit.from, edit.to));
++    case "remove":
++      return holds(keys, edit.key)
++        ? {
++            kind: "send",
++            changes: [
++              keysChange(
++                action,
++                keys.filter((key) => !sameKey(key, edit.key)),
++              ),
++            ],
++          }
++        : NOTHING;
++    case "removeAll":
++      return keys.length === 0 ? NOTHING : { kind: "send", changes: [keysChange(action, [])] };
++    case "reset":
++      return { kind: "send", changes: [{ action, keys: null }] };
++    default: {
++      const _exhaustive: never = edit;
++      return _exhaustive;
++    }
++  }
++}
+diff --git c/frontend/src/ui/problem.ts i/frontend/src/ui/problem.ts
+index 4661a31..724bbd5 100644
+--- c/frontend/src/ui/problem.ts
++++ i/frontend/src/ui/problem.ts
+@@ -1,9 +1,15 @@
+ import type { ShallowRef } from "vue";
+ 
+-import { log, type SourceFailure, type SourceResult } from "../ipc";
++import { log, type KeyProblem, type SourceFailure, type SourceResult } from "../ipc";
+ 
+ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+ 
++type KeysUnread = {
++  readonly kind: "Keys";
++  readonly path: string;
++  readonly problems: readonly KeyProblem[];
++};
++
+ export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type Problem =
+@@ -12,12 +18,15 @@ export type Problem =
+       readonly action: "open" | "finish" | "take" | "reset";
+       readonly path: string;
+       readonly cause: ProblemCause;
+-    };
++    }
++  | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread };
+ 
+ export type Outcome<T> =
+   | { readonly ok: true; readonly value: T }
+   | { readonly ok: false; readonly cause: ProblemCause };
+ 
++type Target = { readonly problem: ShallowRef<Problem | null> };
++
+ export function unexpected(error: unknown): Unexpected {
+   return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
+ }
+@@ -32,14 +41,41 @@ export async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<
+ }
+ 
+ export function logProblem(problem: Problem): void {
+-  const where = problem.action === "list" ? {} : { path: problem.path };
+-  log.error(`store.${problem.action}_failed`, { ...where, ...problem.cause });
++  const event = `store.${problem.action}_failed`;
++  switch (problem.action) {
++    case "list":
++      log.error(event, { ...problem.cause });
++      return;
++    case "settings": {
++      const { cause } = problem;
++      const fields = cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : cause;
++      log.error(event, { ...fields });
++      return;
++    }
++    case "open":
++    case "finish":
++    case "take":
++    case "reset":
++      log.error(event, { path: problem.path, ...problem.cause });
++      return;
++    default: {
++      const _exhaustive: never = problem;
++      return _exhaustive;
++    }
++  }
+ }
+ 
+-export function report(
+-  target: { readonly problem: ShallowRef<Problem | null> },
+-  failure: Problem,
+-): void {
++export function report(target: Target, failure: Problem): void {
+   logProblem(failure);
+   target.problem.value = failure;
+ }
++
++export function clearProblemAbout(target: Target, path: string): void {
++  const problem = target.problem.value;
++  if (problem === null || problem.action === "list" || problem.action === "settings") {
++    return;
++  }
++  if (problem.path === path) {
++    target.problem.value = null;
++  }
++}
+diff --git c/frontend/src/ui/problemText.test.ts i/frontend/src/ui/problemText.test.ts
+index fabdef5..36b2305 100644
+--- c/frontend/src/ui/problemText.test.ts
++++ i/frontend/src/ui/problemText.test.ts
+@@ -1,75 +1,83 @@
+ import { expect, test } from "vitest";
+ 
+-import type { SourceFailure } from "../ipc";
++import { parseKey, type Key, type SourceFailure } from "../ipc";
+ import type { Problem, ProblemCause } from "./problem";
+ import { problemText } from "./problemText";
+ 
+ const PATH = "src/a.ts";
++const SETTINGS = "/home/me/.config/yamt/settings.json";
++const LINUX = "Linux x86_64";
+ 
+ function onFinish(cause: ProblemCause): Problem {
+   return { action: "finish", path: PATH, cause };
+ }
+ 
++function text(problem: Problem): string {
++  return problemText(problem, LINUX);
++}
++
++function key(written: string): Key {
++  const parsed = parseKey(written);
++  if (parsed === null) {
++    throw new Error(`${written} does not parse`);
++  }
++  return parsed;
++}
++
+ test.each([
+   ["open", `Could not open ${PATH}`],
+   ["finish", `Could not mark ${PATH} as resolved`],
+   ["take", `Could not resolve ${PATH} with one side`],
+   ["reset", `Could not reset ${PATH}`],
+ ] as const)("a failed %s names the file and what failed", (action, words) => {
+-  const text = problemText({ action, path: PATH, cause: { kind: "Unexpected", message: "boom" } });
++  const said = text({ action, path: PATH, cause: { kind: "Unexpected", message: "boom" } });
+ 
+-  expect(text).toContain(words);
+-  expect(text).toContain("boom");
++  expect(said).toContain(words);
++  expect(said).toContain("boom");
+ });
+ 
+ test("a failed list says the list could not be read, with the cause", () => {
+-  const text = problemText({ action: "list", cause: { kind: "Unexpected", message: "repo gone" } });
++  const said = text({ action: "list", cause: { kind: "Unexpected", message: "repo gone" } });
+ 
+-  expect(text).toContain("Could not list the conflicted files");
+-  expect(text).toContain("repo gone");
++  expect(said).toContain("Could not list the conflicted files");
++  expect(said).toContain("repo gone");
+ });
+ 
+ test("Git carries git's own message", () => {
+-  const text = problemText(onFinish({ kind: "Git", message: "git add failed: index.lock\n" }));
++  const said = text(onFinish({ kind: "Git", message: "git add failed: index.lock\n" }));
+ 
+-  expect(text).toContain(`Could not mark ${PATH} as resolved`);
+-  expect(text).toContain("git add failed: index.lock");
+-  expect(text.endsWith("\n")).toBe(false);
++  expect(said).toContain(`Could not mark ${PATH} as resolved`);
++  expect(said).toContain("git add failed: index.lock");
++  expect(said.endsWith("\n")).toBe(false);
+ });
+ 
+ test("UnknownPath names the path", () => {
+-  const text = problemText({
+-    action: "open",
+-    path: PATH,
+-    cause: { kind: "UnknownPath", path: PATH },
+-  });
++  const said = text({ action: "open", path: PATH, cause: { kind: "UnknownPath", path: PATH } });
+ 
+-  expect(text).toContain(`${PATH} is not one of the conflicted files`);
++  expect(said).toContain(`${PATH} is not one of the conflicted files`);
+ });
+ 
+ test("WriteFailed names the path and the system's message", () => {
+-  const text = problemText(onFinish({ kind: "WriteFailed", path: PATH, message: "disk full" }));
++  const said = text(onFinish({ kind: "WriteFailed", path: PATH, message: "disk full" }));
+ 
+-  expect(text).toContain(`writing ${PATH} failed`);
+-  expect(text).toContain("disk full");
++  expect(said).toContain(`writing ${PATH} failed`);
++  expect(said).toContain("disk full");
+ });
+ 
+ test("NotAFile says nothing was written because the path is not a regular file", () => {
+-  const text = problemText(onFinish({ kind: "NotAFile", path: PATH }));
+-
+-  expect(text).toBe(
++  expect(text(onFinish({ kind: "NotAFile", path: PATH }))).toBe(
+     `Could not mark ${PATH} as resolved: ${PATH} is not a regular file on disk; nothing was written`,
+   );
+ });
+ 
+ test("ReadFailed names the path and the system's message", () => {
+-  const text = problemText({
++  const said = text({
+     action: "take",
+     path: PATH,
+     cause: { kind: "ReadFailed", path: PATH, message: "permission denied\n" },
+   });
+ 
+-  expect(text).toBe(
++  expect(said).toBe(
+     `Could not resolve ${PATH} with one side: reading ${PATH} failed: permission denied`,
+   );
+ });
+@@ -84,8 +92,84 @@ test.each([
+   ["Submodule", "it is a submodule"],
+ ] as const)("Unsupported %s says why the file cannot be shown", (reason, words) => {
+   const cause: SourceFailure = { kind: "Unsupported", path: "src/logo.png", reason };
+-  const text = problemText({ action: "open", path: "src/logo.png", cause });
++  const said = text({ action: "open", path: "src/logo.png", cause });
+ 
+-  expect(text).toContain("src/logo.png cannot be shown in the editor");
+-  expect(text).toContain(words);
++  expect(said).toContain("src/logo.png cannot be shown in the editor");
++  expect(said).toContain(words);
++});
++
++test("a broken settings file names its line and column and what to do", () => {
++  const message = "expected `,` or `}` at line 3 column 7";
++
++  expect(
++    text({ action: "settings", cause: { kind: "SettingsBroken", path: SETTINGS, message } }),
++  ).toBe(
++    `The settings file ${SETTINGS} has an error at line 3, column 7: expected \`,\` or \`}\`. Fix it or choose another file.`,
++  );
++});
++
++test("a broken settings entry without a position names the error only", () => {
++  const message = "`theme`: unknown variant `blue`, expected `dark` or `light`";
++
++  expect(
++    text({ action: "settings", cause: { kind: "SettingsBroken", path: SETTINGS, message } }),
++  ).toBe(`The settings file ${SETTINGS} has an error: ${message}. Fix it or choose another file.`);
++});
++
++test("the other settings failures say the settings file could not be used and why", () => {
++  expect(text({ action: "settings", cause: { kind: "NotAbsolute", path: "yamt.json" } })).toBe(
++    "Could not use the settings file: yamt.json is not an absolute path; start it with / or ~/.",
++  );
++  expect(text({ action: "settings", cause: { kind: "NoConfigFolder" } })).toBe(
++    "Could not use the settings file: this system has no config folder to keep it in.",
++  );
++  expect(
++    text({
++      action: "settings",
++      cause: { kind: "ReadFailed", path: SETTINGS, message: "Permission denied (os error 13)" },
++    }),
++  ).toBe(
++    `Could not use the settings file: reading ${SETTINGS} failed: Permission denied (os error 13)`,
++  );
++  expect(
++    text({
++      action: "settings",
++      cause: { kind: "WriteFailed", path: SETTINGS, message: "Read-only file system" },
++    }),
++  ).toBe(`Could not use the settings file: writing ${SETTINGS} failed: Read-only file system`);
++});
++
++test("key problems name the action, the key and what yamt does instead", () => {
++  const said = problemText(
++    {
++      action: "settings",
++      cause: {
++        kind: "Keys",
++        path: SETTINGS,
++        problems: [
++          { kind: "unreadable", action: "redo", text: "Ctrl+Q" },
++          { kind: "twice", key: key("Mod-f"), actions: ["find", "indent"] },
++        ],
++      },
++    },
++    LINUX,
++  );
++
++  expect(said).toBe(
++    `The settings file ${SETTINGS} gives Redo the key "Ctrl+Q", which yamt cannot read; Redo keeps its default keys. ` +
++      `The settings file ${SETTINGS} gives Ctrl+F to both Find and Indent; only Find uses it.`,
++  );
++  expect(
++    problemText(
++      {
++        action: "settings",
++        cause: {
++          kind: "Keys",
++          path: SETTINGS,
++          problems: [{ kind: "twice", key: key("Mod-f"), actions: ["find", "indent"] }],
++        },
++      },
++      "MacIntel",
++    ),
++  ).toContain("gives ⌘F to both");
+ });
+diff --git c/frontend/src/ui/problemText.ts i/frontend/src/ui/problemText.ts
+index 5de3c19..cd2a1a4 100644
+--- c/frontend/src/ui/problemText.ts
++++ i/frontend/src/ui/problemText.ts
+@@ -1,7 +1,11 @@
++import { keyLabel, type KeyProblem } from "../ipc";
++import { ACTION_NAMES } from "./keyText";
+ import type { Problem, ProblemCause } from "./problem";
+ 
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
++const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
++
+ function attempted(problem: Problem): string {
+   switch (problem.action) {
+     case "list":
+@@ -14,6 +18,8 @@ function attempted(problem: Problem): string {
+       return `Could not resolve ${problem.path} with one side`;
+     case "reset":
+       return `Could not reset ${problem.path}`;
++    case "settings":
++      return "Could not use the settings file";
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+@@ -44,7 +50,32 @@ function unsupportedBecause(reason: UnsupportedReason): string {
+   }
+ }
+ 
+-export function problemText(problem: Problem): string {
++// serde_json ends a syntax error with " at line L column C" (serde_json src/error.rs Display).
++function brokenText(path: string, message: string): string {
++  const found = AT_POSITION.exec(message.trim());
++  const [, what = message.trim(), line, column] = found ?? [];
++  const where = line === undefined ? "" : ` at line ${line}, column ${column}`;
++  return `The settings file ${path} has an error${where}: ${what}. Fix it or choose another file.`;
++}
++
++function keyProblemText(path: string, problem: KeyProblem, platform: string): string {
++  switch (problem.kind) {
++    case "unreadable": {
++      const name = ACTION_NAMES[problem.action];
++      return `The settings file ${path} gives ${name} the key "${problem.text}", which yamt cannot read; ${name} keeps its default keys.`;
++    }
++    case "twice": {
++      const [keeps, loses] = problem.actions.map((action) => ACTION_NAMES[action]);
++      return `The settings file ${path} gives ${keyLabel(problem.key, platform)} to both ${keeps} and ${loses}; only ${keeps} uses it.`;
++    }
++    default: {
++      const _exhaustive: never = problem;
++      return _exhaustive;
++    }
++  }
++}
++
++export function problemText(problem: Problem, platform: string): string {
+   const { cause } = problem;
+   switch (cause.kind) {
+     case "Git":
+@@ -59,6 +90,14 @@ export function problemText(problem: Problem): string {
+       return `${attempted(problem)}: ${cause.path} is not a regular file on disk; nothing was written`;
+     case "ReadFailed":
+       return `${attempted(problem)}: reading ${cause.path} failed: ${cause.message.trim()}`;
++    case "SettingsBroken":
++      return brokenText(cause.path, cause.message);
++    case "NotAbsolute":
++      return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
++    case "NoConfigFolder":
++      return `${attempted(problem)}: this system has no config folder to keep it in.`;
++    case "Keys":
++      return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
+     case "Unexpected":
+       return `${attempted(problem)}: ${cause.message.trim()}`;
+     default: {
+diff --git c/frontend/src/ui/question.test.ts i/frontend/src/ui/question.test.ts
+index e7b6ee1..bc7fd7c 100644
+--- c/frontend/src/ui/question.test.ts
++++ i/frontend/src/ui/question.test.ts
+@@ -1,9 +1,12 @@
+ import { expect, test } from "vitest";
+ 
++import { parseKey } from "../ipc";
+ import { exitMustAsk, finishMustAsk, questionText } from "./question";
+ 
++const LINUX = "Linux x86_64";
++
+ function unprocessed(conflicts: number, changes: number): string {
+-  return questionText({ kind: "unprocessed", summary: { conflicts, changes } }).message;
++  return questionText({ kind: "unprocessed", summary: { conflicts, changes } }, LINUX).message;
+ }
+ 
+ test("Mark resolved asks exactly when the summary counts a conflict or a change", () => {
+@@ -34,14 +37,14 @@ test("the unprocessed sentence names only the non-zero counts with singular and
+ 
+ test("each question carries WebStorm's title and buttons, and the exit one lists its files", () => {
+   expect(
+-    questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }),
++    questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }, LINUX),
+   ).toMatchObject({
+     title: "Unprocessed Changes",
+     files: [],
+     confirm: "Save Current Result",
+     cancel: "Back to Resolving",
+   });
+-  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] })).toMatchObject({
++  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toMatchObject({
+     title: "Cancel File Merge",
+     message: "Are you sure you want to exit without applying changes?",
+     files: ["src/App.vue", "a.ts"],
+@@ -49,3 +52,22 @@ test("each question carries WebStorm's title and buttons, and the exit one lists
+     cancel: "Cancel",
+   });
+ });
++
++test("the clash question names the key in the platform's words, its owner and the asking action", () => {
++  const key = parseKey("Mod-f");
++  if (key === null) {
++    throw new Error("Mod-f does not parse");
++  }
++  const clash = { kind: "clash", key, action: "undo", owner: "find" } as const;
++
++  expect(questionText(clash, LINUX)).toEqual({
++    title: "Key Already in Use",
++    message: "Ctrl+F is already used by Find. Move it to Undo?",
++    files: [],
++    confirm: "Move",
++    cancel: "Cancel",
++  });
++  expect(questionText(clash, "MacIntel").message).toBe(
++    "⌘F is already used by Find. Move it to Undo?",
++  );
++});
+diff --git c/frontend/src/ui/question.ts i/frontend/src/ui/question.ts
+index 91b61f8..337ccb0 100644
+--- c/frontend/src/ui/question.ts
++++ i/frontend/src/ui/question.ts
+@@ -1,8 +1,12 @@
++import { keyLabel } from "../ipc";
++import type { Clash } from "./keymapEdit";
++import { ACTION_NAMES } from "./keyText";
+ import type { MergeSummary } from "./useMergeController";
+ 
+ export type Question =
+   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
+-  | { readonly kind: "exit"; readonly files: readonly string[] };
++  | { readonly kind: "exit"; readonly files: readonly string[] }
++  | ({ readonly kind: "clash" } & Clash);
+ 
+ export type QuestionText = {
+   readonly title: string;
+@@ -29,7 +33,7 @@ function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
+   return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
+ }
+ 
+-export function questionText(question: Question): QuestionText {
++export function questionText(question: Question, platform: string): QuestionText {
+   switch (question.kind) {
+     case "unprocessed":
+       return {
+@@ -47,6 +51,14 @@ export function questionText(question: Question): QuestionText {
+         confirm: "Exit",
+         cancel: "Cancel",
+       };
++    case "clash":
++      return {
++        title: "Key Already in Use",
++        message: `${keyLabel(question.key, platform)} is already used by ${ACTION_NAMES[question.owner]}. Move it to ${ACTION_NAMES[question.action]}?`,
++        files: [],
++        confirm: "Move",
++        cancel: "Cancel",
++      };
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
+diff --git c/frontend/src/ui/settings.ts i/frontend/src/ui/settings.ts
+new file mode 100644
+index 0000000..7a036f6
+--- /dev/null
++++ i/frontend/src/ui/settings.ts
+@@ -0,0 +1,111 @@
++import type { ShallowRef } from "vue";
++
++import {
++  bindingsOf,
++  KEY_ACTIONS,
++  keyText,
++  type ChunkSource,
++  type Key,
++  type KeyAction,
++  type KeysRead,
++  type SettingsRead,
++  type SourceResult,
++  type StoredSettings,
++  type Theme,
++} from "../ipc";
++import type { Asking } from "./asking";
++import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
++import { attempt, report, type Problem } from "./problem";
++import type { Preferences } from "./useMergeController";
++
++export type SettingsInUse = {
++  readonly read: SettingsRead | null;
++  readonly theme: Theme;
++  readonly keys: KeysRead;
++};
++
++type SettingsTarget = {
++  readonly source: ChunkSource;
++  readonly settings: ShallowRef<SettingsInUse>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly asking: Pick<Asking, "ask">;
++};
++
++export type SettingsActions = {
++  loadSettings(): Promise<void>;
++  setTheme(theme: Theme): Promise<void>;
++  addKey(action: KeyAction, key: Key): Promise<void>;
++  changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
++  removeKey(action: KeyAction, key: Key): Promise<void>;
++  removeAllKeys(action: KeyAction): Promise<void>;
++  resetKeys(action: KeyAction): Promise<void>;
++  moveSettings(path: string): Promise<void>;
++};
++
++type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
++
++export function startSettings(theme: Theme): SettingsInUse {
++  return { read: null, theme, keys: bindingsOf({}) };
++}
++
++export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
++  return { theme, keys: keys.bindings };
++}
++
++function storedSettings({ theme, keys }: SettingsInUse): StoredSettings {
++  const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
++  return {
++    theme,
++    keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
++  };
++}
++
++function use(target: SettingsTarget, read: SettingsRead): void {
++  const keys = bindingsOf(read.stored.keys);
++  target.settings.value = { read, theme: read.stored.theme, keys };
++  if (keys.problems.length > 0) {
++    const cause = {
++      kind: "Keys",
++      path: read.path,
++      problems: keys.problems,
++    } satisfies Problem["cause"];
++    report(target, { action: "settings", cause });
++  } else if (target.problem.value?.action === "settings") {
++    target.problem.value = null;
++  }
++}
++
++async function send(target: SettingsTarget, call: Send): Promise<void> {
++  const current = storedSettings(target.settings.value);
++  const outcome = await attempt(() => call(current));
++  if (!outcome.ok) {
++    report(target, { action: "settings", cause: outcome.cause });
++    return;
++  }
++  use(target, outcome.value);
++}
++
++async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
++  const plan = planKeyEdit(target.settings.value.keys.bindings, edit);
++  if (plan.kind === "nothing") {
++    return;
++  }
++  if (plan.kind === "ask" && !(await target.asking.ask({ kind: "clash", ...plan.clash }))) {
++    return;
++  }
++  await send(target, (current) => target.source.setKeys(current, plan.changes));
++}
++
++export function settingsActions(target: SettingsTarget): SettingsActions {
++  const { source } = target;
++  return {
++    loadSettings: () => send(target, (current) => source.loadSettings(current)),
++    setTheme: (theme) => send(target, (current) => source.setTheme(current, theme)),
++    addKey: (action, key) => editKeys(target, { kind: "add", action, key }),
++    changeKey: (action, from, to) => editKeys(target, { kind: "change", action, from, to }),
++    removeKey: (action, key) => editKeys(target, { kind: "remove", action, key }),
++    removeAllKeys: (action) => editKeys(target, { kind: "removeAll", action }),
++    resetKeys: (action) => editKeys(target, { kind: "reset", action }),
++    moveSettings: (path) => send(target, (current) => source.moveSettings(current, path)),
++  };
++}
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index e4eab47..d2ba67d 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -1,7 +1,9 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import {
++  DEFAULT_KEYS,
+   loadFixture,
++  parseKey,
+   type ChunkSource,
+   type DiskChange,
+   type DiskResult,
+@@ -10,13 +12,16 @@ import {
+   type FileList,
+   type FileMergeData,
+   type FileSides,
++  type Key,
++  type SettingsRead,
+   type SourceFailure,
+   type SourceResult,
++  type StoredSettings,
+   type WriteReply,
+ } from "../ipc";
+ import { resultLine } from "./choiceText";
+ import type { FileWork } from "./closeGuard";
+-import { createAppStore, useAppStore, type AppStore } from "./store";
++import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
+ 
+ type PendingLoad = {
+   readonly path: string;
+@@ -28,11 +33,21 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
+ 
+ const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+ const NOTHING_LEFT = { conflicts: 0, changes: 0 };
++const NO_SETTINGS: Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings"> = {
++  loadSettings: () => Promise.reject(new Error("not used")),
++  setTheme: () => Promise.reject(new Error("not used")),
++  setKeys: () => Promise.reject(new Error("not used")),
++  moveSettings: () => Promise.reject(new Error("not used")),
++};
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+ 
++function createAppStore(source: ChunkSource): AppStore {
++  return createStoreWithTheme(source, "dark");
++}
++
+ function entry(path: string): FileEntry {
+   return { path, status: "Unresolved", unsupported: null };
+ }
+@@ -89,6 +104,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     describeFile: () => Promise.reject(new Error("not used")),
+     takeSide: () => Promise.reject(new Error("not used")),
+     remoteName: () => Promise.resolve(null),
++    ...NO_SETTINGS,
+   };
+   return { source, pending };
+ }
+@@ -134,7 +150,7 @@ test("useAppStore throws before createAppStore, then returns the created store",
+   const fresh = await import("./store");
+   expect(() => fresh.useAppStore()).toThrow("useAppStore() called before createAppStore()");
+ 
+-  const created = fresh.createAppStore(handSource([]).source);
++  const created = fresh.createAppStore(handSource([]).source, "dark");
+ 
+   expect(fresh.useAppStore()).toBe(created);
+ });
+@@ -944,6 +960,7 @@ function choiceSource(
+       return Promise.resolve(written(taken));
+     },
+     remoteName: () => Promise.resolve(null),
++    ...NO_SETTINGS,
+     ...overrides,
+   };
+   return { source, calls };
+@@ -1632,3 +1649,251 @@ test("a take on a deleted-side file shown from the disk shows yamt's view again"
+   expect(store.opened.value[0]?.middle).toEqual({ kind: "Stages", text: "kept\n" });
+   expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, { by: "side", side: "local" }]]));
+ });
++
++const SETTINGS_PATH = "/home/me/.config/yamt/settings.json";
++
++function read(stored: StoredSettings): SourceResult<SettingsRead> {
++  return ok({ path: SETTINGS_PATH, defaultPath: SETTINGS_PATH, stored });
++}
++
++function parsed(text: string): Key {
++  const key = parseKey(text);
++  if (key === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return key;
++}
++
++function settingsSource(overrides: Partial<ChunkSource>): {
++  source: ChunkSource;
++  sent: unknown[][];
++} {
++  const sent: unknown[][] = [];
++  const { source } = handSource([]);
++  const recorded: ChunkSource = {
++    ...source,
++    loadSettings: (current) => {
++      sent.push(["loadSettings", current]);
++      return overrides.loadSettings?.(current) ?? Promise.resolve(read(current));
++    },
++    setTheme: (current, theme) => {
++      sent.push(["setTheme", current, theme]);
++      return overrides.setTheme?.(current, theme) ?? Promise.resolve(read({ ...current, theme }));
++    },
++    setKeys: (current, changes) => {
++      sent.push(["setKeys", current, changes]);
++      const keys = Object.fromEntries(
++        changes.flatMap(({ action, keys: texts }) => (texts === null ? [] : [[action, texts]])),
++      );
++      return overrides.setKeys?.(current, changes) ?? Promise.resolve(read({ ...current, keys }));
++    },
++    moveSettings: (current, path) => {
++      sent.push(["moveSettings", current, path]);
++      return overrides.moveSettings?.(current, path) ?? Promise.resolve(read(current));
++    },
++  };
++  return { source: recorded, sent };
++}
++
++test("settings start with the start theme and the default keys, before any file is read", () => {
++  const store = createStoreWithTheme(handSource([]).source, "light");
++
++  expect(store.settings.value).toEqual({
++    read: null,
++    theme: "light",
++    keys: { bindings: DEFAULT_KEYS, problems: [] },
++  });
++  expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
++});
++
++test("a load on focus applies a file changed by hand since the last load", async () => {
++  const files = [
++    read({ theme: "dark", keys: {} }),
++    read({ theme: "light", keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
++  ];
++  const { source, sent } = settingsSource({
++    loadSettings: () => Promise.resolve(files.shift() ?? read({ theme: "dark", keys: {} })),
++  });
++  const store = createAppStore(source);
++
++  await store.loadSettings();
++  expect(store.settings.value.theme).toBe("dark");
++
++  await store.loadSettings();
++
++  expect(store.settings.value.theme).toBe("light");
++  expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
++  expect(sent).toEqual([
++    ["loadSettings", { theme: "dark", keys: {} }],
++    ["loadSettings", { theme: "dark", keys: {} }],
++  ]);
++});
++
++test("a loaded file sets the theme and keys every opened file follows", async () => {
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(read({ theme: "light", keys: { apply: ["a"] } })),
++  });
++  const store = createAppStore(source);
++
++  await store.loadSettings();
++
++  expect(store.settings.value.read?.path).toBe(SETTINGS_PATH);
++  expect(store.preferences.value.theme).toBe("light");
++  expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
++  expect(store.preferences.value.keys.ignore).toEqual(DEFAULT_KEYS.ignore);
++  expect(store.problem.value).toBeNull();
++});
++
++test("a failed load or change keeps the settings in use and shows a settings problem", async () => {
++  spyConsole();
++  const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
++  const failed: SourceResult<SettingsRead> = { ok: false, failure: broken };
++  const loads = [read({ theme: "light", keys: {} }), failed];
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
++    setTheme: () => Promise.resolve({ ok: false, failure: broken }),
++    setKeys: () => Promise.reject(new Error("ipc down")),
++  });
++  const store = createAppStore(source);
++  await store.loadSettings();
++  const inUse = store.settings.value;
++
++  await store.loadSettings();
++  expect(store.settings.value).toBe(inUse);
++  expect(store.problem.value).toEqual({ action: "settings", cause: broken });
++
++  await store.setTheme("dark");
++  await store.removeAllKeys("undo");
++
++  expect(store.settings.value).toBe(inUse);
++  expect(store.problem.value).toEqual({
++    action: "settings",
++    cause: { kind: "Unexpected", message: "ipc down" },
++  });
++});
++
++test("key problems in the file show one settings problem, which a clean read clears", async () => {
++  spyConsole();
++  const loads = [
++    read({ theme: "dark", keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
++    read({ theme: "dark", keys: {} }),
++  ];
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
++  });
++  const store = createAppStore(source);
++
++  await store.loadSettings();
++
++  expect(store.problem.value).toEqual({
++    action: "settings",
++    cause: {
++      kind: "Keys",
++      path: SETTINGS_PATH,
++      problems: [
++        { kind: "unreadable", action: "redo", text: "Ctrl+Q" },
++        { kind: "twice", key: parsed("Mod-f"), actions: ["find", "indent"] },
++      ],
++    },
++  });
++  expect(store.preferences.value.keys.redo).toEqual(DEFAULT_KEYS.redo);
++
++  await store.loadSettings();
++
++  expect(store.problem.value).toBeNull();
++});
++
++test("setTheme sends the settings in use and applies the reply", async () => {
++  const { source, sent } = settingsSource({});
++  const store = createAppStore(source);
++
++  await store.setTheme("light");
++
++  expect(sent).toEqual([["setTheme", { theme: "dark", keys: {} }, "light"]]);
++  expect(store.settings.value.theme).toBe("light");
++});
++
++test("a key another action holds asks; Move writes both changes in one call", async () => {
++  const { source, sent } = settingsSource({});
++  const store = createAppStore(source);
++
++  const adding = store.addKey("undo", parsed("Mod-f"));
++  await vi.waitFor(() => {
++    expect(store.question.value).toEqual({
++      kind: "clash",
++      key: parsed("Mod-f"),
++      action: "undo",
++      owner: "find",
++    });
++  });
++  store.answer(true);
++  await adding;
++
++  expect(sent).toEqual([
++    [
++      "setKeys",
++      { theme: "dark", keys: {} },
++      [
++        { action: "undo", keys: ["Mod-z", "Mod-f"] },
++        { action: "find", keys: [] },
++      ],
++    ],
++  ]);
++  expect(store.preferences.value.keys.find).toEqual([]);
++  expect(store.preferences.value.keys.undo).toEqual([parsed("Mod-z"), parsed("Mod-f")]);
++});
++
++test("Cancel on the clash question writes nothing", async () => {
++  const { source, sent } = settingsSource({});
++  const store = createAppStore(source);
++
++  const adding = store.changeKey("find", parsed("Mod-f"), parsed("Mod-z"));
++  await vi.waitFor(() => {
++    expect(store.question.value?.kind).toBe("clash");
++  });
++  store.answer(false);
++  await adding;
++
++  expect(sent).toEqual([]);
++  expect(store.preferences.value.keys).toEqual(DEFAULT_KEYS);
++});
++
++test("each key edit sends only the changed actions, as key texts", async () => {
++  const { source, sent } = settingsSource({});
++  const store = createAppStore(source);
++
++  await store.addKey("apply", parsed("a"));
++  await store.removeKey("redo", parsed("Mod-y"));
++  await store.resetKeys("apply");
++  await store.removeKey("apply", parsed("q"));
++
++  expect(sent).toEqual([
++    ["setKeys", { theme: "dark", keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
++    [
++      "setKeys",
++      { theme: "dark", keys: { apply: ["Enter", "Space", "a"] } },
++      [{ action: "redo", keys: ["Mod-Shift-z"] }],
++    ],
++    [
++      "setKeys",
++      { theme: "dark", keys: { redo: ["Mod-Shift-z"] } },
++      [{ action: "apply", keys: null }],
++    ],
++  ]);
++});
++
++test("moveSettings sends the path with the settings in use and uses the file found there", async () => {
++  const moved: SettingsRead = {
++    path: "/elsewhere.json",
++    defaultPath: SETTINGS_PATH,
++    stored: { theme: "light", keys: {} },
++  };
++  const { source, sent } = settingsSource({ moveSettings: () => Promise.resolve(ok(moved)) });
++  const store = createAppStore(source);
++
++  await store.moveSettings("/elsewhere.json");
++
++  expect(sent).toEqual([["moveSettings", { theme: "dark", keys: {} }, "/elsewhere.json"]]);
++  expect(store.settings.value.read).toEqual(moved);
++  expect(store.settings.value.theme).toBe("light");
++});
+diff --git c/frontend/src/ui/store.ts i/frontend/src/ui/store.ts
+index b101966..104c459 100644
+--- c/frontend/src/ui/store.ts
++++ i/frontend/src/ui/store.ts
+@@ -10,16 +10,20 @@ import {
+   type FileSides,
+   type RemoteName,
+   type Side,
++  type Theme,
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { applyDiskChanges } from "./diskChanges";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
+-import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
++import { attempt, clearProblemAbout, logProblem, report, unexpected } from "./problem";
++import type { Problem } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
++import { preferencesOf, settingsActions, startSettings } from "./settings";
++import type { SettingsActions, SettingsInUse } from "./settings";
+ import type { Taken } from "./sides";
+-import type { MergeSummary } from "./useMergeController";
++import type { MergeSummary, Preferences } from "./useMergeController";
+ import { fetchView, isShown, reload } from "./views";
+ 
+ type FinishRequest = Parameters<ChunkSource["finishFile"]>[0] & {
+@@ -36,6 +40,7 @@ type Refs = {
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly settingsOpen: ShallowRef<boolean>;
++  readonly settings: ShallowRef<SettingsInUse>;
+ };
+ 
+ type State = Refs & {
+@@ -45,30 +50,32 @@ type State = Refs & {
+   latestOpen: number;
+ };
+ 
+-type Actions = Omit<CloseGuard, "markSaved"> & {
+-  loadFiles(): Promise<void>;
+-  refreshFiles(): Promise<void>;
+-  loadRemoteName(): Promise<void>;
+-  open(path: string): Promise<void>;
+-  pick(path: string): Promise<void>;
+-  finish(request: FinishRequest): Promise<void>;
+-  takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
+-  reset(path: string, diskVersion: DiskVersion): Promise<void>;
+-  dismissProblem(): void;
+-  dismissNotice(path: string): void;
+-  openSettings(): void;
+-  closeSettings(): void;
+-  answer(yes: boolean): void;
+-};
++type Actions = Omit<CloseGuard, "markSaved"> &
++  SettingsActions & {
++    loadFiles(): Promise<void>;
++    refreshFiles(): Promise<void>;
++    loadRemoteName(): Promise<void>;
++    open(path: string): Promise<void>;
++    pick(path: string): Promise<void>;
++    finish(request: FinishRequest): Promise<void>;
++    takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
++    reset(path: string, diskVersion: DiskVersion): Promise<void>;
++    dismissProblem(): void;
++    dismissNotice(path: string): void;
++    openSettings(): void;
++    closeSettings(): void;
++    answer(yes: boolean): void;
++  };
+ 
+ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly question: ComputedRef<Question | null>;
+   readonly allResolved: ComputedRef<boolean>;
++  readonly preferences: ComputedRef<Preferences>;
+ } & Actions;
+ 
+ let store: AppStore | null = null;
+ 
+-export function createAppStore(source: ChunkSource): AppStore {
++export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore {
+   const refs: Refs = {
+     files: shallowRef<readonly FileEntry[]>([]),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+@@ -79,17 +86,19 @@ export function createAppStore(source: ChunkSource): AppStore {
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+     settingsOpen: shallowRef(false),
++    settings: shallowRef(startSettings(startTheme)),
+   };
+   const asking = createAsking();
+   const guard = createCloseGuard(asking, refs.opened);
+   const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
+-  const { files } = refs;
++  const { files, settings } = refs;
+   store = {
+     ...refs,
+     question: asking.question,
+     allResolved: computed(
+       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+     ),
++    preferences: computed(() => preferencesOf(settings.value)),
+     ...actions(state),
+   };
+   return store;
+@@ -128,16 +137,10 @@ function actions(state: State): Actions {
+     unsavedFiles: state.guard.unsavedFiles,
+     mayClose: state.guard.mayClose,
+     watchWindowClose: state.guard.watchWindowClose,
++    ...settingsActions(state),
+   };
+ }
+ 
+-function clearProblemAbout(state: State, path: string): void {
+-  const problem = state.problem.value;
+-  if (problem !== null && problem.action !== "list" && problem.path === path) {
+-    state.problem.value = null;
+-  }
+-}
+-
+ async function loadFiles(state: State): Promise<void> {
+   const listed = await refreshFiles(state, "start");
+   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
+diff --git c/frontend/src/ui/useMergeController.test.ts i/frontend/src/ui/useMergeController.test.ts
+index 658d810..8be02d1 100644
+--- c/frontend/src/ui/useMergeController.test.ts
++++ i/frontend/src/ui/useMergeController.test.ts
+@@ -1,21 +1,35 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
+ 
+-import { loadFixture, type FileMergeData } from "../ipc";
+-import { useMergeController, type MergeHandle } from "./useMergeController";
++import { bindingsOf, DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
++import { useMergeController, type MergeHandle, type Preferences } from "./useMergeController";
+ 
+ const editor = vi.hoisted(() => {
+-  const state = { text: "", built: 0, destroyed: 0, readOnly: new Array<boolean>() };
++  const state = {
++    text: "",
++    built: 0,
++    destroyed: 0,
++    readOnly: new Array<boolean>(),
++    themes: new Array<string>(),
++  };
+   class MergeController {
+-    constructor(data: FileMergeData, _hosts: unknown, options: { readOnly: boolean }) {
++    constructor(
++      data: FileMergeData,
++      _hosts: unknown,
++      options: { readOnly: boolean; preferences: { theme: string } },
++    ) {
+       state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
+       state.built += 1;
+       state.readOnly.push(options.readOnly);
++      state.themes.push(`built ${options.preferences.theme}`);
+     }
+     summary(): { conflicts: number; changes: number } {
+       return { conflicts: 0, changes: 0 };
+     }
+     onSummaryChange(): void {}
++    setPreferences(preferences: { theme: string }): void {
++      state.themes.push(`set ${preferences.theme}`);
++    }
+     resultText(): string {
+       return state.text;
+     }
+@@ -28,8 +42,10 @@ const editor = vi.hoisted(() => {
+ 
+ vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
+ 
++const DARK: Preferences = { theme: "dark", keys: DEFAULT_KEYS };
++
+ afterEach(() => {
+-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [] });
++  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [], themes: [] });
+ });
+ 
+ function host<T>(present: boolean): ShallowRef<T | null> {
+@@ -38,7 +54,7 @@ function host<T>(present: boolean): ShallowRef<T | null> {
+ 
+ function mount(
+   data: ShallowRef<FileMergeData | null>,
+-  { present = true, readOnly = shallowRef(false) } = {},
++  { present = true, readOnly = shallowRef(false), preferences = shallowRef(DARK) } = {},
+ ): { scope: EffectScope; handle: MergeHandle } {
+   const scope = effectScope();
+   const handle = scope.run(() =>
+@@ -51,6 +67,7 @@ function mount(
+         strips: [host(present), host(present)],
+       },
+       readOnly,
++      preferences,
+     ),
+   );
+   if (handle === undefined) {
+@@ -84,7 +101,7 @@ test("unsaved: false when built, true after an edit, false after markSaved, fals
+   data.value = await fileData("changed on disk\n");
+   await nextTick();
+ 
+-  expect(editor.state).toEqual({
++  expect(editor.state).toMatchObject({
+     text: "changed on disk\n",
+     built: 2,
+     destroyed: 1,
+@@ -126,6 +143,32 @@ test("the editor is read-only as the view says, and is rebuilt when that changes
+   expect(editor.state.built).toBe(2);
+ });
+ 
++test("the editor is built with the preferences in use and follows a change without a rebuild", async () => {
++  const preferences = shallowRef<Preferences>({ theme: "light", keys: DEFAULT_KEYS });
++  mount(shallowRef<FileMergeData | null>(await fileData("b\n")), { preferences });
++  await nextTick();
++
++  preferences.value = { theme: "dark", keys: bindingsOf({ apply: ["a"] }).bindings };
++  await nextTick();
++
++  expect(editor.state.themes).toEqual(["built light", "set dark"]);
++  expect(editor.state.built).toBe(1);
++  expect(editor.state.destroyed).toBe(0);
++});
++
++test("a preferences change before the file loaded reaches the editor built later", async () => {
++  const data = shallowRef<FileMergeData | null>(null);
++  const preferences = shallowRef<Preferences>(DARK);
++  mount(data, { preferences });
++  await nextTick();
++
++  preferences.value = { theme: "light", keys: DEFAULT_KEYS };
++  data.value = await fileData("b\n");
++  await nextTick();
++
++  expect(editor.state.themes).toEqual(["built light"]);
++});
++
+ test("while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing", async () => {
+   const { handle } = mount(shallowRef<FileMergeData | null>(null));
+   const ctrlZ: KeyboardEvent = Object.create(null);
+diff --git c/frontend/src/ui/useMergeController.ts i/frontend/src/ui/useMergeController.ts
+index 6be74d4..b6ffd0f 100644
+--- c/frontend/src/ui/useMergeController.ts
++++ i/frontend/src/ui/useMergeController.ts
+@@ -2,15 +2,23 @@ import {
+   onScopeDispose,
+   shallowRef,
+   toRef,
++  toValue,
+   watch,
+   type MaybeRefOrGetter,
+   type ShallowRef,
+ } from "vue";
+ 
+-import { MergeController, type Direction, type MergeSummary, type Side } from "../editor";
++import {
++  MergeController,
++  type Direction,
++  type MergeOptions,
++  type MergeSummary,
++  type Preferences,
++  type Side,
++} from "../editor";
+ import type { FileMergeData } from "../ipc";
+ 
+-export type { Direction, MergeSummary } from "../editor";
++export type { Direction, MergeSummary, Preferences } from "../editor";
+ 
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+@@ -45,7 +53,7 @@ type HostElements = readonly [
+ 
+ function createController(
+   data: FileMergeData | null,
+-  readOnly: boolean,
++  options: MergeOptions,
+   [left, center, right, leftStrip, rightStrip]: HostElements,
+ ): MergeController | null {
+   if (
+@@ -61,7 +69,7 @@ function createController(
+   return new MergeController(
+     data,
+     { left, center, right, strips: [leftStrip, rightStrip] },
+-    { readOnly },
++    options,
+   );
+ }
+ 
+@@ -91,6 +99,7 @@ export function useMergeController(
+   data: MaybeRefOrGetter<FileMergeData | null>,
+   hosts: Hosts,
+   readOnly: MaybeRefOrGetter<boolean>,
++  preferences: MaybeRefOrGetter<Preferences>,
+ ): MergeHandle {
+   const summary = shallowRef<MergeSummary | null>(null);
+   let loaded: Loaded | null = null;
+@@ -105,7 +114,8 @@ export function useMergeController(
+     [toRef(data), toRef(readOnly), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+     ([current, currentReadOnly, ...elements]) => {
+       destroyController();
+-      const controller = createController(current, currentReadOnly, elements);
++      const options = { readOnly: currentReadOnly, preferences: toValue(preferences) };
++      const controller = createController(current, options, elements);
+       controller?.onSummaryChange((next) => {
+         summary.value = next;
+       });
+@@ -115,6 +125,10 @@ export function useMergeController(
+     { immediate: true, flush: "post" },
+   );
+ 
++  watch(toRef(preferences), (next) => {
++    loaded?.controller.setPreferences(next);
++  });
++
+   onScopeDispose(destroyController);
+ 
+   return handleOf(summary, () => loaded);

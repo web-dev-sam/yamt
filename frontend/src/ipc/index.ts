@@ -12,15 +12,36 @@ export type {
   FileList,
   FileMergeData,
   FileSides,
+  KeysChange,
   NotText,
   RemoteName,
+  SettingsRead,
   Side,
   SideContent,
   SourceFailure,
   SourceResult,
+  StoredSettings,
+  Theme,
   WriteReply,
 } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
+export {
+  bindingsOf,
+  DEFAULT_KEYS,
+  isLetter,
+  isMac,
+  KEY_ACTIONS,
+  keyLabel,
+  keyOfEvent,
+  keyText,
+  parseKey,
+  sameKey,
+  type Key,
+  type KeyAction,
+  type KeyBindings,
+  type KeyProblem,
+  type KeysRead,
+} from "./keys";
 export { createTauriSource } from "./tauri";
 
 const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";

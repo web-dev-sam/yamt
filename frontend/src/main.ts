@@ -8,7 +8,8 @@ import "./style.css";
 
 const source =
   import.meta.env.VITE_CHUNK_SOURCE === "tauri" ? createTauriSource() : createFixtureSource(log);
-const store = createAppStore(source);
+const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
+const store = createAppStore(source, startTheme);
 void store.loadFiles();
 void store.loadRemoteName();
 createApp(App).mount("#app");

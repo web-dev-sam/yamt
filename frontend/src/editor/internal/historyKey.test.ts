@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 
+import { DEFAULT_KEYS, parseKey, type Key, type KeyBindings } from "../../ipc";
 import { historyCommand } from "./historyKey";
 
 const LINUX = "Linux x86_64";
@@ -16,7 +17,11 @@ type Press = {
   target?: EventTarget | null;
 };
 
-function command(platform: string, press: Press): "undo" | "redo" | null {
+function command(
+  platform: string,
+  press: Press,
+  keys: KeyBindings = DEFAULT_KEYS,
+): "undo" | "redo" | null {
   return historyCommand(
     {
       key: press.key,
@@ -29,7 +34,16 @@ function command(platform: string, press: Press): "undo" | "redo" | null {
       target: press.target ?? null,
     },
     platform,
+    keys,
   );
+}
+
+function key(text: string): Key {
+  const parsed = parseKey(text);
+  if (parsed === null) {
+    throw new Error(`${text} does not parse`);
+  }
+  return parsed;
 }
 
 test("Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing", () => {
@@ -81,4 +95,21 @@ test("a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ct
   expect(command(LINUX, { key: ";", code: "KeyZ", ctrl: true })).toBeNull();
   expect(command(LINUX, { key: ":", code: "KeyZ", ctrl: true, shift: true })).toBeNull();
   expect(command(LINUX, { key: "-", code: "KeyY", ctrl: true })).toBeNull();
+});
+
+test("a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing", () => {
+  const keys = { ...DEFAULT_KEYS, undo: [key("Alt-Backspace")] };
+  const side = Object.assign(new EventTarget(), { tagName: "DIV" });
+
+  expect(command(LINUX, { key: "Backspace", alt: true, target: side }, keys)).toBe("undo");
+  expect(command(LINUX, { key: "z", ctrl: true }, keys)).toBeNull();
+  expect(command(LINUX, { key: "Backspace" }, keys)).toBeNull();
+  expect(command(LINUX, { key: "Y", ctrl: true, shift: true })).toBeNull();
+});
+
+test("a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only", () => {
+  const keys = { ...DEFAULT_KEYS, redo: [key("Mod-Shift-z")] };
+
+  expect(command(LINUX, { key: "Я", code: "KeyZ", ctrl: true, shift: true }, keys)).toBe("redo");
+  expect(command(LINUX, { key: "н", code: "KeyY", ctrl: true }, keys)).toBeNull();
 });

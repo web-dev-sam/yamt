@@ -11,6 +11,7 @@ import {
   type SourceResult,
   type WriteReply,
 } from "./domain";
+import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
 type SchemaOf<T> = { readonly [K in keyof T]-?: v.GenericSchema<T[K]> };
@@ -220,5 +221,6 @@ export function createFixtureSource(
     async remoteName() {
       return null;
     },
+    ...createFixtureSettings(),
   };
 }

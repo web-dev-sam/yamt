@@ -2,15 +2,23 @@ import {
   onScopeDispose,
   shallowRef,
   toRef,
+  toValue,
   watch,
   type MaybeRefOrGetter,
   type ShallowRef,
 } from "vue";
 
-import { MergeController, type Direction, type MergeSummary, type Side } from "../editor";
+import {
+  MergeController,
+  type Direction,
+  type MergeOptions,
+  type MergeSummary,
+  type Preferences,
+  type Side,
+} from "../editor";
 import type { FileMergeData } from "../ipc";
 
-export type { Direction, MergeSummary } from "../editor";
+export type { Direction, MergeSummary, Preferences } from "../editor";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -45,7 +53,7 @@ type HostElements = readonly [
 
 function createController(
   data: FileMergeData | null,
-  readOnly: boolean,
+  options: MergeOptions,
   [left, center, right, leftStrip, rightStrip]: HostElements,
 ): MergeController | null {
   if (
@@ -61,7 +69,7 @@ function createController(
   return new MergeController(
     data,
     { left, center, right, strips: [leftStrip, rightStrip] },
-    { readOnly },
+    options,
   );
 }
 
@@ -91,6 +99,7 @@ export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: Hosts,
   readOnly: MaybeRefOrGetter<boolean>,
+  preferences: MaybeRefOrGetter<Preferences>,
 ): MergeHandle {
   const summary = shallowRef<MergeSummary | null>(null);
   let loaded: Loaded | null = null;
@@ -105,7 +114,8 @@ export function useMergeController(
     [toRef(data), toRef(readOnly), hosts.left, hosts.center, hosts.right, ...hosts.strips],
     ([current, currentReadOnly, ...elements]) => {
       destroyController();
-      const controller = createController(current, currentReadOnly, elements);
+      const options = { readOnly: currentReadOnly, preferences: toValue(preferences) };
+      const controller = createController(current, options, elements);
       controller?.onSummaryChange((next) => {
         summary.value = next;
       });
@@ -114,6 +124,10 @@ export function useMergeController(
     },
     { immediate: true, flush: "post" },
   );
+
+  watch(toRef(preferences), (next) => {
+    loaded?.controller.setPreferences(next);
+  });
 
   onScopeDispose(destroyController);
 

@@ -13,6 +13,10 @@ const commands = vi.hoisted(() => ({
   takeSide: vi.fn(),
   remoteName: vi.fn(),
   log: vi.fn(),
+  loadSettings: vi.fn(),
+  setTheme: vi.fn(),
+  setKeys: vi.fn(),
+  moveSettings: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -298,4 +302,49 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
     event: "scroll.drift",
     fields: { nan: "NaN", up: "Infinity", down: "-Infinity", lines: 3.5, ok: true, name: "a" },
   });
+});
+
+const STORED: Generated.StoredSettings = { theme: "light", keys: { undo: ["Alt-Backspace"] } };
+const SETTINGS_DTO: Generated.SettingsRead = {
+  path: "/home/me/.config/yamt/settings.json",
+  default_path: "/home/me/.config/yamt/settings.json",
+  stored: STORED,
+};
+const SETTINGS_READ = {
+  path: SETTINGS_DTO.path,
+  defaultPath: SETTINGS_DTO.default_path,
+  stored: STORED,
+};
+
+test("the four settings commands send their arguments and return the read with its default path", async () => {
+  for (const command of [
+    commands.loadSettings,
+    commands.setTheme,
+    commands.setKeys,
+    commands.moveSettings,
+  ]) {
+    command.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
+  }
+  const source = createTauriSource();
+  const changes = [{ action: "undo", keys: null }];
+
+  expect(await source.loadSettings(STORED)).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.setTheme(STORED, "dark")).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.setKeys(STORED, changes)).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.moveSettings(STORED, "~/s.json")).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(commands.loadSettings).toHaveBeenCalledWith(STORED);
+  expect(commands.setTheme).toHaveBeenCalledWith(STORED, "dark");
+  expect(commands.setKeys).toHaveBeenCalledWith(STORED, changes);
+  expect(commands.moveSettings).toHaveBeenCalledWith(STORED, "~/s.json");
+});
+
+test("a settings failure comes back as the app's error", async () => {
+  const broken = {
+    kind: "SettingsBroken",
+    path: SETTINGS_DTO.path,
+    message: "x at line 3 column 7",
+  };
+  commands.loadSettings.mockResolvedValue({ status: "error", error: broken });
+
+  expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
 });

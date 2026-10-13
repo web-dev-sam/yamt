@@ -1,6 +1,10 @@
+import { keyLabel, type KeyProblem } from "../ipc";
+import { ACTION_NAMES } from "./keyText";
 import type { Problem, ProblemCause } from "./problem";
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+
+const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
 
 function attempted(problem: Problem): string {
   switch (problem.action) {
@@ -14,6 +18,8 @@ function attempted(problem: Problem): string {
       return `Could not resolve ${problem.path} with one side`;
     case "reset":
       return `Could not reset ${problem.path}`;
+    case "settings":
+      return "Could not use the settings file";
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -44,7 +50,32 @@ function unsupportedBecause(reason: UnsupportedReason): string {
   }
 }
 
-export function problemText(problem: Problem): string {
+// serde_json ends a syntax error with " at line L column C" (serde_json src/error.rs Display).
+function brokenText(path: string, message: string): string {
+  const found = AT_POSITION.exec(message.trim());
+  const [, what = message.trim(), line, column] = found ?? [];
+  const where = line === undefined ? "" : ` at line ${line}, column ${column}`;
+  return `The settings file ${path} has an error${where}: ${what}. Fix it or choose another file.`;
+}
+
+function keyProblemText(path: string, problem: KeyProblem, platform: string): string {
+  switch (problem.kind) {
+    case "unreadable": {
+      const name = ACTION_NAMES[problem.action];
+      return `The settings file ${path} gives ${name} the key "${problem.text}", which yamt cannot read; ${name} keeps its default keys.`;
+    }
+    case "twice": {
+      const [keeps, loses] = problem.actions.map((action) => ACTION_NAMES[action]);
+      return `The settings file ${path} gives ${keyLabel(problem.key, platform)} to both ${keeps} and ${loses}; only ${keeps} uses it.`;
+    }
+    default: {
+      const _exhaustive: never = problem;
+      return _exhaustive;
+    }
+  }
+}
+
+export function problemText(problem: Problem, platform: string): string {
   const { cause } = problem;
   switch (cause.kind) {
     case "Git":
@@ -59,6 +90,14 @@ export function problemText(problem: Problem): string {
       return `${attempted(problem)}: ${cause.path} is not a regular file on disk; nothing was written`;
     case "ReadFailed":
       return `${attempted(problem)}: reading ${cause.path} failed: ${cause.message.trim()}`;
+    case "SettingsBroken":
+      return brokenText(cause.path, cause.message);
+    case "NotAbsolute":
+      return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
+    case "NoConfigFolder":
+      return `${attempted(problem)}: this system has no config folder to keep it in.`;
+    case "Keys":
+      return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "Unexpected":
       return `${attempted(problem)}: ${cause.message.trim()}`;
     default: {

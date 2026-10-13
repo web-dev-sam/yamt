@@ -3,7 +3,9 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { find, findLabel, labelOutdated, showFindSpace, stepMatch } from "./find";
+import { DEFAULT_KEYS, parseKey } from "../../ipc";
+import { closeButtonTitle, find, showFindSpace } from "./find";
+import { findLabel, labelOutdated, stepMatch } from "./findMatch";
 
 const DOC = "foo bar\nFoo baz\nqux FOO\n";
 const FIRST = { from: 0, to: 3 };
@@ -86,4 +88,18 @@ test("the space above the first line stays from show to hide, across edits; the 
   expect(
     spaced(state.update({ effects: [showFindSpace.of(true), showFindSpace.of(false)] }).state),
   ).toBe(false);
+});
+
+test("the Close button's title names the first Close find key, or none", () => {
+  const f10 = parseKey("F10");
+  if (f10 === null) {
+    throw new Error("F10 does not parse");
+  }
+
+  expect(closeButtonTitle(DEFAULT_KEYS, "Linux x86_64")).toBe("Close (Escape)");
+  expect(closeButtonTitle({ ...DEFAULT_KEYS, "close-find": [f10] }, "Linux x86_64")).toBe(
+    "Close (F10)",
+  );
+  expect(closeButtonTitle(DEFAULT_KEYS, "MacIntel")).toBe("Close (⎋)");
+  expect(closeButtonTitle({ ...DEFAULT_KEYS, "close-find": [] }, "Linux x86_64")).toBe("Close");
 });

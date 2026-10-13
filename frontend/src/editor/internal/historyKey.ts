@@ -1,4 +1,4 @@
-import { isModHeld } from "./modClick";
+import { keyOfEvent, sameKey, type KeyBindings } from "../../ipc";
 
 type HistoryKey = Pick<
   KeyboardEvent,
@@ -6,9 +6,6 @@ type HistoryKey = Pick<
 >;
 
 const TEXT_FIELDS: Readonly<Record<string, true>> = { INPUT: true, TEXTAREA: true };
-const LATIN_LETTER = /^[a-z]$/i;
-const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
-const LETTER_CODE = /^Key([A-Z])$/;
 
 function inTextField(target: EventTarget | null): boolean {
   return (
@@ -19,34 +16,20 @@ function inTextField(target: EventTarget | null): boolean {
   );
 }
 
-// A non-Latin layout gives `key` 'я' for Ctrl+Z; like CodeMirror's runHandlers (keyCode fallback,
-// @codemirror/view keymap.ts: keyCode follows a Latin layout, so Dvorak's ';' on KeyZ stays ';'),
-// the physical key decides only then.
-function letterOf({ key, code }: Pick<KeyboardEvent, "key" | "code">): string {
-  if (LATIN_LETTER.test(key)) {
-    return key.toLowerCase();
-  }
-  if (!LETTER_OR_MARK.test(key)) {
-    return "";
-  }
-  return LETTER_CODE.exec(code)?.[1]?.toLowerCase() ?? "";
-}
-
-export function historyCommand(event: HistoryKey, platform: string): "undo" | "redo" | null {
-  if (
-    event.defaultPrevented ||
-    event.altKey ||
-    !isModHeld(event, platform) ||
-    inTextField(event.target)
-  ) {
+export function historyCommand(
+  event: HistoryKey,
+  platform: string,
+  keys: KeyBindings,
+): "undo" | "redo" | null {
+  if (event.defaultPrevented || inTextField(event.target)) {
     return null;
   }
-  switch (letterOf(event)) {
-    case "z":
-      return event.shiftKey ? "redo" : "undo";
-    case "y":
-      return "redo";
-    default:
-      return null;
+  const pressed = keyOfEvent(event, platform);
+  if (pressed === null) {
+    return null;
   }
+  if (keys.undo.some((key) => sameKey(key, pressed))) {
+    return "undo";
+  }
+  return keys.redo.some((key) => sameKey(key, pressed)) ? "redo" : null;
 }

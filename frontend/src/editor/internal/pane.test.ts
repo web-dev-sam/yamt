@@ -1,19 +1,38 @@
-import { indentLess, indentMore, undo, undoDepth } from "@codemirror/commands";
+import {
+  indentLess,
+  indentMore,
+  redo,
+  selectParentSyntax,
+  undo,
+  undoDepth,
+  undoSelection,
+} from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import type { EditorState, StateCommand } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
-import { loadFixture } from "../../ipc";
+import { DEFAULT_KEYS, loadFixture, parseKey, type Key, type KeyBindings } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
-import { centerPane, languageCompartment, paletteHighlight, paneState } from "./pane";
+import {
+  centerPane,
+  languageCompartment,
+  paletteHighlight,
+  paneState,
+  type PaneSettings,
+} from "./pane";
 import { sideStatusField } from "./sideStatus";
 
 const PARSE_BUDGET_MS = 5000;
 const COLOUR = /(?:^|[{ ])color: ([^;]+);/;
+const LINUX = "Linux x86_64";
+const SETTINGS: PaneSettings = {
+  preferences: { theme: "dark", keys: DEFAULT_KEYS },
+  platform: LINUX,
+};
 
 const VUE_SFC = `<template>
   <div class="app">{{ msg }}</div>
@@ -58,8 +77,31 @@ async function loaded(path: string): Promise<Language> {
   return (await description.load()).language;
 }
 
-function center(doc: string, language: Language | null): EditorState {
-  return paneState({ kind: "center", doc, eol: "Lf", language, extensions: [] });
+function center(doc: string, language: Language | null, settings = SETTINGS): EditorState {
+  return paneState({ kind: "center", doc, eol: "Lf", language, settings, extensions: [] });
+}
+
+function key(text: string): Key {
+  const parsed = parseKey(text);
+  if (parsed === null) {
+    throw new Error(`${text} does not parse`);
+  }
+  return parsed;
+}
+
+function withKeys(keys: Partial<KeyBindings>): PaneSettings {
+  return { preferences: { theme: "dark", keys: { ...DEFAULT_KEYS, ...keys } }, platform: LINUX };
+}
+
+// CodeMirror runs the commands bound to a key in the keymap facet's order (precedence first) until
+// one returns true (@codemirror/view keymap.ts buildKeymap, runHandlers).
+function commandsOn(state: EditorState, name: string): unknown[] {
+  return state
+    .facet(keymap)
+    .flat()
+    .filter((binding) => (binding.linux ?? binding.key) === name)
+    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"))
+    .map(({ run: command }) => command);
 }
 
 function run(command: StateCommand, state: EditorState): EditorState {
@@ -146,6 +188,7 @@ async function tintedLeft(): Promise<EditorState> {
     doc: data.local,
     eol: data.eol,
     language: null,
+    settings: SETTINGS,
     extensions: [statuses, sideDecorations(statuses, "local")],
   });
 }
@@ -191,6 +234,7 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
     ...centerPane(data.middle, false),
     eol: data.eol,
     language: null,
+    settings: SETTINGS,
     extensions: [field],
   });
   expect(colourAt(plain, "<template>")).toBeNull();
@@ -263,4 +307,43 @@ test("one undo takes back a whole Tab on three lines", () => {
 
   expect(undoDepth(indented)).toBe(1);
   expect(run(undo, indented).doc.toString()).toBe(PHP);
+});
+
+test("the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults", () => {
+  const state = center(PHP, null);
+
+  expect(commandsOn(state, "Mod-z")).toEqual([undo]);
+  expect(commandsOn(state, "Mod-Shift-z")).toEqual([redo]);
+  expect(commandsOn(state, "Mod-y")).toEqual([redo]);
+  expect(commandsOn(state, "Ctrl-Shift-z")).toEqual([]);
+  expect(commandsOn(state, "Tab")).toEqual([indentMore]);
+  expect(commandsOn(state, "Shift-Tab")).toEqual([indentLess]);
+});
+
+test("Indent on Mod-i runs before the default keymap's selectParentSyntax", () => {
+  const state = center(PHP, null, withKeys({ indent: [key("Mod-i")] }));
+
+  expect(commandsOn(state, "Mod-i")).toEqual([indentMore, selectParentSyntax]);
+});
+
+test("Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection", () => {
+  const state = center(PHP, null, withKeys({ undo: [key("Alt-Backspace")] }));
+
+  expect(commandsOn(state, "Mod-z")).toEqual([]);
+  expect(commandsOn(state, "Alt-Backspace")).toEqual([undo]);
+  expect(commandsOn(state, "Mod-u")).toEqual([undoSelection]);
+});
+
+test("Indent without keys: Tab indents nothing in the middle", () => {
+  const state = center(PHP, null, withKeys({ indent: [] }));
+
+  expect(commandsOn(state, "Tab")).toEqual([]);
+  expect(commandsOn(state, "Shift-Tab")).toEqual([indentLess]);
+});
+
+test("CodeMirror's dark flag follows the theme", () => {
+  const light: PaneSettings = { ...SETTINGS, preferences: { theme: "light", keys: DEFAULT_KEYS } };
+
+  expect(center(PHP, null).facet(EditorView.darkTheme)).toBe(true);
+  expect(center(PHP, null, light).facet(EditorView.darkTheme)).toBe(false);
 });

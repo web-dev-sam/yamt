@@ -1,6 +1,7 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
+import { isMac } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import type { ChunkRow } from "./geometry";
 import { changeAt } from "./navigation";
@@ -15,11 +16,6 @@ const BUTTON_ACTION: Readonly<Record<number, ChunkAction["kind"]>> = {
   [MAIN_BUTTON]: "apply",
   [SECONDARY_BUTTON]: "ignore",
 };
-
-// The platform test CodeMirror uses for `Mod` (@codemirror/view browser.mac).
-function isMac(platform: string): boolean {
-  return /Mac/.test(platform);
-}
 
 export function isModHeld({ ctrlKey, metaKey }: Modifiers, platform: string): boolean {
   // On macOS Ctrl+click is the system's secondary click.

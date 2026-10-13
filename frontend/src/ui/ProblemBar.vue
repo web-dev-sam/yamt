@@ -8,7 +8,7 @@ import { problemText } from "./problemText";
 const props = defineProps<{ problem: Problem }>();
 const emit = defineEmits<{ close: [] }>();
 
-const text = computed(() => problemText(props.problem));
+const text = computed(() => problemText(props.problem, navigator.platform));
 </script>
 
 <template>

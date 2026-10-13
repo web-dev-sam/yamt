@@ -3,9 +3,13 @@ import type {
   FileList,
   FileMergeData,
   FileSides,
+  KeysChange,
   RemoteName,
+  SettingsRead,
   Side,
   SourceResult,
+  StoredSettings,
+  Theme,
   WriteReply,
 } from "./domain";
 
@@ -21,4 +25,11 @@ export interface ChunkSource {
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   remoteName(): Promise<RemoteName | null>;
+  loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+  setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+  setKeys(
+    current: StoredSettings,
+    changes: readonly KeysChange[],
+  ): Promise<SourceResult<SettingsRead>>;
+  moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
 }

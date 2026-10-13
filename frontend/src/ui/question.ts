@@ -1,8 +1,12 @@
+import { keyLabel } from "../ipc";
+import type { Clash } from "./keymapEdit";
+import { ACTION_NAMES } from "./keyText";
 import type { MergeSummary } from "./useMergeController";
 
 export type Question =
   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
-  | { readonly kind: "exit"; readonly files: readonly string[] };
+  | { readonly kind: "exit"; readonly files: readonly string[] }
+  | ({ readonly kind: "clash" } & Clash);
 
 export type QuestionText = {
   readonly title: string;
@@ -29,7 +33,7 @@ function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
   return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
 }
 
-export function questionText(question: Question): QuestionText {
+export function questionText(question: Question, platform: string): QuestionText {
   switch (question.kind) {
     case "unprocessed":
       return {
@@ -45,6 +49,14 @@ export function questionText(question: Question): QuestionText {
         message: "Are you sure you want to exit without applying changes?",
         files: question.files,
         confirm: "Exit",
+        cancel: "Cancel",
+      };
+    case "clash":
+      return {
+        title: "Key Already in Use",
+        message: `${keyLabel(question.key, platform)} is already used by ${ACTION_NAMES[question.owner]}. Move it to ${ACTION_NAMES[question.action]}?`,
+        files: [],
+        confirm: "Move",
         cancel: "Cancel",
       };
     default: {

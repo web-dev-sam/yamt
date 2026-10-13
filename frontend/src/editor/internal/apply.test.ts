@@ -3,7 +3,7 @@ import { Transaction, type EditorState, type StateCommand } from "@codemirror/st
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import {
   actionSteps,
   bulkApplySteps,
@@ -16,11 +16,15 @@ import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations } from "./decorations";
 import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
-import { centerPane, paneState, paneText } from "./pane";
+import { centerPane, paneState, paneText, type PaneSettings } from "./pane";
 import type { Side } from "./side";
 import { summarize } from "./status";
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+const SETTINGS: PaneSettings = {
+  preferences: { theme: "dark", keys: DEFAULT_KEYS },
+  platform: "Linux x86_64",
+};
 
 type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
 
@@ -65,7 +69,7 @@ async function synthetic(
 
 function open(data: FileMergeData, readOnly = false): ApplyTarget {
   const field = chunkField(data.chunks);
-  const pane = { eol: data.eol, language: null };
+  const pane = { eol: data.eol, language: null, settings: SETTINGS };
   return {
     state: paneState({
       ...pane,

@@ -1,12 +1,28 @@
 import "@fontsource/jetbrains-mono/400.css";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentLess,
+  indentMore,
+  redo,
+  redoSelection,
+  undo,
+  undoSelection,
+} from "@codemirror/commands";
 import {
   HighlightStyle,
   indentUnit,
   syntaxHighlighting,
   type Language,
 } from "@codemirror/language";
-import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  Prec,
+  type Extension,
+  type StateCommand,
+} from "@codemirror/state";
 import {
   Decoration,
   drawSelection,
@@ -18,50 +34,68 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
-import type { FileMergeData } from "../../ipc";
-import { find } from "./find";
+import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+import { find, findKeys, findKeysCompartment } from "./find";
+import { SIDE_PANE, type PaneViews } from "./geometry";
 import { indentUnitOf } from "./indent";
+import { cmKeys } from "./keys";
+import { SIDES, type Side } from "./side";
+import { sideKeysCompartment } from "./sideKeys";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
 
-export const languageCompartment = new Compartment();
+export type Preferences = { readonly theme: Theme; readonly keys: KeyBindings };
 
-const darkTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      backgroundColor: "var(--color-panel)",
-      color: "var(--color-code)",
-      fontSize: "13px",
-    },
-    ".cm-scroller": {
-      fontFamily: "var(--font-mono)",
-      fontVariantLigatures: "none",
-      lineHeight: "1.4",
-    },
-    ".cm-content": { caretColor: "var(--color-caret)" },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
-      { backgroundColor: "var(--color-selection)" },
-    ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
-    ".cm-gutters": {
-      backgroundColor: "var(--color-panel)",
-      color: "var(--color-gutter)",
-      border: "none",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "var(--color-active-line)",
-      color: "var(--color-gutter-active)",
-    },
-    ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
-    ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
-    ".cm-searchMatch.cm-searchMatch-selected": {
-      backgroundColor: "var(--color-selection)",
-      outline: "1px solid var(--color-primary)",
-    },
-  },
-  { dark: true },
+export type PaneSettings = { readonly preferences: Preferences; readonly platform: string };
+
+export const languageCompartment = new Compartment();
+const themeCompartment = new Compartment();
+const middleKeysCompartment = new Compartment();
+
+const MIDDLE_COMMANDS: readonly { readonly action: KeyAction; readonly run: StateCommand }[] = [
+  { action: "undo", run: undo },
+  { action: "redo", run: redo },
+  { action: "indent", run: indentMore },
+  { action: "outdent", run: indentLess },
+];
+
+const selectionHistoryKeymap = historyKeymap.filter(
+  ({ run }) => run === undoSelection || run === redoSelection,
 );
+
+const paneTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    backgroundColor: "var(--color-panel)",
+    color: "var(--color-code)",
+    fontSize: "13px",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    fontVariantLigatures: "none",
+    lineHeight: "1.4",
+  },
+  ".cm-content": { caretColor: "var(--color-caret)" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-caret)" },
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .selected-text":
+    { backgroundColor: "var(--color-selection)" },
+  ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
+  ".cm-gutters": {
+    backgroundColor: "var(--color-panel)",
+    color: "var(--color-gutter)",
+    border: "none",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "var(--color-active-line)",
+    color: "var(--color-gutter-active)",
+  },
+  ".cm-panels": { backgroundColor: "var(--color-panel-inline)", color: "var(--color-fg)" },
+  ".cm-searchMatch": { backgroundColor: "var(--color-search-match)" },
+  ".cm-searchMatch.cm-searchMatch-selected": {
+    backgroundColor: "var(--color-selection)",
+    outline: "1px solid var(--color-primary)",
+  },
+});
 
 export const paletteHighlight = HighlightStyle.define([
   {
@@ -108,17 +142,51 @@ const sideFocusOutline = EditorView.theme({
   "&.cm-focused": { outline: "1px solid var(--color-primary)", outlineOffset: "-1px" },
 });
 
-function centerExtensions(doc: string): Extension {
+function darkFlag(theme: Theme): Extension {
+  return EditorView.darkTheme.of(theme === "dark");
+}
+
+function middleKeys(keys: KeyBindings, platform: string): Extension {
+  return Prec.high(
+    keymap.of(
+      MIDDLE_COMMANDS.flatMap(({ action, run }) =>
+        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault: true })),
+      ),
+    ),
+  );
+}
+
+export function showPreferences(
+  views: PaneViews,
+  { preferences, platform }: PaneSettings,
+  sideKeys: (side: Side) => Extension,
+): void {
+  const { theme, keys } = preferences;
+  const shared = [
+    themeCompartment.reconfigure(darkFlag(theme)),
+    findKeysCompartment.reconfigure(findKeys(keys, platform)),
+  ];
+  views.center.dispatch({
+    effects: [...shared, middleKeysCompartment.reconfigure(middleKeys(keys, platform))],
+  });
+  for (const side of SIDES) {
+    const effects = [...shared, sideKeysCompartment.reconfigure(sideKeys(side))];
+    views[SIDE_PANE[side]].dispatch({ effects });
+  }
+}
+
+function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
   return [
     history(),
     indentUnit.of(indentUnitOf(doc)),
-    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+    middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
+    keymap.of([...defaultKeymap, ...selectionHistoryKeymap]),
     highlightActiveLine(),
     highlightActiveLineGutter(),
   ];
 }
 
-function kindExtensions(kind: PaneKind, doc: string): Extension {
+function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Extension {
   switch (kind) {
     case "side":
       return [
@@ -128,9 +196,9 @@ function kindExtensions(kind: PaneKind, doc: string): Extension {
         sideFocusOutline,
       ];
     case "center":
-      return centerExtensions(doc);
+      return centerExtensions(doc, settings);
     case "readOnlyCenter":
-      return [centerExtensions(doc), EditorState.readOnly.of(true)];
+      return [centerExtensions(doc, settings), EditorState.readOnly.of(true)];
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -143,8 +211,10 @@ export function paneState(pane: {
   doc: string;
   eol: FileMergeData["eol"];
   language: Language | null;
+  settings: PaneSettings;
   extensions: Extension;
 }): EditorState {
+  const { preferences, platform } = pane.settings;
   return EditorState.create({
     doc: pane.doc,
     extensions: [
@@ -152,11 +222,13 @@ export function paneState(pane: {
       pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
       drawSelection(),
       selectionOverTints,
-      darkTheme,
+      paneTheme,
+      themeCompartment.of(darkFlag(preferences.theme)),
       syntaxHighlighting(paletteHighlight),
       languageCompartment.of(pane.language ?? []),
       find,
-      kindExtensions(pane.kind, pane.doc),
+      findKeysCompartment.of(findKeys(preferences.keys, platform)),
+      kindExtensions(pane.kind, pane.doc, pane.settings),
       pane.extensions,
     ],
   });

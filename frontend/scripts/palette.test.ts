@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "vitest";
 
-import { findPaletteViolations, readPaletteSources } from "./palette";
+import { findPaletteViolations, readPaletteSources, WINDOW_FILE } from "./palette";
 
 const FRONTEND_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -14,8 +14,102 @@ const PALETTE = {
   text: `@theme static {\n  --color-*: initial;\n  --color-editor: #1e1f22;\n}\n`,
 };
 
-test("the real source tree has no palette violations", () => {
-  expect(findPaletteViolations(readPaletteSources(FRONTEND_ROOT))).toEqual([]);
+test("the real source tree has no palette violations, the native window colours included", () => {
+  const sources = readPaletteSources(FRONTEND_ROOT);
+
+  expect(sources.map(({ path }) => path)).toContain(WINDOW_FILE);
+  expect(findPaletteViolations(sources)).toEqual([]);
+});
+
+const TWO_PALETTES = {
+  path: "src/style.css",
+  text: [
+    "@theme static {",
+    "  --color-*: initial;",
+    "  --color-window: #26282c;",
+    "  --color-editor: #1e1f22;",
+    "}",
+    "",
+    ':root[data-theme="light"] {',
+    "  color-scheme: light;",
+    "  --color-window: #E9EAEE;",
+    "  --color-editor: #ffffff;",
+    "}",
+    "",
+  ].join("\n"),
+};
+
+function shell(dark: string, light: string): { path: string; text: string } {
+  return {
+    path: WINDOW_FILE,
+    text: [
+      "// `--color-window` in frontend/src/style.css, dark and light palettes.",
+      `const BACKGROUND_DARK: Color = Color(${dark}, 0xff);`,
+      `const BACKGROUND_LIGHT: Color = Color(${light}, 0xff);`,
+      "",
+    ].join("\n"),
+  };
+}
+
+test("colour literals inside the light block are allowed", () => {
+  expect(findPaletteViolations([TWO_PALETTES])).toEqual([]);
+});
+
+test("the light block must define exactly the dark block's colour tokens", () => {
+  const palette = {
+    path: "src/style.css",
+    text: [
+      "@theme static {",
+      "  --color-window: #26282c;",
+      "  --color-editor: #1e1f22;",
+      "}",
+      ':root[data-theme="light"] {',
+      "  --color-window: #e9eaee;",
+      "  --color-extra: #123456;",
+      "}",
+      "",
+    ].join("\n"),
+  };
+
+  expect(findPaletteViolations([palette])).toEqual([
+    { rule: "light-missing", file: "src/style.css", line: 5, match: "--color-editor" },
+    { rule: "light-extra", file: "src/style.css", line: 7, match: "--color-extra" },
+  ]);
+});
+
+test("a light block outside src/style.css exempts nothing", () => {
+  const file = {
+    path: "src/ui/extra.css",
+    text: `:root[data-theme="light"] {\n  color: #fff;\n}\n`,
+  };
+
+  expect(findPaletteViolations([TWO_PALETTES, file])).toEqual([
+    { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#fff" },
+  ]);
+});
+
+test("the native window backgrounds equal each palette's --color-window", () => {
+  expect(
+    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xe9, 0xea, 0xee")]),
+  ).toEqual([]);
+  expect(
+    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2d", "0xe9, 0xea, 0xee")]),
+  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 2, match: "BACKGROUND_DARK" }]);
+  expect(
+    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xff, 0xff, 0xff")]),
+  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 3, match: "BACKGROUND_LIGHT" }]);
+});
+
+test("a window file without one of the backgrounds is reported", () => {
+  const missing = {
+    path: WINDOW_FILE,
+    text: "const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);\n",
+  };
+
+  expect(findPaletteViolations([TWO_PALETTES, missing])).toEqual([
+    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_DARK" },
+    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_LIGHT" },
+  ]);
 });
 
 test("readPaletteSources reports ts, vue and css literals on disk and skips src/ipc/bindings.ts", () => {

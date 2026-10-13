@@ -8,17 +8,13 @@ import {
   searchPanelOpen,
   setSearchQuery,
 } from "@codemirror/search";
-import {
-  EditorSelection,
-  StateEffect,
-  StateField,
-  type EditorState,
-  type TransactionSpec,
-} from "@codemirror/state";
+import { Compartment, Facet, StateEffect, StateField, type Extension } from "@codemirror/state";
 import {
   EditorView,
   keymap,
   runScopeHandlers,
+  type Command,
+  type KeyBinding,
   type Panel,
   type ViewUpdate,
 } from "@codemirror/view";
@@ -27,13 +23,16 @@ import arrowUpIcon from "~icons/lucide/arrow-up?raw";
 import searchIcon from "~icons/lucide/search?raw";
 import xIcon from "~icons/lucide/x?raw";
 
+import { keyLabel, type KeyAction, type KeyBindings } from "../../ipc";
+import { findLabel, labelOutdated, matches, matchFrom, selectMatch, stepMatch } from "./findMatch";
+import type { FindDirection } from "./findMatch";
 import type { PaneViews } from "./geometry";
-
-type Match = { readonly from: number; readonly to: number };
-type Direction = "next" | "previous";
+import { cmKeys } from "./keys";
 
 const FIND_BAR_HEIGHT_PX = 29;
 const FIND_BAR_INSET_PX = 16;
+const CLOSE = "Close";
+const FIND_SCOPE = "editor search-panel";
 
 const findTheme = EditorView.theme({
   ".cm-panels.cm-panels-top": {
@@ -68,69 +67,16 @@ export function syncFindSpace(views: PaneViews): void {
   }
 }
 
-function matches(state: EditorState, query: SearchQuery): Match[] {
-  const found: Match[] = [];
-  if (!query.valid) {
-    return found;
-  }
-  const cursor = query.getCursor(state);
-  for (let next = cursor.next(); next.done !== true; next = cursor.next()) {
-    found.push({ from: next.value.from, to: next.value.to });
-  }
-  return found;
+const closeTitle = Facet.define<string, string>({
+  combine: (titles) => titles[0] ?? CLOSE,
+});
+
+export function closeButtonTitle(keys: KeyBindings, platform: string): string {
+  const [first] = keys["close-find"];
+  return first === undefined ? CLOSE : `${CLOSE} (${keyLabel(first, platform)})`;
 }
 
-export function findLabel(state: EditorState, query: SearchQuery): string {
-  if (query.search === "") {
-    return "";
-  }
-  const found = matches(state, query);
-  if (found.length === 0) {
-    return "No results";
-  }
-  const { from, to } = state.selection.main;
-  const current = found.findIndex((match) => match.from === from && match.to === to);
-  if (current >= 0) {
-    return `${current + 1} of ${found.length}`;
-  }
-  return found.length === 1 ? "1 result" : `${found.length} results`;
-}
-
-export function labelOutdated(before: EditorState, after: EditorState): boolean {
-  return (
-    before.doc !== after.doc ||
-    !before.selection.eq(after.selection) ||
-    !getSearchQuery(before).eq(getSearchQuery(after))
-  );
-}
-
-function matchFrom(found: readonly Match[], pos: number): Match | undefined {
-  return found.find((match) => match.from >= pos) ?? found[0];
-}
-
-export function stepMatch(
-  state: EditorState,
-  { query, direction }: { readonly query: SearchQuery; readonly direction: Direction },
-): TransactionSpec | null {
-  const found = matches(state, query);
-  const { from, to } = state.selection.main;
-  const match =
-    direction === "next"
-      ? matchFrom(found, to)
-      : (found.findLast((candidate) => candidate.to <= from) ?? found.at(-1));
-  return match === undefined ? null : selectMatch(match);
-}
-
-function selectMatch({ from, to }: Match): TransactionSpec {
-  const selection = EditorSelection.single(from, to);
-  return {
-    selection,
-    effects: EditorView.scrollIntoView(selection.main, { y: "center" }),
-    userEvent: "select.search",
-  };
-}
-
-function step(view: EditorView, direction: Direction): boolean {
+function step(view: EditorView, direction: FindDirection): boolean {
   const spec = stepMatch(view.state, { query: getSearchQuery(view.state), direction });
   if (spec !== null) {
     view.dispatch(spec);
@@ -193,6 +139,7 @@ class FindPanel implements Panel {
   readonly #view: EditorView;
   readonly #field = document.createElement("input");
   readonly #count = document.createElement("span");
+  readonly #close: HTMLButtonElement;
 
   constructor(view: EditorView) {
     this.#view = view;
@@ -214,6 +161,11 @@ class FindPanel implements Panel {
     this.#count.className = "find-count";
     this.#count.setAttribute("aria-live", "polite");
     this.#count.textContent = findLabel(view.state, getSearchQuery(view.state));
+    this.#close = iconButton({
+      icon: xIcon,
+      title: view.state.facet(closeTitle),
+      run: () => closeFind(view),
+    });
     this.dom.append(
       icon,
       this.#field,
@@ -228,7 +180,7 @@ class FindPanel implements Panel {
         title: "Next Occurrence (Enter)",
         run: () => findNext(view),
       }),
-      iconButton({ icon: xIcon, title: "Close (Escape)", run: () => closeFind(view) }),
+      this.#close,
     );
   }
 
@@ -244,6 +196,11 @@ class FindPanel implements Panel {
     }
     if (labelOutdated(update.startState, update.state)) {
       this.#count.textContent = findLabel(update.state, query);
+    }
+    const title = update.state.facet(closeTitle);
+    if (title !== update.startState.facet(closeTitle)) {
+      this.#close.title = title;
+      this.#close.setAttribute("aria-label", title);
     }
   }
 
@@ -270,15 +227,26 @@ export const find = [
   findTheme,
   findSpace,
   search({ literal: true, createPanel: (view) => new FindPanel(view) }),
-  keymap.of([
-    { key: "Mod-f", run: openFind, scope: "editor search-panel", preventDefault: true },
-    {
-      key: "F3",
-      run: findNext,
-      shift: findPrevious,
-      scope: "editor search-panel",
-      preventDefault: true,
-    },
-    { key: "Escape", run: closeFind, scope: "editor search-panel" },
-  ]),
 ];
+
+export const findKeysCompartment = new Compartment();
+
+export function findKeys(keys: KeyBindings, platform: string): Extension {
+  function bind(action: KeyAction, run: Command, preventDefault: boolean): KeyBinding[] {
+    return cmKeys(keys[action], platform).map((key) => ({
+      key,
+      run,
+      scope: FIND_SCOPE,
+      preventDefault,
+    }));
+  }
+  return [
+    closeTitle.of(closeButtonTitle(keys, platform)),
+    keymap.of([
+      ...bind("find", openFind, true),
+      ...bind("find-next", findNext, true),
+      ...bind("find-previous", findPrevious, true),
+      ...bind("close-find", closeFind, false),
+    ]),
+  ];
+}

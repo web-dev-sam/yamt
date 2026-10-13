@@ -10,16 +10,20 @@ import {
   type FileSides,
   type RemoteName,
   type Side,
+  type Theme,
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { applyDiskChanges } from "./diskChanges";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
+import { attempt, clearProblemAbout, logProblem, report, unexpected } from "./problem";
+import type { Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
+import { preferencesOf, settingsActions, startSettings } from "./settings";
+import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
-import type { MergeSummary } from "./useMergeController";
+import type { MergeSummary, Preferences } from "./useMergeController";
 import { fetchView, isShown, reload } from "./views";
 
 type FinishRequest = Parameters<ChunkSource["finishFile"]>[0] & {
@@ -36,6 +40,7 @@ type Refs = {
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
   readonly settingsOpen: ShallowRef<boolean>;
+  readonly settings: ShallowRef<SettingsInUse>;
 };
 
 type State = Refs & {
@@ -45,30 +50,32 @@ type State = Refs & {
   latestOpen: number;
 };
 
-type Actions = Omit<CloseGuard, "markSaved"> & {
-  loadFiles(): Promise<void>;
-  refreshFiles(): Promise<void>;
-  loadRemoteName(): Promise<void>;
-  open(path: string): Promise<void>;
-  pick(path: string): Promise<void>;
-  finish(request: FinishRequest): Promise<void>;
-  takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
-  reset(path: string, diskVersion: DiskVersion): Promise<void>;
-  dismissProblem(): void;
-  dismissNotice(path: string): void;
-  openSettings(): void;
-  closeSettings(): void;
-  answer(yes: boolean): void;
-};
+type Actions = Omit<CloseGuard, "markSaved"> &
+  SettingsActions & {
+    loadFiles(): Promise<void>;
+    refreshFiles(): Promise<void>;
+    loadRemoteName(): Promise<void>;
+    open(path: string): Promise<void>;
+    pick(path: string): Promise<void>;
+    finish(request: FinishRequest): Promise<void>;
+    takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
+    reset(path: string, diskVersion: DiskVersion): Promise<void>;
+    dismissProblem(): void;
+    dismissNotice(path: string): void;
+    openSettings(): void;
+    closeSettings(): void;
+    answer(yes: boolean): void;
+  };
 
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly question: ComputedRef<Question | null>;
   readonly allResolved: ComputedRef<boolean>;
+  readonly preferences: ComputedRef<Preferences>;
 } & Actions;
 
 let store: AppStore | null = null;
 
-export function createAppStore(source: ChunkSource): AppStore {
+export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore {
   const refs: Refs = {
     files: shallowRef<readonly FileEntry[]>([]),
     opened: shallowRef<readonly FileMergeData[]>([]),
@@ -79,17 +86,19 @@ export function createAppStore(source: ChunkSource): AppStore {
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
     settingsOpen: shallowRef(false),
+    settings: shallowRef(startSettings(startTheme)),
   };
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
   const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
-  const { files } = refs;
+  const { files, settings } = refs;
   store = {
     ...refs,
     question: asking.question,
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
     ),
+    preferences: computed(() => preferencesOf(settings.value)),
     ...actions(state),
   };
   return store;
@@ -128,14 +137,8 @@ function actions(state: State): Actions {
     unsavedFiles: state.guard.unsavedFiles,
     mayClose: state.guard.mayClose,
     watchWindowClose: state.guard.watchWindowClose,
+    ...settingsActions(state),
   };
-}
-
-function clearProblemAbout(state: State, path: string): void {
-  const problem = state.problem.value;
-  if (problem !== null && problem.action !== "list" && problem.path === path) {
-    state.problem.value = null;
-  }
 }
 
 async function loadFiles(state: State): Promise<void> {

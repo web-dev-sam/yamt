@@ -23,6 +23,8 @@ const {
   allResolved,
   pick,
   refreshFiles,
+  loadSettings,
+  settings,
   dismissProblem,
   dismissNotice,
   answer,
@@ -34,11 +36,20 @@ const focused = useWindowFocus();
 watch(focused, (now) => {
   if (now) {
     void refreshFiles();
+    void loadSettings();
   }
 });
+watch(
+  () => settings.value.theme,
+  (theme) => {
+    document.documentElement.dataset["theme"] = theme;
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   void watchWindowClose();
+  void loadSettings();
 });
 </script>
 

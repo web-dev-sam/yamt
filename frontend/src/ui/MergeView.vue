@@ -33,6 +33,8 @@ const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+const { track, untrack, finish, reset, takeSide, taken, remoteName, question, preferences } =
+  useAppStore();
 const {
   summary,
   applyAllNonConflicting,
@@ -47,8 +49,8 @@ const {
   () => props.data,
   { left, center, right, strips: [leftStrip, rightStrip] },
   () => !isEditable(props.data),
+  preferences,
 );
-const { track, untrack, finish, reset, takeSide, taken, remoteName, question } = useAppStore();
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {
   track(props.data.path, work);

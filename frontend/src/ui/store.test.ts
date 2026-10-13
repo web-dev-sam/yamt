@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
+  DEFAULT_KEYS,
   loadFixture,
+  parseKey,
   type ChunkSource,
   type DiskChange,
   type DiskResult,
@@ -10,13 +12,16 @@ import {
   type FileList,
   type FileMergeData,
   type FileSides,
+  type Key,
+  type SettingsRead,
   type SourceFailure,
   type SourceResult,
+  type StoredSettings,
   type WriteReply,
 } from "../ipc";
 import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
-import { createAppStore, useAppStore, type AppStore } from "./store";
+import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
 
 type PendingLoad = {
   readonly path: string;
@@ -28,10 +33,20 @@ type FakeView = { text: string; saved: string; readonly work: FileWork };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+const NO_SETTINGS: Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings"> = {
+  loadSettings: () => Promise.reject(new Error("not used")),
+  setTheme: () => Promise.reject(new Error("not used")),
+  setKeys: () => Promise.reject(new Error("not used")),
+  moveSettings: () => Promise.reject(new Error("not used")),
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+function createAppStore(source: ChunkSource): AppStore {
+  return createStoreWithTheme(source, "dark");
+}
 
 function entry(path: string): FileEntry {
   return { path, status: "Unresolved", unsupported: null };
@@ -89,6 +104,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
     remoteName: () => Promise.resolve(null),
+    ...NO_SETTINGS,
   };
   return { source, pending };
 }
@@ -134,7 +150,7 @@ test("useAppStore throws before createAppStore, then returns the created store",
   const fresh = await import("./store");
   expect(() => fresh.useAppStore()).toThrow("useAppStore() called before createAppStore()");
 
-  const created = fresh.createAppStore(handSource([]).source);
+  const created = fresh.createAppStore(handSource([]).source, "dark");
 
   expect(fresh.useAppStore()).toBe(created);
 });
@@ -944,6 +960,7 @@ function choiceSource(
       return Promise.resolve(written(taken));
     },
     remoteName: () => Promise.resolve(null),
+    ...NO_SETTINGS,
     ...overrides,
   };
   return { source, calls };
@@ -1631,4 +1648,252 @@ test("a take on a deleted-side file shown from the disk shows yamt's view again"
   ]);
   expect(store.opened.value[0]?.middle).toEqual({ kind: "Stages", text: "kept\n" });
   expect(store.taken.value).toEqual(new Map([[REMOVED_TEXT, { by: "side", side: "local" }]]));
+});
+
+const SETTINGS_PATH = "/home/me/.config/yamt/settings.json";
+
+function read(stored: StoredSettings): SourceResult<SettingsRead> {
+  return ok({ path: SETTINGS_PATH, defaultPath: SETTINGS_PATH, stored });
+}
+
+function parsed(text: string): Key {
+  const key = parseKey(text);
+  if (key === null) {
+    throw new Error(`${text} does not parse`);
+  }
+  return key;
+}
+
+function settingsSource(overrides: Partial<ChunkSource>): {
+  source: ChunkSource;
+  sent: unknown[][];
+} {
+  const sent: unknown[][] = [];
+  const { source } = handSource([]);
+  const recorded: ChunkSource = {
+    ...source,
+    loadSettings: (current) => {
+      sent.push(["loadSettings", current]);
+      return overrides.loadSettings?.(current) ?? Promise.resolve(read(current));
+    },
+    setTheme: (current, theme) => {
+      sent.push(["setTheme", current, theme]);
+      return overrides.setTheme?.(current, theme) ?? Promise.resolve(read({ ...current, theme }));
+    },
+    setKeys: (current, changes) => {
+      sent.push(["setKeys", current, changes]);
+      const keys = Object.fromEntries(
+        changes.flatMap(({ action, keys: texts }) => (texts === null ? [] : [[action, texts]])),
+      );
+      return overrides.setKeys?.(current, changes) ?? Promise.resolve(read({ ...current, keys }));
+    },
+    moveSettings: (current, path) => {
+      sent.push(["moveSettings", current, path]);
+      return overrides.moveSettings?.(current, path) ?? Promise.resolve(read(current));
+    },
+  };
+  return { source: recorded, sent };
+}
+
+test("settings start with the start theme and the default keys, before any file is read", () => {
+  const store = createStoreWithTheme(handSource([]).source, "light");
+
+  expect(store.settings.value).toEqual({
+    read: null,
+    theme: "light",
+    keys: { bindings: DEFAULT_KEYS, problems: [] },
+  });
+  expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
+});
+
+test("a load on focus applies a file changed by hand since the last load", async () => {
+  const files = [
+    read({ theme: "dark", keys: {} }),
+    read({ theme: "light", keys: { apply: ["a"], "later-action": ["Mod-q"] } }),
+  ];
+  const { source, sent } = settingsSource({
+    loadSettings: () => Promise.resolve(files.shift() ?? read({ theme: "dark", keys: {} })),
+  });
+  const store = createAppStore(source);
+
+  await store.loadSettings();
+  expect(store.settings.value.theme).toBe("dark");
+
+  await store.loadSettings();
+
+  expect(store.settings.value.theme).toBe("light");
+  expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
+  expect(sent).toEqual([
+    ["loadSettings", { theme: "dark", keys: {} }],
+    ["loadSettings", { theme: "dark", keys: {} }],
+  ]);
+});
+
+test("a loaded file sets the theme and keys every opened file follows", async () => {
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(read({ theme: "light", keys: { apply: ["a"] } })),
+  });
+  const store = createAppStore(source);
+
+  await store.loadSettings();
+
+  expect(store.settings.value.read?.path).toBe(SETTINGS_PATH);
+  expect(store.preferences.value.theme).toBe("light");
+  expect(store.preferences.value.keys.apply).toEqual([parsed("a")]);
+  expect(store.preferences.value.keys.ignore).toEqual(DEFAULT_KEYS.ignore);
+  expect(store.problem.value).toBeNull();
+});
+
+test("a failed load or change keeps the settings in use and shows a settings problem", async () => {
+  spyConsole();
+  const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
+  const failed: SourceResult<SettingsRead> = { ok: false, failure: broken };
+  const loads = [read({ theme: "light", keys: {} }), failed];
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
+    setTheme: () => Promise.resolve({ ok: false, failure: broken }),
+    setKeys: () => Promise.reject(new Error("ipc down")),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+  const inUse = store.settings.value;
+
+  await store.loadSettings();
+  expect(store.settings.value).toBe(inUse);
+  expect(store.problem.value).toEqual({ action: "settings", cause: broken });
+
+  await store.setTheme("dark");
+  await store.removeAllKeys("undo");
+
+  expect(store.settings.value).toBe(inUse);
+  expect(store.problem.value).toEqual({
+    action: "settings",
+    cause: { kind: "Unexpected", message: "ipc down" },
+  });
+});
+
+test("key problems in the file show one settings problem, which a clean read clears", async () => {
+  spyConsole();
+  const loads = [
+    read({ theme: "dark", keys: { redo: ["Ctrl+Q"], indent: ["Mod-f"] } }),
+    read({ theme: "dark", keys: {} }),
+  ];
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(loads.shift() ?? read({ theme: "dark", keys: {} })),
+  });
+  const store = createAppStore(source);
+
+  await store.loadSettings();
+
+  expect(store.problem.value).toEqual({
+    action: "settings",
+    cause: {
+      kind: "Keys",
+      path: SETTINGS_PATH,
+      problems: [
+        { kind: "unreadable", action: "redo", text: "Ctrl+Q" },
+        { kind: "twice", key: parsed("Mod-f"), actions: ["find", "indent"] },
+      ],
+    },
+  });
+  expect(store.preferences.value.keys.redo).toEqual(DEFAULT_KEYS.redo);
+
+  await store.loadSettings();
+
+  expect(store.problem.value).toBeNull();
+});
+
+test("setTheme sends the settings in use and applies the reply", async () => {
+  const { source, sent } = settingsSource({});
+  const store = createAppStore(source);
+
+  await store.setTheme("light");
+
+  expect(sent).toEqual([["setTheme", { theme: "dark", keys: {} }, "light"]]);
+  expect(store.settings.value.theme).toBe("light");
+});
+
+test("a key another action holds asks; Move writes both changes in one call", async () => {
+  const { source, sent } = settingsSource({});
+  const store = createAppStore(source);
+
+  const adding = store.addKey("undo", parsed("Mod-f"));
+  await vi.waitFor(() => {
+    expect(store.question.value).toEqual({
+      kind: "clash",
+      key: parsed("Mod-f"),
+      action: "undo",
+      owner: "find",
+    });
+  });
+  store.answer(true);
+  await adding;
+
+  expect(sent).toEqual([
+    [
+      "setKeys",
+      { theme: "dark", keys: {} },
+      [
+        { action: "undo", keys: ["Mod-z", "Mod-f"] },
+        { action: "find", keys: [] },
+      ],
+    ],
+  ]);
+  expect(store.preferences.value.keys.find).toEqual([]);
+  expect(store.preferences.value.keys.undo).toEqual([parsed("Mod-z"), parsed("Mod-f")]);
+});
+
+test("Cancel on the clash question writes nothing", async () => {
+  const { source, sent } = settingsSource({});
+  const store = createAppStore(source);
+
+  const adding = store.changeKey("find", parsed("Mod-f"), parsed("Mod-z"));
+  await vi.waitFor(() => {
+    expect(store.question.value?.kind).toBe("clash");
+  });
+  store.answer(false);
+  await adding;
+
+  expect(sent).toEqual([]);
+  expect(store.preferences.value.keys).toEqual(DEFAULT_KEYS);
+});
+
+test("each key edit sends only the changed actions, as key texts", async () => {
+  const { source, sent } = settingsSource({});
+  const store = createAppStore(source);
+
+  await store.addKey("apply", parsed("a"));
+  await store.removeKey("redo", parsed("Mod-y"));
+  await store.resetKeys("apply");
+  await store.removeKey("apply", parsed("q"));
+
+  expect(sent).toEqual([
+    ["setKeys", { theme: "dark", keys: {} }, [{ action: "apply", keys: ["Enter", "Space", "a"] }]],
+    [
+      "setKeys",
+      { theme: "dark", keys: { apply: ["Enter", "Space", "a"] } },
+      [{ action: "redo", keys: ["Mod-Shift-z"] }],
+    ],
+    [
+      "setKeys",
+      { theme: "dark", keys: { redo: ["Mod-Shift-z"] } },
+      [{ action: "apply", keys: null }],
+    ],
+  ]);
+});
+
+test("moveSettings sends the path with the settings in use and uses the file found there", async () => {
+  const moved: SettingsRead = {
+    path: "/elsewhere.json",
+    defaultPath: SETTINGS_PATH,
+    stored: { theme: "light", keys: {} },
+  };
+  const { source, sent } = settingsSource({ moveSettings: () => Promise.resolve(ok(moved)) });
+  const store = createAppStore(source);
+
+  await store.moveSettings("/elsewhere.json");
+
+  expect(sent).toEqual([["moveSettings", { theme: "dark", keys: {} }, "/elsewhere.json"]]);
+  expect(store.settings.value.read).toEqual(moved);
+  expect(store.settings.value.theme).toBe("light");
 });

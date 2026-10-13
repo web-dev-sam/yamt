@@ -8,7 +8,7 @@ const emit = defineEmits<{ answer: [yes: boolean] }>();
 
 const dialog = useTemplateRef<HTMLDialogElement>("dialog");
 
-const text = computed(() => questionText(props.question));
+const text = computed(() => questionText(props.question, navigator.platform));
 
 onMounted(() => {
   dialog.value?.showModal();

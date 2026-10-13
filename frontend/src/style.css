@@ -56,7 +56,61 @@
   --color-chunk-conflict-removal: #b589ec;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-window: #e9eaee;
+  --color-panel: #ffffff;
+  --color-panel-inline: #f7f8f9;
+  --color-separator: #e9eaee;
+  --color-control-border: #d1d3d9;
+  --color-fg: #000000;
+  --color-fg-muted: #73767c;
+  --color-code: #080808;
+  --color-gutter: #aeb3c2;
+  --color-gutter-active: #767a8a;
+  --color-active-line: #f5f8fe;
+  --color-selection: #a6d2ff;
+  --color-caret: #000000;
+  --color-hover: #00000012;
+  --color-row-hover: #00000008;
+  --color-row-selected: #d0dffe;
+  --color-primary: #3871e1;
+  --color-on-primary: #ffffff;
+  --color-problem: #fff6f5;
+  --color-problem-border: #ffc4c5;
+  --color-success: #f5faf3;
+  --color-success-border: #bbdbc2;
+  --color-info: #f7f8ff;
+  --color-info-border: #bdd3ff;
+  --color-search-match: #ccccff;
+
+  --color-syntax-keyword: #0033b3;
+  --color-syntax-string: #067d17;
+  --color-syntax-number: #1750eb;
+  --color-syntax-comment: #8c8c8c;
+  --color-syntax-function: #00627a;
+  --color-syntax-property: #871094;
+  --color-syntax-decorator: #9e880d;
+  --color-syntax-tag: #0033b3;
+  --color-syntax-regexp: #264eff;
+  --color-syntax-link: #006dcc;
+
+  --color-chunk-inserted: #4e9d6c5c;
+  --color-chunk-modified: #538af95c;
+  --color-chunk-deleted: #8b8e945c;
+  --color-chunk-conflict: #967bef6b;
+  --color-chunk-modified-word: #538af9a6;
+  --color-chunk-conflict-word: #967befa6;
+  --color-chunk-modified-removal: #3871e1;
+  --color-chunk-conflict-removal: #8060db;
+}
+
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
   html,
   body,
   #app {

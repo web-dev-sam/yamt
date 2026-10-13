@@ -3,13 +3,13 @@ import type { EditorState, StateCommand, StateField } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
+import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
-import { centerPane, paneState } from "./pane";
+import { centerPane, paneState, type PaneSettings } from "./pane";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
@@ -25,6 +25,10 @@ type Range = [start: number, len: number];
 type Lines = { readonly first: number; readonly last: number };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
+const SETTINGS: PaneSettings = {
+  preferences: { theme: "dark", keys: DEFAULT_KEYS },
+  platform: "Linux x86_64",
+};
 const CONFLICT = 8;
 const LOCAL_ONLY = 0;
 const CONFLICT_LEFT_LINES: Lines = { first: 129, last: 136 };
@@ -67,7 +71,7 @@ async function synthetic(
 
 function open(data: FileMergeData): Merge {
   const field = chunkField(data.chunks);
-  const pane = { eol: data.eol, language: null };
+  const pane = { eol: data.eol, language: null, settings: SETTINGS };
   const center = paneState({
     ...pane,
     ...centerPane(data.middle, false),
