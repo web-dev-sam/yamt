@@ -1,0 +1,80 @@
+diff --git c/frontend/scripts/palette.test.ts i/frontend/scripts/palette.test.ts
+index 31ae88e..6ac5d55 100644
+--- c/frontend/scripts/palette.test.ts
++++ i/frontend/scripts/palette.test.ts
+@@ -136,6 +136,31 @@ test("readPaletteSources reports ts, vue and css literals on disk and skips src/
+   }
+ });
+ 
++function windowTextAbove(frontendRoot: string): string | undefined {
++  return readPaletteSources(frontendRoot).find(({ path }) => path === WINDOW_FILE)?.text;
++}
++
++function placeWindowFile(folder: string, text: string): void {
++  mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
++  writeFileSync(join(folder, WINDOW_FILE), text);
++}
++
++test("readPaletteSources reads the window file of the nearest ancestor, as from a mutation sandbox", () => {
++  const root = mkdtempSync(join(tmpdir(), "yamt-palette-"));
++  const frontend = join(root, "target/stryker-tmp/sandbox-1");
++  try {
++    mkdirSync(join(frontend, "src"), { recursive: true });
++
++    expect(windowTextAbove(frontend)).toBeUndefined();
++    placeWindowFile(root, "// repository\n");
++    expect(windowTextAbove(frontend)).toBe("// repository\n");
++    placeWindowFile(join(root, "target"), "// nearer\n");
++    expect(windowTextAbove(frontend)).toBe("// nearer\n");
++  } finally {
++    rmSync(root, { recursive: true, force: true });
++  }
++});
++
+ test("rgb() in a ts theme object is a literal", () => {
+   const file = {
+     path: "src/editor/theme.ts",
+diff --git c/frontend/scripts/palette.ts i/frontend/scripts/palette.ts
+index 997edf7..388909f 100644
+--- c/frontend/scripts/palette.ts
++++ i/frontend/scripts/palette.ts
+@@ -1,5 +1,5 @@
+ import { existsSync, globSync, readFileSync } from "node:fs";
+-import { join } from "node:path";
++import { dirname, join } from "node:path";
+ 
+ import { readSourceTree, type SourceFile } from "./fences";
+ 
+@@ -20,7 +20,7 @@ type Definition = { readonly name: string; readonly value: string; readonly inde
+ type Background = { readonly hex: string; readonly index: number };
+ 
+ const PALETTE_FILE = "src/style.css";
+-export const WINDOW_FILE = "../src-tauri/src/window.rs";
++export const WINDOW_FILE = "src-tauri/src/window.rs";
+ const THEME_OPENER = /@theme(?:\s+(?:static|inline))?\s*\{/g;
+ const LIGHT_OPENER = /:root\[data-theme="light"\]\s*\{/g;
+ const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
+@@ -182,13 +182,19 @@ export function findPaletteViolations(files: readonly SourceFile[]): PaletteViol
+   ];
+ }
+ 
++function findAbove(folder: string, relativePath: string): string | undefined {
++  const candidate = join(folder, relativePath);
++  if (existsSync(candidate)) return candidate;
++  const parent = dirname(folder);
++  return parent === folder ? undefined : findAbove(parent, relativePath);
++}
++
+ export function readPaletteSources(frontendRoot: string): SourceFile[] {
+   const styles = globSync("src/**/*.css", { cwd: frontendRoot })
+     .toSorted()
+     .map((path) => ({ path, text: readFileSync(join(frontendRoot, path), "utf8") }));
+-  const windowPath = join(frontendRoot, WINDOW_FILE);
+-  const shell = existsSync(windowPath)
+-    ? [{ path: WINDOW_FILE, text: readFileSync(windowPath, "utf8") }]
+-    : [];
++  const windowPath = findAbove(frontendRoot, WINDOW_FILE);
++  const shell =
++    windowPath === undefined ? [] : [{ path: WINDOW_FILE, text: readFileSync(windowPath, "utf8") }];
+   return [...readSourceTree(frontendRoot), ...styles, ...shell];
+ }

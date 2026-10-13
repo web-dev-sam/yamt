@@ -136,6 +136,31 @@ test("readPaletteSources reports ts, vue and css literals on disk and skips src/
   }
 });
 
+function windowTextAbove(frontendRoot: string): string | undefined {
+  return readPaletteSources(frontendRoot).find(({ path }) => path === WINDOW_FILE)?.text;
+}
+
+function placeWindowFile(folder: string, text: string): void {
+  mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
+  writeFileSync(join(folder, WINDOW_FILE), text);
+}
+
+test("readPaletteSources reads the window file of the nearest ancestor, as from a mutation sandbox", () => {
+  const root = mkdtempSync(join(tmpdir(), "yamt-palette-"));
+  const frontend = join(root, "target/stryker-tmp/sandbox-1");
+  try {
+    mkdirSync(join(frontend, "src"), { recursive: true });
+
+    expect(windowTextAbove(frontend)).toBeUndefined();
+    placeWindowFile(root, "// repository\n");
+    expect(windowTextAbove(frontend)).toBe("// repository\n");
+    placeWindowFile(join(root, "target"), "// nearer\n");
+    expect(windowTextAbove(frontend)).toBe("// nearer\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rgb() in a ts theme object is a literal", () => {
   const file = {
     path: "src/editor/theme.ts",

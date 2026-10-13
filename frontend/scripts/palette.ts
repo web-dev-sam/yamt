@@ -1,5 +1,5 @@
 import { existsSync, globSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { readSourceTree, type SourceFile } from "./fences";
 
@@ -20,7 +20,7 @@ type Definition = { readonly name: string; readonly value: string; readonly inde
 type Background = { readonly hex: string; readonly index: number };
 
 const PALETTE_FILE = "src/style.css";
-export const WINDOW_FILE = "../src-tauri/src/window.rs";
+export const WINDOW_FILE = "src-tauri/src/window.rs";
 const THEME_OPENER = /@theme(?:\s+(?:static|inline))?\s*\{/g;
 const LIGHT_OPENER = /:root\[data-theme="light"\]\s*\{/g;
 const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
@@ -182,13 +182,19 @@ export function findPaletteViolations(files: readonly SourceFile[]): PaletteViol
   ];
 }
 
+function findAbove(folder: string, relativePath: string): string | undefined {
+  const candidate = join(folder, relativePath);
+  if (existsSync(candidate)) return candidate;
+  const parent = dirname(folder);
+  return parent === folder ? undefined : findAbove(parent, relativePath);
+}
+
 export function readPaletteSources(frontendRoot: string): SourceFile[] {
   const styles = globSync("src/**/*.css", { cwd: frontendRoot })
     .toSorted()
     .map((path) => ({ path, text: readFileSync(join(frontendRoot, path), "utf8") }));
-  const windowPath = join(frontendRoot, WINDOW_FILE);
-  const shell = existsSync(windowPath)
-    ? [{ path: WINDOW_FILE, text: readFileSync(windowPath, "utf8") }]
-    : [];
+  const windowPath = findAbove(frontendRoot, WINDOW_FILE);
+  const shell =
+    windowPath === undefined ? [] : [{ path: WINDOW_FILE, text: readFileSync(windowPath, "utf8") }];
   return [...readSourceTree(frontendRoot), ...styles, ...shell];
 }

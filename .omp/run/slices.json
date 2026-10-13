@@ -1,5 +1,4 @@
 {
-  "SettingsWebR2": { "owned": ["frontend/scripts/palette.ts", "frontend/scripts/palette.test.ts"] },
   "SettingsViewR2": {
     "owned": [
       "frontend/src/ui/KeymapList.vue",
@@ -8,5 +7,6 @@
       "frontend/src/ui/menuKeys.ts",
       "frontend/src/ui/menuKeys.test.ts"
     ]
-  }
+  },
+  "SettingsDesktopR3": { "owned": ["crates/settings/**"] }
 }
