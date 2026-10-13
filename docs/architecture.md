@@ -440,6 +440,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files) | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map (`Taken`: by a side, or by the disk) set by `takeSide` and by a disk change that staged a choice file; a deleted-side file "resolved on disk" comes from its `middle` kind; deleted by reset       | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47, #52)            |
 | summary counts of the open file                                                                         | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                   | per controller                                                                                                                    |
 | whether the settings view shows instead of the shown file                                               | `settingsOpen` shallowRef in `ui/store.ts`: set by the gear (`openSettings`), cleared by "Back" (`closeSettings`) and by a file picked in the list (`pick`), never by the app's own `open`                                                                                                                       | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56)                                   |
+| toolbar buttons the user hid                                                                            | `HiddenButtons` (`ui/toolbarButtons.ts`, `useStorage`) held by the store: read as `hiddenButtons`, changed only by `toggleButton` from the toolbar's right-click menu; stored in localStorage `yamt.toolbar.hidden` as the hidden ids in toolbar order                                                           | one choice for every file, remembered across restarts; a button added later shows until hidden (plan §2 #57)                      |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
 text passes through once, from `resultText()` to `store.finish` (and back into that file's own
@@ -572,7 +573,10 @@ arrows that keep the side's keyboard on a pointer press, bulk apply left/right, 
 finish, reset — `MergeView` calls the store's `finish`/`reset`), `SettingsButton.vue` (the gear at the
 right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
 (the settings screen in the files' grid cell: a centred column with "Back", empty for now; keyboard to
-"Back" on open and back to its opener on "Back", plan §2 #56),
+"Back" on open and back to its opener on "Back", plan §2 #56), `ToolbarMenu.vue` (the toolbar's
+right-click menu: one check per icon button in `TOOLBAR_BUTTONS` order, toggles through the store,
+teleported to the body and placed by `menuPosition.ts`; closes on Escape, another key, a press
+elsewhere, a choice or window blur, never moving the keyboard, plan §2 #57),
 `ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
 `report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
@@ -586,7 +590,8 @@ opened file the editor cannot show), the active path, the problem, the open ques
 settings show; actions: load the list, open (a later open wins; re-clicking the shown file does
 nothing; a file the editor cannot show is described instead of loaded), pick (a file chosen in the
 list: closes settings, then opens), finish (asks when work is left), take a side, reset, open/close
-settings, the window-close check.
+settings, toggle a toolbar button (the hidden set lives in `toolbarButtons.ts`, persisted), the
+window-close check.
 
 The Vue↔editor seam is one adaptable composable:
 

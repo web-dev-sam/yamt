@@ -27,6 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keyboard first.
 - A settings gear at the right end of the toolbar opens a settings page in place of the open file
   (empty for now); Back returns to the file exactly as it was.
+- Right-click the toolbar to show or hide its icon buttons (previous/next change, apply all from the
+  left or the right, undo, redo) from a menu with a check mark per button. Their keys keep working,
+  and yamt remembers the choice for every file and after a restart.
 
 ### Changed
 
