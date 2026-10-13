@@ -12,6 +12,7 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 &nbsp;
 
 ## Why does this exist?
+
 1. PhpStorm's three-pane merge window is the only merge tool I find usable. VS Code's merge editor, its extensions and the TUI mergetools all felt unintuitive.
 2. They all start from the `<<<<<<<` conflict markers. Once git has collapsed a merge into markers the base is gone, so you can see _that_ two sides differ but not _what each side changed_. yamt never parses a conflict marker: it reads the base, your side and theirs from git's index and diffs them itself.
 3. `git mergetool` opens one file at a time, and real merges touch many files. yamt takes over the whole merge: every conflicted file in one window, your side on the left, theirs on the right, the result in the middle.
@@ -65,6 +66,7 @@ When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `y
 - The result pane is a normal editor: type, Tab / Shift+Tab indent and outdent, undo and redo. Ctrl+F (Cmd+F) finds text in whichever pane you clicked.
 - The gear at the toolbar's right end opens settings: **Dark** or **Light** colours, and every yamt shortcut — add, change or remove a key per action, or reset it (a key another action uses asks before moving). Settings are saved per user in `~/.config/yamt/settings.json` (`~/Library/Application Support/yamt/settings.json` on macOS) and hold only what you changed; point the settings page at another file, for example in your dotfiles, and yamt reads and writes that one, picking up your edits whenever its window gets focus.
 - **Mark resolved** writes the result, stages the file and opens the next unresolved one. It turns blue once nothing is left to process. **Reset**, next to "Result", brings the conflict back as git left it.
+- Right-click the toolbar to choose which of its icon buttons show (previous/next change, apply all from either side, undo, redo; Undo and Redo start hidden). The choice applies to every file and is remembered after a restart; the keys work either way.
 - A file deleted on one side and changed on the other shows the changed side with its changes, and two buttons: **Keep** and **Delete**. Other files the editor cannot show (binary, symlinks, submodules) get a choice between the two sides.
 - Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can tell. Then continue as usual (`git commit`, `git rebase --continue`, …).
 

@@ -37,14 +37,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yamt at another file — an existing one is used, a missing one is created — and yamt picks up edits
   made to the file whenever its window gets focus. A broken file is reported and never overwritten.
   The window opens in the saved colours from its first frame.
+- Right-click the toolbar to show or hide its icon buttons (previous/next change, apply all from the
+  left or the right, undo, redo) from a menu with a check mark per button. Their keys keep working,
+  and yamt remembers the choice for every file and after a restart.
 
 ### Changed
 
 - The dark look follows WebStorm's Islands Dark: darker panes (#191A1C), the file list and the open
   file as rounded panels on a lighter frame, notices as rounded boxes; syntax and change colours are
   unchanged.
-- The toolbar no longer shows Undo and Redo buttons; Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS)
-  still undo and redo. Ctrl+Shift+Y no longer redoes.
+- The toolbar's Undo and Redo buttons start hidden (right-click the toolbar to show them);
+  Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS) still undo and redo. Ctrl+Shift+Y no longer redoes.
 
 ## [0.1.0] - 2026-10-11
 

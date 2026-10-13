@@ -1,0 +1,269 @@
+diff --git i/frontend/src/ui/MergeToolbar.vue w/frontend/src/ui/MergeToolbar.vue
+index 03b6e5e..ca44bea 100644
+--- i/frontend/src/ui/MergeToolbar.vue
++++ w/frontend/src/ui/MergeToolbar.vue
+@@ -20,7 +20,6 @@ type IconButton = {
+   readonly label: string;
+   readonly icon: Component;
+   readonly keepsKeyboard: boolean;
+-  readonly history: boolean;
+   readonly run: () => void;
+ };
+ 
+@@ -41,7 +40,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Previous change",
+     icon: ArrowUp,
+     keepsKeyboard: true,
+-    history: false,
+     run: () => {
+       emit("move", "up");
+     },
+@@ -50,7 +48,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Next change",
+     icon: ArrowDown,
+     keepsKeyboard: true,
+-    history: false,
+     run: () => {
+       emit("move", "down");
+     },
+@@ -59,7 +56,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Apply non-conflicting changes from the left",
+     icon: ChevronsRight,
+     keepsKeyboard: false,
+-    history: false,
+     run: () => {
+       emit("applyLeft");
+     },
+@@ -68,7 +64,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Apply non-conflicting changes from the right",
+     icon: ChevronsLeft,
+     keepsKeyboard: false,
+-    history: false,
+     run: () => {
+       emit("applyRight");
+     },
+@@ -77,7 +72,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Undo",
+     icon: Undo2,
+     keepsKeyboard: false,
+-    history: true,
+     run: () => {
+       emit("undo");
+     },
+@@ -86,7 +80,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     label: "Redo",
+     icon: Redo2,
+     keepsKeyboard: false,
+-    history: true,
+     run: () => {
+       emit("redo");
+     },
+diff --git i/frontend/src/ui/store.test.ts w/frontend/src/ui/store.test.ts
+index 6633501..1bd80af 100644
+--- i/frontend/src/ui/store.test.ts
++++ w/frontend/src/ui/store.test.ts
+@@ -465,17 +465,6 @@ test("settings open and close; picking a file while they show closes them and sh
+   expect(pending).toHaveLength(2);
+ });
+ 
+-test("toggleButton hides a toolbar button for every file and shows it again", () => {
+-  const store = createAppStore(handSource([]).source);
+-  expect([...store.hiddenButtons.value]).toEqual([]);
+-
+-  store.toggleButton("undo");
+-  expect([...store.hiddenButtons.value]).toEqual(["undo"]);
+-
+-  store.toggleButton("undo");
+-  expect([...store.hiddenButtons.value]).toEqual([]);
+-});
+-
+ test.each([true, false])(
+   "the app's own opens, the first file and the next one after a finish, keep settings as they were (open: %s)",
+   async (settingsOpen) => {
+diff --git i/frontend/src/ui/store.ts w/frontend/src/ui/store.ts
+index 2e4c7e5..28ca5ac 100644
+--- i/frontend/src/ui/store.ts
++++ w/frontend/src/ui/store.ts
+@@ -47,7 +47,6 @@ type State = Refs & {
+   readonly source: ChunkSource;
+   readonly asking: Asking;
+   readonly guard: CloseGuard;
+-  readonly buttons: HiddenButtons;
+   latestOpen: number;
+   latestSettings: number;
+ };
+@@ -95,7 +94,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
+   const asking = createAsking();
+   const guard = createCloseGuard(asking, refs.opened);
+   const buttons = createHiddenButtons();
+-  const state: State = { ...refs, source, asking, guard, buttons, latestOpen: 0, latestSettings: 0 };
++  const state: State = { ...refs, source, asking, guard, latestOpen: 0, latestSettings: 0 };
+   const { files, settings } = refs;
+   store = {
+     ...refs,
+@@ -105,12 +104,12 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
+     ),
+     preferences: computed(() => preferencesOf(settings.value)),
+     hiddenButtons: buttons.hidden,
+-    ...actions(state),
++    ...actions(state, buttons),
+   };
+   return store;
+ }
+ 
+-function actions(state: State): Actions {
++function actions(state: State, buttons: HiddenButtons): Actions {
+   return {
+     loadFiles: () => loadFiles(state),
+     refreshFiles: async () => {
+@@ -138,9 +137,7 @@ function actions(state: State): Actions {
+       state.settingsOpen.value = false;
+     },
+     answer: state.asking.answer,
+-    toggleButton: (id) => {
+-      state.buttons.toggle(id);
+-    },
++    toggleButton: buttons.toggle,
+     track: state.guard.track,
+     untrack: state.guard.untrack,
+     unsavedFiles: state.guard.unsavedFiles,
+diff --git i/frontend/src/ui/toolbarButtons.test.ts w/frontend/src/ui/toolbarButtons.test.ts
+index 62351c0..f0ec917 100644
+--- i/frontend/src/ui/toolbarButtons.test.ts
++++ w/frontend/src/ui/toolbarButtons.test.ts
+@@ -37,21 +37,21 @@ function spyWarnings(): string[] {
+   return lines;
+ }
+ 
+-test("toggling hides then shows a button and stores the hidden ones in toolbar order", () => {
++test("Undo and Redo start hidden; toggling shows or hides a button and stores the hidden ones in toolbar order", () => {
+   const storage = memoryStorage();
+   const buttons = createHiddenButtons(storage);
+-  expect(hiddenList(buttons)).toEqual([]);
++  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
+   expect(storage.items.get(KEY)).toBeUndefined();
+ 
+   buttons.toggle("redo");
+-  expect(hiddenList(buttons)).toEqual(["redo"]);
+-  expect(storage.items.get(KEY)).toBe('["redo"]');
++  expect(hiddenList(buttons)).toEqual(["undo"]);
++  expect(storage.items.get(KEY)).toBe('["undo"]');
+ 
+   buttons.toggle("previous");
+-  expect([...buttons.hidden.value].sort()).toEqual(["previous", "redo"]);
+-  expect(storage.items.get(KEY)).toBe('["previous","redo"]');
++  expect([...buttons.hidden.value].sort()).toEqual(["previous", "undo"]);
++  expect(storage.items.get(KEY)).toBe('["previous","undo"]');
+ 
+-  buttons.toggle("redo");
++  buttons.toggle("undo");
+   expect(hiddenList(buttons)).toEqual(["previous"]);
+   expect(storage.items.get(KEY)).toBe('["previous"]');
+ 
+@@ -60,15 +60,18 @@ test("toggling hides then shows a button and stores the hidden ones in toolbar o
+   expect(storage.items.get(KEY)).toBe("[]");
+ });
+ 
+-test("a second start over the same storage hides the same buttons", () => {
++test("a second start over the same storage keeps the choice, also once every button shows", () => {
+   const storage = memoryStorage();
+   const first = createHiddenButtons(storage);
+   first.toggle("undo");
+   first.toggle("next");
+ 
+-  const restarted = createHiddenButtons(storage);
++  expect([...createHiddenButtons(storage).hidden.value].sort()).toEqual(["next", "redo"]);
+ 
+-  expect([...restarted.hidden.value].sort()).toEqual(["next", "undo"]);
++  first.toggle("redo");
++  first.toggle("next");
++
++  expect(hiddenList(createHiddenButtons(storage))).toEqual([]);
+ });
+ 
+ test("stored ids yamt does not know are dropped and duplicates collapse", () => {
+@@ -86,25 +89,25 @@ test.each([
+   ["a string", '"undo"'],
+   ["null", "null"],
+   ["an array holding a non-string", '["undo",4]'],
+-])("a stored value that is %s hides nothing", (_name, value) => {
++])("a stored value that is %s hides Undo and Redo, as at first", (_name, value) => {
+   const warnings = spyWarnings();
+ 
+   const buttons = createHiddenButtons(memoryStorage({ [KEY]: value }));
+ 
+-  expect(hiddenList(buttons)).toEqual([]);
++  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
+   expect(warnings).toEqual([]);
+ });
+ 
+-test("a missing key hides nothing and writes nothing until a toggle", () => {
++test("a missing key hides Undo and Redo and writes nothing until a toggle", () => {
+   const storage = memoryStorage({ other: "x" });
+ 
+   const buttons = createHiddenButtons(storage);
+ 
+-  expect(hiddenList(buttons)).toEqual([]);
++  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
+   expect([...storage.items.keys()]).toEqual(["other"]);
+ });
+ 
+-test("a storage that throws hides nothing, still toggles in memory and logs warnings", () => {
++test("a storage that throws hides Undo and Redo, still toggles in memory and logs warnings", () => {
+   const warnings = spyWarnings();
+   const failing: StorageLike = {
+     getItem: () => {
+@@ -119,13 +122,13 @@ test("a storage that throws hides nothing, still toggles in memory and logs warn
+   };
+ 
+   const buttons = createHiddenButtons(failing);
+-  expect(hiddenList(buttons)).toEqual([]);
++  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
+   expect(warnings).toEqual([
+     '[warn] toolbar.storage_failed {kind: "Unexpected", message: "storage disabled"}',
+   ]);
+ 
+   buttons.toggle("undo");
+-  expect(hiddenList(buttons)).toEqual(["undo"]);
++  expect(hiddenList(buttons)).toEqual(["redo"]);
+   expect(warnings).toHaveLength(2);
+ });
+ 
+diff --git i/frontend/src/ui/toolbarButtons.ts w/frontend/src/ui/toolbarButtons.ts
+index 66b0a41..95f47db 100644
+--- i/frontend/src/ui/toolbarButtons.ts
++++ w/frontend/src/ui/toolbarButtons.ts
+@@ -17,11 +17,14 @@ export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
+ 
+ export type HiddenButtons = {
+   readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
+-  toggle(id: ToolbarButtonId): void;
++  readonly toggle: (id: ToolbarButtonId) => void;
+ };
+ 
+ const STORAGE_KEY = "yamt.toolbar.hidden";
+ 
++// Undo and Redo start hidden until the user shows them (plan §2 #58); their keys still work.
++const HIDDEN_AT_FIRST: ReadonlySet<ToolbarButtonId> = new Set(["undo", "redo"]);
++
+ function parseJson(raw: string): unknown {
+   try {
+     return JSON.parse(raw);
+@@ -33,7 +36,7 @@ function parseJson(raw: string): unknown {
+ function readHidden(raw: string): ReadonlySet<ToolbarButtonId> {
+   const names = parseJson(raw);
+   if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
+-    return new Set();
++    return HIDDEN_AT_FIRST;
+   }
+   return new Set(TOOLBAR_BUTTONS.filter((id) => names.includes(id)));
+ }
+@@ -43,7 +46,7 @@ function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
+ }
+ 
+ export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
+-  const hidden = useStorage<ReadonlySet<ToolbarButtonId>>(STORAGE_KEY, new Set(), storage, {
++  const hidden = useStorage<ReadonlySet<ToolbarButtonId>>(STORAGE_KEY, HIDDEN_AT_FIRST, storage, {
+     serializer: { read: readHidden, write: writeHidden },
+     flush: "sync",
+     writeDefaults: false,
