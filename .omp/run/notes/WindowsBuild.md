@@ -45,3 +45,23 @@ alias on Windows; licence diff under Git Bash; Windows temp ACL [INFERENCE]; the
 
 Boundary: fail — blocks #781 (deleted_side link fixture), #782 (whole-file unix gates), #783 (copied workflow setup),
 promoted should #784 (Symlink compiles on Windows); dropped #785, #786. → rework 1.
+
+## Rework 1 (`cace957`)
+
+`FileKind::Symlink` unix-only at compile time (`link_to` stub gone); smallest gates in deleted_side, disk_is_truth,
+start_from_disk, describe, take, every_kind (Windows compiles 74 session tests, was 41); `.github/actions/setup` shared
+by ci.yml and release.yml. Boundary re-check pass.
+
+## Mutants (`9da4adb`) and correctness
+
+44 mutants, 29 caught, 8 unviable, 7 missed — all judged (#792): non-unix variants killed on windows-2025 by named tests,
+`link_to` gate-covered, start.rs:284 newline guard = old #581. Correctness fail: #790 (RK25: under Git for Windows'
+core.symlinks=false a link conflict is a plain file and was staged silently at the first refresh), #791 (promoted).
+
+## Rework 2 (`278321e`)
+
+`compare_stage`: `OnDisk::File(bytes) if is_link => same(link blob, bytes)`; later `!is_link` guards removed as
+redundant. Test `a_link_git_wrote_as_a_plain_file_is_untouched_and_stays_an_unresolved_link` (ungated, builds the 120000
+stage with git plumbing): failed before (`DiskChange{link, Staged}`), passes after. Only link rows gated in
+open_and_load (RK18 submodule reset now on Windows), describe, disk_is_truth. `just test` 370 pass; Windows-target
+check/clippy clean (with #793 fixed in `454db8e`). Correctness re-check pass.
