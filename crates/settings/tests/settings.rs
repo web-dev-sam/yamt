@@ -269,23 +269,24 @@ fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
     assert_eq!(json_at(&dotfile), light_subpixel());
 }
 
-#[cfg(unix)]
-#[test]
-fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
-    const LINUX_LINK_LIMIT: usize = 40;
+/// A dark settings file at the end of `links_in_a_row` symlinks, the first one at the default
+/// file; relative targets, so no hop walks the temp dir's path again.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn assert_a_chain_of_links_is_written_through(links_in_a_row: usize) {
     let config = Config::new();
     let dotfile = config.elsewhere("dotfiles/settings.json");
     write(&dotfile, r#"{"theme": "dark"}"#);
     let links = config.elsewhere("links");
     fs::create_dir_all(&links).unwrap();
-    let mut target = dotfile.clone();
-    for number in 1..LINUX_LINK_LIMIT {
-        let link = links.join(format!("link-{number}"));
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        target = link;
+    let mut target = std::path::PathBuf::from("../dotfiles/settings.json");
+    for number in 1..links_in_a_row {
+        let name = format!("link-{number}");
+        std::os::unix::fs::symlink(&target, links.join(&name)).unwrap();
+        target = std::path::PathBuf::from(name);
     }
     fs::create_dir_all(config.folder()).unwrap();
-    std::os::unix::fs::symlink(&target, config.default_file()).unwrap();
+    let from_the_folder = std::path::Path::new("../../elsewhere/links").join(target);
+    std::os::unix::fs::symlink(from_the_folder, config.default_file()).unwrap();
     let current = StoredSettings::default();
     assert_eq!(
         read(&config.places, &current).unwrap().stored.theme,
@@ -298,12 +299,29 @@ fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
         assert!(entry.unwrap().file_type().unwrap().is_symlink());
         link_count += 1;
     }
-    assert_eq!(link_count + 1, LINUX_LINK_LIMIT);
+    assert_eq!(link_count + 1, links_in_a_row);
     assert!(
         fs::symlink_metadata(config.default_file())
             .unwrap()
             .is_symlink()
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
+    // Linux resolves at most 40 symlinks in one path lookup (`MAXSYMLINKS`, include/linux/namei.h).
+    const LINUX_LINK_LIMIT: usize = 40;
+    assert_a_chain_of_links_is_written_through(LINUX_LINK_LIMIT);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_chain_of_thirty_one_settings_symlinks_is_written_through_as_macos_reads_it() {
+    // macOS resolves at most 32 symlinks in one path lookup (`MAXSYMLINKS`, sys/param.h), and a temp
+    // dir under `/var` (→ `/private/var`) spends one of them.
+    const MACOS_LINK_LIMIT: usize = 32;
+    assert_a_chain_of_links_is_written_through(MACOS_LINK_LIMIT - 1);
 }
 
 #[cfg(unix)]
