@@ -3,7 +3,7 @@
   "tasks": [
     {
       "label": "yamt: run the merge window",
-      "detail": "Start the merge window (just dev-web), then open http://localhost:5173 in GNOME Web. Stop it with Ctrl+C in its terminal.",
+      "detail": "Start the merge window (just dev-web), then open http://localhost:5173 in GNOME Web. Running it again restarts it with the current code; an open page reloads itself. Stop it with Ctrl+C in its terminal.",
       "type": "shell",
       "command": "just dev-web",
       "isBackground": true,
@@ -17,6 +17,7 @@
         }
       },
       "presentation": { "panel": "dedicated", "reveal": "always" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
       "options": {
         "statusbar": {
           "label": "$(play)",
@@ -60,11 +61,12 @@
     },
     {
       "label": "merge: open in yamt",
-      "detail": "Build yamt (debug, pages built in) and open it on /tmp/yamt-conflict-project (made first if missing). The terminal shows yamt's exit status when you close it.",
+      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-conflict-project (made first if missing). Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
       "type": "shell",
       "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "reveal": "always" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
       "options": {
         "statusbar": { "label": "$(link-external) yamt" }
       }
