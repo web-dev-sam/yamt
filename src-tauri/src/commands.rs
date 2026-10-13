@@ -182,7 +182,7 @@ mod tests {
                 cmd: cmd.to_owned(),
                 callback: CallbackFn(0),
                 error: CallbackFn(1),
-                url: "tauri://localhost".parse().unwrap(),
+                url: self.webview.url().unwrap(),
                 body: InvokeBody::Json(args),
                 headers: tauri::http::HeaderMap::default(),
                 invoke_key: INVOKE_KEY.to_owned(),

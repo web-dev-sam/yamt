@@ -1,5 +1,1 @@
-{
-  "WindowsBuildR4": {
-    "owned": ["src-tauri/src/commands.rs"]
-  }
-}
+{}
