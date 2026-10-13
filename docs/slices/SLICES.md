@@ -243,6 +243,32 @@ heading, storage, Rust/IPC changes.
 | 1'  | verifier (`briefs/3.S-toolbar-settings-verify.md`): `just check`, `just mutants af83d3a`, the real app on a private X display: arrows on both sides and from the middle, gear on every file kind, settings and back keep the merge, no key reaches it | verifier | done     | `ToolbarSettingsVerify` on the working tree, gate **pass**. `just check` exit 0 (464 web tests, arch/map ok, 10 goldens, hooks 16/16). Stryker 94.22 % (`problem.ts` 100, `store.ts` 96.33, `views.ts` 97.59, `useMergeController.ts` 83.12): new-line survivor only the `moveToChange` forwarder (#657, dropped), older gaps → #582 (#658). Real app (Xvfb, X11, `xdotool`): titles "Previous change"/"Next change"/"Settings"; arrows step each side and keep its keyboard, stop at the lowest; from the middle ↓ gives the left its first change below the visible top, Enter then applies it; gear on the deleted-side and binary files; settings hide the file, Delete/Down/x/Ctrl+Z change nothing; Back restores text, status and all three `scrollTop`s, keyboard on the gear, Ctrl+Z undoes; a list pick (also the shown file) closes settings |
 | 1'' | follow-ups: one `#focusedSide()` in `SideFocus` for `deciding` and `moveToChange` (#661)                                                                                                                                                              | web-impl | planned  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
+## Settings — light/dark theme, keys, settings file (session 8)
+
+Intent (owner 2026-10-13, #662; answers #663): the settings view gets a Light / Dark switch and
+yamt's own keyboard actions (apply, ignore, next/previous change, left/right side, undo, redo, find,
+find next/previous, close find, indent, outdent) with their keys: per action change, add or remove a
+key and reset to the defaults; a key another action already uses → a question naming that action,
+"Move" or "Cancel". Settings are per user, in a settings file: by default in the user's config
+folder; the view shows its location in a field prefilled with the default path; another location →
+yamt reads and writes that file (created with the current settings when missing, its settings take
+effect when it exists) and picks up edits made outside. Also: the toolbar's Undo/Redo buttons are
+hidden by a hardcoded switch, their code kept. The owner asked for the usual loop (#662): review
+agents and commits.
+
+Acceptance (proposed): in the desktop app, Light recolours the whole window at once (panels, text,
+syntax, change colours, connectors, the native window background) and the next start opens light
+without a dark flash; a re-bound key works in every opened file at once and the removed one no
+longer does; reset restores the defaults; a clash asks and "Move" takes the key; the settings file
+holds what the view shows and survives a restart; a hand edit shows up in the open window; a new
+location reads or creates that file; a broken file shows a problem and is not overwritten; Undo/Redo
+buttons are gone while Ctrl/Cmd+Z/Y still work. Non-goals: following the system theme, the result
+pane's text-editing keys, mouse shortcuts, per-repository settings, importing WebStorm keymaps.
+
+| row | slice                                                                                                               | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: settings file, theme switch, keys into the editor, settings view, slicing (`briefs/3.S-settings-design.md`) | designer | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
