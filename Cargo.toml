@@ -36,6 +36,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tauri = "2.12.1"
 tauri-build = "2.7.1"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+# The GTK 3 binding tauri 2.12.1 already runs on (tao, wry); yamt-app sets GTK's font settings on Linux (plan §2 #60).
+gtk = "0.18.2"
 
 [workspace.lints.rust]
 # deny, not forbid: the app's NVIDIA start-up guard is the one allowed `unsafe` (plan §2 #43, arch-check);

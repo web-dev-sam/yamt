@@ -1,0 +1,570 @@
+diff --git c/.github/actions/setup/action.yml i/.github/actions/setup/action.yml
+new file mode 100644
+index 0000000..4093877
+--- /dev/null
++++ i/.github/actions/setup/action.yml
+@@ -0,0 +1,41 @@
++name: setup
++description: The toolchains and packages that ci.yml and release.yml build with.
++
++inputs:
++  rust:
++    description: "'false' skips the Rust/Tauri part (Linux system packages, rustup, tauri-cli) for a frontend-only job."
++    default: "true"
++
++runs:
++  using: composite
++  steps:
++    - name: Linux system packages
++      if: inputs.rust == 'true' && runner.os == 'Linux'
++      shell: bash
++      run: |
++        sudo apt-get update
++        sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
++
++    - name: Rust toolchain from rust-toolchain.toml
++      if: inputs.rust == 'true'
++      shell: bash
++      run: |
++        rustup toolchain install
++        rustup show active-toolchain
++
++    - name: Tauri CLI
++      if: inputs.rust == 'true'
++      shell: bash
++      run: cargo install tauri-cli --version 2.12.1 --locked
++
++    - uses: actions/setup-node@v7.1.0
++      with:
++        node-version: 24
++
++    - uses: pnpm/action-setup@v6.1.0
++      with:
++        package_json_file: frontend/package.json
++
++    - name: Frontend packages
++      shell: bash
++      run: pnpm -C frontend install --frozen-lockfile
+diff --git c/.github/workflows/ci.yml i/.github/workflows/ci.yml
+index eaee7bc..38d4608 100644
+--- c/.github/workflows/ci.yml
++++ i/.github/workflows/ci.yml
+@@ -30,35 +30,12 @@ jobs:
+     steps:
+       - uses: actions/checkout@v7.0.1
+ 
+-      - name: Linux system packages
+-        if: runner.os == 'Linux'
+-        run: |
+-          sudo apt-get update
+-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+-
+-      - name: Rust toolchain from rust-toolchain.toml
+-        run: |
+-          rustup toolchain install
+-          rustup show active-toolchain
++      - uses: ./.github/actions/setup
+ 
+       - uses: taiki-e/install-action@v2.87.28
+         with:
+           tool: nextest,just
+ 
+-      - name: Tauri CLI
+-        run: cargo install tauri-cli --version 2.12.1 --locked
+-
+-      - uses: actions/setup-node@v7.1.0
+-        with:
+-          node-version: 24
+-
+-      - uses: pnpm/action-setup@v6.1.0
+-        with:
+-          package_json_file: frontend/package.json
+-
+-      - name: Frontend packages
+-        run: pnpm -C frontend install --frozen-lockfile
+-
+       - name: Rust tests without the runner's git config (RK19)
+         run: just test
+ 
+@@ -78,16 +55,9 @@ jobs:
+     steps:
+       - uses: actions/checkout@v7.0.1
+ 
+-      - uses: actions/setup-node@v7.1.0
++      - uses: ./.github/actions/setup
+         with:
+-          node-version: 24
+-
+-      - uses: pnpm/action-setup@v6.1.0
+-        with:
+-          package_json_file: frontend/package.json
+-
+-      - name: Frontend packages
+-        run: pnpm -C frontend install --frozen-lockfile
++          rust: "false"
+ 
+       - name: Frontend unit tests
+         run: pnpm -C frontend test
+diff --git c/.github/workflows/release.yml i/.github/workflows/release.yml
+index 453876d..47cf469 100644
+--- c/.github/workflows/release.yml
++++ i/.github/workflows/release.yml
+@@ -41,35 +41,12 @@ jobs:
+     steps:
+       - uses: actions/checkout@v7.0.1
+ 
+-      - name: Linux system packages
+-        if: runner.os == 'Linux'
+-        run: |
+-          sudo apt-get update
+-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+-
+-      - name: Rust toolchain from rust-toolchain.toml
+-        run: |
+-          rustup toolchain install
+-          rustup show active-toolchain
++      - uses: ./.github/actions/setup
+ 
+       - name: macOS targets for the universal build
+         if: runner.os == 'macOS'
+         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+ 
+-      - name: Tauri CLI
+-        run: cargo install tauri-cli --version 2.12.1 --locked
+-
+-      - uses: actions/setup-node@v7.1.0
+-        with:
+-          node-version: 24
+-
+-      - uses: pnpm/action-setup@v6.1.0
+-        with:
+-          package_json_file: frontend/package.json
+-
+-      - name: Frontend packages
+-        run: pnpm -C frontend install --frozen-lockfile
+-
+       - name: THIRD_PARTY_LICENSES.txt is current
+         run: |
+           scripts/third-party-licenses.sh
+diff --git c/crates/conflict-repo/AGENTS.md i/crates/conflict-repo/AGENTS.md
+index 7093690..f866f3c 100644
+--- c/crates/conflict-repo/AGENTS.md
++++ i/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git c/crates/conflict-repo/src/lib.rs i/crates/conflict-repo/src/lib.rs
+index 4e4b58e..ba53958 100644
+--- c/crates/conflict-repo/src/lib.rs
++++ i/crates/conflict-repo/src/lib.rs
+@@ -2,7 +2,7 @@
+ #![forbid(unsafe_code)]
+ 
+ use std::fs;
+-use std::io::{self, Write};
++use std::io::Write;
+ use std::path::Path;
+ use std::process::{Command, Output, Stdio};
+ 
+@@ -40,6 +40,8 @@ pub struct ConflictFile<'a> {
+ #[derive(Clone, Copy, Debug)]
+ pub enum FileKind {
+     Regular,
++    /// Unix only: Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`).
++    #[cfg(unix)]
+     Symlink,
+     Submodule,
+ }
+@@ -192,6 +194,7 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+             fs::write(&worktree_file, bytes)?;
+             git_ok(root, &["add", "--", file.path])?;
+         }
++        #[cfg(unix)]
+         FileKind::Symlink => {
+             if worktree_file.symlink_metadata().is_ok() {
+                 fs::remove_file(&worktree_file)?;
+@@ -210,21 +213,11 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
+ }
+ 
+ #[cfg(unix)]
+-fn link_to(target: &[u8], link: &Path) -> io::Result<()> {
++fn link_to(target: &[u8], link: &Path) -> std::io::Result<()> {
+     use std::os::unix::ffi::OsStrExt;
+     std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), link)
+ }
+ 
+-// Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`), so
+-// tests that script one run on unix only.
+-#[cfg(not(unix))]
+-fn link_to(_target: &[u8], _link: &Path) -> io::Result<()> {
+-    Err(io::Error::new(
+-        io::ErrorKind::Unsupported,
+-        "scripted symlinks are unix-only",
+-    ))
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git c/crates/session/tests/deleted_side.rs i/crates/session/tests/deleted_side.rs
+index 9901660..06e4c6f 100644
+--- c/crates/session/tests/deleted_side.rs
++++ i/crates/session/tests/deleted_side.rs
+@@ -13,6 +13,7 @@ const REMOTE_DELETED: &str = "b_remote_deleted.ts";
+ const KEPT_BINARY: &str = "c_kept_binary.bin";
+ const BASE_BINARY: &str = "d_base_binary.txt";
+ const KEPT_LATIN1: &str = "e_kept_latin1.txt";
++#[cfg(unix)]
+ const KEPT_LINK: &str = "f_kept_link";
+ const EMPTY_BASE_CRLF: &str = "g_empty_base_crlf.ts";
+ const BASE: &[u8] = b"one\ntwo\nthree\nfour\n";
+@@ -34,17 +35,18 @@ const fn deleted(
+     }
+ }
+ 
+-const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
+-    use FileKind::{Regular, Symlink};
+-    [
++const DELETED_ON_ONE_SIDE: &[ConflictFile<'static>] = {
++    use FileKind::Regular;
++    &[
+         deleted(LOCAL_DELETED, Regular, BASE, None, Some(KEPT)),
+         deleted(REMOTE_DELETED, Regular, BASE, Some(KEPT), None),
+         deleted(KEPT_BINARY, Regular, b"base\n", Some(b"\0kept"), None),
+         deleted(BASE_BINARY, Regular, b"\0base", None, Some(b"kept\n")),
+         deleted(KEPT_LATIN1, Regular, b"base\n", None, Some(b"caf\xe9\n")),
++        #[cfg(unix)]
+         deleted(
+             KEPT_LINK,
+-            Symlink,
++            FileKind::Symlink,
+             b"base-target",
+             Some(b"kept-target"),
+             None,
+@@ -60,7 +62,7 @@ const DELETED_ON_ONE_SIDE: [ConflictFile<'static>; 7] = {
+ };
+ 
+ fn deleted_on_one_side() -> TempDir {
+-    conflict_repo(&DELETED_ON_ONE_SIDE).unwrap()
++    conflict_repo(DELETED_ON_ONE_SIDE).unwrap()
+ }
+ 
+ fn unmerged(dir: &TempDir) -> String {
+@@ -122,6 +124,7 @@ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason(
+         (KEPT_BINARY, Some(UnsupportedReason::RemoteDeleted)),
+         (BASE_BINARY, Some(UnsupportedReason::LocalDeleted)),
+         (KEPT_LATIN1, Some(UnsupportedReason::LocalDeleted)),
++        #[cfg(unix)]
+         (KEPT_LINK, Some(UnsupportedReason::Symlink)),
+         (EMPTY_BASE_CRLF, None),
+     ]
+diff --git c/crates/session/tests/describe.rs i/crates/session/tests/describe.rs
+index b013b49..5577239 100644
+--- c/crates/session/tests/describe.rs
++++ i/crates/session/tests/describe.rs
+@@ -1,13 +1,14 @@
+ #![cfg(test)]
+-// Unix only: `every_kind` scripts symlinks (scripted on unix only).
+-#![cfg(unix)]
+ 
+ use yamt_session::{MergeSession, SideContent, UnsupportedReason};
+ 
+ mod every_kind;
+ use every_kind::{
+-    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
+-    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, every_kind_of_conflict, file_against_link,
++    BINARY, LATIN1, LOCAL_DELETED, REMOTE_DELETED, SUBMODULE, TEXT, every_kind_of_conflict,
++};
++#[cfg(unix)]
++use every_kind::{
++    FILE_OR_LINK, FILE_OR_LINK_RENAMED, LOCAL_COMMIT, REMOTE_COMMIT, SYMLINK, file_against_link,
+ };
+ 
+ fn described_sides(session: &mut MergeSession, path: &str) -> (SideContent, SideContent) {
+@@ -27,6 +28,7 @@ fn describe_counts_the_lines_of_text_sides_and_names_a_deleted_side_missing() {
+     assert_eq!(described(REMOTE_DELETED), (Text { lines: 3 }, Missing));
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn describe_gives_sizes_of_unreadable_sides_link_targets_and_commit_ids() {
+     use SideContent::{Binary, Commit, Link, NonUtf8};
+@@ -65,6 +67,7 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
+         (REMOTE_DELETED, None),
+         (BINARY, Some(UnsupportedReason::Binary)),
+         (LATIN1, Some(UnsupportedReason::NonUtf8)),
++        #[cfg(unix)]
+         (SYMLINK, Some(UnsupportedReason::Symlink)),
+         (SUBMODULE, Some(UnsupportedReason::Submodule)),
+     ];
+@@ -73,6 +76,7 @@ fn describe_reports_the_file_reason_and_none_for_a_text_file() {
+     }
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn describe_a_file_against_a_link_shows_the_file_and_the_link_target() {
+     use SideContent::{Link, Missing, Text};
+diff --git c/crates/session/tests/disk_is_truth.rs i/crates/session/tests/disk_is_truth.rs
+index ffc2e97..a4a488f 100644
+--- c/crates/session/tests/disk_is_truth.rs
++++ i/crates/session/tests/disk_is_truth.rs
+@@ -1,20 +1,20 @@
+ #![cfg(test)]
+-// Unix only: every test merges `FILES`, which holds a symlink (scripted on unix only).
+-#![cfg(unix)]
+ 
+ use std::fs;
++#[cfg(unix)]
+ use std::os::unix::fs::symlink;
+ 
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
+ };
+ use yamt_session::{
+-    DiskChange, DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle,
+-    NotText, Side, WriteReply,
++    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
++    WriteReply,
+ };
+ 
+ const TEXT: &str = "f.txt";
+ const BINARY: &str = "logo.bin";
++#[cfg(unix)]
+ const LINK: &str = "link";
+ const SUBMODULE: &str = "vendor/lib";
+ 
+@@ -23,7 +23,7 @@ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+ 
+ const USER_TEXT: &[u8] = b"written by the user\n";
+ 
+-const FILES: [ConflictFile<'static>; 4] = [
++const FILES: &[ConflictFile<'static>] = &[
+     ConflictFile {
+         path: TEXT,
+         kind: FileKind::Regular,
+@@ -38,6 +38,7 @@ const FILES: [ConflictFile<'static>; 4] = [
+         local: Some(b"\0local"),
+         remote: Some(b"\0remote"),
+     },
++    #[cfg(unix)]
+     ConflictFile {
+         path: LINK,
+         kind: FileKind::Symlink,
+@@ -61,7 +62,7 @@ fn merged_in(style: &str, config: &[(&str, &str)]) -> TempDir {
+         config: &all_config,
+         ..Setup::default()
+     };
+-    conflict_repo_with(&FILES, &setup).unwrap()
++    conflict_repo_with(FILES, &setup).unwrap()
+ }
+ 
+ fn merged() -> TempDir {
+@@ -281,8 +282,10 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
+     }
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missing_file() {
++    use yamt_session::Error;
+     let dir = merged();
+     let mut session = opened(&dir);
+     let outside = TempDir::new().unwrap();
+@@ -313,6 +316,7 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
+     assert_eq!(read(&dir, TEXT), b"merged\n");
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
+     let dir = merged();
+diff --git c/crates/session/tests/every_kind/mod.rs i/crates/session/tests/every_kind/mod.rs
+index 390b653..5a2fdfa 100644
+--- c/crates/session/tests/every_kind/mod.rs
++++ i/crates/session/tests/every_kind/mod.rs
+@@ -1,14 +1,13 @@
+ //! A merge stopped on every kind of conflicted path, and a file against a link.
+ 
+-use std::fs;
+-
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git, git_ok};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
+ 
+ pub const TEXT: &str = "a_text.txt";
+ pub const LOCAL_DELETED: &str = "b_local_deleted.txt";
+ pub const REMOTE_DELETED: &str = "c_remote_deleted.txt";
+ pub const BINARY: &str = "d_binary.bin";
+ pub const LATIN1: &str = "e_latin1.txt";
++#[cfg(unix)]
+ pub const SYMLINK: &str = "f_symlink";
+ pub const SUBMODULE: &str = "g_submodule";
+ 
+@@ -30,9 +29,9 @@ pub const fn conflict(
+     }
+ }
+ 
+-const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
+-    use FileKind::{Regular, Submodule, Symlink};
+-    [
++const EVERY_KIND_OF_CONFLICT: &[ConflictFile<'static>] = {
++    use FileKind::{Regular, Submodule};
++    &[
+         conflict(
+             TEXT,
+             Regular,
+@@ -66,9 +65,10 @@ const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
+                 Some(b"caf\xe9 remote\n"),
+             ],
+         ),
++        #[cfg(unix)]
+         conflict(
+             SYMLINK,
+-            Symlink,
++            FileKind::Symlink,
+             [
+                 Some(b"base-target"),
+                 Some(b"local-target"),
+@@ -88,15 +88,20 @@ const EVERY_KIND_OF_CONFLICT: [ConflictFile<'static>; 7] = {
+ };
+ 
+ pub fn every_kind_of_conflict() -> TempDir {
+-    conflict_repo(&EVERY_KIND_OF_CONFLICT).unwrap()
++    conflict_repo(EVERY_KIND_OF_CONFLICT).unwrap()
+ }
+ 
++#[cfg(unix)]
+ pub const FILE_OR_LINK: &str = "readme";
++#[cfg(unix)]
+ pub const FILE_OR_LINK_RENAMED: &str = "readme~HEAD";
+ 
+ // git's ort merge records a file against a symlink as two paths: "CONFLICT (distinct types): …
+ // renamed one of them so each can be recorded somewhere" (observed on git 2.56).
++#[cfg(unix)]
+ pub fn file_against_link() -> TempDir {
++    use std::fs;
++    use yamt_conflict_repo::{git, git_ok};
+     let dir = TempDir::new().unwrap();
+     let root = dir.path();
+     let commit = |message: &str| {
+diff --git c/crates/session/tests/start_from_disk.rs i/crates/session/tests/start_from_disk.rs
+index a110624..2ede054 100644
+--- c/crates/session/tests/start_from_disk.rs
++++ i/crates/session/tests/start_from_disk.rs
+@@ -1,24 +1,22 @@
+ #![cfg(test)]
+-// Unix only: most tests merge `FILES`, which holds a symlink (scripted on unix only).
+-#![cfg(unix)]
+ 
+ use std::fs;
+-use std::os::unix::fs::PermissionsExt;
+ 
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
+ };
+-use yamt_session::{DiskResult, DiskVersion, Error, FileList, FileStatus, MergeSession, Middle};
++use yamt_session::{DiskResult, FileList, FileStatus, MergeSession, Middle};
+ 
+ const TEXT: &str = "f.txt";
+ const DELETED: &str = "gone.txt";
+ const BINARY: &str = "logo.bin";
++#[cfg(unix)]
+ const LINK: &str = "link";
+ 
+ mod samples;
+ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+ 
+-const FILES: [ConflictFile<'static>; 4] = [
++const FILES: &[ConflictFile<'static>] = &[
+     ConflictFile {
+         path: TEXT,
+         kind: FileKind::Regular,
+@@ -40,6 +38,7 @@ const FILES: [ConflictFile<'static>; 4] = [
+         local: Some(b"\0local"),
+         remote: Some(b"\0remote"),
+     },
++    #[cfg(unix)]
+     ConflictFile {
+         path: LINK,
+         kind: FileKind::Symlink,
+@@ -51,7 +50,7 @@ const FILES: [ConflictFile<'static>; 4] = [
+ 
+ fn merged(config: &[(&str, &str)], attributes: Option<&str>) -> TempDir {
+     let setup = Setup { config, attributes };
+-    conflict_repo_with(&FILES, &setup).unwrap()
++    conflict_repo_with(FILES, &setup).unwrap()
+ }
+ 
+ fn zdiff3() -> TempDir {
+@@ -267,6 +266,7 @@ fn a_binary_file_is_untouched_as_ours_and_staged_once_replaced_by_theirs() {
+     assert_eq!(changes(&list), [(BINARY, &DiskResult::Staged)]);
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn a_text_file_git_did_not_merge_and_a_symlink_kept_as_ours_are_untouched() {
+     let dir = merged(&[], Some("f.txt -merge\n"));
+@@ -334,8 +334,11 @@ fn a_file_merge_ort_aligned_with_histogram_is_untouched() {
+     assert_eq!(list.disk_changes, []);
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
++    use std::os::unix::fs::PermissionsExt;
++    use yamt_session::{DiskVersion, Error};
+     const NO_ACCESS: u32 = 0o000;
+     const READ_WRITE: u32 = 0o644;
+     let dir = zdiff3();
+diff --git c/crates/session/tests/take.rs i/crates/session/tests/take.rs
+index 3731ca5..5995835 100644
+--- c/crates/session/tests/take.rs
++++ i/crates/session/tests/take.rs
+@@ -1,8 +1,7 @@
+ #![cfg(test)]
+-// Unix only: almost every test takes from `every_kind`, which scripts symlinks (unix only).
+-#![cfg(unix)]
+ 
+ use std::fs;
++#[cfg(unix)]
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{FileKind, TempDir, conflict_repo, git, git_ok};
+@@ -10,9 +9,11 @@ use yamt_session::{DiskVersion, FileStatus, MergeSession, Side, WriteReply};
+ 
+ mod every_kind;
+ use every_kind::{
+-    BINARY, FILE_OR_LINK, FILE_OR_LINK_RENAMED, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT,
+-    REMOTE_DELETED, SUBMODULE, SYMLINK, TEXT, conflict, every_kind_of_conflict, file_against_link,
++    BINARY, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT, REMOTE_DELETED, SUBMODULE, TEXT,
++    conflict, every_kind_of_conflict,
+ };
++#[cfg(unix)]
++use every_kind::{FILE_OR_LINK, FILE_OR_LINK_RENAMED, SYMLINK, file_against_link};
+ 
+ fn unmerged(dir: &TempDir) -> String {
+     String::from_utf8(git_ok(dir.path(), &["ls-files", "-u"]).unwrap()).unwrap()
+@@ -95,6 +96,7 @@ fn take_of_a_binary_file_stages_and_writes_the_chosen_side_with_fresh_stat_data(
+     }
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
+     for (side, target) in [
+@@ -109,6 +111,7 @@ fn take_of_a_symlink_makes_the_worktree_a_link_to_the_chosen_target() {
+     }
+ }
+ 
++#[cfg(unix)]
+ #[test]
+ fn take_of_a_file_against_a_link_writes_the_link_and_the_file() {
+     let dir = file_against_link();
+@@ -201,6 +204,7 @@ fn reset_after_take_brings_back_the_stages_of_every_kind() {
+         (REMOTE_DELETED, Side::Local),
+         (BINARY, Side::Remote),
+         (LATIN1, Side::Local),
++        #[cfg(unix)]
+         (SYMLINK, Side::Remote),
+         (SUBMODULE, Side::Local),
+     ];

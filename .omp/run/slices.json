@@ -1,16 +1,5 @@
 {
-  "CrispTextProbe": {
-    "owned": []
-  },
-  "WindowsBuildR1": {
-    "owned": [
-      "crates/conflict-repo/**",
-      "crates/session/tests/**",
-      "crates/gitio/tests/**",
-      "crates/cli/tests/**",
-      "src-tauri/src/**",
-      ".github/workflows/**",
-      ".github/actions/**"
-    ]
+  "AntialiasingDesktop": {
+    "owned": ["crates/settings/**", "src-tauri/src/**"]
   }
 }
