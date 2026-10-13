@@ -3,6 +3,7 @@ import type { ShallowRef } from "vue";
 import { log, type DiskChange } from "../ipc";
 import type { CloseGuard } from "./closeGuard";
 import type { Notice } from "./noticeText";
+import { clearProblemAbout, type Problem } from "./problem";
 import type { Taken } from "./sides";
 import { isShown, reload, takesASide, type Shown } from "./views";
 
@@ -50,4 +51,13 @@ export async function applyDiskChanges(
   target.taken.value = taken;
   const shown = [...byPath.keys()].filter((path) => isShown(target, path));
   await Promise.all(shown.map((path) => reload(target, path)));
+}
+
+export async function changedOnDisk(
+  target: DiskChangeTarget & { readonly problem: ShallowRef<Problem | null> },
+  path: string,
+  change: DiskChange,
+): Promise<void> {
+  clearProblemAbout(target, path);
+  await applyDiskChanges(target, [change], "running");
 }

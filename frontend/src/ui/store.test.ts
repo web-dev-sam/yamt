@@ -449,6 +449,17 @@ test("settings open and close; picking a file while they show closes them and sh
   expect(pending).toHaveLength(2);
 });
 
+test("toggleButton hides a toolbar button for every file and shows it again", () => {
+  const store = createAppStore(handSource([]).source);
+  expect([...store.hiddenButtons.value]).toEqual([]);
+
+  store.toggleButton("undo");
+  expect([...store.hiddenButtons.value]).toEqual(["undo"]);
+
+  store.toggleButton("undo");
+  expect([...store.hiddenButtons.value]).toEqual([]);
+});
+
 test.each([true, false])(
   "the app's own opens, the first file and the next one after a finish, keep settings as they were (open: %s)",
   async (settingsOpen) => {

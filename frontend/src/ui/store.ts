@@ -3,7 +3,6 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 import {
   log,
   type ChunkSource,
-  type DiskChange,
   type DiskVersion,
   type FileEntry,
   type FileMergeData,
@@ -13,12 +12,20 @@ import {
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
-import { applyDiskChanges } from "./diskChanges";
+import { applyDiskChanges, changedOnDisk } from "./diskChanges";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
+import {
+  attempt,
+  clearProblemAbout,
+  logProblem,
+  report,
+  unexpected,
+  type Problem,
+} from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import type { Taken } from "./sides";
+import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
 import type { MergeSummary } from "./useMergeController";
 import { fetchView, isShown, reload } from "./views";
 
@@ -42,6 +49,7 @@ type State = Refs & {
   readonly source: ChunkSource;
   readonly asking: Asking;
   readonly guard: CloseGuard;
+  readonly buttons: HiddenButtons;
   latestOpen: number;
 };
 
@@ -59,11 +67,13 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
   openSettings(): void;
   closeSettings(): void;
   answer(yes: boolean): void;
+  toggleButton(id: ToolbarButtonId): void;
 };
 
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly question: ComputedRef<Question | null>;
   readonly allResolved: ComputedRef<boolean>;
+  readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions;
 
 let store: AppStore | null = null;
@@ -82,7 +92,8 @@ export function createAppStore(source: ChunkSource): AppStore {
   };
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
-  const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
+  const buttons = createHiddenButtons();
+  const state: State = { ...refs, source, asking, guard, buttons, latestOpen: 0 };
   const { files } = refs;
   store = {
     ...refs,
@@ -90,6 +101,7 @@ export function createAppStore(source: ChunkSource): AppStore {
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
     ),
+    hiddenButtons: buttons.hidden,
     ...actions(state),
   };
   return store;
@@ -123,19 +135,15 @@ function actions(state: State): Actions {
       state.settingsOpen.value = false;
     },
     answer: state.asking.answer,
+    toggleButton: (id) => {
+      state.buttons.toggle(id);
+    },
     track: state.guard.track,
     untrack: state.guard.untrack,
     unsavedFiles: state.guard.unsavedFiles,
     mayClose: state.guard.mayClose,
     watchWindowClose: state.guard.watchWindowClose,
   };
-}
-
-function clearProblemAbout(state: State, path: string): void {
-  const problem = state.problem.value;
-  if (problem !== null && problem.action !== "list" && problem.path === path) {
-    state.problem.value = null;
-  }
 }
 
 async function loadFiles(state: State): Promise<void> {
@@ -211,11 +219,6 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
   if (next !== null) {
     await open(state, next);
   }
-}
-
-async function changedOnDisk(state: State, path: string, change: DiskChange): Promise<void> {
-  clearProblemAbout(state, path);
-  await applyDiskChanges(state, [change], "running");
 }
 
 async function finish(

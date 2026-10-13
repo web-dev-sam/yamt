@@ -43,3 +43,13 @@ export function report(
   logProblem(failure);
   target.problem.value = failure;
 }
+
+export function clearProblemAbout(
+  target: { readonly problem: ShallowRef<Problem | null> },
+  path: string,
+): void {
+  const problem = target.problem.value;
+  if (problem !== null && problem.action !== "list" && problem.path === path) {
+    target.problem.value = null;
+  }
+}
