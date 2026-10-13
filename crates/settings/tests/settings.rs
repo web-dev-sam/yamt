@@ -212,6 +212,24 @@ fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
 
 #[cfg(unix)]
 #[test]
+fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
+    let config = Config::new();
+    let dotfile = config.elsewhere("dotfiles/settings.json");
+    write(&dotfile, r#"{"theme": "dark"}"#);
+    let second_link = config.elsewhere("links/settings.json");
+    fs::create_dir_all(config.elsewhere("links")).unwrap();
+    std::os::unix::fs::symlink("../dotfiles/settings.json", &second_link).unwrap();
+    fs::create_dir_all(config.folder()).unwrap();
+    std::os::unix::fs::symlink(&second_link, config.default_file()).unwrap();
+    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+    for link in [config.default_file(), second_link] {
+        assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+    }
+    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+}
+
+#[cfg(unix)]
+#[test]
 fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
     let config = Config::new();
     fs::create_dir_all(config.folder()).unwrap();

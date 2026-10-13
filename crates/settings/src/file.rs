@@ -11,6 +11,9 @@ use crate::{Error, StoredSettings};
 const THEME: &str = "theme";
 const KEYS: &str = "keys";
 
+/// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
+const MAX_LINK_HOPS: usize = 40;
+
 /// A settings file: the entries yamt does not know, kept as written, and what yamt reads.
 pub(crate) struct Loaded {
     others: Map<String, Value>,
@@ -95,13 +98,14 @@ pub(crate) fn write_entries(path: &Path, loaded: Loaded) -> Result<(), Error> {
     write_text(path, &format!("{:#}\n", Value::Object(loaded.entries())))
 }
 
-/// Writes through a temporary file and a rename; a symlink at `path` is followed, so it stays a link.
+/// Writes through a temporary file and a rename into the file at the end of the symlinks at
+/// `path`, so every link stays a link.
 pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
     let failed = |target: &Path, error: io::Error| Error::WriteFailed {
         path: target.to_owned(),
         message: error.to_string(),
     };
-    let target = link_target(path).map_err(|error| failed(path, error))?;
+    let target = file_to_write(path).map_err(|error| failed(path, error))?;
     let Some(name) = target.file_name() else {
         return Err(failed(&target, io::Error::from(ErrorKind::IsADirectory)));
     };
@@ -119,15 +123,45 @@ pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// What a symlink at `path` points to, also when that does not exist yet; `path` itself otherwise.
-fn link_target(path: &Path) -> io::Result<PathBuf> {
-    let is_link = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
-    if !is_link {
-        return Ok(path.to_owned());
+/// Also when the last link points to a file that does not exist yet.
+fn file_to_write(path: &Path) -> io::Result<PathBuf> {
+    let mut current = path.to_owned();
+    for _ in 0..MAX_LINK_HOPS {
+        let is_link = fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_symlink());
+        if !is_link {
+            return Ok(current);
+        }
+        let target = fs::read_link(&current)?;
+        current = match current.parent() {
+            Some(folder) => folder.join(target),
+            None => target,
+        };
     }
-    let target = fs::read_link(path)?;
-    match path.parent() {
-        Some(folder) => Ok(folder.join(target)),
-        None => Ok(target),
+    Err(io::Error::other(format!(
+        "more than {MAX_LINK_HOPS} symlinks in a row"
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cycle_is_a_write_error_on_the_settings_path_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.json");
+        let second = dir.path().join("second.json");
+        std::os::unix::fs::symlink(&second, &first).unwrap();
+        std::os::unix::fs::symlink(&first, &second).unwrap();
+        let error = write_text(&first, "{}\n").unwrap_err();
+        assert!(
+            matches!(&error, Error::WriteFailed { path, .. } if *path == first),
+            "{error:?}"
+        );
+        for link in [&first, &second] {
+            assert!(fs::symlink_metadata(link).unwrap().is_symlink());
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 }
