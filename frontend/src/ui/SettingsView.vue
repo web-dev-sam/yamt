@@ -43,7 +43,7 @@ function restorePath(): void {
   pathText.value = read.value?.path ?? "";
 }
 
-async function useDefault(): Promise<void> {
+async function moveToDefault(): Promise<void> {
   if (read.value !== null) {
     await moveSettings(read.value.defaultPath);
   }
@@ -107,7 +107,7 @@ async function useDefault(): Promise<void> {
             type="button"
             :disabled="defaultInUse"
             class="rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-            @click="useDefault"
+            @click="moveToDefault"
           >
             Default
           </button>

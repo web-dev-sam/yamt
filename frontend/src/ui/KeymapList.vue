@@ -12,11 +12,14 @@ import {
   keymapMenu,
   type KeymapCommand,
 } from "./keyText";
+import { ARROW_STEPS, stepMenuItem } from "./menuKeys";
 import { useAppStore } from "./store";
 
-type Recording = { readonly action: KeyAction; readonly from: Key | null };
-
-const ROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
+type Recording = {
+  readonly action: KeyAction;
+  readonly from: Key | null;
+  readonly initial: Key | null;
+};
 
 const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
 const list = useTemplateRef<HTMLDivElement>("list");
@@ -47,7 +50,7 @@ const menuEntries = computed(() =>
 onClickOutside(
   () => menu.value?.[0] ?? null,
   () => {
-    void closeMenu();
+    void closeMenuAfterClick();
   },
   { ignore: ["[data-keymap-row][aria-expanded=true]"] },
 );
@@ -69,6 +72,15 @@ async function closeMenu(): Promise<void> {
   }
 }
 
+async function closeMenuAfterClick(): Promise<void> {
+  const focused = document.activeElement;
+  if (focused !== document.body && menu.value?.[0]?.contains(focused) !== true) {
+    menuFor.value = null;
+    return;
+  }
+  await closeMenu();
+}
+
 async function toggleMenu(action: KeyAction): Promise<void> {
   if (menuFor.value === action) {
     await closeMenu();
@@ -80,7 +92,7 @@ async function toggleMenu(action: KeyAction): Promise<void> {
 }
 
 function stepRow(event: KeyboardEvent): void {
-  const step = ROW_STEPS[event.key];
+  const step = ARROW_STEPS[event.key];
   const rows = [...(list.value?.querySelectorAll<HTMLElement>("[data-keymap-row]") ?? [])];
   if (step === undefined) {
     return;
@@ -90,29 +102,37 @@ function stepRow(event: KeyboardEvent): void {
 }
 
 function menuKey(event: KeyboardEvent): void {
-  if (event.key === "Escape" || event.key === "Tab") {
-    event.preventDefault();
-    void closeMenu();
-    return;
-  }
-  const step = ROW_STEPS[event.key];
   const items = [...(menu.value?.[0]?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
-  if (step === undefined || items.length === 0) {
-    return;
+  const step = stepMenuItem(
+    { count: items.length, focused: items.findIndex((item) => item === event.target) },
+    event,
+  );
+  switch (step.kind) {
+    case "close":
+      event.preventDefault();
+      void closeMenu();
+      return;
+    case "focus":
+      event.preventDefault();
+      items[step.index]?.focus();
+      return;
+    case "ignore":
+      return;
+    default: {
+      const _exhaustive: never = step;
+      return _exhaustive;
+    }
   }
-  event.preventDefault();
-  const index = items.findIndex((item) => item === event.target);
-  items[(index + step + items.length) % items.length]?.focus();
 }
 
 async function run(action: KeyAction, command: KeymapCommand): Promise<void> {
   await closeMenu();
   switch (command.kind) {
     case "add":
-      recording.value = { action, from: null };
+      recording.value = { action, from: null, initial: bindings.value[action][0] ?? null };
       return;
     case "change":
-      recording.value = { action, from: command.key };
+      recording.value = { action, from: command.key, initial: command.key };
       return;
     case "remove":
       await removeKey(action, command.key);
@@ -215,7 +235,7 @@ async function recorded(key: Key): Promise<void> {
     <KeyRecorder
       v-if="recording !== null"
       :action="recording.action"
-      :initial="recording.from"
+      :initial="recording.initial"
       :bindings="bindings"
       @record="recorded"
       @close="stopRecording"

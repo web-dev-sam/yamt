@@ -30,7 +30,7 @@ const emit = defineEmits<{
   finish: [];
 }>();
 
-// The owner hid Undo and Redo for now (board item 662); their keys still work.
+// The owner hid Undo and Redo for now (plan §2 #57); their keys still work.
 const HISTORY_BUTTONS_SHOWN = false;
 
 const ICON_BUTTONS: readonly IconButton[] = [

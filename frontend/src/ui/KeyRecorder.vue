@@ -4,21 +4,14 @@ import { computed, nextTick, onMounted, shallowRef, useTemplateRef } from "vue";
 import Plus from "~icons/lucide/plus";
 import TriangleAlert from "~icons/lucide/triangle-alert";
 
-import {
-  KEY_ACTIONS,
-  keyLabel,
-  keyOfEvent,
-  sameKey,
-  type Key,
-  type KeyAction,
-  type KeyBindings,
-} from "../ipc";
+import { keyLabel, type Key, type KeyAction, type KeyBindings } from "../ipc";
+import { fieldKey } from "./keyField";
+import { keyOwners } from "./keymapEdit";
 import { ACTION_NAMES, setKeyMenu, usedByText } from "./keyText";
+import { stepMenuItem } from "./menuKeys";
 
 const props = defineProps<{ action: KeyAction; initial: Key | null; bindings: KeyBindings }>();
 const emit = defineEmits<{ record: [key: Key]; close: [] }>();
-
-const MENU_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
 
 const dialog = useTemplateRef<HTMLDialogElement>("dialog");
 const field = useTemplateRef<HTMLInputElement>("field");
@@ -31,15 +24,9 @@ const setKeys = setKeyMenu(navigator.platform);
 const shownText = computed(() =>
   shown.value === null ? "" : keyLabel(shown.value, navigator.platform),
 );
-const owners = computed(() => {
-  const key = shown.value;
-  return key === null
-    ? []
-    : KEY_ACTIONS.filter(
-        (other) =>
-          other !== props.action && props.bindings[other].some((held) => sameKey(held, key)),
-      );
-});
+const owners = computed(() =>
+  shown.value === null ? [] : keyOwners(props.bindings, props.action, shown.value),
+);
 
 onClickOutside(
   plusMenu,
@@ -65,27 +52,29 @@ function cancel(event: Event): void {
   emit("close");
 }
 
-// ShortcutTextField.processKeyEvent: plain Escape and (with a key shown) plain Enter go to the
-// dialog, a modifier alone changes nothing, every other key with its modifiers replaces the shown one.
 function recordKey(event: KeyboardEvent): void {
-  const modified = event.ctrlKey || event.metaKey || event.altKey;
-  if (event.key === "Tab" && !modified) {
+  const decision = fieldKey(event, shown.value, navigator.platform);
+  if (decision.kind === "leave") {
     return;
   }
   event.preventDefault();
   event.stopPropagation();
-  const plain = !modified && !event.shiftKey;
-  if (plain && event.key === "Escape") {
-    emit("close");
-    return;
-  }
-  if (plain && event.key === "Enter" && shown.value !== null) {
-    confirm();
-    return;
-  }
-  const key = keyOfEvent(event, navigator.platform);
-  if (key !== null) {
-    shown.value = key;
+  switch (decision.kind) {
+    case "cancel":
+      emit("close");
+      return;
+    case "confirm":
+      emit("record", decision.key);
+      return;
+    case "record":
+      shown.value = decision.key;
+      return;
+    case "ignore":
+      return;
+    default: {
+      const _exhaustive: never = decision;
+      return _exhaustive;
+    }
   }
 }
 
@@ -106,20 +95,28 @@ function setKey(key: Key): void {
 }
 
 function plusMenuKey(event: KeyboardEvent): void {
-  if (event.key === "Escape" || event.key === "Tab") {
-    event.preventDefault();
-    event.stopPropagation();
-    closePlus();
-    return;
-  }
-  const step = MENU_STEPS[event.key];
   const items = [...(plusMenu.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
-  if (step === undefined || items.length === 0) {
-    return;
+  const step = stepMenuItem(
+    { count: items.length, focused: items.findIndex((item) => item === event.target) },
+    event,
+  );
+  switch (step.kind) {
+    case "close":
+      event.preventDefault();
+      event.stopPropagation();
+      closePlus();
+      return;
+    case "focus":
+      event.preventDefault();
+      items[step.index]?.focus();
+      return;
+    case "ignore":
+      return;
+    default: {
+      const _exhaustive: never = step;
+      return _exhaustive;
+    }
   }
-  event.preventDefault();
-  const index = items.findIndex((item) => item === event.target);
-  items[(index + step + items.length) % items.length]?.focus();
 }
 </script>
 

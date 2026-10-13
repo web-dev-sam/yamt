@@ -645,7 +645,10 @@ each sends the settings in use and adopts the reply; a failure keeps them). `key
 pure key-edit rules (a key another action holds → the "Key Already in Use" question, Move/Cancel;
 a list equal to the defaults is sent as `null`); `keyText.ts` the actions' names, places and groups,
 and the words built from data: the Keymap edit menu (`keymapMenu`), the "+" menu (`setKeyMenu`) and
-the conflict line (`usedByText`).
+the conflict line (`usedByText`). `keymapEdit.ts` also owns `keyOwners` (which other actions hold a
+key), used by the clash question and the dialog's live warning; `menuKeys.ts` (`stepMenuItem`) is
+the one keyboard rule of both menus; `keyField.ts` (`fieldKey`) decides what a key does in the
+dialog's field, after WebStorm's `ShortcutTextField`.
 
 The Vue↔editor seam is one adaptable composable:
 

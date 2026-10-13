@@ -58,7 +58,8 @@ frontend/src/icons.d.ts  types `~icons/*?raw` (string, editor/) and `~icons/*` (
 frontend/src/connectors  index.ts: Span, Band, bandPath — pure band geometry → SVG path strings; no DOM
 frontend/src/ui     Vue 3 chrome: App, FileList (emits select; vscode-icons via fileIcon.ts, plan §2 #39), MergeToolbar (emits move/applyLeft/applyRight/undo/redo/reset/finish; Undo/Redo hidden by `HISTORY_BUTTONS_SHOWN`), summaryLabel.ts, MergeView,
                     SettingsButton (the gear in every file's header row) + SettingsView (settings screen in the files' grid cell, `settingsOpen` in the store, #56: Theme, Keymap, Settings file, #57)
-                    + KeymapList (the actions' rows, WebStorm's Keymap edit menu) + KeyRecorder (WebStorm's Keyboard Shortcut dialog);
+                    + KeymapList (the actions' rows, WebStorm's Keymap edit menu) + KeyRecorder (WebStorm's Keyboard Shortcut dialog); menuKeys.ts (`stepMenuItem`: both menus' Up/Down/Escape/Tab);
+                    keyField.ts (`fieldKey`: what a key does in the dialog's field — record, confirm, cancel, leave, ignore, after WebStorm's ShortcutTextField);
                     useMergeController (only ../editor importer), store.ts singleton; problem.ts (Problem types, attempt, report) + ProblemBar + problemText.ts (failures in words, 2.1);
                     QuestionDialog + question.ts (Mark resolved / quit confirmations: words and decisions, 2.K); one MergeView per opened file (inactive = `invisible` + `content-visibility: hidden`: no layout or paint, state and scrollTop kept, plan §2 #51);
                     ChoiceView + choiceText.ts (two-button choice for files the editor cannot show, with a Result column; also the deleted-side view's words: sentences, labels, Result lines, plan §2 #36, #47);

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { bindingsOf, DEFAULT_KEYS, parseKey, type Key, type KeyBindings } from "../ipc";
-import { isDefault, planKeyEdit } from "./keymapEdit";
+import { isDefault, keyOwners, planKeyEdit } from "./keymapEdit";
 
 function key(text: string): Key {
   const parsed = parseKey(text);
@@ -152,4 +152,11 @@ test("a list is the defaults when it holds exactly the default keys, in any orde
   expect(isDefault("redo", [key("Mod-y")])).toBe(false);
   expect(isDefault("redo", [key("Mod-y"), key("Mod-Shift-z"), key("Mod-r")])).toBe(false);
   expect(isDefault("redo", [key("Mod-y"), key("Mod-r")])).toBe(false);
+});
+
+test("a key's owners are every other action holding it, never the action itself", () => {
+  const bindings: KeyBindings = { ...DEFAULT_KEYS, undo: [key("Mod-z"), key("Mod-f")] };
+  expect(keyOwners(bindings, "redo", key("Mod-f"))).toEqual(["undo", "find"]);
+  expect(keyOwners(bindings, "find", key("Mod-f"))).toEqual(["undo"]);
+  expect(keyOwners(bindings, "apply", key("Enter"))).toEqual([]);
 });

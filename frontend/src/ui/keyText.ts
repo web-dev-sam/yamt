@@ -12,7 +12,7 @@ export type KeymapMenuEntry =
   | { readonly kind: "separator" }
   | { readonly kind: "command"; readonly label: string; readonly command: KeymapCommand };
 
-export type SetKeyEntry = { readonly label: string; readonly key: Key };
+type SetKeyEntry = { readonly label: string; readonly key: Key };
 
 export const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
   apply: "Apply",
@@ -99,16 +99,17 @@ export function keymapMenu(
     });
   }
   return entries.filter(
-    (entry, index) =>
-      entry.kind !== "separator" ||
-      (entries[index - 1]?.kind !== "separator" && index < entries.length - 1),
+    (entry, index) => entry.kind !== "separator" || entries[index - 1]?.kind !== "separator",
   );
 }
 
 // The keys a focus traversal or the dialog itself would take (ShortcutTextField.getKeyStrokes).
-const SET_KEYS: readonly Key[] = ["Enter", "Escape", "Tab", "Shift-Tab"].flatMap((text) => {
+const SET_KEYS: readonly Key[] = ["Enter", "Escape", "Tab", "Shift-Tab"].map((text) => {
   const key = parseKey(text);
-  return key === null ? [] : [key];
+  if (key === null) {
+    throw new Error(`set key ${text} does not parse`);
+  }
+  return key;
 });
 
 export function setKeyMenu(platform: string): SetKeyEntry[] {

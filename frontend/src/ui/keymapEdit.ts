@@ -38,13 +38,17 @@ function keysChange(action: KeyAction, keys: readonly Key[]): KeysChange {
   return { action, keys: isDefault(action, keys) ? null : keys.map(keyText) };
 }
 
+export function keyOwners(bindings: KeyBindings, action: KeyAction, key: Key): KeyAction[] {
+  return KEY_ACTIONS.filter((other) => other !== action && holds(bindings[other], key));
+}
+
 function placed(
   bindings: KeyBindings,
   clash: Omit<Clash, "owner">,
   keys: readonly Key[],
 ): KeyEditPlan {
   const { action, key } = clash;
-  const owner = KEY_ACTIONS.find((other) => other !== action && holds(bindings[other], key));
+  const [owner] = keyOwners(bindings, action, key);
   const change = keysChange(action, keys);
   if (owner === undefined) {
     return { kind: "send", changes: [change] };
