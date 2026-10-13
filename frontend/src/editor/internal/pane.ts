@@ -22,6 +22,7 @@ import {
   Prec,
   type Extension,
   type StateCommand,
+  type StateEffect,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -36,11 +37,9 @@ import { tags } from "@lezer/highlight";
 
 import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
 import { find, findKeys, findKeysCompartment } from "./find";
-import { SIDE_PANE, type PaneViews } from "./geometry";
 import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
-import { SIDES, type Side } from "./side";
-import { sideKeysCompartment } from "./sideKeys";
+import { sideKeys } from "./sideKeys";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
 
@@ -51,12 +50,17 @@ export type PaneSettings = { readonly preferences: Preferences; readonly platfor
 export const languageCompartment = new Compartment();
 const themeCompartment = new Compartment();
 const middleKeysCompartment = new Compartment();
+const sideKeysCompartment = new Compartment();
 
-const MIDDLE_COMMANDS: readonly { readonly action: KeyAction; readonly run: StateCommand }[] = [
-  { action: "undo", run: undo },
-  { action: "redo", run: redo },
-  { action: "indent", run: indentMore },
-  { action: "outdent", run: indentLess },
+const MIDDLE_COMMANDS: readonly {
+  readonly action: KeyAction;
+  readonly run: StateCommand;
+  readonly preventDefault: boolean;
+}[] = [
+  { action: "undo", run: undo, preventDefault: true },
+  { action: "redo", run: redo, preventDefault: true },
+  { action: "indent", run: indentMore, preventDefault: false },
+  { action: "outdent", run: indentLess, preventDefault: false },
 ];
 
 const selectionHistoryKeymap = historyKeymap.filter(
@@ -149,34 +153,51 @@ function darkFlag(theme: Theme): Extension {
 function middleKeys(keys: KeyBindings, platform: string): Extension {
   return Prec.high(
     keymap.of(
-      MIDDLE_COMMANDS.flatMap(({ action, run }) =>
-        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault: true })),
+      MIDDLE_COMMANDS.flatMap(({ action, run, preventDefault }) =>
+        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault })),
       ),
     ),
   );
 }
 
-export function showPreferences(
-  views: PaneViews,
+export function preferenceEffects(
+  kind: "side" | "center",
   { preferences, platform }: PaneSettings,
-  sideKeys: (side: Side) => Extension,
-): void {
+): StateEffect<unknown>[] {
   const { theme, keys } = preferences;
-  const shared = [
+  const kindKeys =
+    kind === "side"
+      ? sideKeysCompartment.reconfigure(sideKeys(keys, platform))
+      : middleKeysCompartment.reconfigure(middleKeys(keys, platform));
+  return [
     themeCompartment.reconfigure(darkFlag(theme)),
     findKeysCompartment.reconfigure(findKeys(keys, platform)),
+    kindKeys,
   ];
-  views.center.dispatch({
-    effects: [...shared, middleKeysCompartment.reconfigure(middleKeys(keys, platform))],
-  });
-  for (const side of SIDES) {
-    const effects = [...shared, sideKeysCompartment.reconfigure(sideKeys(side))];
-    views[SIDE_PANE[side]].dispatch({ effects });
-  }
 }
+
+const HISTORY_INPUTS: Readonly<Record<string, true>> = { historyUndo: true, historyRedo: true };
+
+// The browser's own undo (WebKit: Ctrl/Cmd+Z when no binding prevents the key) arrives as a
+// beforeinput that history() turns into an undo (@codemirror/commands history(), dist/index.js:267-271);
+// undo comes only from the bound keys and the toolbar.
+export function refuseNativeHistory(
+  event: Pick<InputEvent, "inputType" | "preventDefault">,
+): boolean {
+  if (!Object.hasOwn(HISTORY_INPUTS, event.inputType)) {
+    return false;
+  }
+  event.preventDefault();
+  return true;
+}
+
+const nativeHistoryBlocked = Prec.highest(
+  EditorView.domEventHandlers({ beforeinput: refuseNativeHistory }),
+);
 
 function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
   return [
+    nativeHistoryBlocked,
     history(),
     indentUnit.of(indentUnitOf(doc)),
     middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
@@ -194,6 +215,7 @@ function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Ex
         EditorView.editable.of(false),
         EditorView.contentAttributes.of({ tabindex: "0" }),
         sideFocusOutline,
+        sideKeysCompartment.of(sideKeys(settings.preferences.keys, settings.platform)),
       ];
     case "center":
       return centerExtensions(doc, settings);

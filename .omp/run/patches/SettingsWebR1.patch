@@ -1,0 +1,764 @@
+diff --git c/frontend/src/editor/index.ts i/frontend/src/editor/index.ts
+index f9393bf..d51bbac 100644
+--- c/frontend/src/editor/index.ts
++++ i/frontend/src/editor/index.ts
+@@ -17,12 +17,12 @@ import { historyCommand } from "./internal/historyKey";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import { modClicks } from "./internal/modClick";
+ import type { Direction } from "./internal/navigation";
+-import { centerPane, createPane, paneText, showPreferences } from "./internal/pane";
++import { centerPane, createPane, paneText, preferenceEffects } from "./internal/pane";
+ import type { PaneSettings, Preferences } from "./internal/pane";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+ import { SideFocus } from "./internal/sideFocus";
+-import { sideKeys, sideKeysCompartment } from "./internal/sideKeys";
++import { sideRunner } from "./internal/sideKeys";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+ import { Strips, type IconPress } from "./internal/strips";
+@@ -145,23 +145,15 @@ export class MergeController {
+     };
+   }
+ 
+-  #sideKeys(side: Side): Extension {
+-    return sideKeys(
+-      (command) => {
+-        this.#focus.run(side, command);
+-      },
+-      this.#settings.preferences.keys,
+-      this.#settings.platform,
+-    );
+-  }
+-
+   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
+     return [
+       statuses,
+       sideDecorations(statuses, side),
+       focusDecorations(statuses, side),
+       coveredDecorations(side),
+-      sideKeysCompartment.of(this.#sideKeys(side)),
++      sideRunner.of((command) => {
++        this.#focus.run(side, command);
++      }),
+       this.#repaint,
+       this.#readOnly
+         ? []
+@@ -248,7 +240,11 @@ export class MergeController {
+ 
+   setPreferences(preferences: Preferences): void {
+     this.#settings = { ...this.#settings, preferences };
+-    showPreferences(this.#views, this.#settings, (side) => this.#sideKeys(side));
++    const { left, center, right } = this.#views;
++    center.dispatch({ effects: preferenceEffects("center", this.#settings) });
++    for (const side of [left, right]) {
++      side.dispatch({ effects: preferenceEffects("side", this.#settings) });
++    }
+   }
+ 
+   undo(): boolean {
+diff --git c/frontend/src/editor/internal/pane.test.ts i/frontend/src/editor/internal/pane.test.ts
+index ba2801e..9e05738 100644
+--- c/frontend/src/editor/internal/pane.test.ts
++++ i/frontend/src/editor/internal/pane.test.ts
+@@ -9,7 +9,7 @@ import {
+ } from "@codemirror/commands";
+ import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
+ import type { EditorState, StateCommand } from "@codemirror/state";
+-import { EditorView, keymap } from "@codemirror/view";
++import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
+ import { highlightTree } from "@lezer/highlight";
+ import { expect, test } from "vitest";
+ 
+@@ -22,6 +22,8 @@ import {
+   languageCompartment,
+   paletteHighlight,
+   paneState,
++  preferenceEffects,
++  refuseNativeHistory,
+   type PaneSettings,
+ } from "./pane";
+ import { sideStatusField } from "./sideStatus";
+@@ -95,13 +97,16 @@ function withKeys(keys: Partial<KeyBindings>): PaneSettings {
+ 
+ // CodeMirror runs the commands bound to a key in the keymap facet's order (precedence first) until
+ // one returns true (@codemirror/view keymap.ts buildKeymap, runHandlers).
+-function commandsOn(state: EditorState, name: string): unknown[] {
++function bindingsOn(state: EditorState, name: string): KeyBinding[] {
+   return state
+     .facet(keymap)
+     .flat()
+     .filter((binding) => (binding.linux ?? binding.key) === name)
+-    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"))
+-    .map(({ run: command }) => command);
++    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"));
++}
++
++function commandsOn(state: EditorState, name: string): unknown[] {
++  return bindingsOn(state, name).map(({ run: command }) => command);
+ }
+ 
+ function run(command: StateCommand, state: EditorState): EditorState {
+@@ -347,3 +352,81 @@ test("CodeMirror's dark flag follows the theme", () => {
+   expect(center(PHP, null).facet(EditorView.darkTheme)).toBe(true);
+   expect(center(PHP, null, light).facet(EditorView.darkTheme)).toBe(false);
+ });
++
++test("the browser's own undo and redo are refused in the middle; other input passes through", () => {
++  const prevented: string[] = [];
++  function input(inputType: string): boolean {
++    return refuseNativeHistory({
++      inputType,
++      preventDefault: () => {
++        prevented.push(inputType);
++      },
++    });
++  }
++
++  expect(["historyUndo", "historyRedo", "insertText", "deleteContentBackward"].map(input)).toEqual([
++    true,
++    true,
++    false,
++    false,
++  ]);
++  expect(prevented).toEqual(["historyUndo", "historyRedo"]);
++});
++
++test("a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key", () => {
++  const state = paneState({
++    kind: "readOnlyCenter",
++    doc: PHP,
++    eol: "Lf",
++    language: null,
++    settings: SETTINGS,
++    extensions: [],
++  });
++  const tab = bindingsOn(state, "Tab");
++
++  expect(tab.map(({ run: command }) => command)).toEqual([indentMore]);
++  expect(tab.some(({ preventDefault }) => preventDefault === true)).toBe(false);
++  expect(indentMore({ state, dispatch: () => undefined })).toBe(false);
++  expect(bindingsOn(state, "Mod-z").map(({ preventDefault }) => preventDefault)).toEqual([true]);
++});
++
++test("new preferences turn the middle light, move its Undo and rebind its find keys", () => {
++  const changed = withKeys({ undo: [key("Alt-Backspace")], "close-find": [key("F10")] });
++  const light: PaneSettings = {
++    ...changed,
++    preferences: { ...changed.preferences, theme: "light" },
++  };
++
++  const state = center(PHP, null).update({ effects: preferenceEffects("center", light) }).state;
++
++  expect(state.facet(EditorView.darkTheme)).toBe(false);
++  expect(commandsOn(state, "Mod-z")).toEqual([]);
++  expect(commandsOn(state, "Alt-Backspace")).toEqual([undo]);
++  expect(commandsOn(state, "F10")).toHaveLength(1);
++});
++
++test("new preferences turn a side light, rebind its Apply and its find keys", () => {
++  const changed = withKeys({ apply: [key("a")], "close-find": [key("F10")] });
++  const light: PaneSettings = {
++    ...changed,
++    preferences: { ...changed.preferences, theme: "light" },
++  };
++  const before = paneState({
++    kind: "side",
++    doc: PHP,
++    eol: "Lf",
++    language: null,
++    settings: SETTINGS,
++    extensions: [],
++  });
++
++  const state = before.update({ effects: preferenceEffects("side", light) }).state;
++
++  expect(before.facet(EditorView.darkTheme)).toBe(true);
++  expect(state.facet(EditorView.darkTheme)).toBe(false);
++  expect(commandsOn(before, "a")).toEqual([]);
++  expect(commandsOn(state, "a")).toHaveLength(1);
++  expect(commandsOn(state, "Enter")).toEqual([]);
++  expect(commandsOn(state, "F10")).toHaveLength(1);
++  expect(commandsOn(state, "Escape")).toEqual([]);
++});
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index a978313..fbc9e0a 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -22,6 +22,7 @@ import {
+   Prec,
+   type Extension,
+   type StateCommand,
++  type StateEffect,
+ } from "@codemirror/state";
+ import {
+   Decoration,
+@@ -36,11 +37,9 @@ import { tags } from "@lezer/highlight";
+ 
+ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+ import { find, findKeys, findKeysCompartment } from "./find";
+-import { SIDE_PANE, type PaneViews } from "./geometry";
+ import { indentUnitOf } from "./indent";
+ import { cmKeys } from "./keys";
+-import { SIDES, type Side } from "./side";
+-import { sideKeysCompartment } from "./sideKeys";
++import { sideKeys } from "./sideKeys";
+ 
+ type PaneKind = "side" | "center" | "readOnlyCenter";
+ 
+@@ -51,12 +50,17 @@ export type PaneSettings = { readonly preferences: Preferences; readonly platfor
+ export const languageCompartment = new Compartment();
+ const themeCompartment = new Compartment();
+ const middleKeysCompartment = new Compartment();
++const sideKeysCompartment = new Compartment();
+ 
+-const MIDDLE_COMMANDS: readonly { readonly action: KeyAction; readonly run: StateCommand }[] = [
+-  { action: "undo", run: undo },
+-  { action: "redo", run: redo },
+-  { action: "indent", run: indentMore },
+-  { action: "outdent", run: indentLess },
++const MIDDLE_COMMANDS: readonly {
++  readonly action: KeyAction;
++  readonly run: StateCommand;
++  readonly preventDefault: boolean;
++}[] = [
++  { action: "undo", run: undo, preventDefault: true },
++  { action: "redo", run: redo, preventDefault: true },
++  { action: "indent", run: indentMore, preventDefault: false },
++  { action: "outdent", run: indentLess, preventDefault: false },
+ ];
+ 
+ const selectionHistoryKeymap = historyKeymap.filter(
+@@ -149,34 +153,51 @@ function darkFlag(theme: Theme): Extension {
+ function middleKeys(keys: KeyBindings, platform: string): Extension {
+   return Prec.high(
+     keymap.of(
+-      MIDDLE_COMMANDS.flatMap(({ action, run }) =>
+-        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault: true })),
++      MIDDLE_COMMANDS.flatMap(({ action, run, preventDefault }) =>
++        cmKeys(keys[action], platform).map((key) => ({ key, run, preventDefault })),
+       ),
+     ),
+   );
+ }
+ 
+-export function showPreferences(
+-  views: PaneViews,
++export function preferenceEffects(
++  kind: "side" | "center",
+   { preferences, platform }: PaneSettings,
+-  sideKeys: (side: Side) => Extension,
+-): void {
++): StateEffect<unknown>[] {
+   const { theme, keys } = preferences;
+-  const shared = [
++  const kindKeys =
++    kind === "side"
++      ? sideKeysCompartment.reconfigure(sideKeys(keys, platform))
++      : middleKeysCompartment.reconfigure(middleKeys(keys, platform));
++  return [
+     themeCompartment.reconfigure(darkFlag(theme)),
+     findKeysCompartment.reconfigure(findKeys(keys, platform)),
++    kindKeys,
+   ];
+-  views.center.dispatch({
+-    effects: [...shared, middleKeysCompartment.reconfigure(middleKeys(keys, platform))],
+-  });
+-  for (const side of SIDES) {
+-    const effects = [...shared, sideKeysCompartment.reconfigure(sideKeys(side))];
+-    views[SIDE_PANE[side]].dispatch({ effects });
+-  }
+ }
+ 
++const HISTORY_INPUTS: Readonly<Record<string, true>> = { historyUndo: true, historyRedo: true };
++
++// The browser's own undo (WebKit: Ctrl/Cmd+Z when no binding prevents the key) arrives as a
++// beforeinput that history() turns into an undo (@codemirror/commands history(), dist/index.js:267-271);
++// undo comes only from the bound keys and the toolbar.
++export function refuseNativeHistory(
++  event: Pick<InputEvent, "inputType" | "preventDefault">,
++): boolean {
++  if (!Object.hasOwn(HISTORY_INPUTS, event.inputType)) {
++    return false;
++  }
++  event.preventDefault();
++  return true;
++}
++
++const nativeHistoryBlocked = Prec.highest(
++  EditorView.domEventHandlers({ beforeinput: refuseNativeHistory }),
++);
++
+ function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
+   return [
++    nativeHistoryBlocked,
+     history(),
+     indentUnit.of(indentUnitOf(doc)),
+     middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
+@@ -194,6 +215,7 @@ function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Ex
+         EditorView.editable.of(false),
+         EditorView.contentAttributes.of({ tabindex: "0" }),
+         sideFocusOutline,
++        sideKeysCompartment.of(sideKeys(settings.preferences.keys, settings.platform)),
+       ];
+     case "center":
+       return centerExtensions(doc, settings);
+diff --git c/frontend/src/editor/internal/sideFocus.test.ts i/frontend/src/editor/internal/sideKeys.test.ts
+similarity index 100%
+rename from frontend/src/editor/internal/sideFocus.test.ts
+rename to frontend/src/editor/internal/sideKeys.test.ts
+diff --git c/frontend/src/editor/internal/sideKeys.ts i/frontend/src/editor/internal/sideKeys.ts
+index 78667f3..ca3bc69 100644
+--- c/frontend/src/editor/internal/sideKeys.ts
++++ i/frontend/src/editor/internal/sideKeys.ts
+@@ -1,4 +1,4 @@
+-import { Compartment, type Extension } from "@codemirror/state";
++import { Facet, type Extension } from "@codemirror/state";
+ import { keymap } from "@codemirror/view";
+ 
+ import { KEY_ACTIONS, type KeyAction, type KeyBindings } from "../../ipc";
+@@ -25,7 +25,11 @@ const SIDE_COMMANDS: Readonly<Record<SideAction, SideCommand>> = {
+   "right-side": { kind: "toward", side: "remote" },
+ };
+ 
+-export const sideKeysCompartment = new Compartment();
++type SideRunner = (command: SideCommand) => void;
++
++export const sideRunner = Facet.define<SideRunner, SideRunner | null>({
++  combine: (runners) => runners[0] ?? null,
++});
+ 
+ function isSideAction(action: KeyAction): action is SideAction {
+   return Object.hasOwn(SIDE_COMMANDS, action);
+@@ -40,18 +44,15 @@ export function sideKeyCommands(
+   );
+ }
+ 
+-export function sideKeys(
+-  run: (command: SideCommand) => void,
+-  keys: KeyBindings,
+-  platform: string,
+-): Extension {
++export function sideKeys(keys: KeyBindings, platform: string): Extension {
+   return keymap.of(
+     sideKeyCommands(keys, platform).map(({ key, command }) => ({
+       key,
+       preventDefault: true,
+-      run: () => {
+-        run(command);
+-        return true;
++      run: (view) => {
++        const run = view.state.facet(sideRunner);
++        run?.(command);
++        return run !== null;
+       },
+     })),
+   );
+diff --git c/frontend/src/ipc/fixtureSettings.ts i/frontend/src/ipc/fixtureSettings.ts
+index 2b5f61c..eb0ce31 100644
+--- c/frontend/src/ipc/fixtureSettings.ts
++++ i/frontend/src/ipc/fixtureSettings.ts
+@@ -1,10 +1,7 @@
+ import type { ChunkSource } from "./ChunkSource";
+ import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
+ 
+-export type FixtureSettings = Pick<
+-  ChunkSource,
+-  "loadSettings" | "setTheme" | "setKeys" | "moveSettings"
+->;
++type FixtureSettings = Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings">;
+ 
+ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
+ 
+diff --git c/frontend/src/ipc/index.ts i/frontend/src/ipc/index.ts
+index a3ab60b..11274e5 100644
+--- c/frontend/src/ipc/index.ts
++++ i/frontend/src/ipc/index.ts
+@@ -39,6 +39,7 @@ export {
+   type Key,
+   type KeyAction,
+   type KeyBindings,
++  type KeyName,
+   type KeyProblem,
+   type KeysRead,
+ } from "./keys";
+diff --git c/frontend/src/ipc/keys.test.ts i/frontend/src/ipc/keys.test.ts
+index 6b0af1d..8f908dc 100644
+--- c/frontend/src/ipc/keys.test.ts
++++ i/frontend/src/ipc/keys.test.ts
+@@ -1,5 +1,6 @@
+ import { expect, test } from "vitest";
+ 
++import type { KeyName } from ".";
+ import {
+   bindingsOf,
+   DEFAULT_KEYS,
+@@ -76,22 +77,22 @@ test("the defaults are the keys yamt bound before settings existed", () => {
+   );
+ 
+   expect(defaults).toEqual({
+-    // editor/internal/sideFocus.ts SIDE_KEYS (plan §2 #54)
++    // sideFocus.ts SIDE_KEYS at 9b717cb (plan §2 #54)
+     apply: ["Enter", "Space"],
+     ignore: ["Backspace", "Delete", "x"],
+     "next-change": ["ArrowDown"],
+     "previous-change": ["ArrowUp"],
+     "left-side": ["ArrowLeft"],
+     "right-side": ["ArrowRight"],
+-    // editor/internal/historyKey.ts and the middle pane's historyKeymap
++    // historyKey.ts historyCommand at 9b717cb: Mod-z, Mod-Shift-z, Mod-y (plan §2 #54)
+     undo: ["Mod-z"],
+     redo: ["Mod-Shift-z", "Mod-y"],
+-    // editor/internal/find.ts keymap (plan §2 #44)
++    // find.ts:269-284 at 9b717cb (plan §2 #44)
+     find: ["Mod-f"],
+     "find-next": ["F3"],
+     "find-previous": ["Shift-F3"],
+     "close-find": ["Escape"],
+-    // the middle pane's indentWithTab (plan §2 #35)
++    // pane.ts indentWithTab at 9b717cb (plan §2 #35)
+     indent: ["Tab"],
+     outdent: ["Shift-Tab"],
+   });
+@@ -121,6 +122,8 @@ test("the file form reads modifiers in order, a named key or one character, and
+     shift: true,
+     name: "z",
+   });
++  const minus: KeyName = key("Mod--").name;
++  expect(minus).toBe("-");
+ });
+ 
+ test("anything else is refused", () => {
+@@ -143,6 +146,8 @@ test("anything else is refused", () => {
+     "Up",
+     "ab",
+     "Mod-zz",
++    "Shift-1",
++    "Shift-?",
+   ]) {
+     expect(parseKey(text)).toBeNull();
+   }
+@@ -249,6 +254,17 @@ test("bindingsOf: a malformed key keeps that action's defaults and is reported",
+   expect(problems).toEqual([{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }]);
+ });
+ 
++test("bindingsOf: Shift before a symbol is unreadable, since no key press gives it", () => {
++  const { bindings, problems } = bindingsOf({ apply: ["Shift-1"], find: ["Mod-Shift-?"] });
++
++  expect(texts(bindings.apply)).toEqual(["Enter", "Space"]);
++  expect(texts(bindings.find)).toEqual(["Mod-f"]);
++  expect(problems).toEqual([
++    { kind: "unreadable", action: "apply", text: "Shift-1" },
++    { kind: "unreadable", action: "find", text: "Mod-Shift-?" },
++  ]);
++});
++
+ test("bindingsOf: a key on two actions stays with the first in list order and is reported", () => {
+   const { bindings, problems } = bindingsOf({ indent: ["Mod-f"], "find-next": ["Enter"] });
+ 
+diff --git c/frontend/src/ipc/keys.ts i/frontend/src/ipc/keys.ts
+index fbeca30..56f533e 100644
+--- c/frontend/src/ipc/keys.ts
++++ i/frontend/src/ipc/keys.ts
+@@ -33,7 +33,7 @@ export const KEY_ACTIONS: readonly KeyAction[] = [
+   "outdent",
+ ];
+ 
+-type KeyName = string & { readonly __brand: "KeyName" };
++export type KeyName = string & { readonly __brand: "KeyName" };
+ 
+ export type Key = {
+   readonly mod: boolean;
+@@ -118,7 +118,8 @@ export function parseKey(text: string): Key | null {
+       rest = rest.slice(prefix.length);
+     }
+   }
+-  return isKeyName(rest) ? { ...held, name: rest } : null;
++  const shiftedSymbol = held.shift && !Object.hasOwn(NAMED_KEYS, rest) && !isLetter(rest);
++  return isKeyName(rest) && !shiftedSymbol ? { ...held, name: rest } : null;
+ }
+ 
+ export function keyText(key: Key): string {
+diff --git c/frontend/src/ui/settings.ts i/frontend/src/ui/settings.ts
+index 7a036f6..4c5327b 100644
+--- c/frontend/src/ui/settings.ts
++++ i/frontend/src/ui/settings.ts
+@@ -7,6 +7,7 @@ import {
+   type ChunkSource,
+   type Key,
+   type KeyAction,
++  type KeyProblem,
+   type KeysRead,
+   type SettingsRead,
+   type SourceResult,
+@@ -15,7 +16,7 @@ import {
+ } from "../ipc";
+ import type { Asking } from "./asking";
+ import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
+-import { attempt, report, type Problem } from "./problem";
++import { attempt, logProblem, report, type Problem } from "./problem";
+ import type { Preferences } from "./useMergeController";
+ 
+ export type SettingsInUse = {
+@@ -29,6 +30,7 @@ type SettingsTarget = {
+   readonly settings: ShallowRef<SettingsInUse>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly asking: Pick<Asking, "ask">;
++  latestSettings: number;
+ };
+ 
+ export type SettingsActions = {
+@@ -60,29 +62,72 @@ function storedSettings({ theme, keys }: SettingsInUse): StoredSettings {
+   };
+ }
+ 
+-function use(target: SettingsTarget, read: SettingsRead): void {
+-  const keys = bindingsOf(read.stored.keys);
+-  target.settings.value = { read, theme: read.stored.theme, keys };
+-  if (keys.problems.length > 0) {
+-    const cause = {
+-      kind: "Keys",
+-      path: read.path,
+-      problems: keys.problems,
+-    } satisfies Problem["cause"];
+-    report(target, { action: "settings", cause });
+-  } else if (target.problem.value?.action === "settings") {
+-    target.problem.value = null;
++function sameTexts(a: readonly string[], b: readonly string[]): boolean {
++  return a.length === b.length && a.every((text, index) => text === b[index]);
++}
++
++function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
++  if (inUse === null || inUse.path !== read.path || inUse.stored.theme !== read.stored.theme) {
++    return false;
++  }
++  const before = Object.entries(inUse.stored.keys);
++  const after = read.stored.keys;
++  return (
++    before.length === Object.keys(after).length &&
++    before.every(([action, texts]) => {
++      const now = after[action];
++      return now !== undefined && sameTexts(texts, now);
++    })
++  );
++}
++
++function problemKey(problem: KeyProblem): string {
++  return problem.kind === "unreadable"
++    ? `unreadable ${problem.action} ${problem.text}`
++    : `twice ${keyText(problem.key)} ${problem.actions.join(" ")}`;
++}
++
++function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: KeysRead): void {
++  const { problems } = target.settings.value.keys;
++  const shown = target.problem.value;
++  const settingsShown = shown?.action === "settings" ? shown.cause.kind : null;
++  if (problems.length === 0) {
++    if (settingsShown !== null) {
++      target.problem.value = null;
++    }
++    return;
++  }
++  const sameProblems = sameTexts(before.problems.map(problemKey), problems.map(problemKey));
++  if (!sameProblems || (settingsShown !== null && settingsShown !== "Keys")) {
++    report(target, { action: "settings", cause: { kind: "Keys", path: read.path, problems } });
+   }
+ }
+ 
++function adopt(target: SettingsTarget, read: SettingsRead): void {
++  const before = target.settings.value;
++  if (!sameStored(before.read, read)) {
++    target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
++  }
++  showKeyProblems(target, read, before.keys);
++}
++
+ async function send(target: SettingsTarget, call: Send): Promise<void> {
++  target.latestSettings += 1;
++  const ticket = target.latestSettings;
+   const current = storedSettings(target.settings.value);
+   const outcome = await attempt(() => call(current));
++  const latest = ticket === target.latestSettings;
+   if (!outcome.ok) {
+-    report(target, { action: "settings", cause: outcome.cause });
++    const failure: Problem = { action: "settings", cause: outcome.cause };
++    logProblem(failure);
++    if (latest) {
++      target.problem.value = failure;
++    }
+     return;
+   }
+-  use(target, outcome.value);
++  if (latest) {
++    adopt(target, outcome.value);
++  }
+ }
+ 
+ async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
+@@ -93,7 +138,11 @@ async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
+   if (plan.kind === "ask" && !(await target.asking.ask({ kind: "clash", ...plan.clash }))) {
+     return;
+   }
+-  await send(target, (current) => target.source.setKeys(current, plan.changes));
++  const replanned = planKeyEdit(target.settings.value.keys.bindings, edit);
++  if (replanned.kind === "nothing") {
++    return;
++  }
++  await send(target, (current) => target.source.setKeys(current, replanned.changes));
+ }
+ 
+ export function settingsActions(target: SettingsTarget): SettingsActions {
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index d2ba67d..6b1ecf7 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -1682,9 +1682,14 @@ function settingsSource(overrides: Partial<ChunkSource>): {
+     },
+     setKeys: (current, changes) => {
+       sent.push(["setKeys", current, changes]);
+-      const keys = Object.fromEntries(
+-        changes.flatMap(({ action, keys: texts }) => (texts === null ? [] : [[action, texts]])),
+-      );
++      const keys = { ...current.keys };
++      for (const { action, keys: texts } of changes) {
++        if (texts === null) {
++          delete keys[action];
++        } else {
++          keys[action] = texts;
++        }
++      }
+       return overrides.setKeys?.(current, changes) ?? Promise.resolve(read({ ...current, keys }));
+     },
+     moveSettings: (current, path) => {
+@@ -1876,12 +1881,109 @@ test("each key edit sends only the changed actions, as key texts", async () => {
+     ],
+     [
+       "setKeys",
+-      { theme: "dark", keys: { redo: ["Mod-Shift-z"] } },
++      { theme: "dark", keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
+       [{ action: "apply", keys: null }],
+     ],
+   ]);
+ });
+ 
++test("an identical load keeps the settings object and does not show the same key problems again", async () => {
++  const lines = spyConsole();
++  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(read(broken)),
++    setTheme: (_current, theme) => Promise.resolve(read({ ...broken, theme })),
++  });
++  const store = createAppStore(source);
++  await store.loadSettings();
++  const inUse = store.settings.value;
++  const preferences = store.preferences.value;
++  store.dismissProblem();
++
++  await store.loadSettings();
++
++  expect(store.problem.value).toBeNull();
++  expect(store.settings.value).toBe(inUse);
++  expect(store.preferences.value).toBe(preferences);
++
++  await store.setTheme("light");
++
++  expect(store.preferences.value.theme).toBe("light");
++  expect(store.problem.value).toBeNull();
++  expect(lines.error).toHaveLength(1);
++});
++
++test("a key problem shown again replaces a settings failure the file no longer has", async () => {
++  spyConsole();
++  const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
++  const unreadable = read({ theme: "dark", keys: { redo: ["Ctrl+Q"] } });
++  const loads: SourceResult<SettingsRead>[] = [unreadable, { ok: false, failure: broken }];
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(loads.shift() ?? unreadable),
++  });
++  const store = createAppStore(source);
++  await store.loadSettings();
++  await store.loadSettings();
++  expect(store.problem.value).toEqual({ action: "settings", cause: broken });
++
++  await store.loadSettings();
++
++  expect(store.problem.value).toEqual({
++    action: "settings",
++    cause: {
++      kind: "Keys",
++      path: SETTINGS_PATH,
++      problems: [{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }],
++    },
++  });
++});
++
++test("a load that started before a change and answers after it does not put the old file back", async () => {
++  const lines = spyConsole();
++  const loads: ((result: SourceResult<SettingsRead>) => void)[] = [];
++  const { source } = settingsSource({
++    loadSettings: () =>
++      new Promise((resolve) => {
++        loads.push(resolve);
++      }),
++  });
++  const store = createAppStore(source);
++
++  const loading = store.loadSettings();
++  const failing = store.loadSettings();
++  await store.setTheme("light");
++  loads[0]?.(read({ theme: "dark", keys: {} }));
++  loads[1]?.({ ok: false, failure: { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" } });
++  await loading;
++  await failing;
++
++  expect(store.settings.value.theme).toBe("light");
++  expect(store.problem.value).toBeNull();
++  expect(lines.error).toHaveLength(1);
++});
++
++test("Move after a reload freed the key sends the edit planned on the bindings now in use", async () => {
++  const { source, sent } = settingsSource({
++    loadSettings: () => Promise.resolve(read({ theme: "dark", keys: { find: ["Mod-g"] } })),
++  });
++  const store = createAppStore(source);
++
++  const adding = store.addKey("undo", parsed("Mod-f"));
++  await vi.waitFor(() => {
++    expect(store.question.value?.kind).toBe("clash");
++  });
++  await store.loadSettings();
++  store.answer(true);
++  await adding;
++
++  expect(sent.at(-1)).toEqual([
++    "setKeys",
++    { theme: "dark", keys: { find: ["Mod-g"] } },
++    [{ action: "undo", keys: ["Mod-z", "Mod-f"] }],
++  ]);
++  expect(store.preferences.value.keys.find).toEqual([parsed("Mod-g")]);
++});
++
+ test("moveSettings sends the path with the settings in use and uses the file found there", async () => {
+   const moved: SettingsRead = {
+     path: "/elsewhere.json",
+diff --git c/frontend/src/ui/store.ts i/frontend/src/ui/store.ts
+index 104c459..732caff 100644
+--- c/frontend/src/ui/store.ts
++++ i/frontend/src/ui/store.ts
+@@ -48,6 +48,7 @@ type State = Refs & {
+   readonly asking: Asking;
+   readonly guard: CloseGuard;
+   latestOpen: number;
++  latestSettings: number;
+ };
+ 
+ type Actions = Omit<CloseGuard, "markSaved"> &
+@@ -90,7 +91,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
+   };
+   const asking = createAsking();
+   const guard = createCloseGuard(asking, refs.opened);
+-  const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
++  const state: State = { ...refs, source, asking, guard, latestOpen: 0, latestSettings: 0 };
+   const { files, settings } = refs;
+   store = {
+     ...refs,

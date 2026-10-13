@@ -434,6 +434,15 @@ export interface ChunkSource {
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
   remoteName(): Promise<RemoteName | null>; // what is merged in, for the right header (#50); fixture: null
+  // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
+  // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
+  loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+  setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+  setKeys(
+    current: StoredSettings,
+    changes: readonly KeysChange[],
+  ): Promise<SourceResult<SettingsRead>>;
+  moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
 }
 ```
 
@@ -468,6 +477,9 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files) | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map (`Taken`: by a side, or by the disk) set by `takeSide` and by a disk change that staged a choice file; a deleted-side file "resolved on disk" comes from its `middle` kind; deleted by reset       | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47, #52)            |
 | summary counts of the open file                                                                         | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                   | per controller                                                                                                                    |
 | whether the settings view shows instead of the shown file                                               | `settingsOpen` shallowRef in `ui/store.ts`: set by the gear (`openSettings`), cleared by "Back" (`closeSettings`) and by a file picked in the list (`pick`), never by the app's own `open`                                                                                                                       | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56)                                   |
+| the settings in use (theme, key bindings, the file's path)                                              | `settings` shallowRef in `ui/store.ts`, changed only by the replies of the four settings calls (`ui/settings.ts`), re-read on window focus with the file list; `preferences` is computed from it and handed to every opened file's controller                                                                    | the file is the truth (Rust `yamt-settings`); a failed call keeps the settings in use (plan §2 #57)                               |
+| the page's theme attribute (`<html data-theme>`)                                                        | set before the first frame by the shell's start script; `main.ts` reads it as the start theme; afterwards written only by `App.vue` from `settings.theme`                                                                                                                                                        | one palette per theme in `style.css` (plan §2 #57)                                                                                |
+| each pane's dark flag and key bindings                                                                  | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                           | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                           |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
 text passes through once, from `resultText()` to `store.finish` (and back into that file's own
@@ -477,11 +489,12 @@ baseline in `useMergeController`).
 
 ```ts
 export class MergeController {
-  constructor(data: FileMergeData, hosts: MergeHosts, options?: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly } (plan §2 #47)
+  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences }
+  setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
   applyAllNonConflicting(side: Side): void; // one undo step
   undo(): boolean;
   redo(): boolean;
-  historyKey(event: KeyboardEvent): boolean; // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y from anywhere in the shown file's window, unless already handled (the middle's own keymap) or typed in a text field (plan §2 #54)
+  historyKey(event: KeyboardEvent): boolean; // the bound Undo/Redo keys (default Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y) from anywhere in the shown file's window, unless already handled (the middle's own keymap) or typed in a text field (plan §2 #54, #57)
   moveToChange(direction: Direction): void; // the toolbar arrows: Up/Down on the side that has the keyboard, else the left side takes it first (plan §2 #56)
   resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
   summary(): MergeSummary; // { changes, conflicts } still to decide
@@ -546,14 +559,22 @@ Internals (`editor/internal/`, not importable from `ui/`):
   the pane's top right (it never resizes the scroller, so scroll sync is untouched), the count
   ("k of N" / "N results" / "No results"), next/previous with wrap; while any pane's bar is open all
   three panes get the bar's height as space above line 1 (`findSpace`), so a match on line 1 shows
-  below the bar and the panes stay aligned.
+  below the bar and the panes stay aligned. Its keys are the bound Find / Find next / Find previous /
+  Close find (the Close button's title names the bound key); the box's own Enter / Shift+Enter stay.
+  `findMatch.ts` holds the match helpers (count, label, step, select).
+- `keys.ts` (`cmKey`: a `Key` from `ipc/keys.ts` → CodeMirror's key string; Shift+letter alone is
+  the upper-case name; a macOS-only ⌃ key is not bound on Linux) and `sideKeys.ts` (the side
+  keymap from the bound Apply / Ignore / Next / Previous / Left / Right keys): every keymap of the
+  three panes sits in a compartment, with the dark flag, and `setPreferences` reconfigures them
+  (plan §2 #57). The middle's yamt keymap (Undo, Redo, Indent, Outdent) is `Prec.high` over
+  `defaultKeymap`; of `historyKeymap` only the selection undo/redo stays.
 - `navigation.ts`, `sideMark.ts`, `sideFocus.ts`, `viewport.ts`, `wheel.ts`, `historyKey.ts` — keyboard
   focus in the side panes (plan §2 #54). `navigation.ts` holds the rules as pure functions over the
   chunk states and rows (step to the next/previous change still waiting on a side, cross to the other
   side, the pick after a decision, the first change on screen, the click hit test, and what follows a
   decision: hand over when it emptied the focused side, otherwise reveal a newly focused change, otherwise
   stay). `sideMark.ts` is each side's `SideMark` field. `sideFocus.ts`
-  binds the side-only keymap (Enter/Space apply, Backspace/Delete/x ignore, arrows), the press that
+  binds the side keymap (`sideKeys.ts`; defaults Enter/Space apply, Backspace/Delete/x ignore, arrows), the press that
   sets a mark (scrollbar presses excluded; a press `modClick.ts` acts on is skipped by asking its
   `modClickAction`), the focus WebKit gives a side's scroller on a scrollbar press handed back to its
   content, Ctrl/Cmd+wheel over a side and the toolbar arrows (`moveToChange`: both take the keyboard
@@ -562,10 +583,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
   focused side's `scrollTop` is written, with WebStorm's placement from `viewport.ts`
   (`SyncScrollSupport.getTargetOffsets`), nothing when the change is fully visible; the other panes
   follow through the sync. `wheel.ts` turns wheel bursts into steps (the first event of a burst steps
-  at once, then one per 90 px — under one 96 px X11 notch). `historyKey.ts` maps the undo/redo
-  shortcut, falling back to the physical key only when the layout gives a single non-Latin letter or
-  combining mark; `ui/MergeView.vue` calls `historyKey` from a window `keydown`
-  only while its file is shown and no question is open.
+  at once, then one per 90 px — under one 96 px X11 notch). `historyKey.ts` matches the bound
+  Undo/Redo keys through `keyOfEvent` (`ipc/keys.ts`), which falls back to the physical key only when
+  the layout gives a single non-Latin letter or combining mark; `ui/MergeView.vue` calls `historyKey`
+  from a window `keydown` only while its file is shown and no question is open.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
   interpolation between chunk anchor pixel positions (`lineBlockAt`), reference point the middle
   of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan
@@ -608,13 +629,17 @@ one sentence per side from `choiceText.ts`, plan §2 #36). Names are multi-word 
 `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
-`createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file list,
+`createAppStore(source, startTheme)` once in `main.ts`, `useAppStore()` in components; state: the file list,
 the opened files (each loaded once per session; reset replaces it in place), the choices (one per
-opened file the editor cannot show), the active path, the problem, the open question and whether
-settings show; actions: load the list, open (a later open wins; re-clicking the shown file does
+opened file the editor cannot show), the active path, the problem, the open question, whether
+settings show, and the settings in use (`settings`, `preferences`); actions: load the list, open (a later open wins; re-clicking the shown file does
 nothing; a file the editor cannot show is described instead of loaded), pick (a file chosen in the
 list: closes settings, then opens), finish (asks when work is left), take a side, reset, open/close
-settings, the window-close check.
+settings, the window-close check, and the settings actions in `settings.ts` (load on mount and on
+window focus, set the theme, add/change/remove/remove all/reset an action's keys, move the file;
+each sends the settings in use and adopts the reply; a failure keeps them). `keymapEdit.ts` holds the
+pure key-edit rules (a key another action holds → the "Key Already in Use" question, Move/Cancel;
+a list equal to the defaults is sent as `null`); `keyText.ts` the actions' names, places and groups.
 
 The Vue↔editor seam is one adaptable composable:
 
@@ -623,6 +648,7 @@ export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: MergeHosts,
   readOnly: MaybeRefOrGetter<boolean>, // MergeView's one rule: deleted side or a middle that is not text on disk
+  preferences: MaybeRefOrGetter<Preferences>, // the store's; a change reaches the controller through setPreferences, no rebuild (plan §2 #57)
 ): {
   summary: Readonly<ShallowRef<MergeSummary | null>>;
   applyAllNonConflicting;

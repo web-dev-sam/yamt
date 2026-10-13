@@ -48,6 +48,7 @@ type State = Refs & {
   readonly asking: Asking;
   readonly guard: CloseGuard;
   latestOpen: number;
+  latestSettings: number;
 };
 
 type Actions = Omit<CloseGuard, "markSaved"> &
@@ -90,7 +91,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
   };
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
-  const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
+  const state: State = { ...refs, source, asking, guard, latestOpen: 0, latestSettings: 0 };
   const { files, settings } = refs;
   store = {
     ...refs,

@@ -7,6 +7,7 @@ import {
   type ChunkSource,
   type Key,
   type KeyAction,
+  type KeyProblem,
   type KeysRead,
   type SettingsRead,
   type SourceResult,
@@ -15,7 +16,7 @@ import {
 } from "../ipc";
 import type { Asking } from "./asking";
 import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
-import { attempt, report, type Problem } from "./problem";
+import { attempt, logProblem, report, type Problem } from "./problem";
 import type { Preferences } from "./useMergeController";
 
 export type SettingsInUse = {
@@ -29,6 +30,7 @@ type SettingsTarget = {
   readonly settings: ShallowRef<SettingsInUse>;
   readonly problem: ShallowRef<Problem | null>;
   readonly asking: Pick<Asking, "ask">;
+  latestSettings: number;
 };
 
 export type SettingsActions = {
@@ -60,29 +62,72 @@ function storedSettings({ theme, keys }: SettingsInUse): StoredSettings {
   };
 }
 
-function use(target: SettingsTarget, read: SettingsRead): void {
-  const keys = bindingsOf(read.stored.keys);
-  target.settings.value = { read, theme: read.stored.theme, keys };
-  if (keys.problems.length > 0) {
-    const cause = {
-      kind: "Keys",
-      path: read.path,
-      problems: keys.problems,
-    } satisfies Problem["cause"];
-    report(target, { action: "settings", cause });
-  } else if (target.problem.value?.action === "settings") {
-    target.problem.value = null;
+function sameTexts(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((text, index) => text === b[index]);
+}
+
+function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
+  if (inUse === null || inUse.path !== read.path || inUse.stored.theme !== read.stored.theme) {
+    return false;
+  }
+  const before = Object.entries(inUse.stored.keys);
+  const after = read.stored.keys;
+  return (
+    before.length === Object.keys(after).length &&
+    before.every(([action, texts]) => {
+      const now = after[action];
+      return now !== undefined && sameTexts(texts, now);
+    })
+  );
+}
+
+function problemKey(problem: KeyProblem): string {
+  return problem.kind === "unreadable"
+    ? `unreadable ${problem.action} ${problem.text}`
+    : `twice ${keyText(problem.key)} ${problem.actions.join(" ")}`;
+}
+
+function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: KeysRead): void {
+  const { problems } = target.settings.value.keys;
+  const shown = target.problem.value;
+  const settingsShown = shown?.action === "settings" ? shown.cause.kind : null;
+  if (problems.length === 0) {
+    if (settingsShown !== null) {
+      target.problem.value = null;
+    }
+    return;
+  }
+  const sameProblems = sameTexts(before.problems.map(problemKey), problems.map(problemKey));
+  if (!sameProblems || (settingsShown !== null && settingsShown !== "Keys")) {
+    report(target, { action: "settings", cause: { kind: "Keys", path: read.path, problems } });
   }
 }
 
+function adopt(target: SettingsTarget, read: SettingsRead): void {
+  const before = target.settings.value;
+  if (!sameStored(before.read, read)) {
+    target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
+  }
+  showKeyProblems(target, read, before.keys);
+}
+
 async function send(target: SettingsTarget, call: Send): Promise<void> {
+  target.latestSettings += 1;
+  const ticket = target.latestSettings;
   const current = storedSettings(target.settings.value);
   const outcome = await attempt(() => call(current));
+  const latest = ticket === target.latestSettings;
   if (!outcome.ok) {
-    report(target, { action: "settings", cause: outcome.cause });
+    const failure: Problem = { action: "settings", cause: outcome.cause };
+    logProblem(failure);
+    if (latest) {
+      target.problem.value = failure;
+    }
     return;
   }
-  use(target, outcome.value);
+  if (latest) {
+    adopt(target, outcome.value);
+  }
 }
 
 async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
@@ -93,7 +138,11 @@ async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
   if (plan.kind === "ask" && !(await target.asking.ask({ kind: "clash", ...plan.clash }))) {
     return;
   }
-  await send(target, (current) => target.source.setKeys(current, plan.changes));
+  const replanned = planKeyEdit(target.settings.value.keys.bindings, edit);
+  if (replanned.kind === "nothing") {
+    return;
+  }
+  await send(target, (current) => target.source.setKeys(current, replanned.changes));
 }
 
 export function settingsActions(target: SettingsTarget): SettingsActions {

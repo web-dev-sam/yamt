@@ -33,7 +33,7 @@ export const KEY_ACTIONS: readonly KeyAction[] = [
   "outdent",
 ];
 
-type KeyName = string & { readonly __brand: "KeyName" };
+export type KeyName = string & { readonly __brand: "KeyName" };
 
 export type Key = {
   readonly mod: boolean;
@@ -118,7 +118,8 @@ export function parseKey(text: string): Key | null {
       rest = rest.slice(prefix.length);
     }
   }
-  return isKeyName(rest) ? { ...held, name: rest } : null;
+  const shiftedSymbol = held.shift && !Object.hasOwn(NAMED_KEYS, rest) && !isLetter(rest);
+  return isKeyName(rest) && !shiftedSymbol ? { ...held, name: rest } : null;
 }
 
 export function keyText(key: Key): string {

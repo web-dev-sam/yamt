@@ -39,6 +39,7 @@ export {
   type Key,
   type KeyAction,
   type KeyBindings,
+  type KeyName,
   type KeyProblem,
   type KeysRead,
 } from "./keys";

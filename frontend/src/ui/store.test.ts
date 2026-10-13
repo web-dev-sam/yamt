@@ -1682,9 +1682,14 @@ function settingsSource(overrides: Partial<ChunkSource>): {
     },
     setKeys: (current, changes) => {
       sent.push(["setKeys", current, changes]);
-      const keys = Object.fromEntries(
-        changes.flatMap(({ action, keys: texts }) => (texts === null ? [] : [[action, texts]])),
-      );
+      const keys = { ...current.keys };
+      for (const { action, keys: texts } of changes) {
+        if (texts === null) {
+          delete keys[action];
+        } else {
+          keys[action] = texts;
+        }
+      }
       return overrides.setKeys?.(current, changes) ?? Promise.resolve(read({ ...current, keys }));
     },
     moveSettings: (current, path) => {
@@ -1876,10 +1881,107 @@ test("each key edit sends only the changed actions, as key texts", async () => {
     ],
     [
       "setKeys",
-      { theme: "dark", keys: { redo: ["Mod-Shift-z"] } },
+      { theme: "dark", keys: { apply: ["Enter", "Space", "a"], redo: ["Mod-Shift-z"] } },
       [{ action: "apply", keys: null }],
     ],
   ]);
+});
+
+test("an identical load keeps the settings object and does not show the same key problems again", async () => {
+  const lines = spyConsole();
+  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(read(broken)),
+    setTheme: (_current, theme) => Promise.resolve(read({ ...broken, theme })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+  const inUse = store.settings.value;
+  const preferences = store.preferences.value;
+  store.dismissProblem();
+
+  await store.loadSettings();
+
+  expect(store.problem.value).toBeNull();
+  expect(store.settings.value).toBe(inUse);
+  expect(store.preferences.value).toBe(preferences);
+
+  await store.setTheme("light");
+
+  expect(store.preferences.value.theme).toBe("light");
+  expect(store.problem.value).toBeNull();
+  expect(lines.error).toHaveLength(1);
+});
+
+test("a key problem shown again replaces a settings failure the file no longer has", async () => {
+  spyConsole();
+  const broken: SourceFailure = { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" };
+  const unreadable = read({ theme: "dark", keys: { redo: ["Ctrl+Q"] } });
+  const loads: SourceResult<SettingsRead>[] = [unreadable, { ok: false, failure: broken }];
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(loads.shift() ?? unreadable),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+  await store.loadSettings();
+  expect(store.problem.value).toEqual({ action: "settings", cause: broken });
+
+  await store.loadSettings();
+
+  expect(store.problem.value).toEqual({
+    action: "settings",
+    cause: {
+      kind: "Keys",
+      path: SETTINGS_PATH,
+      problems: [{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }],
+    },
+  });
+});
+
+test("a load that started before a change and answers after it does not put the old file back", async () => {
+  const lines = spyConsole();
+  const loads: ((result: SourceResult<SettingsRead>) => void)[] = [];
+  const { source } = settingsSource({
+    loadSettings: () =>
+      new Promise((resolve) => {
+        loads.push(resolve);
+      }),
+  });
+  const store = createAppStore(source);
+
+  const loading = store.loadSettings();
+  const failing = store.loadSettings();
+  await store.setTheme("light");
+  loads[0]?.(read({ theme: "dark", keys: {} }));
+  loads[1]?.({ ok: false, failure: { kind: "SettingsBroken", path: SETTINGS_PATH, message: "x" } });
+  await loading;
+  await failing;
+
+  expect(store.settings.value.theme).toBe("light");
+  expect(store.problem.value).toBeNull();
+  expect(lines.error).toHaveLength(1);
+});
+
+test("Move after a reload freed the key sends the edit planned on the bindings now in use", async () => {
+  const { source, sent } = settingsSource({
+    loadSettings: () => Promise.resolve(read({ theme: "dark", keys: { find: ["Mod-g"] } })),
+  });
+  const store = createAppStore(source);
+
+  const adding = store.addKey("undo", parsed("Mod-f"));
+  await vi.waitFor(() => {
+    expect(store.question.value?.kind).toBe("clash");
+  });
+  await store.loadSettings();
+  store.answer(true);
+  await adding;
+
+  expect(sent.at(-1)).toEqual([
+    "setKeys",
+    { theme: "dark", keys: { find: ["Mod-g"] } },
+    [{ action: "undo", keys: ["Mod-z", "Mod-f"] }],
+  ]);
+  expect(store.preferences.value.keys.find).toEqual([parsed("Mod-g")]);
 });
 
 test("moveSettings sends the path with the settings in use and uses the file found there", async () => {

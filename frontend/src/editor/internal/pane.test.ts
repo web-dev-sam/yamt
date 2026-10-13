@@ -9,7 +9,7 @@ import {
 } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import type { EditorState, StateCommand } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
@@ -22,6 +22,8 @@ import {
   languageCompartment,
   paletteHighlight,
   paneState,
+  preferenceEffects,
+  refuseNativeHistory,
   type PaneSettings,
 } from "./pane";
 import { sideStatusField } from "./sideStatus";
@@ -95,13 +97,16 @@ function withKeys(keys: Partial<KeyBindings>): PaneSettings {
 
 // CodeMirror runs the commands bound to a key in the keymap facet's order (precedence first) until
 // one returns true (@codemirror/view keymap.ts buildKeymap, runHandlers).
-function commandsOn(state: EditorState, name: string): unknown[] {
+function bindingsOn(state: EditorState, name: string): KeyBinding[] {
   return state
     .facet(keymap)
     .flat()
     .filter((binding) => (binding.linux ?? binding.key) === name)
-    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"))
-    .map(({ run: command }) => command);
+    .filter(({ scope }) => scope === undefined || scope.split(" ").includes("editor"));
+}
+
+function commandsOn(state: EditorState, name: string): unknown[] {
+  return bindingsOn(state, name).map(({ run: command }) => command);
 }
 
 function run(command: StateCommand, state: EditorState): EditorState {
@@ -346,4 +351,82 @@ test("CodeMirror's dark flag follows the theme", () => {
 
   expect(center(PHP, null).facet(EditorView.darkTheme)).toBe(true);
   expect(center(PHP, null, light).facet(EditorView.darkTheme)).toBe(false);
+});
+
+test("the browser's own undo and redo are refused in the middle; other input passes through", () => {
+  const prevented: string[] = [];
+  function input(inputType: string): boolean {
+    return refuseNativeHistory({
+      inputType,
+      preventDefault: () => {
+        prevented.push(inputType);
+      },
+    });
+  }
+
+  expect(["historyUndo", "historyRedo", "insertText", "deleteContentBackward"].map(input)).toEqual([
+    true,
+    true,
+    false,
+    false,
+  ]);
+  expect(prevented).toEqual(["historyUndo", "historyRedo"]);
+});
+
+test("a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key", () => {
+  const state = paneState({
+    kind: "readOnlyCenter",
+    doc: PHP,
+    eol: "Lf",
+    language: null,
+    settings: SETTINGS,
+    extensions: [],
+  });
+  const tab = bindingsOn(state, "Tab");
+
+  expect(tab.map(({ run: command }) => command)).toEqual([indentMore]);
+  expect(tab.some(({ preventDefault }) => preventDefault === true)).toBe(false);
+  expect(indentMore({ state, dispatch: () => undefined })).toBe(false);
+  expect(bindingsOn(state, "Mod-z").map(({ preventDefault }) => preventDefault)).toEqual([true]);
+});
+
+test("new preferences turn the middle light, move its Undo and rebind its find keys", () => {
+  const changed = withKeys({ undo: [key("Alt-Backspace")], "close-find": [key("F10")] });
+  const light: PaneSettings = {
+    ...changed,
+    preferences: { ...changed.preferences, theme: "light" },
+  };
+
+  const state = center(PHP, null).update({ effects: preferenceEffects("center", light) }).state;
+
+  expect(state.facet(EditorView.darkTheme)).toBe(false);
+  expect(commandsOn(state, "Mod-z")).toEqual([]);
+  expect(commandsOn(state, "Alt-Backspace")).toEqual([undo]);
+  expect(commandsOn(state, "F10")).toHaveLength(1);
+});
+
+test("new preferences turn a side light, rebind its Apply and its find keys", () => {
+  const changed = withKeys({ apply: [key("a")], "close-find": [key("F10")] });
+  const light: PaneSettings = {
+    ...changed,
+    preferences: { ...changed.preferences, theme: "light" },
+  };
+  const before = paneState({
+    kind: "side",
+    doc: PHP,
+    eol: "Lf",
+    language: null,
+    settings: SETTINGS,
+    extensions: [],
+  });
+
+  const state = before.update({ effects: preferenceEffects("side", light) }).state;
+
+  expect(before.facet(EditorView.darkTheme)).toBe(true);
+  expect(state.facet(EditorView.darkTheme)).toBe(false);
+  expect(commandsOn(before, "a")).toEqual([]);
+  expect(commandsOn(state, "a")).toHaveLength(1);
+  expect(commandsOn(state, "Enter")).toEqual([]);
+  expect(commandsOn(state, "F10")).toHaveLength(1);
+  expect(commandsOn(state, "Escape")).toEqual([]);
 });

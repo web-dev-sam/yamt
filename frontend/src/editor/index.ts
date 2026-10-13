@@ -17,12 +17,12 @@ import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
 import { modClicks } from "./internal/modClick";
 import type { Direction } from "./internal/navigation";
-import { centerPane, createPane, paneText, showPreferences } from "./internal/pane";
+import { centerPane, createPane, paneText, preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
-import { sideKeys, sideKeysCompartment } from "./internal/sideKeys";
+import { sideRunner } from "./internal/sideKeys";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
 import { Strips, type IconPress } from "./internal/strips";
@@ -145,23 +145,15 @@ export class MergeController {
     };
   }
 
-  #sideKeys(side: Side): Extension {
-    return sideKeys(
-      (command) => {
-        this.#focus.run(side, command);
-      },
-      this.#settings.preferences.keys,
-      this.#settings.platform,
-    );
-  }
-
   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
     return [
       statuses,
       sideDecorations(statuses, side),
       focusDecorations(statuses, side),
       coveredDecorations(side),
-      sideKeysCompartment.of(this.#sideKeys(side)),
+      sideRunner.of((command) => {
+        this.#focus.run(side, command);
+      }),
       this.#repaint,
       this.#readOnly
         ? []
@@ -248,7 +240,11 @@ export class MergeController {
 
   setPreferences(preferences: Preferences): void {
     this.#settings = { ...this.#settings, preferences };
-    showPreferences(this.#views, this.#settings, (side) => this.#sideKeys(side));
+    const { left, center, right } = this.#views;
+    center.dispatch({ effects: preferenceEffects("center", this.#settings) });
+    for (const side of [left, right]) {
+      side.dispatch({ effects: preferenceEffects("side", this.#settings) });
+    }
   }
 
   undo(): boolean {

@@ -1,10 +1,7 @@
 import type { ChunkSource } from "./ChunkSource";
 import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
 
-export type FixtureSettings = Pick<
-  ChunkSource,
-  "loadSettings" | "setTheme" | "setKeys" | "moveSettings"
->;
+type FixtureSettings = Pick<ChunkSource, "loadSettings" | "setTheme" | "setKeys" | "moveSettings">;
 
 type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 

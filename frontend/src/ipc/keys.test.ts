@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 
+import type { KeyName } from ".";
 import {
   bindingsOf,
   DEFAULT_KEYS,
@@ -76,22 +77,22 @@ test("the defaults are the keys yamt bound before settings existed", () => {
   );
 
   expect(defaults).toEqual({
-    // editor/internal/sideFocus.ts SIDE_KEYS (plan §2 #54)
+    // sideFocus.ts SIDE_KEYS at 9b717cb (plan §2 #54)
     apply: ["Enter", "Space"],
     ignore: ["Backspace", "Delete", "x"],
     "next-change": ["ArrowDown"],
     "previous-change": ["ArrowUp"],
     "left-side": ["ArrowLeft"],
     "right-side": ["ArrowRight"],
-    // editor/internal/historyKey.ts and the middle pane's historyKeymap
+    // historyKey.ts historyCommand at 9b717cb: Mod-z, Mod-Shift-z, Mod-y (plan §2 #54)
     undo: ["Mod-z"],
     redo: ["Mod-Shift-z", "Mod-y"],
-    // editor/internal/find.ts keymap (plan §2 #44)
+    // find.ts:269-284 at 9b717cb (plan §2 #44)
     find: ["Mod-f"],
     "find-next": ["F3"],
     "find-previous": ["Shift-F3"],
     "close-find": ["Escape"],
-    // the middle pane's indentWithTab (plan §2 #35)
+    // pane.ts indentWithTab at 9b717cb (plan §2 #35)
     indent: ["Tab"],
     outdent: ["Shift-Tab"],
   });
@@ -121,6 +122,8 @@ test("the file form reads modifiers in order, a named key or one character, and 
     shift: true,
     name: "z",
   });
+  const minus: KeyName = key("Mod--").name;
+  expect(minus).toBe("-");
 });
 
 test("anything else is refused", () => {
@@ -143,6 +146,8 @@ test("anything else is refused", () => {
     "Up",
     "ab",
     "Mod-zz",
+    "Shift-1",
+    "Shift-?",
   ]) {
     expect(parseKey(text)).toBeNull();
   }
@@ -247,6 +252,17 @@ test("bindingsOf: a malformed key keeps that action's defaults and is reported",
   expect(texts(bindings.redo)).toEqual(["Mod-Shift-z", "Mod-y"]);
   expect(texts(bindings.find)).toEqual(["Mod-g"]);
   expect(problems).toEqual([{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }]);
+});
+
+test("bindingsOf: Shift before a symbol is unreadable, since no key press gives it", () => {
+  const { bindings, problems } = bindingsOf({ apply: ["Shift-1"], find: ["Mod-Shift-?"] });
+
+  expect(texts(bindings.apply)).toEqual(["Enter", "Space"]);
+  expect(texts(bindings.find)).toEqual(["Mod-f"]);
+  expect(problems).toEqual([
+    { kind: "unreadable", action: "apply", text: "Shift-1" },
+    { kind: "unreadable", action: "find", text: "Mod-Shift-?" },
+  ]);
 });
 
 test("bindingsOf: a key on two actions stays with the first in list order and is reported", () => {
