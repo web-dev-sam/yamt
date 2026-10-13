@@ -105,13 +105,17 @@ function pressed(button: IconButton, event: MouseEvent): void {
 }
 
 function barPressed(event: MouseEvent): void {
-  if (event.button === SECONDARY_BUTTON) {
+  if (event.button === SECONDARY_BUTTON || event.ctrlKey) {
     event.preventDefault();
   }
 }
 
 function openMenu(event: MouseEvent): void {
   menuAt.value = { x: event.clientX, y: event.clientY };
+}
+
+function closeMenu(): void {
+  menuAt.value = null;
 }
 </script>
 
@@ -124,7 +128,7 @@ function openMenu(event: MouseEvent): void {
     <button
       type="button"
       :disabled="summary === null"
-      class="mr-2 rounded border px-3.5 py-1"
+      class="mr-2 rounded border px-3.5 py-1 disabled:pointer-events-none"
       :class="
         nothingLeft
           ? 'border-primary bg-primary text-on-primary hover:brightness-110'
@@ -141,7 +145,7 @@ function openMenu(event: MouseEvent): void {
       :title="button.label"
       :aria-label="button.label"
       :disabled="summary === null"
-      class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+      class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent"
       @mousedown="pressed(button, $event)"
       @click="button.run"
     >
@@ -149,11 +153,6 @@ function openMenu(event: MouseEvent): void {
     </button>
     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
     <SettingsButton class="ml-auto" />
-    <ToolbarMenu
-      v-if="menuAt !== null"
-      :at="menuAt"
-      :buttons="ICON_BUTTONS"
-      @close="menuAt = null"
-    />
+    <ToolbarMenu v-if="menuAt !== null" :at="menuAt" :buttons="ICON_BUTTONS" @close="closeMenu" />
   </header>
 </template>

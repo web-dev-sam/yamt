@@ -22,6 +22,7 @@ const viewport = useWindowSize();
 const windowFocused = useWindowFocus();
 useEventListener(window, "keydown", keyPressed, { capture: true });
 useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
+useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
 
 const items = computed(() =>
   TOOLBAR_BUTTONS.map((id): Item => ({

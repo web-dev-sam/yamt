@@ -87,9 +87,12 @@ test.each([
   ["null", "null"],
   ["an array holding a non-string", '["undo",4]'],
 ])("a stored value that is %s hides nothing", (_name, value) => {
+  const warnings = spyWarnings();
+
   const buttons = createHiddenButtons(memoryStorage({ [KEY]: value }));
 
   expect(hiddenList(buttons)).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test("a missing key hides nothing and writes nothing until a toggle", () => {
