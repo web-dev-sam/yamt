@@ -319,6 +319,33 @@ hidden Undo/Redo as the menu's starting state: Undo and Redo start hidden, the m
 | 1'' | verifier (`briefs/3.M-toolbar-menu-verify.md`): `just check`, `just mutants e916c35`, the real app on a private X display with its own storage: menu, keyboard, closing, restart            | verifier  | done     | `ToolbarMenuVerify` on the working tree, gate **pass**. `just check` exit 0 (326 Rust tests + 1 skipped, 481 web tests in 43 files, 10 goldens, arch/map ok, hooks 16/16). Stryker 96.88 % (menuPosition 100, toolbarButtons 97.30: one equivalent survivor; moved `clearProblemAbout`/`changedOnDisk` survivors = old gaps #582 at new paths, #777). Real app (Xvfb :87, X11, `xdotool`, own `XDG_DATA_HOME`; owner's `~/.local/share/dev.yamt.merge` unchanged): yamt's menu, no system menu; hide/show keeps order; Down works with Next hidden; right-click on Mark resolved/Previous/gear presses nothing and the left keeps the keyboard; Ctrl+click keeps it; closes on a middle click (caret there), on a press on the resize handle (closed while held), on focus moving to another window; inside the window at the gear (shifted left); after quit and restart `["next","redo"]` still hidden in every text file (storage `dev.yamt.merge/localstorage/tauri_localhost_0.localstorage`) |
 | 2   | merge with settings (#778): Undo/Redo hidden at first (`toolbarButtons.ts`), `HISTORY_BUTTONS_SHOWN` and the `history` field out of `MergeToolbar.vue`, tests follow (`frontend/src/ui/**`) | owner     | done     | `.omp/run/patches/MergeToolbarDefaults.patch` (the orchestrator may not edit `frontend/`; applied by the owner, no subagents): `HIDDEN_AT_FIRST` {undo, redo}, also for an unreadable value; `toggle` a property; `buttons` out of the store state, store.ts 300 lines; the store's toggle forwarding test dropped. oxfmt, vue-tsc, lint, 639 tests, knip pass on the merged tree; `just check` not run                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
+## Crisp code text — macOS, Linux, Windows (session 10)
+
+Intent (owner brief 2026-10-13, `Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md`; #779:
+the orchestrator decides as product owner this session): code text as crisp as WebStorm's on Linux and macOS, and a
+Windows build that matches WebStorm's ClearType text, with CI. Fix where the platform allows, compensate where it does
+not; engine-level hacks behind a setting; scrolling no slower; what is impossible per platform written down
+(`docs/plan.md` §3). Comparison oracle: zoomed crops of the same lines against WebStorm's own rasterizer (the JetBrains
+Runtime bundled with the owner's WebStorm 2026.2, same font, size, colours), before and after each change.
+
+Facts at start (orchestrator, this machine): the owner's Samsung 4K runs at KDE scale 1.45 on Wayland; GTK3 (yamt) and
+WebStorm (its Wayland toolkit logs "System scale factor: 2.0") both draw at 2× and KWin scales down, so the scale-down
+softens both; the system asks for grey antialiasing (`Xft.rgba: none`, `XftSubPixel=none`) while WebStorm draws its own
+subpixel text. WebKitGTK 2.54.1 (GTK3 port) follows the system's font settings (`FontRenderOptions.h`,
+`s_followSystemSettingsDefault = true` for GTK3). Code text: JetBrains Mono 400 woff2, 13 px, line height 1.4 (18.2 px).
+
+Acceptance (owner, proposed): Linux — with the setting on, zoomed crops show colour fringes like WebStorm's on the same
+lines, at scale 1 and at 2× scaled to 1.45, scroll timing no worse than before; macOS — no change without evidence, the
+limits written down; Windows — an NSIS installer built by CI on every push, the Rust tests green on GitHub's Windows
+runner, and the panes' text eligible for ClearType under Chromium's layer rules (proved with Chromium on Linux with
+subpixel text forced, as no Windows machine is here). Non-goals: code signing, Windows on ARM, MSI, auto-update, a
+different font or size, per-monitor scale handling, `core.autocrlf=true` repositories on Windows (written down as untested).
+
+| row | slice                                                                                                                                | owner     | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------- | ------- | -------- |
+| 1   | measure: WebKitGTK subpixel options, scale, line height, Chromium layer rules, WebStorm reference crops (`briefs/3.X-text-probe.md`) | rust-impl | running |          |
+| 2   | Windows build: portable Rust, `git.exe`, NSIS bundle, CI on push for three systems, release matrix (`briefs/3.X-windows-build.md`)   | rust-impl | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

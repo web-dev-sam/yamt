@@ -1,1 +1,21 @@
-{}
+{
+  "CrispTextProbe": {
+    "owned": []
+  },
+  "WindowsBuild": {
+    "owned": [
+      "crates/gitio/**",
+      "crates/session/**",
+      "crates/conflict-repo/**",
+      "crates/cli/**",
+      "crates/settings/**",
+      "src-tauri/src/**",
+      "src-tauri/tauri.conf.json",
+      "frontend/.env.tauri",
+      ".github/workflows/**",
+      ".gitattributes",
+      "deny.toml",
+      "scripts/third-party-licenses.sh"
+    ]
+  }
+}
