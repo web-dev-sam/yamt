@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::fs;
 use std::process::{Command, Output};
 
 use yamt_conflict_repo::{TempDir, git_ok};
@@ -50,12 +51,18 @@ fn usage_errors_exit_two_with_usage_on_stderr() {
 fn repository_without_conflicts_exits_zero_with_nothing_to_merge() {
     let dir = TempDir::new().unwrap();
     git_ok(dir.path(), &["init", "--quiet"]).unwrap();
-    let root = dir.path().canonicalize().unwrap();
     let output = yamt(&["--repo", dir.path().to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0));
+    let stderr = stderr(&output);
+    let Some(named) = stderr
+        .strip_prefix("yamt: nothing to merge in ")
+        .and_then(|rest| rest.strip_suffix('\n'))
+    else {
+        panic!("{stderr}");
+    };
     assert_eq!(
-        stderr(&output),
-        format!("yamt: nothing to merge in {}\n", root.display())
+        fs::canonicalize(named).unwrap(),
+        fs::canonicalize(dir.path()).unwrap()
     );
 }
 

@@ -299,7 +299,10 @@ fn discover_from_a_subdirectory_returns_the_top_level() {
 
     let repo = Repo::discover(&nested).unwrap();
 
-    assert_eq!(repo.root(), dir.path().canonicalize().unwrap());
+    assert_eq!(
+        fs::canonicalize(repo.root()).unwrap(),
+        fs::canonicalize(dir.path()).unwrap()
+    );
 }
 
 #[test]

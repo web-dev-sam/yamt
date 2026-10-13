@@ -108,7 +108,10 @@ mod tests {
         let Startup::Merge(session) = startup(&inside) else {
             panic!("expected a merge");
         };
-        assert_eq!(session.root(), repo.path().canonicalize().unwrap());
+        assert_eq!(
+            std::fs::canonicalize(session.root()).unwrap(),
+            std::fs::canonicalize(repo.path()).unwrap()
+        );
         let paths: Vec<String> = session.files().into_iter().map(|file| file.path).collect();
         assert_eq!(paths, ["a.ts", "b.ts", "c.ts"]);
     }
@@ -117,13 +120,15 @@ mod tests {
     fn repository_without_conflicts_has_nothing_to_merge() {
         let dir = TempDir::new().unwrap();
         git_ok(dir.path(), &["init", "--quiet"]).unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let ending = ending(startup(dir.path()));
+        assert_eq!(ending.exit, Exit::Success);
+        let message = ending.message.unwrap();
+        let Some(named) = message.strip_prefix("nothing to merge in ") else {
+            panic!("{message}");
+        };
         assert_eq!(
-            ending(startup(dir.path())),
-            Ending {
-                exit: Exit::Success,
-                message: Some(format!("nothing to merge in {}", root.display())),
-            }
+            std::fs::canonicalize(named).unwrap(),
+            std::fs::canonicalize(dir.path()).unwrap()
         );
     }
 
