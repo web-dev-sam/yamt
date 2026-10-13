@@ -14,5 +14,8 @@
       "frontend/src/ipc/index.ts",
       "frontend/src/ipc/domain.ts"
     ]
+  },
+  "WindowsBuildR2": {
+    "owned": ["crates/session/**", "crates/conflict-repo/**"]
   }
 }
