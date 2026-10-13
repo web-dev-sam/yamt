@@ -1,1 +1,5 @@
-{}
+{
+  "WindowsBuildR5": {
+    "owned": ["crates/gitio/tests/repo.rs", "src-tauri/src/outcome.rs", "src-tauri/tests/cli.rs"]
+  }
+}

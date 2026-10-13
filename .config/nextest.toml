@@ -1,4 +1,8 @@
-# `ci` (NEXTEST_PROFILE=ci in .github/workflows/ci.yml): run every test, so one CI run shows every failure; job logs
-# need a token, the failure annotations built from this output do not.
+# `ci` (NEXTEST_PROFILE=ci in .github/workflows/ci.yml): run every test and end the log with each failure's output, so
+# the tail annotation shows the panic messages; job logs need a token, the annotations built from this output do not.
 [profile.ci]
 fail-fast = false
+status-level = "fail"
+final-status-level = "fail"
+failure-output = "final"
+success-output = "never"
