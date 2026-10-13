@@ -1,0 +1,715 @@
+diff --git c/frontend/src/ui/MergeToolbar.vue w/frontend/src/ui/MergeToolbar.vue
+index f3f4dbd..4d2e9c0 100644
+--- c/frontend/src/ui/MergeToolbar.vue
++++ w/frontend/src/ui/MergeToolbar.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, type Component } from "vue";
++import { computed, shallowRef, type Component } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsLeft from "~icons/lucide/chevrons-left";
+@@ -7,9 +7,13 @@ import ChevronsRight from "~icons/lucide/chevrons-right";
+ import Redo2 from "~icons/lucide/redo-2";
+ import Undo2 from "~icons/lucide/undo-2";
+ 
++import type { Point } from "./menuPosition";
+ import { finishMustAsk } from "./question";
+ import SettingsButton from "./SettingsButton.vue";
++import { useAppStore } from "./store";
+ import { summaryLabel } from "./summaryLabel";
++import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
++import ToolbarMenu from "./ToolbarMenu.vue";
+ import type { Direction, MergeSummary } from "./useMergeController";
+ 
+ type IconButton = {
+@@ -29,8 +33,10 @@ const emit = defineEmits<{
+   finish: [];
+ }>();
+ 
+-const ICON_BUTTONS: readonly IconButton[] = [
+-  {
++const SECONDARY_BUTTON = 2;
++
++const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
++  previous: {
+     label: "Previous change",
+     icon: ArrowUp,
+     keepsKeyboard: true,
+@@ -38,7 +44,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("move", "up");
+     },
+   },
+-  {
++  next: {
+     label: "Next change",
+     icon: ArrowDown,
+     keepsKeyboard: true,
+@@ -46,7 +52,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("move", "down");
+     },
+   },
+-  {
++  applyLeft: {
+     label: "Apply non-conflicting changes from the left",
+     icon: ChevronsRight,
+     keepsKeyboard: false,
+@@ -54,7 +60,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("applyLeft");
+     },
+   },
+-  {
++  applyRight: {
+     label: "Apply non-conflicting changes from the right",
+     icon: ChevronsLeft,
+     keepsKeyboard: false,
+@@ -62,7 +68,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("applyRight");
+     },
+   },
+-  {
++  undo: {
+     label: "Undo",
+     icon: Undo2,
+     keepsKeyboard: false,
+@@ -70,7 +76,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("undo");
+     },
+   },
+-  {
++  redo: {
+     label: "Redo",
+     icon: Redo2,
+     keepsKeyboard: false,
+@@ -78,8 +84,17 @@ const ICON_BUTTONS: readonly IconButton[] = [
+       emit("redo");
+     },
+   },
+-];
++};
+ 
++const { hiddenButtons } = useAppStore();
++const menuAt = shallowRef<Point | null>(null);
++
++const shownButtons = computed(() =>
++  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
++    id,
++    ...ICON_BUTTONS[id],
++  })),
++);
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+ 
+@@ -88,10 +103,24 @@ function pressed(button: IconButton, event: MouseEvent): void {
+     event.preventDefault();
+   }
+ }
++
++function barPressed(event: MouseEvent): void {
++  if (event.button === SECONDARY_BUTTON) {
++    event.preventDefault();
++  }
++}
++
++function openMenu(event: MouseEvent): void {
++  menuAt.value = { x: event.clientX, y: event.clientY };
++}
+ </script>
+ 
+ <template>
+-  <header class="flex h-10 shrink-0 items-center gap-1 px-2">
++  <header
++    class="flex h-10 shrink-0 items-center gap-1 px-2"
++    @mousedown="barPressed"
++    @contextmenu.prevent="openMenu"
++  >
+     <button
+       type="button"
+       :disabled="summary === null"
+@@ -106,8 +135,8 @@ function pressed(button: IconButton, event: MouseEvent): void {
+       Mark resolved
+     </button>
+     <button
+-      v-for="button in ICON_BUTTONS"
+-      :key="button.label"
++      v-for="button in shownButtons"
++      :key="button.id"
+       type="button"
+       :title="button.label"
+       :aria-label="button.label"
+@@ -120,5 +149,11 @@ function pressed(button: IconButton, event: MouseEvent): void {
+     </button>
+     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
+     <SettingsButton class="ml-auto" />
++    <ToolbarMenu
++      v-if="menuAt !== null"
++      :at="menuAt"
++      :buttons="ICON_BUTTONS"
++      @close="menuAt = null"
++    />
+   </header>
+ </template>
+diff --git c/frontend/src/ui/ToolbarMenu.vue w/frontend/src/ui/ToolbarMenu.vue
+new file mode 100644
+index 0000000..5c12993
+--- /dev/null
++++ w/frontend/src/ui/ToolbarMenu.vue
+@@ -0,0 +1,101 @@
++<script setup lang="ts">
++import { useEventListener, useWindowFocus, useWindowSize } from "@vueuse/core";
++import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
++import Check from "~icons/lucide/check";
++
++import { menuPosition, type Point, type Size } from "./menuPosition";
++import { useAppStore } from "./store";
++import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
++
++type Item = { readonly id: ToolbarButtonId; readonly label: string; readonly shown: boolean };
++
++const props = defineProps<{
++  at: Point;
++  buttons: Readonly<Record<ToolbarButtonId, { readonly label: string }>>;
++}>();
++const emit = defineEmits<{ close: [] }>();
++
++const { hiddenButtons, toggleButton } = useAppStore();
++const panel = useTemplateRef<HTMLDivElement>("panel");
++const size = shallowRef<Size>({ width: 0, height: 0 });
++const viewport = useWindowSize();
++const windowFocused = useWindowFocus();
++useEventListener(window, "keydown", keyPressed, { capture: true });
++useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
++
++const items = computed(() =>
++  TOOLBAR_BUTTONS.map((id): Item => ({
++    id,
++    label: props.buttons[id].label,
++    shown: !hiddenButtons.value.has(id),
++  })),
++);
++const placement = computed(() => {
++  const { x, y } = menuPosition({
++    pointer: props.at,
++    menu: size.value,
++    viewport: { width: viewport.width.value, height: viewport.height.value },
++  });
++  return { left: `${x}px`, top: `${y}px` };
++});
++
++watch(windowFocused, (focused) => {
++  if (!focused) {
++    emit("close");
++  }
++});
++
++onMounted(() => {
++  if (panel.value !== null) {
++    const { width, height } = panel.value.getBoundingClientRect();
++    size.value = { width, height };
++  }
++});
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key === "Escape") {
++    event.stopPropagation();
++    event.preventDefault();
++  }
++  emit("close");
++}
++
++function pressedElsewhere(event: MouseEvent): void {
++  if (!(event.target instanceof Node && panel.value?.contains(event.target) === true)) {
++    emit("close");
++  }
++}
++
++function choose(id: ToolbarButtonId): void {
++  toggleButton(id);
++  emit("close");
++}
++</script>
++
++<template>
++  <Teleport to="body">
++    <div
++      ref="panel"
++      role="menu"
++      class="fixed z-10 rounded-md border border-control-border bg-panel-inline p-1 whitespace-nowrap shadow-lg"
++      :style="placement"
++      @mousedown.prevent
++      @contextmenu.prevent
++    >
++      <button
++        v-for="item in items"
++        :key="item.id"
++        type="button"
++        role="menuitemcheckbox"
++        :aria-checked="item.shown"
++        tabindex="-1"
++        class="flex w-full items-center gap-2 rounded py-1 pr-3 pl-1.5 text-left hover:bg-hover"
++        @click="choose(item.id)"
++      >
++        <Check v-if="item.shown" class="size-4" aria-hidden="true" />
++        <span v-else class="size-4" aria-hidden="true" />
++        {{ item.label }}
++      </button>
++    </div>
++  </Teleport>
++</template>
+diff --git c/frontend/src/ui/diskChanges.ts w/frontend/src/ui/diskChanges.ts
+index d14ba2b..3bca558 100644
+--- c/frontend/src/ui/diskChanges.ts
++++ w/frontend/src/ui/diskChanges.ts
+@@ -3,6 +3,7 @@ import type { ShallowRef } from "vue";
+ import { log, type DiskChange } from "../ipc";
+ import type { CloseGuard } from "./closeGuard";
+ import type { Notice } from "./noticeText";
++import { clearProblemAbout, type Problem } from "./problem";
+ import type { Taken } from "./sides";
+ import { isShown, reload, takesASide, type Shown } from "./views";
+ 
+@@ -51,3 +52,12 @@ export async function applyDiskChanges(
+   const shown = [...byPath.keys()].filter((path) => isShown(target, path));
+   await Promise.all(shown.map((path) => reload(target, path)));
+ }
++
++export async function changedOnDisk(
++  target: DiskChangeTarget & { readonly problem: ShallowRef<Problem | null> },
++  path: string,
++  change: DiskChange,
++): Promise<void> {
++  clearProblemAbout(target, path);
++  await applyDiskChanges(target, [change], "running");
++}
+diff --git c/frontend/src/ui/menuPosition.test.ts w/frontend/src/ui/menuPosition.test.ts
+new file mode 100644
+index 0000000..133039f
+--- /dev/null
++++ w/frontend/src/ui/menuPosition.test.ts
+@@ -0,0 +1,36 @@
++import { expect, test } from "vitest";
++
++import { menuPosition } from "./menuPosition";
++
++const MENU = { width: 300, height: 200 };
++const VIEWPORT = { width: 1000, height: 800 };
++
++test("a menu that fits opens with its top-left corner at the pointer", () => {
++  expect(menuPosition({ pointer: { x: 40, y: 30 }, menu: MENU, viewport: VIEWPORT })).toEqual({
++    x: 40,
++    y: 30,
++  });
++});
++
++test("a menu that fits exactly stays at the pointer", () => {
++  expect(menuPosition({ pointer: { x: 700, y: 600 }, menu: MENU, viewport: VIEWPORT })).toEqual({
++    x: 700,
++    y: 600,
++  });
++});
++
++test("near the right and bottom edges the menu moves left and up just enough", () => {
++  expect(menuPosition({ pointer: { x: 990, y: 790 }, menu: MENU, viewport: VIEWPORT })).toEqual({
++    x: 700,
++    y: 600,
++  });
++});
++
++test("a menu larger than the window keeps its top-left corner inside it", () => {
++  const huge = { width: 1200, height: 900 };
++
++  expect(menuPosition({ pointer: { x: 500, y: 400 }, menu: huge, viewport: VIEWPORT })).toEqual({
++    x: 0,
++    y: 0,
++  });
++});
+diff --git c/frontend/src/ui/menuPosition.ts w/frontend/src/ui/menuPosition.ts
+new file mode 100644
+index 0000000..fde5341
+--- /dev/null
++++ w/frontend/src/ui/menuPosition.ts
+@@ -0,0 +1,12 @@
++export type Point = { readonly x: number; readonly y: number };
++
++export type Size = { readonly width: number; readonly height: number };
++
++type Placement = { readonly pointer: Point; readonly menu: Size; readonly viewport: Size };
++
++export function menuPosition({ pointer, menu, viewport }: Placement): Point {
++  return {
++    x: Math.max(0, Math.min(pointer.x, viewport.width - menu.width)),
++    y: Math.max(0, Math.min(pointer.y, viewport.height - menu.height)),
++  };
++}
+diff --git c/frontend/src/ui/problem.ts w/frontend/src/ui/problem.ts
+index 4661a31..6b7bfda 100644
+--- c/frontend/src/ui/problem.ts
++++ w/frontend/src/ui/problem.ts
+@@ -43,3 +43,13 @@ export function report(
+   logProblem(failure);
+   target.problem.value = failure;
+ }
++
++export function clearProblemAbout(
++  target: { readonly problem: ShallowRef<Problem | null> },
++  path: string,
++): void {
++  const problem = target.problem.value;
++  if (problem !== null && problem.action !== "list" && problem.path === path) {
++    target.problem.value = null;
++  }
++}
+diff --git c/frontend/src/ui/store.test.ts w/frontend/src/ui/store.test.ts
+index e4eab47..e88e11d 100644
+--- c/frontend/src/ui/store.test.ts
++++ w/frontend/src/ui/store.test.ts
+@@ -449,6 +449,17 @@ test("settings open and close; picking a file while they show closes them and sh
+   expect(pending).toHaveLength(2);
+ });
+ 
++test("toggleButton hides a toolbar button for every file and shows it again", () => {
++  const store = createAppStore(handSource([]).source);
++  expect([...store.hiddenButtons.value]).toEqual([]);
++
++  store.toggleButton("undo");
++  expect([...store.hiddenButtons.value]).toEqual(["undo"]);
++
++  store.toggleButton("undo");
++  expect([...store.hiddenButtons.value]).toEqual([]);
++});
++
+ test.each([true, false])(
+   "the app's own opens, the first file and the next one after a finish, keep settings as they were (open: %s)",
+   async (settingsOpen) => {
+diff --git c/frontend/src/ui/store.ts w/frontend/src/ui/store.ts
+index b101966..f64562d 100644
+--- c/frontend/src/ui/store.ts
++++ w/frontend/src/ui/store.ts
+@@ -3,7 +3,6 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ import {
+   log,
+   type ChunkSource,
+-  type DiskChange,
+   type DiskVersion,
+   type FileEntry,
+   type FileMergeData,
+@@ -13,12 +12,20 @@ import {
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+-import { applyDiskChanges } from "./diskChanges";
++import { applyDiskChanges, changedOnDisk } from "./diskChanges";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
+-import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
++import {
++  attempt,
++  clearProblemAbout,
++  logProblem,
++  report,
++  unexpected,
++  type Problem,
++} from "./problem";
+ import { finishMustAsk, type Question } from "./question";
+ import type { Taken } from "./sides";
++import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
+ import type { MergeSummary } from "./useMergeController";
+ import { fetchView, isShown, reload } from "./views";
+ 
+@@ -42,6 +49,7 @@ type State = Refs & {
+   readonly source: ChunkSource;
+   readonly asking: Asking;
+   readonly guard: CloseGuard;
++  readonly buttons: HiddenButtons;
+   latestOpen: number;
+ };
+ 
+@@ -59,11 +67,13 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
+   openSettings(): void;
+   closeSettings(): void;
+   answer(yes: boolean): void;
++  toggleButton(id: ToolbarButtonId): void;
+ };
+ 
+ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly question: ComputedRef<Question | null>;
+   readonly allResolved: ComputedRef<boolean>;
++  readonly hiddenButtons: HiddenButtons["hidden"];
+ } & Actions;
+ 
+ let store: AppStore | null = null;
+@@ -82,7 +92,8 @@ export function createAppStore(source: ChunkSource): AppStore {
+   };
+   const asking = createAsking();
+   const guard = createCloseGuard(asking, refs.opened);
+-  const state: State = { ...refs, source, asking, guard, latestOpen: 0 };
++  const buttons = createHiddenButtons();
++  const state: State = { ...refs, source, asking, guard, buttons, latestOpen: 0 };
+   const { files } = refs;
+   store = {
+     ...refs,
+@@ -90,6 +101,7 @@ export function createAppStore(source: ChunkSource): AppStore {
+     allResolved: computed(
+       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+     ),
++    hiddenButtons: buttons.hidden,
+     ...actions(state),
+   };
+   return store;
+@@ -123,6 +135,9 @@ function actions(state: State): Actions {
+       state.settingsOpen.value = false;
+     },
+     answer: state.asking.answer,
++    toggleButton: (id) => {
++      state.buttons.toggle(id);
++    },
+     track: state.guard.track,
+     untrack: state.guard.untrack,
+     unsavedFiles: state.guard.unsavedFiles,
+@@ -131,13 +146,6 @@ function actions(state: State): Actions {
+   };
+ }
+ 
+-function clearProblemAbout(state: State, path: string): void {
+-  const problem = state.problem.value;
+-  if (problem !== null && problem.action !== "list" && problem.path === path) {
+-    state.problem.value = null;
+-  }
+-}
+-
+ async function loadFiles(state: State): Promise<void> {
+   const listed = await refreshFiles(state, "start");
+   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
+@@ -213,11 +221,6 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
+   }
+ }
+ 
+-async function changedOnDisk(state: State, path: string, change: DiskChange): Promise<void> {
+-  clearProblemAbout(state, path);
+-  await applyDiskChanges(state, [change], "running");
+-}
+-
+ async function finish(
+   state: State,
+   { path, text, summary, diskVersion }: FinishRequest,
+diff --git c/frontend/src/ui/toolbarButtons.test.ts w/frontend/src/ui/toolbarButtons.test.ts
+new file mode 100644
+index 0000000..5da3246
+--- /dev/null
++++ w/frontend/src/ui/toolbarButtons.test.ts
+@@ -0,0 +1,145 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { createHiddenButtons, type HiddenButtons } from "./toolbarButtons";
++
++const KEY = "yamt.toolbar.hidden";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function hiddenList(buttons: HiddenButtons): string[] {
++  return [...buttons.hidden.value];
++}
++
++function spyWarnings(): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  return lines;
++}
++
++test("toggling hides then shows a button and stores the hidden ones in toolbar order", () => {
++  const storage = memoryStorage();
++  const buttons = createHiddenButtons(storage);
++  expect(hiddenList(buttons)).toEqual([]);
++  expect(storage.items.get(KEY)).toBeUndefined();
++
++  buttons.toggle("redo");
++  expect(hiddenList(buttons)).toEqual(["redo"]);
++  expect(storage.items.get(KEY)).toBe('["redo"]');
++
++  buttons.toggle("previous");
++  expect([...buttons.hidden.value].sort()).toEqual(["previous", "redo"]);
++  expect(storage.items.get(KEY)).toBe('["previous","redo"]');
++
++  buttons.toggle("redo");
++  expect(hiddenList(buttons)).toEqual(["previous"]);
++  expect(storage.items.get(KEY)).toBe('["previous"]');
++
++  buttons.toggle("previous");
++  expect(hiddenList(buttons)).toEqual([]);
++  expect(storage.items.get(KEY)).toBe("[]");
++});
++
++test("a second start over the same storage hides the same buttons", () => {
++  const storage = memoryStorage();
++  const first = createHiddenButtons(storage);
++  first.toggle("undo");
++  first.toggle("next");
++
++  const restarted = createHiddenButtons(storage);
++
++  expect([...restarted.hidden.value].sort()).toEqual(["next", "undo"]);
++});
++
++test("stored ids yamt does not know are dropped and duplicates collapse", () => {
++  const storage = memoryStorage({ [KEY]: '["redo","save","applyLeft","redo"]' });
++
++  const buttons = createHiddenButtons(storage);
++
++  expect([...buttons.hidden.value].sort()).toEqual(["applyLeft", "redo"]);
++});
++
++test.each([
++  ["not JSON", "[undo"],
++  ["a JSON object", '{"undo":true}'],
++  ["a number", "4"],
++  ["a string", '"undo"'],
++  ["null", "null"],
++  ["an array holding a non-string", '["undo",4]'],
++])("a stored value that is %s hides nothing", (_name, value) => {
++  const buttons = createHiddenButtons(memoryStorage({ [KEY]: value }));
++
++  expect(hiddenList(buttons)).toEqual([]);
++});
++
++test("a missing key hides nothing and writes nothing until a toggle", () => {
++  const storage = memoryStorage({ other: "x" });
++
++  const buttons = createHiddenButtons(storage);
++
++  expect(hiddenList(buttons)).toEqual([]);
++  expect([...storage.items.keys()]).toEqual(["other"]);
++});
++
++test("a storage that throws hides nothing, still toggles in memory and logs warnings", () => {
++  const warnings = spyWarnings();
++  const failing: StorageLike = {
++    getItem: () => {
++      throw new Error("storage disabled");
++    },
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++    removeItem: () => {
++      throw new Error("storage disabled");
++    },
++  };
++
++  const buttons = createHiddenButtons(failing);
++  expect(hiddenList(buttons)).toEqual([]);
++  expect(warnings).toEqual([
++    '[warn] toolbar.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++
++  buttons.toggle("undo");
++  expect(hiddenList(buttons)).toEqual(["undo"]);
++  expect(warnings).toHaveLength(2);
++});
++
++test("a storage that throws only on write keeps the toggle and logs the write's message", () => {
++  const warnings = spyWarnings();
++  const storage = memoryStorage({ [KEY]: '["undo"]' });
++  const buttons = createHiddenButtons({
++    ...storage,
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++  });
++
++  buttons.toggle("redo");
++
++  expect([...buttons.hidden.value].sort()).toEqual(["redo", "undo"]);
++  expect(warnings).toEqual([
++    '[warn] toolbar.storage_failed {kind: "Unexpected", message: "quota exceeded"}',
++  ]);
++});
+diff --git c/frontend/src/ui/toolbarButtons.ts w/frontend/src/ui/toolbarButtons.ts
+new file mode 100644
+index 0000000..66b0a41
+--- /dev/null
++++ w/frontend/src/ui/toolbarButtons.ts
+@@ -0,0 +1,64 @@
++import { useStorage, type StorageLike } from "@vueuse/core";
++import type { Ref } from "vue";
++
++import { log } from "../ipc";
++import { unexpected } from "./problem";
++
++export const TOOLBAR_BUTTONS = [
++  "previous",
++  "next",
++  "applyLeft",
++  "applyRight",
++  "undo",
++  "redo",
++] as const;
++
++export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
++
++export type HiddenButtons = {
++  readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
++  toggle(id: ToolbarButtonId): void;
++};
++
++const STORAGE_KEY = "yamt.toolbar.hidden";
++
++function parseJson(raw: string): unknown {
++  try {
++    return JSON.parse(raw);
++  } catch {
++    return null;
++  }
++}
++
++function readHidden(raw: string): ReadonlySet<ToolbarButtonId> {
++  const names = parseJson(raw);
++  if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
++    return new Set();
++  }
++  return new Set(TOOLBAR_BUTTONS.filter((id) => names.includes(id)));
++}
++
++function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
++  return JSON.stringify(TOOLBAR_BUTTONS.filter((id) => hidden.has(id)));
++}
++
++export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
++  const hidden = useStorage<ReadonlySet<ToolbarButtonId>>(STORAGE_KEY, new Set(), storage, {
++    serializer: { read: readHidden, write: writeHidden },
++    flush: "sync",
++    writeDefaults: false,
++    onError: (error) => {
++      log.warn("toolbar.storage_failed", { ...unexpected(error) });
++    },
++  });
++  return {
++    hidden,
++    toggle: (id) => {
++      const next = new Set(hidden.value);
++      if (!next.delete(id)) {
++        next.add(id);
++      }
++      hidden.value = next;
++    },
++  };
++}

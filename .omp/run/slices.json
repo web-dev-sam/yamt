@@ -1,1 +1,1 @@
-{}
+{ "ToolbarMenu": { "owned": ["frontend/src/ui/**", "frontend/src/style.css"] } }
