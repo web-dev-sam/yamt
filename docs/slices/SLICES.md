@@ -223,6 +223,25 @@ Non-goals: light theme, inactive-window dimming, toolbar gradient, styled scroll
 | 1a  | native window background follows `--color-window` (`src-tauri/src/window.rs`)                | rust-impl | done   | `IslandsDarkNativeBg`: `Color(0x26, 0x28, 0x2c)`, `cargo check` ok                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 1'  | verifier: `just check`, `just mutants 9ed6e26`, WebKit smoke                                 | verifier  | done   | `IslandsDarkVerify`: gate pass (hooks-test, the last recipe, 16/16); mutants: none generated (no TS logic, Rust constant only); apply + undo, file list drag 240→360→240 without creep, no console errors; `/tmp/yamt2-verify-3T.png`                                                                                                                                                                                                                                                                                   |
 
+## Toolbar — change arrows and a settings view (session 8)
+
+Intent (owner 2026-10-13, #655; plan §2 #56): previous/next change arrows in the toolbar that act on
+the side holding the keyboard (the left side when none does), and an icon-only gear at the toolbar's
+right end that swaps the merge area for an empty settings view with a "Back" button. The owner asked
+for no review agents on this one (#655): build, then verify.
+
+Acceptance (WebKit, real input): an arrow press moves the outline exactly as Up/Down on that side and
+keeps the side's keyboard; with the middle or nothing focused the left side takes the keyboard first;
+the gear shows on every file's row; settings hide the file without touching it (text, undo history,
+scroll), no key reaches it, "Back" restores it and the keyboard; a file picked in the list closes
+settings. Non-goals: any actual setting, Escape to close, keyboard shortcuts for the arrows, a
+heading, storage, Rust/IPC changes.
+
+| row | slice                                                                                                                                                                                                               | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | 3.S build: change arrows, gear, settings view (`briefs/3.S-toolbar-settings.md`; `frontend/src/editor/**`, `frontend/src/ui/**`)                                                                                    | web-impl | planned |          |
+| 1'  | verifier: `just check`, `just mutants <base of row 1>`, the real app on a private X display: arrows on both sides and from the middle, gear on every file kind, settings and back keep the merge, no key reaches it | verifier | planned |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
