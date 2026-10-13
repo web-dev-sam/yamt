@@ -2,20 +2,21 @@
 # Usage: scripts/third-party-licenses.sh
 #        scripts/third-party-licenses.sh ubuntu-versions
 # Without an argument: writes THIRD_PARTY_LICENSES.txt, the copyright lines and licence texts of every
-# Rust crate the app builds on Linux and macOS (`cargo metadata`, no dev-dependencies), every production
+# Rust crate the app builds on Linux, macOS and Windows (`cargo metadata`, no dev-dependencies), every production
 # JS package (`pnpm licenses list --prod`) and the two icon sets, quoted from each package's licence files.
 # A package without licence files gets the standard text of its declared licence with the holder from its
 # metadata; when the script has no text for that licence it stops, naming the package.
 # With `ubuntu-versions` (the Linux release job on Ubuntu 22.04, before bundling): appends the installed
 # versions of the Ubuntu source packages listed for the AppImage, and the GNU GPL and LGPL texts from
 # /usr/share/common-licenses (LGPLv3 §4(b) requires the GPL next to it).
-# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's.
+# The release jobs run it on macOS too, whose bash is 3.2 and whose tools are BSD's, and on Windows under Git
+# Bash, where a native jq.exe ends its lines with CRLF (jq manual, `--binary`) and paths use `\`.
 set -euo pipefail
 export LC_ALL=C
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/THIRD_PARTY_LICENSES.txt"
-rust_targets=(x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin)
+rust_targets=(x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc)
 icon_sets=(lucide vscode-icons)
 ubuntu_lgpl_sources=(
     webkit2gtk gtk+3.0 glib2.0 glib-networking libsoup3 pango1.0 gdk-pixbuf atk1.0 at-spi2-atk
@@ -38,14 +39,15 @@ def reachable($edges): . as $seen
 | ([.resolve.root] | reachable($edges)) as $ids
 | .packages[]
 | select(.source != null and (.id as $id | $ids | index($id)))
-| [.name, .version, (.license // ""), (.manifest_path | rtrimstr("/Cargo.toml")), (.authors | join(", ")),
+| [.name, .version, (.license // ""), (.manifest_path | gsub("\\\\"; "/") | rtrimstr("/Cargo.toml")),
+   (.authors | join(", ")),
    (.repository // "")]
 | join("\u001f")'
 
 # shellcheck disable=SC2016
 js_packages_jq='
 to_entries[] | .key as $licence | .value[] | . as $package | range(0; .paths | length)
-| [$package.name, $package.versions[.], $licence, $package.paths[.], ($package.author // "")]
+| [$package.name, $package.versions[.], $licence, ($package.paths[.] | gsub("\\\\"; "/")), ($package.author // "")]
 | join("\u001f")'
 
 die() {
@@ -53,18 +55,23 @@ die() {
     exit 1
 }
 
+# $@: jq's arguments after `-r`. Prints jq's raw output with LF line ends.
+jq_lines() {
+    jq -r "$@" | tr -d '\r'
+}
+
 # Prints one line per crate: name, version, licence, directory, authors, repository (separated by $field).
 rust_crates() {
     local target
     for target in "${rust_targets[@]}"; do
         cargo metadata --format-version 1 --locked --manifest-path "$root/src-tauri/Cargo.toml" \
-            --filter-platform "$target" | jq -r "$rust_crates_jq"
+            --filter-platform "$target" | jq_lines "$rust_crates_jq"
     done | sort -u
 }
 
 # Prints one line per production JS package: name, version, licence, directory, author (separated by $field).
 js_packages() {
-    pnpm -C "$root/frontend" licenses list --prod --json | jq -r "$js_packages_jq" | sort -u
+    pnpm -C "$root/frontend" licenses list --prod --json | jq_lines "$js_packages_jq" | sort -u
 }
 
 # $1: licence expression. Prints its licence ids and operators separated by spaces, without parentheses; the
@@ -215,8 +222,8 @@ icon_entries() {
     for set in "${icon_sets[@]}"; do
         dir="$root/frontend/node_modules/@iconify-json/$set"
         [ -f "$dir/info.json" ] || die "missing $dir/info.json (run pnpm -C frontend install)"
-        entry "$set icons" "$(jq -r .version "$dir/package.json")" "$(jq -r .license.spdx "$dir/info.json")" \
-            "$dir" "$(jq -r .author.name "$dir/info.json")"
+        entry "$set icons" "$(jq_lines .version "$dir/package.json")" "$(jq_lines .license.spdx "$dir/info.json")" \
+            "$dir" "$(jq_lines .author.name "$dir/info.json")"
     done
     printf '\nSome Lucide icons are derived from Feather (lucide LICENSE, hand-checked):\n\n'
     standard_text MIT "2013-present Cole Bemis"

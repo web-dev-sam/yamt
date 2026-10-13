@@ -1,5 +1,9 @@
 #![cfg(test)]
 
+#[cfg_attr(
+    not(unix),
+    expect(dead_code, reason = "`names_in` serves the unix-only link test")
+)]
 mod config;
 
 use std::fs;
@@ -7,7 +11,9 @@ use std::fs;
 use serde_json::json;
 use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
 
-use crate::config::{Config, json_at, light_with_apply, names_in, write};
+#[cfg(unix)]
+use crate::config::names_in;
+use crate::config::{Config, json_at, light_with_apply, write};
 
 #[test]
 fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
@@ -105,7 +111,7 @@ fn a_relative_path_is_refused_and_a_home_prefix_is_expanded() {
     );
     assert!(!config.location_file().exists());
     let settings = relocate(&config.places, &StoredSettings::default(), "~/s.json").unwrap();
-    let in_home = config.dir.path().join("home/s.json");
+    let in_home = config.dir.path().join("home").join("s.json");
     assert_eq!(settings.path, in_home.display().to_string());
     assert!(in_home.exists());
 }

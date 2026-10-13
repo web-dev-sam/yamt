@@ -3,8 +3,8 @@
   "productName": "yamt",
   "identifier": "dev.yamt.merge",
   "build": {
-    "beforeDevCommand": "VITE_CHUNK_SOURCE=tauri pnpm dev --port 5173 --strictPort",
-    "beforeBuildCommand": "VITE_CHUNK_SOURCE=tauri pnpm build",
+    "beforeDevCommand": "pnpm dev --mode tauri --port 5173 --strictPort",
+    "beforeBuildCommand": "pnpm build --mode tauri",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../frontend/dist"
   },
@@ -18,7 +18,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "deb", "app", "dmg"],
+    "targets": ["appimage", "deb", "app", "dmg", "nsis"],
     "category": "DeveloperTool",
     "shortDescription": "Three-way merge window for every conflicted file of a git merge",
     "longDescription": "yamt opens all conflicted files of a stopped git merge, rebase or cherry-pick in one window: your side on the left, theirs on the right, the result in the middle, with arrows to apply each change. Marking a file resolved stages it.",

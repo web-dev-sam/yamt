@@ -1,7 +1,5 @@
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -25,6 +23,7 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
     minor: 44,
 };
 const SCRATCH_ATTEMPTS: u32 = 1000;
+#[cfg(unix)]
 const SCRATCH_MODE: u32 = 0o700;
 
 /// The gitattributes that decide what git wrote to a conflicted path.
@@ -281,7 +280,9 @@ fn compare_stage(
     let look = match file.disk {
         OnDisk::Link(target) if is_link => same(&blobs.read(&entry.oid)?, target),
         // git-hash-object(1) `--stdin-paths` reads one path per line.
-        OnDisk::File(bytes) if !is_link && file.path.as_os_str().as_bytes().contains(&b'\n') => {
+        OnDisk::File(bytes)
+            if !is_link && file.path.as_os_str().as_encoded_bytes().contains(&b'\n') =>
+        {
             same(&blobs.read(&entry.oid)?, bytes)
         }
         OnDisk::File(_) if !is_link => StartLook::BlobOf(entry.oid.clone()),
@@ -308,7 +309,7 @@ impl ScratchDir {
         let process = std::process::id();
         for attempt in 0..SCRATCH_ATTEMPTS {
             let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
-            match fs::DirBuilder::new().mode(SCRATCH_MODE).create(&dir) {
+            match create_private_dir(&dir) {
                 Ok(()) => return Ok(ScratchDir(dir)),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
@@ -316,6 +317,19 @@ impl ScratchDir {
         }
         Err(io::Error::from(io::ErrorKind::AlreadyExists))
     }
+}
+
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
+}
+
+// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
+// system and administrators) may read.
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    fs::create_dir(dir)
 }
 
 impl Drop for ScratchDir {
@@ -329,19 +343,24 @@ impl Drop for ScratchDir {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::*;
 
-    const PERMISSION_BITS: u32 = 0o777;
-
     #[test]
-    fn the_scratch_dir_is_readable_by_its_owner_only_and_removed_when_dropped() {
+    fn the_scratch_dir_is_removed_when_dropped() {
         let scratch = ScratchDir::create().unwrap();
         let dir = scratch.0.clone();
-        let mode = fs::metadata(&dir).unwrap().permissions().mode();
-        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
+        assert!(dir.is_dir());
         drop(scratch);
         assert!(!dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_scratch_dir_is_readable_by_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        const PERMISSION_BITS: u32 = 0o777;
+        let scratch = ScratchDir::create().unwrap();
+        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
+        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
     }
 }

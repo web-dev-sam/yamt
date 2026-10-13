@@ -32,7 +32,12 @@ jobs:
             args: ""
           - runner: macos-14
             args: --target universal-apple-darwin
+          - runner: windows-2025
+            args: ""
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7.0.1
 

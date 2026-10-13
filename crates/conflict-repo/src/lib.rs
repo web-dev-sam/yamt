@@ -1,11 +1,8 @@
 //! Test fixture: real git repositories whose merge stops with scripted conflicts.
 #![forbid(unsafe_code)]
 
-use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -199,7 +196,7 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
             if worktree_file.symlink_metadata().is_ok() {
                 fs::remove_file(&worktree_file)?;
             }
-            symlink(OsStr::from_bytes(bytes), &worktree_file)?;
+            link_to(bytes, &worktree_file)?;
             git_ok(root, &["add", "--", file.path])?;
         }
         FileKind::Submodule => {
@@ -210,6 +207,22 @@ fn write_side(root: &Path, file: &ConflictFile, bytes: &[u8]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn link_to(target: &[u8], link: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), link)
+}
+
+// Windows creates a symlink only in Developer Mode or with an admin right (`CreateSymbolicLinkW`), so
+// tests that script one run on unix only.
+#[cfg(not(unix))]
+fn link_to(_target: &[u8], _link: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "scripted symlinks are unix-only",
+    ))
 }
 
 #[cfg(test)]

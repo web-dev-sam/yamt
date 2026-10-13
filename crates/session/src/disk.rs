@@ -1,6 +1,5 @@
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -105,7 +104,8 @@ pub(crate) fn read_on_disk(repo: &Repo, path: &Path, is_submodule: bool) -> Resu
         Err(source) => return Err(read_failed(source)),
     };
     let read = if file_type.is_symlink() {
-        fs::read_link(&full_path).map(|target| OnDisk::Link(target.into_os_string().into_vec()))
+        fs::read_link(&full_path)
+            .map(|target| OnDisk::Link(target.into_os_string().into_encoded_bytes()))
     } else if file_type.is_file() {
         fs::read(&full_path).map(OnDisk::File)
     } else if file_type.is_dir() && is_submodule {

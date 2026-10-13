@@ -14,7 +14,9 @@ const REMOTE_DELETED: &str = "d_remote_deleted.txt";
 const BINARY: &str = "e_binary.bin";
 const LATIN1: &str = "f_latin1.txt";
 const CRLF: &str = "g_crlf.txt";
+#[cfg(unix)]
 const SUBMODULE: &str = "h_submodule";
+#[cfg(unix)]
 const SYMLINK: &str = "i_symlink";
 
 const MODIFY_SIDES: [&str; 3] = [
@@ -243,6 +245,8 @@ fn load_add_add_crlf_file_takes_its_eol_from_local() {
     assert_eq!(data.eol, Eol::CrLf);
 }
 
+// Unix only: holds a symlink (scripted on unix only).
+#[cfg(unix)]
 const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
     ConflictFile {
         path: MODIFY_TS,
@@ -267,6 +271,7 @@ const NON_REGULAR_NEXT_TO_TEXT: [ConflictFile<'static>; 3] = [
     },
 ];
 
+#[cfg(unix)]
 #[test]
 fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads() {
     let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();
@@ -298,6 +303,7 @@ fn submodule_and_symlink_conflicts_are_unsupported_and_the_text_file_still_loads
     assert_eq!(session.load(MODIFY_TS).unwrap().local, MODIFY_SIDES[1]);
 }
 
+#[cfg(unix)]
 #[test]
 fn reset_of_a_submodule_conflict_keeps_its_stages_and_leaves_it_unresolved() {
     let dir = conflict_repo(&NON_REGULAR_NEXT_TO_TEXT).unwrap();

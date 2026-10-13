@@ -3,7 +3,6 @@
 mod config;
 
 use std::fs;
-use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use serde_json::json;
@@ -299,7 +298,7 @@ fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
 fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
     let config = Config::new();
     fs::create_dir_all(config.folder()).unwrap();
-    let relative_target = Path::new("../../elsewhere/dotfiles/settings.json");
+    let relative_target = std::path::Path::new("../../elsewhere/dotfiles/settings.json");
     std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
     let dotfile = config.elsewhere("dotfiles/settings.json");
     read(&config.places, &StoredSettings::default()).unwrap();

@@ -1,5 +1,3 @@
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::{Error, Result};
@@ -95,7 +93,7 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
     if fields.next().is_some() || path.is_empty() {
         return None;
     }
-    let path = PathBuf::from(OsStr::from_bytes(path));
+    let path = path_from_git(path);
     Some(StageEntry {
         mode,
         oid,
@@ -139,8 +137,21 @@ fn push_stage_record(input: &mut Vec<u8>, entry: &StageEntry) {
 }
 
 fn push_path(input: &mut Vec<u8>, path: &Path) {
-    input.extend_from_slice(path.as_os_str().as_bytes());
+    input.extend_from_slice(path.as_os_str().as_encoded_bytes());
     input.push(b'\0');
+}
+
+#[cfg(unix)]
+pub(crate) fn path_from_git(bytes: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+
+// Git for Windows keeps paths as UTF-8 and cannot check out one that is not, so `-z` output is UTF-8
+// (git-for-windows `compat/mingw.c`, `xutftowcs_path`).
+#[cfg(not(unix))]
+pub(crate) fn path_from_git(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
 #[cfg(test)]

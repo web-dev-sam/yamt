@@ -1,4 +1,6 @@
 #![cfg(test)]
+// Unix only: `every_kind` scripts symlinks (scripted on unix only).
+#![cfg(unix)]
 
 use yamt_session::{MergeSession, SideContent, UnsupportedReason};
 

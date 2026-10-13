@@ -1,4 +1,6 @@
 #![cfg(test)]
+// Unix only: every test merges `FILES`, which holds a symlink (scripted on unix only).
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::symlink;

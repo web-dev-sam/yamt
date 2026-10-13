@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            app: --no-bundle
+          - runner: macos-14
+            app: --no-bundle
+          - runner: windows-2025
+            app: --bundles nsis
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+
+      - name: Rust toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: nextest,just
+
+      - name: Tauri CLI
+        run: cargo install tauri-cli --version 2.12.1 --locked
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Frontend packages
+        run: pnpm -C frontend install --frozen-lockfile
+
+      - name: Rust tests without the runner's git config (RK19)
+        run: just test
+
+      - name: App build
+        run: cargo tauri build ${{ matrix.app }}
+
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: yamt-windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Frontend packages
+        run: pnpm -C frontend install --frozen-lockfile
+
+      - name: Frontend unit tests
+        run: pnpm -C frontend test

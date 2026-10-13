@@ -1,4 +1,6 @@
 #![cfg(test)]
+// Unix only: almost every test takes from `every_kind`, which scripts symlinks (unix only).
+#![cfg(unix)]
 
 use std::fs;
 use std::path::Path;

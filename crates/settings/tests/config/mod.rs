@@ -21,7 +21,7 @@ impl Config {
     }
 
     pub fn folder(&self) -> PathBuf {
-        self.dir.path().join("config/yamt")
+        self.dir.path().join("config").join("yamt")
     }
 
     pub fn default_file(&self) -> PathBuf {

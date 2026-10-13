@@ -1,17 +1,14 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::blob::{BlobReader, CAT_FILE};
-use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged};
+use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
 use crate::run::{Access, GIT_TIMEOUT, git_command, run};
 use crate::{Error, Result, StageEntry};
 
-const ANY_EXECUTE_BIT: u32 = 0o111;
 const REV_PARSE: &str = "rev-parse";
 const LOG: &str = "log";
 const HASH_OBJECT: &str = "hash-object";
@@ -40,7 +37,7 @@ impl Repo {
         let git = find_git_on_path()?;
         let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
         let output = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
-        let root = PathBuf::from(OsStr::from_bytes(&output));
+        let root = path_from_git(&output);
         Ok(Repo { root, git })
     }
 
@@ -87,7 +84,7 @@ impl Repo {
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
         let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
-        let path = self.root.join(OsStr::from_bytes(&git_path));
+        let path = self.root.join(path_from_git(&git_path));
         match fs::read(&path) {
             Ok(message) => Ok(Some(message)),
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -165,7 +162,7 @@ impl Repo {
     pub fn resolve_with(&self, chosen: &StageEntry) -> Result<()> {
         let (mode, oid) = (chosen.mode, chosen.oid.as_str());
         let mut record = format!("{mode:o} {oid} 0\t").into_bytes();
-        record.extend_from_slice(chosen.path.as_os_str().as_bytes());
+        record.extend_from_slice(chosen.path.as_os_str().as_encoded_bytes());
         record.push(b'\0');
         let command = self.command(Access::Write, &["update-index", "-z", "--index-info"]);
         run(command, Some(record), GIT_TIMEOUT)?;
@@ -187,7 +184,7 @@ impl Repo {
         }
         let mut input = Vec::new();
         for path in paths {
-            input.extend_from_slice(path.as_os_str().as_bytes());
+            input.extend_from_slice(path.as_os_str().as_encoded_bytes());
             input.push(b'\n');
         }
         let command = self.command(Access::Read, &[HASH_OBJECT, "--stdin-paths"]);
@@ -252,17 +249,98 @@ fn without_final_newline(mut output: Vec<u8>) -> Result<Vec<u8>> {
 
 fn find_git_on_path() -> Result<PathBuf> {
     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
-    for dir in std::env::split_paths(&search_path) {
-        if !dir.is_absolute() {
-            continue;
-        }
-        let candidate = dir.join("git");
-        let is_executable = candidate.metadata().is_ok_and(|metadata| {
-            metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
-        });
-        if is_executable {
-            return Ok(candidate);
-        }
+    git_in(&search_path).ok_or(Error::GitNotFound)
+}
+
+fn git_in(search_path: &OsStr) -> Option<PathBuf> {
+    std::env::split_paths(search_path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(GIT_FILE_NAME))
+        .find(|candidate| is_runnable(candidate))
+}
+
+#[cfg(unix)]
+const GIT_FILE_NAME: &str = "git";
+
+#[cfg(not(unix))]
+const GIT_FILE_NAME: &str = "git.exe";
+
+#[cfg(unix)]
+fn is_runnable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    const ANY_EXECUTE_BIT: u32 = 0o111;
+    path.metadata().is_ok_and(|metadata| {
+        metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
+    })
+}
+
+// Windows has no execute bit: the `.exe` name is what makes a file runnable.
+#[cfg(not(unix))]
+fn is_runnable(path: &Path) -> bool {
+    path.is_file()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::*;
+
+    fn search_path(dirs: &[&Path]) -> OsString {
+        std::env::join_paths(dirs).unwrap()
     }
-    Err(Error::GitNotFound)
+
+    #[cfg(unix)]
+    fn runnable_git_in(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let git = dir.join(GIT_FILE_NAME);
+        fs::write(&git, "").unwrap();
+        fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+        git
+    }
+
+    #[cfg(not(unix))]
+    fn runnable_git_in(dir: &Path) -> PathBuf {
+        let git = dir.join(GIT_FILE_NAME);
+        fs::write(&git, "").unwrap();
+        git
+    }
+
+    #[test]
+    fn a_relative_path_entry_is_skipped_and_the_same_folder_found_by_its_absolute_path() {
+        let dir = tempfile::tempdir_in(".").unwrap();
+        runnable_git_in(dir.path());
+        let name = dir.path().file_name().unwrap();
+        let (relative, absolute) = (Path::new(name), std::env::current_dir().unwrap().join(name));
+        assert_eq!(git_in(&search_path(&[relative])), None);
+        let found = git_in(&search_path(&[relative, &absolute]));
+        assert_eq!(found, Some(absolute.join(GIT_FILE_NAME)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_git_without_an_execute_bit_is_skipped_and_the_next_executable_one_found() {
+        use std::os::unix::fs::PermissionsExt;
+        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let not_executable = plain.path().join("git");
+        fs::write(&not_executable, "").unwrap();
+        fs::set_permissions(&not_executable, fs::Permissions::from_mode(0o644)).unwrap();
+        let git = runnable_git_in(runnable.path());
+        assert_eq!(
+            git_in(&search_path(&[plain.path(), runnable.path()])),
+            Some(git)
+        );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn a_git_without_the_exe_name_is_skipped_and_the_next_git_exe_found() {
+        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        fs::write(plain.path().join("git"), "").unwrap();
+        let git = runnable_git_in(runnable.path());
+        assert_eq!(
+            git_in(&search_path(&[plain.path(), runnable.path()])),
+            Some(git)
+        );
+    }
 }

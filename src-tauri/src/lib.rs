@@ -1,5 +1,6 @@
 //! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
 
+#[cfg(target_os = "linux")]
 mod appimage;
 mod args;
 mod commands;
@@ -37,7 +38,11 @@ pub fn run() -> ExitCode {
             println!("yamt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Invocation::Merge { repo }) => merge(&appimage::repo_from_start_dir(repo)).report(),
+        Ok(Invocation::Merge { repo }) => {
+            #[cfg(target_os = "linux")]
+            let repo = appimage::repo_from_start_dir(repo);
+            merge(&repo).report()
+        }
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }
 }

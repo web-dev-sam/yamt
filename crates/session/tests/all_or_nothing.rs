@@ -1,7 +1,6 @@
 #![cfg(test)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
@@ -10,7 +9,9 @@ use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Sid
 const TEXT: &str = "src/cart.ts";
 const BINARY: &str = "assets/logo.bin";
 const DELETED: &str = "assets/removed.txt";
+#[cfg(unix)]
 const READ_ONLY_DIR: u32 = 0o555;
+#[cfg(unix)]
 const WRITABLE_DIR: u32 = 0o755;
 
 fn mixed_conflict() -> TempDir {
@@ -122,11 +123,16 @@ fn take_with_a_held_index_lock_changes_nothing() {
     }
 }
 
+// Unix only: Windows does not honour the read-only attribute on a folder ("File Attribute
+// Constants", `FILE_ATTRIBUTE_READONLY`), so nothing there makes a worktree write fail this way.
+#[cfg(unix)]
 fn set_assets_mode(dir: &TempDir, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
     let assets = dir.path().join("assets");
     fs::set_permissions(assets, fs::Permissions::from_mode(mode)).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn take_whose_worktree_write_fails_puts_the_conflict_back() {
     let dir = mixed_conflict();
@@ -152,6 +158,7 @@ fn staged(dir: &TempDir, path: &str) -> String {
     String::from_utf8(git_ok(dir.path(), &["ls-files", "-s", "--", path]).unwrap()).unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn take_of_a_resolved_file_whose_worktree_write_fails_keeps_the_earlier_resolution() {
     let dir = mixed_conflict();

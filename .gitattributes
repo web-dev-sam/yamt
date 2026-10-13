@@ -1,0 +1,2 @@
+# Goldens, fixtures and test inputs are compared byte for byte: a Windows checkout must equal a Linux one.
+* -text

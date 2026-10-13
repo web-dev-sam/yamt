@@ -1,4 +1,3 @@
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::repo::Repo;
@@ -45,7 +44,7 @@ impl Repo {
         ];
         let mut input = Vec::new();
         for path in paths {
-            input.extend_from_slice(path.as_os_str().as_bytes());
+            input.extend_from_slice(path.as_os_str().as_encoded_bytes());
             input.push(b'\0');
         }
         let output = run(self.command(Access::Read, &args), Some(input), GIT_TIMEOUT)?;
@@ -70,8 +69,8 @@ fn parse_attributes(output: &[u8], paths: &[&Path]) -> Option<Vec<MergeAttribute
     for path in paths {
         let mut value_of = |name: &str| {
             let [record_path, attribute, info] = records.next()?;
-            let matches =
-                *record_path == path.as_os_str().as_bytes() && *attribute == name.as_bytes();
+            let matches = *record_path == path.as_os_str().as_encoded_bytes()
+                && *attribute == name.as_bytes();
             matches.then(|| attribute_value(info))
         };
         attributes.push(MergeAttributes {
