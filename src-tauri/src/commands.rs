@@ -23,6 +23,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
+        settings::set_antialiasing::<tauri::Wry>,
         settings::set_keys::<tauri::Wry>,
         settings::move_settings::<tauri::Wry>,
     ])

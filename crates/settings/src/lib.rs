@@ -31,11 +31,32 @@ impl Theme {
     }
 }
 
+/// How code text is smoothed: with coloured subpixels or grey only (applied on Linux, at start).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum Antialiasing {
+    #[default]
+    Subpixel,
+    Greyscale,
+}
+
+impl Antialiasing {
+    /// The spelling in the settings file.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Antialiasing::Subpixel => "subpixel",
+            Antialiasing::Greyscale => "greyscale",
+        }
+    }
+}
+
 /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
 /// keys differ from the defaults (the window knows the defaults; Rust never does).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct StoredSettings {
     pub theme: Theme,
+    pub antialiasing: Antialiasing,
     pub keys: BTreeMap<String, Vec<String>>,
 }
 
@@ -66,15 +87,16 @@ pub enum Error {
     NotAbsolute { path: String },
 }
 
-/// The file in use's theme; `Dark` when anything on the way to it is missing, unreadable or broken.
+/// The file in use's settings; defaults when anything on the way to it is missing, unreadable or
+/// broken. Never writes.
 #[must_use]
-pub fn theme_at_start(places: &Places) -> Theme {
+pub fn stored_at_start(places: &Places) -> StoredSettings {
     let Ok(path) = places.file_in_use() else {
-        return Theme::Dark;
+        return StoredSettings::default();
     };
     match file::load(&path) {
-        Ok(Some(loaded)) => loaded.stored.theme,
-        Ok(None) | Err(_) => Theme::Dark,
+        Ok(Some(loaded)) => loaded.stored,
+        Ok(None) | Err(_) => StoredSettings::default(),
     }
 }
 
@@ -91,6 +113,14 @@ pub fn set_theme(
     theme: Theme,
 ) -> Result<SettingsRead, Error> {
     change(places, current, |stored| stored.theme = theme)
+}
+
+pub fn set_antialiasing(
+    places: &Places,
+    current: &StoredSettings,
+    antialiasing: Antialiasing,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| stored.antialiasing = antialiasing)
 }
 
 pub fn set_keys(
@@ -156,6 +186,16 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(theme).unwrap(),
                 serde_json::Value::from(theme.name())
+            );
+        }
+    }
+
+    #[test]
+    fn an_antialiasing_name_is_its_serde_spelling() {
+        for antialiasing in [Antialiasing::Subpixel, Antialiasing::Greyscale] {
+            assert_eq!(
+                serde_json::to_value(antialiasing).unwrap(),
+                serde_json::Value::from(antialiasing.name())
             );
         }
     }

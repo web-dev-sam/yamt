@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::{Error, StoredSettings};
 
 const THEME: &str = "theme";
+const ANTIALIASING: &str = "antialiasing";
 const KEYS: &str = "keys";
 
 /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
@@ -31,6 +32,10 @@ impl Loaded {
     fn entries(self) -> Map<String, Value> {
         let mut entries = self.others;
         entries.insert(THEME.to_owned(), Value::from(self.stored.theme.name()));
+        entries.insert(
+            ANTIALIASING.to_owned(),
+            Value::from(self.stored.antialiasing.name()),
+        );
         if !self.stored.keys.is_empty() {
             let mut keys = Map::new();
             for (action, action_keys) in self.stored.keys {
@@ -70,6 +75,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
         serde_json::from_str(text).map_err(|error| broken(path, syntax_message(&error)))?;
     let stored = StoredSettings {
         theme: entry(path, THEME, others.remove(THEME))?,
+        antialiasing: entry(path, ANTIALIASING, others.remove(ANTIALIASING))?,
         keys: entry(path, KEYS, others.remove(KEYS))?,
     };
     Ok(Loaded { others, stored })

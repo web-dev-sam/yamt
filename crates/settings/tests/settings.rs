@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::json;
 use yamt_settings::{
-    Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
+    Antialiasing, Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme,
+    stored_at_start,
 };
 
 use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
@@ -28,7 +29,7 @@ fn a_missing_folder_and_file_are_created_from_the_current_settings() {
     assert_eq!(settings.default_path, settings.path);
     assert_eq!(
         fs::read_to_string(config.default_file()).unwrap(),
-        "{\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
+        "{\n  \"antialiasing\": \"subpixel\",\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
     );
 }
 
@@ -154,6 +155,7 @@ fn unknown_entries_and_unknown_action_ids_survive_a_change() {
         json!({
             "window": { "x": 1 },
             "theme": "light",
+            "antialiasing": "subpixel",
             "keys": { "future-action": ["F1"], "apply": ["Mod-Enter"] },
         })
     );
@@ -169,12 +171,19 @@ fn some_sets_and_none_removes_an_action_and_keys_disappears_when_empty() {
     assert_eq!(settings.stored.keys, expected);
     assert_eq!(
         json_at(&config.default_file()),
-        json!({ "theme": "light", "keys": { "ignore": [], "undo": ["Mod-u"] } })
+        json!({
+            "theme": "light",
+            "antialiasing": "subpixel",
+            "keys": { "ignore": [], "undo": ["Mod-u"] },
+        })
     );
     let back = [change("ignore", None), change("undo", None)];
     let settings = set_keys(&config.places, &light_with_apply(), &back).unwrap();
     assert!(settings.stored.keys.is_empty());
-    assert_eq!(json_at(&config.default_file()), json!({ "theme": "light" }));
+    assert_eq!(
+        json_at(&config.default_file()),
+        json!({ "theme": "light", "antialiasing": "subpixel" })
+    );
 }
 
 #[test]
@@ -187,7 +196,7 @@ fn a_change_rereads_the_file_so_an_outside_edit_to_another_entry_survives() {
     assert_eq!(settings.stored.theme, Theme::Light);
     assert_eq!(
         json_at(&config.default_file()),
-        json!({ "theme": "light", "keys": { "apply": ["F2"] } })
+        json!({ "theme": "light", "antialiasing": "subpixel", "keys": { "apply": ["F2"] } })
     );
 }
 
@@ -198,7 +207,11 @@ fn a_change_to_a_missing_file_starts_from_the_current_settings() {
     assert_eq!(settings.stored.keys, light_with_apply().keys);
     assert_eq!(
         json_at(&config.default_file()),
-        json!({ "theme": "dark", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
+        json!({
+            "theme": "dark",
+            "antialiasing": "subpixel",
+            "keys": { "apply": ["Mod-Enter"], "ignore": [] },
+        })
     );
 }
 
@@ -235,7 +248,7 @@ fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
     set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
     let link = fs::symlink_metadata(config.default_file()).unwrap();
     assert!(link.file_type().is_symlink());
-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+    assert_eq!(json_at(&dotfile), light_subpixel());
 }
 
 #[cfg(unix)]
@@ -253,7 +266,7 @@ fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
     for link in [config.default_file(), second_link] {
         assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
     }
-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+    assert_eq!(json_at(&dotfile), light_subpixel());
 }
 
 #[cfg(unix)]
@@ -279,7 +292,7 @@ fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
         Theme::Dark
     );
     set_theme(&config.places, &current, Theme::Light).unwrap();
-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+    assert_eq!(json_at(&dotfile), light_subpixel());
     let mut link_count = 0;
     for entry in fs::read_dir(&links).unwrap() {
         assert!(entry.unwrap().file_type().unwrap().is_symlink());
@@ -302,7 +315,10 @@ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
     std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
     let dotfile = config.elsewhere("dotfiles/settings.json");
     read(&config.places, &StoredSettings::default()).unwrap();
-    assert_eq!(json_at(&dotfile), json!({ "theme": "dark" }));
+    assert_eq!(
+        json_at(&dotfile),
+        json!({ "theme": "dark", "antialiasing": "subpixel" })
+    );
     set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
     let link = fs::symlink_metadata(config.default_file()).unwrap();
     assert!(link.file_type().is_symlink());
@@ -310,27 +326,60 @@ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
         fs::read_link(config.default_file()).unwrap(),
         relative_target
     );
-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+    assert_eq!(json_at(&dotfile), light_subpixel());
+}
+
+fn light_subpixel() -> serde_json::Value {
+    json!({ "theme": "light", "antialiasing": "subpixel" })
 }
 
 #[test]
-fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
+fn stored_at_start_gives_the_defaults_whenever_anything_is_missing_or_broken() {
     let config = Config::new();
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    let defaults = StoredSettings::default();
+    assert_eq!(stored_at_start(&config.places), defaults);
     assert!(!config.folder().exists());
-    write(&config.default_file(), r#"{"theme": "light"}"#);
-    assert_eq!(theme_at_start(&config.places), Theme::Light);
+    write(
+        &config.default_file(),
+        r#"{"theme": "light", "antialiasing": "greyscale", "keys": {"apply": ["F2"]}}"#,
+    );
+    let stored = StoredSettings {
+        theme: Theme::Light,
+        antialiasing: Antialiasing::Greyscale,
+        keys: keys(&[("apply", &["F2"])]),
+    };
+    assert_eq!(stored_at_start(&config.places), stored);
     write(&config.default_file(), r#"{"keys": {}}"#);
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert_eq!(stored_at_start(&config.places), defaults);
     write(&config.default_file(), r#"{"theme": "light""#);
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert_eq!(stored_at_start(&config.places), defaults);
+    write(
+        &config.default_file(),
+        r#"{"theme": "light", "antialiasing": "sharp"}"#,
+    );
+    assert_eq!(stored_at_start(&config.places), defaults);
     let target = config.elsewhere("missing.json");
     write(&config.location_file(), &format!("{}\n", target.display()));
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert_eq!(stored_at_start(&config.places), defaults);
     assert!(!target.exists());
     write(&config.location_file(), "relative.json\n");
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert_eq!(stored_at_start(&config.places), defaults);
     fs::remove_file(config.location_file()).unwrap();
     fs::create_dir(config.location_file()).unwrap();
-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert_eq!(stored_at_start(&config.places), defaults);
+}
+
+#[cfg(unix)]
+#[test]
+fn stored_at_start_gives_the_defaults_for_an_unreadable_file_and_leaves_it_alone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let config = Config::new();
+    let text = r#"{"theme": "light", "antialiasing": "greyscale"}"#;
+    write(&config.default_file(), text);
+    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o000)).unwrap();
+    let stored = stored_at_start(&config.places);
+    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(stored, StoredSettings::default());
+    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
 }

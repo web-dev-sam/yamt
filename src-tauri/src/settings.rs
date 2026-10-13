@@ -1,6 +1,6 @@
 use tauri::path::PathResolver;
 use tauri::{Manager, Runtime, WebviewWindow};
-use yamt_settings::{KeysChange, Places, SettingsRead, StoredSettings, Theme};
+use yamt_settings::{Antialiasing, KeysChange, Places, SettingsRead, StoredSettings, Theme};
 
 use crate::ipc_error::IpcError;
 use crate::window::show_theme;
@@ -39,6 +39,22 @@ pub(crate) fn set_theme<R: Runtime>(
     theme: Theme,
 ) -> Result<SettingsRead, IpcError> {
     let read = yamt_settings::set_theme(&places(window.path())?, &current, theme)?;
+    show_theme(&window, read.stored.theme);
+    Ok(read)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
+pub(crate) fn set_antialiasing<R: Runtime>(
+    window: WebviewWindow<R>,
+    current: StoredSettings,
+    antialiasing: Antialiasing,
+) -> Result<SettingsRead, IpcError> {
+    let read = yamt_settings::set_antialiasing(&places(window.path())?, &current, antialiasing)?;
     show_theme(&window, read.stored.theme);
     Ok(read)
 }

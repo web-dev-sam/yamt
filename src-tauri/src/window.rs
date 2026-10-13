@@ -9,7 +9,7 @@ use tauri::{
     WindowEvent,
 };
 use yamt_session::MergeSession;
-use yamt_settings::Theme;
+use yamt_settings::{StoredSettings, Theme};
 
 use crate::commands::{SessionState, lock, with_session};
 use crate::outcome::{Ending, ending_on_close};
@@ -38,7 +38,11 @@ pub(crate) fn run(session: MergeSession) -> Ending {
 
 fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
-    let theme = start_theme(app.path());
+    let stored = start_settings(app.path());
+    // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
+    #[cfg(target_os = "linux")]
+    crate::font_rendering::apply(stored.antialiasing);
+    let theme = stored.theme;
     WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::default())
         .title(title)
         .inner_size(WIDTH, HEIGHT)
@@ -52,12 +56,15 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
 }
 
-fn start_theme(paths: &PathResolver<tauri::Wry>) -> Theme {
+fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {
     match settings::places(paths) {
-        Ok(places) => yamt_settings::theme_at_start(&places),
+        Ok(places) => yamt_settings::stored_at_start(&places),
         Err(error) => {
-            tracing::warn!(?error, "no config folder: the window starts dark");
-            Theme::Dark
+            tracing::warn!(
+                ?error,
+                "no config folder: the window starts with the defaults"
+            );
+            StoredSettings::default()
         }
     }
 }

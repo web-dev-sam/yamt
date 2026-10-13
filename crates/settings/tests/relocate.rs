@@ -9,7 +9,7 @@ mod config;
 use std::fs;
 
 use serde_json::json;
-use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
+use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, stored_at_start};
 
 #[cfg(unix)]
 use crate::config::names_in;
@@ -34,7 +34,7 @@ fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
         again.default_path,
         config.default_file().display().to_string()
     );
-    assert_eq!(theme_at_start(&config.places), Theme::Light);
+    assert_eq!(stored_at_start(&config.places).theme, Theme::Light);
 }
 
 #[test]
@@ -50,7 +50,11 @@ fn relocating_to_a_missing_path_creates_it_from_the_current_settings() {
     assert_eq!(settings.stored, light_with_apply());
     assert_eq!(
         json_at(&target),
-        json!({ "theme": "light", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
+        json!({
+            "theme": "light",
+            "antialiasing": "subpixel",
+            "keys": { "apply": ["Mod-Enter"], "ignore": [] },
+        })
     );
     assert!(config.location_file().exists());
 }

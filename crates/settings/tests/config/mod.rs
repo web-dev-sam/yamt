@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use tempfile::TempDir;
-use yamt_settings::{Places, StoredSettings, Theme};
+use yamt_settings::{Antialiasing, Places, StoredSettings, Theme};
 
 pub struct Config {
     pub dir: TempDir,
@@ -67,6 +67,7 @@ pub fn keys(entries: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
 pub fn light_with_apply() -> StoredSettings {
     StoredSettings {
         theme: Theme::Light,
+        antialiasing: Antialiasing::Subpixel,
         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
     }
 }

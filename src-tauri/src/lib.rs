@@ -4,6 +4,8 @@
 mod appimage;
 mod args;
 mod commands;
+#[cfg(target_os = "linux")]
+mod font_rendering;
 mod frontend_log;
 #[cfg(target_os = "linux")]
 mod graphics;
