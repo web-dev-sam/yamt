@@ -1,5 +1,13 @@
 {
   "MacTests": {
     "owned": ["crates/*/tests/**", "crates/*/src/**", "src-tauri/tests/**", "src-tauri/src/**"]
+  },
+  "WindowsBuildR3": {
+    "owned": [
+      "src-tauri/build.rs",
+      "src-tauri/windows-app-manifest.xml",
+      ".github/workflows/**",
+      ".github/actions/**"
+    ]
   }
 }
