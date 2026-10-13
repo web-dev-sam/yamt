@@ -109,3 +109,12 @@ export function writeState(path: string, state: SessionState): void {
   writeFileSync(partial, `${JSON.stringify(state)}\n`);
   renameSync(partial, path);
 }
+
+/** How a command saves its session; `stop` finds every process only through this file. */
+export type Save<S extends SessionState> = (next: S) => S;
+
+/** The one place a command writes its session's state file. */
+export function saveState<S extends SessionState>(state: S): S {
+  writeState(statePath(state.name), state);
+  return state;
+}

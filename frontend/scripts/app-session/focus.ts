@@ -1,8 +1,7 @@
-import { join } from "node:path";
-
-import { launch, run, stopProc } from "./processes";
+import { logsFolder } from "./folders";
+import { launchTracked, run, stopProc } from "./processes";
 import { appSession, displayEnv } from "./session";
-import { statePath, writeState, type SessionState } from "./state";
+import { saveState, type SessionState } from "./state";
 
 const FOCUS_ROLE = "focus-window";
 const FOCUS_CLASS = "yamt-app-session-focus";
@@ -24,16 +23,19 @@ export async function focusAway(state: SessionState): Promise<Readonly<Record<st
     throw new Error("focus is already away; run focus-back first");
   }
   const env = displayEnv(app.display);
-  const { proc } = await launch({
-    role: FOCUS_ROLE,
-    command: "xmessage",
-    args: ["-name", FOCUS_CLASS, "-geometry", "+0+0", "focus away"],
-    env,
-    cwd: app.folder,
-    logDir: join(app.folder, "logs"),
-    fd3File: null,
-  });
-  writeState(statePath(app.name), { ...app, procs: [...app.procs, proc] });
+  await launchTracked(
+    app,
+    {
+      role: FOCUS_ROLE,
+      command: "xmessage",
+      args: ["-name", FOCUS_CLASS, "-geometry", "+0+0", "focus away"],
+      env,
+      cwd: app.folder,
+      logDir: logsFolder(app.folder),
+      fd3File: null,
+    },
+    saveState,
+  );
   const window = await firstWindow(["--sync", "--classname", FOCUS_CLASS], env);
   await run("xdotool", ["windowfocus", "--sync", window], env);
   return { focused: "xmessage", window };
@@ -48,9 +50,6 @@ export async function focusBack(state: SessionState): Promise<Readonly<Record<st
   for (const proc of away) {
     await stopProc(proc);
   }
-  writeState(statePath(app.name), {
-    ...app,
-    procs: app.procs.filter((proc) => !away.includes(proc)),
-  });
+  saveState({ ...app, procs: app.procs.filter((proc) => !away.includes(proc)) });
   return { focused: "app", window };
 }

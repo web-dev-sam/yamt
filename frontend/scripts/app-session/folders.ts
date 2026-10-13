@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 
 export const TEMP_PREFIX = "yamt-app-session-";
 
@@ -9,6 +9,10 @@ function isInside(path: string, folder: string): boolean {
 
 export function isOwnTempFolder(folder: string, tmpRoot: string): boolean {
   return dirname(folder) === tmpRoot && basename(folder).startsWith(TEMP_PREFIX);
+}
+
+export function logsFolder(sessionFolder: string): string {
+  return join(sessionFolder, "logs");
 }
 
 export function ownerConfigClash(

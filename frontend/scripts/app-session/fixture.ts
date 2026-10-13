@@ -1,8 +1,8 @@
 import type { Command } from "./args";
-import { freePort, waitUntil } from "./processes";
+import { freePort, launchTracked, waitUntil } from "./processes";
 import { fromRoot } from "./session";
-import { DRIVER_READY_MS, launchTracked, tempFolder, withCleanup, type Save } from "./start";
-import type { FixtureState } from "./state";
+import { DRIVER_READY_MS, tempFolder, withCleanup } from "./start";
+import type { FixtureState, Save } from "./state";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartFixture = Extract<Command, { kind: "start-fixture" }>;

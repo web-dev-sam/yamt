@@ -1,4 +1,4 @@
-import { execFileSync, type ChildProcess } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -12,16 +12,22 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 
 import type { Command } from "./args";
-import { ownerConfigClash, TEMP_PREFIX } from "./folders";
-import { freePort, launch, waitUntil, type Launch } from "./processes";
+import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
+import { freePort, launchTracked, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
-import { readState, statePath, writeState, type AppState, type SessionState } from "./state";
+import {
+  readState,
+  saveState,
+  statePath,
+  type AppState,
+  type Save,
+  type SessionState,
+} from "./state";
 import { stopSession } from "./stop";
 import { finishRecording, recordingLaunch, waitForRecording } from "./video";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartApp = Extract<Command, { kind: "start-app" }>;
-export type Save<S> = (next: S) => S;
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
@@ -38,7 +44,7 @@ export function tempFolder(name: string): { folder: string; logDir: string } {
     throw new Error(`a session named "${name}" exists; stop it first`);
   }
   const folder = mkdtempSync(join(tmpdir(), `${TEMP_PREFIX}${name}-`));
-  const logDir = join(folder, "logs");
+  const logDir = logsFolder(folder);
   mkdirSync(logDir);
   return { folder, logDir };
 }
@@ -88,24 +94,14 @@ function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
   return env;
 }
 
-export async function launchTracked<S extends SessionState>(
-  state: S,
-  spec: Launch,
-  save: Save<S>,
-): Promise<{ state: S; child: ChildProcess }> {
-  const { child, proc } = await launch(spec);
-  return { state: save({ ...state, procs: [...state.procs, proc] }), child };
-}
-
 export async function withCleanup<S extends SessionState>(
   first: S,
   steps: (save: Save<S>) => Promise<S>,
 ): Promise<S> {
   let latest = first;
   function save(next: S): S {
-    latest = next;
-    writeState(statePath(next.name), next);
-    return next;
+    latest = saveState(next);
+    return latest;
   }
   save(first);
   try {

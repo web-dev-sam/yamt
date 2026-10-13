@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { isOwnTempFolder } from "./folders";
 import { stopProc } from "./processes";
 import { readState, statePath, type SessionState } from "./state";
-import { webdriver } from "./webdriver";
+import { deleteSession } from "./webdriver";
 
 async function endSession(state: SessionState): Promise<string> {
   if (state.session === null) {
     return "none";
   }
   try {
-    await webdriver(state.driverPort, "DELETE", `/session/${state.session}`);
+    await deleteSession(state.driverPort, state.session);
     return "ended";
   } catch (error) {
     return `not ended: ${error instanceof Error ? error.message : String(error)}`;

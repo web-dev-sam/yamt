@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
-import { parseStartTicks, type Proc } from "./state";
+import { parseStartTicks, type Proc, type Save, type SessionState } from "./state";
 
 const POLL_MS = 100;
 const STOP_GRACE_MS = 3000;
@@ -35,7 +35,7 @@ function startTicksOf(pid: number): number | null {
   }
 }
 
-export async function launch(spec: Launch): Promise<{ child: ChildProcess; proc: Proc }> {
+async function launch(spec: Launch): Promise<{ child: ChildProcess; proc: Proc }> {
   const log = openSync(logFile(spec.logDir, spec.role), "a");
   const extra = spec.fd3File === null ? [] : [openSync(spec.fd3File, "w")];
   const child = spawn(spec.command, spec.args, {
@@ -55,6 +55,16 @@ export async function launch(spec: Launch): Promise<{ child: ChildProcess; proc:
     throw new Error(`${spec.command} exited at once; see ${logFile(spec.logDir, spec.role)}`);
   }
   return { child, proc: { role: spec.role, pid, startTicks } };
+}
+
+/** Launches a process and records it in the session's state at once, so `stop` always finds it. */
+export async function launchTracked<S extends SessionState>(
+  state: S,
+  spec: Launch,
+  save: Save<S>,
+): Promise<{ state: S; child: ChildProcess }> {
+  const { child, proc } = await launch(spec);
+  return { state: save({ ...state, procs: [...state.procs, proc] }), child };
 }
 
 export async function waitUntil(
