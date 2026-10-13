@@ -1,5 +1,5 @@
 {
-  "SettingsDesktop": {
+  "SettingsDesktopR1": {
     "owned": [
       "crates/settings/**",
       "src-tauri/src/**",
