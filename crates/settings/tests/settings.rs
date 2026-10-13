@@ -329,6 +329,7 @@ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
     assert_eq!(json_at(&dotfile), light_subpixel());
 }
 
+#[cfg(unix)]
 fn light_subpixel() -> serde_json::Value {
     json!({ "theme": "light", "antialiasing": "subpixel" })
 }
