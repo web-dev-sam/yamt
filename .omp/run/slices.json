@@ -1,6 +1,5 @@
 {
-  "SettingsDesktopR2": { "owned": ["crates/settings/**"] },
-  "SettingsWeb": {
+  "SettingsWebR1": {
     "owned": [
       "frontend/index.html",
       "frontend/src/style.css",
