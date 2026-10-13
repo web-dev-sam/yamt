@@ -1,12 +1,5 @@
 {
-  "WorkflowRules": {
-    "owned": [".omp/skills/**", ".omp/agents/**", ".omp/GUARDRAILS.md", ".omp/hooks/test/**"]
-  },
-  "AppSession": {
-    "owned": [
-      "frontend/scripts/app-session.ts",
-      "frontend/scripts/app-session.test.ts",
-      "frontend/scripts/app-session/**"
-    ]
+  "AppSessionR1": {
+    "owned": ["frontend/scripts/app-session.ts", "frontend/scripts/app-session/**"]
   }
 }

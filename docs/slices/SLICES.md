@@ -287,10 +287,10 @@ growth harm only, small findings judged by whether they hurt the app as it grows
 one scoped re-check per fix round, a mutation run after each build, overlapped builds, builds sized
 to the budget, one shared real-app helper, fewer stops for questions, lighter bookkeeping.
 
-| row | slice                                                                                                 | owner    | status  | evidence                                                                                   |
-| --- | ----------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------ |
-| 1   | rules: W1–W5, W7–W9 in skills, agents, registry, hook test (`.omp/run/gate-d-2026-10-13.md`)          | curator  | running | orchestrator applied `--ignoreStatic` (justfile) and `MAX_PARALLEL_AGENTS = 3` (policy.ts) |
-| 2   | the shared real-app helper `app-session` (`briefs/W.app-session.md`; `frontend/scripts/app-session*`) | web-impl | running |                                                                                            |
+| row | slice                                                                                                 | owner    | status | evidence                                                                                                                                                                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------- | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | rules: W1–W5, W7–W9 in skills, agents, registry, hook test (`.omp/run/gate-d-2026-10-13.md`)          | curator  | done   | `02ea70c`: OR10/OR12/OR13, RV8, growth check, VF7 per slice; hooks-test 16/16; leftovers in architecture, ai-system, justfile fixed by the orchestrator. Notes: `history://WorkflowRules`                                                                                                                 |
+| 2   | the shared real-app helper `app-session` (`briefs/W.app-session.md`; `frontend/scripts/app-session*`) | web-impl | review | `e52a1f4` (`AppSession`, notes `.omp/run/notes/AppSession.md`): 12 commands, 56 tests; real app: light start 0 dark frames of 300, Settings → Dark, focus away/back, stop leaves nothing; fixture: Next change + Enter 3 → 2 changes. `just app-session` recipe. Mutants running, boundary review running |
 
 ## Open product questions
 

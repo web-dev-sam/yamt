@@ -1,0 +1,536 @@
+[Survived] ArrayDeclaration
+scripts/app-session/args.ts:98:48
+-     const [, width, height] = SIZE.exec(text) ?? [];
++     const [, width, height] = SIZE.exec(text) ?? ["Stryker was here"];
+Tests ran:
+    --settings must be a JSON object, --size must be <width>x<height>
+
+
+[Survived] ConditionalExpression
+scripts/app-session/args.ts:99:7
+-     if (width === undefined || height === undefined) {
++     if (false || height === undefined) {
+Tests ran:
+    start-app reads every option of the acceptance run
+    --settings must be a JSON object, --size must be <width>x<height>
+    start-fixture takes a name and a size
+
+
+[Survived] LogicalOperator
+scripts/app-session/args.ts:99:7
+-     if (width === undefined || height === undefined) {
++     if (width === undefined && height === undefined) {
+Tests ran:
+    start-app reads every option of the acceptance run
+    --settings must be a JSON object, --size must be <width>x<height>
+    start-fixture takes a name and a size
+
+
+[Survived] ConditionalExpression
+scripts/app-session/args.ts:99:30
+-     if (width === undefined || height === undefined) {
++     if (width === undefined || false) {
+Tests ran:
+    start-app reads every option of the acceptance run
+    start-fixture takes a name and a size
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:129:48
+-     return { file, seconds: wholeNumber(seconds, "--record-seconds", 1) };
++     return { file, seconds: wholeNumber(seconds, "", 1) };
+Tests ran:
+    start-app reads every option of the acceptance run
+    --record and --record-seconds come together, with whole seconds of at least 1
+
+
+[Survived] ObjectLiteral
+scripts/app-session/args.ts:142:58
+-       throw new Error(`--settings is not JSON: ${reason}`, { cause: error });
++       throw new Error(`--settings is not JSON: ${reason}`, {});
+Tests ran:
+    --settings must be a JSON object, --size must be <width>x<height>
+
+
+[Survived] ConditionalExpression
+scripts/app-session/args.ts:144:7
+-     if (typeof value !== "object" || value === null || Array.isArray(value)) {
++     if (false || value === null || Array.isArray(value)) {
+Tests ran:
+    start-app reads every option of the acceptance run
+    --settings must be a JSON object, --size must be <width>x<height>
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:158:46
+-     return { kind: "px", px: wholeNumber(text, "--to", 0) };
++     return { kind: "px", px: wholeNumber(text, "", 0) };
+Tests ran:
+    scroll takes a target and --to top, bottom or a whole pixel offset
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:166:54
+-       nth: nth === undefined ? null : wholeNumber(nth, "--nth", 0),
++       nth: nth === undefined ? null : wholeNumber(nth, "", 0),
+Tests ran:
+    click takes one accessible name, an optional role, a 0-based --nth and --x11
+    scroll takes a target and --to top, bottom or a whole pixel offset
+
+
+[Survived] CallExpression
+scripts/app-session/args.ts:171:3
+-     noPositionals(parsed);
++     ;
+Tests ran:
+    start-app takes the brief's defaults: debug binary, 1600x1000, no recording, no settings
+    start-app reads every option of the acceptance run
+    start-app needs exactly one repository choice
+  and 3 more tests!
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:199:56
+-         return { kind, name, text: onePositional(parsed, "text"), x11 };
++         return { kind, name, text: onePositional(parsed, ""), x11 };
+Tests ran:
+    type, read and shot take exactly one positional; -- lets one start with --
+
+
+[Survived] ConditionalExpression
+scripts/app-session/args.ts:205:7
+-     if (file === undefined || hexes.length === 0) {
++     if (false || hexes.length === 0) {
+Tests ran:
+    colours takes a file and at least one colour, and needs no session
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:229:42
+-         const file = onePositional(parsed, "file");
++         const file = onePositional(parsed, "");
+Tests ran:
+    type, read and shot take exactly one positional; -- lets one start with --
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:232:10
+-       case "focus-away":
++       case "":
+Tests ran:
+    a session name is a plain file name, never a path
+    colours takes a file and at least one colour, and needs no session
+    unknown commands show the usage; unknown, valueless or repeated options are errors
+
+
+[Survived] StringLiteral
+scripts/app-session/args.ts:233:10
+-       case "focus-back":
++       case "":
+Tests ran:
+    a session name is a plain file name, never a path
+    colours takes a file and at least one colour, and needs no session
+    unknown commands show the usage; unknown, valueless or repeated options are errors
+
+
+[Survived] ConditionalExpression
+scripts/app-session/args.ts:248:7
+-     if (word === undefined || !isCommandKind(word)) {
++     if (false || !isCommandKind(word)) {
+Tests ran:
+    start-app takes the brief's defaults: debug binary, 1600x1000, no recording, no settings
+    start-app reads every option of the acceptance run
+    start-app needs exactly one repository choice
+  and 10 more tests!
+
+
+[Survived] ArithmeticOperator
+scripts/app-session/colours.ts:54:20
+-     for (let at = 0; at + BYTES_PER_PIXEL <= frame.length; at += BYTES_PER_PIXEL) {
++     for (let at = 0; at - BYTES_PER_PIXEL <= frame.length; at += BYTES_PER_PIXEL) {
+Tests ran:
+    only exact pixels count; one step off in any channel does not
+    a colour straddling two pixels is not a match
+    frames split across chunks, mid-pixel, keep each frame's own counts
+
+
+[Survived] ArithmeticOperator
+scripts/app-session/colours.ts:27:10
+-     return width * height * BYTES_PER_PIXEL;
++     return width / height * BYTES_PER_PIXEL;
+Tests ran:
+    frames split across chunks, mid-pixel, keep each frame's own counts
+    feedFrames returns the bytes of an unfinished frame and hands over only whole ones
+
+
+[Survived] EqualityOperator
+scripts/app-session/colours.ts:59:21
+-       for (let i = 0; i < wanted.length; i += 1) {
++       for (let i = 0; i <= wanted.length; i += 1) {
+Tests ran:
+    only exact pixels count; one step off in any channel does not
+    a colour straddling two pixels is not a match
+    frames split across chunks, mid-pixel, keep each frame's own counts
+
+
+[Survived] MethodExpression
+scripts/app-session/colours.ts:72:35
+-       if (previous !== undefined && previous.counts.every((count, i) => count === counts[i])) {
++       if (previous !== undefined && previous.counts.some((count, i) => count === counts[i])) {
+Tests ran:
+    consecutive equal rows collapse into one inclusive frame range; equal rows apart stay apart
+
+
+[Survived] EqualityOperator
+scripts/app-session/colours.ts:82:38
+-     return perFrame.filter((counts) => (counts[colour] ?? 0) > 0).length;
++     return perFrame.filter((counts) => (counts[colour] ?? 0) <= 0).length;
+Tests ran:
+    framesWithMatch counts frames with at least one pixel of that colour
+
+
+[Survived] StringLiteral
+scripts/app-session/find.ts:108:34
+-     const record = recordOf(value, "candidate");
++     const record = recordOf(value, "");
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+
+
+[Survived] StringLiteral
+scripts/app-session/find.ts:109:47
+-     const element = recordOf(record["element"], "element");
++     const element = recordOf(record["element"], "");
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+
+
+[Survived] Regex
+scripts/app-session/find.ts:135:40
+-       return candidate.role.trim().split(/\s+/)[0] ?? "";
++       return candidate.role.trim().split(/\s/)[0] ?? "";
+Tests ran:
+    text names only roles that take their name from content
+    roles: the first explicit token, else the tag's implicit role
+
+
+[Survived] StringLiteral
+scripts/app-session/find.ts:138:38
+-       return candidate.href ? "link" : "";
++       return candidate.href ? "link" : "Stryker was here!";
+Tests ran:
+    text names only roles that take their name from content
+
+
+[Survived] MethodExpression
+scripts/app-session/find.ts:172:17
+-     const shown = candidates.slice(0, SHOWN_CANDIDATES).map((candidate, i) => {
++     const shown = candidates.map((candidate, i) => {
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/find.ts:173:18
+-       const role = roleOf(candidate) === "" ? candidate.tag : roleOf(candidate);
++       const role = true ? candidate.tag : roleOf(candidate);
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/find.ts:173:18
+-       const role = roleOf(candidate) === "" ? candidate.tag : roleOf(candidate);
++       const role = false ? candidate.tag : roleOf(candidate);
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] StringLiteral
+scripts/app-session/find.ts:173:40
+-       const role = roleOf(candidate) === "" ? candidate.tag : roleOf(candidate);
++       const role = roleOf(candidate) === "Stryker was here!" ? candidate.tag : roleOf(candidate);
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] EqualityOperator
+scripts/app-session/find.ts:173:18
+-       const role = roleOf(candidate) === "" ? candidate.tag : roleOf(candidate);
++       const role = roleOf(candidate) !== "" ? candidate.tag : roleOf(candidate);
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/find.ts:178:5
+-       candidates.length > SHOWN_CANDIDATES ? `; … ${candidates.length - SHOWN_CANDIDATES} more` : "";
++       false ? `; … ${candidates.length - SHOWN_CANDIDATES} more` : "";
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/find.ts:185:20
+-       const hidden = matches.length === 0 ? "" : `; ${matches.length} hidden: ${listed(matches)}`;
++       const hidden = false ? "" : `; ${matches.length} hidden: ${listed(matches)}`;
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    CSS matches are picked by visibility and role, with the same errors
+
+
+[Survived] StringLiteral
+scripts/app-session/find.ts:185:43
+-       const hidden = matches.length === 0 ? "" : `; ${matches.length} hidden: ${listed(matches)}`;
++       const hidden = matches.length === 0 ? "Stryker was here!" : `; ${matches.length} hidden: ${listed(matches)}`;
+Tests ran:
+    CSS matches are picked by visibility and role, with the same errors
+
+
+[Survived] ConditionalExpression
+scripts/app-session/find.ts:198:7
+-     if (only === undefined || others.length > 0) {
++     if (false || others.length > 0) {
+Tests ran:
+    a hidden element with the same name is never picked
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 1 more test!
+
+
+[Survived] EqualityOperator
+scripts/app-session/find.ts:178:5
+-       candidates.length > SHOWN_CANDIDATES ? `; … ${candidates.length - SHOWN_CANDIDATES} more` : "";
++       candidates.length >= SHOWN_CANDIDATES ? `; … ${candidates.length - SHOWN_CANDIDATES} more` : "";
+Tests ran:
+    only hidden matches is an error that counts and lists them
+    several visible matches is an error naming each; --nth counts visible ones only
+    --role tells a button from a region with the same name
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/folders.ts:7:10
+-     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
++     return false || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+Tests ran:
+    a config folder at or inside the owner's config folder is refused
+    a private config folder, or a sibling sharing a prefix, is allowed
+
+
+[Survived] StringLiteral
+scripts/app-session/folders.ts:7:18
+-     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
++     return rel === "Stryker was here!" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+Tests ran:
+    a config folder at or inside the owner's config folder is refused
+    a private config folder, or a sibling sharing a prefix, is allowed
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:4:10
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return true && value !== null && !Array.isArray(value);
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:4:10
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return true;
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:4:10
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return true && !Array.isArray(value);
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] LogicalOperator
+scripts/app-session/json.ts:4:10
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return typeof value === "object" && value !== null || !Array.isArray(value);
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+
+[Backing file: ~/.omp/agent/sessions/-Projects-yamt/2026-10-09T08-11-26-444Z_01a11fb7-916c-757e-9297-21b301786bbf/5031.bash-original.log (193.7KB). Use artifact://5031:raw:1-3000 for bounded verbatim chunks, artifact://5031:1-3000 for numbered exploration, and the backing file path for search/copy workflows.]
+
+[Showing lines 1-2003 of 5668. Use :2004 to continue]
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:8:7
+-     if (!isRecord(value)) {
++     if (false) {
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] LogicalOperator
+scripts/app-session/json.ts:4:10
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return typeof value === "object" || value !== null && !Array.isArray(value);
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:4:39
+-     return typeof value === "object" && value !== null && !Array.isArray(value);
++     return typeof value === "object" && true && !Array.isArray(value);
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:32:7
+-     if (typeof value !== "boolean") {
++     if (false) {
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+
+
+[Survived] LogicalOperator
+scripts/app-session/json.ts:24:7
+-     if (typeof value !== "number" || !Number.isFinite(value)) {
++     if (typeof value !== "number" && !Number.isFinite(value)) {
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/app-session/json.ts:24:7
+-     if (typeof value !== "number" || !Number.isFinite(value)) {
++     if (false || !Number.isFinite(value)) {
+Tests ran:
+    parseCandidates reads the page's records and rejects a malformed one
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+  and 2 more tests!
+
+
+[Survived] StringLiteral
+scripts/app-session/keys.ts:192:73
+-     throw new Error(`unknown key "${text}" (named keys: ${NAMED_KEYS.join(", ")})`);
++     throw new Error(`unknown key "${text}" (named keys: ${NAMED_KEYS.join("")})`);
+Tests ran:
+    press parses every key, in order
+    unknown keys and modifiers, a repeated modifier and a missing key are refused
+
+
+[Survived] StringLiteral
+scripts/app-session/keys.ts:205:82
+-         throw new Error(`unknown modifier "${part}" in "${text}" (${MODIFIERS.join(", ")})`);
++         throw new Error(`unknown modifier "${part}" in "${text}" (${MODIFIERS.join("")})`);
+Tests ran:
+    unknown keys and modifiers, a repeated modifier and a missing key are refused
+
+
+[Survived] StringLiteral
+scripts/app-session/placement.ts:41:34
+-     const record = recordOf(value, "element placement");
++     const record = recordOf(value, "");
+Tests ran:
+    parsePlacement rejects a reply without a number
+
+
+[Survived] StringLiteral
+scripts/app-session/state.ts:50:34
+-     const record = recordOf(value, "process");
++     const record = recordOf(value, "");
+Tests ran:
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+    a state of an unknown kind or without its kind's fields is refused
+
+
+[Survived] StringLiteral
+scripts/app-session/state.ts:63:41
+-     const size = recordOf(record["size"], "size");
++     const size = recordOf(record["size"], "");
+Tests ran:
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+    a state of an unknown kind or without its kind's fields is refused
+
+
+[Survived] StringLiteral
+scripts/app-session/state.ts:75:45
+-     const record = recordOf(JSON.parse(text), "state file");
++     const record = recordOf(JSON.parse(text), "");
+Tests ran:
+    every process survives a write and a read, in order
+    a process without a usable pid is refused, not dropped
+    a state of an unknown kind or without its kind's fields is refused
+
+
+[Survived] StringLiteral
+scripts/app-session/state.ts:98:42
+-       return parseState(readFileSync(path, "utf8"));
++       return parseState(readFileSync(path, ""));
+Tests ran:
+    every process survives a write and a read, in order
+    a missing state file reads as no session; a broken one is an error naming the file
+
+
+[Survived] ObjectLiteral
+scripts/app-session/state.ts:100:91
+-       throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`, {
+-         cause: error,
+-       });
++       throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`, {});
+Tests ran:
+    a missing state file reads as no session; a broken one is an error naming the file
+
+
