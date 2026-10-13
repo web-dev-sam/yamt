@@ -1,0 +1,1655 @@
+diff --git c/crates/settings/AGENTS.md i/crates/settings/AGENTS.md
+new file mode 100644
+index 0000000..da3b1a7
+--- /dev/null
++++ i/crates/settings/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57): `lib.rs` (types crossing the IPC, `Error`, the five operations), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename). No tauri, no git, no `yamt-*` crate (arch-check); action ids and key strings are opaque text. Tests are integration tests on temp folders in `tests/`.
+diff --git c/crates/settings/Cargo.toml i/crates/settings/Cargo.toml
+new file mode 100644
+index 0000000..981acce
+--- /dev/null
++++ i/crates/settings/Cargo.toml
+@@ -0,0 +1,18 @@
++[package]
++name = "yamt-settings"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++serde.workspace = true
++serde_json.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++
++[dev-dependencies]
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git c/crates/settings/src/file.rs i/crates/settings/src/file.rs
+new file mode 100644
+index 0000000..08db468
+--- /dev/null
++++ i/crates/settings/src/file.rs
+@@ -0,0 +1,151 @@
++use std::fs;
++use std::io::{self, ErrorKind};
++use std::path::Path;
++use std::process;
++
++use serde::de::DeserializeOwned;
++use serde_json::{Map, Value};
++
++use crate::{Error, KeysChange, StoredSettings, Theme};
++
++const THEME: &str = "theme";
++const KEYS: &str = "keys";
++
++/// A settings file's entries as written, unknown ones included, and what yamt reads from them.
++pub(crate) struct Loaded {
++    pub(crate) entries: Map<String, Value>,
++    pub(crate) stored: StoredSettings,
++}
++
++impl Loaded {
++    pub(crate) fn from_settings(settings: &StoredSettings) -> Loaded {
++        let mut loaded = Loaded {
++            entries: Map::new(),
++            stored: settings.clone(),
++        };
++        loaded.set_theme(settings.theme);
++        loaded.put_keys();
++        loaded
++    }
++
++    pub(crate) fn set_theme(&mut self, theme: Theme) {
++        self.stored.theme = theme;
++        self.entries
++            .insert(THEME.to_owned(), Value::from(theme_name(theme)));
++    }
++
++    pub(crate) fn set_keys(&mut self, changes: &[KeysChange]) {
++        for change in changes {
++            match &change.keys {
++                Some(keys) => {
++                    self.stored.keys.insert(change.action.clone(), keys.clone());
++                }
++                None => {
++                    self.stored.keys.remove(&change.action);
++                }
++            }
++        }
++        self.put_keys();
++    }
++
++    fn put_keys(&mut self) {
++        if self.stored.keys.is_empty() {
++            self.entries.remove(KEYS);
++            return;
++        }
++        let mut keys = Map::new();
++        for (action, action_keys) in &self.stored.keys {
++            keys.insert(action.clone(), Value::from(action_keys.clone()));
++        }
++        self.entries.insert(KEYS.to_owned(), Value::Object(keys));
++    }
++}
++
++fn theme_name(theme: Theme) -> &'static str {
++    match theme {
++        Theme::Dark => "dark",
++        Theme::Light => "light",
++    }
++}
++
++/// `None` when there is no file at `path`.
++pub(crate) fn load(path: &Path) -> Result<Option<Loaded>, Error> {
++    match fs::read_to_string(path) {
++        Ok(text) => parsed(path, &text).map(Some),
++        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
++        Err(error) => Err(Error::ReadFailed {
++            path: path.to_owned(),
++            message: error.to_string(),
++        }),
++    }
++}
++
++pub(crate) fn read_or_create(
++    path: &Path,
++    current: &StoredSettings,
++) -> Result<StoredSettings, Error> {
++    if let Some(loaded) = load(path)? {
++        return Ok(loaded.stored);
++    }
++    let created = Loaded::from_settings(current);
++    write_entries(path, created.entries)?;
++    Ok(created.stored)
++}
++
++fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
++    let entries: Map<String, Value> =
++        serde_json::from_str(text).map_err(|error| broken(path, error.to_string()))?;
++    let stored = StoredSettings {
++        theme: entry(path, &entries, THEME)?,
++        keys: entry(path, &entries, KEYS)?,
++    };
++    Ok(Loaded { entries, stored })
++}
++
++fn entry<T: DeserializeOwned + Default>(
++    path: &Path,
++    entries: &Map<String, Value>,
++    name: &str,
++) -> Result<T, Error> {
++    match entries.get(name) {
++        Some(value) => {
++            T::deserialize(value).map_err(|error| broken(path, format!("`{name}`: {error}")))
++        }
++        None => Ok(T::default()),
++    }
++}
++
++fn broken(path: &Path, message: String) -> Error {
++    Error::Broken {
++        path: path.to_owned(),
++        message,
++    }
++}
++
++pub(crate) fn write_entries(path: &Path, entries: Map<String, Value>) -> Result<(), Error> {
++    write_text(path, &format!("{:#}\n", Value::Object(entries)))
++}
++
++/// Writes through a temporary file and a rename; a symlink at `path` is followed, so it stays a link.
++pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
++    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
++    let failed = |error: io::Error| Error::WriteFailed {
++        path: target.clone(),
++        message: error.to_string(),
++    };
++    let Some(name) = target.file_name() else {
++        return Err(failed(io::Error::from(ErrorKind::IsADirectory)));
++    };
++    let mut temp_name = name.to_owned();
++    temp_name.push(format!(".{}.tmp", process::id()));
++    let temp = target.with_file_name(temp_name);
++    if let Some(folder) = target.parent() {
++        fs::create_dir_all(folder).map_err(failed)?;
++    }
++    let written = fs::write(&temp, text).and_then(|()| fs::rename(&temp, &target));
++    if let Err(error) = written {
++        fs::remove_file(&temp).ok();
++        return Err(failed(error));
++    }
++    Ok(())
++}
+diff --git c/crates/settings/src/lib.rs i/crates/settings/src/lib.rs
+new file mode 100644
+index 0000000..08932ea
+--- /dev/null
++++ i/crates/settings/src/lib.rs
+@@ -0,0 +1,126 @@
++//! The per-user settings file: where it is, what it holds, and how a change is written to it.
++#![forbid(unsafe_code)]
++
++mod file;
++mod places;
++
++use std::collections::BTreeMap;
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++
++use crate::file::Loaded;
++pub use crate::places::Places;
++
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++#[serde(rename_all = "lowercase")]
++pub enum Theme {
++    #[default]
++    Dark,
++    Light,
++}
++
++/// What the window holds and sends: `keys` = action id → key strings, only for actions whose
++/// keys differ from the defaults (the window knows the defaults; Rust never does).
++#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++pub struct StoredSettings {
++    #[serde(default)]
++    pub theme: Theme,
++    #[serde(default)]
++    pub keys: BTreeMap<String, Vec<String>>,
++}
++
++/// `Some(keys)` replaces the action's entry (an empty list = the action has no key);
++/// `None` removes the entry (the action is back on its defaults).
++#[derive(Clone, Debug, PartialEq, Eq, Deserialize, specta::Type)]
++pub struct KeysChange {
++    pub action: String,
++    pub keys: Option<Vec<String>>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
++pub struct SettingsRead {
++    pub path: String,
++    pub default_path: String,
++    pub stored: StoredSettings,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error("cannot read {}: {message}", path.display())]
++    ReadFailed { path: PathBuf, message: String },
++    #[error("{} is broken: {message}", path.display())]
++    Broken { path: PathBuf, message: String },
++    #[error("cannot write {}: {message}", path.display())]
++    WriteFailed { path: PathBuf, message: String },
++    #[error("`{path}` is not an absolute path")]
++    NotAbsolute { path: String },
++}
++
++/// The file in use's theme; `Dark` when anything on the way to it is missing, unreadable or broken.
++#[must_use]
++pub fn theme_at_start(places: &Places) -> Theme {
++    let Ok(path) = places.file_in_use() else {
++        return Theme::Dark;
++    };
++    match file::load(&path) {
++        Ok(Some(loaded)) => loaded.stored.theme,
++        Ok(None) | Err(_) => Theme::Dark,
++    }
++}
++
++/// The file in use, created from `current` when it is missing; an existing file is never rewritten.
++pub fn read(places: &Places, current: &StoredSettings) -> Result<SettingsRead, Error> {
++    let path = places.file_in_use()?;
++    let stored = file::read_or_create(&path, current)?;
++    Ok(settings_read(places, &path, stored))
++}
++
++pub fn set_theme(
++    places: &Places,
++    current: &StoredSettings,
++    theme: Theme,
++) -> Result<SettingsRead, Error> {
++    change(places, current, |loaded| loaded.set_theme(theme))
++}
++
++pub fn set_keys(
++    places: &Places,
++    current: &StoredSettings,
++    changes: &[KeysChange],
++) -> Result<SettingsRead, Error> {
++    change(places, current, |loaded| loaded.set_keys(changes))
++}
++
++/// Makes `to` the file in use: an existing file there is used, a missing one is created from
++/// `current`; the location is recorded only once that file is readable.
++pub fn relocate(
++    places: &Places,
++    current: &StoredSettings,
++    to: &str,
++) -> Result<SettingsRead, Error> {
++    let path = places.expanded(to)?;
++    let stored = file::read_or_create(&path, current)?;
++    places.record_location(&path)?;
++    Ok(settings_read(places, &path, stored))
++}
++
++fn change(
++    places: &Places,
++    current: &StoredSettings,
++    edit: impl FnOnce(&mut Loaded),
++) -> Result<SettingsRead, Error> {
++    let path = places.file_in_use()?;
++    let mut loaded = file::load(&path)?.unwrap_or_else(|| Loaded::from_settings(current));
++    edit(&mut loaded);
++    file::write_entries(&path, loaded.entries)?;
++    Ok(settings_read(places, &path, loaded.stored))
++}
++
++fn settings_read(places: &Places, path: &Path, stored: StoredSettings) -> SettingsRead {
++    SettingsRead {
++        path: path.display().to_string(),
++        default_path: places.default_file().display().to_string(),
++        stored,
++    }
++}
+diff --git c/crates/settings/src/places.rs i/crates/settings/src/places.rs
+new file mode 100644
+index 0000000..3c506cf
+--- /dev/null
++++ i/crates/settings/src/places.rs
+@@ -0,0 +1,88 @@
++use std::fs;
++use std::io::ErrorKind;
++use std::path::{Path, PathBuf};
++
++use crate::Error;
++use crate::file;
++
++const FOLDER: &str = "yamt";
++const DEFAULT_FILE: &str = "settings.json";
++const LOCATION_FILE: &str = "settings-location";
++const HOME_PREFIX: &str = "~/";
++
++#[derive(Clone, Debug)]
++pub struct Places {
++    default_file: PathBuf,
++    location_file: PathBuf,
++    home: PathBuf,
++}
++
++impl Places {
++    /// `config_dir` = the platform's per-user config folder; files go in `<config_dir>/yamt/`.
++    #[must_use]
++    pub fn new(config_dir: &Path, home: &Path) -> Places {
++        let folder = config_dir.join(FOLDER);
++        Places {
++            default_file: folder.join(DEFAULT_FILE),
++            location_file: folder.join(LOCATION_FILE),
++            home: home.to_owned(),
++        }
++    }
++
++    #[must_use]
++    pub fn default_file(&self) -> &Path {
++        &self.default_file
++    }
++
++    pub(crate) fn file_in_use(&self) -> Result<PathBuf, Error> {
++        let text = match fs::read_to_string(&self.location_file) {
++            Ok(text) => text,
++            Err(error) if error.kind() == ErrorKind::NotFound => {
++                return Ok(self.default_file.clone());
++            }
++            Err(error) => {
++                return Err(Error::ReadFailed {
++                    path: self.location_file.clone(),
++                    message: error.to_string(),
++                });
++            }
++        };
++        let recorded = PathBuf::from(text.trim_end_matches(['\n', '\r']));
++        if recorded.is_absolute() {
++            Ok(recorded)
++        } else {
++            Err(Error::Broken {
++                path: self.location_file.clone(),
++                message: format!("`{}` is not an absolute path", recorded.display()),
++            })
++        }
++    }
++
++    pub(crate) fn expanded(&self, to: &str) -> Result<PathBuf, Error> {
++        if let Some(below_home) = to.strip_prefix(HOME_PREFIX) {
++            return Ok(self.home.join(below_home));
++        }
++        let path = PathBuf::from(to);
++        if path.is_absolute() {
++            Ok(path)
++        } else {
++            Err(Error::NotAbsolute {
++                path: to.to_owned(),
++            })
++        }
++    }
++
++    pub(crate) fn record_location(&self, path: &Path) -> Result<(), Error> {
++        if path != self.default_file {
++            return file::write_text(&self.location_file, &format!("{}\n", path.display()));
++        }
++        match fs::remove_file(&self.location_file) {
++            Ok(()) => Ok(()),
++            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
++            Err(error) => Err(Error::WriteFailed {
++                path: self.location_file.clone(),
++                message: error.to_string(),
++            }),
++        }
++    }
++}
+diff --git c/crates/settings/tests/config/mod.rs i/crates/settings/tests/config/mod.rs
+new file mode 100644
+index 0000000..3d43de6
+--- /dev/null
++++ i/crates/settings/tests/config/mod.rs
+@@ -0,0 +1,63 @@
++//! A per-test config folder and home under a temp dir, and the settings the tests send.
++
++use std::collections::BTreeMap;
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use serde_json::Value;
++use tempfile::TempDir;
++use yamt_settings::{Places, StoredSettings, Theme};
++
++pub struct Config {
++    pub dir: TempDir,
++    pub places: Places,
++}
++
++impl Config {
++    pub fn new() -> Config {
++        let dir = tempfile::tempdir().unwrap();
++        let places = Places::new(&dir.path().join("config"), &dir.path().join("home"));
++        Config { dir, places }
++    }
++
++    pub fn folder(&self) -> PathBuf {
++        self.dir.path().join("config/yamt")
++    }
++
++    pub fn default_file(&self) -> PathBuf {
++        self.folder().join("settings.json")
++    }
++
++    pub fn location_file(&self) -> PathBuf {
++        self.folder().join("settings-location")
++    }
++
++    pub fn elsewhere(&self, name: &str) -> PathBuf {
++        self.dir.path().join("elsewhere").join(name)
++    }
++}
++
++pub fn write(path: &Path, text: &str) {
++    fs::create_dir_all(path.parent().unwrap()).unwrap();
++    fs::write(path, text).unwrap();
++}
++
++pub fn json_at(path: &Path) -> Value {
++    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
++}
++
++pub fn keys(entries: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
++    let mut keys = BTreeMap::new();
++    for (action, action_keys) in entries {
++        let action_keys = action_keys.iter().map(|key| (*key).to_owned()).collect();
++        keys.insert((*action).to_owned(), action_keys);
++    }
++    keys
++}
++
++pub fn light_with_apply() -> StoredSettings {
++    StoredSettings {
++        theme: Theme::Light,
++        keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
++    }
++}
+diff --git c/crates/settings/tests/relocate.rs i/crates/settings/tests/relocate.rs
+new file mode 100644
+index 0000000..f0713c6
+--- /dev/null
++++ i/crates/settings/tests/relocate.rs
+@@ -0,0 +1,133 @@
++#![cfg(test)]
++
++mod config;
++
++use std::fs;
++
++use serde_json::json;
++use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
++
++use crate::config::{Config, json_at, light_with_apply, write};
++
++#[test]
++fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
++    let config = Config::new();
++    let target = config.elsewhere("s.json");
++    write(&target, r#"{"theme": "light"}"#);
++    let target_name = target.display().to_string();
++    let settings = relocate(&config.places, &StoredSettings::default(), &target_name).unwrap();
++    assert_eq!(settings.stored.theme, Theme::Light);
++    assert_eq!(settings.path, target_name);
++    assert_eq!(
++        fs::read_to_string(config.location_file()).unwrap(),
++        format!("{target_name}\n")
++    );
++    let again = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(again.path, target_name);
++    assert_eq!(
++        again.default_path,
++        config.default_file().display().to_string()
++    );
++    assert_eq!(theme_at_start(&config.places), Theme::Light);
++}
++
++#[test]
++fn relocating_to_a_missing_path_creates_it_from_the_current_settings() {
++    let config = Config::new();
++    let target = config.elsewhere("new/s.json");
++    let settings = relocate(
++        &config.places,
++        &light_with_apply(),
++        &target.display().to_string(),
++    )
++    .unwrap();
++    assert_eq!(settings.stored, light_with_apply());
++    assert_eq!(
++        json_at(&target),
++        json!({ "theme": "light", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
++    );
++    assert!(config.location_file().exists());
++}
++
++#[test]
++fn relocating_to_the_default_removes_the_location_file() {
++    let config = Config::new();
++    let target = config.elsewhere("s.json").display().to_string();
++    relocate(&config.places, &StoredSettings::default(), &target).unwrap();
++    let default_name = config.default_file().display().to_string();
++    let settings = relocate(&config.places, &light_with_apply(), &default_name).unwrap();
++    assert!(!config.location_file().exists());
++    assert_eq!(settings.path, default_name);
++    assert_eq!(json_at(&config.default_file())["theme"], "light");
++}
++
++#[test]
++fn a_relative_path_is_refused_and_a_home_prefix_is_expanded() {
++    let config = Config::new();
++    let error = relocate(
++        &config.places,
++        &StoredSettings::default(),
++        "elsewhere/s.json",
++    );
++    assert!(
++        matches!(error, Err(Error::NotAbsolute { ref path }) if path == "elsewhere/s.json"),
++        "{error:?}"
++    );
++    assert!(!config.location_file().exists());
++    let settings = relocate(&config.places, &StoredSettings::default(), "~/s.json").unwrap();
++    let in_home = config.dir.path().join("home/s.json");
++    assert_eq!(settings.path, in_home.display().to_string());
++    assert!(in_home.exists());
++}
++
++#[test]
++fn relocating_to_a_broken_file_keeps_the_old_location() {
++    let config = Config::new();
++    let broken = config.elsewhere("broken.json");
++    write(&broken, "{");
++    let error = relocate(
++        &config.places,
++        &StoredSettings::default(),
++        &broken.display().to_string(),
++    );
++    assert!(matches!(error, Err(Error::Broken { .. })), "{error:?}");
++    assert!(!config.location_file().exists());
++}
++
++#[cfg(unix)]
++#[test]
++fn relocating_into_an_unwritable_folder_keeps_the_old_location() {
++    use std::os::unix::fs::PermissionsExt;
++
++    let config = Config::new();
++    let old = config.elsewhere("old.json").display().to_string();
++    relocate(&config.places, &StoredSettings::default(), &old).unwrap();
++    let locked = config.dir.path().join("locked");
++    fs::create_dir(&locked).unwrap();
++    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
++    let target = locked.join("s.json").display().to_string();
++    let error = relocate(&config.places, &StoredSettings::default(), &target);
++    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
++    assert!(matches!(error, Err(Error::WriteFailed { .. })), "{error:?}");
++    assert_eq!(
++        fs::read_to_string(config.location_file()).unwrap(),
++        format!("{old}\n")
++    );
++    assert_eq!(fs::read_dir(&locked).unwrap().count(), 0);
++}
++
++#[test]
++fn an_unreadable_location_file_is_an_error() {
++    let config = Config::new();
++    fs::create_dir_all(config.location_file()).unwrap();
++    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
++    assert!(
++        matches!(error, Error::ReadFailed { ref path, .. } if *path == config.location_file()),
++        "{error:?}"
++    );
++    fs::remove_dir(config.location_file()).unwrap();
++    write(&config.location_file(), "relative.json\n");
++    let error = set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap_err();
++    assert!(matches!(error, Error::Broken { .. }), "{error:?}");
++    assert!(!config.default_file().exists());
++}
+diff --git c/crates/settings/tests/settings.rs i/crates/settings/tests/settings.rs
+new file mode 100644
+index 0000000..e9f634a
+--- /dev/null
++++ i/crates/settings/tests/settings.rs
+@@ -0,0 +1,233 @@
++#![cfg(test)]
++
++mod config;
++
++use std::fs;
++use std::path::Path;
++use std::time::{Duration, SystemTime};
++
++use serde_json::json;
++use yamt_settings::{
++    Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
++};
++
++use crate::config::{Config, json_at, keys, light_with_apply, write};
++
++fn change(action: &str, action_keys: Option<&[&str]>) -> KeysChange {
++    KeysChange {
++        action: action.to_owned(),
++        keys: action_keys.map(|list| list.iter().map(|key| (*key).to_owned()).collect()),
++    }
++}
++
++#[test]
++fn a_missing_folder_and_file_are_created_from_the_current_settings() {
++    let config = Config::new();
++    let settings = read(&config.places, &light_with_apply()).unwrap();
++    assert_eq!(settings.stored, light_with_apply());
++    assert_eq!(settings.path, config.default_file().display().to_string());
++    assert_eq!(settings.default_path, settings.path);
++    assert_eq!(
++        fs::read_to_string(config.default_file()).unwrap(),
++        "{\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
++    );
++}
++
++#[test]
++fn reading_an_existing_file_never_rewrites_it() {
++    let config = Config::new();
++    let text = "{\"theme\":\"light\",   \"extra\": 1}";
++    write(&config.default_file(), text);
++    let long_ago = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
++    let file = fs::File::options()
++        .write(true)
++        .open(config.default_file())
++        .unwrap();
++    file.set_modified(long_ago).unwrap();
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(settings.stored.theme, Theme::Light);
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++    let modified = fs::metadata(config.default_file())
++        .unwrap()
++        .modified()
++        .unwrap();
++    assert_eq!(modified, long_ago);
++}
++
++#[test]
++fn broken_json_reports_line_and_column_and_a_change_leaves_the_bytes_untouched() {
++    let config = Config::new();
++    let text = "{\n  \"theme\": \"light\",\n}\n";
++    write(&config.default_file(), text);
++    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
++    let Error::Broken { path, message } = error else {
++        panic!("not broken: {error:?}");
++    };
++    assert_eq!(path, config.default_file());
++    assert!(message.contains("line 3 column 1"), "{message}");
++    let current = StoredSettings::default();
++    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
++    assert!(
++        matches!(theme_error, Error::Broken { .. }),
++        "{theme_error:?}"
++    );
++    let keys_error = set_keys(&config.places, &current, &[change("apply", None)]).unwrap_err();
++    assert!(matches!(keys_error, Error::Broken { .. }), "{keys_error:?}");
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++}
++
++#[test]
++fn an_unknown_theme_or_a_wrong_keys_type_is_broken_and_names_the_entry() {
++    let config = Config::new();
++    write(&config.default_file(), r#"{"theme": "blue"}"#);
++    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
++    let Error::Broken { message, .. } = error else {
++        panic!("not broken: {error:?}");
++    };
++    assert!(message.starts_with("`theme`: "), "{message}");
++    assert!(message.contains("blue"), "{message}");
++    write(
++        &config.default_file(),
++        r#"{"keys": {"apply": "Mod-Enter"}}"#,
++    );
++    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
++    let Error::Broken { message, .. } = error else {
++        panic!("not broken: {error:?}");
++    };
++    assert!(message.starts_with("`keys`: "), "{message}");
++}
++
++#[test]
++fn unknown_entries_and_unknown_action_ids_survive_a_change() {
++    let config = Config::new();
++    write(
++        &config.default_file(),
++        r#"{"window": {"x": 1}, "keys": {"future-action": ["F1"]}}"#,
++    );
++    let current = StoredSettings::default();
++    set_theme(&config.places, &current, Theme::Light).unwrap();
++    set_keys(
++        &config.places,
++        &current,
++        &[change("apply", Some(&["Mod-Enter"]))],
++    )
++    .unwrap();
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({
++            "window": { "x": 1 },
++            "theme": "light",
++            "keys": { "future-action": ["F1"], "apply": ["Mod-Enter"] },
++        })
++    );
++}
++
++#[test]
++fn some_sets_and_none_removes_an_action_and_keys_disappears_when_empty() {
++    let config = Config::new();
++    read(&config.places, &light_with_apply()).unwrap();
++    let changes = [change("apply", None), change("undo", Some(&["Mod-u"]))];
++    let settings = set_keys(&config.places, &light_with_apply(), &changes).unwrap();
++    let expected = keys(&[("ignore", &[]), ("undo", &["Mod-u"])]);
++    assert_eq!(settings.stored.keys, expected);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "light", "keys": { "ignore": [], "undo": ["Mod-u"] } })
++    );
++    let back = [change("ignore", None), change("undo", None)];
++    let settings = set_keys(&config.places, &light_with_apply(), &back).unwrap();
++    assert!(settings.stored.keys.is_empty());
++    assert_eq!(json_at(&config.default_file()), json!({ "theme": "light" }));
++}
++
++#[test]
++fn a_change_rereads_the_file_so_an_outside_edit_to_another_entry_survives() {
++    let config = Config::new();
++    let current = StoredSettings::default();
++    read(&config.places, &current).unwrap();
++    write(&config.default_file(), r#"{"theme": "light"}"#);
++    let settings = set_keys(&config.places, &current, &[change("apply", Some(&["F2"]))]).unwrap();
++    assert_eq!(settings.stored.theme, Theme::Light);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "light", "keys": { "apply": ["F2"] } })
++    );
++}
++
++#[test]
++fn a_change_to_a_missing_file_starts_from_the_current_settings() {
++    let config = Config::new();
++    let settings = set_theme(&config.places, &light_with_apply(), Theme::Dark).unwrap();
++    assert_eq!(settings.stored.keys, light_with_apply().keys);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "dark", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
++    );
++}
++
++fn names_in(folder: &Path) -> Vec<String> {
++    let mut names = Vec::new();
++    for entry in fs::read_dir(folder).unwrap() {
++        names.push(entry.unwrap().file_name().into_string().unwrap());
++    }
++    names.sort();
++    names
++}
++
++#[test]
++fn a_write_leaves_no_temporary_file() {
++    let config = Config::new();
++    read(&config.places, &StoredSettings::default()).unwrap();
++    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
++    relocate(&config.places, &StoredSettings::default(), "~/s.json").unwrap();
++    assert_eq!(
++        names_in(&config.folder()),
++        ["settings-location", "settings.json"]
++    );
++}
++
++#[test]
++fn a_failed_rename_leaves_no_temporary_file() {
++    let config = Config::new();
++    fs::create_dir_all(config.location_file().join("occupied")).unwrap();
++    let target = config.elsewhere("s.json").display().to_string();
++    let error = relocate(&config.places, &StoredSettings::default(), &target);
++    assert!(matches!(error, Err(Error::WriteFailed { .. })), "{error:?}");
++    assert_eq!(names_in(&config.folder()), ["settings-location"]);
++}
++
++#[cfg(unix)]
++#[test]
++fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
++    let config = Config::new();
++    let dotfile = config.elsewhere("dotfiles/settings.json");
++    write(&dotfile, r#"{"theme": "dark"}"#);
++    fs::create_dir_all(config.folder()).unwrap();
++    std::os::unix::fs::symlink(&dotfile, config.default_file()).unwrap();
++    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
++    let link = fs::symlink_metadata(config.default_file()).unwrap();
++    assert!(link.file_type().is_symlink());
++    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++}
++
++#[test]
++fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
++    let config = Config::new();
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert!(!config.folder().exists());
++    write(&config.default_file(), r#"{"theme": "light"}"#);
++    assert_eq!(theme_at_start(&config.places), Theme::Light);
++    write(&config.default_file(), r#"{"keys": {}}"#);
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    write(&config.default_file(), r#"{"theme": "light""#);
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    let target = config.elsewhere("missing.json");
++    write(&config.location_file(), &format!("{}\n", target.display()));
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert!(!target.exists());
++    write(&config.location_file(), "relative.json\n");
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    fs::remove_file(config.location_file()).unwrap();
++    fs::create_dir(config.location_file()).unwrap();
++    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++}
+diff --git c/docs/slices/briefs/3.S-settings-view.md i/docs/slices/briefs/3.S-settings-view.md
+new file mode 100644
+index 0000000..11da061
+--- /dev/null
++++ i/docs/slices/briefs/3.S-settings-view.md
+@@ -0,0 +1,137 @@
++# Slice 3.S — settings, web build 2: the settings view; Undo/Redo hidden
++
++Board "Settings" row 4. Product rule: `docs/plan.md` §2 **#57** (read it whole) and **#56** (the
++view's frame: "Back", the centred column, focus rules). Design:
++`docs/slices/briefs/3.S-settings-design.md` option C. The two earlier builds are merged: the store's
++settings state and actions, `ipc/keys.ts`, `ui/keyText.ts`, the clash question and the settings
++problems exist — read them in the tree; do not change their behaviour (report a needed change).
++Where this brief and #57 disagree, #57 wins; report it.
++
++## Target
++
++Owned:
++
++- `frontend/src/ui/SettingsView.vue`, `frontend/src/ui/MergeToolbar.vue`;
++- new `frontend/src/ui/KeymapList.vue`, `frontend/src/ui/KeyRecorder.vue` (VU15 reasons below);
++- `frontend/src/ui/keyText.ts` and its test (words only: add the menu, dialog and section words).
++
++Read-only: everything else, including `store.ts`, `settings.ts`, `keymapEdit.ts`, `ipc/**`,
++`editor/**`. List every new file in `deviations_from_brief` for the project map.
++
++Non-goals: a second stroke (WebStorm's two-key shortcuts), mouse shortcuts, abbreviations, a
++search box over the 14 actions, a native file chooser, Escape to close the settings view, any
++change to the store's rules.
++
++## Behaviour
++
++### The view (`SettingsView.vue`)
++
++1. Below "Back" (unchanged), three sections with small headings, in this order: **Theme**,
++   **Keymap**, **Settings file**. Same panel and column as today (`rounded-island bg-panel`,
++   `mx-auto w-full max-w-3xl p-6`); the column scrolls when taller than the window, "Back" scrolls
++   with it.
++2. **Theme**: two buttons side by side, "Dark" then "Light", the current one pressed
++   (`aria-pressed`, the filled look "Mark resolved" uses when ready; the other bordered). A press
++   calls `setTheme`; the whole window recolours at once (earlier build).
++
++### Keymap (`KeymapList.vue`, VU15 reason: "14 rows with a menu each; the view stays a layout")
++
++3. One group per `KEYMAP_GROUPS` entry: the group title, then a row per action: its name
++   (`ACTION_NAMES`), its keys as small bordered key labels (`keyLabel(key, navigator.platform)`)
++   or a muted "None", and a muted line saying where it acts (`ACTION_PLACES`). A row whose keys
++   differ from the defaults shows its name in the primary colour (WebStorm marks changed actions
++   the same way, `ActionsTree` modified colour) — report the colour you used.
++4. Each row is one focusable button-like element (Tab moves between rows; Up/Down move between
++   rows too, as in WebStorm's tree). Click, Enter or Space on a row opens **WebStorm's edit menu**
++   (`KeymapPanel.createEditActionGroup`, `KeymapPanel.java:749-788` under
++   `/tmp/ij-diff/platform/platform-impl/src/com/intellij/openapi/keymap/impl/ui/`) anchored below
++   the row:
++   - "Add Keyboard Shortcut";
++   - a separator, then per key "Change <label>…" and "Remove <label>" (yamt's "Change" is the
++     owner's re-bind, #664);
++   - when the action has more than 2 keys: a separator and "Remove All";
++   - when its keys differ from the defaults: a separator (unless one already precedes) and
++     "Reset Shortcuts".
++     The menu is a real menu (`role="menu"`/`menuitem`), Up/Down/Enter/Escape work, a click outside
++     or Escape closes it and returns focus to the row. "Remove …", "Remove All" and "Reset Shortcuts"
++     call the store at once.
++
++### Key dialog (`KeyRecorder.vue`, VU15 reason: "WebStorm's Keyboard Shortcut dialog")
++
++5. "Add Keyboard Shortcut" and "Change <label>…" open a modal dialog like WebStorm's (DR6:
++   `KeyboardShortcutDialog.java`, `ShortcutDialog.java`, `ShortcutTextField.java`):
++   - title "Keyboard Shortcut"; the action's name on top (`ShortcutDialog.java`);
++   - one key field without a caret, focused on open, showing the key being recorded; "Change"
++     opens it prefilled with that key (`KeymapPanel.java:516-525`);
++   - each key pressed together with its modifiers (`keyOfEvent`) replaces the shown key; a
++     modifier alone changes nothing (`ShortcutTextField.processKeyEvent`);
++   - Escape with no modifiers cancels the dialog; Enter with no modifiers confirms once a key is
++     shown, otherwise it records Enter; Tab / Shift+Tab move focus out of the field;
++   - a "+" button at the field's end opens a small menu "Set Enter", "Set Escape", "Set Tab",
++     "Set Shift+Tab" (`ShortcutTextField.showPopup`/`getKeyStrokes`), so those keys can be bound;
++   - below the field, while the shown key is used by another action, a live warning naming it
++     ("Already used by: Find"; WebStorm's conflicts panel, `ShortcutDialog.setShortcut`); the
++     action's own keys are not conflicts;
++   - "OK" (disabled while the field is empty) and "Cancel". OK calls `addKey` or `changeKey`; the
++     store asks the clash question itself when needed ("Move" / "Cancel").
++   - The dialog's keys never reach a file or the window's undo (it is a dialog over the settings
++     view; check that Ctrl+Z recorded in the field does not undo anything).
++   - Focus returns to the row when the dialog closes.
++
++### Settings file
++
++6. A text field labelled "Settings file", prefilled with the path in use (`settings.read.path`;
++   while `read` is null, empty and disabled), then "Use" (also Enter in the field) →
++   `moveSettings(text)`, and "Default" → `moveSettings(defaultPath)`, disabled when the default is
++   already in use. Escape in the field restores the path in use. On a failure the typed text stays
++   and the problem bar says why (earlier build). A muted line under the field: "yamt reads this
++   file again whenever its window gets focus."
++
++### Toolbar
++
++7. `MergeToolbar.vue`: one constant `const HISTORY_BUTTONS_SHOWN = false;` with a one-line
++   comment saying why (the owner hid them for now, #662); Undo and Redo are filtered out of the
++   rendered buttons by it; their entries, icons and emits stay. Ctrl/Cmd+Z/Y keep working.
++
++## Constraints
++
++- `skill://vue-conventions` (script-setup section order, typed emits, template refs), house rules
++  in `docs/architecture.md` §5.5; Tailwind classes from the existing tokens only (no colour
++  literals: the palette check); works in both themes — check every new element in Light and Dark.
++- `ui/` reads keys only from `ipc/keys.ts` and words from `keyText.ts`.
++- Pressing keys inside the view must not reach a hidden file (#56 already hides them; confirm
++  with the dialog open too).
++
++## Acceptance
++
++- `pnpm -C frontend lint`, `typecheck`, `test` exit 0; `just sfc-order`, `just web-unused` exit 0.
++  Paste the tails. `keyText.test.ts` only for words built from data (e.g. menu labels per key);
++  no tests of static strings.
++- **WebKit run** (fixture mode `pnpm -C frontend dev --port <p> --strictPort` + `just webdriver
++  <p2>`, MiniBrowser): real pointer and key input at visible elements, state read with `execute`
++  only. Page screenshots in Dark and in Light of: the whole view; a row's open menu; the key dialog
++  with a conflict warning. Paste what you observe:
++  1. Light, then Dark: the window recolours at once; the pressed button follows.
++  2. Apply: Change "Enter…" → press A → OK: the row shows A and Space, its name marked changed;
++     back in the merge, A on a focused side change applies it, Enter does not.
++  3. Undo: Add Keyboard Shortcut → press Ctrl+F → the warning names Find → OK → the clash
++     question → Move: Find shows "None", Undo shows Ctrl+Z and Ctrl+F; Ctrl+F in the merge
++     undoes.
++  4. The same with Cancel in the question: nothing changes.
++  5. Escape in the dialog cancels; the "+" menu's "Set Escape" records Escape; a modifier alone
++     shows nothing; OK is disabled while empty.
++  6. Reset Shortcuts on Apply and Undo: defaults back, names no longer marked.
++  7. Remove All on Ignore (3 keys): "None"; Delete on a focused side change no longer ignores.
++  8. Settings file: type a relative path + Enter → the problem bar says why, the text stays;
++     `/fixture/other.json` + Use → the field shows it; Default → back.
++  9. The toolbar shows no Undo/Redo buttons; Ctrl+Z still undoes.
++
++## Skills
++
++`skill://vue-conventions`, `skill://ts-conventions`, `skill://verification`.
++
++## Report
++
++Fill in every field of the output schema. In `deviations_from_brief` list the new files with their
++VU15 reasons, the colours and Tailwind values you chose, and anything this brief left open that
++you decided.
+diff --git c/docs/slices/briefs/3.S-settings-web.md i/docs/slices/briefs/3.S-settings-web.md
+new file mode 100644
+index 0000000..a6ee207
+--- /dev/null
++++ i/docs/slices/briefs/3.S-settings-web.md
+@@ -0,0 +1,281 @@
++# Slice 3.S — settings, web build 1: light palette, keys into the editor, settings data and store
++
++Board "Settings" row 3. Product rule: `docs/plan.md` §2 **#57** (read it whole; every sentence is
++acceptance, except the settings view's look, which is the next build's). Design:
++`docs/slices/briefs/3.S-settings-design.md` option C; this brief carries what you need from it.
++The desktop build (row 2) is merged: crate `yamt-settings`, four commands, `IpcError` variants and
++the generated `frontend/src/ipc/bindings.ts` are in the tree — read them there. Where this brief
++and #57 disagree, #57 wins; report it.
++
++## Target
++
++Owned:
++
++- `frontend/index.html`, `frontend/src/style.css`, `frontend/src/main.ts`;
++- `frontend/scripts/palette.ts`, `frontend/scripts/palette.test.ts`;
++- `frontend/src/ipc/**` except `bindings.ts` (generated, hook-blocked);
++- `frontend/src/editor/**`;
++- `frontend/src/ui/**` except `SettingsView.vue` and `MergeToolbar.vue` (the next build's; it also
++  creates `KeymapList.vue` and `KeyRecorder.vue` — do not create them).
++
++Read-only: everything else (`crates/**`, `src-tauri/**`, `docs/**`, `.omp/**`). The orchestrator
++updates `docs/architecture.md` and the project map from your report: list every new, removed or
++renamed file and every public-surface change in `deviations_from_brief`.
++
++Non-goals: the settings view's content (theme buttons, key list, key dialog, location field —
++next build); hiding Undo/Redo (next build); the middle pane's text-editing keys; mouse gestures;
++following the system theme.
++
++## Contract
++
++Fixed (exists; add only): `MergeController`'s current public members, `MergeHosts`,
++`MergeHandle`'s current members, the store's current state and actions, `ChunkSource`'s current
++methods, the generated bindings.
++
++New public surface (exactly this; names fixed because the next build codes against them):
++
++```ts
++// ipc/index.ts re-exports (domain types; `Theme`, `StoredSettings`, `KeysChange` as generated)
++export type SettingsRead = { readonly path: string; readonly defaultPath: string; readonly stored: StoredSettings };
++
++// ipc/keys.ts — the one source for what keys mean (vision 2)
++export type KeyAction =
++  | "apply" | "ignore" | "next-change" | "previous-change" | "left-side" | "right-side"
++  | "undo" | "redo" | "find" | "find-next" | "find-previous" | "close-find" | "indent" | "outdent";
++export const KEY_ACTIONS: readonly KeyAction[];            // the list order above
++export type KeyName = string & { readonly __brand: "KeyName" };  // a named key or one character
++export type Key = {
++  readonly mod: boolean;      // Ctrl on Linux, ⌘ on macOS
++  readonly macCtrl: boolean;  // ⌃ on macOS; such a key never fires on Linux (#665)
++  readonly alt: boolean;
++  readonly shift: boolean;
++  readonly name: KeyName;
++};
++export type KeyBindings = Readonly<Record<KeyAction, readonly Key[]>>;
++export const DEFAULT_KEYS: KeyBindings;
++export function parseKey(text: string): Key | null;
++export function keyText(key: Key): string;                 // the file form
++export function keyLabel(key: Key, platform: string): string;
++export function keyOfEvent(
++  event: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
++  platform: string,
++): Key | null;
++export function sameKey(a: Key, b: Key): boolean;
++export type KeyProblem =
++  | { readonly kind: "unreadable"; readonly action: KeyAction; readonly text: string }
++  | { readonly kind: "twice"; readonly key: Key; readonly actions: readonly [KeyAction, KeyAction] };
++export type KeysRead = { readonly bindings: KeyBindings; readonly problems: readonly KeyProblem[] };
++export function bindingsOf(stored: StoredSettings["keys"]): KeysRead;
++
++// ipc/ChunkSource.ts gains
++loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
++setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
++setKeys(current: StoredSettings, changes: readonly KeysChange[]): Promise<SourceResult<SettingsRead>>;
++moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
++
++// editor/index.ts
++export type Preferences = { readonly theme: Theme; readonly keys: KeyBindings };
++export type MergeOptions = { readonly readOnly: boolean; readonly preferences: Preferences }; // preferences required
++// MergeController gains: setPreferences(preferences: Preferences): void
++// MergeController.historyKey(event) matches preferences.keys.undo / redo
++
++// ui/useMergeController.ts: useMergeController(data, hosts, readOnly, preferences: MaybeRefOrGetter<Preferences>)
++//   — every opened file, shown or hidden, follows a change at once
++
++// ui/keyText.ts (words): ACTION_NAMES: Record<KeyAction, string> ("Apply", "Ignore",
++//   "Next change", "Previous change", "Left side", "Right side", "Undo", "Redo", "Find",
++//   "Find next", "Find previous", "Close find", "Indent", "Outdent"), ACTION_PLACES (where each
++//   acts, one short phrase), KEYMAP_GROUPS: readonly { title: string; actions: readonly KeyAction[] }[]
++//   = "Side panes" (apply … right-side), "Anywhere in the file" (undo, redo), "Find" (four),
++//   "Result pane" (indent, outdent)
++
++// ui/store.ts (useAppStore) gains
++settings: Readonly<ShallowRef<SettingsInUse>>;  // { read: SettingsRead | null; theme: Theme; keys: KeysRead }
++preferences: ComputedRef<Preferences>;
++loadSettings(): Promise<void>;
++setTheme(theme: Theme): Promise<void>;
++addKey(action: KeyAction, key: Key): Promise<void>;
++changeKey(action: KeyAction, from: Key, to: Key): Promise<void>;
++removeKey(action: KeyAction, key: Key): Promise<void>;
++removeAllKeys(action: KeyAction): Promise<void>;
++resetKeys(action: KeyAction): Promise<void>;
++moveSettings(path: string): Promise<void>;
++// createAppStore(source, startTheme: Theme)
++```
++
++## Behaviour
++
++### Theme
++
++1. **Palette.** `style.css` keeps the dark `@theme static` block as it is and gains one
++   `:root[data-theme="light"]` block redefining **every** colour token with these values
++   (Islands Light, read by the design from `ManyIslandsLight.theme.json`, `expUI_lightScheme.xml`
++   and its parent "Default" in `DefaultColorSchemesManager.xml`; files under
++   `/tmp/yamt-islands-light/themes/`, re-extract from
++   `~/.local/share/JetBrains/WebStorm-262.10968.77/lib/intellij.platform.ide.impl.jar` if gone):
++
++   | token          | light     |     | token                  | light             |
++   | -------------- | --------- | --- | ---------------------- | ----------------- |
++   | window         | #e9eaee   |     | primary                | #3871e1           |
++   | panel          | #ffffff   |     | on-primary             | #ffffff           |
++   | panel-inline   | #f7f8f9   |     | problem / -border      | #fff6f5 / #ffc4c5 |
++   | separator      | #e9eaee   |     | success / -border      | #f5faf3 / #bbdbc2 |
++   | control-border | #d1d3d9   |     | info / -border         | #f7f8ff / #bdd3ff |
++   | fg             | #000000   |     | search-match           | #ccccff           |
++   | fg-muted       | #73767c   |     | syntax-keyword         | #0033b3           |
++   | code           | #080808   |     | syntax-string          | #067d17           |
++   | gutter         | #aeb3c2   |     | syntax-number          | #1750eb           |
++   | gutter-active  | #767a8a   |     | syntax-comment         | #8c8c8c           |
++   | active-line    | #f5f8fe   |     | syntax-function        | #00627a           |
++   | selection      | #a6d2ff   |     | syntax-property        | #871094           |
++   | caret          | #000000   |     | syntax-decorator       | #9e880d           |
++   | hover          | #00000012 |     | syntax-tag             | #0033b3           |
++   | row-hover      | #00000008 |     | syntax-regexp          | #264eff           |
++   | row-selected   | #d0dffe   |     | syntax-link            | #006dcc           |
++   | chunk-inserted | #4e9d6c5c |     | chunk-modified-word    | #538af9a6         |
++   | chunk-modified | #538af95c |     | chunk-conflict-word    | #967befa6         |
++   | chunk-deleted  | #8b8e945c |     | chunk-modified-removal | #3871e1           |
++   | chunk-conflict | #967bef6b |     | chunk-conflict-removal | #8060db           |
++
++   Verify each against the theme files and report any you change, with the key you read
++   (conflicts stay purple, #32). If the dark block has a token this table lacks, find its light
++   value the same way and report it.
++
++2. `color-scheme` moves from `index.html:6` into the CSS (`dark` on `:root`, `light` in the light
++   block), so scrollbars, focus rings and form controls follow.
++3. `frontend/scripts/palette.ts` (+ test): colour literals allowed inside the light block too; the
++   light block must define exactly the dark block's colour tokens (none missing, none extra); the
++   window backgrounds in `src-tauri/src/window.rs` (`BACKGROUND_DARK`, `BACKGROUND_LIGHT`) equal
++   each palette's `--color-window`.
++4. **Start.** The desktop app marks `<html data-theme="…">` before the first frame (row 2's
++   initialization script). `main.ts` reads that attribute (`"light"` → light, anything else →
++   dark) and passes it to `createAppStore(source, startTheme)`; afterwards `App.vue` writes the
++   attribute from `settings.theme` (the only writer once the page runs). Fixture mode has no
++   attribute → dark.
++5. CodeMirror's dark flag (`pane.ts:63` `{ dark: true }`) moves into a compartment per pane,
++   switched by `setPreferences` in all three panes of every opened file.
++
++### Keys
++
++6. **Defaults** (today's keys; `DEFAULT_KEYS` is checked by a test citing each source):
++   apply Enter, Space · ignore Backspace, Delete, x · next-change ArrowDown · previous-change
++   ArrowUp · left-side ArrowLeft · right-side ArrowRight · undo Mod-z · redo Mod-Shift-z, Mod-y ·
++   find Mod-f · find-next F3 · find-previous Shift-F3 · close-find Escape · indent Tab · outdent
++   Shift-Tab. (Ctrl/Cmd+Shift+Y no longer redoes; the middle's Mod-[ / Mod-] and Mod-u / Alt-u
++   stay as text-editing keys.)
++7. **File form** (`parseKey`/`keyText`): modifiers in the order `Mod-`, `MacCtrl-`, `Alt-`,
++   `Shift-`, then the name: one of Enter, Space, Tab, Escape, Backspace, Delete, Insert, Home,
++   End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, F1–F12, or a single
++   character (Latin letters lowercase). Anything else → `null`. Round-trips exactly.
++8. **Labels** (`keyLabel`): Linux "Ctrl+Shift+Z", "Shift+F3", "Space", "↑"; macOS in Apple's
++   order ⌃⌥⇧⌘ ("⇧⌘Z", "⌃⌥X"); a `macCtrl` key on Linux "⌃X (macOS)". Use the names WebStorm
++   shows for keys (`KeymapUtil`/`KeyEvent` texts) where they differ from these, and say which.
++9. **`keyOfEvent`**: a modifier alone → `null`; Linux: Ctrl → `mod`, Meta → `null`; macOS: Meta →
++   `mod`, Ctrl → `macCtrl`; a non-Latin layout falls back to the physical key exactly as
++   `historyKey.ts:22-33` does today (Ctrl+я → Mod-z; Dvorak ';' on KeyZ stays ';'); a shifted
++   symbol carries no Shift ("?" not "Shift-/"); " " → Space.
++10. **`bindingsOf`**: per action, the stored entry if present else the defaults; an unknown action
++    id is ignored (Rust keeps it in the file); a malformed key text → that action keeps its
++    defaults and a `"unreadable"` problem; `[]` → the action has no key; a key on two actions
++    (a hand edit) → the first in `KEY_ACTIONS` order keeps it and a `"twice"` problem.
++11. **Into the editor** (`setPreferences`, at creation through `MergeOptions.preferences`):
++    compartments in each pane for the side keys (today `SIDE_KEYS`/`sideKeys`,
++    `sideFocus.ts:42-65`), the find keys (`find.ts:269-284`; the box's `runScopeHandlers` at
++    `:260` picks them up), and a `Prec.high` keymap in the middle for undo, redo, indent and
++    outdent that beats `defaultKeymap` (Indent on Mod-i wins over selectParentSyntax). The
++    middle's `historyKeymap` keeps only its selection undo/redo (Mod-u / Alt-u), so Mod-z does
++    nothing there once Undo is bound elsewhere; `indentWithTab` is replaced by the bound keys.
++    A CodeMirror key string per `Key` (`cmKey`, in `editor/internal/`): Shift+letter without
++    Ctrl/Alt is the uppercase name ("X"), as CodeMirror matches it; a `macCtrl` key on Linux is
++    not bound. The find bar's Close button title follows the close-find binding; its Enter /
++    Shift+Enter titles stay. Window-wide undo/redo (`historyKey`) match the bound keys through
++    `keyOfEvent`, with today's guards (text fields, already-handled events, Alt rules as today).
++    A key removed from a side action is simply not bound: the browser's default acts there again.
++12. `editor/index.ts` stays ≤ 300 lines: move `#loadLanguage` (`index.ts:96-112`) into
++    `internal/language.ts`, or similar wiring, never by compressing lines.
++
++### Settings data and store
++
++13. **Sources.** `ipc/tauri.ts` maps the four generated commands; `ipc/domain.ts` turns
++    `SettingsRead` into the domain shape (`defaultPath`). Fixture mode: `ipc/fixtureSettings.ts`, an
++    in-memory store with the same rules as the file (path shown `/fixture/settings.json`;
++    `Some`/`None` per action; a move to an unknown path "creates" it from `current`, a known one is
++    used; relative paths refused with `NotAbsolute`).
++14. **Store** (`ui/settings.ts` holds the settings actions so `store.ts` stays ≤ 300 lines; move
++    `clearProblemAbout` into `problem.ts` if needed): `settings` starts `{ read: null, theme:
++    startTheme, keys: bindingsOf({}) }`. `current` sent with every command =
++    `{ theme, keys: <only actions whose bindings differ from DEFAULT_KEYS, as key texts> }`.
++    - `loadSettings`: at mount and whenever the window gets focus, together with `refreshFiles`
++      (`App.vue:32-38`). OK → settings from the reply; key problems → one settings problem. Failure
++      → a settings problem, the settings in use stay.
++    - `setTheme`, key edits, `moveSettings`: send, then apply the reply; failure (a broken file, a
++      relative path, an unwritable folder) → a settings problem, nothing changes.
++    - Key edits (pure rules in `ui/keymapEdit.ts`, mutation-tested): add a key the action already
++      has → nothing; add/change to a key another action holds → ask the new question kind
++      `"clash"` (the key, the action asking, the owner) through `asking`; "Move" sends both
++      changes in one `setKeys` (the owner loses the key), "Cancel" sends nothing; change replaces
++      in place; remove; remove all → `[]`; reset → `null`; a resulting list equal to the defaults
++      is sent as `null`.
++15. **Clash question** (`question.ts` + `QuestionDialog.vue`'s existing rendering): title
++    "Key Already in Use", message naming the key and the owner, e.g. "Ctrl+F is already used by
++    Find. Move it to Undo?", confirm "Move", cancel "Cancel" (WebStorm `KeymapPanel`
++    `showConfirmationDialog`, `KeymapPanel.java:786-796` under `/tmp/ij-diff/…/keymap/impl/ui/`,
++    without "Leave", #663).
++16. **Problems.** `Problem` gains `{ action: "settings"; … }`; `problemText` words for
++    `SettingsBroken` ("The settings file … has an error at line 3, column 7: … Fix it or choose
++    another file."), `NotAbsolute`, `NoConfigFolder`, `ReadFailed`/`WriteFailed` on the settings
++    file, and the two key problems.
++17. The window's question guard: while the clash question is open, no key reaches a file (the
++    existing `question === null` check covers it — confirm).
++
++## Constraints
++
++- `editor/index.ts` ≤ 300 lines, `ui/store.ts` ≤ 300 lines, no lint disables.
++- `ui/` imports `editor/` only through `useMergeController` (VU11); `ui/` and `editor/` read key
++  facts only from `ipc/keys.ts` (one source); `bindings.ts` only through `ipc/` (IPC2).
++- `skill://cm6-rules` for every compartment and keymap change; `skill://risk-register` RK20 (the
++  redo binding probe in `apply.test.ts` must still pass).
++
++## Acceptance
++
++- `pnpm -C frontend lint`, `typecheck`, `test` exit 0; `just sfc-order`, `just web-unused` exit 0.
++  Paste the tails.
++- Unit tests, each failing for a plausible bug: `ipc/keys.test.ts` (defaults = today's table;
++  parse/print round-trip, refusals; labels on both platforms incl. a `macCtrl` key; `keyOfEvent`
++  cases from item 9; `bindingsOf` cases from item 10); `ui/keymapEdit.test.ts` (item 14's rules);
++  `editor/internal/keys.test.ts` (`cmKey`: Shift+x → "X", Mod-Shift-z, Space, macCtrl on Linux →
++  none); `pane.test.ts` (Indent on Mod-i beats selectParentSyntax; Undo bound to Alt-Backspace →
++  Mod-z does nothing in the middle and Mod-u still undoes the selection; Tab unbound → no indent);
++  `sideFocus` (Apply rebound to "a" → "a" applies, Enter does not); `historyKey` (rebound Undo
++  works window-wide; the non-Latin fallback stays); `fixtureSettings.test.ts`; `palette.test.ts`;
++  store tests (load on focus applies a changed file; a failure keeps the settings in use; a clash
++  asks and Move writes both changes in one call; Cancel writes nothing).
++- **Real app on a private X display** (`Xvfb`, `tauri-driver`, `GDK_BACKEND=x11`,
++  `XDG_CONFIG_HOME=/tmp/<dir>/config` — never the owner's `~/.config`; a repo from
++  `scripts/conflict-repo.sh`; a debug build of your tree). There is no settings view yet: drive
++  settings by writing the file by hand. Real pointer and key input at visible elements (WebDriver
++  actions or `xdotool`); read state with `execute` only. Paste what you observe:
++  1. File `{"theme": "light"}` before start: the window opens light (page screenshot: panels,
++     syntax, change colours, connectors); first frames show no dark frame (frame capture).
++  2. Open two files. Edit the file to `{"theme": "dark", "keys": {"apply": ["a"]}}` while another
++     X window has focus, then focus yamt: both files are dark; in the hidden file too (switch to
++     it); "a" on a focused side change applies it, Enter does not.
++  3. `"undo": ["Alt-Backspace"]`: Ctrl+Z in the middle no longer undoes; Alt+Backspace does, from
++     a side too.
++  4. `"close-find": ["F10"]`: Escape leaves the find bar open, F10 closes it; the Close button's
++     title says F10.
++  5. Break the file: a problem bar names line and column; the window keeps its settings.
++- Fixture mode (`pnpm -C frontend dev --port <p> --strictPort` + `just webdriver <p2>`): the app
++  still starts dark and every listed default key works as before (Enter applies, Ctrl+Z undoes,
++  Ctrl+F finds, Tab indents).
++
++## Skills
++
++`skill://cm6-rules`, `skill://ts-conventions`, `skill://vue-conventions`, `skill://ipc-contract`,
++`skill://risk-register`, `skill://verification`.
++
++## Report
++
++Fill in every field of the output schema. In `deviations_from_brief` list every new, removed or
++renamed file or export (for the project map), any palette value you changed and why, the key
++label words you took from WebStorm, and anything this brief left open that you decided.
+diff --git c/scripts/arch-check.sh i/scripts/arch-check.sh
+index 961b493..9425494 100755
+--- c/scripts/arch-check.sh
++++ i/scripts/arch-check.sh
+@@ -20,10 +20,17 @@ if [ -n "$forbidden_in_core" ]; then
+     failed=1
+ fi
+ 
++settings_deps=$(normal_deps yamt-settings)
++forbidden_in_settings=$(grep -E '^(yamt-|tauri(-|$))' <<<"$settings_deps" | grep -vx 'yamt-settings' || true)
++if [ -n "$forbidden_in_settings" ]; then
++    echo "arch-check: yamt-settings must not depend on:" $forbidden_in_settings >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -xE 'yamt-(gitio|merge-core)' <<<"$app_deps" || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session and yamt-settings only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git c/scripts/map-check.sh i/scripts/map-check.sh
+index 6b210d3..0e41bba 100755
+--- c/scripts/map-check.sh
++++ i/scripts/map-check.sh
+@@ -25,7 +25,7 @@ while IFS= read -r command; do
+     for doc in "$ARCH" "$IPC"; do
+         grep -qw -- "$command" "$doc" || missing+=("command $command (not in $doc)")
+     done
+-done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/commands.rs)
++done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
+ 
+ # Every window data-source method must be named in architecture.
+ while IFS= read -r method; do
+diff --git c/src-tauri/Cargo.toml i/src-tauri/Cargo.toml
+index 515ecfa..13140b3 100644
+--- c/src-tauri/Cargo.toml
++++ i/src-tauri/Cargo.toml
+@@ -25,6 +25,7 @@ tauri-build.workspace = true
+ 
+ [dependencies]
+ yamt-session.workspace = true
++yamt-settings.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+ specta-typescript.workspace = true
+diff --git c/src-tauri/src/commands.rs i/src-tauri/src/commands.rs
+index b11c917..707efce 100644
+--- c/src-tauri/src/commands.rs
++++ i/src-tauri/src/commands.rs
+@@ -7,6 +7,7 @@ use yamt_session::{
+ 
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
++use crate::settings;
+ 
+ pub(crate) type SessionState = Mutex<MergeSession>;
+ 
+@@ -20,6 +21,10 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         take_side,
+         remote_name,
+         log,
++        settings::load_settings::<tauri::Wry>,
++        settings::set_theme::<tauri::Wry>,
++        settings::set_keys::<tauri::Wry>,
++        settings::move_settings::<tauri::Wry>,
+     ])
+ }
+ 
+diff --git c/src-tauri/src/ipc_error.rs i/src-tauri/src/ipc_error.rs
+index 23df34f..25c8444 100644
+--- c/src-tauri/src/ipc_error.rs
++++ i/src-tauri/src/ipc_error.rs
+@@ -24,6 +24,14 @@ pub enum IpcError {
+         path: String,
+         message: String,
+     },
++    SettingsBroken {
++        path: String,
++        message: String,
++    },
++    NotAbsolute {
++        path: String,
++    },
++    NoConfigFolder,
+ }
+ 
+ impl From<yamt_session::Error> for IpcError {
+@@ -49,6 +57,26 @@ impl From<yamt_session::Error> for IpcError {
+     }
+ }
+ 
++impl From<yamt_settings::Error> for IpcError {
++    fn from(error: yamt_settings::Error) -> IpcError {
++        match error {
++            yamt_settings::Error::ReadFailed { path, message } => IpcError::ReadFailed {
++                path: path.display().to_string(),
++                message,
++            },
++            yamt_settings::Error::Broken { path, message } => IpcError::SettingsBroken {
++                path: path.display().to_string(),
++                message,
++            },
++            yamt_settings::Error::WriteFailed { path, message } => IpcError::WriteFailed {
++                path: path.display().to_string(),
++                message,
++            },
++            yamt_settings::Error::NotAbsolute { path } => IpcError::NotAbsolute { path },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use serde_json::{Value, json};
+@@ -112,4 +140,48 @@ mod tests {
+             json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
+         );
+     }
++
++    #[test]
++    fn settings_errors_serialise_with_their_kind_and_fields() {
++        let settings_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
++        let broken = yamt_settings::Error::Broken {
++            path: "/c/yamt/settings.json".into(),
++            message: "trailing comma at line 3 column 1".to_owned(),
++        };
++        assert_eq!(
++            settings_json(broken),
++            json!({
++                "kind": "SettingsBroken",
++                "path": "/c/yamt/settings.json",
++                "message": "trailing comma at line 3 column 1",
++            })
++        );
++        let not_absolute = yamt_settings::Error::NotAbsolute {
++            path: "s.json".to_owned(),
++        };
++        assert_eq!(
++            settings_json(not_absolute),
++            json!({ "kind": "NotAbsolute", "path": "s.json" })
++        );
++        let read_failed = yamt_settings::Error::ReadFailed {
++            path: "/c/yamt/settings-location".into(),
++            message: "is a directory".to_owned(),
++        };
++        assert_eq!(
++            settings_json(read_failed),
++            json!({ "kind": "ReadFailed", "path": "/c/yamt/settings-location", "message": "is a directory" })
++        );
++        let write_failed = yamt_settings::Error::WriteFailed {
++            path: "/locked/s.json".into(),
++            message: "permission denied".to_owned(),
++        };
++        assert_eq!(
++            settings_json(write_failed),
++            json!({ "kind": "WriteFailed", "path": "/locked/s.json", "message": "permission denied" })
++        );
++        assert_eq!(
++            serde_json::to_value(IpcError::NoConfigFolder).unwrap(),
++            json!({ "kind": "NoConfigFolder" })
++        );
++    }
+ }
+diff --git c/src-tauri/src/lib.rs i/src-tauri/src/lib.rs
+index 729e793..e3cd15a 100644
+--- c/src-tauri/src/lib.rs
++++ i/src-tauri/src/lib.rs
+@@ -8,6 +8,7 @@ mod frontend_log;
+ mod graphics;
+ mod ipc_error;
+ mod outcome;
++mod settings;
+ mod window;
+ 
+ use std::path::Path;
+diff --git c/src-tauri/src/settings.rs i/src-tauri/src/settings.rs
+new file mode 100644
+index 0000000..860a7f1
+--- /dev/null
++++ i/src-tauri/src/settings.rs
+@@ -0,0 +1,76 @@
++use tauri::path::PathResolver;
++use tauri::{Manager, Runtime, WebviewWindow};
++use yamt_settings::{KeysChange, Places, SettingsRead, StoredSettings, Theme};
++
++use crate::ipc_error::IpcError;
++use crate::window::show_theme;
++
++pub(crate) fn places<R: Runtime>(paths: &PathResolver<R>) -> Result<Places, IpcError> {
++    match (paths.config_dir(), paths.home_dir()) {
++        (Ok(config_dir), Ok(home)) => Ok(Places::new(&config_dir, &home)),
++        (Err(_), _) | (_, Err(_)) => Err(IpcError::NoConfigFolder),
++    }
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn load_settings<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::read(&places(window.path())?, &current)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn set_theme<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    theme: Theme,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::set_theme(&places(window.path())?, &current, theme)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn set_keys<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    changes: Vec<KeysChange>,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::set_keys(&places(window.path())?, &current, &changes)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn move_settings<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    path: String,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::relocate(&places(window.path())?, &current, &path)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
+diff --git c/src-tauri/src/window.rs i/src-tauri/src/window.rs
+index 0a4c6f6..09048e1 100644
+--- c/src-tauri/src/window.rs
++++ i/src-tauri/src/window.rs
+@@ -2,22 +2,27 @@ use std::path::Path;
+ use std::sync::mpsc::{self, Receiver, Sender};
+ use std::time::{Duration, Instant};
+ 
++use tauri::path::PathResolver;
+ use tauri::window::Color;
+ use tauri::{
+-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
++    AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
++    WindowEvent,
+ };
+ use yamt_session::MergeSession;
++use yamt_settings::Theme;
+ 
+ use crate::commands::{SessionState, lock, with_session};
+ use crate::outcome::{Ending, ending_on_close};
++use crate::settings;
+ 
+ const WINDOW_LABEL: &str = "main";
+ const WIDTH: f64 = 1600.0;
+ const HEIGHT: f64 = 1000.0;
+ const MIN_WIDTH: f64 = 900.0;
+ const MIN_HEIGHT: f64 = 600.0;
+-// `--color-window` in frontend/src/style.css.
+-const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);
++// `--color-window` in frontend/src/style.css, dark and light palettes.
++const BACKGROUND_DARK: Color = Color(0x26, 0x28, 0x2c, 0xff);
++const BACKGROUND_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
+ const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
+ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+ const PAGE_PING: &str = "true";
+@@ -33,11 +38,13 @@ pub(crate) fn run(session: MergeSession) -> Ending {
+ 
+ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
++    let theme = start_theme(app.path());
+     WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::default())
+         .title(title)
+         .inner_size(WIDTH, HEIGHT)
+         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
+-        .background_color(BACKGROUND)
++        .background_color(background(theme))
++        .initialization_script(start_script(theme))
+         .build()?;
+     let handle = app.handle().clone();
+     let mut close_watch = CloseWatch::new();
+@@ -45,6 +52,39 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
+ }
+ 
++fn start_theme<R: Runtime>(paths: &PathResolver<R>) -> Theme {
++    match settings::places(paths) {
++        Ok(places) => yamt_settings::theme_at_start(&places),
++        Err(error) => {
++            tracing::warn!(?error, "no config folder: the window starts dark");
++            Theme::Dark
++        }
++    }
++}
++
++pub(crate) fn show_theme<R: Runtime>(window: &WebviewWindow<R>, theme: Theme) {
++    if let Err(error) = window.set_background_color(Some(background(theme))) {
++        tracing::warn!(%error, "window background not changed");
++    }
++}
++
++fn background(theme: Theme) -> Color {
++    match theme {
++        Theme::Dark => BACKGROUND_DARK,
++        Theme::Light => BACKGROUND_LIGHT,
++    }
++}
++
++// wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
++// document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
++fn start_script(theme: Theme) -> String {
++    let name = match theme {
++        Theme::Dark => "dark",
++        Theme::Light => "light",
++    };
++    format!("document.documentElement.dataset.theme = \"{name}\";")
++}
++
+ fn window_title(root: &Path) -> String {
+     let folder = root.file_name().unwrap_or(root.as_os_str());
+     format!("{} — yamt", folder.to_string_lossy())
+@@ -149,6 +189,12 @@ mod tests {
+         assert!(!answered("null"));
+     }
+ 
++    #[test]
++    fn the_start_script_names_the_theme() {
++        assert!(start_script(Theme::Light).contains(r#"dataset.theme = "light""#));
++        assert!(start_script(Theme::Dark).contains(r#"dataset.theme = "dark""#));
++    }
++
+     fn second_request_after(delay: Duration) -> CloseRequest {
+         let asked = Instant::now();
+         let mut watch = CloseWatch::new();

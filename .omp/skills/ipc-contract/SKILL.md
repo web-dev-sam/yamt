@@ -24,10 +24,12 @@ from them and committed.
   `ipc/domain.ts` is the only place that applies the TS brands, by type guard (`n is MiddleLine`), never `as` (TS4).
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
   (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`; #53:
-  `NotAFile { path }`, `ReadFailed { path, message }`); never a string. The frontend `switch`es on
+  `NotAFile { path }`, `ReadFailed { path, message }`; #57: `SettingsBroken { path, message }`,
+  `NotAbsolute { path }`, `NoConfigFolder`); never a string. The frontend `switch`es on
   `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `FileList.disk_changes`), never an error.
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
-  method, map the error. No logic in `src-tauri`.
+  method, map the error — or, for settings, compute `Places` and call one `yamt_settings`
+  function. No logic in `src-tauri`.
 - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
   reaches the webview (`FileEntry.unsupported` carries the reason instead).
 
@@ -42,6 +44,10 @@ describe_file(path)               -> FileSides   what each side holds (Missing/T
 take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
 remote_name()                     -> Option<RemoteName>   Branch{name} | Commit{short_id, subject, message}, read once at open, #50
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
+load_settings(current: StoredSettings)          -> SettingsRead   the file in use, created from `current` when missing, never rewritten by a read, #57
+set_theme(current, theme: Theme)                -> SettingsRead   re-reads, replaces `theme`, writes; each settings command recolours the native window
+set_keys(current, changes: Vec<KeysChange>)     -> SettingsRead   re-reads, sets (`Some`) or removes (`None`) each action's entry, writes
+move_settings(current, path)                   -> SettingsRead   absolute or `~/`; an existing file is used, a missing one created from `current`
 ```
 
 Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window

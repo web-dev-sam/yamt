@@ -47,8 +47,9 @@ yamt/
 │  ├─ gitio/                  git subprocess layer. NO merge logic
 │  ├─ session/                MergeSession state machine; depends on merge-core + gitio
 │  ├─ cli/                    headless binary (M0): classify / scan / golden tooling
-│  └─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
-├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session only
+│  ├─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
+│  └─ settings/               the per-user settings file (theme, changed keys, its location). NO tauri, NO git
+├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session + settings only
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
 │  ├─ src/
@@ -79,6 +80,7 @@ graph LR
     cli[cli] --> session
     cli --> core
     tauri[src-tauri] --> session
+    tauri --> settings[settings]
   end
   tauri -. generates .-> bindings[ipc/bindings.ts]
   subgraph Frontend
@@ -98,7 +100,7 @@ Rules (each one is enforced, not advised — §8 says by what):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
 | `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
-| `src-tauri` depends only on `session` + tauri crates; command bodies ≤ 15 lines (thin)                                                                       | `scripts/arch-check.sh` (yamt-app's direct deps); reviewer rule                                                                 |
+| `src-tauri` depends only on `session`, `settings` + tauri crates; command bodies ≤ 15 lines (thin); `settings` depends on no `yamt-*` crate and not on tauri | `scripts/arch-check.sh` (yamt-app's and yamt-settings' direct deps); reviewer rule |
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
 | `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --features bindings --bin export-bindings` output                                | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
@@ -330,15 +332,40 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   Option<RemoteName>` (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`:
   the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
   so it settles disk changes and uses git's view (#49).
+- Settings commands (`settings.rs`, plan §2 #57), each given the window's settings in use
+  (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
+  `load_settings(current)`, `set_theme(current, theme)`, `set_keys(current, changes)`,
+  `move_settings(current, path)`. Each computes `Places` from Tauri's path resolver, calls one
+  `yamt_settings` function and applies the returned theme to the native window background
+  (`window::show_theme`); no settings state lives in the shell. At start `window.rs` reads
+  `theme_at_start` before building the window: its background and an initialization script that
+  sets `<html data-theme>` before the first frame.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
-  `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`) mirrored into TS; no stringly errors. A disk
-  change is never an error.
+  `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
+  `NoConfigFolder`) mirrored into TS; no stringly errors. A disk change is never an error.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`. It needs the `bindings` feature, so
   `cargo tauri build` neither builds nor bundles it: tauri bundles every bin of the package unless
   its required features are off, and the universal macOS build makes only the main binary.
+
+### 3.6 `settings` — the per-user settings file
+
+Plan §2 #57. Owns the file, never what a key means (the window does, `frontend/src/ipc/keys.ts`).
+
+- `Places::new(config_dir, home)`: the default file `<config>/yamt/settings.json` and the location
+  file `<config>/yamt/settings-location` (one line: the file in use when it is not the default).
+- `StoredSettings { theme, keys }`: `keys` maps an action id to key strings, only for actions
+  whose keys differ from the window's defaults; ids and key strings are opaque text here.
+- `read`, `set_theme`, `set_keys`, `relocate`, `theme_at_start`. A read never rewrites an existing
+  file; a change re-reads the file, replaces one entry and writes through a temporary file and a
+  rename (a symlink's target is written, the link stays); unknown entries survive; broken JSON →
+  `Error::Broken` with line and column, and nothing is written; `relocate` takes an absolute or
+  `~/` path, uses an existing file or creates a missing one from the window's settings, then
+  records it. `theme_at_start` never writes and falls back to Dark.
+- Dependencies: `serde`, `serde_json` (line/column errors and kept entries), `specta`,
+  `thiserror`.
 
 ---
 
@@ -682,7 +709,8 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   `clippy.toml`), `missing_docs = warn` on `merge-core` public items only, `unsafe_code = deny`
   (libraries `forbid`; the one exception is the NVIDIA start-up guard, plan §2 #43, checked by `arch-check`).
 - `cargo nextest`, `insta` (goldens), `proptest` (invariants), `cargo-deny`, `tracing` for logs.
-- deps: `imara-diff`, `thiserror`, `serde`, `specta` + `tauri-specta`, `tauri 2`, `tracing`.
+- deps: `imara-diff`, `thiserror`, `serde`, `specta` + `tauri-specta`, `tauri 2`, `tracing`;
+  `serde_json` at run time only in `cli` and `settings` (plan §2 #57).
 - **Readable-by-a-Rust-beginner rules** (the product owner reads this code; cleverness is a
   defect): owned types at crate boundaries (`String`, `Vec<T>`, `PathBuf`); no lifetimes in
   public signatures beyond `&str`/`&[T]`/`&Path` parameters; a generic needs two concrete

@@ -7,6 +7,7 @@ use yamt_session::{
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
+use crate::settings;
 
 pub(crate) type SessionState = Mutex<MergeSession>;
 
@@ -20,6 +21,10 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         take_side,
         remote_name,
         log,
+        settings::load_settings::<tauri::Wry>,
+        settings::set_theme::<tauri::Wry>,
+        settings::set_keys::<tauri::Wry>,
+        settings::move_settings::<tauri::Wry>,
     ])
 }
 

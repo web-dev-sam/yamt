@@ -8,6 +8,7 @@ mod frontend_log;
 mod graphics;
 mod ipc_error;
 mod outcome;
+mod settings;
 mod window;
 
 use std::path::Path;

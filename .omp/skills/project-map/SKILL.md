@@ -28,8 +28,11 @@ crates/session      (yamt-session) MergeSession state machine; describe/take (`s
                     marker parsing and views (`markers.rs`), locating blocks in the stages (`locate.rs`), the middle seeded from the disk (`seed.rs`), DTO building (`merge_data.rs`)
 crates/cli          (yamt-cli, bin yamt-cli) headless binary: classify / scan / golden / fixture
 crates/conflict-repo (yamt-conflict-repo) dev-only: temp git repos whose merge stops with scripted conflicts (regular, symlink, gitlink; `conflict_repo_with`: config and attributes set before the merge); dev-dependency of gitio, session, cli
+crates/settings     (yamt-settings) the per-user settings file (plan §2 #57): lib (types crossing the IPC, Error, read/set_theme/set_keys/relocate/theme_at_start),
+                    places (default file, settings-location, `~/`), file (kept entries, temp file + rename, symlink target). Key strings are opaque here. NO tauri, NO yamt-* crate
 src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-specta builder for both bins) + graphics (NVIDIA guard, the one `unsafe`, plan §2 #43),
-                    args, outcome (start-up decision, exit status), window (close fallback when the page is gone), commands, ipc_error (IpcError), frontend_log,
+                    args, outcome (start-up decision, exit status), window (close fallback when the page is gone; theme at start: native background + `data-theme` script; `show_theme`),
+                    commands, settings (`places` + the four settings commands), ipc_error (IpcError), frontend_log,
                     appimage (a relative repo path is resolved against OWD only when the running binary lives under $APPDIR with APPIMAGE set; never chdir);
                     bins `yamt` and `export-bindings` (→ ipc/bindings.ts; feature `bindings`, so no bundle carries it); tauri.conf.json (bundles: AppImage, deb, app, dmg); icons/icon.svg source (plan §2 #41)
 release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.md, THIRD_PARTY_LICENSES.txt (GENERATED, in every bundle), docs/screenshot.png, .github/workflows/release.yml (draft release on `v*`; plan §2 #38)

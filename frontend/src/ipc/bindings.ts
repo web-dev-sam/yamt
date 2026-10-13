@@ -12,6 +12,10 @@ export const commands = {
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
 	remoteName: () => __TAURI_INVOKE<{ kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | null>("remote_name"),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
+	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
+	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
+	setKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_keys", { current, changes })),
+	moveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("move_settings", { current, path })),
 };
 
 /* Types */
@@ -120,7 +124,16 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" };
+
+/**
+ *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
+ *  `None` removes the entry (the action is back on its defaults).
+ */
+export type KeysChange = {
+	action: string,
+	keys: string[] | null,
+};
 
 /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
 export type LineRange<L> = {
@@ -164,6 +177,12 @@ export type RemoteLine = number;
 /**  What is merged in: the one branch at `MERGE_HEAD`, else the commit being merged or replayed. */
 export type RemoteName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
 
+export type SettingsRead = {
+	path: string,
+	default_path: string,
+	stored: StoredSettings,
+};
+
 export type Side = "local" | "remote";
 
 export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
@@ -178,6 +197,17 @@ export type SideWordChanges<L> = {
 	/**  Places where base text this side removed would sit: sorted, at most one per place. */
 	removed_at: InlinePoint<L>[],
 };
+
+/**
+ *  What the window holds and sends: `keys` = action id → key strings, only for actions whose
+ *  keys differ from the defaults (the window knows the defaults; Rust never does).
+ */
+export type StoredSettings = {
+	theme?: Theme,
+	keys?: { [key in string]: string[] },
+};
+
+export type Theme = "dark" | "light";
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 

@@ -4608,6 +4608,7 @@ dependencies = [
  "tracing-subscriber",
  "yamt-conflict-repo",
  "yamt-session",
+ "yamt-settings",
 ]
 
 [[package]]
@@ -4662,6 +4663,17 @@ dependencies = [
  "yamt-conflict-repo",
  "yamt-gitio",
  "yamt-merge-core",
+]
+
+[[package]]
+name = "yamt-settings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

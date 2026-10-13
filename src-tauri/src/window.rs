@@ -2,22 +2,27 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use tauri::path::PathResolver;
 use tauri::window::Color;
 use tauri::{
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use yamt_session::MergeSession;
+use yamt_settings::Theme;
 
 use crate::commands::{SessionState, lock, with_session};
 use crate::outcome::{Ending, ending_on_close};
+use crate::settings;
 
 const WINDOW_LABEL: &str = "main";
 const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
-// `--color-window` in frontend/src/style.css.
-const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);
+// `--color-window` in frontend/src/style.css, dark and light palettes.
+const BACKGROUND_DARK: Color = Color(0x26, 0x28, 0x2c, 0xff);
+const BACKGROUND_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
 const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
@@ -33,16 +38,51 @@ pub(crate) fn run(session: MergeSession) -> Ending {
 
 fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
+    let theme = start_theme(app.path());
     WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::default())
         .title(title)
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
-        .background_color(BACKGROUND)
+        .background_color(background(theme))
+        .initialization_script(start_script(theme))
         .build()?;
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
+}
+
+fn start_theme<R: Runtime>(paths: &PathResolver<R>) -> Theme {
+    match settings::places(paths) {
+        Ok(places) => yamt_settings::theme_at_start(&places),
+        Err(error) => {
+            tracing::warn!(?error, "no config folder: the window starts dark");
+            Theme::Dark
+        }
+    }
+}
+
+pub(crate) fn show_theme<R: Runtime>(window: &WebviewWindow<R>, theme: Theme) {
+    if let Err(error) = window.set_background_color(Some(background(theme))) {
+        tracing::warn!(%error, "window background not changed");
+    }
+}
+
+fn background(theme: Theme) -> Color {
+    match theme {
+        Theme::Dark => BACKGROUND_DARK,
+        Theme::Light => BACKGROUND_LIGHT,
+    }
+}
+
+// wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
+// document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
+fn start_script(theme: Theme) -> String {
+    let name = match theme {
+        Theme::Dark => "dark",
+        Theme::Light => "light",
+    };
+    format!("document.documentElement.dataset.theme = \"{name}\";")
 }
 
 fn window_title(root: &Path) -> String {
@@ -147,6 +187,12 @@ mod tests {
         assert!(!answered(""));
         assert!(!answered("false"));
         assert!(!answered("null"));
+    }
+
+    #[test]
+    fn the_start_script_names_the_theme() {
+        assert!(start_script(Theme::Light).contains(r#"dataset.theme = "light""#));
+        assert!(start_script(Theme::Dark).contains(r#"dataset.theme = "dark""#));
     }
 
     fn second_request_after(delay: Duration) -> CloseRequest {

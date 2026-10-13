@@ -25,7 +25,7 @@ while IFS= read -r command; do
     for doc in "$ARCH" "$IPC"; do
         grep -qw -- "$command" "$doc" || missing+=("command $command (not in $doc)")
     done
-done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/commands.rs)
+done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
 
 # Every window data-source method must be named in architecture.
 while IFS= read -r method; do

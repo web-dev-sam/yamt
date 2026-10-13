@@ -24,6 +24,14 @@ pub enum IpcError {
         path: String,
         message: String,
     },
+    SettingsBroken {
+        path: String,
+        message: String,
+    },
+    NotAbsolute {
+        path: String,
+    },
+    NoConfigFolder,
 }
 
 impl From<yamt_session::Error> for IpcError {
@@ -45,6 +53,26 @@ impl From<yamt_session::Error> for IpcError {
                 path,
                 message: source.to_string(),
             },
+        }
+    }
+}
+
+impl From<yamt_settings::Error> for IpcError {
+    fn from(error: yamt_settings::Error) -> IpcError {
+        match error {
+            yamt_settings::Error::ReadFailed { path, message } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_settings::Error::Broken { path, message } => IpcError::SettingsBroken {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_settings::Error::WriteFailed { path, message } => IpcError::WriteFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_settings::Error::NotAbsolute { path } => IpcError::NotAbsolute { path },
         }
     }
 }
@@ -110,6 +138,50 @@ mod tests {
         assert_eq!(
             ipc_json(read_failed),
             json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
+        );
+    }
+
+    #[test]
+    fn settings_errors_serialise_with_their_kind_and_fields() {
+        let settings_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
+        let broken = yamt_settings::Error::Broken {
+            path: "/c/yamt/settings.json".into(),
+            message: "trailing comma at line 3 column 1".to_owned(),
+        };
+        assert_eq!(
+            settings_json(broken),
+            json!({
+                "kind": "SettingsBroken",
+                "path": "/c/yamt/settings.json",
+                "message": "trailing comma at line 3 column 1",
+            })
+        );
+        let not_absolute = yamt_settings::Error::NotAbsolute {
+            path: "s.json".to_owned(),
+        };
+        assert_eq!(
+            settings_json(not_absolute),
+            json!({ "kind": "NotAbsolute", "path": "s.json" })
+        );
+        let read_failed = yamt_settings::Error::ReadFailed {
+            path: "/c/yamt/settings-location".into(),
+            message: "is a directory".to_owned(),
+        };
+        assert_eq!(
+            settings_json(read_failed),
+            json!({ "kind": "ReadFailed", "path": "/c/yamt/settings-location", "message": "is a directory" })
+        );
+        let write_failed = yamt_settings::Error::WriteFailed {
+            path: "/locked/s.json".into(),
+            message: "permission denied".to_owned(),
+        };
+        assert_eq!(
+            settings_json(write_failed),
+            json!({ "kind": "WriteFailed", "path": "/locked/s.json", "message": "permission denied" })
+        );
+        assert_eq!(
+            serde_json::to_value(IpcError::NoConfigFolder).unwrap(),
+            json!({ "kind": "NoConfigFolder" })
         );
     }
 }

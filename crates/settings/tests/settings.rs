@@ -1,0 +1,233 @@
+#![cfg(test)]
+
+mod config;
+
+use std::fs;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
+
+use serde_json::json;
+use yamt_settings::{
+    Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
+};
+
+use crate::config::{Config, json_at, keys, light_with_apply, write};
+
+fn change(action: &str, action_keys: Option<&[&str]>) -> KeysChange {
+    KeysChange {
+        action: action.to_owned(),
+        keys: action_keys.map(|list| list.iter().map(|key| (*key).to_owned()).collect()),
+    }
+}
+
+#[test]
+fn a_missing_folder_and_file_are_created_from_the_current_settings() {
+    let config = Config::new();
+    let settings = read(&config.places, &light_with_apply()).unwrap();
+    assert_eq!(settings.stored, light_with_apply());
+    assert_eq!(settings.path, config.default_file().display().to_string());
+    assert_eq!(settings.default_path, settings.path);
+    assert_eq!(
+        fs::read_to_string(config.default_file()).unwrap(),
+        "{\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
+    );
+}
+
+#[test]
+fn reading_an_existing_file_never_rewrites_it() {
+    let config = Config::new();
+    let text = "{\"theme\":\"light\",   \"extra\": 1}";
+    write(&config.default_file(), text);
+    let long_ago = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let file = fs::File::options()
+        .write(true)
+        .open(config.default_file())
+        .unwrap();
+    file.set_modified(long_ago).unwrap();
+    let settings = read(&config.places, &StoredSettings::default()).unwrap();
+    assert_eq!(settings.stored.theme, Theme::Light);
+    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
+    let modified = fs::metadata(config.default_file())
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(modified, long_ago);
+}
+
+#[test]
+fn broken_json_reports_line_and_column_and_a_change_leaves_the_bytes_untouched() {
+    let config = Config::new();
+    let text = "{\n  \"theme\": \"light\",\n}\n";
+    write(&config.default_file(), text);
+    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
+    let Error::Broken { path, message } = error else {
+        panic!("not broken: {error:?}");
+    };
+    assert_eq!(path, config.default_file());
+    assert!(message.contains("line 3 column 1"), "{message}");
+    let current = StoredSettings::default();
+    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
+    assert!(
+        matches!(theme_error, Error::Broken { .. }),
+        "{theme_error:?}"
+    );
+    let keys_error = set_keys(&config.places, &current, &[change("apply", None)]).unwrap_err();
+    assert!(matches!(keys_error, Error::Broken { .. }), "{keys_error:?}");
+    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
+}
+
+#[test]
+fn an_unknown_theme_or_a_wrong_keys_type_is_broken_and_names_the_entry() {
+    let config = Config::new();
+    write(&config.default_file(), r#"{"theme": "blue"}"#);
+    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
+    let Error::Broken { message, .. } = error else {
+        panic!("not broken: {error:?}");
+    };
+    assert!(message.starts_with("`theme`: "), "{message}");
+    assert!(message.contains("blue"), "{message}");
+    write(
+        &config.default_file(),
+        r#"{"keys": {"apply": "Mod-Enter"}}"#,
+    );
+    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
+    let Error::Broken { message, .. } = error else {
+        panic!("not broken: {error:?}");
+    };
+    assert!(message.starts_with("`keys`: "), "{message}");
+}
+
+#[test]
+fn unknown_entries_and_unknown_action_ids_survive_a_change() {
+    let config = Config::new();
+    write(
+        &config.default_file(),
+        r#"{"window": {"x": 1}, "keys": {"future-action": ["F1"]}}"#,
+    );
+    let current = StoredSettings::default();
+    set_theme(&config.places, &current, Theme::Light).unwrap();
+    set_keys(
+        &config.places,
+        &current,
+        &[change("apply", Some(&["Mod-Enter"]))],
+    )
+    .unwrap();
+    assert_eq!(
+        json_at(&config.default_file()),
+        json!({
+            "window": { "x": 1 },
+            "theme": "light",
+            "keys": { "future-action": ["F1"], "apply": ["Mod-Enter"] },
+        })
+    );
+}
+
+#[test]
+fn some_sets_and_none_removes_an_action_and_keys_disappears_when_empty() {
+    let config = Config::new();
+    read(&config.places, &light_with_apply()).unwrap();
+    let changes = [change("apply", None), change("undo", Some(&["Mod-u"]))];
+    let settings = set_keys(&config.places, &light_with_apply(), &changes).unwrap();
+    let expected = keys(&[("ignore", &[]), ("undo", &["Mod-u"])]);
+    assert_eq!(settings.stored.keys, expected);
+    assert_eq!(
+        json_at(&config.default_file()),
+        json!({ "theme": "light", "keys": { "ignore": [], "undo": ["Mod-u"] } })
+    );
+    let back = [change("ignore", None), change("undo", None)];
+    let settings = set_keys(&config.places, &light_with_apply(), &back).unwrap();
+    assert!(settings.stored.keys.is_empty());
+    assert_eq!(json_at(&config.default_file()), json!({ "theme": "light" }));
+}
+
+#[test]
+fn a_change_rereads_the_file_so_an_outside_edit_to_another_entry_survives() {
+    let config = Config::new();
+    let current = StoredSettings::default();
+    read(&config.places, &current).unwrap();
+    write(&config.default_file(), r#"{"theme": "light"}"#);
+    let settings = set_keys(&config.places, &current, &[change("apply", Some(&["F2"]))]).unwrap();
+    assert_eq!(settings.stored.theme, Theme::Light);
+    assert_eq!(
+        json_at(&config.default_file()),
+        json!({ "theme": "light", "keys": { "apply": ["F2"] } })
+    );
+}
+
+#[test]
+fn a_change_to_a_missing_file_starts_from_the_current_settings() {
+    let config = Config::new();
+    let settings = set_theme(&config.places, &light_with_apply(), Theme::Dark).unwrap();
+    assert_eq!(settings.stored.keys, light_with_apply().keys);
+    assert_eq!(
+        json_at(&config.default_file()),
+        json!({ "theme": "dark", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
+    );
+}
+
+fn names_in(folder: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(folder).unwrap() {
+        names.push(entry.unwrap().file_name().into_string().unwrap());
+    }
+    names.sort();
+    names
+}
+
+#[test]
+fn a_write_leaves_no_temporary_file() {
+    let config = Config::new();
+    read(&config.places, &StoredSettings::default()).unwrap();
+    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+    relocate(&config.places, &StoredSettings::default(), "~/s.json").unwrap();
+    assert_eq!(
+        names_in(&config.folder()),
+        ["settings-location", "settings.json"]
+    );
+}
+
+#[test]
+fn a_failed_rename_leaves_no_temporary_file() {
+    let config = Config::new();
+    fs::create_dir_all(config.location_file().join("occupied")).unwrap();
+    let target = config.elsewhere("s.json").display().to_string();
+    let error = relocate(&config.places, &StoredSettings::default(), &target);
+    assert!(matches!(error, Err(Error::WriteFailed { .. })), "{error:?}");
+    assert_eq!(names_in(&config.folder()), ["settings-location"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
+    let config = Config::new();
+    let dotfile = config.elsewhere("dotfiles/settings.json");
+    write(&dotfile, r#"{"theme": "dark"}"#);
+    fs::create_dir_all(config.folder()).unwrap();
+    std::os::unix::fs::symlink(&dotfile, config.default_file()).unwrap();
+    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+    let link = fs::symlink_metadata(config.default_file()).unwrap();
+    assert!(link.file_type().is_symlink());
+    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+}
+
+#[test]
+fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
+    let config = Config::new();
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert!(!config.folder().exists());
+    write(&config.default_file(), r#"{"theme": "light"}"#);
+    assert_eq!(theme_at_start(&config.places), Theme::Light);
+    write(&config.default_file(), r#"{"keys": {}}"#);
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    write(&config.default_file(), r#"{"theme": "light""#);
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    let target = config.elsewhere("missing.json");
+    write(&config.location_file(), &format!("{}\n", target.display()));
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    assert!(!target.exists());
+    write(&config.location_file(), "relative.json\n");
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+    fs::remove_file(config.location_file()).unwrap();
+    fs::create_dir(config.location_file()).unwrap();
+    assert_eq!(theme_at_start(&config.places), Theme::Dark);
+}

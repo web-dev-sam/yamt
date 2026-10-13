@@ -20,10 +20,17 @@ if [ -n "$forbidden_in_core" ]; then
     failed=1
 fi
 
+settings_deps=$(normal_deps yamt-settings)
+forbidden_in_settings=$(grep -E '^(yamt-|tauri(-|$))' <<<"$settings_deps" | grep -vx 'yamt-settings' || true)
+if [ -n "$forbidden_in_settings" ]; then
+    echo "arch-check: yamt-settings must not depend on:" $forbidden_in_settings >&2
+    failed=1
+fi
+
 app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
-forbidden_in_app=$(grep -xE 'yamt-(gitio|merge-core)' <<<"$app_deps" || true)
+forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings)' || true)
 if [ -n "$forbidden_in_app" ]; then
-    echo "arch-check: yamt-app depends on yamt-session only, not:" $forbidden_in_app >&2
+    echo "arch-check: yamt-app depends on yamt-session and yamt-settings only, not:" $forbidden_in_app >&2
     failed=1
 fi
 
