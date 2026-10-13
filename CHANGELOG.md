@@ -25,14 +25,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Previous change / Next change arrows in the toolbar move through the changes still waiting on the
   side that has the keyboard, like Up and Down there; with no side focused, the left side takes the
   keyboard first.
-- A settings gear at the right end of the toolbar opens a settings page in place of the open file
-  (empty for now); Back returns to the file exactly as it was.
+- A settings gear at the right end of the toolbar opens a settings page in place of the open file;
+  Back returns to the file exactly as it was.
+- Settings: a **Dark** / **Light** switch (Light follows WebStorm's Islands Light; conflicts stay
+  purple), and every yamt keyboard shortcut — apply, ignore, next/previous change, left/right side,
+  undo, redo, find, find next/previous, close find, indent, outdent. Per action, as in WebStorm's
+  Keymap: add a key, change or remove one, remove all, or reset to the defaults; a key another
+  action already uses asks before moving it. Changes act at once in every open file.
+- Settings are kept per user in `~/.config/yamt/settings.json` (`~/Library/Application
+  Support/yamt/settings.json` on macOS), holding only what you changed. The settings page can point
+  yamt at another file — an existing one is used, a missing one is created — and yamt picks up edits
+  made to the file whenever its window gets focus. A broken file is reported and never overwritten.
+  The window opens in the saved colours from its first frame.
 
 ### Changed
 
 - The dark look follows WebStorm's Islands Dark: darker panes (#191A1C), the file list and the open
   file as rounded panels on a lighter frame, notices as rounded boxes; syntax and change colours are
   unchanged.
+- The toolbar no longer shows Undo and Redo buttons; Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS)
+  still undo and redo. Ctrl+Shift+Y no longer redoes.
 
 ## [0.1.0] - 2026-10-11
 

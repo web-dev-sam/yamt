@@ -1,4 +1,18 @@
-import type { KeyAction } from "../ipc";
+import { keyLabel, parseKey, type Key, type KeyAction } from "../ipc";
+import { isDefault } from "./keymapEdit";
+
+export type KeymapCommand =
+  | { readonly kind: "add" }
+  | { readonly kind: "change"; readonly key: Key }
+  | { readonly kind: "remove"; readonly key: Key }
+  | { readonly kind: "removeAll" }
+  | { readonly kind: "reset" };
+
+export type KeymapMenuEntry =
+  | { readonly kind: "separator" }
+  | { readonly kind: "command"; readonly label: string; readonly command: KeymapCommand };
+
+export type SetKeyEntry = { readonly label: string; readonly key: Key };
 
 export const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
   apply: "Apply",
@@ -46,3 +60,61 @@ export const KEYMAP_GROUPS: readonly {
   { title: "Find", actions: ["find", "find-next", "find-previous", "close-find"] },
   { title: "Result pane", actions: ["indent", "outdent"] },
 ];
+
+const SEPARATOR: KeymapMenuEntry = { kind: "separator" };
+
+const KEYS_WITHOUT_REMOVE_ALL = 2;
+
+// WebStorm's Keymap edit menu (KeymapPanel.createEditActionGroup): Remove All only past two keys,
+// Reset Shortcuts right after it without a separator.
+export function keymapMenu(
+  action: KeyAction,
+  keys: readonly Key[],
+  platform: string,
+): KeymapMenuEntry[] {
+  const entries: KeymapMenuEntry[] = [
+    { kind: "command", label: "Add Keyboard Shortcut", command: { kind: "add" } },
+    SEPARATOR,
+  ];
+  for (const key of keys) {
+    const label = keyLabel(key, platform);
+    entries.push(
+      { kind: "command", label: `Change ${label}…`, command: { kind: "change", key } },
+      { kind: "command", label: `Remove ${label}`, command: { kind: "remove", key } },
+    );
+  }
+  const removeAll = keys.length > KEYS_WITHOUT_REMOVE_ALL;
+  if (removeAll) {
+    entries.push(SEPARATOR, {
+      kind: "command",
+      label: "Remove All",
+      command: { kind: "removeAll" },
+    });
+  }
+  if (!isDefault(action, keys)) {
+    entries.push(...(removeAll ? [] : [SEPARATOR]), {
+      kind: "command",
+      label: "Reset Shortcuts",
+      command: { kind: "reset" },
+    });
+  }
+  return entries.filter(
+    (entry, index) =>
+      entry.kind !== "separator" ||
+      (entries[index - 1]?.kind !== "separator" && index < entries.length - 1),
+  );
+}
+
+// The keys a focus traversal or the dialog itself would take (ShortcutTextField.getKeyStrokes).
+const SET_KEYS: readonly Key[] = ["Enter", "Escape", "Tab", "Shift-Tab"].flatMap((text) => {
+  const key = parseKey(text);
+  return key === null ? [] : [key];
+});
+
+export function setKeyMenu(platform: string): SetKeyEntry[] {
+  return SET_KEYS.map((key) => ({ label: `Set ${keyLabel(key, platform)}`, key }));
+}
+
+export function usedByText(owners: readonly KeyAction[]): string {
+  return `Already used by: ${owners.map((owner) => ACTION_NAMES[owner]).join(", ")}`;
+}

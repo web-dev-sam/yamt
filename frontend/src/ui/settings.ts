@@ -87,7 +87,7 @@ function problemKey(problem: KeyProblem): string {
     : `twice ${keyText(problem.key)} ${problem.actions.join(" ")}`;
 }
 
-function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: KeysRead): void {
+function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: SettingsInUse): void {
   const { problems } = target.settings.value.keys;
   const shown = target.problem.value;
   const settingsShown = shown?.action === "settings" ? shown.cause.kind : null;
@@ -97,7 +97,9 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Key
     }
     return;
   }
-  const sameProblems = sameTexts(before.problems.map(problemKey), problems.map(problemKey));
+  const sameProblems =
+    before.read?.path === read.path &&
+    sameTexts(before.keys.problems.map(problemKey), problems.map(problemKey));
   if (!sameProblems || (settingsShown !== null && settingsShown !== "Keys")) {
     report(target, { action: "settings", cause: { kind: "Keys", path: read.path, problems } });
   }
@@ -108,7 +110,7 @@ function adopt(target: SettingsTarget, read: SettingsRead): void {
   if (!sameStored(before.read, read)) {
     target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
   }
-  showKeyProblems(target, read, before.keys);
+  showKeyProblems(target, read, before);
 }
 
 async function send(target: SettingsTarget, call: Send): Promise<void> {
@@ -119,9 +121,10 @@ async function send(target: SettingsTarget, call: Send): Promise<void> {
   const latest = ticket === target.latestSettings;
   if (!outcome.ok) {
     const failure: Problem = { action: "settings", cause: outcome.cause };
-    logProblem(failure);
     if (latest) {
-      target.problem.value = failure;
+      report(target, failure);
+    } else {
+      logProblem(failure);
     }
     return;
   }

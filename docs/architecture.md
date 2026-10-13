@@ -617,11 +617,15 @@ one per opened file, inactive ones `invisible` plus `content-visibility: hidden`
 paint, editors, scroll positions and work kept, plan §2 #51;
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
 data object changes and destroys it with the component), `MergeToolbar.vue` (previous/next change
-arrows that keep the side's keyboard on a pointer press, bulk apply left/right, undo/redo, counts,
-finish, reset — `MergeView` calls the store's `finish`/`reset`), `SettingsButton.vue` (the gear at the
+arrows that keep the side's keyboard on a pointer press, bulk apply left/right, undo/redo — hidden
+for now by `HISTORY_BUTTONS_SHOWN`, #57 —, counts, finish, reset — `MergeView` calls the store's
+`finish`/`reset`), `SettingsButton.vue` (the gear at the
 right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
-(the settings screen in the files' grid cell: a centred column with "Back", empty for now; keyboard to
-"Back" on open and back to its opener on "Back", plan §2 #56),
+(the settings screen in the files' grid cell: a centred column with "Back", then Theme (Dark/Light),
+Keymap and the settings file field with Use/Default; keyboard to "Back" on open and back to its
+opener on "Back", plan §2 #56, #57), `KeymapList.vue` (the actions' rows by group with their key
+labels, WebStorm's Keymap edit menu per row) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
+dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Already used by" line),
 `ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
 `report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,

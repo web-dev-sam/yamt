@@ -178,9 +178,9 @@ export function preferenceEffects(
 
 const HISTORY_INPUTS: Readonly<Record<string, true>> = { historyUndo: true, historyRedo: true };
 
-// The browser's own undo (WebKit: Ctrl/Cmd+Z when no binding prevents the key) arrives as a
-// beforeinput that history() turns into an undo (@codemirror/commands history(), dist/index.js:267-271);
-// undo comes only from the bound keys and the toolbar.
+// The browser's own Undo/Redo command (macOS Edit ▸ Undo, or Cmd+Z in WKWebView when Undo is
+// bound elsewhere, board item 690) arrives as a beforeinput that history() turns into an undo
+// (@codemirror/commands history(), dist/index.js:267-271); only yamt's keys and toolbar undo.
 export function refuseNativeHistory(
   event: Pick<InputEvent, "inputType" | "preventDefault">,
 ): boolean {

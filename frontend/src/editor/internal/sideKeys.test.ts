@@ -1,7 +1,8 @@
+import { EditorState } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, parseKey, type Key } from "../../ipc";
-import { sideKeyCommands } from "./sideKeys";
+import { runSideKey, sideKeyCommands, sideRunner, type SideCommand } from "./sideKeys";
 
 const LINUX = "Linux x86_64";
 
@@ -54,4 +55,18 @@ test("a side action without keys binds nothing, and a macOS-only key is not boun
       ({ key: name }) => name === "Ctrl-n",
     ),
   ).toEqual({ key: "Ctrl-n", command: { kind: "step", direction: "down" } });
+});
+
+test("a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it", () => {
+  const apply: SideCommand = { kind: "decide", decision: "apply" };
+  const ran: SideCommand[] = [];
+  const withRunner = EditorState.create({
+    extensions: sideRunner.of((command) => {
+      ran.push(command);
+    }),
+  });
+
+  expect(runSideKey(withRunner, apply)).toBe(true);
+  expect(ran).toEqual([apply]);
+  expect(runSideKey(EditorState.create(), apply)).toBe(true);
 });

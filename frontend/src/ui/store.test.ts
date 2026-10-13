@@ -1938,6 +1938,30 @@ test("a key problem shown again replaces a settings failure the file no longer h
   });
 });
 
+test("a move to a file with the same broken keys names the new path in the Keys problem", async () => {
+  spyConsole();
+  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
+  const elsewhere = "/elsewhere.json";
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(read(broken)),
+    moveSettings: () =>
+      Promise.resolve(ok({ path: elsewhere, defaultPath: SETTINGS_PATH, stored: broken })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+
+  await store.moveSettings(elsewhere);
+
+  expect(store.problem.value).toEqual({
+    action: "settings",
+    cause: {
+      kind: "Keys",
+      path: elsewhere,
+      problems: [{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }],
+    },
+  });
+});
+
 test("a load that started before a change and answers after it does not put the old file back", async () => {
   const lines = spyConsole();
   const loads: ((result: SourceResult<SettingsRead>) => void)[] = [];

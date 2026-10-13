@@ -16,6 +16,7 @@ type IconButton = {
   readonly label: string;
   readonly icon: Component;
   readonly keepsKeyboard: boolean;
+  readonly history: boolean;
   readonly run: () => void;
 };
 
@@ -29,11 +30,15 @@ const emit = defineEmits<{
   finish: [];
 }>();
 
+// The owner hid Undo and Redo for now (board item 662); their keys still work.
+const HISTORY_BUTTONS_SHOWN = false;
+
 const ICON_BUTTONS: readonly IconButton[] = [
   {
     label: "Previous change",
     icon: ArrowUp,
     keepsKeyboard: true,
+    history: false,
     run: () => {
       emit("move", "up");
     },
@@ -42,6 +47,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
     label: "Next change",
     icon: ArrowDown,
     keepsKeyboard: true,
+    history: false,
     run: () => {
       emit("move", "down");
     },
@@ -50,6 +56,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
     label: "Apply non-conflicting changes from the left",
     icon: ChevronsRight,
     keepsKeyboard: false,
+    history: false,
     run: () => {
       emit("applyLeft");
     },
@@ -58,6 +65,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
     label: "Apply non-conflicting changes from the right",
     icon: ChevronsLeft,
     keepsKeyboard: false,
+    history: false,
     run: () => {
       emit("applyRight");
     },
@@ -66,6 +74,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
     label: "Undo",
     icon: Undo2,
     keepsKeyboard: false,
+    history: true,
     run: () => {
       emit("undo");
     },
@@ -74,11 +83,13 @@ const ICON_BUTTONS: readonly IconButton[] = [
     label: "Redo",
     icon: Redo2,
     keepsKeyboard: false,
+    history: true,
     run: () => {
       emit("redo");
     },
   },
 ];
+const SHOWN_BUTTONS = ICON_BUTTONS.filter(({ history }) => HISTORY_BUTTONS_SHOWN || !history);
 
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -106,7 +117,7 @@ function pressed(button: IconButton, event: MouseEvent): void {
       Mark resolved
     </button>
     <button
-      v-for="button in ICON_BUTTONS"
+      v-for="button in SHOWN_BUTTONS"
       :key="button.label"
       type="button"
       :title="button.label"

@@ -1,0 +1,1012 @@
+diff --git c/frontend/src/editor/internal/pane.ts i/frontend/src/editor/internal/pane.ts
+index fbc9e0a..bbad3a0 100644
+--- c/frontend/src/editor/internal/pane.ts
++++ i/frontend/src/editor/internal/pane.ts
+@@ -178,9 +178,9 @@ export function preferenceEffects(
+ 
+ const HISTORY_INPUTS: Readonly<Record<string, true>> = { historyUndo: true, historyRedo: true };
+ 
+-// The browser's own undo (WebKit: Ctrl/Cmd+Z when no binding prevents the key) arrives as a
+-// beforeinput that history() turns into an undo (@codemirror/commands history(), dist/index.js:267-271);
+-// undo comes only from the bound keys and the toolbar.
++// The browser's own Undo/Redo command (macOS Edit ▸ Undo, or Cmd+Z in WKWebView when Undo is
++// bound elsewhere, board item 690) arrives as a beforeinput that history() turns into an undo
++// (@codemirror/commands history(), dist/index.js:267-271); only yamt's keys and toolbar undo.
+ export function refuseNativeHistory(
+   event: Pick<InputEvent, "inputType" | "preventDefault">,
+ ): boolean {
+diff --git c/frontend/src/editor/internal/sideKeys.test.ts i/frontend/src/editor/internal/sideKeys.test.ts
+index 2f8648a..3acc1e8 100644
+--- c/frontend/src/editor/internal/sideKeys.test.ts
++++ i/frontend/src/editor/internal/sideKeys.test.ts
+@@ -1,7 +1,8 @@
++import { EditorState } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+ import { DEFAULT_KEYS, parseKey, type Key } from "../../ipc";
+-import { sideKeyCommands } from "./sideKeys";
++import { runSideKey, sideKeyCommands, sideRunner, type SideCommand } from "./sideKeys";
+ 
+ const LINUX = "Linux x86_64";
+ 
+@@ -55,3 +56,17 @@ test("a side action without keys binds nothing, and a macOS-only key is not boun
+     ),
+   ).toEqual({ key: "Ctrl-n", command: { kind: "step", direction: "down" } });
+ });
++
++test("a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it", () => {
++  const apply: SideCommand = { kind: "decide", decision: "apply" };
++  const ran: SideCommand[] = [];
++  const withRunner = EditorState.create({
++    extensions: sideRunner.of((command) => {
++      ran.push(command);
++    }),
++  });
++
++  expect(runSideKey(withRunner, apply)).toBe(true);
++  expect(ran).toEqual([apply]);
++  expect(runSideKey(EditorState.create(), apply)).toBe(true);
++});
+diff --git c/frontend/src/editor/internal/sideKeys.ts i/frontend/src/editor/internal/sideKeys.ts
+index ca3bc69..40ff4b9 100644
+--- c/frontend/src/editor/internal/sideKeys.ts
++++ i/frontend/src/editor/internal/sideKeys.ts
+@@ -1,4 +1,4 @@
+-import { Facet, type Extension } from "@codemirror/state";
++import { Facet, type EditorState, type Extension } from "@codemirror/state";
+ import { keymap } from "@codemirror/view";
+ 
+ import { KEY_ACTIONS, type KeyAction, type KeyBindings } from "../../ipc";
+@@ -27,8 +27,8 @@ const SIDE_COMMANDS: Readonly<Record<SideAction, SideCommand>> = {
+ 
+ type SideRunner = (command: SideCommand) => void;
+ 
+-export const sideRunner = Facet.define<SideRunner, SideRunner | null>({
+-  combine: (runners) => runners[0] ?? null,
++export const sideRunner = Facet.define<SideRunner, SideRunner>({
++  combine: (runners) => runners[0] ?? (() => undefined),
+ });
+ 
+ function isSideAction(action: KeyAction): action is SideAction {
+@@ -44,16 +44,17 @@ export function sideKeyCommands(
+   );
+ }
+ 
++export function runSideKey(state: EditorState, command: SideCommand): boolean {
++  state.facet(sideRunner)(command);
++  return true;
++}
++
+ export function sideKeys(keys: KeyBindings, platform: string): Extension {
+   return keymap.of(
+     sideKeyCommands(keys, platform).map(({ key, command }) => ({
+       key,
+       preventDefault: true,
+-      run: (view) => {
+-        const run = view.state.facet(sideRunner);
+-        run?.(command);
+-        return run !== null;
+-      },
++      run: (view) => runSideKey(view.state, command),
+     })),
+   );
+ }
+diff --git c/frontend/src/ui/KeyRecorder.vue i/frontend/src/ui/KeyRecorder.vue
+new file mode 100644
+index 0000000..2c0281d
+--- /dev/null
++++ i/frontend/src/ui/KeyRecorder.vue
+@@ -0,0 +1,205 @@
++<script setup lang="ts">
++import { onClickOutside } from "@vueuse/core";
++import { computed, nextTick, onMounted, shallowRef, useTemplateRef } from "vue";
++import Plus from "~icons/lucide/plus";
++import TriangleAlert from "~icons/lucide/triangle-alert";
++
++import {
++  KEY_ACTIONS,
++  keyLabel,
++  keyOfEvent,
++  sameKey,
++  type Key,
++  type KeyAction,
++  type KeyBindings,
++} from "../ipc";
++import { ACTION_NAMES, setKeyMenu, usedByText } from "./keyText";
++
++const props = defineProps<{ action: KeyAction; initial: Key | null; bindings: KeyBindings }>();
++const emit = defineEmits<{ record: [key: Key]; close: [] }>();
++
++const MENU_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
++
++const dialog = useTemplateRef<HTMLDialogElement>("dialog");
++const field = useTemplateRef<HTMLInputElement>("field");
++const plusButton = useTemplateRef<HTMLButtonElement>("plusButton");
++const plusMenu = useTemplateRef<HTMLUListElement>("plusMenu");
++const shown = shallowRef<Key | null>(props.initial);
++const plusOpen = shallowRef(false);
++const setKeys = setKeyMenu(navigator.platform);
++
++const shownText = computed(() =>
++  shown.value === null ? "" : keyLabel(shown.value, navigator.platform),
++);
++const owners = computed(() => {
++  const key = shown.value;
++  return key === null
++    ? []
++    : KEY_ACTIONS.filter(
++        (other) =>
++          other !== props.action && props.bindings[other].some((held) => sameKey(held, key)),
++      );
++});
++
++onClickOutside(
++  plusMenu,
++  () => {
++    plusOpen.value = false;
++  },
++  { ignore: [plusButton] },
++);
++
++onMounted(() => {
++  dialog.value?.showModal();
++  field.value?.focus();
++});
++
++function confirm(): void {
++  if (shown.value !== null) {
++    emit("record", shown.value);
++  }
++}
++
++function cancel(event: Event): void {
++  event.preventDefault();
++  emit("close");
++}
++
++// ShortcutTextField.processKeyEvent: plain Escape and (with a key shown) plain Enter go to the
++// dialog, a modifier alone changes nothing, every other key with its modifiers replaces the shown one.
++function recordKey(event: KeyboardEvent): void {
++  const modified = event.ctrlKey || event.metaKey || event.altKey;
++  if (event.key === "Tab" && !modified) {
++    return;
++  }
++  event.preventDefault();
++  event.stopPropagation();
++  const plain = !modified && !event.shiftKey;
++  if (plain && event.key === "Escape") {
++    emit("close");
++    return;
++  }
++  if (plain && event.key === "Enter" && shown.value !== null) {
++    confirm();
++    return;
++  }
++  const key = keyOfEvent(event, navigator.platform);
++  if (key !== null) {
++    shown.value = key;
++  }
++}
++
++async function togglePlus(): Promise<void> {
++  plusOpen.value = !plusOpen.value;
++  await nextTick();
++  plusMenu.value?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++}
++
++function closePlus(): void {
++  plusOpen.value = false;
++  field.value?.focus();
++}
++
++function setKey(key: Key): void {
++  shown.value = key;
++  closePlus();
++}
++
++function plusMenuKey(event: KeyboardEvent): void {
++  if (event.key === "Escape" || event.key === "Tab") {
++    event.preventDefault();
++    event.stopPropagation();
++    closePlus();
++    return;
++  }
++  const step = MENU_STEPS[event.key];
++  const items = [...(plusMenu.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  if (step === undefined || items.length === 0) {
++    return;
++  }
++  event.preventDefault();
++  const index = items.findIndex((item) => item === event.target);
++  items[(index + step + items.length) % items.length]?.focus();
++}
++</script>
++
++<template>
++  <dialog
++    ref="dialog"
++    aria-labelledby="key-dialog-title"
++    class="m-auto w-[22rem] overflow-visible rounded-lg border border-control-border bg-panel text-fg"
++    @cancel="cancel"
++  >
++    <h2 id="key-dialog-title" class="border-b border-control-border px-4 py-2 font-semibold">
++      Keyboard Shortcut
++    </h2>
++    <div class="px-4 pt-3">
++      <p class="mb-2">{{ ACTION_NAMES[action] }}</p>
++      <div class="relative">
++        <input
++          ref="field"
++          type="text"
++          readonly
++          aria-label="Keyboard shortcut"
++          :value="shownText"
++          class="w-full rounded border border-control-border bg-panel-inline py-1 pr-9 pl-2 caret-transparent outline-none focus:border-primary"
++          @keydown="recordKey"
++        />
++        <button
++          ref="plusButton"
++          type="button"
++          title="Set a key the field cannot record"
++          aria-label="Set a key the field cannot record"
++          aria-haspopup="menu"
++          :aria-expanded="plusOpen"
++          class="absolute inset-y-0.5 right-0.5 rounded px-1.5 hover:bg-hover"
++          @click="togglePlus"
++        >
++          <Plus class="size-4" aria-hidden="true" />
++        </button>
++        <ul
++          v-if="plusOpen"
++          ref="plusMenu"
++          role="menu"
++          aria-label="Set a key"
++          class="absolute top-full right-0 z-10 mt-1 min-w-36 rounded border border-control-border bg-panel py-1"
++          @keydown="plusMenuKey"
++        >
++          <li v-for="entry in setKeys" :key="entry.label" role="none">
++            <button
++              type="button"
++              role="menuitem"
++              class="w-full px-3 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected"
++              @click="setKey(entry.key)"
++            >
++              {{ entry.label }}
++            </button>
++          </li>
++        </ul>
++      </div>
++      <p role="status" class="mt-2 flex min-h-6 items-start gap-1.5">
++        <template v-if="owners.length > 0">
++          <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
++          {{ usedByText(owners) }}
++        </template>
++      </p>
++    </div>
++    <div class="flex justify-end gap-2 px-4 pt-2 pb-4">
++      <button
++        type="button"
++        :disabled="shown === null"
++        class="rounded border border-primary bg-primary px-3.5 py-1 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
++        @click="confirm"
++      >
++        OK
++      </button>
++      <button
++        type="button"
++        class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="emit('close')"
++      >
++        Cancel
++      </button>
++    </div>
++  </dialog>
++</template>
+diff --git c/frontend/src/ui/KeymapList.vue i/frontend/src/ui/KeymapList.vue
+new file mode 100644
+index 0000000..a7c46cd
+--- /dev/null
++++ i/frontend/src/ui/KeymapList.vue
+@@ -0,0 +1,224 @@
++<script setup lang="ts">
++import { onClickOutside } from "@vueuse/core";
++import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
++
++import { keyLabel, type Key, type KeyAction } from "../ipc";
++import { isDefault } from "./keymapEdit";
++import KeyRecorder from "./KeyRecorder.vue";
++import {
++  ACTION_NAMES,
++  ACTION_PLACES,
++  KEYMAP_GROUPS,
++  keymapMenu,
++  type KeymapCommand,
++} from "./keyText";
++import { useAppStore } from "./store";
++
++type Recording = { readonly action: KeyAction; readonly from: Key | null };
++
++const ROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
++
++const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
++const list = useTemplateRef<HTMLDivElement>("list");
++const menu = useTemplateRef<HTMLUListElement[]>("menu");
++const menuFor = shallowRef<KeyAction | null>(null);
++const recording = shallowRef<Recording | null>(null);
++
++const bindings = computed(() => settings.value.keys.bindings);
++const groups = computed(() =>
++  KEYMAP_GROUPS.map(({ title, actions }) => ({
++    title,
++    rows: actions.map((action) => {
++      const keys = bindings.value[action];
++      return {
++        action,
++        labels: keys.map((key) => keyLabel(key, navigator.platform)),
++        changed: !isDefault(action, keys),
++      };
++    }),
++  })),
++);
++const menuEntries = computed(() =>
++  menuFor.value === null
++    ? []
++    : keymapMenu(menuFor.value, bindings.value[menuFor.value], navigator.platform),
++);
++
++onClickOutside(
++  () => menu.value?.[0] ?? null,
++  () => {
++    void closeMenu();
++  },
++  { ignore: ["[data-keymap-row][aria-expanded=true]"] },
++);
++
++function rowOf(action: KeyAction): HTMLElement | null {
++  return list.value?.querySelector<HTMLElement>(`[data-keymap-row="${action}"]`) ?? null;
++}
++
++async function focusRow(action: KeyAction): Promise<void> {
++  await nextTick();
++  rowOf(action)?.focus();
++}
++
++async function closeMenu(): Promise<void> {
++  const action = menuFor.value;
++  menuFor.value = null;
++  if (action !== null) {
++    await focusRow(action);
++  }
++}
++
++async function toggleMenu(action: KeyAction): Promise<void> {
++  if (menuFor.value === action) {
++    await closeMenu();
++    return;
++  }
++  menuFor.value = action;
++  await nextTick();
++  menu.value?.[0]?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++}
++
++function stepRow(event: KeyboardEvent): void {
++  const step = ROW_STEPS[event.key];
++  const rows = [...(list.value?.querySelectorAll<HTMLElement>("[data-keymap-row]") ?? [])];
++  if (step === undefined) {
++    return;
++  }
++  event.preventDefault();
++  rows[rows.findIndex((row) => row === event.currentTarget) + step]?.focus();
++}
++
++function menuKey(event: KeyboardEvent): void {
++  if (event.key === "Escape" || event.key === "Tab") {
++    event.preventDefault();
++    void closeMenu();
++    return;
++  }
++  const step = ROW_STEPS[event.key];
++  const items = [...(menu.value?.[0]?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  if (step === undefined || items.length === 0) {
++    return;
++  }
++  event.preventDefault();
++  const index = items.findIndex((item) => item === event.target);
++  items[(index + step + items.length) % items.length]?.focus();
++}
++
++async function run(action: KeyAction, command: KeymapCommand): Promise<void> {
++  await closeMenu();
++  switch (command.kind) {
++    case "add":
++      recording.value = { action, from: null };
++      return;
++    case "change":
++      recording.value = { action, from: command.key };
++      return;
++    case "remove":
++      await removeKey(action, command.key);
++      return;
++    case "removeAll":
++      await removeAllKeys(action);
++      return;
++    case "reset":
++      await resetKeys(action);
++      return;
++    default: {
++      const _exhaustive: never = command;
++      return _exhaustive;
++    }
++  }
++}
++
++async function stopRecording(): Promise<Recording | null> {
++  const done = recording.value;
++  recording.value = null;
++  if (done !== null) {
++    await focusRow(done.action);
++  }
++  return done;
++}
++
++async function recorded(key: Key): Promise<void> {
++  const done = await stopRecording();
++  if (done === null) {
++    return;
++  }
++  await (done.from === null ? addKey(done.action, key) : changeKey(done.action, done.from, key));
++  if (document.activeElement === document.body) {
++    await focusRow(done.action);
++  }
++}
++</script>
++
++<template>
++  <div ref="list" class="flex flex-col gap-4">
++    <section v-for="group in groups" :key="group.title" :aria-label="group.title">
++      <h4 class="mb-1 text-fg-muted">{{ group.title }}</h4>
++      <ul class="flex flex-col">
++        <li v-for="row in group.rows" :key="row.action" class="relative">
++          <button
++            type="button"
++            :data-keymap-row="row.action"
++            aria-haspopup="menu"
++            :aria-expanded="menuFor === row.action"
++            class="flex w-full items-start gap-3 rounded px-2 py-1 text-left hover:bg-row-hover aria-expanded:bg-row-selected"
++            @click="toggleMenu(row.action)"
++            @keydown="stepRow"
++          >
++            <span class="min-w-0 flex-1">
++              <span class="block" :class="{ 'text-primary': row.changed }">
++                {{ ACTION_NAMES[row.action] }}
++              </span>
++              <span class="block text-fg-muted">{{ ACTION_PLACES[row.action] }}</span>
++            </span>
++            <span class="flex shrink-0 flex-wrap justify-end gap-1">
++              <kbd
++                v-for="label in row.labels"
++                :key="label"
++                class="rounded border border-control-border bg-panel-inline px-1.5 font-sans"
++              >
++                {{ label }}
++              </kbd>
++              <span v-if="row.labels.length === 0" class="text-fg-muted">None</span>
++            </span>
++          </button>
++          <ul
++            v-if="menuFor === row.action"
++            ref="menu"
++            role="menu"
++            :aria-label="ACTION_NAMES[row.action]"
++            class="absolute top-full left-2 z-10 min-w-56 rounded border border-control-border bg-panel py-1"
++            @keydown="menuKey"
++          >
++            <template v-for="(entry, index) in menuEntries" :key="index">
++              <li
++                v-if="entry.kind === 'separator'"
++                role="separator"
++                class="my-1 border-t border-control-border"
++              />
++              <li v-else role="none">
++                <button
++                  type="button"
++                  role="menuitem"
++                  class="w-full px-3 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected"
++                  @click="run(row.action, entry.command)"
++                >
++                  {{ entry.label }}
++                </button>
++              </li>
++            </template>
++          </ul>
++        </li>
++      </ul>
++    </section>
++    <KeyRecorder
++      v-if="recording !== null"
++      :action="recording.action"
++      :initial="recording.from"
++      :bindings="bindings"
++      @record="recorded"
++      @close="stopRecording"
++    />
++  </div>
++</template>
+diff --git c/frontend/src/ui/MergeToolbar.vue i/frontend/src/ui/MergeToolbar.vue
+index f3f4dbd..68d804c 100644
+--- c/frontend/src/ui/MergeToolbar.vue
++++ i/frontend/src/ui/MergeToolbar.vue
+@@ -16,6 +16,7 @@ type IconButton = {
+   readonly label: string;
+   readonly icon: Component;
+   readonly keepsKeyboard: boolean;
++  readonly history: boolean;
+   readonly run: () => void;
+ };
+ 
+@@ -29,11 +30,15 @@ const emit = defineEmits<{
+   finish: [];
+ }>();
+ 
++// The owner hid Undo and Redo for now (board item 662); their keys still work.
++const HISTORY_BUTTONS_SHOWN = false;
++
+ const ICON_BUTTONS: readonly IconButton[] = [
+   {
+     label: "Previous change",
+     icon: ArrowUp,
+     keepsKeyboard: true,
++    history: false,
+     run: () => {
+       emit("move", "up");
+     },
+@@ -42,6 +47,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+     label: "Next change",
+     icon: ArrowDown,
+     keepsKeyboard: true,
++    history: false,
+     run: () => {
+       emit("move", "down");
+     },
+@@ -50,6 +56,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+     label: "Apply non-conflicting changes from the left",
+     icon: ChevronsRight,
+     keepsKeyboard: false,
++    history: false,
+     run: () => {
+       emit("applyLeft");
+     },
+@@ -58,6 +65,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+     label: "Apply non-conflicting changes from the right",
+     icon: ChevronsLeft,
+     keepsKeyboard: false,
++    history: false,
+     run: () => {
+       emit("applyRight");
+     },
+@@ -66,6 +74,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+     label: "Undo",
+     icon: Undo2,
+     keepsKeyboard: false,
++    history: true,
+     run: () => {
+       emit("undo");
+     },
+@@ -74,11 +83,13 @@ const ICON_BUTTONS: readonly IconButton[] = [
+     label: "Redo",
+     icon: Redo2,
+     keepsKeyboard: false,
++    history: true,
+     run: () => {
+       emit("redo");
+     },
+   },
+ ];
++const SHOWN_BUTTONS = ICON_BUTTONS.filter(({ history }) => HISTORY_BUTTONS_SHOWN || !history);
+ 
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -106,7 +117,7 @@ function pressed(button: IconButton, event: MouseEvent): void {
+       Mark resolved
+     </button>
+     <button
+-      v-for="button in ICON_BUTTONS"
++      v-for="button in SHOWN_BUTTONS"
+       :key="button.label"
+       type="button"
+       :title="button.label"
+diff --git c/frontend/src/ui/SettingsView.vue i/frontend/src/ui/SettingsView.vue
+index 5e1cd35..fc57806 100644
+--- c/frontend/src/ui/SettingsView.vue
++++ i/frontend/src/ui/SettingsView.vue
+@@ -1,13 +1,28 @@
+ <script setup lang="ts">
+-import { nextTick, onMounted, useTemplateRef } from "vue";
++import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ 
++import type { Theme } from "../ipc";
++import KeymapList from "./KeymapList.vue";
+ import { useAppStore } from "./store";
+ 
+-const { closeSettings } = useAppStore();
++const THEMES: readonly { readonly theme: Theme; readonly label: string }[] = [
++  { theme: "dark", label: "Dark" },
++  { theme: "light", label: "Light" },
++];
++
++const { settings, closeSettings, setTheme, moveSettings } = useAppStore();
+ const back = useTemplateRef<HTMLButtonElement>("back");
++const pathText = shallowRef("");
+ const focusedBefore = document.activeElement;
+ 
++const read = computed(() => settings.value.read);
++const defaultInUse = computed(
++  () => read.value === null || read.value.path === read.value.defaultPath,
++);
++
++watch(() => read.value?.path, restorePath, { immediate: true });
++
+ onMounted(() => {
+   back.value?.focus();
+ });
+@@ -23,6 +38,16 @@ async function goBack(): Promise<void> {
+     focusedBefore.focus();
+   }
+ }
++
++function restorePath(): void {
++  pathText.value = read.value?.path ?? "";
++}
++
++async function useDefault(): Promise<void> {
++  if (read.value !== null) {
++    await moveSettings(read.value.defaultPath);
++  }
++}
+ </script>
+ 
+ <template>
+@@ -30,16 +55,65 @@ async function goBack(): Promise<void> {
+     aria-label="Settings"
+     class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island bg-panel"
+   >
+-    <div class="mx-auto w-full max-w-3xl p-6">
++    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
+       <button
+         ref="back"
+         type="button"
+-        class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        class="flex items-center gap-1.5 self-start rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+         @click="goBack"
+       >
+         <ArrowLeft class="size-4" aria-hidden="true" />
+         Back
+       </button>
++      <section aria-labelledby="settings-theme">
++        <h3 id="settings-theme" class="mb-2 font-semibold">Theme</h3>
++        <div class="flex gap-2">
++          <button
++            v-for="{ theme, label } in THEMES"
++            :key="theme"
++            type="button"
++            :aria-pressed="settings.theme === theme"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary aria-pressed:hover:brightness-110"
++            @click="setTheme(theme)"
++          >
++            {{ label }}
++          </button>
++        </div>
++      </section>
++      <section aria-labelledby="settings-keymap">
++        <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>
++        <KeymapList />
++      </section>
++      <section aria-labelledby="settings-file">
++        <h3 id="settings-file" class="mb-2 font-semibold">Settings file</h3>
++        <form class="flex gap-2" @submit.prevent="moveSettings(pathText)">
++          <input
++            v-model="pathText"
++            type="text"
++            aria-labelledby="settings-file"
++            spellcheck="false"
++            :disabled="read === null"
++            class="min-w-0 flex-1 rounded border border-control-border bg-panel-inline px-2 py-1 font-mono outline-none focus:border-primary disabled:text-fg-muted"
++            @keydown.esc="restorePath"
++          />
++          <button
++            type="submit"
++            :disabled="read === null"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          >
++            Use
++          </button>
++          <button
++            type="button"
++            :disabled="defaultInUse"
++            class="rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++            @click="useDefault"
++          >
++            Default
++          </button>
++        </form>
++        <p class="mt-1 text-fg-muted">yamt reads this file again whenever its window gets focus.</p>
++      </section>
+     </div>
+   </section>
+ </template>
+diff --git c/frontend/src/ui/keyText.test.ts i/frontend/src/ui/keyText.test.ts
+index fb200de..b601fa7 100644
+--- c/frontend/src/ui/keyText.test.ts
++++ i/frontend/src/ui/keyText.test.ts
+@@ -1,7 +1,29 @@
+ import { expect, test } from "vitest";
+ 
+-import { KEY_ACTIONS } from "../ipc";
+-import { ACTION_PLACES, KEYMAP_GROUPS } from "./keyText";
++import { DEFAULT_KEYS, KEY_ACTIONS, parseKey, type Key } from "../ipc";
++import {
++  ACTION_PLACES,
++  KEYMAP_GROUPS,
++  keymapMenu,
++  setKeyMenu,
++  usedByText,
++  type KeymapMenuEntry,
++} from "./keyText";
++
++const LINUX = "Linux x86_64";
++const MAC = "MacIntel";
++
++function key(text: string): Key {
++  const parsed = parseKey(text);
++  if (parsed === null) {
++    throw new Error(`${text} does not parse`);
++  }
++  return parsed;
++}
++
++function labels(entries: readonly KeymapMenuEntry[]): string[] {
++  return entries.map((entry) => (entry.kind === "separator" ? "---" : entry.label));
++}
+ 
+ test("the keymap groups list every action once, in the settings order", () => {
+   expect(KEYMAP_GROUPS.flatMap(({ actions }) => actions)).toEqual(KEY_ACTIONS);
+@@ -19,3 +41,71 @@ test("each action says where it acts, matching its group", () => {
+   expect(ACTION_PLACES["close-find"]).toContain("find box");
+   expect(ACTION_PLACES.indent).toBe("in the Result pane");
+ });
++
++test("the edit menu changes and removes each key by its label; default keys offer no reset", () => {
++  const menu = keymapMenu("apply", DEFAULT_KEYS.apply, LINUX);
++
++  expect(labels(menu)).toEqual([
++    "Add Keyboard Shortcut",
++    "---",
++    "Change Enter…",
++    "Remove Enter",
++    "Change Space…",
++    "Remove Space",
++  ]);
++  expect(menu[2]).toEqual({
++    kind: "command",
++    label: "Change Enter…",
++    command: { kind: "change", key: key("Enter") },
++  });
++  expect(menu[3]).toEqual({
++    kind: "command",
++    label: "Remove Enter",
++    command: { kind: "remove", key: key("Enter") },
++  });
++  expect(labels(keymapMenu("find", [key("Mod-Shift-f")], MAC)).slice(2, 4)).toEqual([
++    "Change ⇧⌘F…",
++    "Remove ⇧⌘F",
++  ]);
++});
++
++test("Remove All shows past two keys, and Reset Shortcuts follows it without a separator", () => {
++  expect(labels(keymapMenu("ignore", DEFAULT_KEYS.ignore, LINUX)).slice(-2)).toEqual([
++    "---",
++    "Remove All",
++  ]);
++  expect(
++    labels(keymapMenu("ignore", [key("Delete"), key("x"), key("y")], LINUX)).slice(-3),
++  ).toEqual(["---", "Remove All", "Reset Shortcuts"]);
++  expect(labels(keymapMenu("apply", [key("a"), key("Enter")], LINUX)).slice(-3)).toEqual([
++    "Remove Enter",
++    "---",
++    "Reset Shortcuts",
++  ]);
++});
++
++test("an action left without keys offers Add and Reset with one separator between", () => {
++  const menu = keymapMenu("find", [], LINUX);
++
++  expect(labels(menu)).toEqual(["Add Keyboard Shortcut", "---", "Reset Shortcuts"]);
++  expect(menu.map((entry) => (entry.kind === "command" ? entry.command.kind : null))).toEqual([
++    "add",
++    null,
++    "reset",
++  ]);
++});
++
++test("the + menu sets Enter, Escape, Tab and Shift+Tab, labelled for the platform", () => {
++  expect(setKeyMenu(LINUX)).toEqual([
++    { label: "Set Enter", key: key("Enter") },
++    { label: "Set Escape", key: key("Escape") },
++    { label: "Set Tab", key: key("Tab") },
++    { label: "Set Shift+Tab", key: key("Shift-Tab") },
++  ]);
++  expect(setKeyMenu(MAC).map(({ label }) => label)).toEqual(["Set ⏎", "Set ⎋", "Set ⇥", "Set ⇧⇥"]);
++});
++
++test("the conflict line names every action already using the key", () => {
++  expect(usedByText(["find"])).toBe("Already used by: Find");
++  expect(usedByText(["undo", "find-next"])).toBe("Already used by: Undo, Find next");
++});
+diff --git c/frontend/src/ui/keyText.ts i/frontend/src/ui/keyText.ts
+index 25614a6..22b7f32 100644
+--- c/frontend/src/ui/keyText.ts
++++ i/frontend/src/ui/keyText.ts
+@@ -1,4 +1,18 @@
+-import type { KeyAction } from "../ipc";
++import { keyLabel, parseKey, type Key, type KeyAction } from "../ipc";
++import { isDefault } from "./keymapEdit";
++
++export type KeymapCommand =
++  | { readonly kind: "add" }
++  | { readonly kind: "change"; readonly key: Key }
++  | { readonly kind: "remove"; readonly key: Key }
++  | { readonly kind: "removeAll" }
++  | { readonly kind: "reset" };
++
++export type KeymapMenuEntry =
++  | { readonly kind: "separator" }
++  | { readonly kind: "command"; readonly label: string; readonly command: KeymapCommand };
++
++export type SetKeyEntry = { readonly label: string; readonly key: Key };
+ 
+ export const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
+   apply: "Apply",
+@@ -46,3 +60,61 @@ export const KEYMAP_GROUPS: readonly {
+   { title: "Find", actions: ["find", "find-next", "find-previous", "close-find"] },
+   { title: "Result pane", actions: ["indent", "outdent"] },
+ ];
++
++const SEPARATOR: KeymapMenuEntry = { kind: "separator" };
++
++const KEYS_WITHOUT_REMOVE_ALL = 2;
++
++// WebStorm's Keymap edit menu (KeymapPanel.createEditActionGroup): Remove All only past two keys,
++// Reset Shortcuts right after it without a separator.
++export function keymapMenu(
++  action: KeyAction,
++  keys: readonly Key[],
++  platform: string,
++): KeymapMenuEntry[] {
++  const entries: KeymapMenuEntry[] = [
++    { kind: "command", label: "Add Keyboard Shortcut", command: { kind: "add" } },
++    SEPARATOR,
++  ];
++  for (const key of keys) {
++    const label = keyLabel(key, platform);
++    entries.push(
++      { kind: "command", label: `Change ${label}…`, command: { kind: "change", key } },
++      { kind: "command", label: `Remove ${label}`, command: { kind: "remove", key } },
++    );
++  }
++  const removeAll = keys.length > KEYS_WITHOUT_REMOVE_ALL;
++  if (removeAll) {
++    entries.push(SEPARATOR, {
++      kind: "command",
++      label: "Remove All",
++      command: { kind: "removeAll" },
++    });
++  }
++  if (!isDefault(action, keys)) {
++    entries.push(...(removeAll ? [] : [SEPARATOR]), {
++      kind: "command",
++      label: "Reset Shortcuts",
++      command: { kind: "reset" },
++    });
++  }
++  return entries.filter(
++    (entry, index) =>
++      entry.kind !== "separator" ||
++      (entries[index - 1]?.kind !== "separator" && index < entries.length - 1),
++  );
++}
++
++// The keys a focus traversal or the dialog itself would take (ShortcutTextField.getKeyStrokes).
++const SET_KEYS: readonly Key[] = ["Enter", "Escape", "Tab", "Shift-Tab"].flatMap((text) => {
++  const key = parseKey(text);
++  return key === null ? [] : [key];
++});
++
++export function setKeyMenu(platform: string): SetKeyEntry[] {
++  return SET_KEYS.map((key) => ({ label: `Set ${keyLabel(key, platform)}`, key }));
++}
++
++export function usedByText(owners: readonly KeyAction[]): string {
++  return `Already used by: ${owners.map((owner) => ACTION_NAMES[owner]).join(", ")}`;
++}
+diff --git c/frontend/src/ui/settings.ts i/frontend/src/ui/settings.ts
+index 4c5327b..24a3d26 100644
+--- c/frontend/src/ui/settings.ts
++++ i/frontend/src/ui/settings.ts
+@@ -87,7 +87,7 @@ function problemKey(problem: KeyProblem): string {
+     : `twice ${keyText(problem.key)} ${problem.actions.join(" ")}`;
+ }
+ 
+-function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: KeysRead): void {
++function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: SettingsInUse): void {
+   const { problems } = target.settings.value.keys;
+   const shown = target.problem.value;
+   const settingsShown = shown?.action === "settings" ? shown.cause.kind : null;
+@@ -97,7 +97,9 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Key
+     }
+     return;
+   }
+-  const sameProblems = sameTexts(before.problems.map(problemKey), problems.map(problemKey));
++  const sameProblems =
++    before.read?.path === read.path &&
++    sameTexts(before.keys.problems.map(problemKey), problems.map(problemKey));
+   if (!sameProblems || (settingsShown !== null && settingsShown !== "Keys")) {
+     report(target, { action: "settings", cause: { kind: "Keys", path: read.path, problems } });
+   }
+@@ -108,7 +110,7 @@ function adopt(target: SettingsTarget, read: SettingsRead): void {
+   if (!sameStored(before.read, read)) {
+     target.settings.value = { read, theme: read.stored.theme, keys: bindingsOf(read.stored.keys) };
+   }
+-  showKeyProblems(target, read, before.keys);
++  showKeyProblems(target, read, before);
+ }
+ 
+ async function send(target: SettingsTarget, call: Send): Promise<void> {
+@@ -119,9 +121,10 @@ async function send(target: SettingsTarget, call: Send): Promise<void> {
+   const latest = ticket === target.latestSettings;
+   if (!outcome.ok) {
+     const failure: Problem = { action: "settings", cause: outcome.cause };
+-    logProblem(failure);
+     if (latest) {
+-      target.problem.value = failure;
++      report(target, failure);
++    } else {
++      logProblem(failure);
+     }
+     return;
+   }
+diff --git c/frontend/src/ui/store.test.ts i/frontend/src/ui/store.test.ts
+index 6b1ecf7..1bd80af 100644
+--- c/frontend/src/ui/store.test.ts
++++ i/frontend/src/ui/store.test.ts
+@@ -1938,6 +1938,30 @@ test("a key problem shown again replaces a settings failure the file no longer h
+   });
+ });
+ 
++test("a move to a file with the same broken keys names the new path in the Keys problem", async () => {
++  spyConsole();
++  const broken = { theme: "dark", keys: { redo: ["Ctrl+Q"] } } satisfies StoredSettings;
++  const elsewhere = "/elsewhere.json";
++  const { source } = settingsSource({
++    loadSettings: () => Promise.resolve(read(broken)),
++    moveSettings: () =>
++      Promise.resolve(ok({ path: elsewhere, defaultPath: SETTINGS_PATH, stored: broken })),
++  });
++  const store = createAppStore(source);
++  await store.loadSettings();
++
++  await store.moveSettings(elsewhere);
++
++  expect(store.problem.value).toEqual({
++    action: "settings",
++    cause: {
++      kind: "Keys",
++      path: elsewhere,
++      problems: [{ kind: "unreadable", action: "redo", text: "Ctrl+Q" }],
++    },
++  });
++});
++
+ test("a load that started before a change and answers after it does not put the old file back", async () => {
+   const lines = spyConsole();
+   const loads: ((result: SourceResult<SettingsRead>) => void)[] = [];

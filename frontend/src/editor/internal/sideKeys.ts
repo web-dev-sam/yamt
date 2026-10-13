@@ -1,4 +1,4 @@
-import { Facet, type Extension } from "@codemirror/state";
+import { Facet, type EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 
 import { KEY_ACTIONS, type KeyAction, type KeyBindings } from "../../ipc";
@@ -27,8 +27,8 @@ const SIDE_COMMANDS: Readonly<Record<SideAction, SideCommand>> = {
 
 type SideRunner = (command: SideCommand) => void;
 
-export const sideRunner = Facet.define<SideRunner, SideRunner | null>({
-  combine: (runners) => runners[0] ?? null,
+export const sideRunner = Facet.define<SideRunner, SideRunner>({
+  combine: (runners) => runners[0] ?? (() => undefined),
 });
 
 function isSideAction(action: KeyAction): action is SideAction {
@@ -44,16 +44,17 @@ export function sideKeyCommands(
   );
 }
 
+export function runSideKey(state: EditorState, command: SideCommand): boolean {
+  state.facet(sideRunner)(command);
+  return true;
+}
+
 export function sideKeys(keys: KeyBindings, platform: string): Extension {
   return keymap.of(
     sideKeyCommands(keys, platform).map(({ key, command }) => ({
       key,
       preventDefault: true,
-      run: (view) => {
-        const run = view.state.facet(sideRunner);
-        run?.(command);
-        return run !== null;
-      },
+      run: (view) => runSideKey(view.state, command),
     })),
   );
 }
