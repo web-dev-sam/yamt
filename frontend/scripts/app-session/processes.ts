@@ -1,0 +1,131 @@
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { closeSync, openSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
+
+import { parseStartTicks, type Proc } from "./state";
+
+const POLL_MS = 100;
+const STOP_GRACE_MS = 3000;
+const OWNER_DEV_PORT = 5173;
+const RUN_TIMEOUT_MS = 30_000;
+
+export type Launch = {
+  readonly role: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd: string;
+  readonly logDir: string;
+  readonly fd3File: string | null;
+};
+
+export function logFile(logDir: string, role: string): string {
+  return join(logDir, `${role}.log`);
+}
+
+function startTicksOf(pid: number): number | null {
+  try {
+    return parseStartTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export async function launch(spec: Launch): Promise<{ child: ChildProcess; proc: Proc }> {
+  const log = openSync(logFile(spec.logDir, spec.role), "a");
+  const extra = spec.fd3File === null ? [] : [openSync(spec.fd3File, "w")];
+  const child = spawn(spec.command, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
+    detached: true,
+    stdio: ["ignore", log, log, ...extra],
+  });
+  for (const fd of [log, ...extra]) {
+    closeSync(fd);
+  }
+  await once(child, "spawn");
+  child.unref();
+  const pid = child.pid;
+  const startTicks = pid === undefined ? null : startTicksOf(pid);
+  if (pid === undefined || startTicks === null) {
+    throw new Error(`${spec.command} exited at once; see ${logFile(spec.logDir, spec.role)}`);
+  }
+  return { child, proc: { role: spec.role, pid, startTicks } };
+}
+
+export async function waitUntil(
+  check: () => boolean | Promise<boolean>,
+  timeoutMs: number,
+  what: string,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    }
+    await sleep(POLL_MS);
+  }
+}
+
+export async function freePort(): Promise<number> {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  server.close();
+  await once(server, "close");
+  if (typeof address !== "object" || address === null) {
+    throw new Error("no free port");
+  }
+  return address.port === OWNER_DEV_PORT ? freePort() : address.port;
+}
+
+function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone" | "not ours"> {
+  const ticks = startTicksOf(proc.pid);
+  if (ticks !== null && ticks !== proc.startTicks) {
+    return "not ours";
+  }
+  if (!signalGroup(proc.pid, "SIGTERM")) {
+    return "gone";
+  }
+  try {
+    await waitUntil(() => !signalGroup(proc.pid, 0), STOP_GRACE_MS, `${proc.role} to stop`);
+    return "stopped";
+  } catch {
+    signalGroup(proc.pid, "SIGKILL");
+    return "killed";
+  }
+}
+
+const execFileText = promisify(execFile);
+
+export async function run(
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  try {
+    const { stdout } = await execFileText(command, args, {
+      env,
+      encoding: "utf8",
+      timeout: RUN_TIMEOUT_MS,
+    });
+    return stdout;
+  } catch (error) {
+    const stderr = error instanceof Error && "stderr" in error ? String(error.stderr) : "";
+    throw new Error(`${command} ${args.join(" ")} failed: ${stderr.trim()}`, { cause: error });
+  }
+}

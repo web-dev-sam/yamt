@@ -84,6 +84,11 @@ webdriver port="4445":
 test-window-check:
     scripts/test-screen.sh check
 
+# Drives the real app on a private display or the fixture page (`just app-session start-app --name s --fresh-repo`,
+# then click/press/type/scroll/read/shot/colours, `stop`); see skill://verification.
+app-session *args:
+    pnpm -C frontend exec tsx scripts/app-session.ts {{ args }}
+
 # Desktop app in dev mode; arguments go to yamt (`just dev-app --repo /tmp/yamt-test-merge`).
 dev-app *args:
     cargo tauri dev -- -- {{ args }}
