@@ -141,6 +141,11 @@ export class SideFocus {
     }
   }
 
+  moveToChange(direction: Direction): void {
+    const side = SIDES.find((each) => this.#view(each).hasFocus) ?? "local";
+    this.#takeKeyboardThenStep(side, direction);
+  }
+
   destroy(): void {
     this.#listeners.abort();
   }
@@ -237,13 +242,17 @@ export class SideFocus {
       return;
     }
     event.preventDefault();
+    const { sum, step } = wheelStep(this.#wheelSum, event);
+    this.#wheelSum = sum;
+    this.#takeKeyboardThenStep(side, step);
+  }
+
+  #takeKeyboardThenStep(side: Side, direction: Direction | null): void {
     if (!this.#view(side).hasFocus) {
       this.#focusOn(side, alone(this.#mark(side)));
     }
-    const { sum, step } = wheelStep(this.#wheelSum, event);
-    this.#wheelSum = sum;
-    if (step !== null) {
-      this.#step(side, step);
+    if (direction !== null) {
+      this.#step(side, direction);
     }
   }
 

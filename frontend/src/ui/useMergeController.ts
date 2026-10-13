@@ -7,10 +7,10 @@ import {
   type ShallowRef,
 } from "vue";
 
-import { MergeController, type MergeSummary, type Side } from "../editor";
+import { MergeController, type Direction, type MergeSummary, type Side } from "../editor";
 import type { FileMergeData } from "../ipc";
 
-export type { MergeSummary } from "../editor";
+export type { Direction, MergeSummary } from "../editor";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -24,6 +24,7 @@ type Hosts = {
 export type MergeHandle = {
   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
   applyAllNonConflicting(side: Side): void;
+  moveToChange(direction: Direction): void;
   undo(): void;
   redo(): void;
   historyKey(event: KeyboardEvent): boolean;
@@ -68,6 +69,7 @@ function handleOf(summary: MergeHandle["summary"], current: () => Loaded | null)
   return {
     summary,
     applyAllNonConflicting: (side) => current()?.controller.applyAllNonConflicting(side),
+    moveToChange: (direction) => current()?.controller.moveToChange(direction),
     undo: () => current()?.controller.undo(),
     redo: () => current()?.controller.redo(),
     historyKey: (event) => current()?.controller.historyKey(event) ?? false,

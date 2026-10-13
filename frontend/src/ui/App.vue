@@ -8,6 +8,7 @@ import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
+import SettingsView from "./SettingsView.vue";
 import { useAppStore } from "./store";
 
 const {
@@ -15,11 +16,12 @@ const {
   opened,
   choices,
   active,
+  settingsOpen,
   problem,
   notices,
   question,
   allResolved,
-  open,
+  pick,
   refreshFiles,
   dismissProblem,
   dismissNotice,
@@ -42,7 +44,7 @@ onMounted(() => {
 
 <template>
   <div class="flex h-full gap-island p-island">
-    <FileList :files="files" :active="active" @select="open" />
+    <FileList :files="files" :active="active" @select="pick" />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
@@ -58,14 +60,15 @@ onMounted(() => {
           v-for="file in opened"
           :key="file.path"
           :data="file"
-          :shown="file.path === active"
+          :shown="file.path === active && !settingsOpen"
         />
         <ChoiceView
           v-for="sides in choices"
           :key="sides.path"
           :sides="sides"
-          :shown="sides.path === active"
+          :shown="sides.path === active && !settingsOpen"
         />
+        <SettingsView v-if="settingsOpen" />
       </div>
     </div>
     <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />

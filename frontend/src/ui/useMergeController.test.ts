@@ -134,6 +134,7 @@ test("while the file is still loading, toolbar actions and the undo shortcut do 
   expect(editor.state.built).toBe(0);
   expect(() => {
     handle.applyAllNonConflicting("local");
+    handle.moveToChange("down");
     handle.undo();
     handle.redo();
   }).not.toThrow();

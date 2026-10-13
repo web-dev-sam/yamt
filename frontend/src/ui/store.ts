@@ -16,7 +16,7 @@ import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { applyDiskChanges } from "./diskChanges";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, logProblem, unexpected, type Problem } from "./problem";
+import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import type { Taken } from "./sides";
 import type { MergeSummary } from "./useMergeController";
@@ -35,6 +35,7 @@ type Refs = {
   readonly remoteName: ShallowRef<RemoteName | null>;
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
+  readonly settingsOpen: ShallowRef<boolean>;
 };
 
 type State = Refs & {
@@ -49,11 +50,14 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
   refreshFiles(): Promise<void>;
   loadRemoteName(): Promise<void>;
   open(path: string): Promise<void>;
+  pick(path: string): Promise<void>;
   finish(request: FinishRequest): Promise<void>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
   reset(path: string, diskVersion: DiskVersion): Promise<void>;
   dismissProblem(): void;
   dismissNotice(path: string): void;
+  openSettings(): void;
+  closeSettings(): void;
   answer(yes: boolean): void;
 };
 
@@ -74,6 +78,7 @@ export function createAppStore(source: ChunkSource): AppStore {
     remoteName: shallowRef<RemoteName | null>(null),
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
+    settingsOpen: shallowRef(false),
   };
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
@@ -98,6 +103,10 @@ function actions(state: State): Actions {
     },
     loadRemoteName: () => loadRemoteName(state),
     open: (path) => open(state, path),
+    pick: async (path) => {
+      state.settingsOpen.value = false;
+      await open(state, path);
+    },
     finish: (request) => finish(state, request),
     takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
     reset: (path, diskVersion) => reset(state, path, diskVersion),
@@ -107,6 +116,12 @@ function actions(state: State): Actions {
     dismissNotice: (path) => {
       state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
     },
+    openSettings: () => {
+      state.settingsOpen.value = true;
+    },
+    closeSettings: () => {
+      state.settingsOpen.value = false;
+    },
     answer: state.asking.answer,
     track: state.guard.track,
     untrack: state.guard.untrack,
@@ -114,11 +129,6 @@ function actions(state: State): Actions {
     mayClose: state.guard.mayClose,
     watchWindowClose: state.guard.watchWindowClose,
   };
-}
-
-function report(state: State, failure: Problem): void {
-  logProblem(failure);
-  state.problem.value = failure;
 }
 
 function clearProblemAbout(state: State, path: string): void {

@@ -1,0 +1,715 @@
+diff --git c/frontend/src/editor/index.ts w/frontend/src/editor/index.ts
+index 0db6433..0be9d2b 100644
+--- c/frontend/src/editor/index.ts
++++ w/frontend/src/editor/index.ts
+@@ -8,7 +8,7 @@ import { log, type FileMergeData } from "../ipc";
+ import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
+ import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+-import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
++import { coveredDecorations, pushCovered } from "./internal/covered";
+ import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
+ import { coveredAction, IconDrag } from "./internal/drag";
+ import { syncFindSpace } from "./internal/find";
+@@ -16,6 +16,7 @@ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./interna
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf } from "./internal/language";
+ import { modClicks } from "./internal/modClick";
++import type { Direction } from "./internal/navigation";
+ import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+ import type { Side } from "./internal/side";
+@@ -25,6 +26,7 @@ import { summarize, type ChunkState, type MergeSummary } from "./internal/status
+ import { Strips, type IconPress } from "./internal/strips";
+ import { visibleLines } from "./internal/viewport";
+ 
++export type { Direction } from "./internal/navigation";
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+ 
+@@ -222,14 +224,6 @@ export class MergeController {
+     return this.#layoutCache;
+   }
+ 
+-  #showCovered(covered: ChunkAction | null): void {
+-    if (sameCovered(covered, this.#views.left.state.field(coveredField))) {
+-      return;
+-    }
+-    this.#views.left.dispatch({ effects: showCovered.of(covered) });
+-    this.#views.right.dispatch({ effects: showCovered.of(covered) });
+-  }
+-
+   readonly #press = (press: IconPress, event: PointerEvent): void => {
+     this.#drag.start(press, event);
+   };
+@@ -242,7 +236,7 @@ export class MergeController {
+       this.#scroll.sync(anchors);
+       const press = this.#drag.press;
+       const covered = press === null ? null : coveredAction(press, rows, this.#views);
+-      this.#showCovered(covered);
++      pushCovered(this.#views, covered);
+       this.#strips.paint(this.#views, rows, covered);
+     });
+   }
+@@ -253,6 +247,10 @@ export class MergeController {
+     );
+   }
+ 
++  moveToChange(direction: Direction): void {
++    this.#focus.moveToChange(direction);
++  }
++
+   undo(): boolean {
+     return undo(this.#views.center);
+   }
+diff --git c/frontend/src/editor/internal/covered.ts w/frontend/src/editor/internal/covered.ts
+index 9fb6468..f99e663 100644
+--- c/frontend/src/editor/internal/covered.ts
++++ w/frontend/src/editor/internal/covered.ts
+@@ -2,11 +2,12 @@ import { StateEffect, StateField, type Extension } from "@codemirror/state";
+ import { Decoration, EditorView } from "@codemirror/view";
+ 
+ import type { ChunkAction } from "./apply";
++import type { PaneViews } from "./geometry";
+ import type { Side } from "./side";
+ 
+-export const showCovered = StateEffect.define<ChunkAction | null>();
++const showCovered = StateEffect.define<ChunkAction | null>();
+ 
+-export const coveredField = StateField.define<ChunkAction | null>({
++const coveredField = StateField.define<ChunkAction | null>({
+   create: () => null,
+   update(covered, tr) {
+     const shown = tr.effects.findLast((effect) => effect.is(showCovered));
+@@ -34,7 +35,7 @@ export function coveredDecorations(side: Side): Extension {
+   ];
+ }
+ 
+-export function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boolean {
++function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boolean {
+   if (a === null || b === null) {
+     return a === b;
+   }
+@@ -45,3 +46,11 @@ export function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boole
+     a.chunks.every((chunk, index) => chunk.id === b.chunks[index]?.id)
+   );
+ }
++
++export function pushCovered({ left, right }: PaneViews, covered: ChunkAction | null): void {
++  if (sameCovered(covered, left.state.field(coveredField))) {
++    return;
++  }
++  left.dispatch({ effects: showCovered.of(covered) });
++  right.dispatch({ effects: showCovered.of(covered) });
++}
+diff --git c/frontend/src/editor/internal/sideFocus.ts w/frontend/src/editor/internal/sideFocus.ts
+index 7115f27..a5d0027 100644
+--- c/frontend/src/editor/internal/sideFocus.ts
++++ w/frontend/src/editor/internal/sideFocus.ts
+@@ -141,6 +141,11 @@ export class SideFocus {
+     }
+   }
+ 
++  moveToChange(direction: Direction): void {
++    const side = SIDES.find((each) => this.#view(each).hasFocus) ?? "local";
++    this.#takeKeyboardThenStep(side, direction);
++  }
++
+   destroy(): void {
+     this.#listeners.abort();
+   }
+@@ -237,13 +242,17 @@ export class SideFocus {
+       return;
+     }
+     event.preventDefault();
++    const { sum, step } = wheelStep(this.#wheelSum, event);
++    this.#wheelSum = sum;
++    this.#takeKeyboardThenStep(side, step);
++  }
++
++  #takeKeyboardThenStep(side: Side, direction: Direction | null): void {
+     if (!this.#view(side).hasFocus) {
+       this.#focusOn(side, alone(this.#mark(side)));
+     }
+-    const { sum, step } = wheelStep(this.#wheelSum, event);
+-    this.#wheelSum = sum;
+-    if (step !== null) {
+-      this.#step(side, step);
++    if (direction !== null) {
++      this.#step(side, direction);
+     }
+   }
+ 
+diff --git c/frontend/src/ui/App.vue w/frontend/src/ui/App.vue
+index 946963e..9c950f5 100644
+--- c/frontend/src/ui/App.vue
++++ w/frontend/src/ui/App.vue
+@@ -8,6 +8,7 @@ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
++import SettingsView from "./SettingsView.vue";
+ import { useAppStore } from "./store";
+ 
+ const {
+@@ -15,11 +16,12 @@ const {
+   opened,
+   choices,
+   active,
++  settingsOpen,
+   problem,
+   notices,
+   question,
+   allResolved,
+-  open,
++  pick,
+   refreshFiles,
+   dismissProblem,
+   dismissNotice,
+@@ -42,7 +44,7 @@ onMounted(() => {
+ 
+ <template>
+   <div class="flex h-full gap-island p-island">
+-    <FileList :files="files" :active="active" @select="open" />
++    <FileList :files="files" :active="active" @select="pick" />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+@@ -58,14 +60,15 @@ onMounted(() => {
+           v-for="file in opened"
+           :key="file.path"
+           :data="file"
+-          :shown="file.path === active"
++          :shown="file.path === active && !settingsOpen"
+         />
+         <ChoiceView
+           v-for="sides in choices"
+           :key="sides.path"
+           :sides="sides"
+-          :shown="sides.path === active"
++          :shown="sides.path === active && !settingsOpen"
+         />
++        <SettingsView v-if="settingsOpen" />
+       </div>
+     </div>
+     <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />
+diff --git c/frontend/src/ui/ChoiceView.vue w/frontend/src/ui/ChoiceView.vue
+index 64f8cbe..c300253 100644
+--- c/frontend/src/ui/ChoiceView.vue
++++ w/frontend/src/ui/ChoiceView.vue
+@@ -3,6 +3,7 @@ import { computed } from "vue";
+ 
+ import type { FileSides, Side } from "../ipc";
+ import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import SettingsButton from "./SettingsButton.vue";
+ import { sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+@@ -46,7 +47,9 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+     class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+     :class="{ invisible: !shown }"
+   >
+-    <header class="h-10 shrink-0" />
++    <header class="flex h-10 shrink-0 items-center justify-end px-2">
++      <SettingsButton />
++    </header>
+     <section
+       class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
+     >
+diff --git c/frontend/src/ui/MergeToolbar.vue w/frontend/src/ui/MergeToolbar.vue
+index b1ec683..f3f4dbd 100644
+--- c/frontend/src/ui/MergeToolbar.vue
++++ w/frontend/src/ui/MergeToolbar.vue
+@@ -1,18 +1,27 @@
+ <script setup lang="ts">
+ import { computed, type Component } from "vue";
++import ArrowDown from "~icons/lucide/arrow-down";
++import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsLeft from "~icons/lucide/chevrons-left";
+ import ChevronsRight from "~icons/lucide/chevrons-right";
+ import Redo2 from "~icons/lucide/redo-2";
+ import Undo2 from "~icons/lucide/undo-2";
+ 
+ import { finishMustAsk } from "./question";
++import SettingsButton from "./SettingsButton.vue";
+ import { summaryLabel } from "./summaryLabel";
+-import type { MergeSummary } from "./useMergeController";
++import type { Direction, MergeSummary } from "./useMergeController";
+ 
+-type IconButton = { readonly label: string; readonly icon: Component; readonly run: () => void };
++type IconButton = {
++  readonly label: string;
++  readonly icon: Component;
++  readonly keepsKeyboard: boolean;
++  readonly run: () => void;
++};
+ 
+ const props = defineProps<{ summary: MergeSummary | null }>();
+ const emit = defineEmits<{
++  move: [direction: Direction];
+   applyLeft: [];
+   applyRight: [];
+   undo: [];
+@@ -21,9 +30,26 @@ const emit = defineEmits<{
+ }>();
+ 
+ const ICON_BUTTONS: readonly IconButton[] = [
++  {
++    label: "Previous change",
++    icon: ArrowUp,
++    keepsKeyboard: true,
++    run: () => {
++      emit("move", "up");
++    },
++  },
++  {
++    label: "Next change",
++    icon: ArrowDown,
++    keepsKeyboard: true,
++    run: () => {
++      emit("move", "down");
++    },
++  },
+   {
+     label: "Apply non-conflicting changes from the left",
+     icon: ChevronsRight,
++    keepsKeyboard: false,
+     run: () => {
+       emit("applyLeft");
+     },
+@@ -31,6 +57,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+   {
+     label: "Apply non-conflicting changes from the right",
+     icon: ChevronsLeft,
++    keepsKeyboard: false,
+     run: () => {
+       emit("applyRight");
+     },
+@@ -38,6 +65,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+   {
+     label: "Undo",
+     icon: Undo2,
++    keepsKeyboard: false,
+     run: () => {
+       emit("undo");
+     },
+@@ -45,6 +73,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
+   {
+     label: "Redo",
+     icon: Redo2,
++    keepsKeyboard: false,
+     run: () => {
+       emit("redo");
+     },
+@@ -53,6 +82,12 @@ const ICON_BUTTONS: readonly IconButton[] = [
+ 
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
++
++function pressed(button: IconButton, event: MouseEvent): void {
++  if (button.keepsKeyboard) {
++    event.preventDefault();
++  }
++}
+ </script>
+ 
+ <template>
+@@ -78,10 +113,12 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
+       :aria-label="button.label"
+       :disabled="summary === null"
+       class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++      @mousedown="pressed(button, $event)"
+       @click="button.run"
+     >
+       <component :is="button.icon" class="size-4" aria-hidden="true" />
+     </button>
+     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
++    <SettingsButton class="ml-auto" />
+   </header>
+ </template>
+diff --git c/frontend/src/ui/MergeView.vue w/frontend/src/ui/MergeView.vue
+index d2bc3f0..52820a1 100644
+--- c/frontend/src/ui/MergeView.vue
++++ w/frontend/src/ui/MergeView.vue
+@@ -7,6 +7,7 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
+ import type { FileWork } from "./closeGuard";
+ import { deletedSideView, keptToApply } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
++import SettingsButton from "./SettingsButton.vue";
+ import { sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+@@ -32,12 +33,21 @@ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-const { summary, applyAllNonConflicting, undo, redo, historyKey, resultText, unsaved, markSaved } =
+-  useMergeController(
+-    () => props.data,
+-    { left, center, right, strips: [leftStrip, rightStrip] },
+-    () => !isEditable(props.data),
+-  );
++const {
++  summary,
++  applyAllNonConflicting,
++  moveToChange,
++  undo,
++  redo,
++  historyKey,
++  resultText,
++  unsaved,
++  markSaved,
++} = useMergeController(
++  () => props.data,
++  { left, center, right, strips: [leftStrip, rightStrip] },
++  () => !isEditable(props.data),
++);
+ const { track, untrack, finish, reset, takeSide, taken, remoteName, question } = useAppStore();
+ const work: FileWork = { unsaved, markSaved };
+ if (props.data.deleted === null) {
+@@ -115,13 +125,16 @@ function historyKeyInShownFile(event: KeyboardEvent): void {
+     <MergeToolbar
+       v-if="editable"
+       :summary="summary"
++      @move="moveToChange"
+       @apply-left="applyAllNonConflicting('local')"
+       @apply-right="applyAllNonConflicting('remote')"
+       @undo="undo"
+       @redo="redo"
+       @finish="markResolved"
+     />
+-    <header v-else class="h-10 shrink-0" />
++    <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
++      <SettingsButton />
++    </header>
+     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
+     <section
+       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+diff --git c/frontend/src/ui/problem.ts w/frontend/src/ui/problem.ts
+index 64fe719..4661a31 100644
+--- c/frontend/src/ui/problem.ts
++++ w/frontend/src/ui/problem.ts
+@@ -1,3 +1,5 @@
++import type { ShallowRef } from "vue";
++
+ import { log, type SourceFailure, type SourceResult } from "../ipc";
+ 
+ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+@@ -33,3 +35,11 @@ export function logProblem(problem: Problem): void {
+   const where = problem.action === "list" ? {} : { path: problem.path };
+   log.error(`store.${problem.action}_failed`, { ...where, ...problem.cause });
+ }
++
++export function report(
++  target: { readonly problem: ShallowRef<Problem | null> },
++  failure: Problem,
++): void {
++  logProblem(failure);
++  target.problem.value = failure;
++}
+diff --git c/frontend/src/ui/store.test.ts w/frontend/src/ui/store.test.ts
+index 0bc5583..e4eab47 100644
+--- c/frontend/src/ui/store.test.ts
++++ w/frontend/src/ui/store.test.ts
+@@ -419,6 +419,76 @@ test("a finish of a file no longer shown does not switch files", async () => {
+   expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
+ });
+ 
++test("settings open and close; picking a file while they show closes them and shows it, the shown file too", async () => {
++  spyConsole();
++  const { source, pending } = handSource([]);
++  const store = createAppStore(source);
++  await openNow(store, pending, "a.ts");
++  expect(store.settingsOpen.value).toBe(false);
++
++  store.openSettings();
++  expect(store.settingsOpen.value).toBe(true);
++  store.closeSettings();
++  expect(store.settingsOpen.value).toBe(false);
++
++  store.openSettings();
++  const picking = store.pick("b.ts");
++  expect(store.settingsOpen.value).toBe(false);
++  await vi.waitFor(() => {
++    expect(pending.at(-1)?.path).toBe("b.ts");
++  });
++  pending.at(-1)?.resolve(ok(await dataFor("b.ts")));
++  await picking;
++  expect(store.active.value).toBe("b.ts");
++
++  store.openSettings();
++  await store.pick("b.ts");
++
++  expect(store.settingsOpen.value).toBe(false);
++  expect(store.active.value).toBe("b.ts");
++  expect(pending).toHaveLength(2);
++});
++
++test.each([true, false])(
++  "the app's own opens, the first file and the next one after a finish, keep settings as they were (open: %s)",
++  async (settingsOpen) => {
++    spyConsole();
++    const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
++    const store = createAppStore({
++      ...source,
++      finishFile: () => Promise.resolve(written([resolvedEntry("a.ts"), entry("b.ts")])),
++    });
++    if (settingsOpen) {
++      store.openSettings();
++    }
++
++    const loading = store.loadFiles();
++    await vi.waitFor(() => {
++      expect(pending.at(-1)?.path).toBe("a.ts");
++    });
++    pending.at(-1)?.resolve(ok(await dataFor("a.ts")));
++    await loading;
++
++    expect(store.active.value).toBe("a.ts");
++    expect(store.settingsOpen.value).toBe(settingsOpen);
++
++    const finishing = store.finish({
++      path: "a.ts",
++      text: "a",
++      summary: NOTHING_LEFT,
++      diskVersion: VERSION_0,
++    });
++    await vi.waitFor(() => {
++      expect(pending.at(-1)?.path).toBe("b.ts");
++    });
++    pending.at(-1)?.resolve(ok(await dataFor("b.ts")));
++    await finishing;
++
++    expect(store.active.value).toBe("b.ts");
++    expect(store.settingsOpen.value).toBe(settingsOpen);
++  },
++);
++
+ const AFTER_ACTION_ON_A = [resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
+ 
+ type Answer = (reply: SourceResult<WriteReply>) => void;
+diff --git c/frontend/src/ui/store.ts w/frontend/src/ui/store.ts
+index 83a3260..b101966 100644
+--- c/frontend/src/ui/store.ts
++++ w/frontend/src/ui/store.ts
+@@ -16,7 +16,7 @@ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { applyDiskChanges } from "./diskChanges";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
+-import { attempt, logProblem, unexpected, type Problem } from "./problem";
++import { attempt, logProblem, report, unexpected, type Problem } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
+ import type { Taken } from "./sides";
+ import type { MergeSummary } from "./useMergeController";
+@@ -35,6 +35,7 @@ type Refs = {
+   readonly remoteName: ShallowRef<RemoteName | null>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
++  readonly settingsOpen: ShallowRef<boolean>;
+ };
+ 
+ type State = Refs & {
+@@ -49,11 +50,14 @@ type Actions = Omit<CloseGuard, "markSaved"> & {
+   refreshFiles(): Promise<void>;
+   loadRemoteName(): Promise<void>;
+   open(path: string): Promise<void>;
++  pick(path: string): Promise<void>;
+   finish(request: FinishRequest): Promise<void>;
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
+   reset(path: string, diskVersion: DiskVersion): Promise<void>;
+   dismissProblem(): void;
+   dismissNotice(path: string): void;
++  openSettings(): void;
++  closeSettings(): void;
+   answer(yes: boolean): void;
+ };
+ 
+@@ -74,6 +78,7 @@ export function createAppStore(source: ChunkSource): AppStore {
+     remoteName: shallowRef<RemoteName | null>(null),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
++    settingsOpen: shallowRef(false),
+   };
+   const asking = createAsking();
+   const guard = createCloseGuard(asking, refs.opened);
+@@ -98,6 +103,10 @@ function actions(state: State): Actions {
+     },
+     loadRemoteName: () => loadRemoteName(state),
+     open: (path) => open(state, path),
++    pick: async (path) => {
++      state.settingsOpen.value = false;
++      await open(state, path);
++    },
+     finish: (request) => finish(state, request),
+     takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
+     reset: (path, diskVersion) => reset(state, path, diskVersion),
+@@ -107,6 +116,12 @@ function actions(state: State): Actions {
+     dismissNotice: (path) => {
+       state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
+     },
++    openSettings: () => {
++      state.settingsOpen.value = true;
++    },
++    closeSettings: () => {
++      state.settingsOpen.value = false;
++    },
+     answer: state.asking.answer,
+     track: state.guard.track,
+     untrack: state.guard.untrack,
+@@ -116,11 +131,6 @@ function actions(state: State): Actions {
+   };
+ }
+ 
+-function report(state: State, failure: Problem): void {
+-  logProblem(failure);
+-  state.problem.value = failure;
+-}
+-
+ function clearProblemAbout(state: State, path: string): void {
+   const problem = state.problem.value;
+   if (problem !== null && problem.action !== "list" && problem.path === path) {
+diff --git c/frontend/src/ui/useMergeController.test.ts w/frontend/src/ui/useMergeController.test.ts
+index f371507..658d810 100644
+--- c/frontend/src/ui/useMergeController.test.ts
++++ w/frontend/src/ui/useMergeController.test.ts
+@@ -134,6 +134,7 @@ test("while the file is still loading, toolbar actions and the undo shortcut do
+   expect(editor.state.built).toBe(0);
+   expect(() => {
+     handle.applyAllNonConflicting("local");
++    handle.moveToChange("down");
+     handle.undo();
+     handle.redo();
+   }).not.toThrow();
+diff --git c/frontend/src/ui/useMergeController.ts w/frontend/src/ui/useMergeController.ts
+index 5f77e9e..6be74d4 100644
+--- c/frontend/src/ui/useMergeController.ts
++++ w/frontend/src/ui/useMergeController.ts
+@@ -7,10 +7,10 @@ import {
+   type ShallowRef,
+ } from "vue";
+ 
+-import { MergeController, type MergeSummary, type Side } from "../editor";
++import { MergeController, type Direction, type MergeSummary, type Side } from "../editor";
+ import type { FileMergeData } from "../ipc";
+ 
+-export type { MergeSummary } from "../editor";
++export type { Direction, MergeSummary } from "../editor";
+ 
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+@@ -24,6 +24,7 @@ type Hosts = {
+ export type MergeHandle = {
+   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
+   applyAllNonConflicting(side: Side): void;
++  moveToChange(direction: Direction): void;
+   undo(): void;
+   redo(): void;
+   historyKey(event: KeyboardEvent): boolean;
+@@ -68,6 +69,7 @@ function handleOf(summary: MergeHandle["summary"], current: () => Loaded | null)
+   return {
+     summary,
+     applyAllNonConflicting: (side) => current()?.controller.applyAllNonConflicting(side),
++    moveToChange: (direction) => current()?.controller.moveToChange(direction),
+     undo: () => current()?.controller.undo(),
+     redo: () => current()?.controller.redo(),
+     historyKey: (event) => current()?.controller.historyKey(event) ?? false,
+diff --git c/frontend/src/ui/views.ts w/frontend/src/ui/views.ts
+index dc9f9ad..03fcc9b 100644
+--- c/frontend/src/ui/views.ts
++++ w/frontend/src/ui/views.ts
+@@ -1,7 +1,7 @@
+ import type { ShallowRef } from "vue";
+ 
+ import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
+-import { attempt, logProblem, type Outcome, type Problem } from "./problem";
++import { attempt, report, type Outcome, type Problem } from "./problem";
+ 
+ export type Shown = {
+   readonly source: ChunkSource;
+@@ -54,9 +54,7 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<()
+ export async function reload(shown: Shown, path: string): Promise<boolean> {
+   const view = await fetchView(shown, path);
+   if (!view.ok) {
+-    const failure: Problem = { action: "open", path, cause: view.cause };
+-    logProblem(failure);
+-    shown.problem.value = failure;
++    report(shown, { action: "open", path, cause: view.cause });
+     return false;
+   }
+   view.value();
+diff --git 1/frontend/src/ui/SettingsButton.vue 2/frontend/src/ui/SettingsButton.vue
+new file mode 100644
+index 0000000..176255f
+--- /dev/null
++++ 2/frontend/src/ui/SettingsButton.vue
+@@ -0,0 +1,19 @@
++<script setup lang="ts">
++import Settings from "~icons/lucide/settings";
++
++import { useAppStore } from "./store";
++
++const { openSettings } = useAppStore();
++</script>
++
++<template>
++  <button
++    type="button"
++    title="Settings"
++    aria-label="Settings"
++    class="rounded p-1.5 hover:bg-hover"
++    @click="openSettings"
++  >
++    <Settings class="size-4" aria-hidden="true" />
++  </button>
++</template>
+diff --git 1/frontend/src/ui/SettingsView.vue 2/frontend/src/ui/SettingsView.vue
+new file mode 100644
+index 0000000..5e1cd35
+--- /dev/null
++++ 2/frontend/src/ui/SettingsView.vue
+@@ -0,0 +1,45 @@
++<script setup lang="ts">
++import { nextTick, onMounted, useTemplateRef } from "vue";
++import ArrowLeft from "~icons/lucide/arrow-left";
++
++import { useAppStore } from "./store";
++
++const { closeSettings } = useAppStore();
++const back = useTemplateRef<HTMLButtonElement>("back");
++const focusedBefore = document.activeElement;
++
++onMounted(() => {
++  back.value?.focus();
++});
++
++async function goBack(): Promise<void> {
++  closeSettings();
++  await nextTick();
++  if (
++    focusedBefore instanceof HTMLElement &&
++    focusedBefore.isConnected &&
++    getComputedStyle(focusedBefore).visibility === "visible"
++  ) {
++    focusedBefore.focus();
++  }
++}
++</script>
++
++<template>
++  <section
++    aria-label="Settings"
++    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island bg-panel"
++  >
++    <div class="mx-auto w-full max-w-3xl p-6">
++      <button
++        ref="back"
++        type="button"
++        class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="goBack"
++      >
++        <ArrowLeft class="size-4" aria-hidden="true" />
++        Back
++      </button>
++    </div>
++  </section>
++</template>

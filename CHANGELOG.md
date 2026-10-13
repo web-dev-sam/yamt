@@ -22,6 +22,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Ctrl+click (Cmd+click) on a conflict's apply arrow also ignores the other side; on its × it also
   takes the other side. Holding Ctrl (Cmd) when releasing a drag over several icons does the same
   for every conflict it covers. The icons' hover hint names the shortcut. One undo step either way.
+- Previous change / Next change arrows in the toolbar move through the changes still waiting on the
+  side that has the keyboard, like Up and Down there; with no side focused, the left side takes the
+  keyboard first.
+- A settings gear at the right end of the toolbar opens a settings page in place of the open file
+  (empty for now); Back returns to the file exactly as it was.
 
 ### Changed
 

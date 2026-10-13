@@ -8,7 +8,7 @@ import { log, type FileMergeData } from "../ipc";
 import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
 import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
-import { coveredDecorations, coveredField, sameCovered, showCovered } from "./internal/covered";
+import { coveredDecorations, pushCovered } from "./internal/covered";
 import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
 import { syncFindSpace } from "./internal/find";
@@ -16,6 +16,7 @@ import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./interna
 import { historyCommand } from "./internal/historyKey";
 import { languageOf } from "./internal/language";
 import { modClicks } from "./internal/modClick";
+import type { Direction } from "./internal/navigation";
 import { centerPane, createPane, languageCompartment, paneText } from "./internal/pane";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
 import type { Side } from "./internal/side";
@@ -25,6 +26,7 @@ import { summarize, type ChunkState, type MergeSummary } from "./internal/status
 import { Strips, type IconPress } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
+export type { Direction } from "./internal/navigation";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 
@@ -222,14 +224,6 @@ export class MergeController {
     return this.#layoutCache;
   }
 
-  #showCovered(covered: ChunkAction | null): void {
-    if (sameCovered(covered, this.#views.left.state.field(coveredField))) {
-      return;
-    }
-    this.#views.left.dispatch({ effects: showCovered.of(covered) });
-    this.#views.right.dispatch({ effects: showCovered.of(covered) });
-  }
-
   readonly #press = (press: IconPress, event: PointerEvent): void => {
     this.#drag.start(press, event);
   };
@@ -242,7 +236,7 @@ export class MergeController {
       this.#scroll.sync(anchors);
       const press = this.#drag.press;
       const covered = press === null ? null : coveredAction(press, rows, this.#views);
-      this.#showCovered(covered);
+      pushCovered(this.#views, covered);
       this.#strips.paint(this.#views, rows, covered);
     });
   }
@@ -251,6 +245,10 @@ export class MergeController {
     this.#dispatch(
       bulkApplySteps({ target: this.#target(), side, visible: visibleLines(this.#views.center) }),
     );
+  }
+
+  moveToChange(direction: Direction): void {
+    this.#focus.moveToChange(direction);
   }
 
   undo(): boolean {

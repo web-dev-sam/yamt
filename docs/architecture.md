@@ -439,6 +439,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | saved baseline per opened file (loaded text, then the last text marked resolved)                        | non-reactive `let` in `useMergeController`, set when the controller is built, replaced by `markSaved` after a successful finish                                                                                                                                                                                  | one place decides "unsaved work" (plan §2 #37)                                                                                    |
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files) | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map (`Taken`: by a side, or by the disk) set by `takeSide` and by a disk change that staged a choice file; a deleted-side file "resolved on disk" comes from its `middle` kind; deleted by reset       | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47, #52)            |
 | summary counts of the open file                                                                         | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                   | per controller                                                                                                                    |
+| whether the settings view shows instead of the shown file                                               | `settingsOpen` shallowRef in `ui/store.ts`: set by the gear (`openSettings`), cleared by "Back" (`closeSettings`) and by a file picked in the list (`pick`), never by the app's own `open`                                                                                                                       | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56)                                   |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
 text passes through once, from `resultText()` to `store.finish` (and back into that file's own
@@ -453,6 +454,7 @@ export class MergeController {
   undo(): boolean;
   redo(): boolean;
   historyKey(event: KeyboardEvent): boolean; // Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y from anywhere in the shown file's window, unless already handled (the middle's own keymap) or typed in a text field (plan §2 #54)
+  moveToChange(direction: Direction): void; // the toolbar arrows: Up/Down on the side that has the keyboard, else the left side takes it first (plan §2 #56)
   resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
   summary(): MergeSummary; // { changes, conflicts } still to decide
   onSummaryChange(listener: (s: MergeSummary) => void): void;
@@ -526,7 +528,9 @@ Internals (`editor/internal/`, not importable from `ui/`):
   binds the side-only keymap (Enter/Space apply, Backspace/Delete/x ignore, arrows), the press that
   sets a mark (scrollbar presses excluded; a press `modClick.ts` acts on is skipped by asking its
   `modClickAction`), the focus WebKit gives a side's scroller on a scrollbar press handed back to its
-  content, Ctrl/Cmd+wheel over a side, and the reveal: only the
+  content, Ctrl/Cmd+wheel over a side and the toolbar arrows (`moveToChange`: both take the keyboard
+  for the side first when it lacks it, the arrows choosing the left when no side has it, plan §2 #56),
+  and the reveal: only the
   focused side's `scrollTop` is written, with WebStorm's placement from `viewport.ts`
   (`SyncScrollSupport.getTargetOffsets`), nothing when the change is fully visible; the other panes
   follow through the sync. `wheel.ts` turns wheel bursts into steps (the first event of a burst steps
@@ -563,10 +567,14 @@ Components: `App.vue`, `FileList.vue` (file list, resolved mark, vscode-icons), 
 one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
 paint, editors, scroll positions and work kept, plan §2 #51;
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
-data object changes and destroys it with the component), `MergeToolbar.vue` (bulk apply
-left/right, undo/redo, counts, finish, reset — `MergeView` calls the store's `finish`/`reset`),
-`ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary and `attempt` in
-`problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
+data object changes and destroys it with the component), `MergeToolbar.vue` (previous/next change
+arrows that keep the side's keyboard on a pointer press, bulk apply left/right, undo/redo, counts,
+finish, reset — `MergeView` calls the store's `finish`/`reset`), `SettingsButton.vue` (the gear at the
+right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
+(the settings screen in the files' grid cell: a centred column with "Back", empty for now; keyboard to
+"Back" on open and back to its opener on "Back", plan §2 #56),
+`ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
+`report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
 one sentence per side from `choiceText.ts`, plan §2 #36). Names are multi-word (the Vue linter's
 `multi-word-component-names`; `App` exempt).
@@ -574,10 +582,11 @@ one sentence per side from `choiceText.ts`, plan §2 #36). Names are multi-word 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
 `createAppStore(source)` once in `main.ts`, `useAppStore()` in components; state: the file list,
 the opened files (each loaded once per session; reset replaces it in place), the choices (one per
-opened file the editor cannot show), the active path, the problem and the open question; actions:
-load the list, open (a later open wins; re-clicking the shown file does nothing; a file the editor
-cannot show is described instead of loaded), finish (asks when work is left), take a side, reset,
-the window-close check.
+opened file the editor cannot show), the active path, the problem, the open question and whether
+settings show; actions: load the list, open (a later open wins; re-clicking the shown file does
+nothing; a file the editor cannot show is described instead of loaded), pick (a file chosen in the
+list: closes settings, then opens), finish (asks when work is left), take a side, reset, open/close
+settings, the window-close check.
 
 The Vue↔editor seam is one adaptable composable:
 
@@ -592,6 +601,7 @@ export function useMergeController(
   undo;
   redo;
   historyKey; // MergeView's window keydown, only while its file is shown and no question is open (plan §2 #54)
+  moveToChange; // the toolbar arrows (plan §2 #56)
   resultText;
 };
 ```

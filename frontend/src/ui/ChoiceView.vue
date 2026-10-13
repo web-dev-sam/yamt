@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
@@ -46,7 +47,9 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
     class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
     :class="{ invisible: !shown }"
   >
-    <header class="h-10 shrink-0" />
+    <header class="flex h-10 shrink-0 items-center justify-end px-2">
+      <SettingsButton />
+    </header>
     <section
       class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
     >

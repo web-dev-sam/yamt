@@ -7,6 +7,7 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
+import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
@@ -32,12 +33,21 @@ const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
-const { summary, applyAllNonConflicting, undo, redo, historyKey, resultText, unsaved, markSaved } =
-  useMergeController(
-    () => props.data,
-    { left, center, right, strips: [leftStrip, rightStrip] },
-    () => !isEditable(props.data),
-  );
+const {
+  summary,
+  applyAllNonConflicting,
+  moveToChange,
+  undo,
+  redo,
+  historyKey,
+  resultText,
+  unsaved,
+  markSaved,
+} = useMergeController(
+  () => props.data,
+  { left, center, right, strips: [leftStrip, rightStrip] },
+  () => !isEditable(props.data),
+);
 const { track, untrack, finish, reset, takeSide, taken, remoteName, question } = useAppStore();
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {
@@ -115,13 +125,16 @@ function historyKeyInShownFile(event: KeyboardEvent): void {
     <MergeToolbar
       v-if="editable"
       :summary="summary"
+      @move="moveToChange"
       @apply-left="applyAllNonConflicting('local')"
       @apply-right="applyAllNonConflicting('remote')"
       @undo="undo"
       @redo="redo"
       @finish="markResolved"
     />
-    <header v-else class="h-10 shrink-0" />
+    <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
+      <SettingsButton />
+    </header>
     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
     <section
       class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"

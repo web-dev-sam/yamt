@@ -1,3 +1,5 @@
+import type { ShallowRef } from "vue";
+
 import { log, type SourceFailure, type SourceResult } from "../ipc";
 
 type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
@@ -32,4 +34,12 @@ export async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<
 export function logProblem(problem: Problem): void {
   const where = problem.action === "list" ? {} : { path: problem.path };
   log.error(`store.${problem.action}_failed`, { ...where, ...problem.cause });
+}
+
+export function report(
+  target: { readonly problem: ShallowRef<Problem | null> },
+  failure: Problem,
+): void {
+  logProblem(failure);
+  target.problem.value = failure;
 }

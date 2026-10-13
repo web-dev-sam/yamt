@@ -2,11 +2,12 @@ import { StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 
 import type { ChunkAction } from "./apply";
+import type { PaneViews } from "./geometry";
 import type { Side } from "./side";
 
-export const showCovered = StateEffect.define<ChunkAction | null>();
+const showCovered = StateEffect.define<ChunkAction | null>();
 
-export const coveredField = StateField.define<ChunkAction | null>({
+const coveredField = StateField.define<ChunkAction | null>({
   create: () => null,
   update(covered, tr) {
     const shown = tr.effects.findLast((effect) => effect.is(showCovered));
@@ -34,7 +35,7 @@ export function coveredDecorations(side: Side): Extension {
   ];
 }
 
-export function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boolean {
+function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boolean {
   if (a === null || b === null) {
     return a === b;
   }
@@ -44,4 +45,12 @@ export function sameCovered(a: ChunkAction | null, b: ChunkAction | null): boole
     a.chunks.length === b.chunks.length &&
     a.chunks.every((chunk, index) => chunk.id === b.chunks[index]?.id)
   );
+}
+
+export function pushCovered({ left, right }: PaneViews, covered: ChunkAction | null): void {
+  if (sameCovered(covered, left.state.field(coveredField))) {
+    return;
+  }
+  left.dispatch({ effects: showCovered.of(covered) });
+  right.dispatch({ effects: showCovered.of(covered) });
 }

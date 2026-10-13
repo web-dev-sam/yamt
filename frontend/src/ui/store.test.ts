@@ -419,6 +419,76 @@ test("a finish of a file no longer shown does not switch files", async () => {
   expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
 });
 
+test("settings open and close; picking a file while they show closes them and shows it, the shown file too", async () => {
+  spyConsole();
+  const { source, pending } = handSource([]);
+  const store = createAppStore(source);
+  await openNow(store, pending, "a.ts");
+  expect(store.settingsOpen.value).toBe(false);
+
+  store.openSettings();
+  expect(store.settingsOpen.value).toBe(true);
+  store.closeSettings();
+  expect(store.settingsOpen.value).toBe(false);
+
+  store.openSettings();
+  const picking = store.pick("b.ts");
+  expect(store.settingsOpen.value).toBe(false);
+  await vi.waitFor(() => {
+    expect(pending.at(-1)?.path).toBe("b.ts");
+  });
+  pending.at(-1)?.resolve(ok(await dataFor("b.ts")));
+  await picking;
+  expect(store.active.value).toBe("b.ts");
+
+  store.openSettings();
+  await store.pick("b.ts");
+
+  expect(store.settingsOpen.value).toBe(false);
+  expect(store.active.value).toBe("b.ts");
+  expect(pending).toHaveLength(2);
+});
+
+test.each([true, false])(
+  "the app's own opens, the first file and the next one after a finish, keep settings as they were (open: %s)",
+  async (settingsOpen) => {
+    spyConsole();
+    const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
+    const store = createAppStore({
+      ...source,
+      finishFile: () => Promise.resolve(written([resolvedEntry("a.ts"), entry("b.ts")])),
+    });
+    if (settingsOpen) {
+      store.openSettings();
+    }
+
+    const loading = store.loadFiles();
+    await vi.waitFor(() => {
+      expect(pending.at(-1)?.path).toBe("a.ts");
+    });
+    pending.at(-1)?.resolve(ok(await dataFor("a.ts")));
+    await loading;
+
+    expect(store.active.value).toBe("a.ts");
+    expect(store.settingsOpen.value).toBe(settingsOpen);
+
+    const finishing = store.finish({
+      path: "a.ts",
+      text: "a",
+      summary: NOTHING_LEFT,
+      diskVersion: VERSION_0,
+    });
+    await vi.waitFor(() => {
+      expect(pending.at(-1)?.path).toBe("b.ts");
+    });
+    pending.at(-1)?.resolve(ok(await dataFor("b.ts")));
+    await finishing;
+
+    expect(store.active.value).toBe("b.ts");
+    expect(store.settingsOpen.value).toBe(settingsOpen);
+  },
+);
+
 const AFTER_ACTION_ON_A = [resolvedEntry("a.ts"), resolvedEntry("b.ts"), entry("c.ts")];
 
 type Answer = (reply: SourceResult<WriteReply>) => void;

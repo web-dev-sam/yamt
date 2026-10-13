@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
+import ArrowDown from "~icons/lucide/arrow-down";
+import ArrowUp from "~icons/lucide/arrow-up";
 import ChevronsLeft from "~icons/lucide/chevrons-left";
 import ChevronsRight from "~icons/lucide/chevrons-right";
 import Redo2 from "~icons/lucide/redo-2";
 import Undo2 from "~icons/lucide/undo-2";
 
 import { finishMustAsk } from "./question";
+import SettingsButton from "./SettingsButton.vue";
 import { summaryLabel } from "./summaryLabel";
-import type { MergeSummary } from "./useMergeController";
+import type { Direction, MergeSummary } from "./useMergeController";
 
-type IconButton = { readonly label: string; readonly icon: Component; readonly run: () => void };
+type IconButton = {
+  readonly label: string;
+  readonly icon: Component;
+  readonly keepsKeyboard: boolean;
+  readonly run: () => void;
+};
 
 const props = defineProps<{ summary: MergeSummary | null }>();
 const emit = defineEmits<{
+  move: [direction: Direction];
   applyLeft: [];
   applyRight: [];
   undo: [];
@@ -22,8 +31,25 @@ const emit = defineEmits<{
 
 const ICON_BUTTONS: readonly IconButton[] = [
   {
+    label: "Previous change",
+    icon: ArrowUp,
+    keepsKeyboard: true,
+    run: () => {
+      emit("move", "up");
+    },
+  },
+  {
+    label: "Next change",
+    icon: ArrowDown,
+    keepsKeyboard: true,
+    run: () => {
+      emit("move", "down");
+    },
+  },
+  {
     label: "Apply non-conflicting changes from the left",
     icon: ChevronsRight,
+    keepsKeyboard: false,
     run: () => {
       emit("applyLeft");
     },
@@ -31,6 +57,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
   {
     label: "Apply non-conflicting changes from the right",
     icon: ChevronsLeft,
+    keepsKeyboard: false,
     run: () => {
       emit("applyRight");
     },
@@ -38,6 +65,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
   {
     label: "Undo",
     icon: Undo2,
+    keepsKeyboard: false,
     run: () => {
       emit("undo");
     },
@@ -45,6 +73,7 @@ const ICON_BUTTONS: readonly IconButton[] = [
   {
     label: "Redo",
     icon: Redo2,
+    keepsKeyboard: false,
     run: () => {
       emit("redo");
     },
@@ -53,6 +82,12 @@ const ICON_BUTTONS: readonly IconButton[] = [
 
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+
+function pressed(button: IconButton, event: MouseEvent): void {
+  if (button.keepsKeyboard) {
+    event.preventDefault();
+  }
+}
 </script>
 
 <template>
@@ -78,10 +113,12 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
       :aria-label="button.label"
       :disabled="summary === null"
       class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+      @mousedown="pressed(button, $event)"
       @click="button.run"
     >
       <component :is="button.icon" class="size-4" aria-hidden="true" />
     </button>
     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
+    <SettingsButton class="ml-auto" />
   </header>
 </template>
