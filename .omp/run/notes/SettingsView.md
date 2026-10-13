@@ -1,4 +1,4 @@
-# SettingsView — web-impl report (verbatim JSON)
+# SettingsView — implementer report (fields read one by one)
 
 ```json
 {
@@ -73,7 +73,7 @@
     },
     {
       "command": "Step 5: Light; Redo row → Add; Shift alone, Ctrl alone; Ctrl+F; click +; Set Escape; Escape; then Add → Enter (empty) → Enter → question → Cancel; Change Ctrl+Y… → Tab → Escape",
-      "observed": "opened: field '' okDisabled true; Shift alone, Ctrl alone: field '' okDisabled true; Ctrl+F: 'Already used by: Find'; + menu [Set Enter, Set Escape, Set Tab, Set Shift+Tab], focus on Set Enter; Set Escape: field 'Escape', 'Already used by: Close find', focus back on INPUT; Escape in field: dialog null, redo row unchanged [Ctrl+Shift+Z, Ctrl+Y], focus BUTTON redo; Enter in empty field records 'Enter' ('Already used by: Apply'); Enter with a key shown → confirms → clash question 'Enter is already used by Apply. Move it to Redo?'; Cancel → redo and apply unchanged; Change prefilled field 'Ctrl+Y'; Tab → focus on the + button; Escape there → dialog null, focus BUTTON redo; Escape in the + menu closes only the menu (dialog keeps 'Ctrl+F', focus…
+      "observed": "opened: field '' okDisabled true; Shift alone, Ctrl alone: field '' okDisabled true; Ctrl+F: 'Already used by: Find'; + menu [Set Enter, Set Escape, Set Tab, Set Shift+Tab], focus on Set Enter; Set Escape: field 'Escape', 'Already used by: Close find', focus back on INPUT; Escape in field: dialog null, redo row unchanged [Ctrl+Shift+Z, Ctrl+Y], focus BUTTON redo; Enter in empty field records 'Enter' ('Already used by: Apply'); Enter with a key shown → confirms → clash question 'Enter is already used by Apply. Move it to Redo?'; Cancel → redo and apply unchanged; Change prefilled field 'Ctrl+Y'; Tab → focus on the + button; Escape there → dialog null, focus BUTTON redo; Escape in the + menu closes only the menu (dialog keeps 'Ctrl+F', focus INPUT)"
     },
     {
       "command": "Step 6: Reset Shortcuts on Apply, Undo (and Find)",
@@ -106,7 +106,7 @@
     "Decided: per key, the menu lists 'Change <label>…' then 'Remove <label>' as a pair.",
     "Decided: Tab in an open menu closes it and returns focus to the row (or to the field for the + menu). Up/Down wrap inside menus but stop at the first and last row in the list.",
     "Decided: plain Tab/Shift+Tab leave the field. Ctrl/Alt/Meta+Tab are recorded.",
-    "Colours and Tailwind values: a changed action's name is `text-primary` (#3871e1 in both themes). Theme buttons: pressed = `aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary`, the other bordered `border-control-border hover:bg-hover`. Rows: `hover:bg-row-hover`, open row `aria-expanded:bg-row-selected`. Key labels: `<kbd>` with `rounded border border-control-border bg-panel-inline px-1.5 font-sans`; None and the place line are `text-fg-muted`. Menus: `rounded border border-control-border bg-panel py-1`, items `hover:bg-hover focus:bg-row-selected`, separators `border-t border-control-border`, `min-w-56`, below the row at `top-full left-2`. Dialog: `w-[22rem] overflow-visible rounded-lg border border-control-border bg-panel`…
+    "Colours and Tailwind values: a changed action's name is `text-primary` (#3871e1 in both themes). Theme buttons: pressed = `aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary`, the other bordered `border-control-border hover:bg-hover`. Rows: `hover:bg-row-hover`, open row `aria-expanded:bg-row-selected`. Key labels: `<kbd>` with `rounded border border-control-border bg-panel-inline px-1.5 font-sans`; None and the place line are `text-fg-muted`. Menus: `rounded border border-control-border bg-panel py-1`, items `hover:bg-hover focus:bg-row-selected`, separators `border-t border-control-border`, `min-w-56`, below the row at `top-full left-2`. Dialog: `w-[22rem] overflow-visible rounded-lg border border-control-border bg-panel`; the field is `bg-panel-inline caret-transparent focus:border-primary`; there is a TriangleAlert (lucide) before the conflict line. Group titles are `h4 text-fg-muted`, section headings `h3 font-semibold`. Path field: `font-mono`.",
     "The dialog needed `overflow-visible`: WebKit's modal `<dialog>` clips (overflow: auto), and the WebKit run first showed the + menu cut off.",
     "Fixed words that never change ('Theme', 'Keymap', 'Settings file', 'None', 'Keyboard Shortcut', 'OK', 'Cancel', 'Use', 'Default', the muted file line) are in the templates, as MergeToolbar/QuestionDialog do. keyText.ts holds only the words built from data: menu labels, '+' menu labels, the conflict line.",
     "frontend/node_modules was installed in the isolated worktree (`pnpm install --offline --frozen-lockfile`) so the recipes could run; it is gitignored.",
@@ -131,6 +131,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```

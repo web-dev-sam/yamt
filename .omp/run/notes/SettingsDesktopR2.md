@@ -1,4 +1,4 @@
-# SettingsDesktopR2 — rust-impl report (verbatim JSON)
+# SettingsDesktopR2 — implementer report (fields read one by one)
 
 ```json
 {

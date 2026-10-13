@@ -1,8 +1,8 @@
-# SettingsDesktop — rust-impl report (verbatim JSON)
+# SettingsDesktop — implementer report (fields read one by one)
 
 ```json
 {
-  "summary": "New crate `yamt-settings` (crates/settings): Theme, StoredSettings, KeysChange, SettingsRead, Places, theme_at_start/read/set_theme/set_keys/relocate and Error, matching the brief's Contract and file rules 1–9. It keeps unknown entries, reports JSON errors with line and column, never rewrites a file on read, re-reads the file before every change, writes through a temp file and a rename, follows symlinks, and records another location in `settings-location`.\nsrc-tauri: new `settings.rs` with `places` and four commands (load_settings, set_theme, set_keys, move_settings), each ≤ 15 lines and registered in collect_commands. IpcError gains SettingsBroken / NotAbsolute / NoConfigFolder, plus `From<yamt_settings::Error>`. The window reads the theme at…
+  "summary": "New crate `yamt-settings` (crates/settings): Theme, StoredSettings, KeysChange, SettingsRead, Places, theme_at_start/read/set_theme/set_keys/relocate and Error, matching the brief's Contract and file rules 1–9. It keeps unknown entries, reports JSON errors with line and column, never rewrites a file on read, re-reads the file before every change, writes through a temp file and a rename, follows symlinks, and records another location in `settings-location`.\nsrc-tauri: new `settings.rs` with `places` and four commands (load_settings, set_theme, set_keys, move_settings), each ≤ 15 lines and registered in collect_commands. IpcError gains SettingsBroken / NotAbsolute / NoConfigFolder, plus `From<yamt_settings::Error>`. The window reads the theme at start and gets a dark or light native background and an initialization script that sets `data-theme` on <html>. Every settings command recolours the native background (`show_theme`).\narch-check: yamt-settings must not depend on any yamt-* crate or tauri; yamt-app may depend on yamt-session and yamt-settings only. map-check now reads commands from every src-tauri/src/*.rs.",
   "files_changed": [
     "crates/settings/Cargo.toml",
     "crates/settings/AGENTS.md",
@@ -131,7 +131,7 @@
     },
     {
       "command": "cargo run -q -p yamt-app --features bindings --bin export-bindings -- /tmp/settings-bindings.ts; diff frontend/src/ipc/bindings.ts /tmp/settings-bindings.ts",
-      "observed": "loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"load_settings\", { current })),\nsetTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"set_theme\", { current, theme })),\nsetKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"set_keys\", { current, changes })),\nmoveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"move_settings\", { current, path })),\nexport type IpcError = … | { kind: \"ReadFailed\"; path: string; message: string } | { kind: \"SettingsBroken\"; path: string; message: string } | { kind: \"NotAbsolute\"; path: stri…
+      "observed": "loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"load_settings\", { current })),\nsetTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"set_theme\", { current, theme })),\nsetKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"set_keys\", { current, changes })),\nmoveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE(\"move_settings\", { current, path })),\nexport type IpcError = … | { kind: \"ReadFailed\"; path: string; message: string } | { kind: \"SettingsBroken\"; path: string; message: string } | { kind: \"NotAbsolute\"; path: string } | { kind: \"NoConfigFolder\" };\nexport type KeysChange = { action: string, keys: string[] | null, };\nexport type SettingsRead = { path: string, default_path: string, stored: StoredSettings, };\nexport type StoredSettings = { theme?: Theme, keys?: { [key in string]: string[] }, };\nexport type Theme = \"dark\" | \"light\";"
     },
     {
       "command": "Real app setup: scripts/conflict-repo.sh /tmp/yamt-test-settings/repo; Xvfb :97; env -u WAYLAND_DISPLAY DISPLAY=:97 GDK_BACKEND=x11 XDG_CONFIG_HOME=/tmp/yamt-test-settings/config HOME=/tmp/yamt-test-settings/home tauri-driver --port 4791 --native-port 4792; app = target/debug/yamt from `cargo tauri build --debug --no-bundle` of this tree, args --repo /tmp/yamt-test-settings/repo",
@@ -197,6 +197,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```

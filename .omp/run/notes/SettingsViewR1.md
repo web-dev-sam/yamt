@@ -1,4 +1,4 @@
-# SettingsViewR1 — web-impl report (verbatim JSON)
+# SettingsViewR1 — implementer report (fields read one by one)
 
 ```json
 {
@@ -78,7 +78,7 @@
     },
     {
       "command": "WebKit fixture run, as in round 1: `pnpm -C frontend dev --port 5392 --strictPort`; `just webdriver 4492` (MiniBrowser --automation, 1600x1000, test-screen placed it on Samsung HDMI-A-1); real WebDriver pointer/key actions, state read with execute only; script /tmp/svr1-wd/run.mjs (round-1 helpers wd.mjs/h.mjs copied)",
-      "observed": "settings open, focused: BUTTON Back\napply menu: [\"Add Keyboard Shortcut\",\"---\",\"Change Enter…\",\"Remove Enter\",\"Change Space…\",\"Remove Space\"] focused: BUTTON Add Keyboard Shortcut\nrow menu Up from first: BUTTON Remove Space\nrow menu Down from last: BUTTON Add Keyboard Shortcut\nrow menu Down: BUTTON Change Enter…\nrow menu Escape: menus 0 focused: BUTTON apply\nEnter on row: menus 1 focused: BUTTON Add Keyboard Shortcut\nrow menu Tab: menus 0 focused: BUTTON apply\nAdd on Apply dialog: {\"title\":\"Keyboard Shortcut\",\"field\":\"Enter\",\"status\":\"\",\"okDisabled\":false,...} focused: INPUT Keyboard shortcut\n+ menu open, focused: BUTTON Set Enter\n+ menu Up from first: BUTTON Set Shift+Tab\n+ menu Down from last: BUTTON …
+      "observed": "settings open, focused: BUTTON Back\napply menu: [\"Add Keyboard Shortcut\",\"---\",\"Change Enter…\",\"Remove Enter\",\"Change Space…\",\"Remove Space\"] focused: BUTTON Add Keyboard Shortcut\nrow menu Up from first: BUTTON Remove Space\nrow menu Down from last: BUTTON Add Keyboard Shortcut\nrow menu Down: BUTTON Change Enter…\nrow menu Escape: menus 0 focused: BUTTON apply\nEnter on row: menus 1 focused: BUTTON Add Keyboard Shortcut\nrow menu Tab: menus 0 focused: BUTTON apply\nAdd on Apply dialog: {\"title\":\"Keyboard Shortcut\",\"field\":\"Enter\",\"status\":\"\",\"okDisabled\":false,...} focused: INPUT Keyboard shortcut\n+ menu open, focused: BUTTON Set Enter\n+ menu Up from first: BUTTON Set Shift+Tab\n+ menu Down from last: BUTTON Set Enter\n+ menu Escape: menus 0 dialog open: true focused: INPUT Keyboard shortcut\n+ menu Tab: menus 0 dialog open: true focused: INPUT Keyboard shortcut\nafter OK: dialog null apply row: {\"keys\":[\"Enter\",\"Space\"],...\"nameClass\":\"block\"} focused: BUTTON apply\nfind menu: [\"Add Keyboard Shortcut\",\"---\",\"Change Ctrl+F…\",\"Remove Ctrl+F\"]\nfind row after Remove Ctrl+F : {\"keys\":[],\"none\":true,...\"nameClass\":\"block text-primary\"}\nfind menu now: [\"Add Keyboard Shortcut\",\"---\",\"Reset Shortcuts\"]\nAdd on Find dialog: {\"title\":\"Keyboard Shortcut\",\"field\":\"\",\"status\":\"\",\"okDisabled\":true,...}\nEscape: dialog null focused: BUTTON find\nfind reset: {\"keys\":[\"Ctrl+F\"],...}\nundo menu open: 1 focused: BUTTON Add Keyboard Shortcut\nclick into Settings file field: menus 0 focused: INPUT \nfield before: /fixture/settings.json | disabled=false after typing xyz: /fixture/settings.jsonxyz | disabled=false focused: INPUT \nEscape in field restores: /fixture/settings.json\nclick on empty space: menus 0 focused: BUTTON undo\n(screenshots: /tmp/svr1-wd/add-apply.png, /tmp/svr1-wd/add-find-empty.png)"
     }
   ],
   "deviations_from_brief": [
@@ -101,6 +101,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```

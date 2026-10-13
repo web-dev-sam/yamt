@@ -1,8 +1,8 @@
-# SettingsDesktopR1 — rust-impl report (verbatim JSON)
+# SettingsDesktopR1 — implementer report (fields read one by one)
 
 ```json
 {
-  "summary": "All six findings from rework 1 are fixed. `StoredSettings` no longer has `#[serde(default)]`, so the generated TS fields are required. The file parser still fills in a missing `theme`/`keys` itself.\n`Theme::name()` is now the one place \"dark\"/\"light\" is spelled. `file.rs` and `start_script` use it, and a unit test checks it against serde's output.\n`Loaded` is now `{ others, stored }` with one `entries(self)` that builds the map to write. The setters change only `stored`, and `put_keys`/`theme_name` are gone.\n`write_text` follows a symlink with `read_link`, joining a relative target onto the link's folder. A dangling dotfiles link now gets its target created and stays a link.\n`start_theme` takes `&PathResolver<tauri::Wry>`, and the `star…
+  "summary": "All six findings from rework 1 are fixed. `StoredSettings` no longer has `#[serde(default)]`, so the generated TS fields are required. The file parser still fills in a missing `theme`/`keys` itself.\n`Theme::name()` is now the one place \"dark\"/\"light\" is spelled. `file.rs` and `start_script` use it, and a unit test checks it against serde's output.\n`Loaded` is now `{ others, stored }` with one `entries(self)` that builds the map to write. The setters change only `stored`, and `put_keys`/`theme_name` are gone.\n`write_text` follows a symlink with `read_link`, joining a relative target onto the link's folder. A dangling dotfiles link now gets its target created and stays a link.\n`start_theme` takes `&PathResolver<tauri::Wry>`, and the `start_script` test compares the whole script with `assert_eq!`.",
   "files_changed": [
     "crates/settings/src/lib.rs",
     "crates/settings/src/file.rs",
@@ -67,6 +67,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```

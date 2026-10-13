@@ -1,8 +1,8 @@
-# SettingsWebR1 — web-impl report (verbatim JSON)
+# SettingsWebR1 — implementer report (fields read one by one)
 
 ```json
 {
-  "summary": "All twelve findings of 3.S-settings-web-rework-1 are fixed, and every new test fails when its fix is reverted. In detail: `KeyName` is now exported and re-exported from `ipc/index.ts`. `parseKey` refuses Shift before a symbol. The settings store keeps the same `settings` object and does not report the same key problems again when a reload read an unchanged file. A call counter (`latestSettings`) stops an older reply from overwriting a newer one, and key edits are planned again on the bindings in use after the clash question. In the editor, `preferenceEffects(kind, settings)` in `pane.ts` builds the theme, find-key and side- or middle-key reconfigures for one pane, and `MergeController.setPreferences` sends them to all three views itself, so the…
+  "summary": "All twelve findings of 3.S-settings-web-rework-1 are fixed, and every new test fails when its fix is reverted. In detail: `KeyName` is now exported and re-exported from `ipc/index.ts`. `parseKey` refuses Shift before a symbol. The settings store keeps the same `settings` object and does not report the same key problems again when a reload read an unchanged file. A call counter (`latestSettings`) stops an older reply from overwriting a newer one, and key edits are planned again on the bindings in use after the clash question. In the editor, `preferenceEffects(kind, settings)` in `pane.ts` builds the theme, find-key and side- or middle-key reconfigures for one pane, and `MergeController.setPreferences` sends them to all three views itself, so the callback is gone. The side keymap no longer needs a callback: it reads a `sideRunner` facet. In the middle pane only undo and redo prevent the key's default. A `Prec.highest` `beforeinput` handler blocks the browser's own historyUndo/historyRedo.",
   "files_changed": [
     "frontend/src/ipc/keys.ts",
     "frontend/src/ipc/keys.test.ts",
@@ -86,7 +86,7 @@
     },
     {
       "command": "pnpm -C frontend dev --port 5193 --strictPort + just webdriver 4473 (MiniBrowser 2.54.1, Samsung screen); WebDriver pointer/key actions; execute only to read",
-      "observed": "Dark window: <html data-theme=\"dark\">, color-scheme dark, --color-window #26282c, all three .cm-editor carry ͼ3 (CodeMirror's dark base class), pane background rgb(25,26,28); screenshot /tmp/yamt-smoke-3S-r1/dark.png shows the dark window. Click in the left pane, then ArrowDown: a chunk-modified line gets chunk-focus. Enter: summary goes from \"3 changes · 1 conflict\" to \"2 changes · 1 conflict\". Ctrl+Z (keyboard still on the left pane): back to \"3 changes · 1 conflict\". Click in the middle and type Qq: line \"\\t\\t);\" becomes \"\\t\\t);Qq\". Ctrl+Z: back to \"\\t\\t);\". Ctrl+F: middle find panel opens, activeElement INPUT.find-field. Escape: panel gone, focus back on the middle's cm-content. Tab in the middle: line \"\\tyield …\…
+      "observed": "Dark window: <html data-theme=\"dark\">, color-scheme dark, --color-window #26282c, all three .cm-editor carry ͼ3 (CodeMirror's dark base class), pane background rgb(25,26,28); screenshot /tmp/yamt-smoke-3S-r1/dark.png shows the dark window. Click in the left pane, then ArrowDown: a chunk-modified line gets chunk-focus. Enter: summary goes from \"3 changes · 1 conflict\" to \"2 changes · 1 conflict\". Ctrl+Z (keyboard still on the left pane): back to \"3 changes · 1 conflict\". Click in the middle and type Qq: line \"\\t\\t);\" becomes \"\\t\\t);Qq\". Ctrl+Z: back to \"\\t\\t);\". Ctrl+F: middle find panel opens, activeElement INPUT.find-field. Escape: panel gone, focus back on the middle's cm-content. Tab in the middle: line \"\\tyield …\" becomes \"\\t\\tyield …\", focus stays in the middle. Shift+Tab: back to \"\\tyield …\"."
     },
     {
       "command": "Item 9 beforeinput observation (capture-phase keydown/beforeinput recorder added through execute; it only records)",
@@ -124,6 +124,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```

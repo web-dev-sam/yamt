@@ -1,8 +1,8 @@
-# SettingsWeb — web-impl report (verbatim JSON)
+# SettingsWeb — implementer report (fields read one by one)
 
 ```json
 {
-  "summary": "Unit-level work for 3.S web build 1 is done, but the brief is not complete. The five real-app steps (Xvfb + tauri-driver) and the fixture-mode WebKit smoke were never run. What now exists:\n- A light palette in style.css, with `color-scheme` set in CSS. palette.ts checks that both palettes define the same colour tokens and that window.rs's BACKGROUND_DARK/LIGHT match each `--color-window`.\n- The start theme comes from `<html data-theme>`; App.vue writes it from then on. CodeMirror's dark flag sits in a compartment per pane.\n- `ipc/keys.ts` holds the one source for key facts: actions, defaults, file form, labels, keyOfEvent, bindingsOf. `cmKey` turns these into CodeMirror bindings. Side, find and middle keymaps sit in compartments, and `setPre…
+  "summary": "Unit-level work for 3.S web build 1 is done, but the brief is not complete. The five real-app steps (Xvfb + tauri-driver) and the fixture-mode WebKit smoke were never run. What now exists:\n- A light palette in style.css, with `color-scheme` set in CSS. palette.ts checks that both palettes define the same colour tokens and that window.rs's BACKGROUND_DARK/LIGHT match each `--color-window`.\n- The start theme comes from `<html data-theme>`; App.vue writes it from then on. CodeMirror's dark flag sits in a compartment per pane.\n- `ipc/keys.ts` holds the one source for key facts: actions, defaults, file form, labels, keyOfEvent, bindingsOf. `cmKey` turns these into CodeMirror bindings. Side, find and middle keymaps sit in compartments, and `setPreferences` switches them in all three panes of every opened file. Window-wide undo/redo uses the bound keys.\n- Four settings methods on ChunkSource (Tauri + in-memory fixture). The store gains settings and preferences plus 8 actions (in `ui/settings.ts`), the edit rules (`ui/keymapEdit.ts`), the Move/Cancel clash question and settings problems. Settings load on mount and on window focus.",
   "files_changed": [
     "frontend/index.html",
     "frontend/src/style.css",
@@ -180,6 +180,4 @@
     }
   ]
 }
-
-[Some lines truncated to 768 chars]
 ```
