@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { flaggedTerms, readPlainLanguageLists } from "../lib/plain-language";
-import { type AgentIdentity, readSliceRegistry } from "../lib/policy";
+import { type AgentIdentity, MAX_PARALLEL_AGENTS, readSliceRegistry } from "../lib/policy";
 import bashGuard from "../pre/bash-guard";
 import generated from "../pre/generated";
 import ownership from "../pre/ownership";
@@ -223,8 +223,8 @@ test("task-fanout: at most MAX_PARALLEL_AGENTS tasks per main call", async () =>
     toolName: "task",
     input: { tasks: Array.from({ length: n }, (_, i) => ({ name: `T${i}` })) },
   });
-  await assertVerdict(h, task(2), MAIN, false);
-  await assertVerdict(h, task(3), MAIN, true);
+  await assertVerdict(h, task(MAX_PARALLEL_AGENTS), MAIN, false);
+  await assertVerdict(h, task(MAX_PARALLEL_AGENTS + 1), MAIN, true);
 });
 
 test("task-fanout: one isolated agent per main call", async () => {

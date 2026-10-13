@@ -798,7 +798,7 @@ dev-web / dev-app / smoke-cli (classify on the window's sample) as before
 ```
 
 Implementers run their own layer's commands while working; the integrated `just check` runs
-once per wave, by the verifier, on the merged tree. Nothing in `check` may pass by skipping.
+once per feature, by the verifier, alone, on the merged tree. Nothing in `check` may pass by skipping.
 
 ---
 
@@ -817,9 +817,10 @@ once per wave, by the verifier, on the merged tree. Nothing in `check` may pass 
 Explicitly not tested: wiring, Vue templates, Tauri command plumbing (covered by M2 smoke).
 
 Test strength: `just mutants <base>` mutates the lines changed since `<base>` (cargo-mutants for
-Rust, StrykerJS for the `node` Vitest project) and lists surviving mutants; the verifier runs it
-once per wave, outside `check`. `editor/` (WebKit project) is not mutated and keeps hand
-failing-path proofs.
+Rust, StrykerJS with `--ignoreStatic` for the `node` Vitest project) and lists surviving mutants;
+the orchestrator runs it after each slice, beside the reviews, and the verifier once per feature
+as confirmation, outside `check` (`skill://verification` VF7). `editor/` (WebKit project) is not
+mutated and keeps hand failing-path proofs.
 
 ---
 

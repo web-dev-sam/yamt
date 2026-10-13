@@ -5,8 +5,10 @@ description: The contract between the orchestrator and an implementer in yamt �
 
 # Slice protocol
 
-You were spawned for exactly one slice. The brief in your task has five parts; if one is
-missing, say so in `deviations_from_brief` and do what the architecture doc implies.
+You were spawned for exactly one slice: one concern, sized to fit well inside your 200-request budget
+(`skill://orchestrate` §2). The brief in your task has five parts; if one is missing, say so in
+`deviations_from_brief` and do what the architecture doc implies. Facts the brief gives with a source (a
+value, a source line) are given: use them; re-check only what it marks `[INFERENCE]`.
 
 ```
 # Slice <id> — <title>
@@ -41,7 +43,7 @@ missing, say so in `deviations_from_brief` and do what the architecture doc impl
   confession: use it for everything you did outside `Change`/`Target`, and for everything you
   decided that the brief left open.
 - [SP9] You may not spawn agents, commit, push, or run `git` write commands; the orchestrator
-  commits per wave. Detector: hook `bash-guard.ts`.
+  commits each applied patch. Detector: hook `bash-guard.ts`.
 - [SP10] Working copy may be an isolated workspace; path references in your report are
   repo-relative.
 

@@ -31,8 +31,8 @@ risk register rows whose owner the patch touches; walk the invariants in
 `docs/architecture.md` §3.1 for `merge-core`; walk `skill://cm6-rules` CM1–CM9 for
 `editor/`. Trace every line-space conversion (base/local/remote/doc) by hand. Read each
 added test and ask: would it still pass if the feature were deleted or the boundary were
-off by one? If yes, that is a `should` on the test; `block` if it is the only evidence for an
-Acceptance line.
+off by one? If yes, grade it by `skill://review-protocol` § Grading. Your task carries the
+survivor list of the slice's `just mutants` run; triage it as the correctness lens says.
 
 `bash` is for running one targeted test file when a `block` depends on it (say so in
 `checked`); whole-workspace toolchains are hook-blocked (`bash-guard.ts`). Follow

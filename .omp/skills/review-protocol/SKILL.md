@@ -23,21 +23,33 @@ orchestrator acts on mechanically; prose outside the schema is discarded.
 naming, dead weight (one-caller wrappers, speculative generality, unused exports), comments
 (`skill://comment-policy`), vendored-rule violations the lints cannot see (RS1–RS6, TS8–TS11, TS17,
 VU2–VU16), decision-record contradictions. Test strength is the correctness reviewer's; skip it.
+**Growth check**: for every touched module or component, count its jobs (does it now own data _and_
+layout _and_ rules?); every new piece of state has one owner row in architecture §5.1 and is written
+only by that owner; every new import edge follows §2; a second copy of a decision is reported.
 
 **correctness-reviewer**: invariants (`skill://risk-register`, architecture §3.1 list),
 edge cases named in the brief and in the risk register, off-by-one in line spaces, undo and
 mapping semantics (CM1–CM9), error paths (what happens when git fails mid-call), tests —
 do the added tests catch a plausible consumer-visible bug, or do they pin wiring/defaults? Judge
-by reading; never edit source to mutate it — survivors come from the verifier's `just mutants` (VF7).
+by reading; never edit source to mutate it — survivors come from the orchestrator's per-slice `just mutants`
+run, given to you as input: drop each per VF7 (a)/(b)/(c) (`skill://verification`), grade the rest below.
 
 ## Grading
 
-- `block` — wrong behaviour, violated invariant, violated boundary, changed contract,
-  missing acceptance evidence, a test that is the only evidence for an Acceptance line and
-  would pass with the feature deleted (otherwise such a test is `should`).
-- `should` — maintainability: reader load, naming, a comment that explains instead of
-  restructuring, a rule-table violation without behavioural impact.
+- `block` — (1) wrong behaviour a user or a caller would notice, a violated invariant, a changed
+  contract, missing acceptance evidence, or a test that is the only evidence for an Acceptance line and
+  would pass with the feature deleted; (2) **growth harm**: a change that makes the app harder to grow —
+  a module or component taking on a second job (a god component in the making), state with two writers
+  or a second source of truth, data reaching a place through a side channel or through layers that do
+  not use it, a boundary bent (an edge against architecture §2 or the state-ownership table §5.1), a rule
+  or decision copied instead of shared, a rule other code relies on left untested. A user-visible bug is
+  never a `should` (calibration: #689, #692, #710, #723 were reported as `should`).
+- `should` — local quality with no growth effect: naming, a clearer loop, comment wording, a test gap
+  on a rule nothing else builds on, structure inside one function.
 - `nit` — taste. Never blocks; reported only if ≤ 2 and cheap.
+
+For every `should` and `nit`, the `problem` sentence says what, if anything, gets harder as the app
+grows if it stays; "nothing" is a valid answer. The orchestrator triages them (`skill://orchestrate` OR12).
 
 `verdict: fail` iff ≥ 1 `block`.
 
@@ -59,3 +71,6 @@ by reading; never edit source to mutate it — survivors come from the verifier'
   Detector: hook `bash-guard.ts` (`DENIED_FOR_REVIEWERS`).
 - [RV7] A `should` finding repeated across two slices is reported with
   `rule_id: "promote"` so the curator sees it (`skill://guardrail-evolution`).
+- [RV8] A fix-round re-check (one lens, `skill://orchestrate` §5) asks only: is each block fixed; did
+  the fix break behaviour or cause growth harm (`block` (2))? A new `should`/`nit` is reported only if
+  it meets the `block` bar.

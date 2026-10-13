@@ -10,12 +10,12 @@ and most temporary form of a rule.
 
 ## Enforcement ladder
 
-| level | mechanism | example |
-|---|---|---|
-| L0 | prose in a skill, checked by a reviewer | "prefer `thiserror` enums in library crates" |
-| L1 | static: clippy, oxlint, tsc/vue-tsc, cargo graph, cargo-deny, `scripts/check-*.ts` | "ui/ never imports @codemirror" |
-| L2 | test: proptest invariant, golden, arch test | "chunks are pairwise disjoint" |
-| L3 | hook: `tool_call` block | ownership, generated files, bash guard |
+| level | mechanism                                                                          | example                                      |
+| ----- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| L0    | prose in a skill, checked by a reviewer                                            | "prefer `thiserror` enums in library crates" |
+| L1    | static: clippy, oxlint, tsc/vue-tsc, cargo graph, cargo-deny, `scripts/check-*.ts` | "ui/ never imports @codemirror"              |
+| L2    | test: proptest invariant, golden, arch test                                        | "chunks are pairwise disjoint"               |
+| L3    | hook: `tool_call` block                                                            | ownership, generated files, bash guard       |
 
 - [GE1] An L0 rule that produced a `block` finding **twice** is promoted (L1 → L2 → L3,
   cheapest first) at the next retro, or deleted as unenforceable.
@@ -29,6 +29,7 @@ and most temporary form of a rule.
 ```
 | id | rule | level | detector | origin | added | status |
 ```
+
 `id` is the skill rule id (`RS4`, `CM2`, `PM1`) or `R-open-N` for rules still being shaped.
 `origin` cites findings (`#31,#44`) or the architecture section. `status`: `active`,
 `promoted→L2`, `retired`. A `## Changelog` section is appended per retro with date and the
@@ -42,7 +43,7 @@ Gate D outcome per proposal.
 
 ## Retro procedure (curator)
 
-Input: `.omp/run/findings.jsonl` since the last retro; incidents (hook blocks, rework round
+Input: `.omp/run/findings.jsonl` since the last retro; incidents (hook blocks, fix round
 2, Gate B escalations); human corrections (`source: "human"`) — these weigh most.
 
 1. Cluster findings by `rule_id` (or by problem similarity when unset).
@@ -55,7 +56,7 @@ Input: `.omp/run/findings.jsonl` since the last retro; incidents (hook blocks, r
 4. Comment audit (`R-open-1`): count comments added this milestone, classify each as
    information-carrying or narrating; propose tightening or loosening the policy with examples.
 5. Reviewer calibration: findings that led to a change vs. findings dropped by the
-   orchestrator; propose protocol adjustments if a reviewer is noisy or silent.
+   orchestrator (`triage`, OR12); propose protocol adjustments if a reviewer is noisy or silent.
 
 Output: `proposals[]` with `id, origin_findings, rule, level, detector, cost, diff_summary`.
 The curator applies nothing until the orchestrator relays Gate D approval, then edits only

@@ -7,7 +7,7 @@ description: House rules for Rust in yamt — beginner-readable Rust, error type
 
 The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic ≠ clever.
 
-## Readability (reviewer flags violations as `should`, repeated → `block`)
+## Readability (graded by `skill://review-protocol`)
 
 - [RS1] Owned types at crate boundaries: `String`, `Vec<T>`, `PathBuf` in public structs and
   return types. Borrow only in parameters (`&str`, `&[T]`, `&Path`). No lifetimes in public

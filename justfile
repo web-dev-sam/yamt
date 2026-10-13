@@ -108,7 +108,7 @@ golden-show case:
 golden-repo case dir:
     scripts/golden-repo.sh {{ case }} {{ dir }}
 
-# Mutation testing of the lines changed since <base> (not in `check`; the verifier runs it per wave).
+# Mutation testing of the lines changed since <base> (not in `check`; the orchestrator runs it after each slice, the verifier once per feature).
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail

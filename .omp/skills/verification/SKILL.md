@@ -5,8 +5,8 @@ description: What counts as proof in yamt — the `just check` gate, per-layer s
 
 # Verification
 
-Proof is observed output, pasted. "Tests pass" without the command and its last lines is not
-evidence. The verifier runs the gate once per wave; implementers run their layer's recipes (SP3).
+Proof is observed output, pasted. "Tests pass" without the command and its last lines is not evidence. The verifier
+runs the gate once per feature, in the final check; implementers run their layer's recipes (SP3).
 
 ## The gate
 
@@ -21,20 +21,21 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
 - [VF1] The verifier never fixes anything. A failure goes back to the owning slice.
 - [VF2] Flaky ≠ pass. A test that fails once and passes on rerun is reported as a failure
   with `excerpt: "flaky: …"`; flakiness is a correctness finding.
-- [VF3] The gate is run from a clean tree state as merged by the orchestrator, not inside
-  an implementer's isolated workspace.
-- [VF6] Verifier recipes are read-only commands; a detector's failing path is proven by a
-  committed test, never by tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no
-  repository writes; the scratch dir is exempt).
-- [VF7] After `just check`, once per wave: `just mutants <base>` (`<base>` = the commit before the
-  wave's patches; not in `check`). It mutates the wave's changed Rust lines (cargo-mutants) and
-  changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS); reports in
-  `target/`. Each surviving mutant goes into `smoke[]` as `file:line mutation`; `editor/` is not mutated.
-  Drop a survivor only as (a) equivalent: no observable difference, with the reason; (b) gate-covered: another
-  `just check` recipe kills it, which you name; (c) wiring: framework registration or a log call with no decision of its
-  own, observed in the smoke, which you name. A guard, boundary, constant, filter or branch is a real gap → finding for the owning row.
+- [VF3] The gate is run from a clean tree state as merged by the orchestrator, not inside an implementer's isolated workspace.
+- [VF6] Verifier recipes are read-only commands; a detector's failing path is proven by a committed test, never by
+  tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no repository writes; the scratch dir is exempt).
+- [VF7] `just mutants <base>` (not in `check`) mutates the Rust lines changed since `<base>` (cargo-mutants, report in
+  `target/mutants/`) and changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS, clear-text);
+  `editor/` is not mutated. The orchestrator runs it after each slice's patch is committed (`<base>` = the commit before
+  it) for the correctness reviewer; the verifier runs it once after `just check` in the final check (`<base>` = the commit
+  before the feature), each survivor in `smoke[]` as `file:line mutation`. Drop a survivor only as (a) equivalent: no
+  observable difference, with the reason; (b) gate-covered: another `just check` recipe kills it, which you name; (c) wiring:
+  framework registration or a log call with no decision of its own, observed in the smoke, which you name. A guard,
+  boundary, constant, filter or branch is a real gap → a finding for the owning slice, graded per `skill://review-protocol`.
 
 ## Smoke recipes (pick the one for the layer; paste `observed`)
+
+A shared helper for driving the real app and the fixture page is being built; once it lands, these recipes point to it.
 
 **merge-core / cli**
 
@@ -62,11 +63,10 @@ just webdriver <own port>                # test windows on the Samsung screen (s
 just test-window-check                   # optional: lists where each test window went (VF8)
 ```
 
-- [VF8] WebKit test sessions start through `just webdriver`: it places test windows on the owner's
-  Samsung screen when one is connected, otherwise on a private virtual display (plan §2 #40). A test
-  window on another screen is not a failure (owner 2026-10-10: "atm not important spawn wherever").
-  `just test-window-check` is optional, useful to see where a window went. Set the window size with
-  WebDriver `setWindowRect`. When done, stop the driver, the dev server and the app you started.
+- [VF8] WebKit test sessions start through `just webdriver`: it places test windows on the owner's Samsung screen
+  when one is connected, otherwise on a private virtual display (plan §2 #40). A test window on another screen is not a
+  failure (owner 2026-10-10: "atm not important spawn wherever"). Set the window size with WebDriver `setWindowRect`.
+  When done, stop the driver, the dev server and the app you started.
 - [VF9] Screenshots come only from the WebDriver session (page) or the private display; never a desktop capture (hook `bash-guard.ts`).
 
 observed: three panes, bands between them, apply a change via its arrow, undo, bulk apply;

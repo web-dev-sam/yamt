@@ -19,7 +19,7 @@ human approves them; the system evolves.
 3. **Separation of powers.** Whoever writes code does not review it, does not certify it, and
    does not decide what "done" means. Orchestrator plans and never edits source; implementers
    edit only their slice; reviewers are read-only; the verifier runs the gate.
-4. **One owner per file per wave.** Slices are disjoint by construction; the hook rejects
+4. **One owner per file at a time.** Slices are disjoint by construction; the hook rejects
    anything else. Parallelism comes from disjointness, not from merging.
 5. **Contracts are generated or type-checked, never prose.** IPC via generated bindings;
    module fences via ESLint/clippy/cargo graph; architecture decisions as a numbered record
@@ -56,33 +56,33 @@ only planner. This is deliberate: nested planning is where intent drifts.
 
 ## 3. omp mechanisms used, and for what
 
-| mechanism | used for | config |
-|---|---|---|
-| project agents `.omp/agents/*.md` | roles with restricted `tools`, `autoloadSkills`, `output` schema, `spawns: ""` | per-file frontmatter |
-| project skills `.omp/skills/<name>/SKILL.md` | layer knowledge, protocols, checklists; read on demand via `skill://` or autoloaded | `description` required (native provider) |
-| hooks `.omp/hooks/pre/*.ts` | hard fences on `tool_call` (ownership, generated files, orchestrator no-code, dangerous bash) | `ctx.agent.kind` / `ctx.agent.id` distinguish main vs subagent |
-| hooks `.omp/hooks/post/*.ts` | format-on-edit (`rustfmt`, `prettier`) via `tool_result` on `edit`/`write` | — |
-| task isolation | each implementer in its own workspace; patch captured and applied back only on success | `task.isolation.enabled: true`, `isolation.merge: patch`, `isolation.apply: true` |
-| `outputSchema` | reviewer / verifier / designer return JSON the orchestrator can act on mechanically | per agent `output` |
-| `modelRoles` | one place to swap models per role | `.omp/config.yml` |
-| `AGENTS.md` (root + per-crate) | 25-line entry point; per-directory 3-liners naming the owning skill | depth-merged by omp |
-| `task.disabledAgents` | disable bundled `task`/`sonic` so nobody spawns a generic unconstrained worker | config |
+| mechanism                                    | used for                                                                                      | config                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| project agents `.omp/agents/*.md`            | roles with restricted `tools`, `autoloadSkills`, `output` schema, `spawns: ""`                | per-file frontmatter                                                              |
+| project skills `.omp/skills/<name>/SKILL.md` | layer knowledge, protocols, checklists; read on demand via `skill://` or autoloaded           | `description` required (native provider)                                          |
+| hooks `.omp/hooks/pre/*.ts`                  | hard fences on `tool_call` (ownership, generated files, orchestrator no-code, dangerous bash) | `ctx.agent.kind` / `ctx.agent.id` distinguish main vs subagent                    |
+| hooks `.omp/hooks/post/*.ts`                 | format-on-edit (`rustfmt`, `prettier`) via `tool_result` on `edit`/`write`                    | —                                                                                 |
+| task isolation                               | each implementer in its own workspace; patch captured and applied back only on success        | `task.isolation.enabled: true`, `isolation.merge: patch`, `isolation.apply: true` |
+| `outputSchema`                               | reviewer / verifier / designer return JSON the orchestrator can act on mechanically           | per agent `output`                                                                |
+| `modelRoles`                                 | one place to swap models per role                                                             | `.omp/config.yml`                                                                 |
+| `AGENTS.md` (root + per-crate)               | 25-line entry point; per-directory 3-liners naming the owning skill                           | depth-merged by omp                                                               |
+| `task.disabledAgents`                        | disable bundled `task`/`sonic` so nobody spawns a generic unconstrained worker                | config                                                                            |
 
 ### `.omp/config.yml`
 
 ```yaml
 modelRoles:
-  orchestrator: anthropic/claude-opus-5-5:high     # confirm exact selector with /model
-  implementer:  anthropic/claude-opus-5-5:medium
-  reviewer:     anthropic/claude-opus-5-5:high
-  verifier:     anthropic/claude-opus-5-5:low
+  orchestrator: anthropic/claude-opus-5-5:high # confirm exact selector with /model
+  implementer: anthropic/claude-opus-5-5:medium
+  reviewer: anthropic/claude-opus-5-5:high
+  verifier: anthropic/claude-opus-5-5:low
 task:
   maxRecursionDepth: 1
   isolation: { enabled: true, merge: patch, apply: true }
-  disabledAgents: [task, sonic]        # scout stays: orchestrator may use it for mapping
+  disabledAgents: [task, sonic] # scout stays: orchestrator may use it for mapping
 tools:
   approval:
-    bash: ask                           # hooks allow-list the safe commands below
+    bash: ask # hooks allow-list the safe commands below
 ```
 
 ---
@@ -114,7 +114,7 @@ output: { summary, files_changed, tests_added, smoke_evidence, deviations_from_b
 ```
 
 ```md
---- web-impl.md        (same shape; autoloadSkills: [project-map, slice-protocol, principles, ts-conventions, vue-conventions, cm6-rules])
+--- web-impl.md (same shape; autoloadSkills: [project-map, slice-protocol, principles, ts-conventions, vue-conventions, cm6-rules])
 ```
 
 ```md
@@ -129,7 +129,7 @@ output: { verdict: "pass|fail", checked: [string], findings: [{ file, line, seve
 ```
 
 ```md
---- correctness-reviewer.md   (same shape; autoloadSkills: [review-protocol, risk-register]; focus: edge cases, invariants, tests that would catch consumer-visible bugs, missing cases from the risk register)
+--- correctness-reviewer.md (same shape; autoloadSkills: [review-protocol, risk-register]; focus: edge cases, invariants, tests that would catch consumer-visible bugs, missing cases from the risk register)
 ```
 
 ```md
@@ -165,23 +165,23 @@ Budget: each `SKILL.md` ≤ 120 lines; a rule line has the form
 `- [R<id>] <rule>. Violation: <one-line example>. Detector: <lint|test|hook|review>`.
 Over budget ⇒ promote or delete before adding.
 
-| skill | content | autoloaded by |
-|---|---|---|
-| `project-map` | the §1–§5 of architecture.md condensed: tree, dependency graph, state-ownership table, "where does X go" table, pointer to decision record. Header: `verified against commit <sha>` | everyone |
-| `decision-record` | the plan's §2 table + rule "do not relitigate without new information; propose an ADR instead" + ADR template | designer, orchestrator |
-| `slice-protocol` | what a brief contains, what "done" means, output contract, non-goals discipline, "run `just check` once, at the end", how to report deviations instead of silently widening scope | implementers |
-| `rust-conventions` | house rules (readable-by-a-beginner list from architecture §7, error types, module layout, clippy config, test placement, proptest/insta, `gitio` subprocess rules) + a **curated subset** of `leonardomso/rust-skills` (MIT) vendored under `references/`: keep `own-*`, `err-*`, `name-*`, `type-*`, `proj-*`, `lint-*`, `anti-*`; **drop** `mem-*`, `opt-*`, `async-*`, `perf-*` (premature optimisation and dependencies for a tool that diffs 16 files), `api-builder/typestate/sealed/extension/non-exhaustive/prelude` (library-publishing idioms), `test-mockall/mock-traits` (we run real git), `doc-examples/errors/panics-section` (see comment policy) | rust-impl |
-| `principles` | the four `cursor/plugins` pstack principle skills (MIT) merged into one ~100-line `SKILL.md`: `type-system-discipline`, `minimize-reader-load`, `foundational-thinking`, `redesign-from-first-principles`. The lenses every implementer and reviewer applies | implementers, reviewers, orchestrator |
-| `ts-conventions` | `cursor/plugins` `typescript-best-practices` rule table (MIT) + house additions: brands for line spaces (`ipc/domain.ts`), exhaustiveness via tsgolint, `satisfies`, object args except per-frame paths (`connectors/`, `scrollSync`), structured `log.*` not `console.*`, deviation note on IPC parsing | web-impl, reviewers on frontend diffs |
-| `vue-conventions` | `SKILL.md` = house rules only (SFC section order, `function` declarations, `useTemplateRef`, type-based `defineEmits`/`defineProps`, vueuse-first in `ui/` only, no provide/inject, split by responsibility not section count, `useAppStore()` singleton, Tailwind v4 + `editor/theme.css`, adaptable-composable pattern for `useMergeController`) + explicit overrides of the vendored skill. `references/` = `vuejs-ai/skills` `vue-best-practices` and `create-adaptable-composable` verbatim (MIT), read on demand via `skill://vue-conventions/references/…` | web-impl |
-| `cm6-rules` | the CM6 contract: StateField + invertedEffects for status, `mapPos` sides, `sliceDoc` not `toString`, lineSeparator, read-only pane config, `lineBlockAt`, viewport-only rendering, scroll re-entrancy | web-impl, reviewers on frontend diffs |
-| `ipc-contract` | how to change the IPC: Rust type → `just bindings` → commit; error enum rules; never hand-edit bindings | rust-impl, web-impl |
-| `review-protocol` | checklist, severity rubric (`block` = correctness/boundary/contract; `should` = maintainability; `nit` never blocks), max 10 findings ranked, every finding has file:line + fix, `checked:` list is mandatory evidence, no restating the diff | reviewers |
-| `risk-register` | plan §6 as a table with "test that proves it handled" column | correctness-reviewer |
-| `verification` | `just check`, per-layer smoke recipes (CLI classify on goldens; `just dev-web` + Epiphany checklist; `just dev-app` on a scripted conflict repo), what counts as evidence | verifier, implementers |
-| `orchestrate` | the loop (§6), intent-capture questions, slice-brief template, disjointness check, rework policy, escalation, board updates, session handoff | orchestrator (manual read) |
-| `guardrail-evolution` | enforcement ladder, rule lifecycle, promotion criteria, registry format, retirement | curator, orchestrator |
-| `comment-policy` | **open for refinement** (R-open-1). Current rule: a comment must carry information the code cannot: an external fact (git behaviour, WebKit quirk, CM6 API subtlety) with a reference, or a `///` one-liner on a public `merge-core` item. Never: what the code does, section headers, TODOs, commented-out code. Reviewer test for every comment: "delete it — is anything lost that a rename or extraction could not restore?" If no → `should` finding. Logged per milestone so the curator can see whether agents over- or under-comment and tighten accordingly | implementers, reviewers |
+| skill                 | content                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | autoloaded by                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| `project-map`         | the §1–§5 of architecture.md condensed: tree, dependency graph, state-ownership table, "where does X go" table, pointer to decision record. Header: `verified against commit <sha>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | everyone                              |
+| `decision-record`     | the plan's §2 table + rule "do not relitigate without new information; propose an ADR instead" + ADR template                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | designer, orchestrator                |
+| `slice-protocol`      | what a brief contains, what "done" means, output contract, non-goals discipline, "run `just check` once, at the end", how to report deviations instead of silently widening scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | implementers                          |
+| `rust-conventions`    | house rules (readable-by-a-beginner list from architecture §7, error types, module layout, clippy config, test placement, proptest/insta, `gitio` subprocess rules) + a **curated subset** of `leonardomso/rust-skills` (MIT) vendored under `references/`: keep `own-*`, `err-*`, `name-*`, `type-*`, `proj-*`, `lint-*`, `anti-*`; **drop** `mem-*`, `opt-*`, `async-*`, `perf-*` (premature optimisation and dependencies for a tool that diffs 16 files), `api-builder/typestate/sealed/extension/non-exhaustive/prelude` (library-publishing idioms), `test-mockall/mock-traits` (we run real git), `doc-examples/errors/panics-section` (see comment policy) | rust-impl                             |
+| `principles`          | the four `cursor/plugins` pstack principle skills (MIT) merged into one ~100-line `SKILL.md`: `type-system-discipline`, `minimize-reader-load`, `foundational-thinking`, `redesign-from-first-principles`. The lenses every implementer and reviewer applies                                                                                                                                                                                                                                                                                                                                                                                                       | implementers, reviewers, orchestrator |
+| `ts-conventions`      | `cursor/plugins` `typescript-best-practices` rule table (MIT) + house additions: brands for line spaces (`ipc/domain.ts`), exhaustiveness via tsgolint, `satisfies`, object args except per-frame paths (`connectors/`, `scrollSync`), structured `log.*` not `console.*`, deviation note on IPC parsing                                                                                                                                                                                                                                                                                                                                                           | web-impl, reviewers on frontend diffs |
+| `vue-conventions`     | `SKILL.md` = house rules only (SFC section order, `function` declarations, `useTemplateRef`, type-based `defineEmits`/`defineProps`, vueuse-first in `ui/` only, no provide/inject, split by responsibility not section count, `useAppStore()` singleton, Tailwind v4 + `editor/theme.css`, adaptable-composable pattern for `useMergeController`) + explicit overrides of the vendored skill. `references/` = `vuejs-ai/skills` `vue-best-practices` and `create-adaptable-composable` verbatim (MIT), read on demand via `skill://vue-conventions/references/…`                                                                                                  | web-impl                              |
+| `cm6-rules`           | the CM6 contract: StateField + invertedEffects for status, `mapPos` sides, `sliceDoc` not `toString`, lineSeparator, read-only pane config, `lineBlockAt`, viewport-only rendering, scroll re-entrancy                                                                                                                                                                                                                                                                                                                                                                                                                                                             | web-impl, reviewers on frontend diffs |
+| `ipc-contract`        | how to change the IPC: Rust type → `just bindings` → commit; error enum rules; never hand-edit bindings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | rust-impl, web-impl                   |
+| `review-protocol`     | checklist, severity rubric (`block` = correctness/boundary/contract; `should` = maintainability; `nit` never blocks), max 10 findings ranked, every finding has file:line + fix, `checked:` list is mandatory evidence, no restating the diff                                                                                                                                                                                                                                                                                                                                                                                                                      | reviewers                             |
+| `risk-register`       | plan §6 as a table with "test that proves it handled" column                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | correctness-reviewer                  |
+| `verification`        | `just check`, per-layer smoke recipes (CLI classify on goldens; `just dev-web` + Epiphany checklist; `just dev-app` on a scripted conflict repo), what counts as evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | verifier, implementers                |
+| `orchestrate`         | the loop (§6), intent-capture questions, slice-brief template, disjointness check, rework policy, escalation, board updates, session handoff                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | orchestrator (manual read)            |
+| `guardrail-evolution` | enforcement ladder, rule lifecycle, promotion criteria, registry format, retirement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | curator, orchestrator                 |
+| `comment-policy`      | **open for refinement** (R-open-1). Current rule: a comment must carry information the code cannot: an external fact (git behaviour, WebKit quirk, CM6 API subtlety) with a reference, or a `///` one-liner on a public `merge-core` item. Never: what the code does, section headers, TODOs, commented-out code. Reviewer test for every comment: "delete it — is anything lost that a rename or extraction could not restore?" If no → `should` finding. Logged per milestone so the curator can see whether agents over- or under-comment and tighten accordingly                                                                                               | implementers, reviewers               |
 
 Vendored material always lives in `references/` and is read on demand; `SKILL.md` itself
 stays within budget. Autoloaded total per implementer: rust-impl ≈ 330 lines, web-impl ≈ 420
@@ -196,6 +196,7 @@ Root `AGENTS.md` (complete):
 
 ```md
 # yamt
+
 3-way merge tool. Rust (diff3 + git) + Tauri + CodeMirror 6 + Vue 3. Decisions: docs/plan.md §2 — not up for debate.
 Architecture: skill://project-map. Work board: docs/slices/SLICES.md. Rules registry: .omp/GUARDRAILS.md.
 
@@ -216,14 +217,14 @@ Architecture: skill://project-map. Work board: docs/slices/SLICES.md. Rules regi
 3. Spawn the wave: one `task` call, `isolated: true`, `name` = slice id (e.g. `M0S1MergeCore`). Write .omp/run/slices.json { "<name>": { owned: [...], readonly: [...] } } BEFORE spawning (hook reads it).
 4. Collect implementer outputs. Any `deviations_from_brief` non-empty → decide: accept (update brief in SLICES.md) or reject (rework).
 5. Review: spawn boundary-reviewer + correctness-reviewer in parallel on each patch (patch path + brief). Append all findings to .omp/run/findings.jsonl with slice id.
-6. Rework: `block` findings → revive the same implementer (parked agent) with the findings; max 2 rounds; then ── HUMAN GATE B (escalation) ──. `should` findings → fixed in the same rework or logged as a follow-up slice, never dropped silently. `nit` → log only.
-7. Verify: spawn verifier once for the wave (after patches are applied). `gate: fail` → rework the owning slice (step 6), not a new slice.
-8. Board: mark slices done with the verifier's evidence line. Commit per wave (caveman-commit style).
+6. Fix rounds: the orchestrator triages every `should`/`nit` and mutation survivor by whether leaving it makes the app harder to grow (owner, 2026-10-13: no god components, no unclear data flow); yes → `block`, no → dropped with a reason. Only blocks start a fix round under a fresh name; one reviewer re-checks it; max 2 rounds; then ── HUMAN GATE B (escalation, once per feature) ──. Current text: `skill://orchestrate` §5.
+7. Verify: spawn verifier alone once per feature (after every slice is applied). `gate: fail` → fix round for the owning slice (step 6), not a new slice.
+8. Board: mark slices done with the verifier's evidence line. The orchestrator commits each applied patch (caveman-commit style).
 9. Milestone end: demo recipe for the human (the milestone's acceptance from the plan) + `docs/walkthroughs/M<n>.md` (what was built, the non-obvious Rust constructs and why — the human is a Rust beginner). ── HUMAN GATE C: milestone acceptance ──
 10. Retro: spawn curator with findings.jsonl since last retro + any human corrections from this milestone. Present proposals. ── HUMAN GATE D: approve guardrail changes ── Curator applies approved ones; GUARDRAILS.md changelog updated; skills' "verified against commit" bumped.
 ```
 
-Rules the orchestrator follows about *itself*:
+Rules the orchestrator follows about _itself_:
 
 - It never edits `crates/**` or `frontend/**` (hook-enforced), never runs `just check` as proof
   (the verifier does), never spawns a slice without a disjointness check.
@@ -271,13 +272,13 @@ Use the output schema. `deviations_from_brief` must list anything you did outsid
 
 All `pre/` hooks: `tool_call` handlers; fail closed; reason strings cite the rule id.
 
-| hook | logic | protects against |
-|---|---|---|
-| `pre/ownership.ts` | if `ctx.agent.kind === "sub"`: look up `ctx.agent.id` in `.omp/run/slices.json`; `edit`/`write` path must match an `owned` glob; `bash` commands containing redirection into non-owned paths are blocked (regex, conservative). If `ctx.agent.kind === "main"`: block `edit`/`write` under `crates/**`, `frontend/**`, `src-tauri/**` | scope creep, two agents on one file, orchestrator "just fixing it" |
-| `pre/generated.ts` | block `edit`/`write` on `frontend/src/ipc/bindings.ts`, `Cargo.lock`, `pnpm-lock.yaml`, `**/__snapshots__/**`, `tests/golden/**/expected.json` (goldens change only via `just golden-update`, run by a human or the verifier on request) | silent contract/golden drift |
-| `pre/bash-guard.ts` | deny: `git push`, `git reset --hard`, `git checkout .`, `rm -rf` outside `target/` & `node_modules/`, `cargo publish`, `npm publish`, `curl … \| sh`; subagents additionally denied `git commit` (orchestrator commits per wave) | destructive mistakes; agent-authored commits with no review |
-| `pre/skill-gate.ts` (optional, measure first) | first `edit` by an implementer whose context has not `read` its layer skill in this session → block with "read skill://… first" — only if `autoloadSkills` proves insufficient | ignoring conventions |
-| `post/format.ts` | after a successful `edit`/`write` on `*.rs` → `rustfmt` that file; on `*.ts|*.vue` → `prettier --write` that file; returns `additionalContext` only if the formatter changed something | formatting noise in reviews |
+| hook                                          | logic                                                                                                                                                                                                                                                                                                                                 | protects against                                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pre/ownership.ts`                            | if `ctx.agent.kind === "sub"`: look up `ctx.agent.id` in `.omp/run/slices.json`; `edit`/`write` path must match an `owned` glob; `bash` commands containing redirection into non-owned paths are blocked (regex, conservative). If `ctx.agent.kind === "main"`: block `edit`/`write` under `crates/**`, `frontend/**`, `src-tauri/**` | scope creep, two agents on one file, orchestrator "just fixing it"                                     |
+| `pre/generated.ts`                            | block `edit`/`write` on `frontend/src/ipc/bindings.ts`, `Cargo.lock`, `pnpm-lock.yaml`, `**/__snapshots__/**`, `tests/golden/**/expected.json` (goldens change only via `just golden-update`, run by a human or the verifier on request)                                                                                              | silent contract/golden drift                                                                           |
+| `pre/bash-guard.ts`                           | deny: `git push`, `git reset --hard`, `git checkout .`, `rm -rf` outside `target/` & `node_modules/`, `cargo publish`, `npm publish`, `curl … \| sh`; subagents additionally denied `git commit` (the orchestrator commits each applied patch)                                                                                        | destructive mistakes; agent-authored commits with no review                                            |
+| `pre/skill-gate.ts` (optional, measure first) | first `edit` by an implementer whose context has not `read` its layer skill in this session → block with "read skill://… first" — only if `autoloadSkills` proves insufficient                                                                                                                                                        | ignoring conventions                                                                                   |
+| `post/format.ts`                              | after a successful `edit`/`write` on `*.rs` → `rustfmt` that file; on `*.ts                                                                                                                                                                                                                                                           | *.vue`→`prettier --write`that file; returns`additionalContext` only if the formatter changed something | formatting noise in reviews |
 
 Verify at bootstrap (§9) that `ctx.agent.id` equals the task item `name` — the docs say the
 name "becomes the registry/IRC id"; confirm with a throwaway hook that logs `ctx.agent` once.
@@ -286,16 +287,16 @@ passed in the brief and echoed by the agent into a marker file.
 
 ### Enforcement ladder (for `GUARDRAILS.md`)
 
-| level | mechanism | examples |
-|---|---|---|
-| L0 | prose in a skill | "prefer `thiserror` enums over `anyhow` in library crates" |
-| L1 | static: clippy, ESLint boundaries, tsc, cargo graph, cargo-deny | "ui/ never imports @codemirror" |
-| L2 | test: proptest invariant, golden, arch test | "chunks are disjoint", "undo restores status" |
-| L3 | hook: tool-call block | ownership, generated files, bash guard |
+| level | mechanism                                                       | examples                                                   |
+| ----- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| L0    | prose in a skill                                                | "prefer `thiserror` enums over `anyhow` in library crates" |
+| L1    | static: clippy, ESLint boundaries, tsc, cargo graph, cargo-deny | "ui/ never imports @codemirror"                            |
+| L2    | test: proptest invariant, golden, arch test                     | "chunks are disjoint", "undo restores status"              |
+| L3    | hook: tool-call block                                           | ownership, generated files, bash guard                     |
 
 Promotion rule: an L0 rule that produces a `block` finding **twice** must be promoted to L1–L3
 at the next retro or be deleted as unenforceable. An L1+ rule needs no prose beyond its id and
-a one-line rationale (the detector *is* the rule).
+a one-line rationale (the detector _is_ the rule).
 
 `.omp/GUARDRAILS.md` format:
 
@@ -323,7 +324,7 @@ plus a `## Changelog` section the curator appends to.
 - **Drift check:** curator diffs `project-map` against the tree every retro (dirs, public
   types, dependency graph) and bumps `verified against commit`.
 - **Human authority:** every change to `.omp/agents`, `.omp/skills`, `.omp/hooks`,
-  `GUARDRAILS.md` goes through Gate D. The orchestrator can *recommend* at any time (and
+  `GUARDRAILS.md` goes through Gate D. The orchestrator can _recommend_ at any time (and
   should, when a correction repeats); it never applies.
 
 ---
@@ -353,13 +354,13 @@ first real retro.
 
 ## 10. Risks of the system itself
 
-| risk | mitigation |
-|---|---|
-| over-constraint → agents hedge, stub, or report "blocked" | briefs carry acceptance, not procedure; `deviations_from_brief` is a legal channel; Gate B exists; retro deletes rules that only produce noise |
-| review theater (rubber stamps or restated diffs) | mandatory `checked:` evidence list; `nit` cannot block; findings need file:line + fix; reviewers are measured at retro (findings that led to a real change vs. dropped) |
-| context bloat from autoloaded skills | hard line budgets; per-layer autoload only; promote prose to detectors |
-| skills drift from code | `verified against commit` + curator drift check every retro; project-map is a condensation of a doc that is itself checked by `just check` where possible (bindings, graph) |
-| hook identity assumptions wrong | smoke in bootstrap step 3 before any real slice |
-| parallel patches conflict at apply | disjoint globs enforced before spawn + at tool time; shared files (`Cargo.toml` workspace, `justfile`) are owned by the orchestrator's own edits between waves, never by implementers — brief says "report needed `Cargo.toml` changes in `deviations_from_brief`"; orchestrator applies them (its `.omp`/docs/config edit allowance covers `Cargo.toml`, `justfile`, `package.json`) |
-| orchestrator context exhaustion mid-milestone | board + findings log are the handoff; `skill://orchestrate` step 0 re-hydrates a fresh session in one read |
-| the human becomes the bottleneck at four gates | Gates A and C are the real ones; B only on escalation; D batched per milestone. If still too slow, collapse A into "auto-approve waves whose slices all have L1/L2 acceptance", gated by a config flag the human flips |
+| risk                                                      | mitigation                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| over-constraint → agents hedge, stub, or report "blocked" | briefs carry acceptance, not procedure; `deviations_from_brief` is a legal channel; Gate B exists; retro deletes rules that only produce noise                                                                                                                                                                                                                                        |
+| review theater (rubber stamps or restated diffs)          | mandatory `checked:` evidence list; `nit` cannot block; findings need file:line + fix; reviewers are measured at retro (findings that led to a real change vs. dropped)                                                                                                                                                                                                               |
+| context bloat from autoloaded skills                      | hard line budgets; per-layer autoload only; promote prose to detectors                                                                                                                                                                                                                                                                                                                |
+| skills drift from code                                    | `verified against commit` + curator drift check every retro; project-map is a condensation of a doc that is itself checked by `just check` where possible (bindings, graph)                                                                                                                                                                                                           |
+| hook identity assumptions wrong                           | smoke in bootstrap step 3 before any real slice                                                                                                                                                                                                                                                                                                                                       |
+| parallel patches conflict at apply                        | disjoint globs enforced before spawn + at tool time; shared files (`Cargo.toml` workspace, `justfile`) are owned by the orchestrator's own edits between waves, never by implementers — brief says "report needed `Cargo.toml` changes in `deviations_from_brief`"; orchestrator applies them (its `.omp`/docs/config edit allowance covers `Cargo.toml`, `justfile`, `package.json`) |
+| orchestrator context exhaustion mid-milestone             | board + findings log are the handoff; `skill://orchestrate` step 0 re-hydrates a fresh session in one read                                                                                                                                                                                                                                                                            |
+| the human becomes the bottleneck at four gates            | Gates A and C are the real ones; B only on escalation; D batched per milestone. If still too slow, collapse A into "auto-approve waves whose slices all have L1/L2 acceptance", gated by a config flag the human flips                                                                                                                                                                |
