@@ -6,6 +6,7 @@ members = [
   "crates/session",
   "crates/cli",
   "crates/conflict-repo",
+  "crates/settings",
   "src-tauri",
 ]
 
@@ -20,6 +21,7 @@ yamt-merge-core = { path = "crates/merge-core" }
 yamt-gitio = { path = "crates/gitio" }
 yamt-session = { path = "crates/session" }
 yamt-conflict-repo = { path = "crates/conflict-repo" }
+yamt-settings = { path = "crates/settings" }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
