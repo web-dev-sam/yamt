@@ -1,5 +1,18 @@
 {
-  "AntialiasingDesktop": {
-    "owned": ["crates/settings/**", "src-tauri/src/**"]
+  "CrispTextWeb": {
+    "owned": [
+      "frontend/src/editor/**",
+      "frontend/src/ui/**",
+      "frontend/src/connectors/**",
+      "frontend/src/style.css",
+      "frontend/src/main.ts",
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/fixtureSettings.ts",
+      "frontend/src/ipc/fixtureSettings.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/domain.ts"
+    ]
   }
 }
