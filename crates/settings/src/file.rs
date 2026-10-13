@@ -1,70 +1,41 @@
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::{Error, KeysChange, StoredSettings, Theme};
+use crate::{Error, StoredSettings};
 
 const THEME: &str = "theme";
 const KEYS: &str = "keys";
 
-/// A settings file's entries as written, unknown ones included, and what yamt reads from them.
+/// A settings file: the entries yamt does not know, kept as written, and what yamt reads.
 pub(crate) struct Loaded {
-    pub(crate) entries: Map<String, Value>,
+    others: Map<String, Value>,
     pub(crate) stored: StoredSettings,
 }
 
 impl Loaded {
     pub(crate) fn from_settings(settings: &StoredSettings) -> Loaded {
-        let mut loaded = Loaded {
-            entries: Map::new(),
+        Loaded {
+            others: Map::new(),
             stored: settings.clone(),
-        };
-        loaded.set_theme(settings.theme);
-        loaded.put_keys();
-        loaded
+        }
     }
 
-    pub(crate) fn set_theme(&mut self, theme: Theme) {
-        self.stored.theme = theme;
-        self.entries
-            .insert(THEME.to_owned(), Value::from(theme_name(theme)));
-    }
-
-    pub(crate) fn set_keys(&mut self, changes: &[KeysChange]) {
-        for change in changes {
-            match &change.keys {
-                Some(keys) => {
-                    self.stored.keys.insert(change.action.clone(), keys.clone());
-                }
-                None => {
-                    self.stored.keys.remove(&change.action);
-                }
+    fn entries(self) -> Map<String, Value> {
+        let mut entries = self.others;
+        entries.insert(THEME.to_owned(), Value::from(self.stored.theme.name()));
+        if !self.stored.keys.is_empty() {
+            let mut keys = Map::new();
+            for (action, action_keys) in self.stored.keys {
+                keys.insert(action, Value::from(action_keys));
             }
+            entries.insert(KEYS.to_owned(), Value::Object(keys));
         }
-        self.put_keys();
-    }
-
-    fn put_keys(&mut self) {
-        if self.stored.keys.is_empty() {
-            self.entries.remove(KEYS);
-            return;
-        }
-        let mut keys = Map::new();
-        for (action, action_keys) in &self.stored.keys {
-            keys.insert(action.clone(), Value::from(action_keys.clone()));
-        }
-        self.entries.insert(KEYS.to_owned(), Value::Object(keys));
-    }
-}
-
-fn theme_name(theme: Theme) -> &'static str {
-    match theme {
-        Theme::Dark => "dark",
-        Theme::Light => "light",
+        entries
     }
 }
 
@@ -87,30 +58,28 @@ pub(crate) fn read_or_create(
     if let Some(loaded) = load(path)? {
         return Ok(loaded.stored);
     }
-    let created = Loaded::from_settings(current);
-    write_entries(path, created.entries)?;
-    Ok(created.stored)
+    write_entries(path, Loaded::from_settings(current))?;
+    Ok(current.clone())
 }
 
 fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
-    let entries: Map<String, Value> =
+    let mut others: Map<String, Value> =
         serde_json::from_str(text).map_err(|error| broken(path, error.to_string()))?;
     let stored = StoredSettings {
-        theme: entry(path, &entries, THEME)?,
-        keys: entry(path, &entries, KEYS)?,
+        theme: entry(path, THEME, others.remove(THEME))?,
+        keys: entry(path, KEYS, others.remove(KEYS))?,
     };
-    Ok(Loaded { entries, stored })
+    Ok(Loaded { others, stored })
 }
 
 fn entry<T: DeserializeOwned + Default>(
     path: &Path,
-    entries: &Map<String, Value>,
     name: &str,
+    value: Option<Value>,
 ) -> Result<T, Error> {
-    match entries.get(name) {
-        Some(value) => {
-            T::deserialize(value).map_err(|error| broken(path, format!("`{name}`: {error}")))
-        }
+    match value {
+        Some(value) => serde_json::from_value(value)
+            .map_err(|error| broken(path, format!("`{name}`: {error}"))),
         None => Ok(T::default()),
     }
 }
@@ -122,30 +91,43 @@ fn broken(path: &Path, message: String) -> Error {
     }
 }
 
-pub(crate) fn write_entries(path: &Path, entries: Map<String, Value>) -> Result<(), Error> {
-    write_text(path, &format!("{:#}\n", Value::Object(entries)))
+pub(crate) fn write_entries(path: &Path, loaded: Loaded) -> Result<(), Error> {
+    write_text(path, &format!("{:#}\n", Value::Object(loaded.entries())))
 }
 
 /// Writes through a temporary file and a rename; a symlink at `path` is followed, so it stays a link.
 pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
-    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
-    let failed = |error: io::Error| Error::WriteFailed {
-        path: target.clone(),
+    let failed = |target: &Path, error: io::Error| Error::WriteFailed {
+        path: target.to_owned(),
         message: error.to_string(),
     };
+    let target = link_target(path).map_err(|error| failed(path, error))?;
     let Some(name) = target.file_name() else {
-        return Err(failed(io::Error::from(ErrorKind::IsADirectory)));
+        return Err(failed(&target, io::Error::from(ErrorKind::IsADirectory)));
     };
     let mut temp_name = name.to_owned();
     temp_name.push(format!(".{}.tmp", process::id()));
     let temp = target.with_file_name(temp_name);
     if let Some(folder) = target.parent() {
-        fs::create_dir_all(folder).map_err(failed)?;
+        fs::create_dir_all(folder).map_err(|error| failed(&target, error))?;
     }
     let written = fs::write(&temp, text).and_then(|()| fs::rename(&temp, &target));
     if let Err(error) = written {
         fs::remove_file(&temp).ok();
-        return Err(failed(error));
+        return Err(failed(&target, error));
     }
     Ok(())
+}
+
+/// What a symlink at `path` points to, also when that does not exist yet; `path` itself otherwise.
+fn link_target(path: &Path) -> io::Result<PathBuf> {
+    let is_link = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
+    if !is_link {
+        return Ok(path.to_owned());
+    }
+    let target = fs::read_link(path)?;
+    match path.parent() {
+        Some(folder) => Ok(folder.join(target)),
+        None => Ok(target),
+    }
 }

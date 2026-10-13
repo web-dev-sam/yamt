@@ -20,13 +20,22 @@ pub enum Theme {
     Light,
 }
 
+impl Theme {
+    /// The spelling in the settings file and in the page's `data-theme`.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+        }
+    }
+}
+
 /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
 /// keys differ from the defaults (the window knows the defaults; Rust never does).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct StoredSettings {
-    #[serde(default)]
     pub theme: Theme,
-    #[serde(default)]
     pub keys: BTreeMap<String, Vec<String>>,
 }
 
@@ -81,7 +90,7 @@ pub fn set_theme(
     current: &StoredSettings,
     theme: Theme,
 ) -> Result<SettingsRead, Error> {
-    change(places, current, |loaded| loaded.set_theme(theme))
+    change(places, current, |stored| stored.theme = theme)
 }
 
 pub fn set_keys(
@@ -89,7 +98,18 @@ pub fn set_keys(
     current: &StoredSettings,
     changes: &[KeysChange],
 ) -> Result<SettingsRead, Error> {
-    change(places, current, |loaded| loaded.set_keys(changes))
+    change(places, current, |stored| {
+        for keys_change in changes {
+            match &keys_change.keys {
+                Some(keys) => {
+                    stored.keys.insert(keys_change.action.clone(), keys.clone());
+                }
+                None => {
+                    stored.keys.remove(&keys_change.action);
+                }
+            }
+        }
+    })
 }
 
 /// Makes `to` the file in use: an existing file there is used, a missing one is created from
@@ -108,13 +128,14 @@ pub fn relocate(
 fn change(
     places: &Places,
     current: &StoredSettings,
-    edit: impl FnOnce(&mut Loaded),
+    edit: impl FnOnce(&mut StoredSettings),
 ) -> Result<SettingsRead, Error> {
     let path = places.file_in_use()?;
     let mut loaded = file::load(&path)?.unwrap_or_else(|| Loaded::from_settings(current));
-    edit(&mut loaded);
-    file::write_entries(&path, loaded.entries)?;
-    Ok(settings_read(places, &path, loaded.stored))
+    edit(&mut loaded.stored);
+    let stored = loaded.stored.clone();
+    file::write_entries(&path, loaded)?;
+    Ok(settings_read(places, &path, stored))
 }
 
 fn settings_read(places: &Places, path: &Path, stored: StoredSettings) -> SettingsRead {
@@ -122,5 +143,20 @@ fn settings_read(places: &Places, path: &Path, stored: StoredSettings) -> Settin
         path: path.display().to_string(),
         default_path: places.default_file().display().to_string(),
         stored,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_theme_name_is_its_serde_spelling() {
+        for theme in [Theme::Dark, Theme::Light] {
+            assert_eq!(
+                serde_json::to_value(theme).unwrap(),
+                serde_json::Value::from(theme.name())
+            );
+        }
     }
 }

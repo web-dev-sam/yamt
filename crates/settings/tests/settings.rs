@@ -210,6 +210,26 @@ fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
     assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
+    let config = Config::new();
+    fs::create_dir_all(config.folder()).unwrap();
+    let relative_target = Path::new("../../elsewhere/dotfiles/settings.json");
+    std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
+    let dotfile = config.elsewhere("dotfiles/settings.json");
+    read(&config.places, &StoredSettings::default()).unwrap();
+    assert_eq!(json_at(&dotfile), json!({ "theme": "dark" }));
+    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+    let link = fs::symlink_metadata(config.default_file()).unwrap();
+    assert!(link.file_type().is_symlink());
+    assert_eq!(
+        fs::read_link(config.default_file()).unwrap(),
+        relative_target
+    );
+    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+}
+
 #[test]
 fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
     let config = Config::new();

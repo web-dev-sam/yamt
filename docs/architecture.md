@@ -359,8 +359,9 @@ Plan §2 #57. Owns the file, never what a key means (the window does, `frontend/
 - `StoredSettings { theme, keys }`: `keys` maps an action id to key strings, only for actions
   whose keys differ from the window's defaults; ids and key strings are opaque text here.
 - `read`, `set_theme`, `set_keys`, `relocate`, `theme_at_start`. A read never rewrites an existing
-  file; a change re-reads the file, replaces one entry and writes through a temporary file and a
-  rename (a symlink's target is written, the link stays); unknown entries survive; broken JSON →
+  file; a change re-reads the file, changes one entry, and writes `theme` always, `keys` when not
+  empty and every other entry as it was, through a temporary file and a rename (the end of a
+  symlink chain is written, the links stay); broken JSON →
   `Error::Broken` with line and column, and nothing is written; `relocate` takes an absolute or
   `~/` path, uses an existing file or creates a missing one from the window's settings, then
   records it. `theme_at_start` never writes and falls back to Dark.

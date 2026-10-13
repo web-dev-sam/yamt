@@ -1,12 +1,1 @@
-{
-  "SettingsDesktopR1": {
-    "owned": [
-      "crates/settings/**",
-      "src-tauri/src/**",
-      "src-tauri/Cargo.toml",
-      "src-tauri/tests/**",
-      "scripts/arch-check.sh",
-      "scripts/map-check.sh"
-    ]
-  }
-}
+{ "SettingsDesktopR2": { "owned": ["crates/settings/**"] } }

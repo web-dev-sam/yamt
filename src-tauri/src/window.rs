@@ -52,7 +52,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
 }
 
-fn start_theme<R: Runtime>(paths: &PathResolver<R>) -> Theme {
+fn start_theme(paths: &PathResolver<tauri::Wry>) -> Theme {
     match settings::places(paths) {
         Ok(places) => yamt_settings::theme_at_start(&places),
         Err(error) => {
@@ -78,11 +78,10 @@ fn background(theme: Theme) -> Color {
 // wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
 // document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
 fn start_script(theme: Theme) -> String {
-    let name = match theme {
-        Theme::Dark => "dark",
-        Theme::Light => "light",
-    };
-    format!("document.documentElement.dataset.theme = \"{name}\";")
+    format!(
+        "document.documentElement.dataset.theme = \"{}\";",
+        theme.name()
+    )
 }
 
 fn window_title(root: &Path) -> String {
@@ -191,8 +190,14 @@ mod tests {
 
     #[test]
     fn the_start_script_names_the_theme() {
-        assert!(start_script(Theme::Light).contains(r#"dataset.theme = "light""#));
-        assert!(start_script(Theme::Dark).contains(r#"dataset.theme = "dark""#));
+        assert_eq!(
+            start_script(Theme::Light),
+            r#"document.documentElement.dataset.theme = "light";"#
+        );
+        assert_eq!(
+            start_script(Theme::Dark),
+            r#"document.documentElement.dataset.theme = "dark";"#
+        );
     }
 
     fn second_request_after(delay: Duration) -> CloseRequest {

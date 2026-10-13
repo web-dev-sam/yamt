@@ -1,0 +1,357 @@
+diff --git c/crates/settings/src/file.rs i/crates/settings/src/file.rs
+index 08db468..bcdcd5f 100644
+--- c/crates/settings/src/file.rs
++++ i/crates/settings/src/file.rs
+@@ -1,70 +1,41 @@
+ use std::fs;
+ use std::io::{self, ErrorKind};
+-use std::path::Path;
++use std::path::{Path, PathBuf};
+ use std::process;
+ 
+ use serde::de::DeserializeOwned;
+ use serde_json::{Map, Value};
+ 
+-use crate::{Error, KeysChange, StoredSettings, Theme};
++use crate::{Error, StoredSettings};
+ 
+ const THEME: &str = "theme";
+ const KEYS: &str = "keys";
+ 
+-/// A settings file's entries as written, unknown ones included, and what yamt reads from them.
++/// A settings file: the entries yamt does not know, kept as written, and what yamt reads.
+ pub(crate) struct Loaded {
+-    pub(crate) entries: Map<String, Value>,
++    others: Map<String, Value>,
+     pub(crate) stored: StoredSettings,
+ }
+ 
+ impl Loaded {
+     pub(crate) fn from_settings(settings: &StoredSettings) -> Loaded {
+-        let mut loaded = Loaded {
+-            entries: Map::new(),
++        Loaded {
++            others: Map::new(),
+             stored: settings.clone(),
+-        };
+-        loaded.set_theme(settings.theme);
+-        loaded.put_keys();
+-        loaded
++        }
+     }
+ 
+-    pub(crate) fn set_theme(&mut self, theme: Theme) {
+-        self.stored.theme = theme;
+-        self.entries
+-            .insert(THEME.to_owned(), Value::from(theme_name(theme)));
+-    }
+-
+-    pub(crate) fn set_keys(&mut self, changes: &[KeysChange]) {
+-        for change in changes {
+-            match &change.keys {
+-                Some(keys) => {
+-                    self.stored.keys.insert(change.action.clone(), keys.clone());
+-                }
+-                None => {
+-                    self.stored.keys.remove(&change.action);
+-                }
++    fn entries(self) -> Map<String, Value> {
++        let mut entries = self.others;
++        entries.insert(THEME.to_owned(), Value::from(self.stored.theme.name()));
++        if !self.stored.keys.is_empty() {
++            let mut keys = Map::new();
++            for (action, action_keys) in self.stored.keys {
++                keys.insert(action, Value::from(action_keys));
+             }
++            entries.insert(KEYS.to_owned(), Value::Object(keys));
+         }
+-        self.put_keys();
+-    }
+-
+-    fn put_keys(&mut self) {
+-        if self.stored.keys.is_empty() {
+-            self.entries.remove(KEYS);
+-            return;
+-        }
+-        let mut keys = Map::new();
+-        for (action, action_keys) in &self.stored.keys {
+-            keys.insert(action.clone(), Value::from(action_keys.clone()));
+-        }
+-        self.entries.insert(KEYS.to_owned(), Value::Object(keys));
+-    }
+-}
+-
+-fn theme_name(theme: Theme) -> &'static str {
+-    match theme {
+-        Theme::Dark => "dark",
+-        Theme::Light => "light",
++        entries
+     }
+ }
+ 
+@@ -87,30 +58,28 @@ pub(crate) fn read_or_create(
+     if let Some(loaded) = load(path)? {
+         return Ok(loaded.stored);
+     }
+-    let created = Loaded::from_settings(current);
+-    write_entries(path, created.entries)?;
+-    Ok(created.stored)
++    write_entries(path, Loaded::from_settings(current))?;
++    Ok(current.clone())
+ }
+ 
+ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+-    let entries: Map<String, Value> =
++    let mut others: Map<String, Value> =
+         serde_json::from_str(text).map_err(|error| broken(path, error.to_string()))?;
+     let stored = StoredSettings {
+-        theme: entry(path, &entries, THEME)?,
+-        keys: entry(path, &entries, KEYS)?,
++        theme: entry(path, THEME, others.remove(THEME))?,
++        keys: entry(path, KEYS, others.remove(KEYS))?,
+     };
+-    Ok(Loaded { entries, stored })
++    Ok(Loaded { others, stored })
+ }
+ 
+ fn entry<T: DeserializeOwned + Default>(
+     path: &Path,
+-    entries: &Map<String, Value>,
+     name: &str,
++    value: Option<Value>,
+ ) -> Result<T, Error> {
+-    match entries.get(name) {
+-        Some(value) => {
+-            T::deserialize(value).map_err(|error| broken(path, format!("`{name}`: {error}")))
+-        }
++    match value {
++        Some(value) => serde_json::from_value(value)
++            .map_err(|error| broken(path, format!("`{name}`: {error}"))),
+         None => Ok(T::default()),
+     }
+ }
+@@ -122,30 +91,43 @@ fn broken(path: &Path, message: String) -> Error {
+     }
+ }
+ 
+-pub(crate) fn write_entries(path: &Path, entries: Map<String, Value>) -> Result<(), Error> {
+-    write_text(path, &format!("{:#}\n", Value::Object(entries)))
++pub(crate) fn write_entries(path: &Path, loaded: Loaded) -> Result<(), Error> {
++    write_text(path, &format!("{:#}\n", Value::Object(loaded.entries())))
+ }
+ 
+ /// Writes through a temporary file and a rename; a symlink at `path` is followed, so it stays a link.
+ pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
+-    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+-    let failed = |error: io::Error| Error::WriteFailed {
+-        path: target.clone(),
++    let failed = |target: &Path, error: io::Error| Error::WriteFailed {
++        path: target.to_owned(),
+         message: error.to_string(),
+     };
++    let target = link_target(path).map_err(|error| failed(path, error))?;
+     let Some(name) = target.file_name() else {
+-        return Err(failed(io::Error::from(ErrorKind::IsADirectory)));
++        return Err(failed(&target, io::Error::from(ErrorKind::IsADirectory)));
+     };
+     let mut temp_name = name.to_owned();
+     temp_name.push(format!(".{}.tmp", process::id()));
+     let temp = target.with_file_name(temp_name);
+     if let Some(folder) = target.parent() {
+-        fs::create_dir_all(folder).map_err(failed)?;
++        fs::create_dir_all(folder).map_err(|error| failed(&target, error))?;
+     }
+     let written = fs::write(&temp, text).and_then(|()| fs::rename(&temp, &target));
+     if let Err(error) = written {
+         fs::remove_file(&temp).ok();
+-        return Err(failed(error));
++        return Err(failed(&target, error));
+     }
+     Ok(())
+ }
++
++/// What a symlink at `path` points to, also when that does not exist yet; `path` itself otherwise.
++fn link_target(path: &Path) -> io::Result<PathBuf> {
++    let is_link = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_symlink());
++    if !is_link {
++        return Ok(path.to_owned());
++    }
++    let target = fs::read_link(path)?;
++    match path.parent() {
++        Some(folder) => Ok(folder.join(target)),
++        None => Ok(target),
++    }
++}
+diff --git c/crates/settings/src/lib.rs i/crates/settings/src/lib.rs
+index 08932ea..278fd24 100644
+--- c/crates/settings/src/lib.rs
++++ i/crates/settings/src/lib.rs
+@@ -20,13 +20,22 @@ pub enum Theme {
+     Light,
+ }
+ 
++impl Theme {
++    /// The spelling in the settings file and in the page's `data-theme`.
++    #[must_use]
++    pub fn name(self) -> &'static str {
++        match self {
++            Theme::Dark => "dark",
++            Theme::Light => "light",
++        }
++    }
++}
++
+ /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
+ /// keys differ from the defaults (the window knows the defaults; Rust never does).
+ #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+ pub struct StoredSettings {
+-    #[serde(default)]
+     pub theme: Theme,
+-    #[serde(default)]
+     pub keys: BTreeMap<String, Vec<String>>,
+ }
+ 
+@@ -81,7 +90,7 @@ pub fn set_theme(
+     current: &StoredSettings,
+     theme: Theme,
+ ) -> Result<SettingsRead, Error> {
+-    change(places, current, |loaded| loaded.set_theme(theme))
++    change(places, current, |stored| stored.theme = theme)
+ }
+ 
+ pub fn set_keys(
+@@ -89,7 +98,18 @@ pub fn set_keys(
+     current: &StoredSettings,
+     changes: &[KeysChange],
+ ) -> Result<SettingsRead, Error> {
+-    change(places, current, |loaded| loaded.set_keys(changes))
++    change(places, current, |stored| {
++        for keys_change in changes {
++            match &keys_change.keys {
++                Some(keys) => {
++                    stored.keys.insert(keys_change.action.clone(), keys.clone());
++                }
++                None => {
++                    stored.keys.remove(&keys_change.action);
++                }
++            }
++        }
++    })
+ }
+ 
+ /// Makes `to` the file in use: an existing file there is used, a missing one is created from
+@@ -108,13 +128,14 @@ pub fn relocate(
+ fn change(
+     places: &Places,
+     current: &StoredSettings,
+-    edit: impl FnOnce(&mut Loaded),
++    edit: impl FnOnce(&mut StoredSettings),
+ ) -> Result<SettingsRead, Error> {
+     let path = places.file_in_use()?;
+     let mut loaded = file::load(&path)?.unwrap_or_else(|| Loaded::from_settings(current));
+-    edit(&mut loaded);
+-    file::write_entries(&path, loaded.entries)?;
+-    Ok(settings_read(places, &path, loaded.stored))
++    edit(&mut loaded.stored);
++    let stored = loaded.stored.clone();
++    file::write_entries(&path, loaded)?;
++    Ok(settings_read(places, &path, stored))
+ }
+ 
+ fn settings_read(places: &Places, path: &Path, stored: StoredSettings) -> SettingsRead {
+@@ -124,3 +145,18 @@ fn settings_read(places: &Places, path: &Path, stored: StoredSettings) -> Settin
+         stored,
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_theme_name_is_its_serde_spelling() {
++        for theme in [Theme::Dark, Theme::Light] {
++            assert_eq!(
++                serde_json::to_value(theme).unwrap(),
++                serde_json::Value::from(theme.name())
++            );
++        }
++    }
++}
+diff --git c/crates/settings/tests/settings.rs i/crates/settings/tests/settings.rs
+index e9f634a..a249b08 100644
+--- c/crates/settings/tests/settings.rs
++++ i/crates/settings/tests/settings.rs
+@@ -210,6 +210,26 @@ fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
+     assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
++    let config = Config::new();
++    fs::create_dir_all(config.folder()).unwrap();
++    let relative_target = Path::new("../../elsewhere/dotfiles/settings.json");
++    std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
++    let dotfile = config.elsewhere("dotfiles/settings.json");
++    read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(json_at(&dotfile), json!({ "theme": "dark" }));
++    set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
++    let link = fs::symlink_metadata(config.default_file()).unwrap();
++    assert!(link.file_type().is_symlink());
++    assert_eq!(
++        fs::read_link(config.default_file()).unwrap(),
++        relative_target
++    );
++    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++}
++
+ #[test]
+ fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
+     let config = Config::new();
+diff --git c/src-tauri/src/window.rs i/src-tauri/src/window.rs
+index 09048e1..788043a 100644
+--- c/src-tauri/src/window.rs
++++ i/src-tauri/src/window.rs
+@@ -52,7 +52,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
+ }
+ 
+-fn start_theme<R: Runtime>(paths: &PathResolver<R>) -> Theme {
++fn start_theme(paths: &PathResolver<tauri::Wry>) -> Theme {
+     match settings::places(paths) {
+         Ok(places) => yamt_settings::theme_at_start(&places),
+         Err(error) => {
+@@ -78,11 +78,10 @@ fn background(theme: Theme) -> Color {
+ // wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
+ // document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
+ fn start_script(theme: Theme) -> String {
+-    let name = match theme {
+-        Theme::Dark => "dark",
+-        Theme::Light => "light",
+-    };
+-    format!("document.documentElement.dataset.theme = \"{name}\";")
++    format!(
++        "document.documentElement.dataset.theme = \"{}\";",
++        theme.name()
++    )
+ }
+ 
+ fn window_title(root: &Path) -> String {
+@@ -191,8 +190,14 @@ mod tests {
+ 
+     #[test]
+     fn the_start_script_names_the_theme() {
+-        assert!(start_script(Theme::Light).contains(r#"dataset.theme = "light""#));
+-        assert!(start_script(Theme::Dark).contains(r#"dataset.theme = "dark""#));
++        assert_eq!(
++            start_script(Theme::Light),
++            r#"document.documentElement.dataset.theme = "light";"#
++        );
++        assert_eq!(
++            start_script(Theme::Dark),
++            r#"document.documentElement.dataset.theme = "dark";"#
++        );
+     }
+ 
+     fn second_request_after(delay: Duration) -> CloseRequest {

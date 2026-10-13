@@ -203,8 +203,8 @@ export type SideWordChanges<L> = {
  *  keys differ from the defaults (the window knows the defaults; Rust never does).
  */
 export type StoredSettings = {
-	theme?: Theme,
-	keys?: { [key in string]: string[] },
+	theme: Theme,
+	keys: { [key in string]: string[] },
 };
 
 export type Theme = "dark" | "light";
