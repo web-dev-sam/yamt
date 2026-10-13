@@ -1,1 +1,5 @@
-{}
+{
+  "MacTests": {
+    "owned": ["crates/*/tests/**", "crates/*/src/**", "src-tauri/tests/**", "src-tauri/src/**"]
+  }
+}
