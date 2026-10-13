@@ -332,14 +332,17 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   Option<RemoteName>` (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`:
   the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
   so it settles disk changes and uses git's view (#49).
-- Settings commands (`settings.rs`, plan §2 #57), each given the window's settings in use
+- Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
   (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
-  `load_settings(current)`, `set_theme(current, theme)`, `set_keys(current, changes)`,
-  `move_settings(current, path)`. Each computes `Places` from Tauri's path resolver, calls one
-  `yamt_settings` function and applies the returned theme to the native window background
-  (`window::show_theme`); no settings state lives in the shell. At start `window.rs` reads
-  `theme_at_start` before building the window: its background and an initialization script that
-  sets `<html data-theme>` before the first frame.
+  `load_settings(current)`, `set_theme(current, theme)`, `set_antialiasing(current, antialiasing)`,
+  `set_keys(current, changes)`, `move_settings(current, path)`. Each computes `Places` from Tauri's
+  path resolver, calls one `yamt_settings` function and applies the returned theme to the native
+  window background (`window::show_theme`); no settings state lives in the shell. At start
+  `window.rs` reads `stored_at_start` once before building the window: its background and an
+  initialization script that sets `<html data-theme>` before the first frame, and on Linux
+  `font_rendering::apply(antialiasing)` on GTK's own settings (`gtk-xft-antialias`, `gtk-xft-rgba`)
+  before the webview exists (WebKitGTK fixes its subpixel layout at start, #60); a changed
+  antialiasing takes effect at the next start.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
   `NoConfigFolder`) mirrored into TS; no stringly errors. A disk change is never an error.
@@ -356,15 +359,16 @@ Plan §2 #57. Owns the file, never what a key means (the window does, `frontend/
 
 - `Places::new(config_dir, home)`: the default file `<config>/yamt/settings.json` and the location
   file `<config>/yamt/settings-location` (one line: the file in use when it is not the default).
-- `StoredSettings { theme, keys }`: `keys` maps an action id to key strings, only for actions
-  whose keys differ from the window's defaults; ids and key strings are opaque text here.
-- `read`, `set_theme`, `set_keys`, `relocate`, `theme_at_start`. A read never rewrites an existing
-  file; a change re-reads the file, changes one entry, and writes `theme` always, `keys` when not
-  empty and every other entry as it was, through a temporary file and a rename (the end of a
-  symlink chain is written, the links stay); broken JSON →
+- `StoredSettings { theme, antialiasing, keys }`: `antialiasing` is `subpixel` (default) or
+  `greyscale` (#60); `keys` maps an action id to key strings, only for actions whose keys differ
+  from the window's defaults; ids and key strings are opaque text here.
+- `read`, `set_theme`, `set_antialiasing`, `set_keys`, `relocate`, `stored_at_start`. A read never
+  rewrites an existing file; a change re-reads the file, changes one entry, and writes `theme` and
+  `antialiasing` always, `keys` when not empty and every other entry as it was, through a temporary
+  file and a rename (the end of a symlink chain is written, the links stay); broken JSON →
   `Error::Broken` with line and column, and nothing is written; `relocate` takes an absolute or
   `~/` path, uses an existing file or creates a missing one from the window's settings, then
-  records it. `theme_at_start` never writes and falls back to Dark.
+  records it. `stored_at_start` never writes and falls back to the defaults.
 - Dependencies: `serde`, `serde_json` (line/column errors and kept entries), `specta`,
   `thiserror`.
 
@@ -438,6 +442,10 @@ export interface ChunkSource {
   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+  setAntialiasing(
+    current: StoredSettings,
+    antialiasing: Antialiasing,
+  ): Promise<SourceResult<SettingsRead>>; // #60: next start
   setKeys(
     current: StoredSettings,
     changes: readonly KeysChange[],

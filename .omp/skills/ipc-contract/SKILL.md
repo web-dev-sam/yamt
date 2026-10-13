@@ -46,6 +46,7 @@ remote_name()                     -> Option<RemoteName>   Branch{name} | Commit{
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 load_settings(current: StoredSettings)          -> SettingsRead   the file in use, created from `current` when missing, never rewritten by a read, #57
 set_theme(current, theme: Theme)                -> SettingsRead   re-reads, replaces `theme`, writes; each settings command recolours the native window
+set_antialiasing(current, antialiasing: Antialiasing) -> SettingsRead   re-reads, replaces `antialiasing`, writes; applied by the shell at the next start (Linux), #60
 set_keys(current, changes: Vec<KeysChange>)     -> SettingsRead   re-reads, sets (`Some`) or removes (`None`) each action's entry, writes
 move_settings(current, path)                   -> SettingsRead   absolute or `~/`; an existing file is used, a missing one created from `current`
 ```
