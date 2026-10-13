@@ -1,5 +1,1 @@
-{
-  "ReleaseVersionTest": {
-    "owned": ["src-tauri/tests/cli.rs"]
-  }
-}
+{}

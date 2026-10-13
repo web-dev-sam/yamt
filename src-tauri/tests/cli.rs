@@ -27,7 +27,10 @@ fn help_prints_usage_and_exits_zero() {
 fn version_prints_the_workspace_version() {
     let output = yamt(&["--version"]);
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "yamt 0.1.0\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("yamt {}\n", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]
