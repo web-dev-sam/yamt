@@ -7,7 +7,7 @@ use std::fs;
 use serde_json::json;
 use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
 
-use crate::config::{Config, json_at, light_with_apply, write};
+use crate::config::{Config, json_at, light_with_apply, names_in, write};
 
 #[test]
 fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
@@ -59,6 +59,36 @@ fn relocating_to_the_default_removes_the_location_file() {
     assert!(!config.location_file().exists());
     assert_eq!(settings.path, default_name);
     assert_eq!(json_at(&config.default_file())["theme"], "light");
+}
+
+#[test]
+fn relocating_to_the_default_without_a_location_file_is_ok() {
+    let config = Config::new();
+    let default_name = config.default_file().display().to_string();
+    let settings = relocate(&config.places, &light_with_apply(), &default_name).unwrap();
+    assert_eq!(settings.path, default_name);
+    assert!(!config.location_file().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_location_file_that_cannot_be_removed_is_a_write_error_and_stays_in_force() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let config = Config::new();
+    let old = config.elsewhere("old.json").display().to_string();
+    relocate(&config.places, &StoredSettings::default(), &old).unwrap();
+    write(&config.default_file(), r#"{"theme": "light"}"#);
+    fs::set_permissions(config.folder(), fs::Permissions::from_mode(0o555)).unwrap();
+    let default_name = config.default_file().display().to_string();
+    let error = relocate(&config.places, &StoredSettings::default(), &default_name);
+    fs::set_permissions(config.folder(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        matches!(&error, Err(Error::WriteFailed { path, .. }) if *path == config.location_file()),
+        "{error:?}"
+    );
+    let in_force = read(&config.places, &StoredSettings::default()).unwrap();
+    assert_eq!(in_force.path, old);
 }
 
 #[test]
@@ -130,4 +160,24 @@ fn an_unreadable_location_file_is_an_error() {
     let error = set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap_err();
     assert!(matches!(error, Error::Broken { .. }), "{error:?}");
     assert!(!config.default_file().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_settings_location_link_cycle_is_a_write_error_on_the_location_file_and_writes_nothing() {
+    let config = Config::new();
+    let partner = config.folder().join("partner");
+    fs::create_dir_all(config.folder()).unwrap();
+    std::os::unix::fs::symlink(&partner, config.location_file()).unwrap();
+    std::os::unix::fs::symlink(config.location_file(), &partner).unwrap();
+    let target = config.elsewhere("s.json").display().to_string();
+    let error = relocate(&config.places, &StoredSettings::default(), &target).unwrap_err();
+    assert!(
+        matches!(&error, Error::WriteFailed { path, .. } if *path == config.location_file()),
+        "{error:?}"
+    );
+    for link in [config.location_file(), partner] {
+        assert!(fs::symlink_metadata(link).unwrap().is_symlink());
+    }
+    assert_eq!(names_in(&config.folder()), ["partner", "settings-location"]);
 }

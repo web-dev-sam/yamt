@@ -46,6 +46,15 @@ pub fn json_at(path: &Path) -> Value {
     serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
 }
 
+pub fn names_in(folder: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(folder).unwrap() {
+        names.push(entry.unwrap().file_name().into_string().unwrap());
+    }
+    names.sort();
+    names
+}
+
 pub fn keys(entries: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
     let mut keys = BTreeMap::new();
     for (action, action_keys) in entries {

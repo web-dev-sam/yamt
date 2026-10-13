@@ -1,12 +1,1 @@
-{
-  "SettingsViewR2": {
-    "owned": [
-      "frontend/src/ui/KeymapList.vue",
-      "frontend/src/ui/keyField.ts",
-      "frontend/src/ui/keyField.test.ts",
-      "frontend/src/ui/menuKeys.ts",
-      "frontend/src/ui/menuKeys.test.ts"
-    ]
-  },
-  "SettingsDesktopR3": { "owned": ["crates/settings/**"] }
-}
+{}

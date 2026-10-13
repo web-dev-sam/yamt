@@ -67,12 +67,22 @@ pub(crate) fn read_or_create(
 
 fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
     let mut others: Map<String, Value> =
-        serde_json::from_str(text).map_err(|error| broken(path, error.to_string()))?;
+        serde_json::from_str(text).map_err(|error| broken(path, syntax_message(&error)))?;
     let stored = StoredSettings {
         theme: entry(path, THEME, others.remove(THEME))?,
         keys: entry(path, KEYS, others.remove(KEYS))?,
     };
     Ok(Loaded { others, stored })
+}
+
+/// `serde_json` counts columns from 1 and reports an error after the last newline as column 0
+/// (`serde_json::Error::column`).
+fn syntax_message(error: &serde_json::Error) -> String {
+    let message = error.to_string();
+    match message.strip_suffix(" column 0") {
+        Some(line_only) => line_only.to_owned(),
+        None => message,
+    }
 }
 
 fn entry<T: DeserializeOwned + Default>(
@@ -126,7 +136,7 @@ pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
 /// Also when the last link points to a file that does not exist yet.
 fn file_to_write(path: &Path) -> io::Result<PathBuf> {
     let mut current = path.to_owned();
-    for _ in 0..MAX_LINK_HOPS {
+    for _ in 0..=MAX_LINK_HOPS {
         let is_link = fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_symlink());
         if !is_link {
             return Ok(current);
@@ -140,28 +150,4 @@ fn file_to_write(path: &Path) -> io::Result<PathBuf> {
     Err(io::Error::other(format!(
         "more than {MAX_LINK_HOPS} symlinks in a row"
     )))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlink_cycle_is_a_write_error_on_the_settings_path_and_writes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = dir.path().join("first.json");
-        let second = dir.path().join("second.json");
-        std::os::unix::fs::symlink(&second, &first).unwrap();
-        std::os::unix::fs::symlink(&first, &second).unwrap();
-        let error = write_text(&first, "{}\n").unwrap_err();
-        assert!(
-            matches!(&error, Error::WriteFailed { path, .. } if *path == first),
-            "{error:?}"
-        );
-        for link in [&first, &second] {
-            assert!(fs::symlink_metadata(link).unwrap().is_symlink());
-        }
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
-    }
 }

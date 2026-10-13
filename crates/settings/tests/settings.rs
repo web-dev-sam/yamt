@@ -11,7 +11,7 @@ use yamt_settings::{
     Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
 };
 
-use crate::config::{Config, json_at, keys, light_with_apply, write};
+use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
 
 fn change(action: &str, action_keys: Option<&[&str]>) -> KeysChange {
     KeysChange {
@@ -73,6 +73,44 @@ fn broken_json_reports_line_and_column_and_a_change_leaves_the_bytes_untouched()
     );
     let keys_error = set_keys(&config.places, &current, &[change("apply", None)]).unwrap_err();
     assert!(matches!(keys_error, Error::Broken { .. }), "{keys_error:?}");
+    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
+}
+
+#[test]
+fn broken_json_at_the_end_of_the_file_reports_the_line_without_a_column() {
+    let config = Config::new();
+    write(&config.default_file(), "{\n  \"theme\": \"light\",\n");
+    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
+    let Error::Broken { message, .. } = error else {
+        panic!("not broken: {error:?}");
+    };
+    assert!(message.ends_with(" at line 3"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_settings_file_is_a_read_error_and_stays_untouched() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let config = Config::new();
+    let text = r#"{"theme": "light"}"#;
+    write(&config.default_file(), text);
+    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o000)).unwrap();
+    let current = StoredSettings::default();
+    let read_error = read(&config.places, &current).unwrap_err();
+    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
+    let mode = fs::metadata(config.default_file())
+        .unwrap()
+        .permissions()
+        .mode();
+    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o644)).unwrap();
+    for error in [read_error, theme_error] {
+        assert!(
+            matches!(&error, Error::ReadFailed { path, .. } if *path == config.default_file()),
+            "{error:?}"
+        );
+    }
+    assert_eq!(mode & 0o777, 0o000);
     assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
 }
 
@@ -165,15 +203,6 @@ fn a_change_to_a_missing_file_starts_from_the_current_settings() {
     );
 }
 
-fn names_in(folder: &Path) -> Vec<String> {
-    let mut names = Vec::new();
-    for entry in fs::read_dir(folder).unwrap() {
-        names.push(entry.unwrap().file_name().into_string().unwrap());
-    }
-    names.sort();
-    names
-}
-
 #[test]
 fn a_write_leaves_no_temporary_file() {
     let config = Config::new();
@@ -226,6 +255,43 @@ fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
         assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
     }
     assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
+    const LINUX_LINK_LIMIT: usize = 40;
+    let config = Config::new();
+    let dotfile = config.elsewhere("dotfiles/settings.json");
+    write(&dotfile, r#"{"theme": "dark"}"#);
+    let links = config.elsewhere("links");
+    fs::create_dir_all(&links).unwrap();
+    let mut target = dotfile.clone();
+    for number in 1..LINUX_LINK_LIMIT {
+        let link = links.join(format!("link-{number}"));
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        target = link;
+    }
+    fs::create_dir_all(config.folder()).unwrap();
+    std::os::unix::fs::symlink(&target, config.default_file()).unwrap();
+    let current = StoredSettings::default();
+    assert_eq!(
+        read(&config.places, &current).unwrap().stored.theme,
+        Theme::Dark
+    );
+    set_theme(&config.places, &current, Theme::Light).unwrap();
+    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+    let mut link_count = 0;
+    for entry in fs::read_dir(&links).unwrap() {
+        assert!(entry.unwrap().file_type().unwrap().is_symlink());
+        link_count += 1;
+    }
+    assert_eq!(link_count + 1, LINUX_LINK_LIMIT);
+    assert!(
+        fs::symlink_metadata(config.default_file())
+            .unwrap()
+            .is_symlink()
+    );
 }
 
 #[cfg(unix)]

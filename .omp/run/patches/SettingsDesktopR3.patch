@@ -1,0 +1,286 @@
+diff --git c/crates/settings/AGENTS.md i/crates/settings/AGENTS.md
+index da3b1a7..e9c4877 100644
+--- c/crates/settings/AGENTS.md
++++ i/crates/settings/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57): `lib.rs` (types crossing the IPC, `Error`, the five operations), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename). No tauri, no git, no `yamt-*` crate (arch-check); action ids and key strings are opaque text. Tests are integration tests on temp folders in `tests/`.
++Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57): `lib.rs` (types crossing the IPC, `Error`, the five operations), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename). No tauri, no git, no `yamt-*` crate (arch-check); action ids and key strings are opaque text. Tests are integration tests on temp folders in `tests/` (`settings.rs`, `relocate.rs`, helpers in `config/`), plus one unit test in `lib.rs`: `a_theme_name_is_its_serde_spelling` (`Theme::name` = the serde spelling).
+diff --git c/crates/settings/src/file.rs i/crates/settings/src/file.rs
+index e03ef97..9d8e294 100644
+--- c/crates/settings/src/file.rs
++++ i/crates/settings/src/file.rs
+@@ -67,7 +67,7 @@ pub(crate) fn read_or_create(
+ 
+ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+     let mut others: Map<String, Value> =
+-        serde_json::from_str(text).map_err(|error| broken(path, error.to_string()))?;
++        serde_json::from_str(text).map_err(|error| broken(path, syntax_message(&error)))?;
+     let stored = StoredSettings {
+         theme: entry(path, THEME, others.remove(THEME))?,
+         keys: entry(path, KEYS, others.remove(KEYS))?,
+@@ -75,6 +75,16 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+     Ok(Loaded { others, stored })
+ }
+ 
++/// `serde_json` counts columns from 1 and reports an error after the last newline as column 0
++/// (`serde_json::Error::column`).
++fn syntax_message(error: &serde_json::Error) -> String {
++    let message = error.to_string();
++    match message.strip_suffix(" column 0") {
++        Some(line_only) => line_only.to_owned(),
++        None => message,
++    }
++}
++
+ fn entry<T: DeserializeOwned + Default>(
+     path: &Path,
+     name: &str,
+@@ -126,7 +136,7 @@ pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), Error> {
+ /// Also when the last link points to a file that does not exist yet.
+ fn file_to_write(path: &Path) -> io::Result<PathBuf> {
+     let mut current = path.to_owned();
+-    for _ in 0..MAX_LINK_HOPS {
++    for _ in 0..=MAX_LINK_HOPS {
+         let is_link = fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_symlink());
+         if !is_link {
+             return Ok(current);
+@@ -141,27 +151,3 @@ fn file_to_write(path: &Path) -> io::Result<PathBuf> {
+         "more than {MAX_LINK_HOPS} symlinks in a row"
+     )))
+ }
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[cfg(unix)]
+-    #[test]
+-    fn a_symlink_cycle_is_a_write_error_on_the_settings_path_and_writes_nothing() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let first = dir.path().join("first.json");
+-        let second = dir.path().join("second.json");
+-        std::os::unix::fs::symlink(&second, &first).unwrap();
+-        std::os::unix::fs::symlink(&first, &second).unwrap();
+-        let error = write_text(&first, "{}\n").unwrap_err();
+-        assert!(
+-            matches!(&error, Error::WriteFailed { path, .. } if *path == first),
+-            "{error:?}"
+-        );
+-        for link in [&first, &second] {
+-            assert!(fs::symlink_metadata(link).unwrap().is_symlink());
+-        }
+-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+-    }
+-}
+diff --git c/crates/settings/tests/config/mod.rs i/crates/settings/tests/config/mod.rs
+index 3d43de6..194b407 100644
+--- c/crates/settings/tests/config/mod.rs
++++ i/crates/settings/tests/config/mod.rs
+@@ -46,6 +46,15 @@ pub fn json_at(path: &Path) -> Value {
+     serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+ }
+ 
++pub fn names_in(folder: &Path) -> Vec<String> {
++    let mut names = Vec::new();
++    for entry in fs::read_dir(folder).unwrap() {
++        names.push(entry.unwrap().file_name().into_string().unwrap());
++    }
++    names.sort();
++    names
++}
++
+ pub fn keys(entries: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
+     let mut keys = BTreeMap::new();
+     for (action, action_keys) in entries {
+diff --git c/crates/settings/tests/relocate.rs i/crates/settings/tests/relocate.rs
+index f0713c6..090c457 100644
+--- c/crates/settings/tests/relocate.rs
++++ i/crates/settings/tests/relocate.rs
+@@ -7,7 +7,7 @@ use std::fs;
+ use serde_json::json;
+ use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
+ 
+-use crate::config::{Config, json_at, light_with_apply, write};
++use crate::config::{Config, json_at, light_with_apply, names_in, write};
+ 
+ #[test]
+ fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
+@@ -61,6 +61,36 @@ fn relocating_to_the_default_removes_the_location_file() {
+     assert_eq!(json_at(&config.default_file())["theme"], "light");
+ }
+ 
++#[test]
++fn relocating_to_the_default_without_a_location_file_is_ok() {
++    let config = Config::new();
++    let default_name = config.default_file().display().to_string();
++    let settings = relocate(&config.places, &light_with_apply(), &default_name).unwrap();
++    assert_eq!(settings.path, default_name);
++    assert!(!config.location_file().exists());
++}
++
++#[cfg(unix)]
++#[test]
++fn a_location_file_that_cannot_be_removed_is_a_write_error_and_stays_in_force() {
++    use std::os::unix::fs::PermissionsExt;
++
++    let config = Config::new();
++    let old = config.elsewhere("old.json").display().to_string();
++    relocate(&config.places, &StoredSettings::default(), &old).unwrap();
++    write(&config.default_file(), r#"{"theme": "light"}"#);
++    fs::set_permissions(config.folder(), fs::Permissions::from_mode(0o555)).unwrap();
++    let default_name = config.default_file().display().to_string();
++    let error = relocate(&config.places, &StoredSettings::default(), &default_name);
++    fs::set_permissions(config.folder(), fs::Permissions::from_mode(0o755)).unwrap();
++    assert!(
++        matches!(&error, Err(Error::WriteFailed { path, .. }) if *path == config.location_file()),
++        "{error:?}"
++    );
++    let in_force = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(in_force.path, old);
++}
++
+ #[test]
+ fn a_relative_path_is_refused_and_a_home_prefix_is_expanded() {
+     let config = Config::new();
+@@ -131,3 +161,23 @@ fn an_unreadable_location_file_is_an_error() {
+     assert!(matches!(error, Error::Broken { .. }), "{error:?}");
+     assert!(!config.default_file().exists());
+ }
++
++#[cfg(unix)]
++#[test]
++fn a_settings_location_link_cycle_is_a_write_error_on_the_location_file_and_writes_nothing() {
++    let config = Config::new();
++    let partner = config.folder().join("partner");
++    fs::create_dir_all(config.folder()).unwrap();
++    std::os::unix::fs::symlink(&partner, config.location_file()).unwrap();
++    std::os::unix::fs::symlink(config.location_file(), &partner).unwrap();
++    let target = config.elsewhere("s.json").display().to_string();
++    let error = relocate(&config.places, &StoredSettings::default(), &target).unwrap_err();
++    assert!(
++        matches!(&error, Error::WriteFailed { path, .. } if *path == config.location_file()),
++        "{error:?}"
++    );
++    for link in [config.location_file(), partner] {
++        assert!(fs::symlink_metadata(link).unwrap().is_symlink());
++    }
++    assert_eq!(names_in(&config.folder()), ["partner", "settings-location"]);
++}
+diff --git c/crates/settings/tests/settings.rs i/crates/settings/tests/settings.rs
+index af38dee..0d21d1c 100644
+--- c/crates/settings/tests/settings.rs
++++ i/crates/settings/tests/settings.rs
+@@ -11,7 +11,7 @@ use yamt_settings::{
+     Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
+ };
+ 
+-use crate::config::{Config, json_at, keys, light_with_apply, write};
++use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
+ 
+ fn change(action: &str, action_keys: Option<&[&str]>) -> KeysChange {
+     KeysChange {
+@@ -76,6 +76,44 @@ fn broken_json_reports_line_and_column_and_a_change_leaves_the_bytes_untouched()
+     assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
+ }
+ 
++#[test]
++fn broken_json_at_the_end_of_the_file_reports_the_line_without_a_column() {
++    let config = Config::new();
++    write(&config.default_file(), "{\n  \"theme\": \"light\",\n");
++    let error = read(&config.places, &StoredSettings::default()).unwrap_err();
++    let Error::Broken { message, .. } = error else {
++        panic!("not broken: {error:?}");
++    };
++    assert!(message.ends_with(" at line 3"), "{message}");
++}
++
++#[cfg(unix)]
++#[test]
++fn an_unreadable_settings_file_is_a_read_error_and_stays_untouched() {
++    use std::os::unix::fs::PermissionsExt;
++
++    let config = Config::new();
++    let text = r#"{"theme": "light"}"#;
++    write(&config.default_file(), text);
++    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o000)).unwrap();
++    let current = StoredSettings::default();
++    let read_error = read(&config.places, &current).unwrap_err();
++    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
++    let mode = fs::metadata(config.default_file())
++        .unwrap()
++        .permissions()
++        .mode();
++    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o644)).unwrap();
++    for error in [read_error, theme_error] {
++        assert!(
++            matches!(&error, Error::ReadFailed { path, .. } if *path == config.default_file()),
++            "{error:?}"
++        );
++    }
++    assert_eq!(mode & 0o777, 0o000);
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++}
++
+ #[test]
+ fn an_unknown_theme_or_a_wrong_keys_type_is_broken_and_names_the_entry() {
+     let config = Config::new();
+@@ -165,15 +203,6 @@ fn a_change_to_a_missing_file_starts_from_the_current_settings() {
+     );
+ }
+ 
+-fn names_in(folder: &Path) -> Vec<String> {
+-    let mut names = Vec::new();
+-    for entry in fs::read_dir(folder).unwrap() {
+-        names.push(entry.unwrap().file_name().into_string().unwrap());
+-    }
+-    names.sort();
+-    names
+-}
+-
+ #[test]
+ fn a_write_leaves_no_temporary_file() {
+     let config = Config::new();
+@@ -228,6 +257,43 @@ fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
+     assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
++    const LINUX_LINK_LIMIT: usize = 40;
++    let config = Config::new();
++    let dotfile = config.elsewhere("dotfiles/settings.json");
++    write(&dotfile, r#"{"theme": "dark"}"#);
++    let links = config.elsewhere("links");
++    fs::create_dir_all(&links).unwrap();
++    let mut target = dotfile.clone();
++    for number in 1..LINUX_LINK_LIMIT {
++        let link = links.join(format!("link-{number}"));
++        std::os::unix::fs::symlink(&target, &link).unwrap();
++        target = link;
++    }
++    fs::create_dir_all(config.folder()).unwrap();
++    std::os::unix::fs::symlink(&target, config.default_file()).unwrap();
++    let current = StoredSettings::default();
++    assert_eq!(
++        read(&config.places, &current).unwrap().stored.theme,
++        Theme::Dark
++    );
++    set_theme(&config.places, &current, Theme::Light).unwrap();
++    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++    let mut link_count = 0;
++    for entry in fs::read_dir(&links).unwrap() {
++        assert!(entry.unwrap().file_type().unwrap().is_symlink());
++        link_count += 1;
++    }
++    assert_eq!(link_count + 1, LINUX_LINK_LIMIT);
++    assert!(
++        fs::symlink_metadata(config.default_file())
++            .unwrap()
++            .is_symlink()
++    );
++}
++
+ #[cfg(unix)]
+ #[test]
+ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
