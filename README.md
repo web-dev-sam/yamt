@@ -55,6 +55,13 @@ Download from the [releases page](../../releases):
   sudo mkdir -p /usr/local/bin && sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt
   ```
 
+- **Windows 10/11**: the `_x64-setup.exe`; it installs for your user only, without admin rights.
+  The build is not signed, so SmartScreen may warn: More info → Run anyway. yamt needs
+  [Git for Windows](https://git-scm.com/download/win) (`git.exe` on your PATH). The installer does
+  not put `yamt` on your PATH: add the folder its setup page installed to (under Windows'
+  Environment Variables, user `Path`), then open a new terminal. yamt is a console program: run it
+  from a terminal in the repository; started from the Start menu a console window opens beside it.
+
 ## Use
 
 When `git merge`, `git rebase` or `git cherry-pick` stops with conflicts, run `yamt` in the repository (or `yamt --repo <path>` from anywhere). yamt starts from a terminal inside a repository; double-clicking it in a file manager or Finder shows nothing.

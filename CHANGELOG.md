@@ -40,6 +40,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Right-click the toolbar to show or hide its icon buttons (previous/next change, apply all from the
   left or the right, undo, redo) from a menu with a check mark per button. Their keys keep working,
   and yamt remembers the choice for every file and after a restart.
+- Windows: a per-user installer (`yamt_<version>_x64-setup.exe`, no admin rights). Needs Git for
+  Windows (`git.exe` on the PATH); WebView2 comes with Windows 10 and 11. Code text keeps ClearType
+  edges at fractional display scaling (125–175 %). Untested: repositories with `core.autocrlf=true`.
+- Settings → **Antialiasing** (Linux): **Subpixel** (default) draws code text with coloured
+  subpixel edges like WebStorm's, whatever the desktop's own font setting; **Greyscale** draws it
+  grey. Takes effect the next time yamt starts.
 
 ### Changed
 
@@ -48,6 +54,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 - The toolbar's Undo and Redo buttons start hidden (right-click the toolbar to show them);
   Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS) still undo and redo. Ctrl+Shift+Y no longer redoes.
+- Code lines are 20 px apart (were 18.2): every line now starts on a whole screen pixel, so line
+  spacing no longer alternates, at 100 %, 125 %, 150 %, 175 % and 200 % scaling.
 
 ## [0.1.0] - 2026-10-11
 
