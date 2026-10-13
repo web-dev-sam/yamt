@@ -14,11 +14,15 @@ export const commands = {
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
+	setAntialiasing: (current: StoredSettings, antialiasing: Antialiasing) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_antialiasing", { current, antialiasing })),
 	setKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_keys", { current, changes })),
 	moveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("move_settings", { current, path })),
 };
 
 /* Types */
+/**  How code text is smoothed: with coloured subpixels or grey only (applied on Linux, at start). */
+export type Antialiasing = "subpixel" | "greyscale";
+
 /**  0-based line index in the base text. */
 export type BaseLine = number;
 
@@ -204,6 +208,7 @@ export type SideWordChanges<L> = {
  */
 export type StoredSettings = {
 	theme: Theme,
+	antialiasing: Antialiasing,
 	keys: { [key in string]: string[] },
 };
 

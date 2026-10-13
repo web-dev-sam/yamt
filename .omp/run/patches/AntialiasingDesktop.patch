@@ -1,0 +1,656 @@
+diff --git c/crates/settings/AGENTS.md i/crates/settings/AGENTS.md
+index e9c4877..0a11eb7 100644
+--- c/crates/settings/AGENTS.md
++++ i/crates/settings/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57): `lib.rs` (types crossing the IPC, `Error`, the five operations), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename). No tauri, no git, no `yamt-*` crate (arch-check); action ids and key strings are opaque text. Tests are integration tests on temp folders in `tests/` (`settings.rs`, `relocate.rs`, helpers in `config/`), plus one unit test in `lib.rs`: `a_theme_name_is_its_serde_spelling` (`Theme::name` = the serde spelling).
++Owner skill: `skill://rust-conventions`. The per-user settings file (plan §2 #57, #60): `lib.rs` (types crossing the IPC, `Error`, the six operations: `read`, `set_theme`, `set_antialiasing`, `set_keys`, `relocate`, `stored_at_start`), `places.rs` (`Places`: the default file, the `settings-location` file, `~/` expansion), `file.rs` (parsing into kept entries, writing through a temporary file and a rename). No tauri, no git, no `yamt-*` crate (arch-check); action ids and key strings are opaque text. Tests are integration tests on temp folders in `tests/` (`settings.rs`, `antialiasing.rs`, `relocate.rs`, helpers in `config/`), plus two unit tests in `lib.rs`: `a_theme_name_is_its_serde_spelling` and `an_antialiasing_name_is_its_serde_spelling` (`name` = the serde spelling).
+diff --git c/crates/settings/src/file.rs i/crates/settings/src/file.rs
+index 9d8e294..d7ecf08 100644
+--- c/crates/settings/src/file.rs
++++ i/crates/settings/src/file.rs
+@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
+ use crate::{Error, StoredSettings};
+ 
+ const THEME: &str = "theme";
++const ANTIALIASING: &str = "antialiasing";
+ const KEYS: &str = "keys";
+ 
+ /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
+@@ -31,6 +32,10 @@ impl Loaded {
+     fn entries(self) -> Map<String, Value> {
+         let mut entries = self.others;
+         entries.insert(THEME.to_owned(), Value::from(self.stored.theme.name()));
++        entries.insert(
++            ANTIALIASING.to_owned(),
++            Value::from(self.stored.antialiasing.name()),
++        );
+         if !self.stored.keys.is_empty() {
+             let mut keys = Map::new();
+             for (action, action_keys) in self.stored.keys {
+@@ -70,6 +75,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+         serde_json::from_str(text).map_err(|error| broken(path, syntax_message(&error)))?;
+     let stored = StoredSettings {
+         theme: entry(path, THEME, others.remove(THEME))?,
++        antialiasing: entry(path, ANTIALIASING, others.remove(ANTIALIASING))?,
+         keys: entry(path, KEYS, others.remove(KEYS))?,
+     };
+     Ok(Loaded { others, stored })
+diff --git c/crates/settings/src/lib.rs i/crates/settings/src/lib.rs
+index 278fd24..44a8475 100644
+--- c/crates/settings/src/lib.rs
++++ i/crates/settings/src/lib.rs
+@@ -31,11 +31,32 @@ impl Theme {
+     }
+ }
+ 
++/// How code text is smoothed: with coloured subpixels or grey only (applied on Linux, at start).
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++#[serde(rename_all = "lowercase")]
++pub enum Antialiasing {
++    #[default]
++    Subpixel,
++    Greyscale,
++}
++
++impl Antialiasing {
++    /// The spelling in the settings file.
++    #[must_use]
++    pub fn name(self) -> &'static str {
++        match self {
++            Antialiasing::Subpixel => "subpixel",
++            Antialiasing::Greyscale => "greyscale",
++        }
++    }
++}
++
+ /// What the window holds and sends: `keys` = action id → key strings, only for actions whose
+ /// keys differ from the defaults (the window knows the defaults; Rust never does).
+ #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+ pub struct StoredSettings {
+     pub theme: Theme,
++    pub antialiasing: Antialiasing,
+     pub keys: BTreeMap<String, Vec<String>>,
+ }
+ 
+@@ -66,15 +87,16 @@ pub enum Error {
+     NotAbsolute { path: String },
+ }
+ 
+-/// The file in use's theme; `Dark` when anything on the way to it is missing, unreadable or broken.
++/// The file in use's settings; defaults when anything on the way to it is missing, unreadable or
++/// broken. Never writes.
+ #[must_use]
+-pub fn theme_at_start(places: &Places) -> Theme {
++pub fn stored_at_start(places: &Places) -> StoredSettings {
+     let Ok(path) = places.file_in_use() else {
+-        return Theme::Dark;
++        return StoredSettings::default();
+     };
+     match file::load(&path) {
+-        Ok(Some(loaded)) => loaded.stored.theme,
+-        Ok(None) | Err(_) => Theme::Dark,
++        Ok(Some(loaded)) => loaded.stored,
++        Ok(None) | Err(_) => StoredSettings::default(),
+     }
+ }
+ 
+@@ -93,6 +115,14 @@ pub fn set_theme(
+     change(places, current, |stored| stored.theme = theme)
+ }
+ 
++pub fn set_antialiasing(
++    places: &Places,
++    current: &StoredSettings,
++    antialiasing: Antialiasing,
++) -> Result<SettingsRead, Error> {
++    change(places, current, |stored| stored.antialiasing = antialiasing)
++}
++
+ pub fn set_keys(
+     places: &Places,
+     current: &StoredSettings,
+@@ -159,4 +189,14 @@ mod tests {
+             );
+         }
+     }
++
++    #[test]
++    fn an_antialiasing_name_is_its_serde_spelling() {
++        for antialiasing in [Antialiasing::Subpixel, Antialiasing::Greyscale] {
++            assert_eq!(
++                serde_json::to_value(antialiasing).unwrap(),
++                serde_json::Value::from(antialiasing.name())
++            );
++        }
++    }
+ }
+diff --git c/crates/settings/tests/antialiasing.rs i/crates/settings/tests/antialiasing.rs
+new file mode 100644
+index 0000000..f95851b
+--- /dev/null
++++ i/crates/settings/tests/antialiasing.rs
+@@ -0,0 +1,102 @@
++#![cfg(test)]
++
++#[expect(dead_code, reason = "these tests use part of the shared helpers")]
++mod config;
++
++use std::fs;
++
++use serde_json::json;
++use yamt_settings::{
++    Antialiasing, Error, StoredSettings, Theme, read, set_antialiasing, set_theme,
++};
++
++use crate::config::{Config, json_at, keys, write};
++
++#[test]
++fn a_missing_antialiasing_entry_reads_subpixel_and_the_file_stays_as_written() {
++    let config = Config::new();
++    let text = r#"{"theme": "light"}"#;
++    write(&config.default_file(), text);
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(settings.stored.antialiasing, Antialiasing::Subpixel);
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++}
++
++#[test]
++fn greyscale_reads_back() {
++    let config = Config::new();
++    write(&config.default_file(), r#"{"antialiasing": "greyscale"}"#);
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(settings.stored.antialiasing, Antialiasing::Greyscale);
++}
++
++#[test]
++fn an_unknown_antialiasing_is_broken_names_the_entry_and_no_change_rewrites_the_file() {
++    let config = Config::new();
++    let text = r#"{"antialiasing": "sharp", "theme": "light"}"#;
++    write(&config.default_file(), text);
++    let current = StoredSettings::default();
++    let read_error = read(&config.places, &current).unwrap_err();
++    let Error::Broken { message, .. } = read_error else {
++        panic!("not broken: {read_error:?}");
++    };
++    assert!(message.starts_with("`antialiasing`: "), "{message}");
++    assert!(message.contains("sharp"), "{message}");
++    let antialiasing_error =
++        set_antialiasing(&config.places, &current, Antialiasing::Greyscale).unwrap_err();
++    assert!(
++        matches!(antialiasing_error, Error::Broken { .. }),
++        "{antialiasing_error:?}"
++    );
++    let theme_error = set_theme(&config.places, &current, Theme::Dark).unwrap_err();
++    assert!(
++        matches!(theme_error, Error::Broken { .. }),
++        "{theme_error:?}"
++    );
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++}
++
++#[test]
++fn set_antialiasing_keeps_unknown_entries_and_the_other_settings() {
++    let config = Config::new();
++    write(
++        &config.default_file(),
++        r#"{"window": {"x": 1}, "theme": "light", "keys": {"apply": ["F2"]}}"#,
++    );
++    let settings = set_antialiasing(
++        &config.places,
++        &StoredSettings::default(),
++        Antialiasing::Greyscale,
++    )
++    .unwrap();
++    let expected = StoredSettings {
++        theme: Theme::Light,
++        antialiasing: Antialiasing::Greyscale,
++        keys: keys(&[("apply", &["F2"])]),
++    };
++    assert_eq!(settings.stored, expected);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({
++            "window": { "x": 1 },
++            "theme": "light",
++            "antialiasing": "greyscale",
++            "keys": { "apply": ["F2"] },
++        })
++    );
++    let text = fs::read_to_string(config.default_file()).unwrap();
++    assert!(text.contains(r#""antialiasing": "greyscale""#), "{text}");
++}
++
++#[test]
++fn set_antialiasing_back_to_subpixel_writes_subpixel() {
++    let config = Config::new();
++    let current = StoredSettings::default();
++    set_antialiasing(&config.places, &current, Antialiasing::Greyscale).unwrap();
++    let settings = set_antialiasing(&config.places, &current, Antialiasing::Subpixel).unwrap();
++    assert_eq!(settings.stored.antialiasing, Antialiasing::Subpixel);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "dark", "antialiasing": "subpixel" })
++    );
++}
+diff --git c/crates/settings/tests/config/mod.rs i/crates/settings/tests/config/mod.rs
+index 41a44fc..ecbb331 100644
+--- c/crates/settings/tests/config/mod.rs
++++ i/crates/settings/tests/config/mod.rs
+@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
+ 
+ use serde_json::Value;
+ use tempfile::TempDir;
+-use yamt_settings::{Places, StoredSettings, Theme};
++use yamt_settings::{Antialiasing, Places, StoredSettings, Theme};
+ 
+ pub struct Config {
+     pub dir: TempDir,
+@@ -67,6 +67,7 @@ pub fn keys(entries: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
+ pub fn light_with_apply() -> StoredSettings {
+     StoredSettings {
+         theme: Theme::Light,
++        antialiasing: Antialiasing::Subpixel,
+         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
+     }
+ }
+diff --git c/crates/settings/tests/relocate.rs i/crates/settings/tests/relocate.rs
+index 9e0c91b..c81ee0f 100644
+--- c/crates/settings/tests/relocate.rs
++++ i/crates/settings/tests/relocate.rs
+@@ -9,7 +9,7 @@ mod config;
+ use std::fs;
+ 
+ use serde_json::json;
+-use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, theme_at_start};
++use yamt_settings::{Error, StoredSettings, Theme, read, relocate, set_theme, stored_at_start};
+ 
+ #[cfg(unix)]
+ use crate::config::names_in;
+@@ -34,7 +34,7 @@ fn relocating_to_an_existing_file_uses_it_and_records_the_location() {
+         again.default_path,
+         config.default_file().display().to_string()
+     );
+-    assert_eq!(theme_at_start(&config.places), Theme::Light);
++    assert_eq!(stored_at_start(&config.places).theme, Theme::Light);
+ }
+ 
+ #[test]
+@@ -50,7 +50,11 @@ fn relocating_to_a_missing_path_creates_it_from_the_current_settings() {
+     assert_eq!(settings.stored, light_with_apply());
+     assert_eq!(
+         json_at(&target),
+-        json!({ "theme": "light", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
++        json!({
++            "theme": "light",
++            "antialiasing": "subpixel",
++            "keys": { "apply": ["Mod-Enter"], "ignore": [] },
++        })
+     );
+     assert!(config.location_file().exists());
+ }
+diff --git c/crates/settings/tests/settings.rs i/crates/settings/tests/settings.rs
+index c0db5be..34fc2d5 100644
+--- c/crates/settings/tests/settings.rs
++++ i/crates/settings/tests/settings.rs
+@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime};
+ 
+ use serde_json::json;
+ use yamt_settings::{
+-    Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme, theme_at_start,
++    Antialiasing, Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme,
++    stored_at_start,
+ };
+ 
+ use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
+@@ -28,7 +29,7 @@ fn a_missing_folder_and_file_are_created_from_the_current_settings() {
+     assert_eq!(settings.default_path, settings.path);
+     assert_eq!(
+         fs::read_to_string(config.default_file()).unwrap(),
+-        "{\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
++        "{\n  \"antialiasing\": \"subpixel\",\n  \"keys\": {\n    \"apply\": [\n      \"Mod-Enter\"\n    ],\n    \"ignore\": []\n  },\n  \"theme\": \"light\"\n}\n"
+     );
+ }
+ 
+@@ -154,6 +155,7 @@ fn unknown_entries_and_unknown_action_ids_survive_a_change() {
+         json!({
+             "window": { "x": 1 },
+             "theme": "light",
++            "antialiasing": "subpixel",
+             "keys": { "future-action": ["F1"], "apply": ["Mod-Enter"] },
+         })
+     );
+@@ -169,12 +171,19 @@ fn some_sets_and_none_removes_an_action_and_keys_disappears_when_empty() {
+     assert_eq!(settings.stored.keys, expected);
+     assert_eq!(
+         json_at(&config.default_file()),
+-        json!({ "theme": "light", "keys": { "ignore": [], "undo": ["Mod-u"] } })
++        json!({
++            "theme": "light",
++            "antialiasing": "subpixel",
++            "keys": { "ignore": [], "undo": ["Mod-u"] },
++        })
+     );
+     let back = [change("ignore", None), change("undo", None)];
+     let settings = set_keys(&config.places, &light_with_apply(), &back).unwrap();
+     assert!(settings.stored.keys.is_empty());
+-    assert_eq!(json_at(&config.default_file()), json!({ "theme": "light" }));
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "theme": "light", "antialiasing": "subpixel" })
++    );
+ }
+ 
+ #[test]
+@@ -187,7 +196,7 @@ fn a_change_rereads_the_file_so_an_outside_edit_to_another_entry_survives() {
+     assert_eq!(settings.stored.theme, Theme::Light);
+     assert_eq!(
+         json_at(&config.default_file()),
+-        json!({ "theme": "light", "keys": { "apply": ["F2"] } })
++        json!({ "theme": "light", "antialiasing": "subpixel", "keys": { "apply": ["F2"] } })
+     );
+ }
+ 
+@@ -198,7 +207,11 @@ fn a_change_to_a_missing_file_starts_from_the_current_settings() {
+     assert_eq!(settings.stored.keys, light_with_apply().keys);
+     assert_eq!(
+         json_at(&config.default_file()),
+-        json!({ "theme": "dark", "keys": { "apply": ["Mod-Enter"], "ignore": [] } })
++        json!({
++            "theme": "dark",
++            "antialiasing": "subpixel",
++            "keys": { "apply": ["Mod-Enter"], "ignore": [] },
++        })
+     );
+ }
+ 
+@@ -235,7 +248,7 @@ fn a_settings_file_reached_through_a_symlink_stays_a_symlink() {
+     set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+     let link = fs::symlink_metadata(config.default_file()).unwrap();
+     assert!(link.file_type().is_symlink());
+-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++    assert_eq!(json_at(&dotfile), light_subpixel());
+ }
+ 
+ #[cfg(unix)]
+@@ -253,7 +266,7 @@ fn a_chain_of_settings_symlinks_stays_links_and_writes_the_last_target() {
+     for link in [config.default_file(), second_link] {
+         assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+     }
+-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++    assert_eq!(json_at(&dotfile), light_subpixel());
+ }
+ 
+ #[cfg(unix)]
+@@ -279,7 +292,7 @@ fn a_chain_of_forty_settings_symlinks_is_written_through_as_linux_reads_it() {
+         Theme::Dark
+     );
+     set_theme(&config.places, &current, Theme::Light).unwrap();
+-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++    assert_eq!(json_at(&dotfile), light_subpixel());
+     let mut link_count = 0;
+     for entry in fs::read_dir(&links).unwrap() {
+         assert!(entry.unwrap().file_type().unwrap().is_symlink());
+@@ -302,7 +315,10 @@ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
+     std::os::unix::fs::symlink(relative_target, config.default_file()).unwrap();
+     let dotfile = config.elsewhere("dotfiles/settings.json");
+     read(&config.places, &StoredSettings::default()).unwrap();
+-    assert_eq!(json_at(&dotfile), json!({ "theme": "dark" }));
++    assert_eq!(
++        json_at(&dotfile),
++        json!({ "theme": "dark", "antialiasing": "subpixel" })
++    );
+     set_theme(&config.places, &StoredSettings::default(), Theme::Light).unwrap();
+     let link = fs::symlink_metadata(config.default_file()).unwrap();
+     assert!(link.file_type().is_symlink());
+@@ -310,27 +326,60 @@ fn a_dangling_settings_symlink_creates_its_target_and_stays_a_link() {
+         fs::read_link(config.default_file()).unwrap(),
+         relative_target
+     );
+-    assert_eq!(json_at(&dotfile), json!({ "theme": "light" }));
++    assert_eq!(json_at(&dotfile), light_subpixel());
++}
++
++fn light_subpixel() -> serde_json::Value {
++    json!({ "theme": "light", "antialiasing": "subpixel" })
+ }
+ 
+ #[test]
+-fn theme_at_start_is_dark_whenever_anything_is_missing_or_broken() {
++fn stored_at_start_gives_the_defaults_whenever_anything_is_missing_or_broken() {
+     let config = Config::new();
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    let defaults = StoredSettings::default();
++    assert_eq!(stored_at_start(&config.places), defaults);
+     assert!(!config.folder().exists());
+-    write(&config.default_file(), r#"{"theme": "light"}"#);
+-    assert_eq!(theme_at_start(&config.places), Theme::Light);
++    write(
++        &config.default_file(),
++        r#"{"theme": "light", "antialiasing": "greyscale", "keys": {"apply": ["F2"]}}"#,
++    );
++    let stored = StoredSettings {
++        theme: Theme::Light,
++        antialiasing: Antialiasing::Greyscale,
++        keys: keys(&[("apply", &["F2"])]),
++    };
++    assert_eq!(stored_at_start(&config.places), stored);
+     write(&config.default_file(), r#"{"keys": {}}"#);
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert_eq!(stored_at_start(&config.places), defaults);
+     write(&config.default_file(), r#"{"theme": "light""#);
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert_eq!(stored_at_start(&config.places), defaults);
++    write(
++        &config.default_file(),
++        r#"{"theme": "light", "antialiasing": "sharp"}"#,
++    );
++    assert_eq!(stored_at_start(&config.places), defaults);
+     let target = config.elsewhere("missing.json");
+     write(&config.location_file(), &format!("{}\n", target.display()));
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert_eq!(stored_at_start(&config.places), defaults);
+     assert!(!target.exists());
+     write(&config.location_file(), "relative.json\n");
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert_eq!(stored_at_start(&config.places), defaults);
+     fs::remove_file(config.location_file()).unwrap();
+     fs::create_dir(config.location_file()).unwrap();
+-    assert_eq!(theme_at_start(&config.places), Theme::Dark);
++    assert_eq!(stored_at_start(&config.places), defaults);
++}
++
++#[cfg(unix)]
++#[test]
++fn stored_at_start_gives_the_defaults_for_an_unreadable_file_and_leaves_it_alone() {
++    use std::os::unix::fs::PermissionsExt;
++
++    let config = Config::new();
++    let text = r#"{"theme": "light", "antialiasing": "greyscale"}"#;
++    write(&config.default_file(), text);
++    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o000)).unwrap();
++    let stored = stored_at_start(&config.places);
++    fs::set_permissions(config.default_file(), fs::Permissions::from_mode(0o644)).unwrap();
++    assert_eq!(stored, StoredSettings::default());
++    assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
+ }
+diff --git c/src-tauri/src/commands.rs i/src-tauri/src/commands.rs
+index 707efce..5e8f8e1 100644
+--- c/src-tauri/src/commands.rs
++++ i/src-tauri/src/commands.rs
+@@ -23,6 +23,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         log,
+         settings::load_settings::<tauri::Wry>,
+         settings::set_theme::<tauri::Wry>,
++        settings::set_antialiasing::<tauri::Wry>,
+         settings::set_keys::<tauri::Wry>,
+         settings::move_settings::<tauri::Wry>,
+     ])
+diff --git c/src-tauri/src/font_rendering.rs i/src-tauri/src/font_rendering.rs
+new file mode 100644
+index 0000000..60a7cfb
+--- /dev/null
++++ i/src-tauri/src/font_rendering.rs
+@@ -0,0 +1,68 @@
++use gtk::prelude::GtkSettingsExt;
++use yamt_settings::Antialiasing;
++
++const ANTIALIAS_ON: i32 = 1;
++const SUBPIXEL_ORDERS: [&str; 4] = ["rgb", "bgr", "vrgb", "vbgr"];
++const SUBPIXEL_WITHOUT_DESKTOP_ORDER: &str = "rgb";
++const GREYSCALE: &str = "none";
++
++/// Sets yamt's own GTK font settings, which outrank the desktop's and which the webview reads
++/// when it is built (measured, plan §2 #60).
++pub(crate) fn apply(antialiasing: Antialiasing) {
++    let Some(settings) = gtk::Settings::default() else {
++        tracing::warn!(
++            antialiasing = antialiasing.name(),
++            "no GTK settings: text is drawn as the desktop says"
++        );
++        return;
++    };
++    let rgba = chosen_rgba(antialiasing, settings.gtk_xft_rgba().as_deref());
++    settings.set_gtk_xft_antialias(ANTIALIAS_ON);
++    settings.set_gtk_xft_rgba(Some(rgba));
++    tracing::info!(
++        antialiasing = antialiasing.name(),
++        rgba,
++        "font rendering set"
++    );
++}
++
++fn chosen_rgba(antialiasing: Antialiasing, desktop: Option<&str>) -> &'static str {
++    match antialiasing {
++        Antialiasing::Subpixel => desktop
++            .and_then(|value| SUBPIXEL_ORDERS.into_iter().find(|order| *order == value))
++            .unwrap_or(SUBPIXEL_WITHOUT_DESKTOP_ORDER),
++        Antialiasing::Greyscale => GREYSCALE,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn subpixel_keeps_the_desktops_subpixel_order() {
++        for order in ["rgb", "bgr", "vrgb", "vbgr"] {
++            assert_eq!(chosen_rgba(Antialiasing::Subpixel, Some(order)), order);
++        }
++    }
++
++    #[test]
++    fn subpixel_is_rgb_when_the_desktop_has_no_subpixel_order() {
++        for desktop in [None, Some("none"), Some(""), Some("RGB"), Some("unknown")] {
++            assert_eq!(chosen_rgba(Antialiasing::Subpixel, desktop), "rgb");
++        }
++    }
++
++    #[test]
++    fn greyscale_is_none_whatever_the_desktop_says() {
++        for desktop in [
++            None,
++            Some("none"),
++            Some("rgb"),
++            Some("vbgr"),
++            Some("unknown"),
++        ] {
++            assert_eq!(chosen_rgba(Antialiasing::Greyscale, desktop), "none");
++        }
++    }
++}
+diff --git c/src-tauri/src/lib.rs i/src-tauri/src/lib.rs
+index 4a1453e..7953218 100644
+--- c/src-tauri/src/lib.rs
++++ i/src-tauri/src/lib.rs
+@@ -4,6 +4,8 @@
+ mod appimage;
+ mod args;
+ mod commands;
++#[cfg(target_os = "linux")]
++mod font_rendering;
+ mod frontend_log;
+ #[cfg(target_os = "linux")]
+ mod graphics;
+diff --git c/src-tauri/src/settings.rs i/src-tauri/src/settings.rs
+index 860a7f1..2d11b14 100644
+--- c/src-tauri/src/settings.rs
++++ i/src-tauri/src/settings.rs
+@@ -1,6 +1,6 @@
+ use tauri::path::PathResolver;
+ use tauri::{Manager, Runtime, WebviewWindow};
+-use yamt_settings::{KeysChange, Places, SettingsRead, StoredSettings, Theme};
++use yamt_settings::{Antialiasing, KeysChange, Places, SettingsRead, StoredSettings, Theme};
+ 
+ use crate::ipc_error::IpcError;
+ use crate::window::show_theme;
+@@ -43,6 +43,22 @@ pub(crate) fn set_theme<R: Runtime>(
+     Ok(read)
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn set_antialiasing<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    antialiasing: Antialiasing,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::set_antialiasing(&places(window.path())?, &current, antialiasing)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(
+diff --git c/src-tauri/src/window.rs i/src-tauri/src/window.rs
+index 788043a..b5a1da0 100644
+--- c/src-tauri/src/window.rs
++++ i/src-tauri/src/window.rs
+@@ -9,7 +9,7 @@ use tauri::{
+     WindowEvent,
+ };
+ use yamt_session::MergeSession;
+-use yamt_settings::Theme;
++use yamt_settings::{StoredSettings, Theme};
+ 
+ use crate::commands::{SessionState, lock, with_session};
+ use crate::outcome::{Ending, ending_on_close};
+@@ -38,7 +38,11 @@ pub(crate) fn run(session: MergeSession) -> Ending {
+ 
+ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
+-    let theme = start_theme(app.path());
++    let stored = start_settings(app.path());
++    // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
++    #[cfg(target_os = "linux")]
++    crate::font_rendering::apply(stored.antialiasing);
++    let theme = stored.theme;
+     WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::default())
+         .title(title)
+         .inner_size(WIDTH, HEIGHT)
+@@ -52,12 +56,15 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
+ }
+ 
+-fn start_theme(paths: &PathResolver<tauri::Wry>) -> Theme {
++fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {
+     match settings::places(paths) {
+-        Ok(places) => yamt_settings::theme_at_start(&places),
++        Ok(places) => yamt_settings::stored_at_start(&places),
+         Err(error) => {
+-            tracing::warn!(?error, "no config folder: the window starts dark");
+-            Theme::Dark
++            tracing::warn!(
++                ?error,
++                "no config folder: the window starts with the defaults"
++            );
++            StoredSettings::default()
+         }
+     }
+ }

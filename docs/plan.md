@@ -139,7 +139,7 @@ editing automatically — which is the nastiest piece of a merge tool, free.
 | ----------------------- | ------------------------------ |
 | macOS                   | WKWebView (WebKit)             |
 | **Linux (dev machine)** | **WebKitGTK** (webkit2gtk-4.1) |
-| Windows (later)         | WebView2 (Chromium)            |
+| Windows (since #59)     | WebView2 (Chromium)            |
 
 ⚠️ **Arch + NVIDIA will show a blank window.** WebKitGTK's DMABUF renderer fails to
 initialize on NVIDIA proprietary drivers and some Wayland compositors, and then silently
@@ -156,6 +156,18 @@ if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && nvidia_loaded() {
 
 Gate on `/sys/module/nvidia`; respect a user-set value. It disables the fast presentation
 path, not accelerated GL.
+
+### Text rendering per platform (what yamt can and cannot change)
+
+Measured 2026-10-13 against WebStorm 2026.2's own rasterizer (its JetBrains Runtime and TTF, same lines, size and
+colours), zoomed crops side by side; decisions in §2 #60; numbers in `.omp/run/notes/CrispTextProbe.md`.
+
+| platform | yamt does                                                                                                                                                      | impossible from inside the app                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Linux    | Subpixel text by default (setting "Antialiasing", #60): GTK's subpixel order set in yamt's process before WebKitGTK starts; WebStorm's fringe share is matched | **Fractional scale on Wayland**: GTK 3 (tauri 2's toolkit) has no fractional scaling, so at 1.45 yamt draws at 2× and the compositor scales the picture down, which softens every glyph. WebStorm on its Wayland toolkit does the same (its log: "System scale factor: 2.0"), so both are softened alike. Only a GTK 4 port of tauri's webview would fix it. **Switching live** from grey to subpixel: WebKitGTK fixes it when the window starts |
+| macOS    | Nothing: WKWebView's default smoothing (CoreText, as every native app)                                                                                         | **Subpixel (colour-fringed) text**: macOS removed it in 10.14 and WKWebView cannot draw it; WebStorm's fringes come from its own rasterizer. Stroke weight and contrast stay the system's: `-webkit-font-smoothing: antialiased` would only make strokes thinner. Not compared on a Mac yet (no Mac here)                                                                                                                                        |
+| Windows  | ClearType through WebView2: the code scrollers paint an opaque background, so Chromium keeps subpixel text when it composites them at 125–175 %                | Nothing found; the system's ClearType settings apply. Checked with Chromium on Linux standing in for WebView2, not on Windows itself                                                                                                                                                                                                                                                                                                             |
+| all      | 20 px code lines: the line pitch is a whole number of device pixels at 1, 1.25, 1.45 (via 2×), 1.5, 1.75 and 2                                                 | Glyphs themselves never sit on fractional pixels in WebKit: it snaps each baseline to the device grid (measured; Chromium not measured), so only the pitch between lines was uneven                                                                                                                                                                                                                                                              |
 
 ---
 
