@@ -12,6 +12,7 @@ import type {
 } from "../ipc";
 import {
   LanguageServers,
+  isDocVersion,
   type DocVersion,
   type FailReason,
   type FormatRefusal,
@@ -905,6 +906,53 @@ test("rule 6: a pull answered for an older version is pulled again; one pull in 
   expect(doc.lastShown("tsgo")).toMatchObject({ version: 3, problems: [{ message: "fresh" }] });
   expect(pending).toHaveLength(0);
   expect(server?.sent("textDocument/diagnostic")).toHaveLength(2);
+});
+
+test("rule 6: a late pull never replaces a newer push, nor a late push a newer pull", async () => {
+  const pending: ((report: Json) => void)[] = [];
+  host.setup = (server) => {
+    server.capabilities = { diagnosticProvider: {} };
+    server.handlers = {
+      "textDocument/diagnostic": (_, self) => {
+        const id = self.received.at(-1)?.id;
+        pending.push((report) => self.raw({ jsonrpc: "2.0", id, result: report }));
+        return NO_REPLY;
+      },
+    };
+  };
+  const languageServers = servers([spec("tsgo")]);
+  const doc = new FakeDoc("a.ts", "x");
+  const open = languageServers.open(doc);
+  await settle();
+  open.changed();
+  await vi.advanceTimersByTimeAsync(300);
+  const server = host.only("tsgo");
+
+  server.notify("textDocument/publishDiagnostics", {
+    uri: "file:///repo/a.ts",
+    version: 2,
+    diagnostics: [diagnostic(0, "pushed")],
+  });
+  await settle();
+  pending.shift()?.({ kind: "full", items: [diagnostic(0, "late pull")] });
+  await settle();
+  pending.shift()?.({ kind: "full", items: [diagnostic(0, "pulled")] });
+  await settle();
+  server.notify("textDocument/publishDiagnostics", {
+    uri: "file:///repo/a.ts",
+    version: 1,
+    diagnostics: [diagnostic(0, "late push")],
+  });
+  await settle();
+
+  expect(doc.shown.map(({ version, problems }) => [version, problems[0]?.message])).toEqual([
+    [2, "pushed"],
+    [2, "pulled"],
+  ]);
+  expect(logOf(languageServers, "tsgo").slice(-2)).toEqual([
+    "yamt: Dropped problems for version 1: version 2 is shown",
+    "yamt: Dropped problems for version 1: version 2 is shown",
+  ]);
 });
 
 test("rule 6: a sync of one document pulls every document on that server", async () => {
@@ -1928,6 +1976,15 @@ test("rule 6: pushed versions that are not positive integers are dropped", async
   ]);
 });
 
+test("a document version is a positive safe integer", () => {
+  expect([0, 1, 1.5, Number.MAX_SAFE_INTEGER + 1].map(isDocVersion)).toEqual([
+    false,
+    true,
+    false,
+    false,
+  ]);
+});
+
 test("rule 1/5: a document a running server does not serve is never opened or closed on it", async () => {
   const languageServers = servers([spec("oxlint")]);
   languageServers.open(new FakeDoc("a.ts", "x"));
@@ -2053,6 +2110,27 @@ test("destroy waits for servers removed by setSpecs", async () => {
   expect(destroyed).toBe(false);
 
   host.only("oxlint").exit(0);
+  await settle();
+  expect(destroyed).toBe(true);
+});
+
+test("destroy waits for a removed server still stopping after another removed one stopped", async () => {
+  host.setup = (server) => {
+    server.ignoresStop = server.command.program === "tsgo";
+  };
+  const languageServers = servers([spec("oxlint"), spec("tsgo")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  languageServers.setSpecs([], { startOnOpen: true });
+  await settle();
+  let destroyed = false;
+  void languageServers.destroy().then(() => {
+    destroyed = true;
+  });
+  await settle();
+  expect(destroyed).toBe(false);
+
+  host.only("tsgo").exit(0);
   await settle();
   expect(destroyed).toBe(true);
 });

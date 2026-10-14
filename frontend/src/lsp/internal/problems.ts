@@ -45,6 +45,7 @@ export class DocProblems {
   #version: DocVersion;
   #resultId: string | null = null;
   #items: readonly ServerProblem[] = [];
+  #shown: DocVersion | null = null;
   #pulling = false;
   #again = false;
   #open = true;
@@ -68,7 +69,7 @@ export class DocProblems {
       this.#context.log(`Dropped problems for a version yamt never sent: ${shown}`);
       return;
     }
-    this.#context.show(shown, diagnostics.map(toProblem));
+    this.#show(shown, diagnostics.map(toProblem));
   }
 
   async pull(): Promise<void> {
@@ -97,7 +98,7 @@ export class DocProblems {
   }
 
   clear(): void {
-    this.#context.show(this.#version, []);
+    this.#show(this.#version, []);
   }
 
   close(): void {
@@ -110,6 +111,15 @@ export class DocProblems {
     if (again) {
       void this.pull();
     }
+  }
+
+  #show(version: DocVersion, problems: readonly ServerProblem[]): void {
+    if (this.#shown !== null && version < this.#shown) {
+      this.#context.log(`Dropped problems for version ${version}: version ${this.#shown} is shown`);
+      return;
+    }
+    this.#shown = version;
+    this.#context.show(version, problems);
   }
 
   #pulled(version: DocVersion, reply: Reply): void {
@@ -129,7 +139,7 @@ export class DocProblems {
     if (report.kind === "full") {
       this.#items = report.items.map(toProblem);
     }
-    this.#context.show(version, this.#items);
+    this.#show(version, this.#items);
   }
 }
 
