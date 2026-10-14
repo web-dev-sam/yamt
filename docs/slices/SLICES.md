@@ -401,11 +401,11 @@ Slices (a dependency chain): row 1 changes the reply (`remote_name` → `side_na
 bindings and commits both; row 2 then switches the window to it. Each patch: commit, `just mutants <commit before>`,
 both reviews; then one final run.
 
-| row | slice                                                                                                                                     | owner     | status  | evidence |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
-| 1   | 3.N-rust: `SideNames` read at open, `side_names` command (`briefs/3.N-side-names-rust.md`; `crates/gitio`, `crates/session`, `src-tauri`) | rust-impl | running |          |
-| 2   | 3.N-web: both headers from `sideNames` (`briefs/3.N-side-names-web.md`; `frontend/src/ipc`, `frontend/src/ui`, `main.ts`)                 | web-impl  | planned |          |
-| 3   | final run: `just check`, `just mutants cb0151e`, the real app on merge and rebase conflicts                                               | verifier  | planned |          |
+| row | slice                                                                                                                                     | owner     | status  | evidence                                                                                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 3.N-rust: `SideNames` read at open, `side_names` command (`briefs/3.N-side-names-rust.md`; `crates/gitio`, `crates/session`, `src-tauri`) | rust-impl | review  | round 1 `d5f9e1d` (`SideNamesRust`, notes `.omp/run/notes/SideNamesRust.md`) with bindings: `current_branch`, `side_names.rs`, per-side failure; smoke merge → both branches, rebase → local `3406016 remote` commit form |
+| 2   | 3.N-web: both headers from `sideNames` (`briefs/3.N-side-names-web.md`; `frontend/src/ipc`, `frontend/src/ui`, `main.ts`)                 | web-impl  | running |                                                                                                                                                                                                                           |
+| 3   | final run: `just check`, `just mutants cb0151e`, the real app on merge and rebase conflicts                                               | verifier  | planned |                                                                                                                                                                                                                           |
 
 ## Open product questions
 

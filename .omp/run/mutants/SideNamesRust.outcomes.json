@@ -1,0 +1,1216 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 41.039248136,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0",
+            "--package=yamt-gitio@0.2.0",
+            "--package=yamt-session@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 6.911497202,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-app@0.2.0",
+            "--package=yamt-gitio@0.2.0",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src-tauri/src/commands.rs:15:5: replace specta_builder -> tauri_specta::Builder<R> with Builder::new()",
+          "package": "yamt-app",
+          "file": "src-tauri/src/commands.rs",
+          "function": {
+            "function_name": "specta_builder",
+            "return_type": "-> tauri_specta::Builder<R>",
+            "span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 30,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 29,
+              "column": 7
+            }
+          },
+          "replacement": "Builder::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src-tauri__src__commands.rs_line_15_col_5.log",
+      "diff_path": "diff/src-tauri__src__commands.rs_line_15_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.702101591,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src-tauri/src/commands.rs:15:5: replace specta_builder -> tauri_specta::Builder<R> with Builder::from_iter([Default::default()])",
+          "package": "yamt-app",
+          "file": "src-tauri/src/commands.rs",
+          "function": {
+            "function_name": "specta_builder",
+            "return_type": "-> tauri_specta::Builder<R>",
+            "span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 30,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 29,
+              "column": 7
+            }
+          },
+          "replacement": "Builder::from_iter([Default::default()])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src-tauri__src__commands.rs_line_15_col_5_001.log",
+      "diff_path": "diff/src-tauri__src__commands.rs_line_15_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.752537298,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src-tauri/src/commands.rs:15:5: replace specta_builder -> tauri_specta::Builder<R> with Builder::new(Default::default())",
+          "package": "yamt-app",
+          "file": "src-tauri/src/commands.rs",
+          "function": {
+            "function_name": "specta_builder",
+            "return_type": "-> tauri_specta::Builder<R>",
+            "span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 30,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 29,
+              "column": 7
+            }
+          },
+          "replacement": "Builder::new(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src-tauri__src__commands.rs_line_15_col_5_002.log",
+      "diff_path": "diff/src-tauri__src__commands.rs_line_15_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.702203905,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src-tauri/src/commands.rs:15:5: replace specta_builder -> tauri_specta::Builder<R> with Builder::from(Default::default())",
+          "package": "yamt-app",
+          "file": "src-tauri/src/commands.rs",
+          "function": {
+            "function_name": "specta_builder",
+            "return_type": "-> tauri_specta::Builder<R>",
+            "span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 30,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 29,
+              "column": 7
+            }
+          },
+          "replacement": "Builder::from(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src-tauri__src__commands.rs_line_15_col_5_003.log",
+      "diff_path": "diff/src-tauri__src__commands.rs_line_15_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.752932626,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src-tauri/src/commands.rs:56:5: replace side_names -> SideNames with Default::default()",
+          "package": "yamt-app",
+          "file": "src-tauri/src/commands.rs",
+          "function": {
+            "function_name": "side_names",
+            "return_type": "-> SideNames",
+            "span": {
+              "start": {
+                "line": 52,
+                "column": 1
+              },
+              "end": {
+                "line": 57,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 56,
+              "column": 5
+            },
+            "end": {
+              "line": 56,
+              "column": 38
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src-tauri__src__commands.rs_line_56_col_5.log",
+      "diff_path": "diff/src-tauri__src__commands.rs_line_56_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.802354971,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-app@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:69:9: replace Repo::current_branch -> Result<Option<Vec<u8>>> with Ok(None)",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 9
+            },
+            "end": {
+              "line": 74,
+              "column": 10
+            }
+          },
+          "replacement": "Ok(None)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_69_col_9.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_69_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.106635888,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.552172185,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:69:9: replace Repo::current_branch -> Result<Option<Vec<u8>>> with Ok(Some(vec![]))",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 9
+            },
+            "end": {
+              "line": 74,
+              "column": 10
+            }
+          },
+          "replacement": "Ok(Some(vec![]))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_69_col_9_001.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_69_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.6017217,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.551916714,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:69:9: replace Repo::current_branch -> Result<Option<Vec<u8>>> with Ok(Some(vec![0]))",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 9
+            },
+            "end": {
+              "line": 74,
+              "column": 10
+            }
+          },
+          "replacement": "Ok(Some(vec![0]))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_69_col_9_002.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_69_col_9_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.601931937,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.551650431,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:69:9: replace Repo::current_branch -> Result<Option<Vec<u8>>> with Ok(Some(vec![1]))",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 9
+            },
+            "end": {
+              "line": 74,
+              "column": 10
+            }
+          },
+          "replacement": "Ok(Some(vec![1]))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_69_col_9_003.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_69_col_9_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.601907892,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.552039156,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:72:27: replace match guard is_unresolved_name(&error) with true in Repo::current_branch",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 72,
+              "column": 27
+            },
+            "end": {
+              "line": 72,
+              "column": 53
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_72_col_27.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_72_col_27.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.602137708,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.551954296,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/gitio/src/repo.rs:72:27: replace match guard is_unresolved_name(&error) with false in Repo::current_branch",
+          "package": "yamt-gitio",
+          "file": "crates/gitio/src/repo.rs",
+          "function": {
+            "function_name": "Repo::current_branch",
+            "return_type": "-> Result<Option<Vec<u8>>>",
+            "span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 72,
+              "column": 27
+            },
+            "end": {
+              "line": 72,
+              "column": 53
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__gitio__src__repo.rs_line_72_col_27_001.log",
+      "diff_path": "diff/crates__gitio__src__repo.rs_line_72_col_27_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.601704131,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.55174881,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-gitio@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/open.rs:29:9: replace MergeSession::open -> Result<MergeSession> with Ok(Default::default())",
+          "package": "yamt-session",
+          "file": "crates/session/src/open.rs",
+          "function": {
+            "function_name": "MergeSession::open",
+            "return_type": "-> Result<MergeSession>",
+            "span": {
+              "start": {
+                "line": 28,
+                "column": 5
+              },
+              "end": {
+                "line": 41,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 29,
+              "column": 9
+            },
+            "end": {
+              "line": 40,
+              "column": 11
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__open.rs_line_29_col_9.log",
+      "diff_path": "diff/crates__session__src__open.rs_line_29_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.205402397,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/session.rs:89:9: replace MergeSession::side_names -> &SideNames with Box::leak(Box::new(Default::default()))",
+          "package": "yamt-session",
+          "file": "crates/session/src/session.rs",
+          "function": {
+            "function_name": "MergeSession::side_names",
+            "return_type": "-> &SideNames",
+            "span": {
+              "start": {
+                "line": 87,
+                "column": 5
+              },
+              "end": {
+                "line": 90,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 89,
+              "column": 9
+            },
+            "end": {
+              "line": 89,
+              "column": 25
+            }
+          },
+          "replacement": "Box::leak(Box::new(Default::default()))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__session.rs_line_89_col_9.log",
+      "diff_path": "diff/crates__session__src__session.rs_line_89_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.402066745,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:36:5: replace read_side_names -> SideNames with Default::default()",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "read_side_names",
+            "return_type": "-> SideNames",
+            "span": {
+              "start": {
+                "line": 35,
+                "column": 1
+              },
+              "end": {
+                "line": 40,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 36,
+              "column": 5
+            },
+            "end": {
+              "line": 39,
+              "column": 6
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__side_names.rs_line_36_col_5.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_36_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401715422,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:43:5: replace name_or_warn -> Option<SideName> with None",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "name_or_warn",
+            "return_type": "-> Option<SideName>",
+            "span": {
+              "start": {
+                "line": 42,
+                "column": 1
+              },
+              "end": {
+                "line": 50,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 43,
+              "column": 5
+            },
+            "end": {
+              "line": 49,
+              "column": 6
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__session__src__side_names.rs_line_43_col_5.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_43_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.853385635,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.953542751,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:43:5: replace name_or_warn -> Option<SideName> with Some(Default::default())",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "name_or_warn",
+            "return_type": "-> Option<SideName>",
+            "span": {
+              "start": {
+                "line": 42,
+                "column": 1
+              },
+              "end": {
+                "line": 50,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 43,
+              "column": 5
+            },
+            "end": {
+              "line": 49,
+              "column": 6
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__side_names.rs_line_43_col_5_001.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_43_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401484738,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:53:5: replace checked_out -> Result<Option<SideName>> with Ok(None)",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "checked_out",
+            "return_type": "-> Result<Option<SideName>>",
+            "span": {
+              "start": {
+                "line": 52,
+                "column": 1
+              },
+              "end": {
+                "line": 62,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 53,
+              "column": 5
+            },
+            "end": {
+              "line": 61,
+              "column": 6
+            }
+          },
+          "replacement": "Ok(None)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__session__src__side_names.rs_line_53_col_5.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_53_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.853977075,
+          "process_status": "Success",
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 2.0035783,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:53:5: replace checked_out -> Result<Option<SideName>> with Ok(Some(Default::default()))",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "checked_out",
+            "return_type": "-> Result<Option<SideName>>",
+            "span": {
+              "start": {
+                "line": 52,
+                "column": 1
+              },
+              "end": {
+                "line": 62,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 53,
+              "column": 5
+            },
+            "end": {
+              "line": 61,
+              "column": 6
+            }
+          },
+          "replacement": "Ok(Some(Default::default()))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__side_names.rs_line_53_col_5_001.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_53_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.40139988,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:77:5: replace merge_head_name -> Result<SideName> with Ok(Default::default())",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "merge_head_name",
+            "return_type": "-> Result<SideName>",
+            "span": {
+              "start": {
+                "line": 76,
+                "column": 1
+              },
+              "end": {
+                "line": 95,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 77,
+              "column": 5
+            },
+            "end": {
+              "line": 94,
+              "column": 6
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__side_names.rs_line_77_col_5.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_77_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401899484,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/session/src/side_names.rs:98:5: replace commit_name -> Result<SideName> with Ok(Default::default())",
+          "package": "yamt-session",
+          "file": "crates/session/src/side_names.rs",
+          "function": {
+            "function_name": "commit_name",
+            "return_type": "-> Result<SideName>",
+            "span": {
+              "start": {
+                "line": 97,
+                "column": 1
+              },
+              "end": {
+                "line": 104,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 98,
+              "column": 5
+            },
+            "end": {
+              "line": 103,
+              "column": 7
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__session__src__side_names.rs_line_98_col_5.log",
+      "diff_path": "diff/crates__session__src__side_names.rs_line_98_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.401450776,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/wds/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=yamt-session@0.2.0"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 20,
+  "missed": 0,
+  "caught": 8,
+  "timeout": 0,
+  "unviable": 12,
+  "success": 0,
+  "start_time": "2026-10-14T07:28:57.015075446Z",
+  "end_time": "2026-10-14T07:30:11.982802702Z",
+  "cargo_mutants_version": "27.1.0"
+}

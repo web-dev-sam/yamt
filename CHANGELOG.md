@@ -15,6 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Source Control view does: folders first, a chain of single folders on one row, every folder open at
   first and the shown file's folders opened when it changes, folder icons from vscode-icons. Pressing it
   again shows the flat list. The choice is remembered after a restart.
+- The left pane's header names what is checked out, as the right one names what is merged in:
+  "Local (yours): main", or the commit's short id and subject when no branch is checked out (during a
+  rebase), with the full commit message on hover.
 
 ## [0.2.0] - 2026-10-13
 

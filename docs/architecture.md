@@ -239,6 +239,12 @@ impl Repo {
     pub fn hash_objects(&self, paths: &[&Path]) -> Result<Vec<Oid>>; // hash-object --stdin-paths (clean filters per path)
     pub fn merge_file(&self, scratch: &Path, base: &[u8], local: &[u8], remote: &[u8], options: &MergeFileOptions) -> Result<Vec<u8>>; // merge-file -p; exit 0..127 = conflict count
     pub fn submodule_head(&self, path: &Path) -> Result<Option<Oid>>; // rev-parse HEAD inside a checked-out submodule
+    // the sides' names (plan §2 #50, #62)
+    pub fn commit_named(&self, name: &str) -> Result<Option<Oid>>; // rev-parse --verify --quiet <name>^{commit}; missing → None
+    pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>>; // for-each-ref --points-at refs/heads refs/remotes, symbolic refs skipped
+    pub fn merge_message(&self) -> Result<Option<Vec<u8>>>;        // MERGE_MSG through rev-parse --git-path
+    pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary>; // log -1 %h %s %B
+    pub fn current_branch(&self) -> Result<Option<Vec<u8>>>;      // branch --show-current; detached (empty output) → None
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
@@ -328,8 +334,9 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
   `finish_file(path, text, disk_version) -> WriteReply`, `reset_file(path, disk_version) -> WriteReply`,
   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
-  `ChangedOnDisk` when the disk changed first or the version is old, #53), `remote_name() ->
-  Option<RemoteName>` (what is merged in, read once at open, #50), `log(entry)`. No `quit_if_done`:
+  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> SideNames`
+  (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
+  open, each side on its own, #50/#62), `log(entry)`. No `quit_if_done`:
   the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
   so it settles disk changes and uses git's view (#49).
 - Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
@@ -437,7 +444,7 @@ export interface ChunkSource {
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
-  remoteName(): Promise<RemoteName | null>; // what is merged in, for the right header (#50); fixture: null
+  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null
   // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;

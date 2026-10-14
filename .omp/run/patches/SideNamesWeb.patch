@@ -1,0 +1,563 @@
+From b744640f90abf2f978b0d818101a662d7afc2a68 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 14 Oct 2026 09:34:13 +0200
+Subject: [PATCH] feat(ui): both side headers name their side from side_names
+ (#62)
+
+---
+ .omp/run/notes/SideNamesWeb.md      | 40 +++++++++++++++++++++
+ frontend/src/ipc/ChunkSource.ts     |  4 +--
+ frontend/src/ipc/domain.ts          |  4 ++-
+ frontend/src/ipc/fixture.test.ts    |  4 ---
+ frontend/src/ipc/fixture.ts         |  4 +--
+ frontend/src/ipc/index.ts           |  3 +-
+ frontend/src/ipc/tauri.test.ts      | 17 +--------
+ frontend/src/ipc/tauri.ts           |  4 +--
+ frontend/src/main.ts                |  2 +-
+ frontend/src/ui/ChoiceView.vue      |  4 +--
+ frontend/src/ui/MergeView.vue       |  4 +--
+ frontend/src/ui/listing.ts          | 12 +++----
+ frontend/src/ui/sideHeaders.test.ts | 56 ++++++++++++++++++++---------
+ frontend/src/ui/sideHeaders.ts      | 28 +++++++--------
+ frontend/src/ui/store.test.ts       | 31 +++++++++-------
+ frontend/src/ui/store.ts            | 12 +++----
+ 16 files changed, 140 insertions(+), 89 deletions(-)
+ create mode 100644 .omp/run/notes/SideNamesWeb.md
+
+diff --git a/.omp/run/notes/SideNamesWeb.md b/.omp/run/notes/SideNamesWeb.md
+new file mode 100644
+index 0000000..2ae8150
+--- /dev/null
++++ b/.omp/run/notes/SideNamesWeb.md
+@@ -0,0 +1,40 @@
++# SideNamesWeb — 3.N-web, round 1
++
++Brief `docs/slices/briefs/3.N-side-names-web.md`; plan §2 #62 (with #50). Transcript `history://SideNamesWeb`.
++
++## Summary
++
++- `ipc/`: `SideName`, `SideNames` (domain aliases), `ChunkSource.sideNames()`; tauri `commands.sideNames()`, fixture
++  `{ local: null, remote: null }`. `RemoteName`, `remoteName` gone.
++- Store `sideNames` (both null until loaded), `loadSideNames()` (called in `main.ts`); `ui/listing.ts`
++  `loadSideNames(target)` (`SideNamesTarget`): rejection → both null, warn `store.side_names_failed`, no problem bar.
++  `store.ts` 296 lines.
++- `ui/sideHeaders.ts`: `sideHeader(side, names)`, one rule, `LABEL: Readonly<Record<Side, string>>`; Branch →
++  "<label>: <name>", Commit → "<label>: <short_id> <subject>" (tooltip full message), null → "<label>".
++  `MergeView.vue`, `ChoiceView.vue` pass `sideNames.value`.
++
++## Tests
++
++- `sideHeaders.test.ts` rewritten: per side × {branch, commit, null}; one side named leaves the other plain.
++- `store.test.ts`: `loadSideNames` sets both; a rejection leaves both null, no problem, one warn line.
++- Removed (forwarding/constant): "remoteName returns the app's answer", "the fixture source names nothing merged in".
++
++## Evidence
++
++- typecheck, lint, test (695 tests, 62 files), `just sfc-order`, `just web-unused` exit 0.
++- WebKit fixture (golden file): visible headers "Local (yours)" / "Remote (theirs)" / "Result".
++- Real app, merge (`/tmp/yamt-test-sidenames-merge`): vOn.ts, `docs/removed.md`, `assets/logo.bin` all show "Local
++  (yours): local" / "Remote (theirs): remote" (titles equal); screenshots `/tmp/yamt-sidenames-merge.png`,
++  `/tmp/yamt-sidenames-choice.png`.
++- Real app, rebase: git `26c5817` / `remote`, REBASE_HEAD `e9c1303 local`; page "Local (yours): 26c5817 remote"
++  (title "remote"), "Remote (theirs): e9c1303 local"; `/tmp/yamt-sidenames-rebase.png`.
++
++## Deviations (accepted)
++
++- Fixture mode has no deleted-side or choice file (all fixtures `deleted: null`, `unsupported: null`): those views
++  were checked in the real app only.
++- One-line commit messages in the rebase repo: the hover equals the subject there.
++
++## Open risks
++
++- Names load once at start without awaiting; a header shows the plain label until the reply arrives (as before).
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index e80973d..f58e09a 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -5,9 +5,9 @@ import type {
+   FileMergeData,
+   FileSides,
+   KeysChange,
+-  RemoteName,
+   SettingsRead,
+   Side,
++  SideNames,
+   SourceResult,
+   StoredSettings,
+   Theme,
+@@ -25,7 +25,7 @@ export interface ChunkSource {
+   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+-  remoteName(): Promise<RemoteName | null>;
++  sideNames(): Promise<SideNames>;
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+   setAntialiasing(
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 833a706..2f2e918 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -33,7 +33,9 @@ export type SideContent = Generated.SideContent;
+ 
+ export type Side = Generated.Side;
+ 
+-export type RemoteName = Generated.RemoteName;
++export type SideName = Generated.SideName;
++
++export type SideNames = Generated.SideNames;
+ 
+ export type NotText = Generated.NotText;
+ 
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index fb36565..55fabf8 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -241,10 +241,6 @@ test.each<Side>(["local", "remote"])(
+   },
+ );
+ 
+-test("the fixture source names nothing merged in", async () => {
+-  expect(await createFixtureSource(quietLog().log).remoteName()).toBeNull();
+-});
+-
+ test.each([
+   [
+     "an unknown chunk kind",
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 1f39317..2c75415 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -218,8 +218,8 @@ export function createFixtureSource(
+         log.info("fixture.take", { path, side });
+       });
+     },
+-    async remoteName() {
+-      return null;
++    async sideNames() {
++      return { local: null, remote: null };
+     },
+     ...createFixtureSettings(),
+   };
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 3f4933e..ccfffd8 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -15,10 +15,11 @@ export type {
+   FileSides,
+   KeysChange,
+   NotText,
+-  RemoteName,
+   SettingsRead,
+   Side,
+   SideContent,
++  SideName,
++  SideNames,
+   SourceFailure,
+   SourceResult,
+   StoredSettings,
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 78415d4..35729ae 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -11,7 +11,7 @@ const commands = vi.hoisted(() => ({
+   resetFile: vi.fn(),
+   describeFile: vi.fn(),
+   takeSide: vi.fn(),
+-  remoteName: vi.fn(),
++  sideNames: vi.fn(),
+   log: vi.fn(),
+   loadSettings: vi.fn(),
+   setTheme: vi.fn(),
+@@ -96,21 +96,6 @@ test("a string error from listFiles rejects the call with that message", async (
+   );
+ });
+ 
+-test("remoteName returns the app's answer", async () => {
+-  const name: Generated.RemoteName = {
+-    kind: "Commit",
+-    short_id: "1a2b3c4",
+-    subject: "Fix parser crash",
+-    message: "Fix parser crash\n\nThe lexer read past the end.",
+-  };
+-  commands.remoteName.mockResolvedValueOnce(name);
+-  commands.remoteName.mockResolvedValueOnce(null);
+-  const source = createTauriSource();
+-
+-  expect(await source.remoteName()).toEqual(name);
+-  expect(await source.remoteName()).toBeNull();
+-});
+-
+ test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
+   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index c8ab318..18b9afd 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -76,8 +76,8 @@ export function createTauriSource(): ChunkSource {
+     async takeSide(path, side, diskVersion) {
+       return toResult(await commands.takeSide(path, side, diskVersion));
+     },
+-    remoteName() {
+-      return commands.remoteName();
++    sideNames() {
++      return commands.sideNames();
+     },
+     ...createTauriSettings(),
+   };
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 6c7209e..2ec4b40 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -11,5 +11,5 @@ const source =
+ const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
+ const store = createAppStore(source, startTheme);
+ void store.loadFiles();
+-void store.loadRemoteName();
++void store.loadSideNames();
+ createApp(App).mount("#app");
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index c300253..d59e022 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -22,12 +22,12 @@ const props = defineProps<{ sides: FileSides; shown: boolean }>();
+ 
+ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
+ 
+-const { takeSide, reset, remoteName, taken } = useAppStore();
++const { takeSide, reset, sideNames, taken } = useAppStore();
+ 
+ const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
+ const columns = computed(() =>
+   SIDES.map((side): Column => {
+-    const header = sideHeader(side, remoteName.value);
++    const header = sideHeader(side, sideNames.value);
+     return {
+       side,
+       header: header.text,
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 75386fb..a38163d 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -33,7 +33,7 @@ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-const { track, untrack, finish, reset, takeSide, taken, remoteName, question, preferences } =
++const { track, untrack, finish, reset, takeSide, taken, sideNames, question, preferences } =
+   useAppStore();
+ const {
+   summary,
+@@ -66,7 +66,7 @@ const deletedView = computed(() => {
+ const columns = computed(() =>
+   SIDES.map((side): Column => ({
+     side,
+-    ...sideHeader(side, remoteName.value),
++    ...sideHeader(side, sideNames.value),
+     gridColumn: GRID_COLUMN[side],
+     keep: deletedView.value?.keepIn === side,
+     deleted: side === props.data.deleted,
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index 213a8c2..f453a38 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -1,15 +1,15 @@
+ import type { ShallowRef } from "vue";
+ 
+-import { log, type ChunkSource, type FileEntry, type RemoteName } from "../ipc";
++import { log, type ChunkSource, type FileEntry, type SideNames } from "../ipc";
+ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import type { Notice } from "./noticeText";
+ import { attempt, report, unexpected } from "./problem";
+ 
+ type Listing = DiskChangeTarget & { readonly files: ShallowRef<readonly FileEntry[]> };
+ 
+-type RemoteNameTarget = {
++type SideNamesTarget = {
+   readonly source: ChunkSource;
+-  readonly remoteName: ShallowRef<RemoteName | null>;
++  readonly sideNames: ShallowRef<SideNames>;
+ };
+ 
+ export async function refreshFiles(
+@@ -30,10 +30,10 @@ export async function refreshFiles(
+   return files;
+ }
+ 
+-export async function loadRemoteName(target: RemoteNameTarget): Promise<void> {
++export async function loadSideNames(target: SideNamesTarget): Promise<void> {
+   try {
+-    target.remoteName.value = await target.source.remoteName();
++    target.sideNames.value = await target.source.sideNames();
+   } catch (error) {
+-    log.warn("store.remote_name_failed", { ...unexpected(error) });
++    log.warn("store.side_names_failed", { ...unexpected(error) });
+   }
+ }
+diff --git a/frontend/src/ui/sideHeaders.test.ts b/frontend/src/ui/sideHeaders.test.ts
+index 76b4dbf..37c5d05 100644
+--- a/frontend/src/ui/sideHeaders.test.ts
++++ b/frontend/src/ui/sideHeaders.test.ts
+@@ -1,39 +1,61 @@
+ import { expect, test } from "vitest";
+ 
+-import type { RemoteName } from "../ipc";
++import type { Side, SideName, SideNames } from "../ipc";
+ import { sideHeader } from "./sideHeaders";
+ 
+-const COMMIT: RemoteName = {
++const COMMIT: SideName = {
+   kind: "Commit",
+   short_id: "1a2b3c4",
+   subject: "Fix parser crash",
+   message: "Fix parser crash\n\nThe lexer read past the end of the input.",
+ };
+ 
+-test("the left header is the same whatever is merged in", () => {
+-  const local = { text: "Local (yours)", tooltip: "Local (yours)" };
++const LABEL: Readonly<Record<Side, string>> = {
++  local: "Local (yours)",
++  remote: "Remote (theirs)",
++};
+ 
+-  expect(sideHeader("local", null)).toEqual(local);
+-  expect(sideHeader("local", COMMIT)).toEqual(local);
+-});
++test.each<[Side, string]>([
++  ["local", "local"],
++  ["remote", "remote"],
++])("a branch names the %s header, the same text on hover", (side, branch) => {
++  const name: SideName = { kind: "Branch", name: branch };
+ 
+-test("a branch names the right header, the same text on hover", () => {
+-  expect(sideHeader("remote", { kind: "Branch", name: "minor" })).toEqual({
+-    text: "Remote (theirs): minor",
+-    tooltip: "Remote (theirs): minor",
++  expect(sideHeader(side, { local: name, remote: name })).toEqual({
++    text: `${LABEL[side]}: ${branch}`,
++    tooltip: `${LABEL[side]}: ${branch}`,
+   });
+ });
+ 
+-test("a commit shows its short id and subject; hovering shows the full message", () => {
+-  expect(sideHeader("remote", COMMIT)).toEqual({
+-    text: "Remote (theirs): 1a2b3c4 Fix parser crash",
+-    tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
++test.each<Side>(["local", "remote"])(
++  "a commit shows its short id and subject in the %s header; hovering shows the full message",
++  (side) => {
++    expect(sideHeader(side, { local: COMMIT, remote: COMMIT })).toEqual({
++      text: `${LABEL[side]}: 1a2b3c4 Fix parser crash`,
++      tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
++    });
++  },
++);
++
++test.each<Side>(["local", "remote"])("no name leaves the plain %s header", (side) => {
++  expect(sideHeader(side, { local: null, remote: null })).toEqual({
++    text: LABEL[side],
++    tooltip: LABEL[side],
+   });
+ });
+ 
+-test("no name leaves the plain right header", () => {
+-  expect(sideHeader("remote", null)).toEqual({
++test("each header reads its own side's name; the unnamed side stays plain", () => {
++  const onlyLocal: SideNames = { local: COMMIT, remote: null };
++  const onlyRemote: SideNames = { local: null, remote: { kind: "Branch", name: "minor" } };
++
++  expect(sideHeader("local", onlyLocal).text).toBe("Local (yours): 1a2b3c4 Fix parser crash");
++  expect(sideHeader("remote", onlyLocal)).toEqual({
+     text: "Remote (theirs)",
+     tooltip: "Remote (theirs)",
+   });
++  expect(sideHeader("remote", onlyRemote).text).toBe("Remote (theirs): minor");
++  expect(sideHeader("local", onlyRemote)).toEqual({
++    text: "Local (yours)",
++    tooltip: "Local (yours)",
++  });
+ });
+diff --git a/frontend/src/ui/sideHeaders.ts b/frontend/src/ui/sideHeaders.ts
+index 6e7daa8..8a1c21a 100644
+--- a/frontend/src/ui/sideHeaders.ts
++++ b/frontend/src/ui/sideHeaders.ts
+@@ -1,28 +1,28 @@
+-import type { RemoteName, Side } from "../ipc";
++import type { Side, SideNames } from "../ipc";
+ 
+ export type SideHeader = { readonly text: string; readonly tooltip: string };
+ 
+-const LOCAL = "Local (yours)";
+-const REMOTE = "Remote (theirs)";
++const LABEL: Readonly<Record<Side, string>> = {
++  local: "Local (yours)",
++  remote: "Remote (theirs)",
++};
+ 
+-function remoteHeader(remote: RemoteName | null): SideHeader {
+-  if (remote === null) {
+-    return { text: REMOTE, tooltip: REMOTE };
++export function sideHeader(side: Side, names: SideNames): SideHeader {
++  const label = LABEL[side];
++  const name = names[side];
++  if (name === null) {
++    return { text: label, tooltip: label };
+   }
+-  switch (remote.kind) {
++  switch (name.kind) {
+     case "Branch": {
+-      const text = `${REMOTE}: ${remote.name}`;
++      const text = `${label}: ${name.name}`;
+       return { text, tooltip: text };
+     }
+     case "Commit":
+-      return { text: `${REMOTE}: ${remote.short_id} ${remote.subject}`, tooltip: remote.message };
++      return { text: `${label}: ${name.short_id} ${name.subject}`, tooltip: name.message };
+     default: {
+-      const _exhaustive: never = remote;
++      const _exhaustive: never = name;
+       return _exhaustive;
+     }
+   }
+ }
+-
+-export function sideHeader(side: Side, remote: RemoteName | null): SideHeader {
+-  return side === "local" ? { text: LOCAL, tooltip: LOCAL } : remoteHeader(remote);
+-}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 0eaed8f..8906b1b 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -15,6 +15,7 @@ import {
+   type Key,
+   type SettingsRead,
+   type SettingsSource,
++  type SideNames,
+   type SourceFailure,
+   type SourceResult,
+   type StoredSettings,
+@@ -107,7 +108,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     resetFile: () => Promise.reject(new Error("not used")),
+     describeFile: () => Promise.reject(new Error("not used")),
+     takeSide: () => Promise.reject(new Error("not used")),
+-    remoteName: () => Promise.resolve(null),
++    sideNames: () => Promise.resolve({ local: null, remote: null }),
+     ...NO_SETTINGS,
+   };
+   return { source, pending };
+@@ -963,7 +964,7 @@ function choiceSource(
+       );
+       return Promise.resolve(written(taken));
+     },
+-    remoteName: () => Promise.resolve(null),
++    sideNames: () => Promise.resolve({ local: null, remote: null }),
+     ...NO_SETTINGS,
+     ...overrides,
+   };
+@@ -1303,30 +1304,34 @@ test("a failed refresh is a list problem and keeps the marks; the next good one
+   expect(store.active.value).toBe("a.ts");
+ });
+ 
+-test("the remote name is asked for once; a failure leaves none and logs a warning", async () => {
++test("both side names are asked for once; a failure leaves none and logs a warning", async () => {
+   const warnings: string[] = [];
+   vi.spyOn(console, "warn").mockImplementation((line: string) => {
+     warnings.push(line);
+   });
+   const { source } = handSource([]);
+-  const named = createAppStore({
+-    ...source,
+-    remoteName: () => Promise.resolve({ kind: "Branch", name: "minor" }),
+-  });
+-  await named.loadRemoteName();
++  const names: SideNames = {
++    local: { kind: "Branch", name: "local" },
++    remote: { kind: "Commit", short_id: "1a2b3c4", subject: "Fix", message: "Fix\n\nbody" },
++  };
++  const named = createAppStore({ ...source, sideNames: () => Promise.resolve(names) });
+ 
+-  expect(named.remoteName.value).toEqual({ kind: "Branch", name: "minor" });
++  expect(named.sideNames.value).toEqual({ local: null, remote: null });
++
++  await named.loadSideNames();
++
++  expect(named.sideNames.value).toEqual(names);
+ 
+   const failing = createAppStore({
+     ...source,
+-    remoteName: () => Promise.reject(new Error("ipc down")),
++    sideNames: () => Promise.reject(new Error("ipc down")),
+   });
+-  await expect(failing.loadRemoteName()).resolves.toBeUndefined();
++  await expect(failing.loadSideNames()).resolves.toBeUndefined();
+ 
+-  expect(failing.remoteName.value).toBeNull();
++  expect(failing.sideNames.value).toEqual({ local: null, remote: null });
+   expect(failing.problem.value).toBeNull();
+   expect(warnings).toEqual([
+-    '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',
++    '[warn] store.side_names_failed {kind: "Unexpected", message: "ipc down"}',
+   ]);
+ });
+ 
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index c5bcaa4..731736e 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -7,14 +7,14 @@ import {
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
+-  type RemoteName,
+   type Side,
++  type SideNames,
+   type Theme,
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { changedOnDisk } from "./diskChanges";
+-import { loadRemoteName, refreshFiles } from "./listing";
++import { loadSideNames, refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
+ import { attempt, clearProblemAbout, logProblem, report } from "./problem";
+@@ -40,7 +40,7 @@ type Refs = {
+   readonly choices: ShallowRef<readonly FileSides[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+   readonly notices: ShallowRef<readonly Notice[]>;
+-  readonly remoteName: ShallowRef<RemoteName | null>;
++  readonly sideNames: ShallowRef<SideNames>;
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly settingsOpen: ShallowRef<boolean>;
+@@ -60,7 +60,7 @@ type Actions = Omit<CloseGuard, "markSaved"> &
+   SettingsActions & {
+     loadFiles(): Promise<void>;
+     refreshFiles(): Promise<void>;
+-    loadRemoteName(): Promise<void>;
++    loadSideNames(): Promise<void>;
+     open(path: string): Promise<void>;
+     pick(path: string): Promise<void>;
+     finish(request: FinishRequest): Promise<void>;
+@@ -91,7 +91,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
+     choices: shallowRef<readonly FileSides[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+     notices: shallowRef<readonly Notice[]>([]),
+-    remoteName: shallowRef<RemoteName | null>(null),
++    sideNames: shallowRef<SideNames>({ local: null, remote: null }),
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+     settingsOpen: shallowRef(false),
+@@ -122,7 +122,7 @@ function actions(state: State, buttons: HiddenButtons): Actions {
+     refreshFiles: async () => {
+       await refreshFiles(state, "running");
+     },
+-    loadRemoteName: () => loadRemoteName(state),
++    loadSideNames: () => loadSideNames(state),
+     open: (path) => open(state, path),
+     pick: async (path) => {
+       state.settingsOpen.value = false;
+-- 
+2.56.0
+

@@ -42,7 +42,7 @@ finish_file(path, text, disk_version)   -> WriteReply   Written{files} | Changed
 reset_file(path, disk_version)    -> WriteReply
 describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit), `disk_version`
 take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
-remote_name()                     -> Option<RemoteName>   Branch{name} | Commit{short_id, subject, message}, read once at open, #50
+side_names()                      -> SideNames { local, remote }   each SideName Branch{name} | Commit{short_id, subject, message} or null; HEAD's branch or commit, what is merged in; read once at open, #50/#62
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 load_settings(current: StoredSettings)          -> SettingsRead   the file in use, created from `current` when missing, never rewritten by a read, #57
 set_theme(current, theme: Theme)                -> SettingsRead   re-reads, replaces `theme`, writes; each settings command recolours the native window
