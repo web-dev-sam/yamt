@@ -2,7 +2,7 @@
 import { useEventListener } from "@vueuse/core";
 import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 
-import type { FileMergeData, Side } from "../ipc";
+import { pressesKey, type FileMergeData, type Side } from "../ipc";
 import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply } from "./deletedSide";
@@ -37,34 +37,29 @@ const {
   track,
   untrack,
   finish,
+  save,
   reset,
   takeSide,
   taken,
   sideNames,
   question,
   preferences,
+  settings,
   collapsing,
 } = useAppStore();
-const {
-  summary,
-  applyAllNonConflicting,
-  moveToChange,
-  undo,
-  redo,
-  historyKey,
-  resultText,
-  unsaved,
-  markSaved,
-} = useMergeController(
+const handle = useMergeController(
   () => props.data,
   { left, center, right, strips: [leftStrip, rightStrip] },
   { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing, servers: null },
 );
-const work: FileWork = { unsaved, markSaved };
+const { summary, unsaved, applyAllNonConflicting, moveToChange, undo, redo, historyKey, snapshot } =
+  handle;
+const work: FileWork = { unsaved: () => unsaved.value };
 if (props.data.deleted === null) {
   track(props.data.path, work);
 }
 useEventListener(window, "keydown", historyKeyInShownFile);
+useEventListener(window, "keydown", saveKeyInShownFile);
 
 const deletedView = computed(() => {
   const { deleted, path, middle } = props.data;
@@ -110,11 +105,11 @@ onUnmounted(() => {
 });
 
 function markResolved(): void {
-  const text = resultText();
-  if (text !== null && summary.value !== null) {
+  const result = snapshot();
+  if (result !== null && summary.value !== null) {
     void finish({
       path: props.data.path,
-      text,
+      snapshot: result,
       summary: summary.value,
       diskVersion: props.data.diskVersion,
     });
@@ -125,6 +120,20 @@ function historyKeyInShownFile(event: KeyboardEvent): void {
   if (props.shown && question.value === null) {
     historyKey(event);
   }
+}
+
+function saveKeyInShownFile(event: KeyboardEvent): void {
+  if (
+    !props.shown ||
+    question.value !== null ||
+    !editable.value ||
+    event.defaultPrevented ||
+    !pressesKey(event, settings.value.keys.bindings.save, navigator.platform)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  void save({ path: props.data.path, diskVersion: props.data.diskVersion, handle });
 }
 </script>
 
@@ -179,6 +188,13 @@ function historyKeyInShownFile(event: KeyboardEvent): void {
         >
           Reset
         </button>
+        <span
+          v-if="unsaved"
+          role="img"
+          title="Not saved"
+          aria-label="Not saved"
+          class="ml-auto size-2 shrink-0 rounded-full bg-fg"
+        />
       </div>
       <div class="col-start-4 row-start-1 border-b border-separator" />
 

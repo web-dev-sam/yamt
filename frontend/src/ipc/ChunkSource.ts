@@ -18,19 +18,17 @@ export type LanguageServerSettings = StoredSettings["languageServers"];
 export type RepositoryAnswer = LanguageServerSettings["repositories"][string];
 export type AddedServer = LanguageServerSettings["added"][number];
 
+export type WriteRequest = {
+  readonly path: string;
+  readonly text: string;
+  readonly diskVersion: DiskVersion;
+};
+
 export interface ChunkSource {
   listFiles(): Promise<SourceResult<FileList>>;
   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
-  finishFile(request: {
-    readonly path: string;
-    readonly text: string;
-    readonly diskVersion: DiskVersion;
-  }): Promise<SourceResult<WriteReply>>;
-  saveFile(request: {
-    readonly path: string;
-    readonly text: string;
-    readonly diskVersion: DiskVersion;
-  }): Promise<SourceResult<WriteReply>>;
+  finishFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
+  saveFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;

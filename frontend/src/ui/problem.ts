@@ -15,7 +15,7 @@ export type ProblemCause = SourceFailure | Unexpected;
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
   | {
-      readonly action: "open" | "finish" | "take" | "reset";
+      readonly action: "open" | "finish" | "save" | "take" | "reset";
       readonly path: string;
       readonly cause: ProblemCause;
     }
@@ -54,6 +54,7 @@ export function logProblem(problem: Problem): void {
     }
     case "open":
     case "finish":
+    case "save":
     case "take":
     case "reset":
       log.error(event, { path: problem.path, ...problem.cause });

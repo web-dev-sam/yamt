@@ -42,7 +42,7 @@ export type VisibleLines = { readonly first: number; readonly last: number };
 
 export type Steps = readonly TransactionSpec[];
 
-function sideLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): string[] {
+export function sideLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): string[] {
   return Array.from({ length: range.len }, (_, index) => doc.line(range.start + 1 + index).text);
 }
 

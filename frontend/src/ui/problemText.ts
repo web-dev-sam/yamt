@@ -14,6 +14,8 @@ function attempted(problem: Problem): string {
       return `Could not open ${problem.path}`;
     case "finish":
       return `Could not mark ${problem.path} as resolved`;
+    case "save":
+      return `Could not save ${problem.path}`;
     case "take":
       return `Could not resolve ${problem.path} with one side`;
     case "reset":

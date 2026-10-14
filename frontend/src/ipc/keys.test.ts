@@ -64,6 +64,7 @@ test("the actions are listed in the settings order", () => {
     "right-side",
     "undo",
     "redo",
+    "save",
     "find",
     "find-next",
     "find-previous",
@@ -90,6 +91,8 @@ test("the defaults are the keys yamt bound before settings existed", () => {
     // historyKey.ts historyCommand at 9b717cb: Mod-z, Mod-Shift-z, Mod-y (plan §2 #54)
     undo: ["Mod-z"],
     redo: ["Mod-Shift-z", "Mod-y"],
+    // plan §2 #65
+    save: ["Mod-s"],
     // find.ts:269-284 at 9b717cb (plan §2 #44)
     find: ["Mod-f"],
     "find-next": ["F3"],
@@ -188,6 +191,13 @@ test("pressesKey on macOS: ⌘B presses Mod-b, ⌃B does not", () => {
 
   expect(pressesKey(event({ key: "b", meta: true }), keys, MAC)).toBe(true);
   expect(pressesKey(event({ key: "b", ctrl: true }), keys, MAC)).toBe(false);
+});
+
+test("Save by default: Ctrl+S on Linux and ⌘S on macOS, not ⌃S on macOS (plan §2 #65)", () => {
+  expect(pressesKey(event({ key: "s", ctrl: true }), DEFAULT_KEYS.save, LINUX)).toBe(true);
+  expect(pressesKey(event({ key: "s", meta: true }), DEFAULT_KEYS.save, MAC)).toBe(true);
+  expect(pressesKey(event({ key: "s", ctrl: true }), DEFAULT_KEYS.save, MAC)).toBe(false);
+  expect(pressesKey(event({ key: "s" }), DEFAULT_KEYS.save, LINUX)).toBe(false);
 });
 
 test("Linux labels: Ctrl, Alt, Shift and WebStorm's key names", () => {

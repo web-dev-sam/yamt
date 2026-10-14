@@ -5,12 +5,11 @@ import type { Asking } from "./asking";
 import { unexpected } from "./problem";
 import { exitMustAsk } from "./question";
 
-export type FileWork = { unsaved(): boolean; markSaved(text: string): void };
+export type FileWork = { unsaved(): boolean };
 
 export type CloseGuard = {
   readonly track: (path: string, work: FileWork) => void;
   readonly untrack: (path: string, work: FileWork) => void;
-  readonly markSaved: (path: string, text: string) => void;
   readonly unsavedFiles: () => string[];
   readonly mayClose: () => Promise<boolean>;
   readonly watchWindowClose: () => Promise<void>;
@@ -41,9 +40,6 @@ export function createCloseGuard(
       if (work.get(path) === tracked) {
         work.delete(path);
       }
-    },
-    markSaved: (path, text) => {
-      work.get(path)?.markSaved(text);
     },
     unsavedFiles,
     mayClose,

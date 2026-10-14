@@ -582,7 +582,7 @@ test("finish marks the file resolved and logs its text once; reset returns it un
   expect(entries).toHaveLength(1);
 });
 
-test("save writes the file, logs its length and lines, and leaves it unresolved", async () => {
+test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
   const { log, entries } = quietLog();
   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
   const source = createFixtureSource(log, files);
@@ -601,7 +601,11 @@ test("save writes the file, logs its length and lines, and leaves it unresolved"
   });
 
   expect(entries).toEqual([
-    { level: "info", event: "fixture.save", fields: { path: "a.ts", length: 13, lines: 3 } },
+    {
+      level: "info",
+      event: "fixture.save",
+      fields: { path: "a.ts", text: "one\ntwo\nthree", length: 13, lines: 3 },
+    },
   ]);
   expect(valueOf(await source.listFiles()).files).toEqual(unresolved);
 });

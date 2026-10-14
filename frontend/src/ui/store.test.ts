@@ -24,7 +24,9 @@ import {
 } from "../ipc";
 import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
+import { problemText } from "./problemText";
 import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
+import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
 
 type PendingLoad = {
   readonly path: string;
@@ -32,7 +34,12 @@ type PendingLoad = {
   readonly reject: (error: Error) => void;
 };
 
-type FakeView = { text: string; saved: string; readonly work: FileWork };
+type FakeView = {
+  text: string;
+  saved: string;
+  readonly work: FileWork;
+  snapshot(): ResultSnapshot;
+};
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
 const NOTHING_LEFT = { conflicts: 0, changes: 0 };
@@ -138,15 +145,25 @@ function spyConsole(): { info: string[]; error: string[] } {
   return lines;
 }
 
+function shot(text: string): ResultSnapshot {
+  return { asShown: () => text, fileText: () => text, unsaved: true, markSaved: () => undefined };
+}
+
 function fakeView(store: AppStore, path: string, loaded: string): FakeView {
   const view: FakeView = {
     text: loaded,
     saved: loaded,
-    work: {
-      unsaved: () => view.text !== view.saved,
-      markSaved: (text) => {
-        view.saved = text;
-      },
+    work: { unsaved: () => view.text !== view.saved },
+    snapshot: () => {
+      const { text } = view;
+      return {
+        asShown: () => text,
+        fileText: () => `${text}(file)`,
+        unsaved: text !== view.saved,
+        markSaved: () => {
+          view.saved = text;
+        },
+      };
     },
   };
   store.track(path, view.work);
@@ -412,7 +429,7 @@ test("a finish with nothing left sends the text without asking, saves it, and op
 
   const finishing = store.finish({
     path: "a.ts",
-    text: "merged\r\n",
+    snapshot: view.snapshot(),
     summary: NOTHING_LEFT,
     diskVersion: VERSION_0,
   });
@@ -447,7 +464,12 @@ test("a finish of a file no longer shown does not switch files", async () => {
   await openNow(store, pending, "a.ts");
   await openNow(store, pending, "b.ts");
 
-  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+  await store.finish({
+    path: "a.ts",
+    snapshot: shot("a"),
+    summary: NOTHING_LEFT,
+    diskVersion: VERSION_0,
+  });
 
   expect(store.active.value).toBe("b.ts");
   expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
@@ -508,7 +530,7 @@ test.each([true, false])(
 
     const finishing = store.finish({
       path: "a.ts",
-      text: "a",
+      snapshot: shot("a"),
       summary: NOTHING_LEFT,
       diskVersion: VERSION_0,
     });
@@ -561,7 +583,12 @@ test("a file the user opens while a finish runs wins over the next file, though 
   const { store, pending, acting } = await openWhileActing(
     (answers) => ({ finishFile: () => answeredLater(answers) }),
     (shown) =>
-      shown.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: VERSION_0 }),
+      shown.finish({
+        path: "a.ts",
+        snapshot: shot("a"),
+        summary: NOTHING_LEFT,
+        diskVersion: VERSION_0,
+      }),
   );
 
   expect(pending.map((load) => load.path)).toEqual(["a.ts", "b.ts"]);
@@ -597,7 +624,12 @@ test("a finish with work left asks; Back writes nothing, Save writes the text", 
   });
   const summary = { conflicts: 1, changes: 2 };
 
-  const back = store.finish({ path: "a.ts", text: "first", summary, diskVersion: VERSION_0 });
+  const back = store.finish({
+    path: "a.ts",
+    snapshot: shot("first"),
+    summary,
+    diskVersion: VERSION_0,
+  });
   expect(store.question.value).toEqual({ kind: "unprocessed", summary });
   store.answer(false);
   await back;
@@ -605,7 +637,12 @@ test("a finish with work left asks; Back writes nothing, Save writes the text", 
   expect(store.question.value).toBeNull();
   expect(sent).toEqual([]);
 
-  const save = store.finish({ path: "a.ts", text: "second", summary, diskVersion: VERSION_0 });
+  const save = store.finish({
+    path: "a.ts",
+    snapshot: shot("second"),
+    summary,
+    diskVersion: VERSION_0,
+  });
   store.answer(true);
   await save;
 
@@ -628,7 +665,12 @@ test("a failed finish keeps the file shown, the list unresolved and the old save
   const shown = store.opened.value;
   view.text = "text";
 
-  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+  await store.finish({
+    path: "a.ts",
+    snapshot: view.snapshot(),
+    summary: NOTHING_LEFT,
+    diskVersion: VERSION_0,
+  });
 
   expect(store.files.value).toBe(before);
   expect(store.files.value).toEqual([entry("a.ts"), entry("b.ts")]);
@@ -655,7 +697,12 @@ test("a rejected finish is an Unexpected problem", async () => {
   });
 
   await expect(
-    store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 }),
+    store.finish({
+      path: "a.ts",
+      snapshot: shot("text"),
+      summary: NOTHING_LEFT,
+      diskVersion: VERSION_0,
+    }),
   ).resolves.toBeUndefined();
 
   expect(store.problem.value).toEqual({
@@ -685,14 +732,14 @@ test("the unsaved list names exactly the opened files whose text differs from lo
   c.text = "c finished\n";
   await store.finish({
     path: "c.ts",
-    text: "c finished\n",
+    snapshot: c.snapshot(),
     summary: NOTHING_LEFT,
     diskVersion: VERSION_0,
   });
   d.text = "d finished\n";
   await store.finish({
     path: "d.ts",
-    text: "d finished\n",
+    snapshot: d.snapshot(),
     summary: NOTHING_LEFT,
     diskVersion: VERSION_0,
   });
@@ -700,7 +747,7 @@ test("the unsaved list names exactly the opened files whose text differs from lo
 
   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
 
-  store.untrack("a.ts", { unsaved: () => true, markSaved: () => undefined });
+  store.untrack("a.ts", { unsaved: () => true });
   expect(store.unsavedFiles()).toEqual(["a.ts", "d.ts"]);
   store.untrack("a.ts", a.work);
   expect(store.unsavedFiles()).toEqual(["d.ts"]);
@@ -744,7 +791,12 @@ test("everything is resolved only when every listed file is", async () => {
   await loading;
   expect(store.allResolved.value).toBe(false);
 
-  await store.finish({ path: "b.ts", text: "b", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+  await store.finish({
+    path: "b.ts",
+    snapshot: shot("b"),
+    summary: NOTHING_LEFT,
+    diskVersion: VERSION_0,
+  });
 
   expect(store.allResolved.value).toBe(true);
 });
@@ -918,7 +970,12 @@ test("a reset landing in the background keeps another file's problem; a problem 
 
   expect(store.problem.value).toBe(gone);
 
-  await store.finish({ path: "a.ts", text: "text", summary: NOTHING_LEFT, diskVersion: VERSION_0 });
+  await store.finish({
+    path: "a.ts",
+    snapshot: shot("text"),
+    summary: NOTHING_LEFT,
+    diskVersion: VERSION_0,
+  });
   expect(store.problem.value).toEqual({ action: "finish", path: "a.ts", cause: git });
   const again = store.reset("a.ts", VERSION_0);
   resets[1]?.(written([entry("a.ts")]));
@@ -1352,9 +1409,9 @@ test("both side names are asked for once; a failure leaves none and logs a warni
 const STAGED: DiskResult = { kind: "Staged" };
 const TWO_LEFT: DiskResult = { kind: "MarkersLeft", conflicts: 2 };
 
-function rebuildingView(store: AppStore, path: string): FakeView {
+function rebuildingView(store: AppStore, path: string): Omit<FakeView, "snapshot"> {
   let built = store.opened.value.find((file) => file.path === path);
-  const view: FakeView = {
+  const view: Omit<FakeView, "snapshot"> = {
     text: "loaded\n",
     saved: "loaded\n",
     work: {
@@ -1366,9 +1423,6 @@ function rebuildingView(store: AppStore, path: string): FakeView {
           view.saved = "reloaded\n";
         }
         return view.text !== view.saved;
-      },
-      markSaved: (text) => {
-        view.saved = text;
       },
     },
   };
@@ -1572,7 +1626,7 @@ test("a finish refused because the file changed on disk saves nothing, stays, an
 
   await store.finish({
     path: "a.ts",
-    text: "merged\n",
+    snapshot: view.snapshot(),
     summary: NOTHING_LEFT,
     diskVersion: VERSION_0,
   });
@@ -1639,7 +1693,12 @@ test("finish, take and reset forward the disk version they are given", async () 
   await store.loadFiles();
   await store.open(LOGO);
 
-  await store.finish({ path: "a.ts", text: "a", summary: NOTHING_LEFT, diskVersion: seven });
+  await store.finish({
+    path: "a.ts",
+    snapshot: shot("a"),
+    summary: NOTHING_LEFT,
+    diskVersion: seven,
+  });
   await store.takeSide("a.ts", "local", seven);
   await store.reset(LOGO, LOGO_SIDES.diskVersion);
 
@@ -2264,4 +2323,295 @@ test("toggleCollapsing flips collapsing and keeps the choice in the window's sto
   } finally {
     setSSRHandler("getDefaultStorage", () => undefined);
   }
+});
+
+type SaveCall = [path: string, text: string, diskVersion: DiskVersion];
+
+function savingSource(
+  files: FileEntry[],
+  reply: (call: SaveCall) => Promise<SourceResult<WriteReply>>,
+): { source: ChunkSource; saves: SaveCall[]; calls: string[] } {
+  const saves: SaveCall[] = [];
+  const { source, calls } = choiceSource(
+    {
+      saveFile: ({ path, text, diskVersion }) => {
+        saves.push([path, text, diskVersion]);
+        return reply([path, text, diskVersion]);
+      },
+    },
+    files,
+  );
+  return { source, saves, calls };
+}
+
+function editorHandle(
+  view: FakeView,
+  format: () => Promise<FormatOutcome | null> = () => Promise.resolve(null),
+): Pick<MergeHandle, "format" | "snapshot"> {
+  return { format, snapshot: () => view.snapshot() };
+}
+
+const OXFMT: FormatOutcome = { kind: "formatted", server: "oxfmt" };
+
+test("save: Written writes the file text, marks what was sent as saved, and records the format outcome", async () => {
+  spyConsole();
+  const after = [entry("a.ts"), resolvedEntry("b.ts")];
+  const { source, saves } = savingSource([entry("a.ts"), entry("b.ts")], () =>
+    Promise.resolve(written(after)),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "loaded\n");
+  view.text = "typed\n";
+  const handle = editorHandle(view, () => {
+    view.text = "formatted\n";
+    return Promise.resolve(OXFMT);
+  });
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle });
+
+  expect(saves).toEqual([["a.ts", "formatted\n(file)", 0]]);
+  expect(view.saved).toBe("formatted\n");
+  expect(store.unsavedFiles()).toEqual([]);
+  expect(store.files.value).toEqual(after);
+  expect(store.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
+  expect(store.problem.value).toBeNull();
+});
+
+test("save of a file git already lists as resolved writes the Result as shown (plan §2 #69)", async () => {
+  spyConsole();
+  const { source, saves } = savingSource([resolvedEntry("a.ts")], () =>
+    Promise.resolve(written([resolvedEntry("a.ts")])),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "loaded\n");
+  view.text = "typed\n";
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+
+  expect(saves).toEqual([["a.ts", "typed\n", 0]]);
+  expect(view.saved).toBe("typed\n");
+});
+
+test("save without unsaved work formats but sends nothing", async () => {
+  spyConsole();
+  const { source, saves } = savingSource([entry("a.ts")], () =>
+    Promise.reject(new Error("not used")),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "loaded\n");
+  const format = vi.fn(() => Promise.resolve(OXFMT));
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view, format) });
+  await store.save({
+    path: "a.ts",
+    diskVersion: VERSION_0,
+    handle: { format, snapshot: () => null },
+  });
+
+  expect(format).toHaveBeenCalledTimes(2);
+  expect(saves).toEqual([]);
+  expect(store.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
+});
+
+test("save goes on whatever formatting answers, and an editor without an outcome records none", async () => {
+  spyConsole();
+  const { source, saves } = savingSource([entry("a.ts"), entry("b.ts")], () =>
+    Promise.resolve(written([entry("a.ts"), entry("b.ts")])),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const a = fakeView(store, "a.ts", "a\n");
+  const b = fakeView(store, "b.ts", "b\n");
+  a.text = "a typed\n";
+  b.text = "b typed\n";
+  const crashed: FormatOutcome = { kind: "failed", server: "oxfmt", message: "crashed" };
+
+  await store.save({
+    path: "a.ts",
+    diskVersion: VERSION_0,
+    handle: editorHandle(a, () => Promise.resolve(crashed)),
+  });
+  await store.save({ path: "b.ts", diskVersion: VERSION_0, handle: editorHandle(b) });
+
+  expect(saves).toEqual([
+    ["a.ts", "a typed\n(file)", 0],
+    ["b.ts", "b typed\n(file)", 0],
+  ]);
+  expect(store.unsavedFiles()).toEqual([]);
+  expect(store.formatOutcomes.value).toEqual(new Map([["a.ts", crashed]]));
+});
+
+test("a save while a write to the same file runs is ignored; typing during the write keeps the dot", async () => {
+  spyConsole();
+  const answers: Answer[] = [];
+  const { source, saves } = savingSource([entry("a.ts"), entry("b.ts")], () =>
+    answeredLater(answers),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const a = fakeView(store, "a.ts", "a\n");
+  const b = fakeView(store, "b.ts", "b\n");
+  a.text = "first\n";
+  b.text = "other file\n";
+  const format = vi.fn(() => Promise.resolve(null));
+
+  const first = store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(a) });
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+  a.text = "typed meanwhile\n";
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(a, format) });
+  const other = store.save({ path: "b.ts", diskVersion: VERSION_0, handle: editorHandle(b) });
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(2);
+  });
+  answers[0]?.(written([entry("a.ts"), entry("b.ts")]));
+  answers[1]?.(written([entry("a.ts"), entry("b.ts")]));
+  await Promise.all([first, other]);
+
+  expect(format).not.toHaveBeenCalled();
+  expect(saves.map(([path, text]) => [path, text])).toEqual([
+    ["a.ts", "first\n(file)"],
+    ["b.ts", "other file\n(file)"],
+  ]);
+  expect(a.saved).toBe("first\n");
+  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+
+  const again = store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(a) });
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(3);
+  });
+  answers[2]?.(written([entry("a.ts"), entry("b.ts")]));
+  await again;
+
+  expect(saves.at(-1)?.[1]).toBe("typed meanwhile\n(file)");
+  expect(store.unsavedFiles()).toEqual([]);
+});
+
+test.each(["reset", "finish"] as const)(
+  "a save while a %s of the same file runs is ignored",
+  async (action) => {
+    spyConsole();
+    const answers: Answer[] = [];
+    const { source: base, saves } = savingSource([entry("a.ts")], () =>
+      Promise.resolve(written([entry("a.ts")])),
+    );
+    const source: ChunkSource = {
+      ...base,
+      resetFile: () => answeredLater(answers),
+      finishFile: () => answeredLater(answers),
+    };
+    const store = createAppStore(source);
+    await store.loadFiles();
+    const view = fakeView(store, "a.ts", "a\n");
+    view.text = "typed\n";
+    const writing =
+      action === "reset"
+        ? store.reset("a.ts", VERSION_0)
+        : store.finish({
+            path: "a.ts",
+            snapshot: shot("typed\n"),
+            summary: NOTHING_LEFT,
+            diskVersion: VERSION_0,
+          });
+    await vi.waitFor(() => {
+      expect(answers).toHaveLength(1);
+    });
+
+    await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+    answers[0]?.(written([entry("a.ts")]));
+    await writing;
+    await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+
+    expect(saves).toEqual([["a.ts", "typed\n(file)", 0]]);
+  },
+);
+
+test("a finish that ends while a save of the same file runs leaves that save's claim in place", async () => {
+  spyConsole();
+  const answers: Answer[] = [];
+  const { source: base, saves } = savingSource([entry("a.ts")], () => answeredLater(answers));
+  const source: ChunkSource = {
+    ...base,
+    finishFile: () => Promise.resolve(written([entry("a.ts")])),
+  };
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "a\n");
+  view.text = "typed\n";
+
+  const saving = store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+  await store.finish({
+    path: "a.ts",
+    snapshot: shot("typed\n"),
+    summary: NOTHING_LEFT,
+    diskVersion: VERSION_0,
+  });
+  view.text = "typed again\n";
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+  answers[0]?.(written([entry("a.ts")]));
+  await saving;
+
+  expect(saves).toHaveLength(1);
+});
+
+test("a save refused because the file changed on disk marks nothing saved and shows the disk view", async () => {
+  spyConsole();
+  const files = [entry("a.ts"), entry("b.ts")];
+  const change: DiskChange = { path: "a.ts", result: TWO_LEFT };
+  const { source, calls } = savingSource(files, () =>
+    Promise.resolve(ok({ kind: "ChangedOnDisk", files, change })),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const [shown] = store.opened.value;
+  const view = fakeView(store, "a.ts", "loaded\n");
+  view.text = "typed\n";
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+
+  expect(view.saved).toBe("loaded\n");
+  expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
+  expect(store.opened.value[0]).not.toBe(shown);
+  expect(store.notices.value).toEqual([
+    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
+  ]);
+  expect(store.problem.value).toBeNull();
+});
+
+test("a failed save keeps the dot, is reported in words, and the next save clears it", async () => {
+  const lines = spyConsole();
+  const failure: SourceFailure = { kind: "WriteFailed", path: "a.ts", message: "disk full" };
+  const replies = [Promise.resolve<SourceResult<WriteReply>>({ ok: false, failure })];
+  const { source } = savingSource(
+    [entry("a.ts")],
+    () => replies.shift() ?? Promise.resolve(written([entry("a.ts")])),
+  );
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "loaded\n");
+  view.text = "typed\n";
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+
+  expect(view.saved).toBe("loaded\n");
+  expect(store.unsavedFiles()).toEqual(["a.ts"]);
+  expect(store.problem.value).toEqual({ action: "save", path: "a.ts", cause: failure });
+  expect(problemText({ action: "save", path: "a.ts", cause: failure }, LINUX)).toBe(
+    "Could not save a.ts: writing a.ts failed: disk full",
+  );
+  expect(lines.error).toEqual([
+    '[error] store.save_failed {path: "a.ts", kind: "WriteFailed", message: "disk full"}',
+  ]);
+
+  await store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) });
+
+  expect(store.problem.value).toBeNull();
+  expect(store.unsavedFiles()).toEqual([]);
 });

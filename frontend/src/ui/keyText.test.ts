@@ -54,6 +54,16 @@ test("giving Ctrl/⌘B to another action clashes with Toggle file list", () => {
   );
 });
 
+test("Save is named, acts anywhere in the shown file, and Ctrl/⌘S clashes with it (plan §2 #65)", () => {
+  expect(ACTION_NAMES.save).toBe("Save");
+  expect(ACTION_PLACES.save).toBe("anywhere in the shown file");
+  expect(KEYMAP_GROUPS[1]).toEqual({
+    title: "Anywhere in the file",
+    actions: ["undo", "redo", "save"],
+  });
+  expect(usedByText(keyOwners(DEFAULT_KEYS, "find", key("Mod-s")))).toBe("Already used by: Save");
+});
+
 test("the edit menu changes and removes each key by its label; default keys offer no reset", () => {
   const menu = keymapMenu("apply", DEFAULT_KEYS.apply, LINUX);
 

@@ -45,10 +45,10 @@ export function questionText(question: Question, platform: string): QuestionText
       };
     case "exit":
       return {
-        title: "Cancel File Merge",
-        message: "Are you sure you want to exit without applying changes?",
+        title: "Unsaved Changes",
+        message: "These files have changes that are not saved to disk. Exit without saving them?",
         files: question.files,
-        confirm: "Exit",
+        confirm: "Exit Without Saving",
         cancel: "Cancel",
       };
     case "clash":

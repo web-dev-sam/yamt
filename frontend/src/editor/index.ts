@@ -16,11 +16,12 @@ import type { PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
 import type { Direction } from "./internal/navigation";
-import { paneText, preferenceEffects } from "./internal/pane";
+import { preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
 import { paneDocs } from "./internal/paneDocs";
 import { createPaneViews, type ViewSources } from "./internal/paneViews";
 import { problemCounts, problemsField, type ProblemCounts } from "./internal/problems";
+import { SavedPoint, type ResultSnapshot } from "./internal/savedPoint";
 import { openResult, type ServerDoc } from "./internal/serverDoc";
 import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
@@ -34,6 +35,7 @@ export type { Direction } from "./internal/navigation";
 export type { FormatOutcome } from "./internal/format";
 export type { Preferences } from "./internal/pane";
 export type { ProblemCounts } from "./internal/problems";
+export type { ResultSnapshot } from "./internal/savedPoint";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 
@@ -63,6 +65,7 @@ export class MergeController {
   readonly #focus: SideFocus;
   readonly #frame: Frame;
   readonly #server: ServerDoc | null;
+  readonly #saved: SavedPoint;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
@@ -78,6 +81,8 @@ export class MergeController {
     this.#views = this.#createViews({ data, docs, hosts, language });
     this.#focus = this.#createFocus(data.deleted);
     this.#sides = { local: docs.left, remote: docs.right };
+    const center = () => this.#views.center.state;
+    this.#saved = new SavedPoint({ field: this.#field, sides: this.#sides, current: center });
     const press = this.#readOnly ? null : this.#press;
     this.#strips = new Strips(hosts.strips, press, this.#folds.hovered);
     this.#drag = this.#createDrag(hosts.strips);
@@ -108,13 +113,17 @@ export class MergeController {
     this.#server?.updated(update);
   });
 
+  readonly #savedSync = EditorView.updateListener.of((update) => {
+    this.#saved.updated(update);
+  });
+
   #createViews(sources: ViewSources): PaneViews {
     return createPaneViews(sources, {
       field: this.#field,
       folds: this.#folds,
       readOnly: this.#readOnly,
       settings: this.#settings,
-      center: [this.#repaint, this.#statusSync, problemsField, this.#serverSync],
+      center: [this.#repaint, this.#statusSync, problemsField, this.#serverSync, this.#savedSync],
       repaint: this.#repaint,
       run: (side, command) => {
         this.#focus.run(side, command);
@@ -231,8 +240,12 @@ export class MergeController {
     return command === "undo" ? this.undo() : this.redo();
   }
 
-  resultText(): string {
-    return paneText(this.#views.center.state);
+  snapshot(): ResultSnapshot {
+    return this.#saved.snapshot();
+  }
+
+  onUnsavedChange(listener: (unsaved: boolean) => void): void {
+    this.#saved.onUnsavedChange(listener);
   }
 
   summary(): MergeSummary {
@@ -257,6 +270,7 @@ export class MergeController {
 
   destroy(): void {
     this.#summaryListener = null;
+    this.#saved.onUnsavedChange(null);
     this.#destroyed = true;
     this.#server?.close();
     this.#frame.destroy();

@@ -208,7 +208,7 @@ function fixtureWrites(
     },
     async saveFile({ path, text }) {
       return updateKnown(records, path, () => {
-        log.info("fixture.save", { path, length: text.length, lines: lineCount(text) });
+        log.info("fixture.save", { path, text, length: text.length, lines: lineCount(text) });
       });
     },
     async resetFile(path) {

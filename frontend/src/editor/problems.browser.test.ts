@@ -263,12 +263,12 @@ test("format applies the formatter's result through the controller as one undo s
   servers.reply = (sent) => ({ kind: "formatted", server: "oxfmt", sent, result });
 
   const outcome = await controller.format();
-  const formatted = controller.resultText();
+  const formatted = controller.snapshot().asShown();
   controller.undo();
 
   expect(outcome).toEqual({ kind: "formatted", server: "oxfmt" });
   expect(formatted).toBe(result);
-  expect(controller.resultText()).toBe(MIDDLE);
+  expect(controller.snapshot().asShown()).toBe(MIDDLE);
 
   controller.destroy();
 });

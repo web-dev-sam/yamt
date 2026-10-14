@@ -27,6 +27,7 @@ function key(written: string): Key {
 test.each([
   ["open", `Could not open ${PATH}`],
   ["finish", `Could not mark ${PATH} as resolved`],
+  ["save", `Could not save ${PATH}`],
   ["take", `Could not resolve ${PATH} with one side`],
   ["reset", `Could not reset ${PATH}`],
 ] as const)("a failed %s names the file and what failed", (action, words) => {
@@ -67,6 +68,18 @@ test("WriteFailed names the path and the system's message", () => {
 test("NotAFile says nothing was written because the path is not a regular file", () => {
   expect(text(onFinish({ kind: "NotAFile", path: PATH }))).toBe(
     `Could not mark ${PATH} as resolved: ${PATH} is not a regular file on disk; nothing was written`,
+  );
+});
+
+test("a failed save says the file could not be saved, with the write's own cause", () => {
+  const said = text({
+    action: "save",
+    path: PATH,
+    cause: { kind: "WriteFailed", path: PATH, message: "Permission denied (os error 13)" },
+  });
+
+  expect(said).toBe(
+    `Could not save ${PATH}: writing ${PATH} failed: Permission denied (os error 13)`,
   );
 });
 

@@ -16,12 +16,19 @@ import {
   type MergeSummary,
   type Preferences,
   type ProblemCounts,
+  type ResultSnapshot,
   type Side,
 } from "../editor";
 import type { FileMergeData } from "../ipc";
 import type { LanguageServers } from "../lsp";
 
-export type { Direction, MergeSummary, Preferences } from "../editor";
+export type {
+  Direction,
+  FormatOutcome,
+  MergeSummary,
+  Preferences,
+  ResultSnapshot,
+} from "../editor";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -42,18 +49,15 @@ type ControllerOptions = {
 export type MergeHandle = {
   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
   readonly problems: Readonly<ShallowRef<ProblemCounts | null>>;
+  readonly unsaved: Readonly<ShallowRef<boolean>>;
   applyAllNonConflicting(side: Side): void;
   moveToChange(direction: Direction): void;
   undo(): void;
   redo(): void;
   historyKey(event: KeyboardEvent): boolean;
-  resultText(): string | null;
-  unsaved(): boolean;
-  markSaved(text: string): void;
+  snapshot(): ResultSnapshot | null;
   format(): Promise<FormatOutcome | null>;
 };
-
-type Loaded = { readonly controller: MergeController; saved: string };
 
 type HostElements = readonly [
   HTMLDivElement | null,
@@ -88,60 +92,49 @@ function createController(
 type Shown = {
   readonly summary: ShallowRef<MergeSummary | null>;
   readonly problems: ShallowRef<ProblemCounts | null>;
+  readonly unsaved: ShallowRef<boolean>;
 };
 
 function emptyShown(): Shown {
   return {
     summary: shallowRef<MergeSummary | null>(null),
     problems: shallowRef<ProblemCounts | null>(null),
+    unsaved: shallowRef(false),
   };
 }
 
 function reloaded(
-  previous: Loaded | null,
+  previous: MergeController | null,
   build: () => MergeController | null,
-  { summary, problems }: Shown,
-): Loaded | null {
-  previous?.controller.destroy();
+  { summary, problems, unsaved }: Shown,
+): MergeController | null {
+  previous?.destroy();
   const controller = build();
   summary.value = controller?.summary() ?? null;
   problems.value = controller?.problems() ?? null;
-  if (controller === null) {
-    return null;
-  }
-  controller.onSummaryChange((next) => {
+  unsaved.value = false;
+  controller?.onSummaryChange((next) => {
     summary.value = next;
   });
-  controller.onProblemsChange((next) => {
+  controller?.onProblemsChange((next) => {
     problems.value = next;
   });
-  return { controller, saved: controller.resultText() };
+  controller?.onUnsavedChange((next) => {
+    unsaved.value = next;
+  });
+  return controller;
 }
 
-function handleOf(
-  { summary, problems }: Pick<MergeHandle, "summary" | "problems">,
-  current: () => Loaded | null,
-): MergeHandle {
+function handleOf(shown: Shown, current: () => MergeController | null): MergeHandle {
   return {
-    summary,
-    problems,
-    applyAllNonConflicting: (side) => current()?.controller.applyAllNonConflicting(side),
-    moveToChange: (direction) => current()?.controller.moveToChange(direction),
-    undo: () => current()?.controller.undo(),
-    redo: () => current()?.controller.redo(),
-    historyKey: (event) => current()?.controller.historyKey(event) ?? false,
-    resultText: () => current()?.controller.resultText() ?? null,
-    unsaved: () => {
-      const loaded = current();
-      return loaded !== null && loaded.controller.resultText() !== loaded.saved;
-    },
-    markSaved: (text) => {
-      const loaded = current();
-      if (loaded !== null) {
-        loaded.saved = text;
-      }
-    },
-    format: () => current()?.controller.format() ?? Promise.resolve(null),
+    ...shown,
+    applyAllNonConflicting: (side) => current()?.applyAllNonConflicting(side),
+    moveToChange: (direction) => current()?.moveToChange(direction),
+    undo: () => current()?.undo(),
+    redo: () => current()?.redo(),
+    historyKey: (event) => current()?.historyKey(event) ?? false,
+    snapshot: () => current()?.snapshot() ?? null,
+    format: () => current()?.format() ?? Promise.resolve(null),
   };
 }
 
@@ -151,7 +144,7 @@ export function useMergeController(
   { readOnly, preferences, collapsed, servers }: ControllerOptions,
 ): MergeHandle {
   const shown = emptyShown();
-  let loaded: Loaded | null = null;
+  let controller: MergeController | null = null;
 
   watch(
     [
@@ -170,22 +163,22 @@ export function useMergeController(
         collapsed: toValue(collapsed),
         servers: currentServers,
       };
-      loaded = reloaded(loaded, () => createController(current, options, elements), shown);
+      controller = reloaded(controller, () => createController(current, options, elements), shown);
     },
     { immediate: true, flush: "post" },
   );
 
   watch(toRef(preferences), (next) => {
-    loaded?.controller.setPreferences(next);
+    controller?.setPreferences(next);
   });
 
   watch(toRef(collapsed), (on) => {
-    loaded?.controller.setCollapsed(on);
+    controller?.setCollapsed(on);
   });
 
   onScopeDispose(() => {
-    loaded = reloaded(loaded, () => null, shown);
+    controller = reloaded(controller, () => null, shown);
   });
 
-  return handleOf(shown, () => loaded);
+  return handleOf(shown, () => controller);
 }

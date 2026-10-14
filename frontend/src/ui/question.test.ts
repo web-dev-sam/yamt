@@ -35,7 +35,7 @@ test("the unprocessed sentence names only the non-zero counts with singular and 
   expect(unprocessed(5, 0)).not.toContain("change");
 });
 
-test("each question carries WebStorm's title and buttons, and the exit one lists its files", () => {
+test("the unprocessed question carries WebStorm's title and buttons", () => {
   expect(
     questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }, LINUX),
   ).toMatchObject({
@@ -44,11 +44,14 @@ test("each question carries WebStorm's title and buttons, and the exit one lists
     confirm: "Save Current Result",
     cancel: "Back to Resolving",
   });
-  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toMatchObject({
-    title: "Cancel File Merge",
-    message: "Are you sure you want to exit without applying changes?",
+});
+
+test("the exit question says the listed files are not saved to disk (plan §2 #69)", () => {
+  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toEqual({
+    title: "Unsaved Changes",
+    message: "These files have changes that are not saved to disk. Exit without saving them?",
     files: ["src/App.vue", "a.ts"],
-    confirm: "Exit",
+    confirm: "Exit Without Saving",
     cancel: "Cancel",
   });
 });

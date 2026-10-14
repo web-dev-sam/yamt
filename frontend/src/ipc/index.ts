@@ -8,6 +8,7 @@ export type {
   LanguageServerSettings,
   RepositoryAnswer,
   SettingsSource,
+  WriteRequest,
 } from "./ChunkSource";
 export type {
   Antialiasing,

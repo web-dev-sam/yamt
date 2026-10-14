@@ -18,6 +18,7 @@ const editor = vi.hoisted(() => {
     servers: new Array<unknown>(),
     counts: { errors: 0, warnings: 0, other: 0 },
     countsListener: (_counts: Counts): void => {},
+    unsavedListener: (_unsaved: boolean): void => {},
   };
   class MergeController {
     readonly #id: number;
@@ -58,8 +59,12 @@ const editor = vi.hoisted(() => {
     setCollapsed(on: boolean): void {
       state.collapsed.push(`${this.#id} set ${on}`);
     }
-    resultText(): string {
-      return state.text;
+    snapshot(): { asShown(): string; editor: number } {
+      const text = state.text;
+      return { asShown: () => text, editor: this.#id };
+    }
+    onUnsavedChange(listener: (unsaved: boolean) => void): void {
+      state.unsavedListener = listener;
     }
     destroy(): void {
       state.destroyed += 1;
@@ -83,6 +88,7 @@ afterEach(() => {
     servers: [],
     counts: { errors: 0, warnings: 0, other: 0 },
     countsListener: () => {},
+    unsavedListener: () => {},
   });
 });
 
@@ -123,42 +129,39 @@ async function fileData(text: string): Promise<FileMergeData> {
   return { ...(await loadFixture("vueuse-use-magic-keys.ts")), middle: { kind: "Disk", text } };
 }
 
-test("unsaved: false when built, true after an edit, false after markSaved, false after the file changed on disk", async () => {
+test("unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change", async () => {
   const data = shallowRef<FileMergeData | null>(await fileData("git's merge\n"));
   const { scope, handle } = mount(data);
   await nextTick();
 
   expect(editor.state.built).toBe(1);
-  expect(handle.resultText()).toBe("git's merge\n");
-  expect(handle.unsaved()).toBe(false);
+  expect(handle.snapshot()?.asShown()).toBe("git's merge\n");
+  expect(handle.unsaved.value).toBe(false);
 
-  editor.state.text = "edited\n";
-  expect(handle.unsaved()).toBe(true);
+  editor.state.unsavedListener(true);
+  expect(handle.unsaved.value).toBe(true);
 
-  handle.markSaved("edited\n");
-  expect(handle.unsaved()).toBe(false);
+  editor.state.unsavedListener(false);
+  expect(handle.unsaved.value).toBe(false);
 
-  editor.state.text = "typed in yamt\n";
-  expect(handle.unsaved()).toBe(true);
-
+  editor.state.unsavedListener(true);
   data.value = await fileData("changed on disk\n");
   await nextTick();
 
-  expect(editor.state).toMatchObject({
-    text: "changed on disk\n",
-    built: 2,
-    destroyed: 1,
-    readOnly: [false, false],
-  });
-  expect(handle.resultText()).toBe("changed on disk\n");
-  expect(handle.unsaved()).toBe(false);
+  expect(editor.state).toMatchObject({ built: 2, destroyed: 1, readOnly: [false, false] });
+  expect(handle.snapshot()).toMatchObject({ editor: 2 });
+  expect(handle.snapshot()?.asShown()).toBe("changed on disk\n");
+  expect(handle.unsaved.value).toBe(false);
 
+  editor.state.unsavedListener(true);
   scope.stop();
 
   expect(editor.state.destroyed).toBe(2);
+  expect(handle.snapshot()).toBeNull();
+  expect(handle.unsaved.value).toBe(false);
 });
 
-test("without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored", async () => {
+test("without data or hosts there is no editor: no snapshot, nothing unsaved", async () => {
   const empty = mount(shallowRef<FileMergeData | null>(null));
   const hostless = mount(shallowRef<FileMergeData | null>(await fileData("loaded\n")), {
     present: false,
@@ -166,9 +169,8 @@ test("without data or hosts there is no editor: no text, nothing unsaved, markSa
   await nextTick();
 
   for (const { handle } of [empty, hostless]) {
-    handle.markSaved("x");
-    expect(handle.resultText()).toBeNull();
-    expect(handle.unsaved()).toBe(false);
+    expect(handle.snapshot()).toBeNull();
+    expect(handle.unsaved.value).toBe(false);
     expect(handle.summary.value).toBeNull();
   }
   expect(editor.state.built).toBe(0);

@@ -1,23 +1,6 @@
 import type { StoredSettings } from "./domain";
 
-export type KeyAction =
-  | "apply"
-  | "ignore"
-  | "next-change"
-  | "previous-change"
-  | "left-side"
-  | "right-side"
-  | "undo"
-  | "redo"
-  | "find"
-  | "find-next"
-  | "find-previous"
-  | "close-find"
-  | "indent"
-  | "outdent"
-  | "toggle-file-list";
-
-export const KEY_ACTIONS: readonly KeyAction[] = [
+export const KEY_ACTIONS = [
   "apply",
   "ignore",
   "next-change",
@@ -26,6 +9,7 @@ export const KEY_ACTIONS: readonly KeyAction[] = [
   "right-side",
   "undo",
   "redo",
+  "save",
   "find",
   "find-next",
   "find-previous",
@@ -33,7 +17,9 @@ export const KEY_ACTIONS: readonly KeyAction[] = [
   "indent",
   "outdent",
   "toggle-file-list",
-];
+] as const;
+
+export type KeyAction = (typeof KEY_ACTIONS)[number];
 
 export type KeyName = string & { readonly __brand: "KeyName" };
 
@@ -206,6 +192,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   "right-side": defaultKeys("ArrowRight"),
   undo: defaultKeys("Mod-z"),
   redo: defaultKeys("Mod-Shift-z", "Mod-y"),
+  save: defaultKeys("Mod-s"),
   find: defaultKeys("Mod-f"),
   "find-next": defaultKeys("F3"),
   "find-previous": defaultKeys("Shift-F3"),
