@@ -15,6 +15,7 @@
       "frontend/src/ui/settings.test.ts",
       "frontend/src/ui/AGENTS.md",
       "frontend/src/main.ts",
+      "frontend/src/lsp/index.ts",
       "scripts/conflict-repo.sh",
       "scripts/lsp-repo.sh"
     ]
