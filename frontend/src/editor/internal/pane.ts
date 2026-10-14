@@ -37,6 +37,7 @@ import {
 import { tags } from "@lezer/highlight";
 
 import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+import { cutOnce } from "./cutOnce";
 import { find, findKeys, findKeysCompartment } from "./find";
 import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
@@ -250,6 +251,7 @@ export function paneState(pane: {
       lineNumbers(),
       lineSeparator(pane.eol),
       drawSelection(),
+      cutOnce(),
       selectionOverTints,
       paneTheme,
       themeCompartment.of(darkFlag(preferences.theme)),
