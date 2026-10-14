@@ -437,6 +437,40 @@ row 3 adds the wave in the strips on top of it once row 2's first round is commi
 | 3   | 3.U-strips: the wave joined across both strips (`briefs/3.U-strips.md`, `-rework-1.md`, `-rework-2.md`)                                                                                       | web-impl | accepted | round 1 `e58e941` (`UnchangedStrips`): `waveJoinPath`, `waveRows`, `wavePaints`; joins level at the wave centres, S-curves when clamped; scroll timing no worse; `connectors` mutants 173/174 (1 equivalent). Boundary fail (#839 → panes rework 1; #841, #842 promoted; #843 docs; #844, #845 dropped), correctness pass (#846 with #839, #847 dropped) → rework 1 `e25a8ee` (`STRIP_PANES`, `stripIcons.ts`, one `dropMissing`; markup identical), re-check fail #850 → rework 2 `d6ea368` (no re-export), re-check pass                                                                                                                                                                  |
 | 4   | final run (`briefs/3.U-verify.md`): `just check`, `just mutants 72e68d1`, the real app                                                                                                        | verifier | done     | `UnchangedVerify` at `fb4b30c`, gate **pass** (notes `.omp/run/notes/UnchangedVerify.md`): `just check` 0 (377 Rust + 1 skipped, 743 web, 10 goldens, map/arch ok, hooks 16/16); mutants: no Rust, `connectors` 173/174, the survivor equivalent. Real app (Xvfb, real X input): waves per run in all panes, hover 5 nodes, clicks 4/8/all from pane, strip and side, keyboard kept, find reveal aligned, Delete/Backspace/Ctrl+Shift+K/Ctrl+X on a wave cut nothing, one Ctrl+X one line, hidden runs byte-identical in the written file, light/dark colours, scroll no slower. Offset waves with S-curve joins below a one-sided deletion ruled as plan #63; #853 hook note for the retro |
 
+## Unchanged lines, part 2 — one unbroken wave, a toolbar toggle (session 14)
+
+Owner (#854): "the connector line is 3px too low, I dont wanna just slap a transform onto it because I dont know the
+reason and want it consistent accross devices". Owner (#855): "make the collapsed lines a tool to use as a button from
+the top menu bar and add it to the right-click menu option to hide and show the button. The button toggles the
+collapsing feature. If user extends some lines to show more code and then toggles off->on its like resetting the
+expanded/collapsed areas, it does not remember the last expanded state."
+
+Cause of #854 (orchestrator, measured on `/tmp/uv/zoom-joins.png`): not a height error. Each pane's wave tile starts at
+its crest from the pane's left edge, while every strip join starts and ends on the centre line, so the join ends 3 px
+below the next pane's wave; at a pane's right edge the step depends on the pane's width mod 20 px (window, screen,
+scrollbar). WebStorm fixes the phase at the edge next to the divider (`DiffLineSeparatorRenderer.getStartPhase`).
+
+Acceptance: in WebKit and in the real app with real input — at all four pane–strip edges the pane wave and the join
+meet at one point heading the same way (level joins and S-curves, 1 px and 2 px), at two window widths, with the file
+list shown and hidden, at two device pixel ratios, no offset constant; a "Collapse unchanged fragments" toggle after
+"Next change" shows pressed while on; off shows every hidden line of every opened file, on collapses every run to its
+start (4 lines kept) whatever clicks had shown; files opened later follow it; it is remembered across restarts in the
+window's storage (unreadable → on); the right-click menu lists it and hiding it keeps collapsing as it was; a cursor
+inside lines it hides moves to the wave line; the middle's top line stays and the sides re-align at once; not in undo.
+Non-goals: a key, a settings-view entry, changing the 4 lines, a separate "expand all", remembering shown runs, Rust or
+IPC changes.
+
+Slices (plan §2 #64, #68): row 1 designs both parts; row 2 builds first and row 3 starts once row 2's round 1 is
+committed (both touch `foldView.ts`, and the toggle needs `wavePhase.ts` to type-check); each patch: commit, both
+reviews, then one final run.
+
+| row | slice                                                                                           | owner    | status  | evidence                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design: wave phase at the strip edges; the collapse toggle (`briefs/3.V-wave-toggle-design.md`) | designer | done    | `WaveToggleDesign` (notes `.omp/run/notes/WaveToggleDesign.md`): A1 (phase pinned at each strip's measured edge, the middle stretched to k+½ waves, CSS variables from a `ResizeObserver`) + B1 (every level kept plus a hidden-step count; on/off in the window's storage with its own channel); its open question answered in #68 |
+| 2   | 3.V-phase: the wave unbroken at the four pane–strip edges (`briefs/3.V-phase.md`)               | web-impl | running |                                                                                                                                                                                                                                                                                                                                     |
+| 3   | 3.V-toggle: the toolbar toggle, its storage, collapse/show all                                  | web-impl | pending |                                                                                                                                                                                                                                                                                                                                     |
+| 4   | final run: `just check`, `just mutants 173099a`, the real app                                   | verifier | pending |                                                                                                                                                                                                                                                                                                                                     |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
