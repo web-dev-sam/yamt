@@ -70,7 +70,7 @@ afterEach(() => {
 });
 
 function createAppStore(source: ChunkSource): AppStore {
-  return createStoreWithTheme(source, "dark", new LanguageServers(null));
+  return createStoreWithTheme(source, "dark", new LanguageServers(null), null);
 }
 
 function entry(path: string): FileEntry {
@@ -186,7 +186,12 @@ test("useAppStore throws before createAppStore, then returns the created store",
   const fresh = await import("./store");
   expect(() => fresh.useAppStore()).toThrow("useAppStore() called before createAppStore()");
 
-  const created = fresh.createAppStore(handSource([]).source, "dark", new LanguageServers(null));
+  const created = fresh.createAppStore(
+    handSource([]).source,
+    "dark",
+    new LanguageServers(null),
+    null,
+  );
 
   expect(fresh.useAppStore()).toBe(created);
 });
@@ -1820,7 +1825,12 @@ function settingsSource(overrides: Partial<ChunkSource>): {
 }
 
 test("settings start with the start theme and the default keys, before any file is read", () => {
-  const store = createStoreWithTheme(handSource([]).source, "light", new LanguageServers(null));
+  const store = createStoreWithTheme(
+    handSource([]).source,
+    "light",
+    new LanguageServers(null),
+    null,
+  );
 
   expect(store.settings.value).toEqual({
     read: null,

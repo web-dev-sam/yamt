@@ -92,41 +92,50 @@ function sameTexts(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((text, index) => text === b[index]);
 }
 
+function sameAdded(a: AddedServer, b: AddedServer): boolean {
+  const { command, fileTypes, ...rest } = a;
+  rest satisfies Record<string, never>;
+  return sameTexts(command, b.command) && sameTexts(fileTypes, b.fileTypes);
+}
+
 function sameServers(a: LanguageServerSettings, b: LanguageServerSettings): boolean {
-  const answers = Object.entries(a.repositories);
+  const { repositories, added, ...rest } = a;
+  rest satisfies Record<string, never>;
+  const answers = Object.entries(repositories);
   return (
     answers.length === Object.keys(b.repositories).length &&
     answers.every(([root, answer]) => b.repositories[root] === answer) &&
-    a.added.length === b.added.length &&
-    a.added.every((server, index) => {
+    added.length === b.added.length &&
+    added.every((server, index) => {
       const other = b.added[index];
-      return (
-        other !== undefined &&
-        sameTexts(server.command, other.command) &&
-        sameTexts(server.fileTypes, other.fileTypes)
-      );
+      return other !== undefined && sameAdded(server, other);
+    })
+  );
+}
+
+function sameKeys(before: StoredSettings["keys"], after: StoredSettings["keys"]): boolean {
+  const entries = Object.entries(before);
+  return (
+    entries.length === Object.keys(after).length &&
+    entries.every(([action, texts]) => {
+      const now = after[action];
+      return now !== undefined && sameTexts(texts, now);
     })
   );
 }
 
 function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
-  if (
-    inUse === null ||
-    inUse.path !== read.path ||
-    inUse.stored.theme !== read.stored.theme ||
-    inUse.stored.antialiasing !== read.stored.antialiasing ||
-    !sameServers(inUse.stored.languageServers, read.stored.languageServers)
-  ) {
+  if (inUse === null || inUse.path !== read.path) {
     return false;
   }
-  const before = Object.entries(inUse.stored.keys);
-  const after = read.stored.keys;
+  const { theme, antialiasing, keys, languageServers, ...rest } = read.stored;
+  rest satisfies Record<string, never>;
+  const before = inUse.stored;
   return (
-    before.length === Object.keys(after).length &&
-    before.every(([action, texts]) => {
-      const now = after[action];
-      return now !== undefined && sameTexts(texts, now);
-    })
+    theme === before.theme &&
+    antialiasing === before.antialiasing &&
+    sameServers(before.languageServers, languageServers) &&
+    sameKeys(before.keys, keys)
   );
 }
 

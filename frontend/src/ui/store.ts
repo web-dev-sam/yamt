@@ -7,6 +7,7 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type ServerHost,
   type Side,
   type SideNames,
   type Theme,
@@ -25,6 +26,7 @@ import { afterWrite, createSaving, finish, whileWriting } from "./saving";
 import type { FinishRequest, Saving, Writing } from "./saving";
 import type { Screen } from "./screen";
 import { createServers, type Servers } from "./servers";
+import { createServerSetup, type ServerSetup } from "./serverSetup";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
@@ -85,7 +87,8 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
 } & Actions &
   Collapsing &
   Saving &
-  Servers;
+  Servers &
+  ServerSetup;
 
 let store: AppStore | null = null;
 
@@ -109,6 +112,7 @@ export function createAppStore(
   source: ChunkSource,
   startTheme: Theme,
   servers: LanguageServers,
+  host: ServerHost | null,
 ): AppStore {
   const refs = createRefs(startTheme);
   const asking = createAsking();
@@ -136,6 +140,7 @@ export function createAppStore(
     ...createCollapsing(),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
+    ...createServerSetup({ ...state, host, servers, ...settingsActions(state) }),
   };
   return store;
 }
@@ -172,11 +177,7 @@ function actions(state: State, buttons: HiddenButtons): Actions {
     fileListKey: (event, platform) => {
       fileListKey(state, event, platform);
     },
-    track: state.guard.track,
-    untrack: state.guard.untrack,
-    unsavedFiles: state.guard.unsavedFiles,
-    mayClose: state.guard.mayClose,
-    watchWindowClose: state.guard.watchWindowClose,
+    ...state.guard,
     ...settingsActions(state),
   };
 }

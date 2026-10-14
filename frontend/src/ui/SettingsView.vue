@@ -5,6 +5,7 @@ import ArrowLeft from "~icons/lucide/arrow-left";
 import type { Antialiasing, Theme } from "../ipc";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import KeymapList from "./KeymapList.vue";
+import LanguageServerSettings from "./LanguageServerSettings.vue";
 import { showsAntialiasing } from "./settings";
 import { useAppStore } from "./store";
 
@@ -89,6 +90,10 @@ async function moveToDefault(): Promise<void> {
       <section aria-labelledby="settings-keymap">
         <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>
         <KeymapList />
+      </section>
+      <section aria-labelledby="settings-servers">
+        <h3 id="settings-servers" class="mb-2 font-semibold">Language servers</h3>
+        <LanguageServerSettings />
       </section>
       <section aria-labelledby="settings-file">
         <h3 id="settings-file" class="mb-2 font-semibold">Settings file</h3>

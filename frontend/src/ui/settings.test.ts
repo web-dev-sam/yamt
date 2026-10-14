@@ -177,6 +177,18 @@ test.each<[string, LanguageServerSettings]>([
   expect(target.settings.value.languageServers).toEqual(changed);
 });
 
+test("a load whose only difference is the action a key belongs to is adopted", async () => {
+  const { actions, target } = settingsTarget([
+    { ...startStored(), keys: { undo: ["Alt-U"] } },
+    { ...startStored(), keys: { redo: ["Alt-U"] } },
+  ]);
+  await actions.loadSettings();
+
+  await actions.loadSettings();
+
+  expect(target.settings.value.read?.stored.keys).toEqual({ redo: ["Alt-U"] });
+});
+
 test("a load of the same servers entry keeps the settings in use", async () => {
   const { actions, target } = settingsTarget([
     { ...startStored(), languageServers: structuredClone(SERVERS) },

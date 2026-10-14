@@ -26,10 +26,12 @@ const {
   pick,
   refreshFiles,
   loadSettings,
+  findServers,
   settings,
   dismissProblem,
   dismissNotice,
   answer,
+  dismissQuestion,
   watchWindowClose,
   fileListKey,
 } = useAppStore();
@@ -39,10 +41,10 @@ useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
 
-watch(focused, (now) => {
+watch(focused, async (now) => {
   if (now) {
-    void refreshFiles();
-    void loadSettings();
+    await Promise.all([refreshFiles(), loadSettings()]);
+    await findServers();
   }
 });
 watch(
@@ -55,7 +57,6 @@ watch(
 
 onMounted(() => {
   void watchWindowClose();
-  void loadSettings();
 });
 </script>
 
@@ -93,6 +94,11 @@ onMounted(() => {
         />
       </div>
     </div>
-    <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />
+    <QuestionDialog
+      v-if="question !== null"
+      :question="question"
+      @answer="answer"
+      @dismiss="dismissQuestion"
+    />
   </div>
 </template>

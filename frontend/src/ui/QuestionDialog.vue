@@ -4,7 +4,7 @@ import { computed, onMounted, useTemplateRef } from "vue";
 import { questionText, type Question } from "./question";
 
 const props = defineProps<{ question: Question }>();
-const emit = defineEmits<{ answer: [yes: boolean] }>();
+const emit = defineEmits<{ answer: [yes: boolean]; dismiss: [] }>();
 
 const dialog = useTemplateRef<HTMLDialogElement>("dialog");
 
@@ -14,9 +14,9 @@ onMounted(() => {
   dialog.value?.showModal();
 });
 
-function cancel(event: Event): void {
+function dismiss(event: Event): void {
   event.preventDefault();
-  emit("answer", false);
+  emit("dismiss");
 }
 </script>
 
@@ -25,16 +25,20 @@ function cancel(event: Event): void {
     ref="dialog"
     aria-labelledby="question-title"
     class="m-auto w-[30rem] rounded-lg border border-control-border bg-panel p-5 text-fg"
-    @cancel="cancel"
+    @cancel="dismiss"
   >
     <h2 id="question-title" class="mb-3 font-semibold">{{ text.title }}</h2>
     <p>{{ text.message }}</p>
     <ul
-      v-if="text.files.length > 0"
+      v-if="text.list.kind === 'files' && text.list.files.length > 0"
       class="mt-2 max-h-40 overflow-y-auto opaque-scroller font-mono"
     >
-      <li v-for="file in text.files" :key="file" class="truncate">{{ file }}</li>
+      <li v-for="file in text.list.files" :key="file" class="truncate">{{ file }}</li>
     </ul>
+    <ul v-else-if="text.list.kind === 'servers'" class="mt-2 list-disc pl-5">
+      <li v-for="line in text.list.lines" :key="line">{{ line }}</li>
+    </ul>
+    <p v-if="text.note !== null" class="mt-3 text-fg-muted">{{ text.note }}</p>
     <div class="mt-5 flex justify-end gap-2">
       <button
         type="button"

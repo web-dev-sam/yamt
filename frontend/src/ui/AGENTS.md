@@ -1,3 +1,5 @@
 Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()`; the single editor seam is `useMergeController`. Section order enforced by `scripts/check-sfc-order.ts`.
 
 Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`.
+
+Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` runs detection once the first file list and the settings are in (`main.ts`), asks the question when the repository (the host context's root) has no answer (Escape stores nothing), and runs it again on window focus without asking; every answer or added-server change calls `setSpecs` again. Fixture mode (no host) does none of this. Its Settings section is `LanguageServerSettings.vue`; the question's words are in `question.ts`.

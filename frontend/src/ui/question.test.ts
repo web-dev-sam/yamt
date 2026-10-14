@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { parseKey } from "../ipc";
-import { exitMustAsk, finishMustAsk, questionText } from "./question";
+import type { ServerSpec } from "../lsp";
+import { exitMustAsk, finishMustAsk, projectLabel, questionText } from "./question";
 
 const LINUX = "Linux x86_64";
 
@@ -40,7 +41,8 @@ test("the unprocessed question carries WebStorm's title and buttons", () => {
     questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }, LINUX),
   ).toMatchObject({
     title: "Unprocessed Changes",
-    files: [],
+    list: { kind: "none" },
+    note: null,
     confirm: "Save Current Result",
     cancel: "Back to Resolving",
   });
@@ -50,7 +52,8 @@ test("the exit question says the listed files are not saved to disk (plan §2 #6
   expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toEqual({
     title: "Unsaved Changes",
     message: "These files have changes that are not saved to disk. Exit without saving them?",
-    files: ["src/App.vue", "a.ts"],
+    list: { kind: "files", files: ["src/App.vue", "a.ts"] },
+    note: null,
     confirm: "Exit Without Saving",
     cancel: "Cancel",
   });
@@ -66,11 +69,75 @@ test("the clash question names the key in the platform's words, its owner and th
   expect(questionText(clash, LINUX)).toEqual({
     title: "Key Already in Use",
     message: "Ctrl+F is already used by Find. Move it to Undo?",
-    files: [],
+    list: { kind: "none" },
+    note: null,
     confirm: "Move",
     cancel: "Cancel",
   });
   expect(questionText(clash, "MacIntel").message).toBe(
     "⌘F is already used by Find. Move it to Undo?",
   );
+});
+
+function spec(name: string, project: string, installed = true): ServerSpec {
+  return {
+    name,
+    command: { program: name, args: [] },
+    project,
+    fileTypes: ["ts"],
+    formats: false,
+    settings: null,
+    initializationOptions: null,
+    install: installed
+      ? null
+      : {
+          package: "typescript-language-server",
+          program: "typescript-language-server",
+          folder: project,
+          manager: "pnpm",
+          reason: { kind: "typescript", version: "5.9.3" },
+        },
+  };
+}
+
+test("the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67)", () => {
+  const found = [
+    spec("oxfmt", "frontend"),
+    spec("oxlint", "frontend"),
+    spec("TypeScript", "frontend", false),
+    spec("oxlint (repository root)", ""),
+  ];
+  const added = [spec("pylsp", ""), spec("gopls", "")];
+
+  expect(questionText({ kind: "servers", found, added }, LINUX)).toEqual({
+    title: "Language Servers",
+    message: "Start this project's language servers?",
+    list: {
+      kind: "servers",
+      lines: [
+        "oxfmt, oxlint, TypeScript (not installed) — frontend/",
+        "oxlint (repository root) — repository root",
+        "pylsp, gopls — added by you",
+      ],
+    },
+    note: "yamt remembers your answer for this repository. You can change it in Settings.",
+    confirm: "Start",
+    cancel: "Don't start",
+  });
+  expect(
+    questionText({ kind: "servers", found: [], added: [spec("pylsp", "")] }, LINUX).list,
+  ).toEqual({ kind: "servers", lines: ["pylsp — added by you"] });
+  expect(questionText({ kind: "servers", found, added: [] }, LINUX).list).toEqual({
+    kind: "servers",
+    lines: [
+      "oxfmt, oxlint, TypeScript (not installed) — frontend/",
+      "oxlint (repository root) — repository root",
+    ],
+  });
+});
+
+test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+  expect(projectLabel("frontend")).toBe("frontend/");
+  expect(projectLabel("packages/web")).toBe("packages/web/");
+  expect(projectLabel("")).toBe("repository root");
 });

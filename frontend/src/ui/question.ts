@@ -1,4 +1,5 @@
 import { keyLabel } from "../ipc";
+import type { ServerSpec } from "../lsp";
 import type { Clash } from "./keymapEdit";
 import { ACTION_NAMES } from "./keyText";
 import type { MergeSummary } from "./useMergeController";
@@ -6,15 +7,52 @@ import type { MergeSummary } from "./useMergeController";
 export type Question =
   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
   | { readonly kind: "exit"; readonly files: readonly string[] }
-  | ({ readonly kind: "clash" } & Clash);
+  | ({ readonly kind: "clash" } & Clash)
+  | {
+      readonly kind: "servers";
+      readonly found: readonly ServerSpec[];
+      readonly added: readonly ServerSpec[];
+    };
+
+type QuestionList =
+  | { readonly kind: "none" }
+  | { readonly kind: "files"; readonly files: readonly string[] }
+  | { readonly kind: "servers"; readonly lines: readonly string[] };
 
 export type QuestionText = {
   readonly title: string;
   readonly message: string;
-  readonly files: readonly string[];
+  readonly list: QuestionList;
+  readonly note: string | null;
   readonly confirm: string;
   readonly cancel: string;
 };
+
+export function projectLabel(folder: string): string {
+  return folder === "" ? "repository root" : `${folder}/`;
+}
+
+function serverLabel(spec: ServerSpec): string {
+  return spec.install === null ? spec.name : `${spec.name} (not installed)`;
+}
+
+function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
+  const folders = [...new Set(found.map((spec) => spec.project))];
+  const foundLines = folders.map((folder) => {
+    const names = found.filter((spec) => spec.project === folder).map(serverLabel);
+    return `${names.join(", ")} — ${projectLabel(folder)}`;
+  });
+  const addedLines =
+    added.length > 0 ? [`${added.map((spec) => spec.name).join(", ")} — added by you`] : [];
+  return {
+    title: "Language Servers",
+    message: "Start this project's language servers?",
+    list: { kind: "servers", lines: [...foundLines, ...addedLines] },
+    note: "yamt remembers your answer for this repository. You can change it in Settings.",
+    confirm: "Start",
+    cancel: "Don't start",
+  };
+}
 
 export function finishMustAsk(summary: MergeSummary): boolean {
   return summary.conflicts > 0 || summary.changes > 0;
@@ -39,7 +77,8 @@ export function questionText(question: Question, platform: string): QuestionText
       return {
         title: "Unprocessed Changes",
         message: unprocessedSentence(question.summary),
-        files: [],
+        list: { kind: "none" },
+        note: null,
         confirm: "Save Current Result",
         cancel: "Back to Resolving",
       };
@@ -47,7 +86,8 @@ export function questionText(question: Question, platform: string): QuestionText
       return {
         title: "Unsaved Changes",
         message: "These files have changes that are not saved to disk. Exit without saving them?",
-        files: question.files,
+        list: { kind: "files", files: question.files },
+        note: null,
         confirm: "Exit Without Saving",
         cancel: "Cancel",
       };
@@ -55,10 +95,13 @@ export function questionText(question: Question, platform: string): QuestionText
       return {
         title: "Key Already in Use",
         message: `${keyLabel(question.key, platform)} is already used by ${ACTION_NAMES[question.owner]}. Move it to ${ACTION_NAMES[question.action]}?`,
-        files: [],
+        list: { kind: "none" },
+        note: null,
         confirm: "Move",
         cancel: "Cancel",
       };
+    case "servers":
+      return serversText(question.found, question.added);
     default: {
       const _exhaustive: never = question;
       return _exhaustive;
