@@ -1,12 +1,33 @@
 {
-  "LspHostR2": {
-    "owned": ["src-tauri/src/servers.rs", "src-tauri/src/commands.rs", "src-tauri/AGENTS.md"]
-  },
-  "LspEditorR1": {
+  "SaveWebR1": {
     "owned": [
-      "frontend/src/editor/**",
+      "frontend/src/editor/internal/savedPoint.ts",
+      "frontend/src/editor/internal/savedPoint.test.ts",
+      "frontend/src/editor/internal/fileText.ts",
+      "frontend/src/editor/internal/fileText.test.ts",
+      "frontend/src/editor/internal/apply.ts",
+      "frontend/src/editor/internal/apply.test.ts",
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ui/saving.ts",
+      "frontend/src/ui/saving.test.ts",
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/MergeView.vue",
       "frontend/src/ui/useMergeController.ts",
       "frontend/src/ui/useMergeController.test.ts"
+    ]
+  },
+  "LspDetect": {
+    "owned": [
+      "frontend/src/lsp/internal/presets.ts",
+      "frontend/src/lsp/internal/presets.test.ts",
+      "frontend/src/lsp/internal/detect.ts",
+      "frontend/src/lsp/internal/detect.test.ts",
+      "frontend/src/lsp/internal/packageManager.ts",
+      "frontend/src/lsp/internal/packageManager.test.ts",
+      "frontend/src/lsp/index.ts",
+      "frontend/src/lsp/AGENTS.md"
     ]
   }
 }
