@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
 import { chunkField } from "./chunkField";
-import { fileText } from "./fileText";
+import { dropsShownText, fileText } from "./fileText";
 import { centerKind, paneState, type PaneSettings } from "./pane";
 import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
@@ -255,9 +255,46 @@ test("a line break deleted at a waiting change's edge is written back, so no mar
   );
   const joinedAfter = updated(merge, { changes: { from: 3, to: 4 } });
   const joinedBefore = updated(merge, { changes: { from: 1, to: 2 } });
+  const local = decided(merge, "apply", "local");
+  const halfJoinedAfter = updated(local, { changes: { from: 3, to: 4 } });
+  const halfJoinedBefore = updated(local, { changes: { from: 1, to: 2 } });
+  const block = `a\n${OPEN}\nL\n${SEPARATOR}\nR1\nR2\n${CLOSE}\nz\n`;
 
   expect(joinedAfter.state.doc.toString()).toBe("a\nbz\n");
-  expect(written(joinedAfter)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nR1\nR2\n${CLOSE}\nz\n`);
+  expect(written(joinedAfter)).toBe(block);
   expect(joinedBefore.state.doc.toString()).toBe("ab\nz\n");
-  expect(written(joinedBefore)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nR1\nR2\n${CLOSE}\nz\n`);
+  expect(written(joinedBefore)).toBe(block);
+  expect(halfJoinedAfter.state.doc.toString()).toBe("a\nLz\n");
+  expect(written(halfJoinedAfter)).toBe(block);
+  expect(halfJoinedBefore.state.doc.toString()).toBe("aL\nz\n");
+  expect(written(halfJoinedBefore)).toBe(block);
+});
+
+test("the shown text is left out of the file for a waiting one-sided change and a conflict whose sides both wait, nothing else", async () => {
+  const merge = await opened(
+    { middle: "a\nb\nc\nd\n", local: "a\nB\nc\nL\n", remote: "a\nb\nc\nR\n" },
+    [
+      { kind: "LocalOnly", middle: [1, 1], local: [1, 1], remote: [1, 1] },
+      { kind: "Conflict", middle: [3, 1], local: [3, 1], remote: [3, 1] },
+    ],
+  );
+  const placed = await opened({ middle: "a\nb\n", local: "a\nB\n", remote: "a\nC\n" }, [
+    {
+      kind: "Conflict",
+      middle: [1, 1],
+      local: [1, 1],
+      remote: [1, 1],
+      waiting: { kind: "AsShown" },
+    },
+  ]);
+  function drops({ state, field }: ApplyTarget): boolean[] {
+    return state.field(field).map((span) => dropsShownText(span));
+  }
+
+  expect(drops(merge)).toEqual([true, true]);
+  expect(drops(decided(decided(merge, "ignore", "local", 0), "apply", "remote", 1))).toEqual([
+    false,
+    false,
+  ]);
+  expect(drops(placed)).toEqual([false]);
 });

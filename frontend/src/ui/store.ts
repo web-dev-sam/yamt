@@ -14,14 +14,13 @@ import {
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
-import { changedOnDisk } from "./diskChanges";
 import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
 import { attempt, clearProblemAbout, logProblem, report } from "./problem";
 import type { Problem } from "./problem";
 import type { Question } from "./question";
-import { createSaving, finish, whileWriting } from "./saving";
+import { afterWrite, createSaving, finish, whileWriting } from "./saving";
 import type { FinishRequest, Saving, Writing } from "./saving";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
@@ -112,7 +111,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
     source,
     asking,
     guard,
-    writing: new Set(),
+    writing: new Map(),
     latestOpen: 0,
     latestSettings: 0,
   };
@@ -241,10 +240,7 @@ async function takeSide(
     report(state, { action: "take", path, cause: outcome.cause });
     return;
   }
-  const reply = outcome.value;
-  state.files.value = reply.files;
-  if (reply.kind === "ChangedOnDisk") {
-    await changedOnDisk(state, path, reply.change);
+  if (!(await afterWrite(state, path, outcome.value))) {
     return;
   }
   state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
@@ -262,10 +258,7 @@ async function reset(state: State, path: string, diskVersion: DiskVersion): Prom
       report(state, { action: "reset", path, cause: outcome.cause });
       return;
     }
-    const reply = outcome.value;
-    state.files.value = reply.files;
-    if (reply.kind === "ChangedOnDisk") {
-      await changedOnDisk(state, path, reply.change);
+    if (!(await afterWrite(state, path, outcome.value))) {
       return;
     }
     state.choices.value = state.choices.value.filter((sides) => sides.path !== path);

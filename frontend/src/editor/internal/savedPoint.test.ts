@@ -173,7 +173,7 @@ test("a save clears the dot, then undo past the save lights it again", async () 
   const result = await opened();
   result.type(lineFrom(result, 5), "typed ");
 
-  result.saved.snapshot().markSaved();
+  result.saved.snapshot().markSaved("fileText");
   expect(result.unsaved).toBe(false);
   result.undo();
 
@@ -187,7 +187,7 @@ test("typing during the write keeps the dot: the saved point is the snapshot tha
   const sent = result.saved.snapshot();
 
   result.type(lineFrom(result, 5), "second ");
-  sent.markSaved();
+  sent.markSaved("fileText");
 
   expect(result.unsaved).toBe(true);
   expect(result.heard).toEqual([true]);
@@ -203,14 +203,36 @@ test.each([
     result.type(lineFrom(result, line), "typed ");
     const sent = result.saved.snapshot();
 
-    sent.markSaved();
+    sent.markSaved("fileText");
 
     expect(sent.fileText()).not.toContain("typed");
     expect(result.unsaved).toBe(true);
 
     result.decide("apply", "local", id);
-    result.saved.snapshot().markSaved();
+    result.saved.snapshot().markSaved("fileText");
     expect(result.unsaved).toBe(false);
+  },
+);
+
+test.each([
+  ["a one-sided change", ONE_SIDED, 2],
+  ["a conflict", CONFLICT, 4],
+])(
+  "typing inside %s whose sides all wait is on disk after a write of the Result as shown, so the dot clears",
+  async (_name, id, line) => {
+    const result = await opened();
+    result.type(lineFrom(result, line), "typed ");
+    const sent = result.saved.snapshot();
+
+    sent.markSaved("asShown");
+
+    expect(sent.asShown()).toContain("typed");
+    expect(result.state.field(result.field)[id]?.status).toEqual({
+      local: "pending",
+      remote: "pending",
+    });
+    expect(result.unsaved).toBe(false);
+    expect(result.heard).toEqual([true, false]);
   },
 );
 
@@ -220,7 +242,7 @@ test("typing in the decided section of a half-decided conflict is written, so a 
   result.type(lineFrom(result, 4), "typed ");
   const sent = result.saved.snapshot();
 
-  sent.markSaved();
+  sent.markSaved("fileText");
 
   expect(sent.fileText()).toContain("typed L");
   expect(result.unsaved).toBe(false);

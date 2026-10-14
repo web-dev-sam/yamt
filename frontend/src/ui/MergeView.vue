@@ -189,7 +189,7 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           Reset
         </button>
         <span
-          v-if="unsaved"
+          v-if="editable && unsaved"
           role="img"
           title="Not saved"
           aria-label="Not saved"

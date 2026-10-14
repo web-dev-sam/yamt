@@ -2,20 +2,25 @@ import type { EditorState, StateField, Text, Transaction } from "@codemirror/sta
 
 import type { SideDocs } from "./apply";
 import type { ChunkSpan } from "./chunkField";
-import { fileText } from "./fileText";
+import { dropsShownText, fileText } from "./fileText";
 import { lineSpan } from "./lineSpan";
 import { paneText } from "./pane";
-import { sideChanged, SIDES } from "./side";
 import type { ChunkStatus } from "./status";
+
+type WrittenText = "asShown" | "fileText";
 
 export type ResultSnapshot = {
   asShown(): string;
   fileText(): string;
   readonly unsaved: boolean;
-  markSaved(): void;
+  markSaved(written: WrittenText): void;
 };
 
-type Point = { readonly doc: Text; readonly statuses: readonly ChunkStatus[] };
+type Point = {
+  readonly doc: Text;
+  readonly statuses: readonly ChunkStatus[];
+  readonly written: WrittenText;
+};
 
 type Result = {
   readonly field: StateField<readonly ChunkSpan[]>;
@@ -25,23 +30,16 @@ type Result = {
 
 type Update = Pick<Transaction, "docChanged" | "startState" | "state">;
 
-function pointOf(state: EditorState, field: Result["field"]): Point {
-  return { doc: state.doc, statuses: state.field(field).map(({ status }) => status) };
+function pointOf(state: EditorState, field: Result["field"], written: WrittenText): Point {
+  return { doc: state.doc, statuses: state.field(field).map(({ status }) => status), written };
 }
 
-function typedWhileAllWait(
-  { chunk, status, from, to }: ChunkSpan,
-  doc: Text,
-  opened: Text,
-): boolean {
-  if (
-    chunk.waiting.kind === "AsShown" ||
-    SIDES.some((side) => sideChanged(chunk, side) && status[side] !== "pending")
-  ) {
+function typedButDropped(span: ChunkSpan, doc: Text, opened: Text): boolean {
+  if (!dropsShownText(span)) {
     return false;
   }
-  const atOpen = lineSpan(opened, chunk.middle);
-  return doc.sliceString(from, to) !== opened.sliceString(atOpen.from, atOpen.to);
+  const atOpen = lineSpan(opened, span.chunk.middle);
+  return doc.sliceString(span.from, span.to) !== opened.sliceString(atOpen.from, atOpen.to);
 }
 
 function isUnsaved(
@@ -54,11 +52,13 @@ function isUnsaved(
     return true;
   }
   const spans = state.field(field);
+  const decisionsChanged = spans.some(({ status }, index) => {
+    const saved = point.statuses[index];
+    return saved?.local !== status.local || saved.remote !== status.remote;
+  });
   return (
-    spans.some(({ status }, index) => {
-      const saved = point.statuses[index];
-      return saved?.local !== status.local || saved.remote !== status.remote;
-    }) || spans.some((span) => typedWhileAllWait(span, state.doc, opened))
+    decisionsChanged ||
+    (point.written === "fileText" && spans.some((span) => typedButDropped(span, state.doc, opened)))
   );
 }
 
@@ -73,7 +73,7 @@ export class SavedPoint {
     const state = result.current();
     this.#result = result;
     this.#opened = state.doc;
-    this.#point = pointOf(state, result.field);
+    this.#point = pointOf(state, result.field, "fileText");
   }
 
   updated({ docChanged, startState, state }: Update): void {
@@ -90,8 +90,8 @@ export class SavedPoint {
       asShown: () => paneText(state),
       fileText: () => fileText(state, field, sides),
       unsaved: isUnsaved(this.#point, this.#opened, state, field),
-      markSaved: () => {
-        this.#point = pointOf(state, field);
+      markSaved: (written) => {
+        this.#point = pointOf(state, field, written);
         this.#check(current());
       },
     };

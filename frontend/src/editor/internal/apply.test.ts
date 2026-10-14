@@ -578,6 +578,35 @@ test("a change on an unterminated last line keeps the file without a final line 
   }
 });
 
+test("a side applied where a line break at the change's edge was deleted lands on lines of its own", async () => {
+  const change = open(
+    await synthetic({ middle: "a\nb\nz\n", local: "a\nB\nz\n", remote: "a\nb\nz\n", eol: "Lf" }, [
+      { kind: "LocalOnly", middle: [1, 1], side: [1, 1] },
+    ]),
+  );
+  const conflict = open(
+    await synthetic({ middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR\nz\n", eol: "Lf" }, [
+      { kind: "Conflict", middle: [1, 1], side: [1, 1] },
+    ]),
+  );
+  function joined(merge: ApplyTarget, from: number): ApplyTarget {
+    return { ...merge, state: merge.state.update({ changes: { from, to: from + 1 } }).state };
+  }
+  const after = joined(change, 3);
+  const before = joined(change, 1);
+  const local = run(conflict, applyOne(conflict, chunkAt(conflict, 0), "local"));
+  const localJoined = joined(local, 3);
+
+  expect(paneText(run(after, applyOne(after, chunkAt(after, 0), "local")).state)).toBe("a\nB\nz\n");
+  expect(paneText(run(before, applyOne(before, chunkAt(before, 0), "local")).state)).toBe(
+    "a\nB\nz\n",
+  );
+  expect(paneText(localJoined.state)).toBe("a\nLz\n");
+  expect(
+    paneText(run(localJoined, applyOne(localJoined, chunkAt(localJoined, 0), "remote")).state),
+  ).toBe("a\nL\nR\nz\n");
+});
+
 test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it", async () => {
   const merge = open(await loadFixture(MAGIC_KEYS), true);
   function refused(target: ApplyTarget, edit: StateCommand): boolean {

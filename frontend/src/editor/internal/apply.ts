@@ -46,15 +46,19 @@ export function sideLines(doc: Text, range: Chunk["local"] | Chunk["remote"]): s
   return Array.from({ length: range.len }, (_, index) => doc.line(range.start + 1 + index).text);
 }
 
-function wholeLines(doc: Text, range: { from: number; to: number }, lines: string[]): ChangeSpec {
-  const { from, to } = range;
-  if (doc.lineAt(to).from === to) {
-    return { from, to, insert: Text.of([...lines, ""]) };
+export function wholeLines(
+  doc: Text,
+  { from, to }: { from: number; to: number },
+  lines: readonly string[],
+): ChangeSpec {
+  const fromMidLine = doc.lineAt(from).from !== from;
+  const atFileEnd = to === doc.length && doc.lineAt(to).from !== to;
+  if (atFileEnd && lines.length === 0) {
+    return { from: fromMidLine ? from : Math.max(0, from - 1), to };
   }
-  if (lines.length === 0) {
-    return { from: from === to ? from : Math.max(0, from - 1), to };
-  }
-  return { from, to, insert: Text.of(from === to ? ["", ...lines] : lines) };
+  const before = fromMidLine ? [""] : [];
+  const after = atFileEnd ? [] : [""];
+  return { from, to, insert: Text.of([...before, ...lines, ...after]) };
 }
 
 function applyChange(target: ApplyTarget, span: ChunkSpan, side: Side): ChangeSpec {
