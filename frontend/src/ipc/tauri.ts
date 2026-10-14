@@ -76,8 +76,8 @@ export function createTauriSource(): ChunkSource {
     async takeSide(path, side, diskVersion) {
       return toResult(await commands.takeSide(path, side, diskVersion));
     },
-    remoteName() {
-      return commands.remoteName();
+    sideNames() {
+      return commands.sideNames();
     },
     ...createTauriSettings(),
   };

@@ -7,14 +7,14 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
-  type RemoteName,
   type Side,
+  type SideNames,
   type Theme,
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { changedOnDisk } from "./diskChanges";
-import { loadRemoteName, refreshFiles } from "./listing";
+import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
 import { attempt, clearProblemAbout, logProblem, report } from "./problem";
@@ -40,7 +40,7 @@ type Refs = {
   readonly choices: ShallowRef<readonly FileSides[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
   readonly notices: ShallowRef<readonly Notice[]>;
-  readonly remoteName: ShallowRef<RemoteName | null>;
+  readonly sideNames: ShallowRef<SideNames>;
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
   readonly settingsOpen: ShallowRef<boolean>;
@@ -60,7 +60,7 @@ type Actions = Omit<CloseGuard, "markSaved"> &
   SettingsActions & {
     loadFiles(): Promise<void>;
     refreshFiles(): Promise<void>;
-    loadRemoteName(): Promise<void>;
+    loadSideNames(): Promise<void>;
     open(path: string): Promise<void>;
     pick(path: string): Promise<void>;
     finish(request: FinishRequest): Promise<void>;
@@ -91,7 +91,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
     choices: shallowRef<readonly FileSides[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
     notices: shallowRef<readonly Notice[]>([]),
-    remoteName: shallowRef<RemoteName | null>(null),
+    sideNames: shallowRef<SideNames>({ local: null, remote: null }),
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
     settingsOpen: shallowRef(false),
@@ -122,7 +122,7 @@ function actions(state: State, buttons: HiddenButtons): Actions {
     refreshFiles: async () => {
       await refreshFiles(state, "running");
     },
-    loadRemoteName: () => loadRemoteName(state),
+    loadSideNames: () => loadSideNames(state),
     open: (path) => open(state, path),
     pick: async (path) => {
       state.settingsOpen.value = false;

@@ -241,10 +241,6 @@ test.each<Side>(["local", "remote"])(
   },
 );
 
-test("the fixture source names nothing merged in", async () => {
-  expect(await createFixtureSource(quietLog().log).remoteName()).toBeNull();
-});
-
 test.each([
   [
     "an unknown chunk kind",

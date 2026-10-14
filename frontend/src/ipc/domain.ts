@@ -33,7 +33,9 @@ export type SideContent = Generated.SideContent;
 
 export type Side = Generated.Side;
 
-export type RemoteName = Generated.RemoteName;
+export type SideName = Generated.SideName;
+
+export type SideNames = Generated.SideNames;
 
 export type NotText = Generated.NotText;
 

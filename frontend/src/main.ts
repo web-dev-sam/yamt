@@ -11,5 +11,5 @@ const source =
 const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
 const store = createAppStore(source, startTheme);
 void store.loadFiles();
-void store.loadRemoteName();
+void store.loadSideNames();
 createApp(App).mount("#app");

@@ -33,7 +33,7 @@ const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
-const { track, untrack, finish, reset, takeSide, taken, remoteName, question, preferences } =
+const { track, untrack, finish, reset, takeSide, taken, sideNames, question, preferences } =
   useAppStore();
 const {
   summary,
@@ -66,7 +66,7 @@ const deletedView = computed(() => {
 const columns = computed(() =>
   SIDES.map((side): Column => ({
     side,
-    ...sideHeader(side, remoteName.value),
+    ...sideHeader(side, sideNames.value),
     gridColumn: GRID_COLUMN[side],
     keep: deletedView.value?.keepIn === side,
     deleted: side === props.data.deleted,

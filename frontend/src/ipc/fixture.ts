@@ -218,8 +218,8 @@ export function createFixtureSource(
         log.info("fixture.take", { path, side });
       });
     },
-    async remoteName() {
-      return null;
+    async sideNames() {
+      return { local: null, remote: null };
     },
     ...createFixtureSettings(),
   };

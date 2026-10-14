@@ -1,28 +1,28 @@
-import type { RemoteName, Side } from "../ipc";
+import type { Side, SideNames } from "../ipc";
 
 export type SideHeader = { readonly text: string; readonly tooltip: string };
 
-const LOCAL = "Local (yours)";
-const REMOTE = "Remote (theirs)";
+const LABEL: Readonly<Record<Side, string>> = {
+  local: "Local (yours)",
+  remote: "Remote (theirs)",
+};
 
-function remoteHeader(remote: RemoteName | null): SideHeader {
-  if (remote === null) {
-    return { text: REMOTE, tooltip: REMOTE };
+export function sideHeader(side: Side, names: SideNames): SideHeader {
+  const label = LABEL[side];
+  const name = names[side];
+  if (name === null) {
+    return { text: label, tooltip: label };
   }
-  switch (remote.kind) {
+  switch (name.kind) {
     case "Branch": {
-      const text = `${REMOTE}: ${remote.name}`;
+      const text = `${label}: ${name.name}`;
       return { text, tooltip: text };
     }
     case "Commit":
-      return { text: `${REMOTE}: ${remote.short_id} ${remote.subject}`, tooltip: remote.message };
+      return { text: `${label}: ${name.short_id} ${name.subject}`, tooltip: name.message };
     default: {
-      const _exhaustive: never = remote;
+      const _exhaustive: never = name;
       return _exhaustive;
     }
   }
-}
-
-export function sideHeader(side: Side, remote: RemoteName | null): SideHeader {
-  return side === "local" ? { text: LOCAL, tooltip: LOCAL } : remoteHeader(remote);
 }

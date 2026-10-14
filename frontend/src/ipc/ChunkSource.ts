@@ -5,9 +5,9 @@ import type {
   FileMergeData,
   FileSides,
   KeysChange,
-  RemoteName,
   SettingsRead,
   Side,
+  SideNames,
   SourceResult,
   StoredSettings,
   Theme,
@@ -25,7 +25,7 @@ export interface ChunkSource {
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
-  remoteName(): Promise<RemoteName | null>;
+  sideNames(): Promise<SideNames>;
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
   setAntialiasing(

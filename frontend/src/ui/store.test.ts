@@ -15,6 +15,7 @@ import {
   type Key,
   type SettingsRead,
   type SettingsSource,
+  type SideNames,
   type SourceFailure,
   type SourceResult,
   type StoredSettings,
@@ -107,7 +108,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     resetFile: () => Promise.reject(new Error("not used")),
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
-    remoteName: () => Promise.resolve(null),
+    sideNames: () => Promise.resolve({ local: null, remote: null }),
     ...NO_SETTINGS,
   };
   return { source, pending };
@@ -963,7 +964,7 @@ function choiceSource(
       );
       return Promise.resolve(written(taken));
     },
-    remoteName: () => Promise.resolve(null),
+    sideNames: () => Promise.resolve({ local: null, remote: null }),
     ...NO_SETTINGS,
     ...overrides,
   };
@@ -1303,30 +1304,34 @@ test("a failed refresh is a list problem and keeps the marks; the next good one 
   expect(store.active.value).toBe("a.ts");
 });
 
-test("the remote name is asked for once; a failure leaves none and logs a warning", async () => {
+test("both side names are asked for once; a failure leaves none and logs a warning", async () => {
   const warnings: string[] = [];
   vi.spyOn(console, "warn").mockImplementation((line: string) => {
     warnings.push(line);
   });
   const { source } = handSource([]);
-  const named = createAppStore({
-    ...source,
-    remoteName: () => Promise.resolve({ kind: "Branch", name: "minor" }),
-  });
-  await named.loadRemoteName();
+  const names: SideNames = {
+    local: { kind: "Branch", name: "local" },
+    remote: { kind: "Commit", short_id: "1a2b3c4", subject: "Fix", message: "Fix\n\nbody" },
+  };
+  const named = createAppStore({ ...source, sideNames: () => Promise.resolve(names) });
 
-  expect(named.remoteName.value).toEqual({ kind: "Branch", name: "minor" });
+  expect(named.sideNames.value).toEqual({ local: null, remote: null });
+
+  await named.loadSideNames();
+
+  expect(named.sideNames.value).toEqual(names);
 
   const failing = createAppStore({
     ...source,
-    remoteName: () => Promise.reject(new Error("ipc down")),
+    sideNames: () => Promise.reject(new Error("ipc down")),
   });
-  await expect(failing.loadRemoteName()).resolves.toBeUndefined();
+  await expect(failing.loadSideNames()).resolves.toBeUndefined();
 
-  expect(failing.remoteName.value).toBeNull();
+  expect(failing.sideNames.value).toEqual({ local: null, remote: null });
   expect(failing.problem.value).toBeNull();
   expect(warnings).toEqual([
-    '[warn] store.remote_name_failed {kind: "Unexpected", message: "ipc down"}',
+    '[warn] store.side_names_failed {kind: "Unexpected", message: "ipc down"}',
   ]);
 });
 

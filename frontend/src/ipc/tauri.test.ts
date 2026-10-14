@@ -11,7 +11,7 @@ const commands = vi.hoisted(() => ({
   resetFile: vi.fn(),
   describeFile: vi.fn(),
   takeSide: vi.fn(),
-  remoteName: vi.fn(),
+  sideNames: vi.fn(),
   log: vi.fn(),
   loadSettings: vi.fn(),
   setTheme: vi.fn(),
@@ -94,21 +94,6 @@ test("a string error from listFiles rejects the call with that message", async (
   await expect(createTauriSource().listFiles()).rejects.toThrow(
     new Error("list_files not allowed"),
   );
-});
-
-test("remoteName returns the app's answer", async () => {
-  const name: Generated.RemoteName = {
-    kind: "Commit",
-    short_id: "1a2b3c4",
-    subject: "Fix parser crash",
-    message: "Fix parser crash\n\nThe lexer read past the end.",
-  };
-  commands.remoteName.mockResolvedValueOnce(name);
-  commands.remoteName.mockResolvedValueOnce(null);
-  const source = createTauriSource();
-
-  expect(await source.remoteName()).toEqual(name);
-  expect(await source.remoteName()).toBeNull();
 });
 
 test("loadFile turns the app's data into domain data: the middle range, not base", async () => {

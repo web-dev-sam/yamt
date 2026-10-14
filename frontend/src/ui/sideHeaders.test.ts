@@ -1,39 +1,61 @@
 import { expect, test } from "vitest";
 
-import type { RemoteName } from "../ipc";
+import type { Side, SideName, SideNames } from "../ipc";
 import { sideHeader } from "./sideHeaders";
 
-const COMMIT: RemoteName = {
+const COMMIT: SideName = {
   kind: "Commit",
   short_id: "1a2b3c4",
   subject: "Fix parser crash",
   message: "Fix parser crash\n\nThe lexer read past the end of the input.",
 };
 
-test("the left header is the same whatever is merged in", () => {
-  const local = { text: "Local (yours)", tooltip: "Local (yours)" };
+const LABEL: Readonly<Record<Side, string>> = {
+  local: "Local (yours)",
+  remote: "Remote (theirs)",
+};
 
-  expect(sideHeader("local", null)).toEqual(local);
-  expect(sideHeader("local", COMMIT)).toEqual(local);
-});
+test.each<[Side, string]>([
+  ["local", "local"],
+  ["remote", "remote"],
+])("a branch names the %s header, the same text on hover", (side, branch) => {
+  const name: SideName = { kind: "Branch", name: branch };
 
-test("a branch names the right header, the same text on hover", () => {
-  expect(sideHeader("remote", { kind: "Branch", name: "minor" })).toEqual({
-    text: "Remote (theirs): minor",
-    tooltip: "Remote (theirs): minor",
+  expect(sideHeader(side, { local: name, remote: name })).toEqual({
+    text: `${LABEL[side]}: ${branch}`,
+    tooltip: `${LABEL[side]}: ${branch}`,
   });
 });
 
-test("a commit shows its short id and subject; hovering shows the full message", () => {
-  expect(sideHeader("remote", COMMIT)).toEqual({
-    text: "Remote (theirs): 1a2b3c4 Fix parser crash",
-    tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
+test.each<Side>(["local", "remote"])(
+  "a commit shows its short id and subject in the %s header; hovering shows the full message",
+  (side) => {
+    expect(sideHeader(side, { local: COMMIT, remote: COMMIT })).toEqual({
+      text: `${LABEL[side]}: 1a2b3c4 Fix parser crash`,
+      tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
+    });
+  },
+);
+
+test.each<Side>(["local", "remote"])("no name leaves the plain %s header", (side) => {
+  expect(sideHeader(side, { local: null, remote: null })).toEqual({
+    text: LABEL[side],
+    tooltip: LABEL[side],
   });
 });
 
-test("no name leaves the plain right header", () => {
-  expect(sideHeader("remote", null)).toEqual({
+test("each header reads its own side's name; the unnamed side stays plain", () => {
+  const onlyLocal: SideNames = { local: COMMIT, remote: null };
+  const onlyRemote: SideNames = { local: null, remote: { kind: "Branch", name: "minor" } };
+
+  expect(sideHeader("local", onlyLocal).text).toBe("Local (yours): 1a2b3c4 Fix parser crash");
+  expect(sideHeader("remote", onlyLocal)).toEqual({
     text: "Remote (theirs)",
     tooltip: "Remote (theirs)",
+  });
+  expect(sideHeader("remote", onlyRemote).text).toBe("Remote (theirs): minor");
+  expect(sideHeader("local", onlyRemote)).toEqual({
+    text: "Local (yours)",
+    tooltip: "Local (yours)",
   });
 });

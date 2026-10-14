@@ -22,12 +22,12 @@ const props = defineProps<{ sides: FileSides; shown: boolean }>();
 
 const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
 
-const { takeSide, reset, remoteName, taken } = useAppStore();
+const { takeSide, reset, sideNames, taken } = useAppStore();
 
 const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
 const columns = computed(() =>
   SIDES.map((side): Column => {
-    const header = sideHeader(side, remoteName.value);
+    const header = sideHeader(side, sideNames.value);
     return {
       side,
       header: header.text,

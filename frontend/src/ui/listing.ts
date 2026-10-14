@@ -1,15 +1,15 @@
 import type { ShallowRef } from "vue";
 
-import { log, type ChunkSource, type FileEntry, type RemoteName } from "../ipc";
+import { log, type ChunkSource, type FileEntry, type SideNames } from "../ipc";
 import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import type { Notice } from "./noticeText";
 import { attempt, report, unexpected } from "./problem";
 
 type Listing = DiskChangeTarget & { readonly files: ShallowRef<readonly FileEntry[]> };
 
-type RemoteNameTarget = {
+type SideNamesTarget = {
   readonly source: ChunkSource;
-  readonly remoteName: ShallowRef<RemoteName | null>;
+  readonly sideNames: ShallowRef<SideNames>;
 };
 
 export async function refreshFiles(
@@ -30,10 +30,10 @@ export async function refreshFiles(
   return files;
 }
 
-export async function loadRemoteName(target: RemoteNameTarget): Promise<void> {
+export async function loadSideNames(target: SideNamesTarget): Promise<void> {
   try {
-    target.remoteName.value = await target.source.remoteName();
+    target.sideNames.value = await target.source.sideNames();
   } catch (error) {
-    log.warn("store.remote_name_failed", { ...unexpected(error) });
+    log.warn("store.side_names_failed", { ...unexpected(error) });
   }
 }
