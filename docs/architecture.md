@@ -625,8 +625,10 @@ numbers, no DOM.
 
 Components: `App.vue`, `FileList.vue` (the file list panel: its width, the "View as tree/list" button,
 the flat list — paths, resolved mark, vscode-icons — or `FileTree.vue`'s rows built by the pure
-`fileTree.ts` (`treeRows`: folders first, natural order, compact folder chains; `folderPaths` for
-revealing the shown file), folder icons from `folderIcon.ts`, plan §2 #61), `MergeView.vue`
+`fileTree.ts` (`treeRows`: folders first, natural order, compact folder chains; `revealed`: the closed
+set without the shown file's folders, the same set when nothing opens), folder icons from
+`folderIcon.ts` (`folderIcon(path, open)`), both icon tables over `iconTable.ts` (rows of an icon and
+its space-separated names; `nameKey`: a path's last segment in lower case), plan §2 #61), `MergeView.vue`
 (toolbar + three `<div>` hosts + two `<svg>`, each in a bordered wrapper on its own compositing layer;
 one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
 paint, editors, scroll positions and work kept, plan §2 #51;

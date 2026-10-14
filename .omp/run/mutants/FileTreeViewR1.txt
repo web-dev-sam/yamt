@@ -1,0 +1,121 @@
+mutants: no Rust changes since 7b188b3
+[32m08:28:30 (244500) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m08:28:30 (244500) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m08:28:31 (244500) INFO ProjectReader[39m Found 4 of 338 file(s) to be mutated.
+[32m08:28:31 (244500) INFO Instrumenter[39m Instrumented 4 source file(s) with 563 mutant(s)
+[32m08:28:31 (244500) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m08:28:32 (244500) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m08:28:34 (244500) INFO DryRunExecutor[39m Initial test run succeeded. Ran 40 tests in 1 second (net 38.95399600000087 ms, overhead 1849.0460039999991 ms).
+
+All tests
+  fileIcon.test.ts
+    ✓ fileIcon: prefers the file name over the extension (killed 18)
+    ~ fileIcon: knows literal file names without an extension (covered 11)
+    ✘ fileIcon: names every key once, none empty, in the name rows and in the extension rows (covered 0)
+    ✓ fileIcon: resolves every table name to its row's icon (killed 1)
+    ✓ fileIcon: prefers the longer extension over its suffix (killed 1)
+    ~ fileIcon: maps languages the editor colours (covered 21)
+    ~ fileIcon: matches extensions and names regardless of case (covered 22)
+    ~ fileIcon: looks only at the last path segment (covered 22)
+    ~ fileIcon: falls back to the generic file icon (covered 22)
+    ~ fileIcon: ignores keys inherited from Object.prototype (covered 22)
+    ✓ fileIcon: does not take a dotfile's name as its extension (killed 1)
+  fileTree.test.ts
+    ✓ treeRows: puts folders before files at each level (killed 50)
+    ✓ treeRows: orders names naturally and ignoring case, with a total tie-break (killed 10)
+    ✓ treeRows: orders folders naturally and ignoring case too (killed 2)
+    ✓ treeRows: joins a chain of single folders into one row (killed 7)
+    ~ treeRows: ends a chain at a folder holding files and folders (covered 63)
+    ~ treeRows: never joins a folder holding a file to its child (covered 63)
+    ✓ treeRows: does not join a folder holding one file to anything (killed 1)
+    ~ treeRows: keeps top-level files at depth 0 beside top-level folders (covered 54)
+    ✓ treeRows: hides every descendant of a closed folder and only those (killed 1)
+    ~ treeRows: keys a chained row by its last folder (covered 62)
+    ~ treeRows: ignores a closed key that names no folder (covered 55)
+    ~ treeRows: gives the whole entry to a file row (covered 54)
+    ~ treeRows: shows nothing for no files (covered 14)
+    ✓ folderPaths: names every folder holding a file, outermost first (killed 8)
+    ~ folderPaths: is empty for a top-level file (covered 5)
+    ✓ revealed: opens a closed chained row holding the file (killed 7)
+    ✓ revealed: opens every closed folder holding the file and keeps unrelated ones closed (killed 2)
+    ✓ revealed: returns the same set when no folder holding the file is closed (killed 2)
+    ~ revealed: changes nothing for a top-level file (covered 12)
+  folderIcon.test.ts
+    ✓ folderIcon: matches a table name in any case, closed and open (killed 2)
+    ~ folderIcon: gives an unknown name the generic folder pair (covered 8)
+    ~ folderIcon: looks only at the last segment of a folder path (covered 8)
+    ~ folderIcon: ignores keys inherited from Object.prototype (covered 8)
+    ~ folderIcon: resolves every table name to its row's icons (covered 8)
+    ✘ folderIcon: names every folder once, in lower case, none empty (covered 0)
+  iconTable.test.ts
+    ✘ iconTable: gives every space-separated name its row's icon (covered 0)
+    ~ lookup: finds a table name and misses any other (covered 1)
+    ~ lookup: misses keys inherited from Object.prototype (covered 1)
+    ~ nameKey: is the last path segment in lower case (covered 5)
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:30:16
+-     if (a === b) {
+-       return 0;
+-     }
++     if (a === b) {}
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:66:29
+-       if (only === undefined) {
+-         break;
+-       }
++       if (only === undefined) {}
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return a <= b ? -1 : 1;
+Tests ran:
+    treeRows: orders names naturally and ignoring case, with a total tie-break
+    treeRows: orders folders naturally and ignoring case too
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (false) {
+Tests ran:
+    treeRows: orders names naturally and ignoring case, with a total tie-break
+    treeRows: orders folders naturally and ignoring case too
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (true) {
+Tests ran:
+    treeRows: puts folders before files at each level
+    treeRows: orders folders naturally and ignoring case too
+    treeRows: joins a chain of single folders into one row
+  and 9 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (false) {
+Tests ran:
+    treeRows: joins a chain of single folders into one row
+    treeRows: ends a chain at a folder holding files and folders
+    treeRows: never joins a folder holding a file to its child
+  and 2 more tests!
+
+
+Ran 0.30 tests per mutant on average.
+---------------|------------------|----------|-----------|------------|----------|----------|
+               | % Mutation score |          |           |            |          |          |
+File           |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+---------------|--------|---------|----------|-----------|------------|----------|----------|
+All files      |  95.12 |   96.69 |      113 |         4 |          4 |        2 |        0 |
+ fileIcon.ts   | 100.00 |  100.00 |       15 |         3 |          0 |        0 |        0 |
+ fileTree.ts   |  93.81 |   95.79 |       90 |         1 |          4 |        2 |        0 |
+ folderIcon.ts | 100.00 |  100.00 |        2 |         0 |          0 |        0 |        0 |
+ iconTable.ts  | 100.00 |  100.00 |        6 |         0 |          0 |        0 |        0 |
+---------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m08:28:38 (244500) INFO MutationTestExecutor[39m Done in 7 seconds.

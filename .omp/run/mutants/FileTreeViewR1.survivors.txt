@@ -1,0 +1,10 @@
+just mutants 7b188b3 (after a1b492d), StrykerJS: fileIcon.ts 100, folderIcon.ts 100, iconTable.ts 100, fileTree.ts 93.81
+(90 killed, 1 timeout, 4 survived, 2 no coverage). Full log: .omp/run/mutants/FileTreeViewR1.txt
+
+Survivors / no coverage (all on round-1 lines of fileTree.ts; implementer and orchestrator read them as equivalent, VF7 a):
+src/ui/fileTree.ts:30:7  `if (a === b)` → `if (false)`        reached only for collator-equal names; siblings are never equal strings (Map keys; git lists a path once)
+src/ui/fileTree.ts:30:16 block emptied (no coverage)           same
+src/ui/fileTree.ts:33:10 `a < b` → `a <= b`                    same: a !== b on this line
+src/ui/fileTree.ts:44:11 `if (known === undefined)` → `if (true)`  child === known then; re-setting a Map key keeps its order and object
+src/ui/fileTree.ts:66:9  `only === undefined` → `false`          loop runs only when folders.size === 1; guard exists for noUncheckedIndexedAccess
+src/ui/fileTree.ts:66:29 block emptied (no coverage)           same
