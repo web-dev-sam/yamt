@@ -4,6 +4,23 @@ import { playwright } from "@vitest/browser-playwright";
 import Icons from "unplugin-icons/vite";
 import { configDefaults, defineConfig } from "vitest/config";
 
+// Stryker's vitest runner transforms every project's test files; the WebKit probes import the Tailwind
+// stylesheet, which vite's CSS plugin cannot transform in Stryker's workers. Mutation runs use the node tests only.
+const mutating = process.env["STRYKER_MUTATOR_WORKER"] !== undefined;
+const browserProject = {
+  extends: true,
+  test: {
+    name: "browser",
+    include: ["src/editor/**/*.browser.test.ts"],
+    browser: {
+      enabled: true,
+      provider: playwright(),
+      headless: true,
+      instances: [{ browser: "webkit" as const }],
+    },
+  },
+};
+
 export default defineConfig({
   plugins: [vue(), tailwindcss(), Icons({ compiler: "vue3" })],
   test: {
@@ -25,19 +42,7 @@ export default defineConfig({
           exclude: [...configDefaults.exclude, "**/*.browser.test.ts"],
         },
       },
-      {
-        extends: true,
-        test: {
-          name: "browser",
-          include: ["src/editor/**/*.browser.test.ts"],
-          browser: {
-            enabled: true,
-            provider: playwright(),
-            headless: true,
-            instances: [{ browser: "webkit" }],
-          },
-        },
-      },
+      ...(mutating ? [] : [browserProject]),
     ],
   },
 });
