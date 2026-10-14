@@ -1,20 +1,16 @@
-import { forEachDiagnostic } from "@codemirror/lint";
+import { forEachDiagnostic, setDiagnosticsEffect } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import type { DocVersion, ProblemSeverity, ServerProblem } from "../../lsp";
+import { isDocVersion, type DocVersion, type ProblemSeverity, type ServerProblem } from "../../lsp";
 import { problemCounts, problemsField, problemsSpec, tookSpec } from "./problems";
 
 type At = readonly [line: number, character: number];
 
 const TEXT = "let a = 1;\nlet b = 2;\nlet c = 3;\n";
 
-function isVersion(n: number): n is DocVersion {
-  return Number.isSafeInteger(n) && n > 0;
-}
-
 function version(n: number): DocVersion {
-  if (!isVersion(n)) {
+  if (!isDocVersion(n)) {
     throw new RangeError(`not a document version: ${n}`);
   }
   return n;
@@ -90,24 +86,47 @@ test("rule 2: a problem whose text was deleted since its version is not shown", 
   expect(shown(after)).toEqual([]);
 });
 
-test("rule 2: answers for a version never taken, forgotten, or older than the server's last answer are dropped", () => {
+test("rule 2: answers for a version never taken or forgotten are dropped; a second answer for the same version replaces the first", () => {
   const sent = took(opened(), 1, 2);
   const newer = answer(sent, "oxlint", 2, [problem([0, 4], [0, 5], { message: "newer" })]);
   const slow = answer(answer(sent, "tsgo", 1, []), "oxlint", 2, [
     problem([0, 4], [0, 5], { message: "newer" }),
   ]);
 
-  const older = answer(slow, "oxlint", 1, [problem([1, 4], [1, 5], { message: "older" })]);
   const stillOpen = answer(slow, "tsgo", 1, [problem([1, 4], [1, 5], { message: "remembered" })]);
   const forgotten = answer(newer, "tsgo", 1, [problem([1, 4], [1, 5], { message: "forgotten" })]);
   const unknown = answer(newer, "tsgo", 3, [problem([1, 4], [1, 5], { message: "unknown" })]);
   const same = answer(newer, "tsgo", 2, [problem([2, 4], [2, 5], { message: "same" })]);
+  const again = answer(newer, "oxlint", 2, [problem([1, 4], [1, 5], { message: "again" })]);
 
-  expect(shown(older)).toEqual(["a error newer (oxlint)"]);
   expect(shown(stillOpen)).toEqual(["a error newer (oxlint)", "b error remembered (tsgo)"]);
   expect(shown(forgotten)).toEqual(["a error newer (oxlint)"]);
   expect(shown(unknown)).toEqual(["a error newer (oxlint)"]);
   expect(shown(same)).toEqual(["a error newer (oxlint)", "c error same (tsgo)"]);
+  expect(shown(again)).toEqual(["b error again (oxlint)"]);
+});
+
+test("rule 2: an answer that changes nothing shown sets no diagnostics, so an open problem tooltip stays", () => {
+  const sent = took(opened(), 1);
+  const first = answer(sent, "oxlint", 1, [problem([0, 4], [0, 5], { message: "kept" })]);
+  const both = answer(first, "tsgo", 1, [problem([1, 4], [1, 5], { message: "typed" })]);
+  const edited = both.update({ changes: { from: 0, insert: "// added\n" } }).state;
+  function sets(problems: readonly ServerProblem[]): boolean {
+    const spec = problemsSpec(edited, { server: "oxlint", version: version(1), problems });
+    return [spec?.effects ?? []].flat().some((effect) => effect.is(setDiagnosticsEffect));
+  }
+
+  const repeated = answer(edited, "oxlint", 1, [problem([0, 4], [0, 5], { message: "kept" })]);
+  const cleared = answer(repeated, "tsgo", 1, []);
+
+  expect(sets([problem([0, 4], [0, 5], { message: "kept" })])).toBe(false);
+  expect(sets([problem([0, 4], [0, 5], { message: "changed" })])).toBe(true);
+  expect(sets([problem([0, 4], [0, 6], { message: "kept" })])).toBe(true);
+  expect(sets([problem([0, 4], [0, 5], { message: "kept", severity: "warning" })])).toBe(true);
+  expect(sets([problem([0, 4], [0, 5], { message: "kept", code: "x" })])).toBe(true);
+  expect(sets([])).toBe(true);
+  expect(shown(repeated)).toEqual(["a error kept (oxlint)", "b error typed (tsgo)"]);
+  expect(shown(cleared)).toEqual(["a error kept (oxlint)"]);
 });
 
 test("rule 2: a version stays answerable until every server that answered is past it", () => {

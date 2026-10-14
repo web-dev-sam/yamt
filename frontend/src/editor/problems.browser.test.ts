@@ -4,6 +4,7 @@ import { page, userEvent } from "vitest/browser";
 
 import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
 import {
+  isDocVersion,
   LanguageServers,
   type DocVersion,
   type FormatReply,
@@ -62,12 +63,8 @@ class ProbeServers extends LanguageServers {
 
 const roots: HTMLElement[] = [];
 
-function isVersion(n: number): n is DocVersion {
-  return Number.isSafeInteger(n) && n > 0;
-}
-
 function version(n: number): DocVersion {
-  if (!isVersion(n)) {
+  if (!isDocVersion(n)) {
     throw new RangeError(`not a document version: ${n}`);
   }
   return n;

@@ -98,6 +98,22 @@ function diagnosticOf(taken: Taken, server: string, problem: ServerProblem): Dia
   return { from, to, severity, message, source: code === null ? server : `${server} ${code}` };
 }
 
+function shownAlready(state: EditorState, owners: ReadonlyMap<Diagnostic, string>): boolean {
+  const shown: Diagnostic[] = [];
+  forEachDiagnostic(state, (diagnostic, from, to) => {
+    shown.push({ ...diagnostic, from, to });
+  });
+  const [before, after] = [shown, [...owners.keys()]].map((diagnostics) =>
+    diagnostics
+      .map(({ from, to, severity, message, source }) =>
+        JSON.stringify([from, to, severity, message, source ?? null]),
+      )
+      .sort()
+      .join("\n"),
+  );
+  return before === after;
+}
+
 export function problemsSpec(
   state: EditorState,
   answer: { server: string; version: DocVersion; problems: readonly ServerProblem[] },
@@ -105,8 +121,7 @@ export function problemsSpec(
   const { server, version, problems } = answer;
   const answers = state.field(problemsField);
   const taken = answers.taken.find((candidate) => candidate.version === version);
-  const last = answers.answered.get(server);
-  if (taken === undefined || (last !== undefined && version < last)) {
+  if (taken === undefined) {
     return null;
   }
   const owners = new Map<Diagnostic, string>();
@@ -121,6 +136,9 @@ export function problemsSpec(
     if (diagnostic !== null) {
       owners.set(diagnostic, server);
     }
+  }
+  if (shownAlready(state, owners)) {
+    return { effects: answered.of({ server, version, owners: answers.owners }) };
   }
   const effects: StateEffect<unknown>[] = [answered.of({ server, version, owners })];
   return { effects: effects.concat(setDiagnostics(state, [...owners.keys()]).effects ?? []) };

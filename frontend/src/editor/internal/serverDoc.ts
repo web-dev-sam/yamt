@@ -17,6 +17,7 @@ type Servers = Pick<LanguageServers, "open">;
 
 export type PaneUpdate = {
   readonly docChanged: boolean;
+  readonly startState: EditorState;
   readonly state: EditorState;
   readonly transactions: readonly Transaction[];
 };
@@ -25,7 +26,6 @@ export class ServerDoc implements ResultDocument {
   readonly path: string;
   readonly #pane: () => ResultPane;
   readonly #open: OpenDocument;
-  #counts: ProblemCounts;
   #listener: ((counts: ProblemCounts) => void) | null = null;
   #formatting: Promise<FormatOutcome> | null = null;
   #closed = false;
@@ -33,7 +33,6 @@ export class ServerDoc implements ResultDocument {
   constructor(servers: Servers, path: string, pane: () => ResultPane) {
     this.path = path;
     this.#pane = pane;
-    this.#counts = problemCounts(pane().state);
     this.#open = servers.open(this);
   }
 
@@ -62,11 +61,14 @@ export class ServerDoc implements ResultDocument {
     if (!update.docChanged && !linted) {
       return;
     }
-    const counts = problemCounts(update.state);
-    const { errors, warnings, other } = this.#counts;
-    if (counts.errors !== errors || counts.warnings !== warnings || counts.other !== other) {
-      this.#counts = counts;
-      this.#listener?.(counts);
+    const before = problemCounts(update.startState);
+    const after = problemCounts(update.state);
+    if (
+      after.errors !== before.errors ||
+      after.warnings !== before.warnings ||
+      after.other !== before.other
+    ) {
+      this.#listener?.(after);
     }
   }
 

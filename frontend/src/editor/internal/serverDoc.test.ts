@@ -3,12 +3,13 @@ import type { EditorState, TransactionSpec } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, type FileMergeData } from "../../ipc";
-import type {
-  DocVersion,
-  FormatReply,
-  OpenDocument,
-  ResultDocument,
-  ServerProblem,
+import {
+  isDocVersion,
+  type DocVersion,
+  type FormatReply,
+  type OpenDocument,
+  type ResultDocument,
+  type ServerProblem,
 } from "../../lsp";
 import type { ResultPane } from "./format";
 import { paneState, type PaneSettings } from "./pane";
@@ -43,7 +44,12 @@ class FakePane implements ResultPane {
   dispatch(spec: TransactionSpec): void {
     const tr = this.state.update(spec);
     this.state = tr.state;
-    this.doc?.updated({ docChanged: tr.docChanged, state: tr.state, transactions: [tr] });
+    this.doc?.updated({
+      docChanged: tr.docChanged,
+      startState: tr.startState,
+      state: tr.state,
+      transactions: [tr],
+    });
   }
 }
 
@@ -68,12 +74,8 @@ class FakeServers {
 
 type Panes = { readonly left: FakePane; readonly center: FakePane; readonly right: FakePane };
 
-function isVersion(n: number): n is DocVersion {
-  return Number.isSafeInteger(n) && n > 0;
-}
-
 function version(n: number): DocVersion {
-  if (!isVersion(n)) {
+  if (!isDocVersion(n)) {
     throw new RangeError(`not a document version: ${n}`);
   }
   return n;

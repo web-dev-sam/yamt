@@ -1,5 +1,6 @@
 import { undo, undoDepth } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
+import { forEachDiagnostic, setDiagnostics } from "@codemirror/lint";
 import { EditorState, type StateField, type TransactionSpec } from "@codemirror/state";
 import { expect, test } from "vitest";
 
@@ -119,11 +120,24 @@ function formatter(pane: FakePane, reply: (sent: string) => FormatReply): Format
   };
 }
 
-function reformatted(sent: string, lineNumbers: readonly number[], eol: Eol): string {
+function reformatted(
+  sent: string,
+  lineNumbers: readonly number[],
+  eol: Eol,
+  change: (line: string) => string = (line) => `${line};`,
+): string {
   const lines = sent.split(separator(eol));
   return lines
-    .map((line, index) => (lineNumbers.includes(index + 1) ? `${line};` : line))
+    .map((line, index) => (lineNumbers.includes(index + 1) ? change(line) : line))
     .join(separator(eol));
+}
+
+function problemTexts(state: EditorState): string[] {
+  const texts: string[] = [];
+  forEachDiagnostic(state, ({ message }, from, to) => {
+    texts.push(`${message}: ${state.doc.lineAt(from).number} ${state.sliceDoc(from, to)}`);
+  });
+  return texts;
 }
 
 function formatting(pane: FakePane, reply: (sent: string) => FormatReply): Promise<unknown> {
@@ -191,6 +205,76 @@ test.each<Eol>(["Lf", "CrLf"])(
     expect(undoDepth(pane.state)).toBe(0);
   },
 );
+
+test.each<Eol>(["Lf", "CrLf"])(
+  "rule 5: reindenting lines 198–204 around an open block keeps it pending on both sides, with its own lines, its arrows and the problems (%s)",
+  async (eol) => {
+    const merge = await conflicted(eol);
+    const { pane } = merge;
+    const { doc } = pane.state;
+    pane.dispatch(
+      setDiagnostics(pane.state, [
+        { from: doc.line(3).from, to: doc.line(3).to, severity: "error", message: "untouched" },
+        { from: doc.line(198).to - 3, to: doc.line(198).to, severity: "error", message: "moved" },
+        { from: doc.line(200).from, to: doc.line(200).to, severity: "error", message: "moved" },
+        { from: doc.line(205).from, to: doc.line(205).to, severity: "error", message: "untouched" },
+      ]),
+    );
+    const reindented = [198, 199, 200, 201, 202, 203, 204];
+    const result = reformatted(paneText(pane.state), reindented, eol, (line) => `  ${line}`);
+
+    await formatting(pane, (text) => ({ kind: "formatted", server: SERVER, sent: text, result }));
+
+    expect(paneText(pane.state)).toBe(result);
+    expect(status(merge)).toBe("pending pending");
+    expect(blockText(merge)).toBe([...numbered("  block", BLOCK.len), ""].join(separator(eol)));
+    expect(arrows(merge, "local")).toEqual(["replace"]);
+    expect(arrows(merge, "remote")).toEqual(["replace"]);
+    expect(problemTexts(pane.state)).toEqual([
+      "untouched: 3 line 3",
+      "moved: 198 198",
+      "moved: 200 block 1",
+      "untouched: 205 line 205",
+    ]);
+  },
+);
+
+test("rule 5: reindenting the line before an open block and its first line leaves the block where it starts", async () => {
+  const merge = await conflicted();
+  const { pane } = merge;
+  const result = reformatted(paneText(pane.state), [199, 200], "Lf", (line) => `  ${line}`);
+
+  await formatting(pane, (text) => ({ kind: "formatted", server: SERVER, sent: text, result }));
+
+  expect(paneText(pane.state)).toBe(result);
+  expect(status(merge)).toBe("pending pending");
+  expect(blockText(merge)).toBe("  block 1\nblock 2\nblock 3\n");
+});
+
+test("rule 5: a formatter's LF answer to a CRLF Result is split on every line break, and the Result stays CRLF", async () => {
+  const merge = await conflicted("CrLf");
+  const { pane } = merge;
+  const result = reformatted(paneText(pane.state), [3, 400], "CrLf").replaceAll("\r\n", "\n");
+
+  const outcome = await formatting(pane, (text) => ({
+    kind: "formatted",
+    server: SERVER,
+    sent: text,
+    result,
+  }));
+  const same = await formatting(pane, (text) => ({
+    kind: "formatted",
+    server: SERVER,
+    sent: text,
+    result: text.replaceAll("\r\n", "\n"),
+  }));
+
+  expect(outcome).toEqual({ kind: "formatted", server: SERVER });
+  expect(paneText(pane.state)).toBe(result.replaceAll("\n", "\r\n"));
+  expect(pane.state.doc.lines).toBe(result.split("\n").length);
+  expect(status(merge)).toBe("pending pending");
+  expect(same).toEqual({ kind: "unchanged", server: SERVER });
+});
 
 test("rule 5: a CRLF Result keeps CRLF line breaks in every formatted line", async () => {
   const merge = await conflicted("CrLf");

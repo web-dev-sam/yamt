@@ -6,6 +6,7 @@ import { LanguageServers } from "../lsp";
 import { useMergeController, type MergeHandle, type Preferences } from "./useMergeController";
 
 type Counts = { errors: number; warnings: number; other: number };
+type Summary = { conflicts: number; changes: number };
 
 const editor = vi.hoisted(() => {
   const state = {
@@ -17,7 +18,9 @@ const editor = vi.hoisted(() => {
     collapsed: new Array<string>(),
     servers: new Array<unknown>(),
     counts: { errors: 0, warnings: 0, other: 0 },
+    summary: { conflicts: 0, changes: 0 },
     countsListener: (_counts: Counts): void => {},
+    summaryListener: (_summary: Summary): void => {},
     unsavedListener: (_unsaved: boolean): void => {},
   };
   class MergeController {
@@ -40,10 +43,12 @@ const editor = vi.hoisted(() => {
       state.collapsed.push(`${this.#id} built ${options.collapsed}`);
       state.servers.push(options.servers);
     }
-    summary(): { conflicts: number; changes: number } {
-      return { conflicts: 0, changes: 0 };
+    summary(): Summary {
+      return state.summary;
     }
-    onSummaryChange(): void {}
+    onSummaryChange(listener: (summary: Summary) => void): void {
+      state.summaryListener = listener;
+    }
     problems(): Counts {
       return state.counts;
     }
@@ -87,7 +92,9 @@ afterEach(() => {
     collapsed: [],
     servers: [],
     counts: { errors: 0, warnings: 0, other: 0 },
+    summary: { conflicts: 0, changes: 0 },
     countsListener: () => {},
+    summaryListener: () => {},
     unsavedListener: () => {},
   });
 });
@@ -303,6 +310,33 @@ test("problems: the editor's counts when built, then each change it reports; nul
   scope.stop();
 
   expect(handle.problems.value).toBeNull();
+});
+
+test("summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change", async () => {
+  editor.state.summary = { conflicts: 2, changes: 5 };
+  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  const { scope, handle } = mount(data);
+  await nextTick();
+
+  expect(handle.summary.value).toEqual({ conflicts: 2, changes: 5 });
+
+  editor.state.summaryListener({ conflicts: 1, changes: 5 });
+
+  expect(handle.summary.value).toEqual({ conflicts: 1, changes: 5 });
+
+  editor.state.summary = { conflicts: 3, changes: 3 };
+  data.value = await fileData("b\n");
+  await nextTick();
+
+  expect(handle.summary.value).toEqual({ conflicts: 3, changes: 3 });
+
+  editor.state.summaryListener({ conflicts: 0, changes: 3 });
+
+  expect(handle.summary.value).toEqual({ conflicts: 0, changes: 3 });
+
+  scope.stop();
+
+  expect(handle.summary.value).toBeNull();
 });
 
 test("problems and format are null while no editor is built", async () => {
