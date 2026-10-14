@@ -1,0 +1,14 @@
+just mutants 1a57989 (after bcf20f3), StrykerJS, files keys.ts, keyText.ts, store.ts, listing.ts.
+Scores: keys.ts 80.66, keyText.ts 45.65, listing.ts 100.00, store.ts 97.06 (whole files; most survivors are older lines).
+Survivors on lines changed by bcf20f3 (7):
+
+src/ui/keyText.ts:32:23 StringLiteral   "toggle-file-list": "Toggle file list" → ""
+src/ui/keyText.ts:50:23 StringLiteral   "toggle-file-list": "anywhere in the window" → ""
+src/ui/keyText.ts:64:12 StringLiteral   { title: "Window", … } → { title: "", … }
+src/ui/keyText.ts:64:31 ArrayDeclaration actions: ["toggle-file-list"] → []
+src/ui/keyText.ts:64:3  ObjectLiteral   { title: "Window", actions: [...] } → {}
+src/ui/keyText.ts:64:32 StringLiteral   actions: ["toggle-file-list"] → [""]
+  (module-level constants; #732: such mutants are not re-evaluated under the vitest runner)
+src/ui/store.ts:287:6   MethodExpression !bound.some((key) => sameKey(key, pressed)) → !bound.every(…)
+
+Full log: .omp/run/mutants/FileListKey.txt
