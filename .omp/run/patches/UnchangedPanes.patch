@@ -1,0 +1,2012 @@
+diff --git a/frontend/src/connectors/index.test.ts b/frontend/src/connectors/index.test.ts
+index 7fe40f4..f5801bf 100644
+--- a/frontend/src/connectors/index.test.ts
++++ b/frontend/src/connectors/index.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { bandPath } from ".";
++import { bandPath, waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from ".";
+ 
+ test("an aligned band is a rectangle drawn with flat curves", () => {
+   const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
+@@ -31,3 +31,13 @@ test("an insertion on the right tapers to the right edge, at fractional line hei
+     "M0 18.2 C19.5 18.2 19.5 36.4 39 36.4 L39 36.4 C19.5 36.4 19.5 54.6 0 54.6 Z",
+   );
+ });
++
++test("the wave tile is four quarter curves of 5 px with a 3 px half-height, 1 px from the tile edge", () => {
++  expect(waveTile()).toBe("M0 1 Q2.5 1 5 4 Q7.5 7 10 7 Q12.5 7 15 4 Q17.5 1 20 1");
++  expect([WAVE_TILE_WIDTH_PX, WAVE_TILE_HEIGHT_PX]).toEqual([20, 8]);
++});
++
++test("the wave sits in the middle of a 20 px line", () => {
++  expect(waveCenterY(20)).toBe(10);
++  expect(waveCenterY(30)).toBe(15);
++});
+diff --git a/frontend/src/connectors/index.ts b/frontend/src/connectors/index.ts
+index 0c66037..e430c3b 100644
+--- a/frontend/src/connectors/index.ts
++++ b/frontend/src/connectors/index.ts
+@@ -20,3 +20,31 @@ export function bandPath(band: Band, width: number): string {
+     "Z",
+   ].join(" ");
+ }
++
++const WAVE_STEP_PX = 5;
++const WAVE_HALF_HEIGHT_PX = 3;
++const WAVE_GAP_PX = 1;
++const WAVE_STEPS = 4;
++const HALF = 0.5;
++export const WAVE_TILE_WIDTH_PX = WAVE_STEPS * WAVE_STEP_PX;
++export const WAVE_TILE_HEIGHT_PX =
++  WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
++
++export function waveTile(): string {
++  const top = WAVE_GAP_PX;
++  const mid = WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX;
++  const bottom = mid + WAVE_HALF_HEIGHT_PX;
++  const level = [top, mid, bottom, mid, top];
++  const segments = Array.from({ length: WAVE_STEPS }, (_, step) => {
++    const from = level[step] ?? mid;
++    const to = level[step + 1] ?? mid;
++    const crest = from === mid ? to : from;
++    const x = step * WAVE_STEP_PX;
++    return `Q${px(x + WAVE_STEP_PX * HALF)} ${px(crest)} ${px(x + WAVE_STEP_PX)} ${px(to)}`;
++  });
++  return [`M0 ${px(top)}`, ...segments].join(" ");
++}
++
++export function waveCenterY(lineHeight: number): number {
++  return (lineHeight - WAVE_TILE_HEIGHT_PX) * HALF + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
++}
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index d51bbac..ba20ae3 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -1,25 +1,28 @@
+ import { redo, undo } from "@codemirror/commands";
+ import type { Language } from "@codemirror/language";
+-import { searchPanelOpen } from "@codemirror/search";
+-import type { Extension, StateField } from "@codemirror/state";
++import type { Extension, StateField, Text } from "@codemirror/state";
+ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+ import type { FileMergeData } from "../ipc";
+ import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
+ import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
+ import { chunkField, type ChunkSpan } from "./internal/chunkField";
+-import { coveredDecorations, pushCovered } from "./internal/covered";
++import { coveredDecorations } from "./internal/covered";
+ import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
+ import { coveredAction, IconDrag } from "./internal/drag";
+-import { syncFindSpace } from "./internal/find";
+-import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
++import { Folding } from "./internal/folding";
++import { foldRuns, type Fold } from "./internal/foldRuns";
++import { foldField, pushFolds, showNextStep, sideFoldField, sideReveals } from "./internal/folds";
++import { foldView } from "./internal/foldView";
++import { Frame } from "./internal/frame";
++import { SIDE_PANE, type Pane, type PaneViews } from "./internal/geometry";
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import { modClicks } from "./internal/modClick";
+ import type { Direction } from "./internal/navigation";
+ import { centerPane, createPane, paneText, preferenceEffects } from "./internal/pane";
+ import type { PaneSettings, Preferences } from "./internal/pane";
+-import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
++import { paneDocs } from "./internal/paneDocs";
+ import type { Side } from "./internal/side";
+ import { SideFocus } from "./internal/sideFocus";
+ import { sideRunner } from "./internal/sideKeys";
+@@ -44,93 +47,90 @@ export type MergeOptions = { readonly readOnly: boolean; readonly preferences: P
+ 
+ type ViewSources = {
+   data: FileMergeData;
++  docs: Readonly<Record<Pane, Text>>;
+   hosts: MergeHosts;
+   language: Language | null;
+ };
+-type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
+ 
+ export class MergeController {
+   readonly #field: StateField<readonly ChunkSpan[]>;
++  readonly #folds: Readonly<Record<"center" | "sides", StateField<readonly Fold[]>>>;
+   readonly #readOnly: boolean;
+   #settings: PaneSettings;
+   readonly #views: PaneViews;
+   readonly #sides: SideDocs;
+   readonly #strips: Strips;
+-  readonly #scroll: ScrollSync;
+   readonly #drag: IconDrag;
+   readonly #focus: SideFocus;
+-  #frameId: number | null = null;
+-  #layoutCache: Layout | null = null;
++  readonly #folding: Folding;
++  readonly #frame: Frame;
+   #summaryListener: ((summary: MergeSummary) => void) | null = null;
+   #destroyed = false;
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
+     const description = languageOf(data.path);
++    const docs = paneDocs(data);
++    const runs = foldRuns(data.chunks, docs);
+     this.#field = chunkField(data.chunks);
++    this.#folds = { center: foldField(runs), sides: sideFoldField(runs) };
+     this.#readOnly = options.readOnly;
+     this.#settings = { preferences: options.preferences, platform: navigator.platform };
+     const language = description?.support?.language ?? null;
+-    this.#views = this.#createViews({ data, hosts, language });
+-    this.#focus = new SideFocus({
+-      views: this.#views,
+-      states: () => this.#views.center.state.field(this.#field),
+-      rows: () => this.#layout().rows,
+-      decide: (action) => this.#decide(action, "side"),
+-      readOnly: this.#readOnly,
+-      hidden: data.deleted,
++    this.#folding = new Folding([hosts.left, hosts.center, hosts.right, ...hosts.strips], (run) => {
++      const center = this.#views.center;
++      center.dispatch(showNextStep(center.state.field(this.#folds.center), run));
+     });
+-    this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
++    this.#views = this.#createViews({ data, docs, hosts, language });
++    this.#focus = this.#createFocus(data.deleted);
++    this.#sides = { local: docs.left, remote: docs.right };
+     this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
+-    this.#drag = new IconDrag(hosts.strips, {
+-      changed: () => {
+-        this.#requestFrame();
+-      },
+-      released: (press, reach) => {
+-        this.#act(coveredAction(press, this.#layout().rows, this.#views), reach);
+-      },
++    this.#drag = this.#createDrag(hosts.strips);
++    this.#frame = new Frame({
++      views: this.#views,
++      spans: this.#field,
++      layoutFields: [this.#field, this.#folds.center, this.#folds.sides],
++      drag: this.#drag,
++      strips: this.#strips,
+     });
+-    this.#scroll = new ScrollSync(this.#views, () => {
+-      this.#requestFrame();
+-    });
+-    this.#requestFrame();
++    this.#frame.request();
+     if (description !== null && description.support === undefined) {
+       void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
+     }
+   }
+ 
+   readonly #repaint = EditorView.updateListener.of((update) => {
+-    if (rowsChanged(update, this.#field)) {
+-      this.#layoutCache = null;
+-    }
+-    if (
+-      update.docChanged ||
+-      update.geometryChanged ||
+-      searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
+-    ) {
+-      this.#requestFrame();
+-    }
++    this.#frame.changed(update);
+   });
+ 
+-  #createViews({ data, hosts, language }: ViewSources): PaneViews {
+-    const field = this.#field;
+-    const statusSync = EditorView.updateListener.of((update) => {
+-      this.#statusesChanged(update);
+-    });
++  readonly #statusSync = EditorView.updateListener.of((update) => {
++    this.#statusesChanged(update);
++  });
++
++  #createViews({ data, docs, hosts, language }: ViewSources): PaneViews {
+     const shared = { eol: data.eol, language, settings: this.#settings };
+     const center = createPane({
+       ...shared,
+-      ...centerPane(data.middle, this.#readOnly),
++      kind: centerPane(data.middle, this.#readOnly).kind,
++      doc: docs.center,
+       parent: hosts.center,
+-      extensions: [field, centerDecorations(field), this.#repaint, statusSync],
++      extensions: [
++        this.#field,
++        centerDecorations(this.#field),
++        this.#folds.center,
++        foldView(this.#folds.center, "center", () => this.#folding.hovered()),
++        pushFolds(this.#folds.center, this.#folds.sides, () => this.#views),
++        this.#repaint,
++        this.#statusSync,
++      ],
+     });
+     const statuses = sideStatusField(
+-      center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
++      center.state.field(this.#field).map(({ chunk, status }) => ({ chunk, status })),
+     );
+     return {
+       left: createPane({
+         ...shared,
+         kind: "side",
+-        doc: data.local,
++        doc: docs.left,
+         parent: hosts.left,
+         extensions: this.#sideExtensions(statuses, "local"),
+       }),
+@@ -138,7 +138,7 @@ export class MergeController {
+       right: createPane({
+         ...shared,
+         kind: "side",
+-        doc: data.remote,
++        doc: docs.right,
+         parent: hosts.right,
+         extensions: this.#sideExtensions(statuses, "remote"),
+       }),
+@@ -146,11 +146,15 @@ export class MergeController {
+   }
+ 
+   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
++    const pane = SIDE_PANE[side];
+     return [
+       statuses,
+       sideDecorations(statuses, side),
+       focusDecorations(statuses, side),
+       coveredDecorations(side),
++      this.#folds.sides,
++      foldView(this.#folds.sides, pane, () => this.#folding.hovered()),
++      sideReveals(this.#folds.sides, pane, () => this.#views.center),
+       sideRunner.of((command) => {
+         this.#focus.run(side, command);
+       }),
+@@ -158,7 +162,7 @@ export class MergeController {
+       this.#readOnly
+         ? []
+         : modClicks(side, {
+-            rows: () => this.#layout().rows,
++            rows: () => this.#frame.layout().rows,
+             act: (action) => {
+               this.#act(action, "side");
+             },
+@@ -166,6 +170,28 @@ export class MergeController {
+     ];
+   }
+ 
++  #createFocus(hidden: Side | null): SideFocus {
++    return new SideFocus({
++      views: this.#views,
++      states: () => this.#views.center.state.field(this.#field),
++      rows: () => this.#frame.layout().rows,
++      decide: (action) => this.#decide(action, "side"),
++      readOnly: this.#readOnly,
++      hidden,
++    });
++  }
++
++  #createDrag(strips: MergeHosts["strips"]): IconDrag {
++    return new IconDrag(strips, {
++      changed: () => {
++        this.#frame.request();
++      },
++      released: (press, reach) => {
++        this.#act(coveredAction(press, this.#frame.layout().rows, this.#views), reach);
++      },
++    });
++  }
++
+   #target(): ApplyTarget {
+     return { state: this.#views.center.state, field: this.#field, sides: this.#sides };
+   }
+@@ -199,35 +225,14 @@ export class MergeController {
+     const states = after.map(({ chunk, status }) => ({ chunk, status }));
+     this.#views.left.dispatch({ effects: showStatuses.of(states) });
+     this.#views.right.dispatch({ effects: showStatuses.of(states) });
+-    this.#requestFrame();
++    this.#frame.request();
+     this.#summaryListener?.(summarize(after));
+   }
+ 
+-  #layout(): Layout {
+-    if (this.#layoutCache === null) {
+-      const rows = chunkRows(this.#views, this.#views.center.state.field(this.#field));
+-      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(this.#views)) };
+-    }
+-    return this.#layoutCache;
+-  }
+-
+   readonly #press = (press: IconPress, event: PointerEvent): void => {
+     this.#drag.start(press, event);
+   };
+ 
+-  #requestFrame(): void {
+-    this.#frameId ??= requestAnimationFrame(() => {
+-      this.#frameId = null;
+-      syncFindSpace(this.#views);
+-      const { rows, anchors } = this.#layout();
+-      this.#scroll.sync(anchors);
+-      const press = this.#drag.press;
+-      const covered = press === null ? null : coveredAction(press, rows, this.#views);
+-      pushCovered(this.#views, covered);
+-      this.#strips.paint(this.#views, rows, covered);
+-    });
+-  }
+-
+   applyAllNonConflicting(side: Side): void {
+     this.#dispatch(
+       bulkApplySteps({ target: this.#target(), side, visible: visibleLines(this.#views.center) }),
+@@ -280,10 +285,8 @@ export class MergeController {
+   destroy(): void {
+     this.#summaryListener = null;
+     this.#destroyed = true;
+-    if (this.#frameId !== null) {
+-      cancelAnimationFrame(this.#frameId);
+-    }
+-    this.#scroll.destroy();
++    this.#frame.destroy();
++    this.#folding.destroy();
+     this.#focus.destroy();
+     this.#drag.destroy();
+     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {
+diff --git a/frontend/src/editor/internal/chunkField.ts b/frontend/src/editor/internal/chunkField.ts
+index 3f25ec3..98af23d 100644
+--- a/frontend/src/editor/internal/chunkField.ts
++++ b/frontend/src/editor/internal/chunkField.ts
+@@ -8,11 +8,11 @@ import {
+ } from "@codemirror/state";
+ 
+ import type { Chunk } from "../../ipc";
++import { toDocPos, type DocPos } from "./docPos";
+ import { lineSpan } from "./lineSpan";
+ import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
+ import { chunkTone, type Tone } from "./tone";
+ 
+-type DocPos = number & { readonly __brand: "DocPos" };
+ type StatusChanges = ReadonlyMap<Chunk["id"], ChunkStatus>;
+ 
+ export type ChunkSpan = ChunkState & {
+@@ -26,17 +26,6 @@ export const setStatus = StateEffect.define<{
+   readonly status: ChunkStatus;
+ }>();
+ 
+-function isDocPos(n: number): n is DocPos {
+-  return Number.isSafeInteger(n) && n >= 0;
+-}
+-
+-function toDocPos(n: number): DocPos {
+-  if (!isDocPos(n)) {
+-    throw new Error(`${n} is not a document position`);
+-  }
+-  return n;
+-}
+-
+ function endsMidLine(span: ChunkSpan, doc: Text | null): boolean {
+   return doc !== null && span.from < span.to && doc.lineAt(span.to).from !== span.to;
+ }
+diff --git a/frontend/src/editor/internal/docPos.ts b/frontend/src/editor/internal/docPos.ts
+new file mode 100644
+index 0000000..30af416
+--- /dev/null
++++ b/frontend/src/editor/internal/docPos.ts
+@@ -0,0 +1,12 @@
++export type DocPos = number & { readonly __brand: "DocPos" };
++
++function isDocPos(n: number): n is DocPos {
++  return Number.isSafeInteger(n) && n >= 0;
++}
++
++export function toDocPos(n: number): DocPos {
++  if (!isDocPos(n)) {
++    throw new Error(`${n} is not a document position`);
++  }
++  return n;
++}
+diff --git a/frontend/src/editor/internal/foldRuns.test.ts b/frontend/src/editor/internal/foldRuns.test.ts
+new file mode 100644
+index 0000000..912b548
+--- /dev/null
++++ b/frontend/src/editor/internal/foldRuns.test.ts
+@@ -0,0 +1,174 @@
++import type { Text } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { loadFixture, type FileMergeData } from "../../ipc";
++import { toDocPos } from "./docPos";
++import { displayed, foldRuns, type Fold, type Hidden } from "./foldRuns";
++import type { Pane } from "./geometry";
++import { paneDocs } from "./paneDocs";
++
++type Range = [start: number, len: number];
++type ChunkRanges = { middle: Range; local: Range; remote: Range };
++
++function numbered(count: number): string {
++  return Array.from({ length: count }, (_, index) => `line ${index + 1}\n`).join("");
++}
++
++function lineRange([start, len]: Range): { start: number; len: number } {
++  return { start, len };
++}
++
++async function synthetic(
++  texts: { middle: string; local: string; remote: string },
++  chunks: readonly ChunkRanges[],
++): Promise<FileMergeData> {
++  const { middle, ...sides } = texts;
++  const record = {
++    path: "synthetic.ts",
++    deleted: null,
++    middle: { kind: "Stages", text: middle },
++    ...sides,
++    eol: "Lf",
++    disk_version: 0,
++    chunks: chunks.map((chunk, id) => {
++      return {
++        chunk: {
++          id,
++          kind: "Conflict",
++          base: lineRange(chunk.middle),
++          local: lineRange(chunk.local),
++          remote: lineRange(chunk.remote),
++        },
++        middle: lineRange(chunk.middle),
++        words: {
++          chunk: id,
++          local: { changed: [], removed_at: [] },
++          remote: { changed: [], removed_at: [] },
++        },
++      };
++    }),
++  };
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
++}
++
++function same(range: Range): ChunkRanges {
++  return { middle: range, local: range, remote: range };
++}
++
++async function runsOf(
++  lineCounts: Readonly<Record<"middle" | "local" | "remote", number>>,
++  chunks: readonly ChunkRanges[],
++): Promise<{ runs: Fold[]; docs: Readonly<Record<Pane, Text>> }> {
++  const data = await synthetic(
++    {
++      middle: numbered(lineCounts.middle),
++      local: numbered(lineCounts.local),
++      remote: numbered(lineCounts.remote),
++    },
++    chunks,
++  );
++  const docs = paneDocs(data);
++  return { runs: foldRuns(data.chunks, docs), docs };
++}
++
++function lines(doc: Text, hidden: Hidden | null): string {
++  return hidden === null
++    ? "-"
++    : `${doc.lineAt(hidden.from).number}-${doc.lineAt(hidden.to).number}`;
++}
++
++function levelLines(runs: readonly Fold[], docs: Readonly<Record<Pane, Text>>, pane: Pane) {
++  return runs.map((fold) => fold.hidden.map((level) => lines(docs[pane], level[pane])));
++}
++
++const ALL = { middle: 100, local: 100, remote: 100 };
++
++test("each run keeps 4, then 8, then 16 lines next to each change", async () => {
++  const { runs, docs } = await runsOf(ALL, [same([20, 1]), same([80, 1])]);
++
++  expect(levelLines(runs, docs, "center")[1]).toEqual(["26-76", "30-72", "38-64"]);
++  expect(levelLines(runs, docs, "left")[1]).toEqual(["26-76", "30-72", "38-64"]);
++});
++
++test("nothing is kept at the file's top or bottom", async () => {
++  const { runs, docs } = await runsOf(ALL, [same([50, 2])]);
++
++  expect(levelLines(runs, docs, "center")).toEqual([
++    ["1-46", "1-42", "1-34"],
++    ["57-101", "61-101", "69-101"],
++  ]);
++});
++
++test("a file without changes has one run with one level hiding each whole pane", async () => {
++  const { runs, docs } = await runsOf({ middle: 30, local: 10, remote: 0 }, []);
++
++  expect(levelLines(runs, docs, "center")).toEqual([["1-31"]]);
++  expect(levelLines(runs, docs, "left")).toEqual([["1-11"]]);
++  expect(levelLines(runs, docs, "right")).toEqual([["-"]]);
++});
++
++test("a run of 9 lines hides nothing, a run of 10 hides its 2 middle lines once", async () => {
++  const nine = await runsOf(ALL, [same([10, 1]), same([20, 1])]);
++  const ten = await runsOf(ALL, [same([10, 1]), same([21, 1])]);
++
++  expect(nine.runs[1]?.hidden).toEqual([]);
++  expect(levelLines(ten.runs, ten.docs, "center")[1]).toEqual(["16-17"]);
++});
++
++test("an empty document hides nothing in its pane", async () => {
++  const data = await synthetic({ middle: numbered(40), local: "", remote: numbered(40) }, [
++    { middle: [20, 1], local: [0, 0], remote: [20, 1] },
++  ]);
++  const docs = paneDocs(data);
++  const runs = foldRuns(data.chunks, docs);
++
++  expect(runs.flatMap((fold) => fold.hidden.map((level) => level.left))).toEqual(
++    runs.flatMap((fold) => fold.hidden.map(() => null)),
++  );
++  expect(runs.flatMap((fold) => fold.hidden).length).toBeGreaterThan(0);
++});
++
++test("a run long only in the middle still makes its levels, null in the sides", async () => {
++  const { runs, docs } = await runsOf({ middle: 100, local: 40, remote: 40 }, [
++    { middle: [10, 1], local: [10, 1], remote: [10, 1] },
++    { middle: [60, 1], local: [16, 1], remote: [16, 1] },
++  ]);
++
++  expect(levelLines(runs, docs, "center")[1]).toEqual(["16-56", "20-52", "28-44"]);
++  expect(levelLines(runs, docs, "left")[1]).toEqual(["-", "-", "-"]);
++});
++
++test("a level that differs from the one outside it in one pane only is kept", async () => {
++  const { runs, docs } = await runsOf({ middle: 100, local: 100, remote: 100 }, [
++    { middle: [10, 1], local: [10, 1], remote: [10, 1] },
++    { middle: [23, 1], local: [60, 1], remote: [23, 1] },
++  ]);
++
++  expect(levelLines(runs, docs, "center")[1]).toEqual(["16-19", "-", "-"]);
++  expect(levelLines(runs, docs, "left")[1]).toEqual(["16-56", "20-52", "28-44"]);
++  expect(levelLines(runs, docs, "right")[1]).toEqual(["16-19", "-", "-"]);
++});
++
++test("a hidden range runs from its first line's start to its last line's end", async () => {
++  const { runs, docs } = await runsOf(ALL, [same([50, 2])]);
++  const hidden = runs[0] === undefined ? null : displayed(runs[0], "center");
++
++  expect(hidden).toEqual({ from: 0, to: docs.center.line(46).to });
++  expect(docs.center.sliceString(hidden?.from ?? 0, hidden?.to ?? 0).endsWith("line 46")).toBe(
++    true,
++  );
++});
++
++test("a pane shows the first level that hides anything in it", () => {
++  const range = { from: toDocPos(0), to: toDocPos(10) };
++  const fold: Fold = {
++    hidden: [
++      { left: range, center: null, right: null },
++      { left: range, center: range, right: null },
++    ],
++  };
++
++  expect(displayed(fold, "center")).toBe(range);
++  expect(displayed(fold, "left")).toBe(range);
++  expect(displayed(fold, "right")).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/foldRuns.ts b/frontend/src/editor/internal/foldRuns.ts
+new file mode 100644
+index 0000000..e79e3df
+--- /dev/null
++++ b/frontend/src/editor/internal/foldRuns.ts
+@@ -0,0 +1,83 @@
++import type { Text } from "@codemirror/state";
++
++import type { Chunk } from "../../ipc";
++import { toDocPos, type DocPos } from "./docPos";
++import type { Pane } from "./geometry";
++
++export type Hidden = { readonly from: DocPos; readonly to: DocPos };
++export type FoldLevel = Readonly<Record<Pane, Hidden | null>>;
++export type Fold = { readonly hidden: readonly FoldLevel[] };
++
++type RunEdge = { readonly start: number; readonly end: number };
++
++const CONTEXT_LINES = 4;
++const LEVEL_GROWTH = 2;
++const LEVELS = 3;
++export const MIN_HIDDEN_LINES = 2;
++const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
++const CHUNK_RANGE = {
++  left: "local",
++  center: "middle",
++  right: "remote",
++} as const satisfies Readonly<Record<Pane, "local" | "middle" | "remote">>;
++
++function runEdge(before: Chunk | undefined, after: Chunk | undefined, pane: Pane): RunEdge {
++  const key = CHUNK_RANGE[pane];
++  return {
++    start: before === undefined ? -Infinity : before[key].start + before[key].len,
++    end: after === undefined ? Infinity : after[key].start,
++  };
++}
++
++function hiddenLines(doc: Text, edge: RunEdge, shift: number): Hidden | null {
++  const first = Math.max(0, edge.start + shift);
++  const end = Math.min(doc.lines, edge.end - shift);
++  if (end - first < MIN_HIDDEN_LINES) {
++    return null;
++  }
++  return { from: toDocPos(doc.line(first + 1).from), to: toDocPos(doc.line(end).to) };
++}
++
++export function sameHidden(a: Hidden | null, b: Hidden | null): boolean {
++  return a === null || b === null ? a === b : a.from === b.from && a.to === b.to;
++}
++
++function runLevels(
++  edges: Readonly<Record<Pane, RunEdge>>,
++  docs: Readonly<Record<Pane, Text>>,
++): FoldLevel[] {
++  const levels: FoldLevel[] = [];
++  for (let depth = 0; depth < LEVELS; depth += 1) {
++    const shift = CONTEXT_LINES * LEVEL_GROWTH ** depth;
++    const level: FoldLevel = {
++      left: hiddenLines(docs.left, edges.left, shift),
++      center: hiddenLines(docs.center, edges.center, shift),
++      right: hiddenLines(docs.right, edges.right, shift),
++    };
++    const outer = levels.at(-1);
++    const hides = PANES.some((pane) => level[pane] !== null);
++    const differs =
++      outer === undefined || PANES.some((pane) => !sameHidden(level[pane], outer[pane]));
++    if (hides && differs) {
++      levels.push(level);
++    }
++  }
++  return levels;
++}
++
++export function foldRuns(chunks: readonly Chunk[], docs: Readonly<Record<Pane, Text>>): Fold[] {
++  return Array.from({ length: chunks.length + 1 }, (_, run) => {
++    const before = chunks[run - 1];
++    const after = chunks[run];
++    const edges = {
++      left: runEdge(before, after, "left"),
++      center: runEdge(before, after, "center"),
++      right: runEdge(before, after, "right"),
++    };
++    return { hidden: runLevels(edges, docs) };
++  });
++}
++
++export function displayed(fold: Fold, pane: Pane): Hidden | null {
++  return fold.hidden.find((level) => level[pane] !== null)?.[pane] ?? null;
++}
+diff --git a/frontend/src/editor/internal/foldView.test.ts b/frontend/src/editor/internal/foldView.test.ts
+new file mode 100644
+index 0000000..b1a7707
+--- /dev/null
++++ b/frontend/src/editor/internal/foldView.test.ts
+@@ -0,0 +1,59 @@
++import { Text, type RangeSet, type RangeValue } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { toDocPos } from "./docPos";
++import type { Fold, Hidden } from "./foldRuns";
++import { foldDecorations } from "./foldView";
++
++const DOC = Text.of(Array.from({ length: 60 }, (_, index) => `line ${index + 1}`));
++
++function lines(first: number, last: number): Hidden {
++  return { from: toDocPos(DOC.line(first).from), to: toDocPos(DOC.line(last).to) };
++}
++
++function ranges<T extends RangeValue>(set: RangeSet<T>): string[] {
++  const found: string[] = [];
++  set.between(0, DOC.length, (from, to) => {
++    found.push(`${DOC.lineAt(from).number}-${DOC.lineAt(to).number}`);
++  });
++  return found;
++}
++
++const FOLDS: readonly Fold[] = [
++  {
++    hidden: [
++      { left: lines(1, 10), center: lines(1, 12), right: null },
++      { left: lines(1, 6), center: lines(1, 8), right: null },
++    ],
++  },
++  {
++    hidden: [
++      { left: null, center: lines(30, 40), right: lines(30, 40) },
++      { left: lines(33, 37), center: lines(33, 37), right: lines(33, 37) },
++    ],
++  },
++  { hidden: [] },
++  { hidden: [{ left: null, center: lines(55, 60), right: null }] },
++];
++
++test("each run replaces its outermost hidden lines with one wave line", () => {
++  const set = foldDecorations(FOLDS, "center");
++  const widgets: string[] = [];
++  set.between(0, DOC.length, (from, to, decoration) => {
++    widgets.push(
++      `${from === DOC.lineAt(from).from} ${to === DOC.lineAt(to).to} ${decoration.point}`,
++    );
++  });
++
++  expect(ranges(set)).toEqual(["1-12", "30-40", "55-60"]);
++  expect(widgets).toEqual(["true true true", "true true true", "true true true"]);
++});
++
++test("a pane without a range at the outer level shows the next level that has one", () => {
++  expect(ranges(foldDecorations(FOLDS, "left"))).toEqual(["1-10", "33-37"]);
++  expect(ranges(foldDecorations(FOLDS, "right"))).toEqual(["30-40"]);
++});
++
++test("a run with no level left has no wave", () => {
++  expect(ranges(foldDecorations([{ hidden: [] }, { hidden: [] }], "center"))).toEqual([]);
++});
+diff --git a/frontend/src/editor/internal/foldView.ts b/frontend/src/editor/internal/foldView.ts
+new file mode 100644
+index 0000000..d730555
+--- /dev/null
++++ b/frontend/src/editor/internal/foldView.ts
+@@ -0,0 +1,144 @@
++import { RangeSet, RangeSetBuilder, type Extension, type StateField } from "@codemirror/state";
++import {
++  Decoration,
++  EditorView,
++  GutterMarker,
++  lineNumberMarkers,
++  WidgetType,
++  type DecorationSet,
++} from "@codemirror/view";
++
++import { waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
++import { FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
++import { displayed, type Fold } from "./foldRuns";
++import type { Pane } from "./geometry";
++import { LINE_HEIGHT_PX } from "./pane";
++
++const WAVE_LABEL = "Show unchanged lines";
++const THIN_STROKE_PX = 1;
++const THICK_STROKE_PX = 2;
++const HALF = 0.5;
++
++class FoldLine extends WidgetType {
++  readonly run: number;
++
++  constructor(run: number) {
++    super();
++    this.run = run;
++  }
++
++  override eq(other: FoldLine): boolean {
++    return other.run === this.run;
++  }
++
++  toDOM(): HTMLElement {
++    const line = document.createElement("span");
++    line.className = "fold-line";
++    return line;
++  }
++}
++
++class WaveMarker extends GutterMarker {
++  override readonly elementClass = "fold-wave-cell";
++  readonly run: number;
++  readonly #hovered: () => number | null;
++
++  constructor(run: number, hovered: () => number | null) {
++    super();
++    this.run = run;
++    this.#hovered = hovered;
++  }
++
++  override eq(other: WaveMarker): boolean {
++    return other.run === this.run;
++  }
++
++  override toDOM(): Node {
++    const wave = document.createElement("div");
++    wave.className = "fold-wave";
++    wave.classList.toggle(HOVER_CLASS, this.#hovered() === this.run);
++    wave.setAttribute(FOLD_RUN_ATTRIBUTE, String(this.run));
++    wave.setAttribute("role", "button");
++    wave.setAttribute("aria-label", WAVE_LABEL);
++    return wave;
++  }
++}
++
++export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationSet {
++  const builder = new RangeSetBuilder<Decoration>();
++  folds.forEach((fold, run) => {
++    const hidden = displayed(fold, pane);
++    if (hidden !== null) {
++      builder.add(hidden.from, hidden.to, Decoration.replace({ widget: new FoldLine(run) }));
++    }
++  });
++  return builder.finish();
++}
++
++function waveMarkers(
++  folds: readonly Fold[],
++  pane: Pane,
++  hovered: () => number | null,
++): RangeSet<GutterMarker> {
++  const builder = new RangeSetBuilder<GutterMarker>();
++  folds.forEach((fold, run) => {
++    const hidden = displayed(fold, pane);
++    if (hidden !== null) {
++      builder.add(hidden.from, hidden.from, new WaveMarker(run, hovered));
++    }
++  });
++  return builder.finish();
++}
++
++function waveMask(strokePx: number): string {
++  const svg =
++    `<svg xmlns='http://www.w3.org/2000/svg' width='${WAVE_TILE_WIDTH_PX}' height='${WAVE_TILE_HEIGHT_PX}'>` +
++    `<path d='${waveTile()}' fill='none' stroke='black' stroke-width='${strokePx}'/></svg>`;
++  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
++}
++
++function maskStyle(strokePx: number): Readonly<Record<string, string>> {
++  const image = waveMask(strokePx);
++  return { maskImage: image, WebkitMaskImage: image };
++}
++
++const waveTop = waveCenterY(LINE_HEIGHT_PX) - WAVE_TILE_HEIGHT_PX * HALF;
++const tile = {
++  maskRepeat: "repeat-x",
++  maskPosition: `0 ${waveTop}px`,
++  maskSize: `${WAVE_TILE_WIDTH_PX}px ${WAVE_TILE_HEIGHT_PX}px`,
++};
++
++const waveTheme = EditorView.theme({
++  ".cm-scroller": { containerType: "inline-size" },
++  ".cm-gutter.cm-lineNumbers": { overflow: "visible" },
++  ".fold-wave-cell": { position: "relative" },
++  ".fold-wave": {
++    position: "absolute",
++    left: "0",
++    top: "0",
++    width: "100cqi",
++    height: "100%",
++    cursor: "pointer",
++    backgroundColor: "var(--color-diff-wave)",
++    ...tile,
++    WebkitMaskRepeat: tile.maskRepeat,
++    WebkitMaskPosition: tile.maskPosition,
++    WebkitMaskSize: tile.maskSize,
++    ...maskStyle(THIN_STROKE_PX),
++  },
++  [`.fold-wave.${HOVER_CLASS}`]: maskStyle(THICK_STROKE_PX),
++});
++
++export function foldView(
++  field: StateField<readonly Fold[]>,
++  pane: Pane,
++  hovered: () => number | null,
++): Extension {
++  return [
++    EditorView.decorations.compute([field], (state) => foldDecorations(state.field(field), pane)),
++    EditorView.atomicRanges.of((view) => foldDecorations(view.state.field(field), pane)),
++    lineNumberMarkers.compute([field], (state) => waveMarkers(state.field(field), pane, hovered)),
++    waveTheme,
++  ];
++}
+diff --git a/frontend/src/editor/internal/folding.ts b/frontend/src/editor/internal/folding.ts
+new file mode 100644
+index 0000000..e7a75b7
+--- /dev/null
++++ b/frontend/src/editor/internal/folding.ts
+@@ -0,0 +1,76 @@
++export const FOLD_RUN_ATTRIBUTE = "data-fold-run";
++export const HOVER_CLASS = "fold-wave-hover";
++
++export function foldRunAt(target: EventTarget | null): number | null {
++  const wave = target instanceof Element ? target.closest(`[${FOLD_RUN_ATTRIBUTE}]`) : null;
++  const run = wave?.getAttribute(FOLD_RUN_ATTRIBUTE);
++  return run === undefined || run === null ? null : Number(run);
++}
++
++function primaryRun(event: Event): number | null {
++  return event instanceof MouseEvent && event.button === 0 ? foldRunAt(event.target) : null;
++}
++
++export class Folding {
++  readonly #hosts: readonly Element[];
++  readonly #listeners = new AbortController();
++  #hovered: number | null = null;
++
++  constructor(hosts: readonly Element[], show: (run: number) => void) {
++    this.#hosts = hosts;
++    const handlers: Readonly<Record<string, (event: Event) => void>> = {
++      pointerover: (event) => {
++        this.#hover(foldRunAt(event.target));
++      },
++      pointerleave: () => {
++        this.#hover(null);
++      },
++      mousedown: (event) => {
++        if (primaryRun(event) !== null) {
++          event.preventDefault();
++        }
++      },
++      click: (event) => {
++        const run = primaryRun(event);
++        if (run !== null) {
++          show(run);
++          this.#hover(null);
++        }
++      },
++    };
++    const signal = this.#listeners.signal;
++    for (const host of hosts) {
++      for (const [type, handler] of Object.entries(handlers)) {
++        host.addEventListener(type, handler, { signal });
++      }
++    }
++  }
++
++  hovered(): number | null {
++    return this.#hovered;
++  }
++
++  destroy(): void {
++    this.#listeners.abort();
++  }
++
++  #hover(run: number | null): void {
++    if (run === this.#hovered) {
++      return;
++    }
++    this.#mark(this.#hovered, false);
++    this.#hovered = run;
++    this.#mark(run, true);
++  }
++
++  #mark(run: number | null, hovered: boolean): void {
++    if (run === null) {
++      return;
++    }
++    for (const host of this.#hosts) {
++      for (const wave of host.querySelectorAll(`[${FOLD_RUN_ATTRIBUTE}="${run}"]`)) {
++        wave.classList.toggle(HOVER_CLASS, hovered);
++      }
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+new file mode 100644
+index 0000000..53951c2
+--- /dev/null
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -0,0 +1,326 @@
++import { undo } from "@codemirror/commands";
++import {
++  EditorSelection,
++  type EditorState,
++  type StateField,
++  type TransactionSpec,
++} from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../../ipc";
++import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./apply";
++import { chunkField } from "./chunkField";
++import { selectMatch } from "./findMatch";
++import { foldRuns, type Fold, type Hidden } from "./foldRuns";
++import {
++  foldField,
++  revealKeep,
++  showFolds,
++  showNextStep,
++  sideFoldField,
++  sideFoldPush,
++} from "./folds";
++import { paneState, type PaneSettings } from "./pane";
++import { paneDocs } from "./paneDocs";
++
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
++
++type Merge = ApplyTarget & {
++  readonly folds: StateField<readonly Fold[]>;
++  readonly runs: Fold[];
++};
++
++function numbered(from: number, to: number): string[] {
++  return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
++}
++
++function noWords(id: number) {
++  return {
++    chunk: id,
++    local: { changed: [], removed_at: [] },
++    remote: { changed: [], removed_at: [] },
++  };
++}
++
++async function twoChanges(): Promise<FileMergeData> {
++  const middle = numbered(1, 100);
++  const local = [...numbered(1, 30), "local a", "local b", "local c", ...numbered(33, 100)];
++  const remote = [...numbered(1, 70), "remote x", ...numbered(72, 100)];
++  const record = {
++    path: "synthetic.ts",
++    deleted: null,
++    middle: { kind: "Stages", text: `${middle.join("\n")}\n` },
++    local: `${local.join("\n")}\n`,
++    remote: `${remote.join("\n")}\n`,
++    eol: "Lf",
++    disk_version: 0,
++    chunks: [
++      {
++        chunk: {
++          id: 0,
++          kind: "LocalOnly",
++          base: { start: 30, len: 2 },
++          local: { start: 30, len: 3 },
++          remote: { start: 30, len: 2 },
++        },
++        middle: { start: 30, len: 2 },
++        words: noWords(0),
++      },
++      {
++        chunk: {
++          id: 1,
++          kind: "RemoteOnly",
++          base: { start: 70, len: 1 },
++          local: { start: 71, len: 1 },
++          remote: { start: 70, len: 1 },
++        },
++        middle: { start: 70, len: 1 },
++        words: noWords(1),
++      },
++    ],
++  };
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
++}
++
++async function open(): Promise<Merge> {
++  const data = await twoChanges();
++  const docs = paneDocs(data);
++  const runs = foldRuns(data.chunks, docs);
++  const field = chunkField(data.chunks);
++  const folds = foldField(runs);
++  const state = paneState({
++    kind: "center",
++    doc: docs.center,
++    eol: data.eol,
++    language: null,
++    settings: SETTINGS,
++    extensions: [field, folds],
++  });
++  return { state, field, folds, runs, sides: { local: docs.left, remote: docs.right } };
++}
++
++function after(merge: Merge, ...specs: TransactionSpec[]): Merge {
++  return { ...merge, state: merge.state.update(...specs).state };
++}
++
++function steps(merge: Merge, list: readonly TransactionSpec[]): Merge {
++  let state = merge.state;
++  dispatchSteps((spec) => {
++    state = state.update(spec).state;
++  }, list);
++  return { ...merge, state };
++}
++
++function lineRange(state: EditorState, hidden: Hidden | null): string {
++  return hidden === null
++    ? "-"
++    : `${state.doc.lineAt(hidden.from).number}-${state.doc.lineAt(hidden.to).number}`;
++}
++
++function centerLines(merge: Merge, run: number): string[] {
++  const fold = merge.state.field(merge.folds)[run];
++  return fold === undefined ? [] : fold.hidden.map((level) => lineRange(merge.state, level.center));
++}
++
++function hiddenTexts(merge: Merge): string[] {
++  return merge.state
++    .field(merge.folds)
++    .flatMap((fold) =>
++      fold.hidden.map(({ center }) =>
++        center === null ? "-" : merge.state.sliceDoc(center.from, center.to),
++      ),
++    );
++}
++
++function levelOf(merge: Merge, run: number, level: number): Hidden {
++  const hidden = merge.state.field(merge.folds)[run]?.hidden[level]?.center;
++  if (hidden === undefined || hidden === null) {
++    throw new Error(`run ${run} has no level ${level} in the middle`);
++  }
++  return hidden;
++}
++
++function click(merge: Merge, run: number): Merge {
++  return after(merge, showNextStep(merge.state.field(merge.folds), run));
++}
++
++test("the middle starts with every run's levels: 4, 8 and 16 lines kept next to each change", async () => {
++  const merge = await open();
++
++  expect([0, 1, 2].map((run) => centerLines(merge, run))).toEqual([
++    ["1-26", "1-22", "1-14"],
++    ["37-66", "41-62", "49-54"],
++    ["76-101", "80-101", "88-101"],
++  ]);
++});
++
++test("a line inserted above moves every range below it by one line", async () => {
++  const merge = after(await open(), { changes: { from: 0, insert: "new\n" } });
++
++  expect(centerLines(merge, 1)).toEqual(["38-67", "42-63", "50-55"]);
++  expect(centerLines(merge, 0)).toEqual(["2-27", "2-23", "2-15"]);
++});
++
++test("typing at a hidden range's first or last character shows that line only", async () => {
++  const merge = await open();
++  const { from, to } = levelOf(merge, 1, 0);
++
++  expect(centerLines(after(merge, { changes: { from, insert: "x" } }), 1)[0]).toBe("38-66");
++  expect(centerLines(after(merge, { changes: { from: to, insert: "x" } }), 1)[0]).toBe("37-65");
++});
++
++test("deleting a level down to one line shows it, and undo does not hide it again", async () => {
++  const merge = await open();
++  const doc = merge.state.doc;
++  const deleted = after(merge, {
++    changes: { from: doc.line(50).from, to: doc.line(55).from },
++  });
++  const undone = { ...deleted, state: undoneState(deleted.state) };
++
++  expect(centerLines(deleted, 1)).toEqual(["37-61", "41-57", "-"]);
++  expect(centerLines(undone, 1)).toEqual(["37-66", "41-62", "-"]);
++});
++
++function undoneState(state: EditorState): EditorState {
++  let next = state;
++  undo({
++    state,
++    dispatch: (tr) => {
++      next = tr.state;
++    },
++  });
++  return next;
++}
++
++test("deciding a change and bulk apply keep every hidden range's lines and every count", async () => {
++  const merge = await open();
++  const before = hiddenTexts(merge);
++  const [first, second] = merge.state.field(merge.field);
++  if (first === undefined || second === undefined) {
++    throw new Error("the data lost its chunks");
++  }
++  const applied = steps(
++    merge,
++    actionSteps(merge, { kind: "apply", side: "local", chunks: [first.chunk] }, "side"),
++  );
++  const bulk = steps(
++    merge,
++    bulkApplySteps({ target: merge, side: "remote", visible: { first: 1, last: 10 } }),
++  );
++
++  expect(hiddenTexts(applied)).toEqual(before);
++  expect(hiddenTexts(bulk)).toEqual(before);
++  expect(centerLines(applied, 1)).toEqual(["38-67", "42-63", "50-55"]);
++  expect(applied.state.field(merge.folds).map((fold) => fold.hidden.length)).toEqual([3, 3, 3]);
++});
++
++test("each click shows the outermost hidden level; three clicks empty the run", async () => {
++  const once = click(await open(), 1);
++  const twice = click(once, 1);
++  const thrice = click(twice, 1);
++
++  expect(centerLines(once, 1)).toEqual(["41-62", "49-54"]);
++  expect(centerLines(twice, 1)).toEqual(["49-54"]);
++  expect(centerLines(thrice, 1)).toEqual([]);
++  expect(centerLines(click(thrice, 1), 1)).toEqual([]);
++  expect(centerLines(thrice, 0)).toEqual(["1-26", "1-22", "1-14"]);
++});
++
++test("a step that keeps more levels than are hidden hides nothing again", async () => {
++  const once = click(await open(), 1);
++  const asked = after(once, { effects: showFolds.of({ run: 1, keep: 3 }) });
++
++  expect(asked.state.field(asked.folds)).toBe(once.state.field(once.folds));
++});
++
++test("a click is not an undo step", async () => {
++  const merge = click(await open(), 1);
++  let undid = false;
++
++  expect(
++    undo({
++      state: merge.state,
++      dispatch: () => {
++        undid = true;
++      },
++    }),
++  ).toBe(false);
++  expect(undid).toBe(false);
++});
++
++test("a find match shows every level holding it, through the innermost one", async () => {
++  const merge = await open();
++  const doc = merge.state.doc;
++  const deep = doc.line(50);
++  const shallow = doc.line(39);
++
++  expect(centerLines(after(merge, selectMatch({ from: deep.from + 1, to: deep.to })), 1)).toEqual(
++    [],
++  );
++  expect(centerLines(after(merge, selectMatch({ from: shallow.from, to: shallow.to })), 1)).toEqual(
++    ["41-62", "49-54"],
++  );
++});
++
++test("a match ending exactly at a range's end shows it", async () => {
++  const merge = await open();
++  const { to } = levelOf(merge, 1, 0);
++
++  expect(centerLines(after(merge, selectMatch({ from: to - 2, to })), 1)).toEqual([
++    "41-62",
++    "49-54",
++  ]);
++});
++
++test("a cursor at a range's first or last position shows nothing", async () => {
++  const merge = await open();
++  const { from, to } = levelOf(merge, 1, 0);
++
++  for (const pos of [from, to]) {
++    const moved = after(merge, { selection: EditorSelection.cursor(pos) });
++    expect(moved.state.field(moved.folds)).toBe(merge.state.field(merge.folds));
++  }
++});
++
++test("a side and the middle reveal the same levels for the same ranges", async () => {
++  const { runs } = await open();
++  const top = runs[0];
++  if (top === undefined) {
++    throw new Error("no first run");
++  }
++  const left = top.hidden.map((level) => level.left);
++  const center = top.hidden.map((level) => level.center);
++
++  const keeps = [50, 150, 180, 400].map((pos) => {
++    const at = EditorSelection.cursor(pos);
++    expect(revealKeep(left, at)).toBe(revealKeep(center, at));
++    return revealKeep(center, at);
++  });
++
++  expect(keeps).toEqual([0, 1, 2, null]);
++  expect(revealKeep(center, EditorSelection.range(0, 500))).toBeNull();
++});
++
++test("the sides are told the counts only when they differ, and mirror them", async () => {
++  const merge = await open();
++  const sides = sideFoldField(merge.runs);
++  const side = paneState({
++    kind: "side",
++    doc: merge.sides.local,
++    eol: "Lf",
++    language: null,
++    settings: SETTINGS,
++    extensions: sides,
++  });
++  const clicked = click(merge, 1).state.field(merge.folds);
++  const effect = sideFoldPush(side.field(sides), clicked);
++  const mirrored = effect === null ? side : side.update({ effects: effect }).state;
++
++  expect(sideFoldPush(side.field(sides), merge.state.field(merge.folds))).toBeNull();
++  expect(mirrored.field(sides).map((fold) => fold.hidden.length)).toEqual([3, 2, 3]);
++  expect(mirrored.field(sides)[1]?.hidden).toEqual(merge.runs[1]?.hidden.slice(1));
++  expect(sideFoldPush(mirrored.field(sides), clicked)).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/folds.ts b/frontend/src/editor/internal/folds.ts
+new file mode 100644
+index 0000000..778415e
+--- /dev/null
++++ b/frontend/src/editor/internal/folds.ts
+@@ -0,0 +1,187 @@
++import {
++  StateEffect,
++  StateField,
++  Transaction,
++  type ChangeDesc,
++  type Extension,
++  type SelectionRange,
++  type Text,
++  type TransactionSpec,
++} from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++
++import { toDocPos } from "./docPos";
++import { MIN_HIDDEN_LINES, sameHidden, type Fold, type FoldLevel, type Hidden } from "./foldRuns";
++import type { Pane, PaneViews } from "./geometry";
++
++type ShowFolds = { readonly run: number; readonly keep: number };
++
++export const showFolds = StateEffect.define<ShowFolds>();
++const showSideFolds = StateEffect.define<readonly number[]>();
++
++function mapHidden(hidden: Hidden, changes: ChangeDesc, doc: Text): Hidden | null {
++  const from = changes.mapPos(hidden.from, 1);
++  const to = changes.mapPos(hidden.to, -1);
++  const fromLine = doc.lineAt(from);
++  const toLine = doc.lineAt(to);
++  const first = fromLine.from === from ? fromLine.number : fromLine.number + 1;
++  const last = toLine.to === to ? toLine.number : toLine.number - 1;
++  if (last - first + 1 < MIN_HIDDEN_LINES) {
++    return null;
++  }
++  return { from: toDocPos(doc.line(first).from), to: toDocPos(doc.line(last).to) };
++}
++
++function mapLevels(
++  levels: readonly FoldLevel[],
++  changes: ChangeDesc,
++  doc: Text,
++): readonly FoldLevel[] {
++  let outerShown = false;
++  const mapped = levels.map((level) => {
++    const center =
++      outerShown || level.center === null ? null : mapHidden(level.center, changes, doc);
++    outerShown = center === null;
++    return sameHidden(center, level.center) ? level : { ...level, center };
++  });
++  return mapped.every((level, index) => level === levels[index]) ? levels : mapped;
++}
++
++function mapFolds(folds: readonly Fold[], changes: ChangeDesc, doc: Text): readonly Fold[] {
++  const mapped = folds.map((fold) => {
++    const hidden = mapLevels(fold.hidden, changes, doc);
++    return hidden === fold.hidden ? fold : { hidden };
++  });
++  return mapped.every((fold, index) => fold === folds[index]) ? folds : mapped;
++}
++
++function shown(folds: readonly Fold[], { run, keep }: ShowFolds): readonly Fold[] {
++  const fold = folds[run];
++  const kept = Math.max(0, keep);
++  if (fold === undefined || kept >= fold.hidden.length) {
++    return folds;
++  }
++  const hidden = fold.hidden.slice(fold.hidden.length - kept);
++  return folds.map((other, index) => (index === run ? { hidden } : other));
++}
++
++function holds({ from, to }: Hidden, selection: SelectionRange): boolean {
++  const { anchor, head } = selection;
++  return (
++    (anchor > from && anchor < to) ||
++    (head > from && head < to) ||
++    (!selection.empty && selection.from >= from && selection.to <= to)
++  );
++}
++
++export function revealKeep(
++  levels: readonly (Hidden | null)[],
++  selection: SelectionRange,
++): number | null {
++  const innermost = levels.findLastIndex((hidden) => hidden !== null && holds(hidden, selection));
++  return innermost < 0 ? null : levels.length - innermost - 1;
++}
++
++function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange): ShowFolds[] {
++  return folds.flatMap((fold, run) => {
++    const keep = revealKeep(
++      fold.hidden.map((level) => level[pane]),
++      selection,
++    );
++    return keep === null ? [] : [{ run, keep }];
++  });
++}
++
++export function foldField(initial: readonly Fold[]): StateField<readonly Fold[]> {
++  return StateField.define<readonly Fold[]>({
++    create: () => initial,
++    update(folds, tr) {
++      let next = tr.docChanged ? mapFolds(folds, tr.changes, tr.state.doc) : folds;
++      for (const effect of tr.effects) {
++        if (effect.is(showFolds)) {
++          next = shown(next, effect.value);
++        }
++      }
++      if (tr.selection !== undefined) {
++        for (const reveal of reveals(next, "center", tr.selection.main)) {
++          next = shown(next, reveal);
++        }
++      }
++      return next;
++    },
++  });
++}
++
++function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
++  return {
++    effects: shows.map((show) => showFolds.of(show)),
++    annotations: Transaction.addToHistory.of(false),
++  };
++}
++
++export function showNextStep(folds: readonly Fold[], run: number): TransactionSpec {
++  return showSpec([{ run, keep: (folds[run]?.hidden.length ?? 0) - 1 }]);
++}
++
++export function sideFoldField(initial: readonly Fold[]): StateField<readonly Fold[]> {
++  return StateField.define<readonly Fold[]>({
++    create: () => initial,
++    update(folds, tr) {
++      const counts = tr.effects.findLast((effect) => effect.is(showSideFolds))?.value;
++      if (counts === undefined) {
++        return folds;
++      }
++      return initial.map(({ hidden }, run) => ({
++        hidden: hidden.slice(Math.max(0, hidden.length - (counts[run] ?? hidden.length))),
++      }));
++    },
++  });
++}
++
++export function sideFoldPush(
++  onSides: readonly Fold[],
++  folds: readonly Fold[],
++): StateEffect<readonly number[]> | null {
++  if (folds.every((fold, run) => fold.hidden.length === onSides[run]?.hidden.length)) {
++    return null;
++  }
++  return showSideFolds.of(folds.map((fold) => fold.hidden.length));
++}
++
++export function pushFolds(
++  field: StateField<readonly Fold[]>,
++  sides: StateField<readonly Fold[]>,
++  views: () => PaneViews,
++): Extension {
++  return EditorView.updateListener.of((update) => {
++    const folds = update.state.field(field);
++    if (folds === update.startState.field(field)) {
++      return;
++    }
++    const { left, right } = views();
++    const effect = sideFoldPush(left.state.field(sides), folds);
++    if (effect !== null) {
++      left.dispatch({ effects: effect });
++      right.dispatch({ effects: effect });
++    }
++  });
++}
++
++export function sideReveals(
++  sides: StateField<readonly Fold[]>,
++  pane: "left" | "right",
++  center: () => EditorView,
++): Extension {
++  return EditorView.updateListener.of((update) => {
++    if (!update.selectionSet) {
++      return;
++    }
++    const selection = update.state.selection.main;
++    const found = reveals(update.state.field(sides), pane, selection);
++    if (found.length === 0) {
++      return;
++    }
++    center().dispatch(showSpec(found));
++    update.view.dispatch({ effects: EditorView.scrollIntoView(selection, { y: "center" }) });
++  });
++}
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+new file mode 100644
+index 0000000..0ca9351
+--- /dev/null
++++ b/frontend/src/editor/internal/frame.ts
+@@ -0,0 +1,78 @@
++import { searchPanelOpen } from "@codemirror/search";
++import type { StateField } from "@codemirror/state";
++import type { ViewUpdate } from "@codemirror/view";
++
++import type { ChunkSpan } from "./chunkField";
++import { pushCovered } from "./covered";
++import { coveredAction, type IconDrag } from "./drag";
++import { syncFindSpace } from "./find";
++import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./geometry";
++import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
++import type { Strips } from "./strips";
++
++type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
++
++type FrameParts = {
++  readonly views: PaneViews;
++  readonly spans: StateField<readonly ChunkSpan[]>;
++  readonly layoutFields: readonly StateField<unknown>[];
++  readonly drag: IconDrag;
++  readonly strips: Strips;
++};
++
++export class Frame {
++  readonly #parts: FrameParts;
++  readonly #scroll: ScrollSync;
++  #frameId: number | null = null;
++  #layoutCache: Layout | null = null;
++
++  constructor(parts: FrameParts) {
++    this.#parts = parts;
++    this.#scroll = new ScrollSync(parts.views, () => {
++      this.request();
++    });
++  }
++
++  changed(update: ViewUpdate): void {
++    if (rowsChanged(update, this.#parts.layoutFields)) {
++      this.#layoutCache = null;
++    }
++    if (
++      update.docChanged ||
++      update.geometryChanged ||
++      searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
++    ) {
++      this.request();
++    }
++  }
++
++  layout(): Layout {
++    if (this.#layoutCache === null) {
++      const { views, spans } = this.#parts;
++      const rows = chunkRows(views, views.center.state.field(spans));
++      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(views)) };
++    }
++    return this.#layoutCache;
++  }
++
++  request(): void {
++    this.#frameId ??= requestAnimationFrame(() => {
++      this.#frameId = null;
++      const { views, drag, strips } = this.#parts;
++      syncFindSpace(views);
++      const { rows, anchors } = this.layout();
++      this.#scroll.sync(anchors);
++      const press = drag.press;
++      const covered = press === null ? null : coveredAction(press, rows, views);
++      pushCovered(views, covered);
++      strips.paint(views, rows, covered);
++    });
++  }
++
++  destroy(): void {
++    if (this.#frameId !== null) {
++      cancelAnimationFrame(this.#frameId);
++    }
++    this.#scroll.destroy();
++  }
++}
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
+index d91d352..e9075f7 100644
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
+@@ -3,6 +3,8 @@ import { expect, test } from "vitest";
+ 
+ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
++import { toDocPos } from "./docPos";
++import { foldField, showNextStep } from "./folds";
+ import { rangeSpan, rowsChanged } from "./geometry";
+ import { centerPane } from "./pane";
+ import { statusAfterIgnore } from "./status";
+@@ -47,13 +49,14 @@ test("an empty document has one point at the top", () => {
+   expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
+ });
+ 
+-test("chunk rows go stale on a status change, an edit or new measurements, not on a cursor move", async () => {
++test("chunk rows go stale on a status change, an edit, a fold step or new measurements, not on a cursor move", async () => {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+-  const state = EditorState.create({
+-    doc: centerPane(data.middle, false).doc,
+-    extensions: field,
+-  });
++  const doc = centerPane(data.middle, false).doc;
++  const lines = Text.of(doc.split("\n"));
++  const hidden = { from: toDocPos(lines.line(3).from), to: toDocPos(lines.line(5).to) };
++  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }]);
++  const state = EditorState.create({ doc, extensions: [field, folds] });
+   const [first] = state.field(field);
+   if (first === undefined) {
+     throw new Error("fixture lost its chunks");
+@@ -61,23 +64,30 @@ test("chunk rows go stale on a status change, an edit or new measurements, not o
+   const status = statusAfterIgnore(first.chunk, first.status, "local");
+   const ignored = state.update({ effects: setStatus.of({ id: first.chunk.id, status }) }).state;
+   const edited = state.update({ changes: { from: 0, insert: "x\n" } }).state;
++  const folded = state.update(showNextStep(state.field(folds), 0)).state;
+   const moved = state.update({ selection: EditorSelection.cursor(1) }).state;
+   const sidePane = EditorState.create({ doc: data.local });
++  const fields = [field, folds];
+ 
+-  expect(rowsChanged({ geometryChanged: false, startState: state, state: ignored }, field)).toBe(
++  expect(rowsChanged({ geometryChanged: false, startState: state, state: ignored }, fields)).toBe(
+     true,
+   );
+-  expect(rowsChanged({ geometryChanged: false, startState: state, state: edited }, field)).toBe(
++  expect(rowsChanged({ geometryChanged: false, startState: state, state: edited }, fields)).toBe(
+     true,
+   );
+-  expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, field)).toBe(
++  expect(rowsChanged({ geometryChanged: false, startState: state, state: folded }, fields)).toBe(
++    true,
++  );
++  expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, fields)).toBe(
+     false,
+   );
+-  expect(rowsChanged({ geometryChanged: true, startState: state, state: moved }, field)).toBe(true);
+-  expect(
+-    rowsChanged({ geometryChanged: false, startState: sidePane, state: sidePane }, field),
+-  ).toBe(false);
+-  expect(rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, field)).toBe(
++  expect(rowsChanged({ geometryChanged: true, startState: state, state: moved }, fields)).toBe(
+     true,
+   );
++  expect(
++    rowsChanged({ geometryChanged: false, startState: sidePane, state: sidePane }, fields),
++  ).toBe(false);
++  expect(
++    rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, fields),
++  ).toBe(true);
+ });
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index 01a9514..ed53070 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -49,10 +49,12 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]):
+ 
+ export function rowsChanged(
+   update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">,
+-  field: StateField<readonly ChunkSpan[]>,
++  fields: readonly StateField<unknown>[],
+ ): boolean {
+   return (
+     update.geometryChanged ||
+-    update.startState.field(field, false) !== update.state.field(field, false)
++    fields.some(
++      (field) => update.startState.field(field, false) !== update.state.field(field, false),
++    )
+   );
+ }
+diff --git a/frontend/src/editor/internal/indent.test.ts b/frontend/src/editor/internal/indent.test.ts
+index 32ae782..b677a55 100644
+--- a/frontend/src/editor/internal/indent.test.ts
++++ b/frontend/src/editor/internal/indent.test.ts
+@@ -80,33 +80,33 @@ const MOSTLY_FOUR = `class A:
+ `;
+ 
+ test("a two-space TypeScript text indents by two spaces", () => {
+-  expect(indentUnitOf(TS_TWO)).toBe("  ");
++  expect(indentUnitOf(TS_TWO.split("\n"))).toBe("  ");
+ });
+ 
+ test("a four-space PHP text whose doc comments step by one space indents by four spaces", () => {
+-  expect(indentUnitOf(PHP_DOC)).toBe("    ");
++  expect(indentUnitOf(PHP_DOC.split("\n"))).toBe("    ");
+ });
+ 
+ test("a tab-indented text indents with a tab", () => {
+-  expect(indentUnitOf(TABS)).toBe("\t");
++  expect(indentUnitOf(TABS.split("\n"))).toBe("\t");
+ });
+ 
+ test("a tab-indented text whose doc comment has more lines than its tab-led lines indents with a tab", () => {
+-  expect(indentUnitOf(TABS_WITH_JSDOC)).toBe("\t");
++  expect(indentUnitOf(TABS_WITH_JSDOC.split("\n"))).toBe("\t");
+ });
+ 
+ test("blank lines between deeper statements do not count as steps", () => {
+-  expect(indentUnitOf(TWO_WITH_BLANKS)).toBe("  ");
++  expect(indentUnitOf(TWO_WITH_BLANKS.split("\n"))).toBe("  ");
+ });
+ 
+ test("whitespace-only lines between deeper statements do not count as steps", () => {
+-  expect(indentUnitOf(FOUR_WITH_WHITESPACE_ONLY)).toBe("    ");
++  expect(indentUnitOf(FOUR_WITH_WHITESPACE_ONLY.split("\n"))).toBe("    ");
+ });
+ 
+ test("a text without indentation indents by two spaces", () => {
+-  expect(indentUnitOf("a\nb\nc\n")).toBe("  ");
++  expect(indentUnitOf(["a", "b", "c", ""])).toBe("  ");
+ });
+ 
+ test("the most common step wins over a few smaller ones", () => {
+-  expect(indentUnitOf(MOSTLY_FOUR)).toBe("    ");
++  expect(indentUnitOf(MOSTLY_FOUR.split("\n"))).toBe("    ");
+ });
+diff --git a/frontend/src/editor/internal/indent.ts b/frontend/src/editor/internal/indent.ts
+index 297e971..185b990 100644
+--- a/frontend/src/editor/internal/indent.ts
++++ b/frontend/src/editor/internal/indent.ts
+@@ -1,12 +1,12 @@
+ const DEFAULT_WIDTH = 2;
+ const SMALLEST_INDENT_STEP = 2;
+ 
+-export function indentUnitOf(text: string): string {
++export function indentUnitOf(lines: Iterable<string>): string {
+   const steps = new Map<number, number>();
+   let tabLines = 0;
+   let spaceLines = 0;
+   let previous = 0;
+-  for (const line of text.split("\n")) {
++  for (const line of lines) {
+     if (line.trim() === "") {
+       continue;
+     }
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index 77ade32..5dd809c 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -23,6 +23,7 @@ import {
+   type Extension,
+   type StateCommand,
+   type StateEffect,
++  type Text,
+ } from "@codemirror/state";
+ import {
+   Decoration,
+@@ -39,6 +40,7 @@ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+ import { find, findKeys, findKeysCompartment } from "./find";
+ import { indentUnitOf } from "./indent";
+ import { cmKeys } from "./keys";
++import { lineSeparator, middleText, paneDoc } from "./paneDocs";
+ import { sideKeys } from "./sideKeys";
+ 
+ type PaneKind = "side" | "center" | "readOnlyCenter";
+@@ -52,6 +54,8 @@ const themeCompartment = new Compartment();
+ const middleKeysCompartment = new Compartment();
+ const sideKeysCompartment = new Compartment();
+ 
++export const LINE_HEIGHT_PX = 20;
++
+ const MIDDLE_COMMANDS: readonly {
+   readonly action: KeyAction;
+   readonly run: StateCommand;
+@@ -77,7 +81,7 @@ const paneTheme = EditorView.theme({
+   ".cm-scroller": {
+     fontFamily: "var(--font-mono)",
+     fontVariantLigatures: "none",
+-    lineHeight: "20px",
++    lineHeight: `${LINE_HEIGHT_PX}px`,
+     // Chromium (WebView2) keeps subpixel text in a scroller it composites only when the
+     // scroller paints an opaque background (plan §2 #60).
+     backgroundColor: "var(--color-panel)",
+@@ -198,11 +202,11 @@ const nativeHistoryBlocked = Prec.highest(
+   EditorView.domEventHandlers({ beforeinput: refuseNativeHistory }),
+ );
+ 
+-function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
++function centerExtensions(doc: Text, { preferences, platform }: PaneSettings): Extension {
+   return [
+     nativeHistoryBlocked,
+     history(),
+-    indentUnit.of(indentUnitOf(doc)),
++    indentUnit.of(indentUnitOf(doc.iterLines())),
+     middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
+     keymap.of([...defaultKeymap, ...selectionHistoryKeymap]),
+     highlightActiveLine(),
+@@ -210,7 +214,7 @@ function centerExtensions(doc: string, { preferences, platform }: PaneSettings):
+   ];
+ }
+ 
+-function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Extension {
++function kindExtensions(kind: PaneKind, doc: Text, settings: PaneSettings): Extension {
+   switch (kind) {
+     case "side":
+       return [
+@@ -233,18 +237,19 @@ function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Ex
+ 
+ export function paneState(pane: {
+   kind: PaneKind;
+-  doc: string;
++  doc: string | Text;
+   eol: FileMergeData["eol"];
+   language: Language | null;
+   settings: PaneSettings;
+   extensions: Extension;
+ }): EditorState {
+   const { preferences, platform } = pane.settings;
++  const doc = typeof pane.doc === "string" ? paneDoc(pane.doc, pane.eol) : pane.doc;
+   return EditorState.create({
+-    doc: pane.doc,
++    doc,
+     extensions: [
+       lineNumbers(),
+-      pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
++      lineSeparator(pane.eol),
+       drawSelection(),
+       selectionOverTints,
+       paneTheme,
+@@ -253,7 +258,7 @@ export function paneState(pane: {
+       languageCompartment.of(pane.language ?? []),
+       find,
+       findKeysCompartment.of(findKeys(preferences.keys, platform)),
+-      kindExtensions(pane.kind, pane.doc, pane.settings),
++      kindExtensions(pane.kind, doc, pane.settings),
+       pane.extensions,
+     ],
+   });
+@@ -274,6 +279,6 @@ type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: st
+ export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
+   return {
+     kind: readOnly ? "readOnlyCenter" : "center",
+-    doc: middle.kind === "DiskNotText" ? "" : middle.text,
++    doc: middleText(middle),
+   };
+ }
+diff --git a/frontend/src/editor/internal/paneDocs.ts b/frontend/src/editor/internal/paneDocs.ts
+new file mode 100644
+index 0000000..cc0ba0c
+--- /dev/null
++++ b/frontend/src/editor/internal/paneDocs.ts
+@@ -0,0 +1,26 @@
++import { EditorState, type Extension, type Text } from "@codemirror/state";
++
++import type { FileMergeData } from "../../ipc";
++import type { Pane } from "./geometry";
++
++export function lineSeparator(eol: FileMergeData["eol"]): Extension {
++  return eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [];
++}
++
++export function paneDoc(text: string, eol: FileMergeData["eol"]): Text {
++  return EditorState.create({ doc: text, extensions: lineSeparator(eol) }).doc;
++}
++
++export function middleText(middle: FileMergeData["middle"]): string {
++  return middle.kind === "DiskNotText" ? "" : middle.text;
++}
++
++export function paneDocs(
++  data: Pick<FileMergeData, "local" | "middle" | "remote" | "eol">,
++): Readonly<Record<Pane, Text>> {
++  return {
++    left: paneDoc(data.local, data.eol),
++    center: paneDoc(middleText(data.middle), data.eol),
++    right: paneDoc(data.remote, data.eol),
++  };
++}
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 21b0567..9e1505f 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -1,6 +1,7 @@
+ import type { EditorView } from "@codemirror/view";
+ 
+ import type { ChunkAction } from "./apply";
++import { foldRunAt } from "./folding";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+ import { isModHeld, modClickAction } from "./modClick";
+ import {
+@@ -188,7 +189,7 @@ export class SideFocus {
+ 
+   #pressed(side: Side, event: MouseEvent, platform: string): void {
+     const view = this.#view(side);
+-    if (event.button !== 0 || event.target === view.scrollDOM) {
++    if (event.button !== 0 || event.target === view.scrollDOM || foldRunAt(event.target) !== null) {
+       return;
+     }
+     const rows = this.#sources.rows();
+diff --git a/frontend/src/editor/internal/viewport.test.ts b/frontend/src/editor/internal/viewport.test.ts
+index 69f9e2a..5cf8573 100644
+--- a/frontend/src/editor/internal/viewport.test.ts
++++ b/frontend/src/editor/internal/viewport.test.ts
+@@ -1,6 +1,7 @@
++import { Text } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+-import { revealScrollTop } from "./viewport";
++import { revealScrollTop, textLineEdges } from "./viewport";
+ 
+ const LINE_PX = 20;
+ const FIND_SPACE_PX = 29;
+@@ -33,3 +34,36 @@ test("a change near line 1 clamps at 0, keeping the space above line 1 in view",
+   expect(revealScrollTop({ top: 20, bottom: 40 }, PANE)).toBe(0);
+   expect(revealScrollTop({ top: 20, bottom: 40 }, { ...PANE, paddingTop: FIND_SPACE_PX })).toBe(0);
+ });
++
++const DOC = Text.of(Array.from({ length: 100 }, (_, index) => `line ${index + 1}`));
++
++function textBlock(line: number, top: number) {
++  const { from, to } = DOC.line(line);
++  return { from, to, top, bottom: top + LINE_PX };
++}
++
++test("a wave line at the top or bottom of the pane is skipped: the visible lines are text lines", () => {
++  const wave = { from: DOC.line(1).from, to: DOC.line(40).to, top: 0, bottom: LINE_PX };
++  const bottomWave = { ...wave, from: DOC.line(60).from, to: DOC.line(100).to, top: 200 };
++
++  expect(
++    textLineEdges(DOC, { first: wave, last: textBlock(50, 180), area: { top: 5, bottom: 195 } }),
++  ).toEqual({
++    first: 41,
++    last: 49,
++  });
++  expect(
++    textLineEdges(DOC, {
++      first: textBlock(45, 0),
++      last: bottomWave,
++      area: { top: 0, bottom: 210 },
++    }),
++  ).toEqual({ first: 45, last: 59 });
++  expect(
++    textLineEdges(DOC, {
++      first: textBlock(45, 0),
++      last: textBlock(50, 100),
++      area: { top: 5, bottom: 110 },
++    }),
++  ).toEqual({ first: 46, last: 49 });
++});
+diff --git a/frontend/src/editor/internal/viewport.ts b/frontend/src/editor/internal/viewport.ts
+index 01223c8..d3a8635 100644
+--- a/frontend/src/editor/internal/viewport.ts
++++ b/frontend/src/editor/internal/viewport.ts
+@@ -1,4 +1,5 @@
+-import type { EditorView } from "@codemirror/view";
++import type { Text } from "@codemirror/state";
++import type { BlockInfo, EditorView } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ import type { VisibleLines } from "./apply";
+@@ -6,18 +7,35 @@ import type { VisibleLines } from "./apply";
+ const REVEAL_GAP_LINES = 2;
+ const REVEAL_PARTS = 3;
+ 
++type Block = Pick<BlockInfo, "from" | "to" | "top" | "bottom">;
++
++export function textLineEdges(
++  doc: Text,
++  { first, last, area }: { readonly first: Block; readonly last: Block; readonly area: Span },
++): VisibleLines {
++  const firstIsWave = doc.lineAt(first.from).number !== doc.lineAt(first.to).number;
++  const lastIsWave = doc.lineAt(last.from).number !== doc.lineAt(last.to).number;
++  const firstLine = firstIsWave
++    ? Math.min(doc.lineAt(first.to).number + 1, doc.lines)
++    : doc.lineAt(first.from).number;
++  const lastLine = lastIsWave
++    ? Math.max(doc.lineAt(last.from).number - 1, 1)
++    : doc.lineAt(last.from).number;
++  return {
++    first: !firstIsWave && first.top < area.top && firstLine < lastLine ? firstLine + 1 : firstLine,
++    last:
++      !lastIsWave && last.bottom > area.bottom && lastLine > firstLine ? lastLine - 1 : lastLine,
++  };
++}
++
+ export function visibleLines(view: EditorView): VisibleLines {
+   const top = view.scrollDOM.getBoundingClientRect().top - view.documentTop;
+   const bottom = top + view.scrollDOM.clientHeight;
+-  const first = view.lineBlockAtHeight(top);
+-  const last = view.lineBlockAtHeight(bottom);
+-  const doc = view.state.doc;
+-  const firstLine = doc.lineAt(first.from).number;
+-  const lastLine = doc.lineAt(last.from).number;
+-  return {
+-    first: first.top < top && firstLine < lastLine ? firstLine + 1 : firstLine,
+-    last: last.bottom > bottom && lastLine > firstLine ? lastLine - 1 : lastLine,
+-  };
++  return textLineEdges(view.state.doc, {
++    first: view.lineBlockAtHeight(top),
++    last: view.lineBlockAtHeight(bottom),
++    area: { top, bottom },
++  });
+ }
+ 
+ export function visibleArea(view: EditorView): Span {
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index cb46369..ab2332c 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -34,6 +34,7 @@
+   --color-info: #233558;
+   --color-info-border: #2e4d89;
+   --color-search-match: #2d543f;
++  --color-diff-wave: #555555;
+ 
+   --color-syntax-keyword: #cf8e6d;
+   --color-syntax-string: #6aab73;
+@@ -84,6 +85,7 @@
+   --color-info: #f7f8ff;
+   --color-info-border: #bdd3ff;
+   --color-search-match: #ccccff;
++  --color-diff-wave: #d0d0d0;
+ 
+   --color-syntax-keyword: #0033b3;
+   --color-syntax-string: #067d17;
