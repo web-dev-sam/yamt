@@ -15,10 +15,17 @@ round with the rule "formatting never touches a change that still waits, nor its
 
 - Rows 1–8, 3b, 6b, 9a: **done** (built, both reviews, fix rounds, re-checks pass). Last code commit before this note:
   `1d31e9d` (setup); docs after it.
-- Row 9 (`3.Y-setup`, `1d31e9d`): **review**. Running when the context ran out (results will not reach the next
-  session; re-spawn them):
-  - boundary review `LspSetupBoundary` and correctness review `LspSetupCorrectness` of `git show 1d31e9d` (prompts
-    as in this session: brief `docs/slices/briefs/3.Y-setup.md`, report `.omp/run/notes/LspSetup.md`);
+- Row 9 (`3.Y-setup`, `1d31e9d`): **review**.
+  - Boundary review **done**: verdict fail, saved verbatim in `.omp/run/notes/LspSetupBoundary.md` (not yet triaged
+    or logged to findings.jsonl). Blocks: Escape is told apart from No through a `dismissals` counter in
+    serverSetup.ts instead of by asking.ts (fix: asking answers yes / no / dismissed; needs a grant on
+    `ui/asking.ts`); `projectLabel` and "not installed" copied across question.ts, LanguageServerSettings.vue and
+    serverText.ts (fix: one home in serverText.ts). Shoulds: start/focus ordering split over main.ts, App.vue and
+    serverSetup.ts; Don't start depends on `setSpecs([])` and a private lsp carry-over (fix: a named lsp operation);
+    `settingsActions(state)` built twice in store.ts. Read the file for the rest.
+  - Correctness review `LspSetupCorrectness` was still running at handoff; its result will not reach the next
+    session. Re-spawn it on `git show 1d31e9d` (brief `docs/slices/briefs/3.Y-setup.md`, report
+    `.omp/run/notes/LspSetup.md`).
   - `just mutants 0b4c487` finished: `target/mutants-setup.log` (serverSetup.ts 9, settings.ts 14, store.ts 3,
     question.ts 1 survivors over the whole files). Filter them to the lines changed in `1d31e9d` and send them to the
     correctness reviewer; the implementer judged 11 `serverSetup.ts` survivors unobservable (`LspSetup.md`).
