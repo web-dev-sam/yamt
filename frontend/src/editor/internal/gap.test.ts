@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { bandPath } from "../../connectors";
+import { bandPath, waveJoinPath } from "../../connectors";
 import { loadFixture, type Chunk } from "../../ipc";
 import {
   arrowTitles,
@@ -10,8 +10,9 @@ import {
   keepsArrowRow,
   type Arrow,
   type ArrowTitles,
+  wavePaints,
 } from "./gap";
-import type { ChunkRow } from "./geometry";
+import type { ChunkRow, WaveRow } from "./geometry";
 import type { Side } from "./side";
 import { PENDING, type ChunkStatus } from "./status";
 
@@ -242,4 +243,55 @@ test("an icon row built while the other side waited is rebuilt once that side is
   expect(ignored.mode).toBe(row.mode);
   expect(keepsArrowRow(row, await conflictArrow(PENDING), { ...layout })).toBe(true);
   expect(keepsArrowRow(row, ignored, layout)).toBe(false);
+});
+
+const WAVE_SIZE = { ...STRIP, lineHeight: LINE_PX };
+
+function joinedRuns(waves: readonly WaveRow[], side: Side): number[] {
+  return wavePaints({ waves, side }, NO_SHIFT, WAVE_SIZE).map(({ run }) => run);
+}
+
+test("a strip joins a run only where both of its panes show a wave", () => {
+  const waves = [
+    { left: 100, center: 200, right: null },
+    { left: null, center: 300, right: 310 },
+    { left: 400, center: 420, right: 430 },
+    { left: null, center: 500, right: null },
+  ];
+
+  expect(joinedRuns(waves, "local")).toEqual([0, 2]);
+  expect(joinedRuns(waves, "remote")).toEqual([1, 2]);
+});
+
+test("an empty side gets no joins on its strip while the other strip keeps them", () => {
+  const waves = [
+    { left: 100, center: 100, right: null },
+    { left: 400, center: 420, right: null },
+  ];
+
+  expect(joinedRuns(waves, "remote")).toEqual([]);
+  expect(joinedRuns(waves, "local")).toEqual([0, 1]);
+});
+
+test("a join runs between the waves' centres, each pane moved by its own shift", () => {
+  const waves = [{ left: 100, center: 200, right: 260 }];
+  const shifts = { left: 5, right: -7 };
+
+  expect(wavePaints({ waves, side: "local" }, shifts, WAVE_SIZE)).toEqual([
+    { run: 0, d: waveJoinPath({ left: 115, right: 203 }, STRIP.width) },
+  ]);
+  expect(wavePaints({ waves, side: "remote" }, shifts, WAVE_SIZE)).toEqual([
+    { run: 0, d: waveJoinPath({ left: 215, right: 263 }, STRIP.width) },
+  ]);
+});
+
+test("a join is kept while either wave line touches the strip and dropped once both have left it", () => {
+  const waves = [
+    { left: -LINE_PX, center: -LINE_PX - 50, right: null },
+    { left: -LINE_PX - 1, center: -LINE_PX - 50, right: null },
+    { left: STRIP.height + 50, center: STRIP.height, right: null },
+    { left: STRIP.height + 50, center: STRIP.height + 1, right: null },
+  ];
+
+  expect(joinedRuns(waves, "local")).toEqual([0, 2]);
 });

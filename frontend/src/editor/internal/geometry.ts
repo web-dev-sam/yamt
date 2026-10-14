@@ -3,6 +3,7 @@ import type { EditorView, ViewUpdate } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 import type { ChunkSpan } from "./chunkField";
+import type { DocPos } from "./docPos";
 import { lineSpan } from "./lineSpan";
 import type { Side } from "./side";
 import type { ChunkState } from "./status";
@@ -10,6 +11,7 @@ import type { ChunkState } from "./status";
 export type Pane = "left" | "center" | "right";
 export type PaneViews = Readonly<Record<Pane, EditorView>>;
 export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+export type WaveRow = Readonly<Record<Pane, number | null>>;
 
 export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
   local: "left",
@@ -44,6 +46,21 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): 
     left: viewSpan(views.left, lineSpan(views.left.state.doc, center.chunk.local)),
     center: viewSpan(views.center, center),
     right: viewSpan(views.right, lineSpan(views.right.state.doc, center.chunk.remote)),
+  }));
+}
+
+export function waveRows(
+  starts: Readonly<Record<Pane, readonly (DocPos | null)[]>>,
+  blockTop: (pane: Pane, pos: DocPos) => number,
+): WaveRow[] {
+  function top(pane: Pane, run: number): number | null {
+    const start = starts[pane][run] ?? null;
+    return start === null ? null : blockTop(pane, start);
+  }
+  return starts.center.map((_, run) => ({
+    left: top("left", run),
+    center: top("center", run),
+    right: top("right", run),
   }));
 }
 

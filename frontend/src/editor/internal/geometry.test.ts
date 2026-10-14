@@ -5,7 +5,7 @@ import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
 import { toDocPos } from "./docPos";
 import { foldField, showNextStep } from "./folds";
-import { rangeSpan, rowsChanged } from "./geometry";
+import { rangeSpan, rowsChanged, waveRows, type Pane } from "./geometry";
 import { centerPane } from "./pane";
 import { statusAfterIgnore } from "./status";
 
@@ -90,4 +90,30 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
   expect(
     rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, fields),
   ).toBe(true);
+});
+
+test("each pane's wave top is the block top at the start its own pane shows, null where it shows none", () => {
+  const starts = {
+    left: [toDocPos(11), null, null],
+    center: [toDocPos(20), null, toDocPos(40)],
+    right: [null, null, toDocPos(50)],
+  };
+  const offset: Readonly<Record<Pane, number>> = { left: 1000, center: 2000, right: 3000 };
+
+  const rows = waveRows(starts, (pane, pos) => offset[pane] + pos);
+
+  expect(rows).toEqual([
+    { left: 1011, center: 2020, right: null },
+    { left: null, center: null, right: null },
+    { left: null, center: 2040, right: 3050 },
+  ]);
+});
+
+test("a pane with fewer runs than the middle shows no wave for the missing runs", () => {
+  const starts = { left: [], center: [toDocPos(0), toDocPos(9)], right: [toDocPos(3)] };
+
+  expect(waveRows(starts, (_, pos) => pos)).toEqual([
+    { left: null, center: 0, right: 3 },
+    { left: null, center: 9, right: null },
+  ]);
 });

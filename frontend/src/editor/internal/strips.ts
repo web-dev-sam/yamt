@@ -18,10 +18,14 @@ import {
   type ArrowShape,
   type BandPaint,
   type ButtonLayout,
+  wavePaints,
+  type WavePaint,
 } from "./gap";
-import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+import { SIDE_PANE, type ChunkRow, type PaneViews, type WaveRow } from "./geometry";
+import { LINE_HEIGHT_PX } from "./pane";
 import type { Side } from "./side";
 import type { ApplyMode } from "./status";
+import { StripWaves } from "./stripWaves";
 
 export type IconPress = {
   readonly kind: ChunkAction["kind"];
@@ -37,7 +41,13 @@ type ArrowPaint = {
   readonly layout: ButtonLayout;
   readonly onPress: OnPress;
 };
-type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
+type GapPaint = {
+  readonly bands: readonly BandPaint[];
+  readonly waves: readonly WavePaint[];
+  readonly arrows: ArrowPaint | null;
+};
+type StripLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
+type StripMarks = { readonly covered: ChunkAction | null; readonly hovered: number | null };
 type ArrowRow = ArrowShape & {
   readonly node: SVGGElement;
   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
@@ -169,6 +179,7 @@ class GapStrip {
   readonly #side: Side;
   readonly #onPress: OnPress | null;
   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
+  readonly #waves = new StripWaves();
   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
@@ -178,11 +189,11 @@ class GapStrip {
     this.#strip = strip;
     this.#side = side;
     this.#onPress = onPress;
-    strip.replaceChildren(this.#bandLayer, this.#arrowLayer);
+    strip.replaceChildren(this.#bandLayer, this.#waves.layer, this.#arrowLayer);
     strip.addEventListener("mousedown", keepEditorFocus);
   }
 
-  measure(panes: GapPanes, rows: readonly ChunkRow[]): GapPaint {
+  measure(panes: GapPanes, { rows, waves: waveRows }: StripLayout): GapPaint {
     const strip = this.#strip;
     const stripTop = strip.getBoundingClientRect().top;
     const size = { width: strip.clientWidth, height: strip.clientHeight };
@@ -191,8 +202,10 @@ class GapStrip {
       right: panes.right.documentTop - stripTop,
     };
     const bands = bandPaints({ rows, side: this.#side }, shifts, size);
+    const waveSize = { ...size, lineHeight: LINE_HEIGHT_PX };
+    const waves = wavePaints({ waves: waveRows, side: this.#side }, shifts, waveSize);
     if (this.#onPress === null) {
-      return { bands, arrows: null };
+      return { bands, waves, arrows: null };
     }
     const local = this.#side === "local";
     const pane = SIDE_PANE[this.#side];
@@ -204,11 +217,12 @@ class GapStrip {
       .map((arrow) => ({ arrow, y: arrow.top + shift }))
       .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
     const layout = { applyX, ignoreX, lineHeight };
-    return { bands, arrows: { placed, layout, onPress: this.#onPress } };
+    return { bands, waves, arrows: { placed, layout, onPress: this.#onPress } };
   }
 
-  paint({ bands, arrows }: GapPaint, covered: ChunkAction | null): void {
+  paint({ bands, waves, arrows }: GapPaint, { covered, hovered }: StripMarks): void {
     this.#paintBands(bands);
+    this.#waves.paint(waves, hovered);
     if (arrows !== null) {
       this.#paintArrows(arrows, covered);
     }
@@ -266,11 +280,11 @@ export class Strips {
     this.#remote = new GapStrip(strips[1], "remote", onPress);
   }
 
-  paint(views: PaneViews, rows: readonly ChunkRow[], covered: ChunkAction | null): void {
-    const local = this.#local.measure({ left: views.left, right: views.center }, rows);
-    const remote = this.#remote.measure({ left: views.center, right: views.right }, rows);
-    this.#local.paint(local, covered);
-    this.#remote.paint(remote, covered);
+  paint(views: PaneViews, layout: StripLayout, marks: StripMarks): void {
+    const local = this.#local.measure({ left: views.left, right: views.center }, layout);
+    const remote = this.#remote.measure({ left: views.center, right: views.right }, layout);
+    this.#local.paint(local, marks);
+    this.#remote.paint(remote, marks);
   }
 
   destroy(): void {

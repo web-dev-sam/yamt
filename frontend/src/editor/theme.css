@@ -113,6 +113,25 @@ path.chunk-band {
   fill: var(--color-hover);
 }
 
+.strip-wave-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: var(--strip-wave-hit);
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.strip-wave-line {
+  fill: none;
+  stroke: var(--color-diff-wave);
+  stroke-width: var(--strip-wave-stroke);
+  pointer-events: none;
+}
+
+.fold-wave-hover > .strip-wave-line {
+  stroke-width: var(--strip-wave-hover-stroke);
+}
+
 .cm-editor .cm-line.chunk-band.chunk-covered {
   background-image: linear-gradient(var(--chunk-tone), var(--chunk-tone));
 }

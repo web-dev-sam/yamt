@@ -1,7 +1,7 @@
-import { bandPath } from "../../connectors";
+import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
-import { SIDE_PANE, type ChunkRow } from "./geometry";
+import { SIDE_PANE, type ChunkRow, type WaveRow } from "./geometry";
 import { modKeyName } from "./modClick";
 import type { Side } from "./side";
 import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
@@ -14,6 +14,7 @@ export type Arrow = {
   readonly decidesOther: boolean;
 };
 export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
+export type WavePaint = { readonly run: number; readonly d: string };
 export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
 export type ButtonLayout = {
   readonly applyX: number;
@@ -83,6 +84,29 @@ export function bandPaints(
       if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
         const d = bandPath({ left: onLeft, right: onRight }, size.width);
         paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
+      }
+    }
+  }
+  return paints;
+}
+
+export function wavePaints(
+  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
+  shifts: { readonly left: number; readonly right: number },
+  size: { readonly width: number; readonly height: number; readonly lineHeight: number },
+): WavePaint[] {
+  const center = waveCenterY(size.lineHeight);
+  const paints = [];
+  for (const [run, wave] of waves.entries()) {
+    const left = side === "local" ? wave.left : wave.center;
+    const right = side === "local" ? wave.center : wave.right;
+    if (left !== null && right !== null) {
+      const onLeft = left + shifts.left;
+      const onRight = right + shifts.right;
+      const top = Math.min(onLeft, onRight);
+      if (crossesStrip(top, Math.max(onLeft, onRight) + size.lineHeight, size.height)) {
+        const join = { left: onLeft + center, right: onRight + center };
+        paints.push({ run, d: waveJoinPath(join, size.width) });
       }
     }
   }

@@ -1,6 +1,13 @@
 import { expect, test } from "vitest";
 
-import { bandPath, waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from ".";
+import {
+  bandPath,
+  waveCenterY,
+  waveJoinPath,
+  waveTile,
+  WAVE_TILE_HEIGHT_PX,
+  WAVE_TILE_WIDTH_PX,
+} from ".";
 
 test("an aligned band is a rectangle drawn with flat curves", () => {
   const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
@@ -40,4 +47,36 @@ test("the wave tile is four quarter curves of 5 px with a 3 px half-height, 1 px
 test("the wave sits in the middle of a 20 px line", () => {
   expect(waveCenterY(20)).toBe(10);
   expect(waveCenterY(30)).toBe(15);
+});
+
+test("a level join wider than five steps is six half-waves through the middle", () => {
+  expect(waveJoinPath({ left: 10, right: 12 }, 38)).toBe(
+    "M0 10 Q2.5 13 5 13 Q7.5 13 10 11 Q12.5 8 19 8 Q25.5 8 28 11 Q30.5 15 33 15 Q35.5 15 38 12",
+  );
+  expect(waveJoinPath({ left: 10, right: 10 }, 26)).toBe(
+    "M0 10 Q2.5 13 5 13 Q7.5 13 10 10 Q12.5 7 13 7 Q13.5 7 16 10 Q18.5 13 21 13 Q23.5 13 26 10",
+  );
+});
+
+test("a level join of five steps or fewer is one sagging curve", () => {
+  expect(waveJoinPath({ left: 10, right: 12 }, 20)).toBe("M0 10 Q10 17 20 12");
+  expect(waveJoinPath({ left: 10, right: 10 }, 25)).toBe("M0 10 Q12.5 16 25 10");
+});
+
+test("a join falling to the right starts flat on the left and dips before the right end", () => {
+  expect(waveJoinPath({ left: 50, right: 10 }, 38)).toBe(
+    "M0 50 C0.63 50.38 0.63 51.5 2.5 51.5 C28 51.5 28 22 38 10",
+  );
+});
+
+test("a join rising to the right dips after the left end and ends flat on the right", () => {
+  expect(waveJoinPath({ left: 10, right: 50 }, 38)).toBe(
+    "M0 10 C10 22 10 51.5 35.5 51.5 C37.38 51.5 37.38 50.38 38 50",
+  );
+});
+
+test("a slope of exactly one in five is no longer level", () => {
+  expect(waveJoinPath({ left: 0, right: 8 }, 40)).toBe(
+    "M0 0 C10 12 10 9.5 37.5 9.5 C39.38 9.5 39.38 8.38 40 8",
+  );
 });

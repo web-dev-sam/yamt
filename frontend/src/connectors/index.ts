@@ -26,6 +26,8 @@ const WAVE_HALF_HEIGHT_PX = 3;
 const WAVE_GAP_PX = 1;
 const WAVE_STEPS = 4;
 const HALF = 0.5;
+export const WAVE_STROKE_PX = 1;
+export const WAVE_HOVER_STROKE_PX = 2;
 export const WAVE_TILE_WIDTH_PX = WAVE_STEPS * WAVE_STEP_PX;
 export const WAVE_TILE_HEIGHT_PX =
   WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
@@ -47,4 +49,99 @@ export function waveTile(): string {
 
 export function waveCenterY(lineHeight: number): number {
   return (lineHeight - WAVE_TILE_HEIGHT_PX) * HALF + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
+}
+
+const LEVEL_SLOPE = 0.2;
+const LEVEL_WIDE_STEPS = 5;
+const EIGHTH = 0.125;
+const ONE_AND_HALF = 1.5;
+const DOUBLE = 2;
+const TWO_AND_HALF = 2.5;
+const QUADRUPLE = 4;
+
+type Point = readonly [x: number, y: number];
+
+function curve(command: "Q" | "C", points: readonly Point[]): string {
+  return command + points.map(([x, y]) => `${px(x)} ${px(y)}`).join(" ");
+}
+
+function levelJoin(y1: number, y2: number, width: number): string[] {
+  const s = WAVE_STEP_PX;
+  const h = WAVE_HALF_HEIGHT_PX;
+  const midX = width * HALF;
+  const midY = (y1 + y2) * HALF;
+  if (width <= LEVEL_WIDE_STEPS * s) {
+    return [
+      curve("Q", [
+        [midX, midY + DOUBLE * h],
+        [width, y2],
+      ]),
+    ];
+  }
+  return [
+    curve("Q", [
+      [HALF * s, y1 + h],
+      [s, y1 + h],
+    ]),
+    curve("Q", [
+      [ONE_AND_HALF * s, y1 + h],
+      [DOUBLE * s, midY],
+    ]),
+    curve("Q", [
+      [TWO_AND_HALF * s, midY - h],
+      [midX, midY - h],
+    ]),
+    curve("Q", [
+      [width - TWO_AND_HALF * s, midY - h],
+      [width - DOUBLE * s, midY],
+    ]),
+    curve("Q", [
+      [width - ONE_AND_HALF * s, y2 + h],
+      [width - s, y2 + h],
+    ]),
+    curve("Q", [
+      [width - HALF * s, y2 + h],
+      [width, y2],
+    ]),
+  ];
+}
+
+function slopedJoin(y1: number, y2: number, width: number): string[] {
+  const s = WAVE_STEP_PX;
+  const h = WAVE_HALF_HEIGHT_PX;
+  if (y1 > y2) {
+    const x = EIGHTH * s;
+    return [
+      curve("C", [
+        [x, y1 + EIGHTH * h],
+        [x, y1 + HALF * h],
+        [HALF * s, y1 + HALF * h],
+      ]),
+      curve("C", [
+        [width - DOUBLE * s, y1 + HALF * h],
+        [width - DOUBLE * s, y2 + QUADRUPLE * h],
+        [width, y2],
+      ]),
+    ];
+  }
+  const x = width - EIGHTH * s;
+  return [
+    curve("C", [
+      [DOUBLE * s, y1 + QUADRUPLE * h],
+      [DOUBLE * s, y2 + HALF * h],
+      [width - HALF * s, y2 + HALF * h],
+    ]),
+    curve("C", [
+      [x, y2 + HALF * h],
+      [x, y2 + EIGHTH * h],
+      [width, y2],
+    ]),
+  ];
+}
+
+export function waveJoinPath(join: { left: number; right: number }, width: number): string {
+  const { left, right } = join;
+  const level = Math.abs(right - left) / width < LEVEL_SLOPE;
+  const segments = level ? levelJoin(left, right, width) : slopedJoin(left, right, width);
+  return [`M0 ${px(left)}`, ...segments].join(" ");
 }

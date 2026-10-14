@@ -88,7 +88,8 @@ export class MergeController {
     this.#frame = new Frame({
       views: this.#views,
       spans: this.#field,
-      layoutFields: [this.#field, this.#folds.center, this.#folds.sides],
+      folds: this.#folds,
+      hovered: () => this.#folding.hovered(),
       drag: this.#drag,
       strips: this.#strips,
     });
