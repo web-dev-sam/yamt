@@ -21,8 +21,6 @@ import { LINE_HEIGHT_PX } from "./pane";
 import type { Side } from "./side";
 import { ACTION_WIDTH_PX, arrowRow, isCovered, type ArrowRow, type OnPress } from "./stripIcons";
 
-export type { IconPress } from "./stripIcons";
-
 type StripPair = readonly [SVGSVGElement, SVGSVGElement];
 type GapPanes = { readonly left: EditorView; readonly right: EditorView };
 type PlacedArrow = { readonly arrow: Arrow; readonly y: number };

@@ -3,7 +3,7 @@ import type { ChunkAction, Reach } from "./apply";
 import { gapArrows } from "./gap";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import { isModHeld } from "./modClick";
-import type { IconPress } from "./strips";
+import type { IconPress } from "./stripIcons";
 
 type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
 

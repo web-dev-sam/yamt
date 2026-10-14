@@ -26,7 +26,8 @@ import { SideFocus } from "./internal/sideFocus";
 import { sideRunner } from "./internal/sideKeys";
 import { showStatuses, sideStatusField } from "./internal/sideStatus";
 import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
-import { Strips, type IconPress } from "./internal/strips";
+import type { IconPress } from "./internal/stripIcons";
+import { Strips } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
 export type { Direction } from "./internal/navigation";
