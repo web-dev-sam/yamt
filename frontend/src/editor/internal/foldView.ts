@@ -9,7 +9,7 @@ import {
 } from "@codemirror/view";
 
 import { waveCenterY, waveTile, WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
-import { WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
+import { MASK_PERIODS, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
 import { Folding, FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
 import { displayed, type Fold } from "./foldRuns";
 import { collapseSpec, foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
@@ -101,9 +101,8 @@ function waveMarkers(
 }
 
 // WebKitGTK draws a repeated mask tile at its width rounded to whole device pixels but places it from the
-// unrounded width (measured in slice 3.V-phase: a 19.58 px tile repeats every 19.5 px at ratio 2), so one
-// tile holds many waves and its width is rounded to whole CSS pixels here.
-const MASK_PERIODS = 64;
+// unrounded width (plan §2 #64), so one tile holds MASK_PERIODS waves: `wavePhase` keeps that width whole
+// CSS pixels, which are whole device pixels because WebKitGTK draws only at whole ratios (plan §3).
 const MASK_WIDTH_PX = WAVE_TILE_WIDTH_PX * MASK_PERIODS;
 
 function waveMask(strokePx: number): string {
@@ -123,7 +122,7 @@ const waveTop = waveCenterY(LINE_HEIGHT_PX) - WAVE_TILE_HEIGHT_PX * HALF;
 const tile = {
   maskRepeat: "repeat-x",
   maskPosition: `var(${WAVE_PHASE_VARS.offset}, 0px) ${waveTop}px`,
-  maskSize: `round(calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}), 1px) ${WAVE_TILE_HEIGHT_PX}px`,
+  maskSize: `calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}) ${WAVE_TILE_HEIGHT_PX}px`,
 };
 
 const waveTheme = EditorView.theme({

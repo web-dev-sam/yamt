@@ -1,0 +1,1585 @@
+commit a200f9eaae6adacbfcd1be7e2637fd8b46c4d418
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-14 16:13:50 +0200
+
+    feat: toolbar toggle collapses unchanged fragments, on resets shown runs (#855, #68)
+
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index f4c6326..88a578a 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -42,7 +42,11 @@ export type MergeHosts = {
+   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
+ };
+ 
+-export type MergeOptions = { readonly readOnly: boolean; readonly preferences: Preferences };
++export type MergeOptions = {
++  readonly readOnly: boolean;
++  readonly preferences: Preferences;
++  readonly collapsed: boolean;
++};
+ 
+ type ViewSources = {
+   data: FileMergeData;
+@@ -69,7 +73,8 @@ export class MergeController {
+     const description = languageOf(data.path);
+     const docs = paneDocs(data);
+     this.#field = chunkField(data.chunks);
+-    this.#folds = new Folds(foldRuns(data.chunks, docs), hosts, () => this.#views);
++    const runs = foldRuns(data.chunks, docs);
++    this.#folds = new Folds(runs, hosts, () => this.#views, options.collapsed);
+     this.#readOnly = options.readOnly;
+     this.#settings = { preferences: options.preferences, platform: navigator.platform };
+     const language = description?.support?.language ?? null;
+@@ -241,6 +246,11 @@ export class MergeController {
+     }
+   }
+ 
++  setCollapsed(collapsed: boolean): void {
++    this.#folds.setCollapsed(collapsed);
++    this.#frame.realign();
++  }
++
+   undo(): boolean {
+     return undo(this.#views.center);
+   }
+diff --git a/frontend/src/editor/internal/foldSelection.test.ts b/frontend/src/editor/internal/foldSelection.test.ts
+new file mode 100644
+index 0000000..d217ddf
+--- /dev/null
++++ b/frontend/src/editor/internal/foldSelection.test.ts
+@@ -0,0 +1,77 @@
++import { EditorSelection, Text } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { toDocPos } from "./docPos";
++import type { Hidden } from "./foldRuns";
++import { leaveAllHidden, leaveHidden, revealKeep } from "./foldSelection";
++
++const DOC = Text.of(Array.from({ length: 12 }, (_, index) => `line ${index + 1}`));
++
++function lines(first: number, last: number): Hidden {
++  return { from: toDocPos(DOC.line(first).from), to: toDocPos(DOC.line(last).to) };
++}
++
++const OUTER = lines(3, 9);
++const INNER = lines(5, 7);
++const LEVELS = [OUTER, INNER];
++
++test("a cursor strictly inside hidden lines moves to their start; one on either edge stays", () => {
++  expect(leaveHidden(EditorSelection.cursor(OUTER.from + 1), [OUTER])).toEqual(
++    EditorSelection.cursor(OUTER.from),
++  );
++  expect(leaveHidden(EditorSelection.cursor(OUTER.to - 1), [OUTER])).toEqual(
++    EditorSelection.cursor(OUTER.from),
++  );
++  expect(leaveHidden(EditorSelection.cursor(OUTER.from), [OUTER])).toBeNull();
++  expect(leaveHidden(EditorSelection.cursor(OUTER.to), [OUTER])).toBeNull();
++});
++
++test("a selection with an end inside is dropped: the head inside goes to the start, the head outside stays", () => {
++  const before = DOC.line(1).from;
++  const below = DOC.line(11).from;
++
++  expect(leaveHidden(EditorSelection.range(before, OUTER.from + 3), [OUTER])).toEqual(
++    EditorSelection.cursor(OUTER.from),
++  );
++  expect(leaveHidden(EditorSelection.range(OUTER.from + 3, below), [OUTER])).toEqual(
++    EditorSelection.cursor(below),
++  );
++  expect(leaveHidden(EditorSelection.range(OUTER.from, OUTER.to), [OUTER])).toEqual(
++    EditorSelection.cursor(OUTER.to),
++  );
++});
++
++test("a selection covering the hidden lines from outside is kept", () => {
++  expect(leaveHidden(EditorSelection.range(DOC.line(2).from, DOC.line(10).to), [OUTER])).toBeNull();
++  expect(leaveHidden(EditorSelection.range(OUTER.from - 1, OUTER.to + 1), [OUTER])).toBeNull();
++});
++
++test("every range of a selection leaves the hidden lines and the main one stays main", () => {
++  const outside = EditorSelection.cursor(DOC.line(11).from);
++  const selection = EditorSelection.create(
++    [EditorSelection.cursor(DOC.line(1).from), EditorSelection.cursor(INNER.from + 1), outside],
++    1,
++  );
++
++  expect(leaveAllHidden(selection, [OUTER])?.main).toEqual(EditorSelection.cursor(OUTER.from));
++  expect(leaveAllHidden(selection, [OUTER])?.ranges).toHaveLength(3);
++  expect(leaveAllHidden(EditorSelection.create([outside]), [OUTER])).toBeNull();
++  expect(leaveAllHidden(selection, [])).toBeNull();
++});
++
++test("no selection left by leaveHidden makes a reveal show the lines again", () => {
++  for (let anchor = 0; anchor <= DOC.length; anchor += 1) {
++    for (let head = 0; head <= DOC.length; head += 1) {
++      const range = EditorSelection.range(anchor, head);
++      const left = leaveHidden(range, [OUTER]) ?? range;
++      expect(revealKeep(LEVELS, left), `${anchor}→${head}`).toBeNull();
++    }
++  }
++});
++
++test("a reveal keeps hiding only the levels inside the innermost one holding the selection", () => {
++  expect(revealKeep(LEVELS, EditorSelection.cursor(INNER.from + 1))).toBe(0);
++  expect(revealKeep(LEVELS, EditorSelection.cursor(OUTER.from + 1))).toBe(1);
++  expect(revealKeep([null, INNER], EditorSelection.cursor(INNER.from + 1))).toBe(0);
++  expect(revealKeep(LEVELS, EditorSelection.cursor(DOC.line(11).from))).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/foldSelection.ts b/frontend/src/editor/internal/foldSelection.ts
+new file mode 100644
+index 0000000..c60606f
+--- /dev/null
++++ b/frontend/src/editor/internal/foldSelection.ts
+@@ -0,0 +1,42 @@
++import { EditorSelection, type SelectionRange } from "@codemirror/state";
++
++import type { Hidden } from "./foldRuns";
++
++function holds({ from, to }: Hidden, selection: SelectionRange): boolean {
++  const { anchor, head } = selection;
++  return (
++    (anchor > from && anchor < to) ||
++    (head > from && head < to) ||
++    (!selection.empty && selection.from >= from && selection.to <= to)
++  );
++}
++
++export function revealKeep(
++  levels: readonly (Hidden | null)[],
++  selection: SelectionRange,
++): number | null {
++  const found = levels.findLastIndex((hidden) => hidden !== null && holds(hidden, selection));
++  return found < 0 ? null : levels.length - found - 1;
++}
++
++export function leaveHidden(
++  range: SelectionRange,
++  hidden: readonly Hidden[],
++): SelectionRange | null {
++  const around = hidden.find(({ from, to }) => range.head > from && range.head < to);
++  if (around !== undefined) {
++    return EditorSelection.cursor(around.from);
++  }
++  return hidden.some((one) => holds(one, range)) ? EditorSelection.cursor(range.head) : null;
++}
++
++export function leaveAllHidden(
++  selection: EditorSelection,
++  hidden: readonly Hidden[],
++): EditorSelection | null {
++  const ranges = selection.ranges.map((range) => leaveHidden(range, hidden) ?? range);
++  if (ranges.every((range, index) => range === selection.ranges[index])) {
++    return null;
++  }
++  return EditorSelection.create(ranges, selection.mainIndex);
++}
+diff --git a/frontend/src/editor/internal/foldView.ts b/frontend/src/editor/internal/foldView.ts
+index 727c5e7..b8a730f 100644
+--- a/frontend/src/editor/internal/foldView.ts
++++ b/frontend/src/editor/internal/foldView.ts
+@@ -12,7 +12,7 @@ import { waveCenterY, waveTile, WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../
+ import { WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
+ import { Folding, FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
+ import { displayed, type Fold } from "./foldRuns";
+-import { foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
++import { collapseSpec, foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
+ import { waveDeletes, type FoldFields } from "./folds";
+ import type { Pane, PaneViews } from "./geometry";
+ import { LINE_HEIGHT_PX } from "./pane";
+@@ -183,8 +183,8 @@ export class Folds {
+   readonly #phases: WavePhases;
+   readonly #wiring: FoldWiring;
+ 
+-  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews) {
+-    const fields = foldFields(runs);
++  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews, collapsed: boolean) {
++    const fields = foldFields(runs, collapsed);
+     this.fields = fields;
+     this.#wiring = { folds: fields, hovered: this.hovered, views };
+     const all = [hosts.left, hosts.center, hosts.right, ...hosts.strips];
+@@ -195,6 +195,13 @@ export class Folds {
+     this.#phases = new WavePhases(hosts, views);
+   }
+ 
++  setCollapsed(collapsed: boolean): void {
++    const center = this.#wiring.views().center;
++    center.dispatch(collapseSpec(this.fields.center, center.state, collapsed), {
++      effects: center.scrollSnapshot(),
++    });
++  }
++
+   center(): Extension {
+     return centerFolds(this.#wiring);
+   }
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+index 4972de4..29107db 100644
+--- a/frontend/src/editor/internal/folds.test.ts
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -1,4 +1,4 @@
+-import { undo } from "@codemirror/commands";
++import { undo, undoDepth, undoSelection } from "@codemirror/commands";
+ import {
+   EditorSelection,
+   type EditorState,
+@@ -12,18 +12,20 @@ import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../../ipc";
+ import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./apply";
+ import { chunkField } from "./chunkField";
+ import { selectMatch } from "./findMatch";
+-import { foldRuns, type Fold, type Hidden } from "./foldRuns";
++import { displayed, foldRuns, type Fold, type Hidden } from "./foldRuns";
+ import {
++  collapseSpec,
+   foldFields,
+   paneFolds,
+-  revealKeep,
+   showFolds,
+   showNextStep,
+   sideFoldPush,
+   sideReveal,
+   waveStarts,
+   type FoldFields,
++  type FoldState,
+ } from "./folds";
++import { revealKeep } from "./foldSelection";
+ import { centerFolds, sideFolds } from "./foldView";
+ import type { Pane } from "./geometry";
+ import { paneState, type PaneSettings } from "./pane";
+@@ -36,7 +38,7 @@ const SETTINGS: PaneSettings = {
+ 
+ type Merge = ApplyTarget & {
+   readonly fields: FoldFields;
+-  readonly folds: StateField<readonly Fold[]>;
++  readonly folds: StateField<FoldState>;
+   readonly runs: Fold[];
+ };
+ 
+@@ -96,12 +98,12 @@ async function twoChanges(): Promise<FileMergeData> {
+   return loadFixture("synthetic.ts", { "synthetic.json": record });
+ }
+ 
+-async function open(): Promise<Merge> {
++async function open(collapsed = true): Promise<Merge> {
+   const data = await twoChanges();
+   const docs = paneDocs(data);
+   const runs = foldRuns(data.chunks, docs);
+   const field = chunkField(data.chunks);
+-  const fields = foldFields(runs);
++  const fields = foldFields(runs, collapsed);
+   const state = paneState({
+     kind: "center",
+     doc: docs.center,
+@@ -143,23 +145,25 @@ function lineRange(state: EditorState, hidden: Hidden | null): string {
+     : `${state.doc.lineAt(hidden.from).number}-${state.doc.lineAt(hidden.to).number}`;
+ }
+ 
++function middleFolds(merge: Merge): readonly Fold[] {
++  return paneFolds(merge.fields, "center", merge.state);
++}
++
+ function centerLines(merge: Merge, run: number): string[] {
+-  const fold = merge.state.field(merge.folds)[run];
++  const fold = middleFolds(merge)[run];
+   return fold === undefined ? [] : fold.hidden.map((level) => lineRange(merge.state, level.center));
+ }
+ 
+ function hiddenTexts(merge: Merge): string[] {
+-  return merge.state
+-    .field(merge.folds)
+-    .flatMap((fold) =>
+-      fold.hidden.map(({ center }) =>
+-        center === null ? "-" : merge.state.sliceDoc(center.from, center.to),
+-      ),
+-    );
++  return middleFolds(merge).flatMap((fold) =>
++    fold.hidden.map(({ center }) =>
++      center === null ? "-" : merge.state.sliceDoc(center.from, center.to),
++    ),
++  );
+ }
+ 
+ function levelOf(merge: Merge, run: number, level: number): Hidden {
+-  const hidden = merge.state.field(merge.folds)[run]?.hidden[level]?.center;
++  const hidden = middleFolds(merge)[run]?.hidden[level]?.center;
+   if (hidden === undefined || hidden === null) {
+     throw new Error(`run ${run} has no level ${level} in the middle`);
+   }
+@@ -170,6 +174,10 @@ function click(merge: Merge, run: number): Merge {
+   return after(merge, showNextStep(merge.state.field(merge.folds), run));
+ }
+ 
++function collapsing(merge: Merge, on: boolean): Merge {
++  return after(merge, collapseSpec(merge.folds, merge.state, on));
++}
++
+ test("the middle starts with every run's levels: 4, 8 and 16 lines kept next to each change", async () => {
+   const merge = await open();
+ 
+@@ -237,7 +245,7 @@ test("deciding a change and bulk apply keep every hidden range's lines and every
+   expect(hiddenTexts(applied)).toEqual(before);
+   expect(hiddenTexts(bulk)).toEqual(before);
+   expect(centerLines(applied, 1)).toEqual(["38-67", "42-63", "50-55"]);
+-  expect(applied.state.field(merge.folds).map((fold) => fold.hidden.length)).toEqual([3, 3, 3]);
++  expect(applied.state.field(merge.folds).hiding).toEqual([3, 3, 3]);
+ });
+ 
+ test("each click shows the outermost hidden level; three clicks empty the run", async () => {
+@@ -333,20 +341,48 @@ test("a side's reveal reads its own ranges and shows what the middle shows for t
+   expect(fromSide.state.field(merge.folds)).toEqual(fromMiddle.state.field(merge.folds));
+ });
+ 
++function pushed(merge: Merge, pane: "left" | "right", side: EditorState): EditorState {
++  const spec = sideFoldPush(merge.fields, pane, side, merge.state.field(merge.folds));
++  return spec === null ? side : side.update(spec).state;
++}
++
+ test("the sides are told the counts only when they differ, and mirror them", async () => {
+   const merge = await open();
+   const sides = merge.fields.sides;
+   const side = sidePane(merge, "left");
+-  const clicked = click(merge, 1).state.field(merge.folds);
+-  const effect = sideFoldPush(side.field(sides), clicked);
+-  const mirrored = effect === null ? side : side.update({ effects: effect }).state;
++  const clicked = click(merge, 1);
++  const mirrored = pushed(clicked, "left", side);
++  const clickedFolds = clicked.state.field(merge.folds);
+ 
+-  expect(sideFoldPush(side.field(sides), merge.state.field(merge.folds))).toBeNull();
++  expect(sideFoldPush(merge.fields, "left", side, merge.state.field(merge.folds))).toBeNull();
+   expect(mirrored.field(sides)).toEqual([3, 2, 3]);
+   expect(paneFolds(merge.fields, "left", mirrored)[1]?.hidden).toEqual(
+     merge.runs[1]?.hidden.slice(1),
+   );
+-  expect(sideFoldPush(mirrored.field(sides), clicked)).toBeNull();
++  expect(sideFoldPush(merge.fields, "left", mirrored, clickedFolds)).toBeNull();
++});
++
++test("a side cursor inside lines that get hidden moves to the wave line's start when counts grow, not when they shrink", async () => {
++  const merge = await open();
++  const sides = merge.fields.sides;
++  const outer = merge.runs[1]?.hidden[0]?.left;
++  const inner = merge.runs[1]?.hidden[2]?.left;
++  if (outer === undefined || outer === null || inner === undefined || inner === null) {
++    throw new Error("run 1 lost its left levels");
++  }
++  const insideInner = EditorSelection.cursor(inner.from + 2);
++  const shownSide = pushed(collapsing(merge, false), "left", sidePane(merge, "left")).update({
++    selection: insideInner,
++  }).state;
++  const grown = pushed(merge, "left", shownSide);
++  const hiddenSide = sidePane(merge, "left").update({ selection: insideInner }).state;
++  const shrunk = pushed(click(merge, 1), "left", hiddenSide);
++
++  expect(shownSide.field(sides)).toEqual([0, 0, 0]);
++  expect(grown.field(sides)).toEqual([3, 3, 3]);
++  expect(grown.selection.main.head).toBe(outer.from);
++  expect(shrunk.field(sides)).toEqual([3, 2, 3]);
++  expect(shrunk.selection.main.head).toBe(insideInner.head);
+ });
+ 
+ function drawnStarts(state: EditorState): number[] {
+@@ -363,12 +399,10 @@ function drawnStarts(state: EditorState): number[] {
+ 
+ test("each pane's wave starts are where that pane draws its waves", async () => {
+   const merge = click(click(await open(), 1), 0);
+-  const counts = sideFoldPush([], merge.state.field(merge.folds));
+-  const effects = counts === null ? [] : [counts];
+   const states: Readonly<Record<Pane, EditorState>> = {
+-    left: sidePane(merge, "left").update({ effects }).state,
++    left: pushed(merge, "left", sidePane(merge, "left")),
+     center: merge.state,
+-    right: sidePane(merge, "right").update({ effects }).state,
++    right: pushed(merge, "right", sidePane(merge, "right")),
+   };
+   const views = {
+     left: { state: states.left },
+@@ -452,3 +486,142 @@ test("a selection deleted across a wave and a delete beside one still delete", a
+   expect(across.state.doc.lines).toBe(doc.lines - 32);
+   expect(beside.state.doc.lines).toBe(doc.lines - 1);
+ });
++
++function waves(merge: Merge, pane: Pane, state: EditorState): string[] {
++  return paneFolds(merge.fields, pane, state).map((fold) =>
++    lineRange(state, displayed(fold, pane)),
++  );
++}
++
++test("off shows every hidden line in all three panes: no wave, and the sides get zero counts", async () => {
++  const merge = await open();
++  const off = collapsing(click(merge, 1), false);
++  const left = pushed(off, "left", sidePane(merge, "left"));
++  const right = pushed(off, "right", sidePane(merge, "right"));
++
++  expect(waves(off, "center", off.state)).toEqual(["-", "-", "-"]);
++  expect(drawnStarts(off.state)).toEqual([]);
++  expect(left.field(merge.fields.sides)).toEqual([0, 0, 0]);
++  expect(right.field(merge.fields.sides)).toEqual([0, 0, 0]);
++  expect(waves(off, "left", left)).toEqual(["-", "-", "-"]);
++  expect(waves(off, "right", right)).toEqual(["-", "-", "-"]);
++  expect(drawnStarts(left)).toEqual([]);
++});
++
++test("on after clicks hides every run as at a fresh open, whether it was on or off before", async () => {
++  const fresh = await open();
++  const clicked = click(click(click(fresh, 1), 1), 0);
++
++  expect(middleFolds(collapsing(clicked, true))).toEqual(middleFolds(fresh));
++  expect(middleFolds(collapsing(collapsing(clicked, false), true))).toEqual(middleFolds(fresh));
++});
++
++test("lines typed above or inside a run while off move or grow its ranges, which hide when on", async () => {
++  const off = collapsing(await open(), false);
++  const above = collapsing(after(off, { changes: { from: 0, insert: "new\n" } }), true);
++  const at = off.state.doc.line(45).from;
++  const inside = collapsing(after(off, { changes: { from: at, insert: "typed\n" } }), true);
++
++  expect([0, 1, 2].map((run) => centerLines(above, run))).toEqual([
++    ["2-27", "2-23", "2-15"],
++    ["38-67", "42-63", "50-55"],
++    ["77-102", "81-102", "89-102"],
++  ]);
++  expect(centerLines(inside, 1)).toEqual(["37-67", "41-63", "50-55"]);
++});
++
++test("a level shrunk below 2 lines while off stays shown when on", async () => {
++  const off = collapsing(await open(), false);
++  const doc = off.state.doc;
++  const deleted = after(off, { changes: { from: doc.line(50).from, to: doc.line(55).from } });
++  const on = collapsing(deleted, true);
++
++  expect(centerLines(deleted, 1)).toEqual([]);
++  expect(centerLines(on, 1)).toEqual(["37-61", "41-57", "-"]);
++});
++
++test("a file opened while off has its runs but hides nothing, and on hides every step", async () => {
++  const off = await open(false);
++  const fresh = await open();
++
++  expect(off.state.field(off.folds).hiding).toEqual([0, 0, 0]);
++  expect(sidePane(off, "left").field(off.fields.sides)).toEqual([0, 0, 0]);
++  expect(drawnStarts(off.state)).toEqual([]);
++  expect(middleFolds(collapsing(off, true))).toEqual(middleFolds(fresh));
++});
++
++test("a toggle is not an undo step: undo after it undoes the earlier edit and leaves the folds", async () => {
++  const merge = await open();
++  const edited = after(merge, { changes: { from: 0, insert: "x\n" }, userEvent: "input.type" });
++  const depth = undoDepth(edited.state);
++  const off = collapsing(edited, false);
++  const undone = undoneState(off.state);
++
++  expect(depth).toBe(1);
++  expect(undoDepth(off.state)).toBe(depth);
++  expect(undone.doc.eq(merge.state.doc)).toBe(true);
++  expect(undoDepth(undone)).toBe(0);
++  expect(undone.field(merge.folds)).toEqual({
++    runs: merge.state.field(merge.folds).runs,
++    hiding: [0, 0, 0],
++  });
++});
++
++test("Undo selection after a toggle moved the cursor does not put it back inside the hidden lines", async () => {
++  const off = collapsing(await open(), false);
++  const inside = after(off, {
++    selection: EditorSelection.cursor(off.state.doc.line(50).from + 2),
++    userEvent: "select.pointer",
++  });
++  const on = collapsing(inside, true);
++  let undone = on.state;
++  undoSelection({
++    state: on.state,
++    dispatch: (tr) => {
++      undone = tr.state;
++    },
++  });
++
++  expect(on.state.selection.main.head).toBe(off.state.doc.line(37).from);
++  expect(undone.field(off.folds).hiding).toEqual([3, 3, 3]);
++});
++
++test("after a toggle, clicks show 4, 8, then all, and Delete at a wave shows the next step", async () => {
++  const on = collapsing(collapsing(click(await open(), 1), false), true);
++  const once = click(on, 1);
++  const twice = click(once, 1);
++  const { from, to } = levelOf(on, 1, 0);
++  const deleted = deleting(on, from, { changes: { from, to }, userEvent: "delete.forward" });
++
++  expect(centerLines(once, 1)).toEqual(["41-62", "49-54"]);
++  expect(centerLines(twice, 1)).toEqual(["49-54"]);
++  expect(centerLines(click(twice, 1), 1)).toEqual([]);
++  expect(deleted.state.doc.eq(on.state.doc)).toBe(true);
++  expect(centerLines(deleted, 1)).toEqual(["41-62", "49-54"]);
++});
++
++test("on moves a middle cursor inside hidden lines to the wave line's start and drops a selection with an end inside, without showing the run", async () => {
++  const off = collapsing(await open(), false);
++  const doc = off.state.doc;
++  function line(number: number): number {
++    return doc.line(number).from;
++  }
++  function toggled(selection: EditorSelection): EditorState {
++    return collapsing(after(off, { selection }), true).state;
++  }
++  const cursor = toggled(EditorSelection.single(line(50) + 2));
++  const headInside = toggled(EditorSelection.single(line(34), line(40)));
++  const anchorInside = toggled(EditorSelection.single(line(40), line(68)));
++  const covering = toggled(EditorSelection.single(line(34), line(68)));
++
++  for (const state of [cursor, headInside, anchorInside, covering]) {
++    expect(state.field(off.folds).hiding).toEqual([3, 3, 3]);
++  }
++  expect(cursor.selection.main.head).toBe(line(37));
++  expect(cursor.selection.main.empty).toBe(true);
++  expect(headInside.selection.main.head).toBe(line(37));
++  expect(headInside.selection.main.empty).toBe(true);
++  expect(anchorInside.selection.main.head).toBe(line(68));
++  expect(anchorInside.selection.main.empty).toBe(true);
++  expect(covering.selection.main).toMatchObject({ anchor: line(34), head: line(68) });
++});
+diff --git a/frontend/src/editor/internal/folds.ts b/frontend/src/editor/internal/folds.ts
+index b58e54e..d3bf0d2 100644
+--- a/frontend/src/editor/internal/folds.ts
++++ b/frontend/src/editor/internal/folds.ts
+@@ -14,18 +14,24 @@ import { EditorView } from "@codemirror/view";
+ import { toDocPos, type DocPos } from "./docPos";
+ import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
+ import type { Fold, FoldLevel, Hidden } from "./foldRuns";
++import { leaveAllHidden, revealKeep } from "./foldSelection";
+ import type { Pane, PaneViews } from "./geometry";
+ 
+ type ShowFolds = { readonly run: number; readonly keep: number };
+ 
++export type FoldState = {
++  readonly runs: readonly Fold[];
++  readonly hiding: readonly number[];
++};
++
+ export type FoldFields = {
+   readonly runs: readonly Fold[];
+-  readonly center: StateField<readonly Fold[]>;
++  readonly center: StateField<FoldState>;
+   readonly sides: StateField<readonly number[]>;
+ };
+ 
+ export const showFolds = StateEffect.define<ShowFolds>();
+-const showSideFolds = StateEffect.define<readonly number[]>();
++const setHiding = StateEffect.define<readonly number[]>();
+ 
+ function mapHidden(hidden: Hidden, changes: ChangeDesc, doc: Text): Hidden | null {
+   const from = changes.mapPos(hidden.from, 1);
+@@ -63,27 +69,39 @@ function mapFolds(folds: readonly Fold[], changes: ChangeDesc, doc: Text): reado
+   return mapped.every((fold, index) => fold === folds[index]) ? folds : mapped;
+ }
+ 
+-function innermost(levels: readonly FoldLevel[], count: number): readonly FoldLevel[] {
+-  return levels.slice(Math.max(0, levels.length - count));
++function hidingAll(runs: readonly Fold[], collapsed: boolean): readonly number[] {
++  return runs.map((fold) => (collapsed ? fold.hidden.length : 0));
+ }
+ 
+-function shown(folds: readonly Fold[], { run, keep }: ShowFolds): readonly Fold[] {
+-  const fold = folds[run];
+-  if (fold === undefined || Math.max(0, keep) >= fold.hidden.length) {
++function sameCounts(a: readonly number[], b: readonly number[]): boolean {
++  return a.length === b.length && a.every((count, run) => count === b[run]);
++}
++
++function hiddenLevels(runs: readonly Fold[], counts: readonly number[]): readonly Fold[] {
++  return runs.map(({ hidden }, run) => ({
++    hidden: hidden.slice(Math.max(0, hidden.length - (counts[run] ?? 0))),
++  }));
++}
++
++function displayedIn(folds: readonly Fold[], pane: Pane): Hidden[] {
++  return folds.flatMap((fold) => displayed(fold, pane) ?? []);
++}
++
++function shown(folds: FoldState, { run, keep }: ShowFolds): FoldState {
++  const count = folds.hiding[run];
++  if (count === undefined || Math.max(0, keep) >= count) {
+     return folds;
+   }
+-  const hidden = innermost(fold.hidden, keep);
+-  return folds.map((other, index) => (index === run ? { hidden } : other));
++  const hiding = folds.hiding.map((other, index) => (index === run ? Math.max(0, keep) : other));
++  return { ...folds, hiding };
+ }
+ 
+ export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): readonly Fold[] {
+   if (pane === "center") {
+-    return state.field(fields.center);
++    const { runs, hiding } = state.field(fields.center);
++    return hiddenLevels(runs, hiding);
+   }
+-  const counts = state.field(fields.sides);
+-  return fields.runs.map(({ hidden }, run) => ({
+-    hidden: innermost(hidden, counts[run] ?? hidden.length),
+-  }));
++  return hiddenLevels(fields.runs, state.field(fields.sides));
+ }
+ 
+ function startsIn(fields: FoldFields, pane: Pane, state: EditorState): (DocPos | null)[] {
+@@ -101,23 +119,6 @@ export function waveStarts(
+   };
+ }
+ 
+-function holds({ from, to }: Hidden, selection: SelectionRange): boolean {
+-  const { anchor, head } = selection;
+-  return (
+-    (anchor > from && anchor < to) ||
+-    (head > from && head < to) ||
+-    (!selection.empty && selection.from >= from && selection.to <= to)
+-  );
+-}
+-
+-export function revealKeep(
+-  levels: readonly (Hidden | null)[],
+-  selection: SelectionRange,
+-): number | null {
+-  const found = levels.findLastIndex((hidden) => hidden !== null && holds(hidden, selection));
+-  return found < 0 ? null : levels.length - found - 1;
+-}
+-
+ function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange): ShowFolds[] {
+   return folds.flatMap((fold, run) => {
+     const keep = revealKeep(
+@@ -128,18 +129,22 @@ function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange):
+   });
+ }
+ 
+-export function foldField(initial: readonly Fold[]): StateField<readonly Fold[]> {
+-  return StateField.define<readonly Fold[]>({
+-    create: () => initial,
++export function foldField(runs: readonly Fold[], collapsed: boolean): StateField<FoldState> {
++  return StateField.define<FoldState>({
++    create: () => ({ runs, hiding: hidingAll(runs, collapsed) }),
+     update(folds, tr) {
+-      let next = tr.docChanged ? mapFolds(folds, tr.changes, tr.state.doc) : folds;
++      const mapped = tr.docChanged ? mapFolds(folds.runs, tr.changes, tr.state.doc) : folds.runs;
++      let next = mapped === folds.runs ? folds : { ...folds, runs: mapped };
+       for (const effect of tr.effects) {
+         if (effect.is(showFolds)) {
+           next = shown(next, effect.value);
++        } else if (effect.is(setHiding) && !sameCounts(effect.value, next.hiding)) {
++          next = { ...next, hiding: effect.value };
+         }
+       }
+       if (tr.selection !== undefined) {
+-        for (const reveal of reveals(next, "center", tr.selection.main)) {
++        const hidden = hiddenLevels(next.runs, next.hiding);
++        for (const reveal of reveals(hidden, "center", tr.selection.main)) {
+           next = shown(next, reveal);
+         }
+       }
+@@ -148,16 +153,35 @@ export function foldField(initial: readonly Fold[]): StateField<readonly Fold[]>
+   });
+ }
+ 
+-function sideFoldField(runs: readonly Fold[]): StateField<readonly number[]> {
++function sideFoldField(runs: readonly Fold[], collapsed: boolean): StateField<readonly number[]> {
+   return StateField.define<readonly number[]>({
+-    create: () => runs.map((fold) => fold.hidden.length),
+-    update: (counts, tr) =>
+-      tr.effects.findLast((effect) => effect.is(showSideFolds))?.value ?? counts,
++    create: () => hidingAll(runs, collapsed),
++    update: (counts, tr) => tr.effects.findLast((effect) => effect.is(setHiding))?.value ?? counts,
+   });
+ }
+ 
+-export function foldFields(runs: readonly Fold[]): FoldFields {
+-  return { runs, center: foldField(runs), sides: sideFoldField(runs) };
++export function foldFields(runs: readonly Fold[], collapsed: boolean): FoldFields {
++  return {
++    runs,
++    center: foldField(runs, collapsed),
++    sides: sideFoldField(runs, collapsed),
++  };
++}
++
++export function collapseSpec(
++  field: StateField<FoldState>,
++  state: EditorState,
++  collapsed: boolean,
++): TransactionSpec {
++  const { runs } = state.field(field);
++  const hiding = hidingAll(runs, collapsed);
++  const spec = {
++    effects: setHiding.of(hiding),
++    annotations: Transaction.addToHistory.of(false),
++  };
++  const hidden = displayedIn(hiddenLevels(runs, hiding), "center");
++  const selection = leaveAllHidden(state.selection, hidden);
++  return selection === null ? spec : { ...spec, selection };
+ }
+ 
+ function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
+@@ -167,11 +191,11 @@ function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
+   };
+ }
+ 
+-function nextStep(folds: readonly Fold[], run: number): ShowFolds {
+-  return { run, keep: (folds[run]?.hidden.length ?? 0) - 1 };
++function nextStep(folds: FoldState, run: number): ShowFolds {
++  return { run, keep: (folds.hiding[run] ?? 0) - 1 };
+ }
+ 
+-export function showNextStep(folds: readonly Fold[], run: number): TransactionSpec {
++export function showNextStep(folds: FoldState, run: number): TransactionSpec {
+   return showSpec([nextStep(folds, run)]);
+ }
+ 
+@@ -183,17 +207,17 @@ function removesHidden(tr: Transaction, { from, to }: Hidden): boolean {
+   return removes;
+ }
+ 
+-function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
++function deletedWaves(tr: Transaction, folds: FoldState): ShowFolds[] {
+   if (!tr.isUserEvent("delete") || tr.startState.selection.ranges.some((range) => !range.empty)) {
+     return [];
+   }
+-  return folds.flatMap((fold, run) => {
++  return hiddenLevels(folds.runs, folds.hiding).flatMap((fold, run) => {
+     const hidden = displayed(fold, "center");
+     return hidden !== null && removesHidden(tr, hidden) ? [nextStep(folds, run)] : [];
+   });
+ }
+ 
+-export function waveDeletes(field: StateField<readonly Fold[]>): Extension {
++export function waveDeletes(field: StateField<FoldState>): Extension {
+   return EditorState.transactionFilter.of((tr) => {
+     const steps = deletedWaves(tr, tr.startState.field(field));
+     return steps.length === 0 ? tr : showSpec(steps);
+@@ -201,26 +225,37 @@ export function waveDeletes(field: StateField<readonly Fold[]>): Extension {
+ }
+ 
+ export function sideFoldPush(
+-  onSides: readonly number[],
+-  folds: readonly Fold[],
+-): StateEffect<readonly number[]> | null {
+-  if (folds.every((fold, run) => fold.hidden.length === onSides[run])) {
++  fields: FoldFields,
++  pane: "left" | "right",
++  side: EditorState,
++  folds: FoldState,
++): TransactionSpec | null {
++  const before = side.field(fields.sides);
++  const counts = folds.hiding;
++  if (sameCounts(counts, before)) {
+     return null;
+   }
+-  return showSideFolds.of(folds.map((fold) => fold.hidden.length));
++  const effects = setHiding.of(counts);
++  if (counts.every((count, run) => count <= (before[run] ?? 0))) {
++    return { effects };
++  }
++  const hidden = displayedIn(hiddenLevels(fields.runs, counts), pane);
++  const selection = leaveAllHidden(side.selection, hidden);
++  return selection === null ? { effects } : { effects, selection };
+ }
+ 
+ export function pushFolds(fields: FoldFields, views: () => PaneViews): Extension {
+   return EditorView.updateListener.of((update) => {
+     const folds = update.state.field(fields.center);
+-    if (folds === update.startState.field(fields.center)) {
++    if (folds.hiding === update.startState.field(fields.center).hiding) {
+       return;
+     }
+-    const { left, right } = views();
+-    const effect = sideFoldPush(left.state.field(fields.sides), folds);
+-    if (effect !== null) {
+-      left.dispatch({ effects: effect });
+-      right.dispatch({ effects: effect });
++    for (const pane of ["left", "right"] as const) {
++      const view = views()[pane];
++      const spec = sideFoldPush(fields, pane, view.state, folds);
++      if (spec !== null) {
++        view.dispatch(spec);
++      }
+     }
+   });
+ }
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index a608c7b..2a71bcd 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -78,6 +78,10 @@ export class Frame {
+     });
+   }
+ 
++  realign(): void {
++    this.#scroll.follow("center");
++  }
++
+   destroy(): void {
+     if (this.#frameId !== null) {
+       cancelAnimationFrame(this.#frameId);
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
+index 6e00977..095b84c 100644
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
+@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
+ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
+ import { toDocPos } from "./docPos";
+-import { foldField, showNextStep } from "./folds";
++import { collapseSpec, foldField, showNextStep } from "./folds";
+ import { rangeSpan, rowsChanged, STRIP_PANES, waveRows, type Pane } from "./geometry";
+ import { paneDocs } from "./paneDocs";
+ import { statusAfterIgnore } from "./status";
+@@ -56,12 +56,12 @@ test("an empty document has one point at the top", () => {
+   expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
+ });
+ 
+-test("chunk rows go stale on a status change, an edit, a fold step or new measurements, not on a cursor move", async () => {
++test("chunk rows go stale on a status change, an edit, a fold step, a toggle or new measurements, not on a cursor move", async () => {
+   const data = await loadFixture("vueuse-use-magic-keys.ts");
+   const field = chunkField(data.chunks);
+   const doc = paneDocs(data).center;
+   const hidden = { from: toDocPos(doc.line(3).from), to: toDocPos(doc.line(5).to) };
+-  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }]);
++  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }], true);
+   const state = EditorState.create({ doc, extensions: [field, folds] });
+   const [first] = state.field(field);
+   if (first === undefined) {
+@@ -71,6 +71,7 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
+   const ignored = state.update({ effects: setStatus.of({ id: first.chunk.id, status }) }).state;
+   const edited = state.update({ changes: { from: 0, insert: "x\n" } }).state;
+   const folded = state.update(showNextStep(state.field(folds), 0)).state;
++  const toggled = state.update(collapseSpec(folds, state, false)).state;
+   const moved = state.update({ selection: EditorSelection.cursor(1) }).state;
+   const sidePane = EditorState.create({ doc: data.local });
+   const fields = [field, folds];
+@@ -84,6 +85,9 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
+   expect(rowsChanged({ geometryChanged: false, startState: state, state: folded }, fields)).toBe(
+     true,
+   );
++  expect(rowsChanged({ geometryChanged: false, startState: state, state: toggled }, fields)).toBe(
++    true,
++  );
+   expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, fields)).toBe(
+     false,
+   );
+diff --git a/frontend/src/editor/internal/scrollSync.test.ts b/frontend/src/editor/internal/scrollSync.test.ts
+index ffe44de..25517ae 100644
+--- a/frontend/src/editor/internal/scrollSync.test.ts
++++ b/frontend/src/editor/internal/scrollSync.test.ts
+@@ -1,8 +1,8 @@
+-import { expect, test } from "vitest";
++import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type { Span } from "../../connectors";
+ import type { Pane } from "./geometry";
+-import { anchorsOf, targets, type Anchor } from "./scrollSync";
++import { anchorsOf, ScrollSync, targets, type Anchor } from "./scrollSync";
+ 
+ const LINE_PX = 20;
+ 
+@@ -121,3 +121,61 @@ test("a 2,000-line file with 40 mixed chunks maps every chunk top exactly and ne
+     }
+   }
+ });
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++type FakePane = {
++  readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
++  readonly documentPadding: { readonly top: number };
++};
++
++function fakePane(scrollTop: number): FakePane {
++  return {
++    scrollDOM: Object.assign(new EventTarget(), { scrollTop, clientHeight: 10 * LINE_PX }),
++    documentPadding: { top: 0 },
++  };
++}
++
++function scrolled(pane: FakePane, scrollTop: number): void {
++  pane.scrollDOM.scrollTop = scrollTop;
++  pane.scrollDOM.dispatchEvent(new Event("scroll"));
++}
++
++function tops(views: Readonly<Record<Pane, FakePane>>): number[] {
++  return [views.left, views.center, views.right].map((pane) => pane.scrollDOM.scrollTop);
++}
++
++test("follow('center') makes the next sync write both sides though the middle did not scroll, and their echoes stay ignored", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), center: fakePane(0), right: fakePane(0) };
++  let requested = 0;
++  const sync = new ScrollSync(views, () => {
++    requested += 1;
++  });
++  const anchors = anchorsOf([], ends(100, 100, 100));
++  scrolled(views.center, 300);
++  sync.sync(anchors);
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++  views.left.scrollDOM.scrollTop = 0;
++  views.right.scrollDOM.scrollTop = 0;
++
++  scrolled(views.center, 300);
++  sync.sync(anchors);
++  expect(tops(views)).toEqual([0, 300, 0]);
++
++  const before = requested;
++  sync.follow("center");
++  expect(requested).toBe(before + 1);
++  sync.sync(anchors);
++  expect(tops(views)).toEqual([300, 300, 300]);
++
++  scrolled(views.left, 500);
++  sync.sync(anchors);
++  expect(tops(views)).toEqual([500, 300, 300]);
++});
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index 0b3493b..a2aa158 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -5,6 +5,10 @@ import type { Pane, PaneViews } from "./geometry";
+ 
+ export type Anchor = Readonly<Record<Pane, number>>;
+ type SpanRow = Readonly<Record<Pane, Span>>;
++type ScrollPane = {
++  readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
++  readonly documentPadding: { readonly top: number };
++};
+ 
+ const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ const ANCHOR_AT = 0.5;
+@@ -55,21 +59,23 @@ export function contentEnds(views: PaneViews): Anchor {
+   };
+ }
+ 
+-function middle(view: EditorView): number {
++function middle(view: ScrollPane): number {
+   const { scrollTop, clientHeight } = view.scrollDOM;
+   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
+ }
+ 
+ export class ScrollSync {
+-  readonly #views: PaneViews;
++  readonly #views: Readonly<Record<Pane, ScrollPane>>;
++  readonly #requestFrame: () => void;
+   readonly #listeners = new AbortController();
+   #source: Pane | null = null;
+   #echoes: readonly Pane[] = [];
+   #clearEchoes: number | null = null;
+   #syncedTops: Readonly<Record<Pane, number>> | null = null;
+ 
+-  constructor(views: PaneViews, requestFrame: () => void) {
++  constructor(views: Readonly<Record<Pane, ScrollPane>>, requestFrame: () => void) {
+     this.#views = views;
++    this.#requestFrame = requestFrame;
+     for (const pane of PANES) {
+       views[pane].scrollDOM.addEventListener(
+         "scroll",
+@@ -84,6 +90,12 @@ export class ScrollSync {
+     }
+   }
+ 
++  follow(source: Pane): void {
++    this.#source = source;
++    this.#syncedTops = null;
++    this.#requestFrame();
++  }
++
+   sync(anchors: readonly Anchor[]): void {
+     const source = this.#source;
+     this.#source = null;
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index ca44bea..a8d90e0 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -1,7 +1,8 @@
+ <script setup lang="ts">
+-import { computed, shallowRef, type Component } from "vue";
++import { computed, shallowRef, type Component, type Ref } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
++import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+ import ChevronsLeft from "~icons/lucide/chevrons-left";
+ import ChevronsRight from "~icons/lucide/chevrons-right";
+ import Redo2 from "~icons/lucide/redo-2";
+@@ -21,6 +22,7 @@ type IconButton = {
+   readonly icon: Component;
+   readonly keepsKeyboard: boolean;
+   readonly run: () => void;
++  readonly pressed: Readonly<Ref<boolean>> | null;
+ };
+ 
+ const props = defineProps<{ summary: MergeSummary | null }>();
+@@ -35,6 +37,8 @@ const emit = defineEmits<{
+ 
+ const SECONDARY_BUTTON = 2;
+ 
++const { hiddenButtons, collapsing, toggleCollapsing } = useAppStore();
++
+ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+   previous: {
+     label: "Previous change",
+@@ -43,6 +47,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("move", "up");
+     },
++    pressed: null,
+   },
+   next: {
+     label: "Next change",
+@@ -51,6 +56,14 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("move", "down");
+     },
++    pressed: null,
++  },
++  collapse: {
++    label: "Collapse unchanged fragments",
++    icon: ChevronsDownUp,
++    keepsKeyboard: true,
++    run: toggleCollapsing,
++    pressed: collapsing,
+   },
+   applyLeft: {
+     label: "Apply non-conflicting changes from the left",
+@@ -59,6 +72,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("applyLeft");
+     },
++    pressed: null,
+   },
+   applyRight: {
+     label: "Apply non-conflicting changes from the right",
+@@ -67,6 +81,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("applyRight");
+     },
++    pressed: null,
+   },
+   undo: {
+     label: "Undo",
+@@ -75,6 +90,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("undo");
+     },
++    pressed: null,
+   },
+   redo: {
+     label: "Redo",
+@@ -83,17 +99,17 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("redo");
+     },
++    pressed: null,
+   },
+ };
+ 
+-const { hiddenButtons } = useAppStore();
+ const menuAt = shallowRef<Point | null>(null);
+ 
+ const shownButtons = computed(() =>
+-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
+-    id,
+-    ...ICON_BUTTONS[id],
+-  })),
++  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => {
++    const button = ICON_BUTTONS[id];
++    return { id, ...button, ariaPressed: button.pressed?.value };
++  }),
+ );
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -144,8 +160,9 @@ function closeMenu(): void {
+       type="button"
+       :title="button.label"
+       :aria-label="button.label"
++      :aria-pressed="button.ariaPressed"
+       :disabled="summary === null"
+-      class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent"
++      class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+       @mousedown="pressed(button, $event)"
+       @click="button.run"
+     >
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index a38163d..2bd697e 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -33,8 +33,18 @@ const center = useTemplateRef<HTMLDivElement>("center");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
+ const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
+-const { track, untrack, finish, reset, takeSide, taken, sideNames, question, preferences } =
+-  useAppStore();
++const {
++  track,
++  untrack,
++  finish,
++  reset,
++  takeSide,
++  taken,
++  sideNames,
++  question,
++  preferences,
++  collapsing,
++} = useAppStore();
+ const {
+   summary,
+   applyAllNonConflicting,
+@@ -48,8 +58,7 @@ const {
+ } = useMergeController(
+   () => props.data,
+   { left, center, right, strips: [leftStrip, rightStrip] },
+-  () => !isEditable(props.data),
+-  preferences,
++  { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing },
+ );
+ const work: FileWork = { unsaved, markSaved };
+ if (props.data.deleted === null) {
+diff --git a/frontend/src/ui/collapsing.test.ts b/frontend/src/ui/collapsing.test.ts
+new file mode 100644
+index 0000000..0c040b0
+--- /dev/null
++++ b/frontend/src/ui/collapsing.test.ts
+@@ -0,0 +1,97 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { createCollapsing } from "./collapsing";
++
++const KEY = "yamt.collapse.unchanged";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function spyWarnings(): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  return lines;
++}
++
++test("a missing key collapses and writes nothing until a toggle", () => {
++  const storage = memoryStorage({ other: "x" });
++
++  const { collapsing } = createCollapsing(storage);
++
++  expect(collapsing.value).toBe(true);
++  expect([...storage.items.keys()]).toEqual(["other"]);
++});
++
++test('a stored "false" does not collapse', () => {
++  expect(createCollapsing(memoryStorage({ [KEY]: "false" })).collapsing.value).toBe(false);
++});
++
++test.each([
++  ["true", "true"],
++  ["empty", ""],
++  ["another word", "no"],
++  ["JSON", "[]"],
++  ["upper case", "FALSE"],
++])("a stored value that is %s collapses", (_name, value) => {
++  expect(createCollapsing(memoryStorage({ [KEY]: value })).collapsing.value).toBe(true);
++});
++
++test('toggling writes "false", then "true", and a second start reads the choice', () => {
++  const storage = memoryStorage();
++  const first = createCollapsing(storage);
++
++  first.toggleCollapsing();
++  expect(first.collapsing.value).toBe(false);
++  expect(storage.items.get(KEY)).toBe("false");
++  expect(createCollapsing(storage).collapsing.value).toBe(false);
++
++  first.toggleCollapsing();
++  expect(first.collapsing.value).toBe(true);
++  expect(storage.items.get(KEY)).toBe("true");
++  expect(createCollapsing(storage).collapsing.value).toBe(true);
++});
++
++test("a storage that throws collapses, still toggles in memory and logs warnings", () => {
++  const warnings = spyWarnings();
++  const failing: StorageLike = {
++    getItem: () => {
++      throw new Error("storage disabled");
++    },
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++    removeItem: () => {
++      throw new Error("storage disabled");
++    },
++  };
++
++  const collapse = createCollapsing(failing);
++  expect(collapse.collapsing.value).toBe(true);
++  expect(warnings).toEqual([
++    '[warn] collapse.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++
++  collapse.toggleCollapsing();
++  expect(collapse.collapsing.value).toBe(false);
++  expect(warnings).toHaveLength(2);
++});
+diff --git a/frontend/src/ui/collapsing.ts b/frontend/src/ui/collapsing.ts
+new file mode 100644
+index 0000000..0514c69
+--- /dev/null
++++ b/frontend/src/ui/collapsing.ts
+@@ -0,0 +1,29 @@
++import { useStorage, type StorageLike } from "@vueuse/core";
++import type { Ref } from "vue";
++
++import { log } from "../ipc";
++import { unexpected } from "./problem";
++
++export type Collapsing = {
++  readonly collapsing: Readonly<Ref<boolean>>;
++  toggleCollapsing(): void;
++};
++
++const STORAGE_KEY = "yamt.collapse.unchanged";
++
++export function createCollapsing(storage?: StorageLike): Collapsing {
++  const collapsing = useStorage<boolean>(STORAGE_KEY, true, storage, {
++    serializer: { read: (raw) => raw !== "false", write: (on) => String(on) },
++    flush: "sync",
++    writeDefaults: false,
++    onError: (error) => {
++      log.warn("collapse.storage_failed", { ...unexpected(error) });
++    },
++  });
++  return {
++    collapsing,
++    toggleCollapsing: () => {
++      collapsing.value = !collapsing.value;
++    },
++  };
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 8906b1b..aeab1b1 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -1,3 +1,4 @@
++import { setSSRHandler } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import {
+@@ -2225,3 +2226,28 @@ test("with two toggle-file-list keys, each one toggles the list", async () => {
+   expect(store.fileListShown.value).toBe(true);
+   expect(second.prevents()).toBe(1);
+ });
++
++test("toggleCollapsing flips collapsing and keeps the choice in the window's storage", () => {
++  const items = new Map<string, string>();
++  setSSRHandler("getDefaultStorage", () => ({
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  }));
++  try {
++    const store = createAppStore(handSource([]).source);
++    expect(store.collapsing.value).toBe(true);
++
++    store.toggleCollapsing();
++
++    expect(store.collapsing.value).toBe(false);
++    expect(items.get("yamt.collapse.unchanged")).toBe("false");
++    expect(createAppStore(handSource([]).source).collapsing.value).toBe(false);
++  } finally {
++    setSSRHandler("getDefaultStorage", () => undefined);
++  }
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 731736e..531e7e1 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -13,6 +13,7 @@ import {
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
++import { createCollapsing, type Collapsing } from "./collapsing";
+ import { changedOnDisk } from "./diskChanges";
+ import { loadSideNames, refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+@@ -80,7 +81,8 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly allResolved: ComputedRef<boolean>;
+   readonly preferences: ComputedRef<Preferences>;
+   readonly hiddenButtons: HiddenButtons["hidden"];
+-} & Actions;
++} & Actions &
++  Collapsing;
+ 
+ let store: AppStore | null = null;
+ 
+@@ -112,6 +114,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
+     preferences: computed(() => preferencesOf(settings.value)),
+     hiddenButtons: buttons.hidden,
+     ...actions(state, buttons),
++    ...createCollapsing(),
+   };
+   return store;
+ }
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index f0ec917..4169388 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -1,7 +1,7 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { createHiddenButtons, type HiddenButtons } from "./toolbarButtons";
++import { createHiddenButtons, TOOLBAR_BUTTONS, type HiddenButtons } from "./toolbarButtons";
+ 
+ const KEY = "yamt.toolbar.hidden";
+ 
+@@ -82,6 +82,29 @@ test("stored ids yamt does not know are dropped and duplicates collapse", () =>
+   expect([...buttons.hidden.value].sort()).toEqual(["applyLeft", "redo"]);
+ });
+ 
++test("the toolbar order puts the collapse toggle after Next change and before the apply-all buttons", () => {
++  expect(TOOLBAR_BUTTONS).toEqual([
++    "previous",
++    "next",
++    "collapse",
++    "applyLeft",
++    "applyRight",
++    "undo",
++    "redo",
++  ]);
++});
++
++test("a hidden list stored before the collapse toggle existed shows it; hiding it stores it in toolbar order", () => {
++  const storage = memoryStorage({ [KEY]: '["undo","redo"]' });
++  const buttons = createHiddenButtons(storage);
++
++  expect(buttons.hidden.value.has("collapse")).toBe(false);
++
++  buttons.toggle("collapse");
++
++  expect(storage.items.get(KEY)).toBe('["collapse","undo","redo"]');
++});
++
+ test.each([
+   ["not JSON", "[undo"],
+   ["a JSON object", '{"undo":true}'],
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index 95f47db..f166fb7 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -7,6 +7,7 @@ import { unexpected } from "./problem";
+ export const TOOLBAR_BUTTONS = [
+   "previous",
+   "next",
++  "collapse",
+   "applyLeft",
+   "applyRight",
+   "undo",
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index 8be02d1..5e8ea07 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -11,17 +11,21 @@ const editor = vi.hoisted(() => {
+     destroyed: 0,
+     readOnly: new Array<boolean>(),
+     themes: new Array<string>(),
++    collapsed: new Array<string>(),
+   };
+   class MergeController {
++    readonly #id: number;
+     constructor(
+       data: FileMergeData,
+       _hosts: unknown,
+-      options: { readOnly: boolean; preferences: { theme: string } },
++      options: { readOnly: boolean; preferences: { theme: string }; collapsed: boolean },
+     ) {
+       state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
+       state.built += 1;
++      this.#id = state.built;
+       state.readOnly.push(options.readOnly);
+       state.themes.push(`built ${options.preferences.theme}`);
++      state.collapsed.push(`${this.#id} built ${options.collapsed}`);
+     }
+     summary(): { conflicts: number; changes: number } {
+       return { conflicts: 0, changes: 0 };
+@@ -30,6 +34,9 @@ const editor = vi.hoisted(() => {
+     setPreferences(preferences: { theme: string }): void {
+       state.themes.push(`set ${preferences.theme}`);
+     }
++    setCollapsed(on: boolean): void {
++      state.collapsed.push(`${this.#id} set ${on}`);
++    }
+     resultText(): string {
+       return state.text;
+     }
+@@ -45,7 +52,14 @@ vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
+ const DARK: Preferences = { theme: "dark", keys: DEFAULT_KEYS };
+ 
+ afterEach(() => {
+-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [], themes: [] });
++  Object.assign(editor.state, {
++    text: "",
++    built: 0,
++    destroyed: 0,
++    readOnly: [],
++    themes: [],
++    collapsed: [],
++  });
+ });
+ 
+ function host<T>(present: boolean): ShallowRef<T | null> {
+@@ -54,7 +68,12 @@ function host<T>(present: boolean): ShallowRef<T | null> {
+ 
+ function mount(
+   data: ShallowRef<FileMergeData | null>,
+-  { present = true, readOnly = shallowRef(false), preferences = shallowRef(DARK) } = {},
++  {
++    present = true,
++    readOnly = shallowRef(false),
++    preferences = shallowRef(DARK),
++    collapsed = shallowRef(true),
++  } = {},
+ ): { scope: EffectScope; handle: MergeHandle } {
+   const scope = effectScope();
+   const handle = scope.run(() =>
+@@ -66,8 +85,7 @@ function mount(
+         right: host(present),
+         strips: [host(present), host(present)],
+       },
+-      readOnly,
+-      preferences,
++      { readOnly, preferences, collapsed },
+     ),
+   );
+   if (handle === undefined) {
+@@ -183,3 +201,55 @@ test("while the file is still loading, toolbar actions and the undo shortcut do
+   }).not.toThrow();
+   expect(handle.historyKey(ctrlZ)).toBe(false);
+ });
++
++test("flipping collapsing before the file loaded reaches no editor and throws nothing", async () => {
++  const collapsed = shallowRef(true);
++  mount(shallowRef<FileMergeData | null>(null), { collapsed });
++  await nextTick();
++
++  collapsed.value = false;
++
++  await expect(nextTick()).resolves.toBeUndefined();
++  expect(editor.state.collapsed).toEqual([]);
++});
++
++test("an editor built while collapsing is off is told so, and a file loaded later follows the current choice", async () => {
++  const collapsed = shallowRef(false);
++  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
++  mount(data, { collapsed });
++  await nextTick();
++  collapsed.value = true;
++  await nextTick();
++  data.value = await fileData("b\n");
++  await nextTick();
++
++  expect(editor.state.collapsed).toEqual(["1 built false", "1 set true", "2 built true"]);
++});
++
++test("flipping collapsing tells every live editor once, and a destroyed one never", async () => {
++  const collapsed = shallowRef(true);
++  const rebuilt = shallowRef<FileMergeData | null>(await fileData("a\n"));
++  mount(rebuilt, { collapsed });
++  mount(shallowRef<FileMergeData | null>(await fileData("b\n")), { collapsed });
++  await nextTick();
++  rebuilt.value = await fileData("c\n");
++  await nextTick();
++  editor.state.collapsed = [];
++
++  collapsed.value = false;
++  await nextTick();
++
++  expect([...editor.state.collapsed].sort()).toEqual(["2 set false", "3 set false"]);
++});
++
++test("a preferences change never resets collapsing", async () => {
++  const preferences = shallowRef<Preferences>(DARK);
++  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { preferences });
++  await nextTick();
++
++  preferences.value = { theme: "light", keys: DEFAULT_KEYS };
++  await nextTick();
++
++  expect(editor.state.collapsed).toEqual(["1 built true"]);
++  expect(editor.state.themes).toEqual(["built dark", "set light"]);
++});
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index b6ffd0f..afe6d1f 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -29,6 +29,12 @@ type Hosts = {
+   readonly strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
+ };
+ 
++type ControllerOptions = {
++  readonly readOnly: MaybeRefOrGetter<boolean>;
++  readonly preferences: MaybeRefOrGetter<Preferences>;
++  readonly collapsed: MaybeRefOrGetter<boolean>;
++};
++
+ export type MergeHandle = {
+   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
+   applyAllNonConflicting(side: Side): void;
+@@ -98,8 +104,7 @@ function handleOf(summary: MergeHandle["summary"], current: () => Loaded | null)
+ export function useMergeController(
+   data: MaybeRefOrGetter<FileMergeData | null>,
+   hosts: Hosts,
+-  readOnly: MaybeRefOrGetter<boolean>,
+-  preferences: MaybeRefOrGetter<Preferences>,
++  { readOnly, preferences, collapsed }: ControllerOptions,
+ ): MergeHandle {
+   const summary = shallowRef<MergeSummary | null>(null);
+   let loaded: Loaded | null = null;
+@@ -114,7 +119,11 @@ export function useMergeController(
+     [toRef(data), toRef(readOnly), hosts.left, hosts.center, hosts.right, ...hosts.strips],
+     ([current, currentReadOnly, ...elements]) => {
+       destroyController();
+-      const options = { readOnly: currentReadOnly, preferences: toValue(preferences) };
++      const options = {
++        readOnly: currentReadOnly,
++        preferences: toValue(preferences),
++        collapsed: toValue(collapsed),
++      };
+       const controller = createController(current, options, elements);
+       controller?.onSummaryChange((next) => {
+         summary.value = next;
+@@ -129,6 +138,10 @@ export function useMergeController(
+     loaded?.controller.setPreferences(next);
+   });
+ 
++  watch(toRef(collapsed), (on) => {
++    loaded?.controller.setCollapsed(on);
++  });
++
+   onScopeDispose(destroyController);
+ 
+   return handleOf(summary, () => loaded);

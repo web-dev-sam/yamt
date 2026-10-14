@@ -6,6 +6,7 @@ import {
   waveJoinPath,
   wavePhase,
   waveTile,
+  MASK_PERIODS,
   WAVE_DOWN_X,
   WAVE_TILE_HEIGHT_PX,
   WAVE_TILE_WIDTH_PX,
@@ -58,6 +59,10 @@ function tileX(x: number, phase: WavePhase): number {
   return (
     ((into - phase.period * Math.floor(into / phase.period)) * WAVE_TILE_WIDTH_PX) / phase.period
   );
+}
+
+function driftPx(x: number, phase: WavePhase, wantedTileX: number): number {
+  return (Math.abs(tileX(x, phase) - wantedTileX) * phase.period) / WAVE_TILE_WIDTH_PX;
 }
 
 function sweep(step: number, to: number): number[] {
@@ -220,22 +225,25 @@ test("a wave entering from a strip is on its centre heading up at the strip's ed
   expect(misses).toEqual([]);
 });
 
-test("a wave between two strips holds the nearest whole number of waves plus a half", () => {
-  const middle = wavePhase(0, { kind: "through", enters: 100, leaves: 520 });
-  expect(middle.period).toBe(420 / 21.5);
-  expect(middle.offset).toBeCloseTo(100 - 4.75 * (420 / 21.5), 9);
+test("420 px between two strips hold 21.5 waves of 1250/64 px, pinned at the middle", () => {
+  expect(wavePhase(0, { kind: "through", enters: 100, leaves: 520 })).toEqual({
+    offset: 7.265625,
+    period: 1250 / MASK_PERIODS,
+  });
+});
+
+test("a wave between two strips holds the nearest whole number of waves plus a half, in a period the mask draws", () => {
   const misses = WAVE_LEFTS.flatMap((waveLeft) =>
     DISTANCES.filter((span) => span > 0).flatMap((span) => {
       const enters = waveLeft + 3.7;
       const phase = wavePhase(waveLeft, { kind: "through", enters, leaves: enters + span });
-      const waves = span / phase.period - 0.5;
-      const nearest = Math.abs(waves - (span / 20 - 0.5)) <= 0.5 + 1e-9;
+      const waves = Math.round(span / phase.period - 0.5) + 0.5;
       const ok =
-        Math.abs(tileX(enters - waveLeft, phase) - WAVE_UP_X) < 1e-9 &&
-        Math.abs(tileX(enters + span - waveLeft, phase) - WAVE_DOWN_X) < 1e-9 &&
-        Math.abs(waves - Math.round(waves)) < 1e-9 &&
-        nearest &&
-        Math.abs(phase.period - 20) / 20 <= 1 / (2 * Math.round(waves) + 1) + 1e-12 &&
+        driftPx(enters - waveLeft, phase, WAVE_UP_X) <= waves / 256 + 1e-9 &&
+        driftPx(enters + span - waveLeft, phase, WAVE_DOWN_X) <= waves / 256 + 1e-9 &&
+        Number.isInteger(phase.period * MASK_PERIODS) &&
+        Math.abs(waves - span / 20) <= 0.5 + 1e-9 &&
+        Math.abs(phase.period - 20) / 20 <= 1 / (2 * waves) + 1 / (2 * MASK_PERIODS * 20) &&
         phase.offset >= 0 &&
         phase.offset < phase.period;
       return ok ? [] : [{ waveLeft, span, phase }];
@@ -243,6 +251,14 @@ test("a wave between two strips holds the nearest whole number of waves plus a h
   );
 
   expect(misses).toEqual([]);
+});
+
+test("a wave between strips a hair apart is drawn one mask pixel per 64 waves", () => {
+  const phase = wavePhase(0, { kind: "through", enters: 100, leaves: 100.001 });
+
+  expect(phase.period).toBe(1 / MASK_PERIODS);
+  expect(phase.offset).toBeGreaterThanOrEqual(0);
+  expect(phase.offset).toBeLessThan(phase.period);
 });
 
 test("a wave between two strips that do not leave room falls back to entering", () => {

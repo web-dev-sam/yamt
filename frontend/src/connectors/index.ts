@@ -34,6 +34,7 @@ export const WAVE_TILE_HEIGHT_PX =
 const WAVE_UP_STEPS = 3;
 export const WAVE_DOWN_X = WAVE_STEP_PX;
 export const WAVE_UP_X = WAVE_UP_STEPS * WAVE_STEP_PX;
+export const MASK_PERIODS = 64;
 
 export type WaveEnds =
   | { readonly kind: "leaves"; readonly at: number }
@@ -60,8 +61,11 @@ export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase {
       if (span <= 0) {
         return pinned(ends.enters - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
       }
-      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF);
-      return pinned(ends.enters - waveLeft, WAVE_UP_X, span / (waves + HALF));
+      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF) + HALF;
+      const maskWidth = Math.max(1, Math.round((span / waves) * MASK_PERIODS));
+      const middle = (ends.enters + ends.leaves) * HALF - waveLeft;
+      const middleX = WAVE_UP_X + waves * WAVE_TILE_WIDTH_PX * HALF;
+      return pinned(middle, middleX, maskWidth / MASK_PERIODS);
     }
   }
 }

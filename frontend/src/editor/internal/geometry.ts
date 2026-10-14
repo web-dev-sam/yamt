@@ -9,6 +9,7 @@ import type { Side } from "./side";
 import type { ChunkState } from "./status";
 
 export type Pane = "left" | "center" | "right";
+export const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 export type PaneViews = Readonly<Record<Pane, EditorView>>;
 export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
 export type WaveRow = Readonly<Record<Pane, number | null>>;

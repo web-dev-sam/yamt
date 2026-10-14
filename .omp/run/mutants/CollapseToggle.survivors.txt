@@ -1,0 +1,8 @@
+just mutants 9e7ff98 (commit a200f9e, CollapseToggle round 1): no Rust; Stryker on ui/ (collapsing.ts, store.ts, toolbarButtons.ts, useMergeController.ts): 314 killed, 23 survived, 1 no coverage, 1 error; score 92.90. Full output: /tmp/toggle-mutants.txt.
+
+Changed lines (git diff -U0 9e7ff98 a200f9e): collapsing.ts 1-29; store.ts 16, 84-85, 117; toolbarButtons.ts 10; useMergeController.ts 32-37, 107, 122-126, 141-144.
+
+Survivor on a changed line:
+- src/ui/collapsing.ts:12:21  STORAGE_KEY "yamt.collapse.unchanged" → ""  — harness: a module-level constant; the vitest runner does not re-evaluate module-level mutants (--ignoreStatic, justfile note, #732); collapsing.test.ts asserts the key by value. Same as the pre-existing toolbarButtons.ts:24. Dropped.
+
+Not on changed lines (pre-existing): store.ts:179, 185, 276 (×3); toolbarButtons.ts:24, 27 (×3), 32; useMergeController.ts:67-71 (×5), 77 (×2), 85-88 (×4), 128 (no coverage), 134.

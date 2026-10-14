@@ -2,7 +2,7 @@ import type { Text } from "@codemirror/state";
 
 import type { Chunk } from "../../ipc";
 import { toDocPos, type DocPos } from "./docPos";
-import type { Pane } from "./geometry";
+import { PANES, type Pane } from "./geometry";
 
 export type Hidden = { readonly from: DocPos; readonly to: DocPos };
 export type FoldLevel = Readonly<Record<Pane, Hidden | null>>;
@@ -14,7 +14,6 @@ const CONTEXT_LINES = 4;
 const LEVEL_GROWTH = 2;
 const LEVELS = 3;
 export const MIN_HIDDEN_LINES = 2;
-const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 const CHUNK_RANGE = {
   left: "local",
   center: "middle",
