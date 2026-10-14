@@ -8,8 +8,10 @@ import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
 import { gapArrows } from "./gap";
+import { SIDE_PANE } from "./geometry";
 import { lineSpan } from "./lineSpan";
-import { centerPane, paneState, type PaneSettings } from "./pane";
+import { paneState, type PaneSettings } from "./pane";
+import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import { summarize, type ApplyMode, type MergeSummary, type SideStatus } from "./status";
@@ -72,9 +74,11 @@ async function synthetic(
 function open(data: FileMergeData): Merge {
   const field = chunkField(data.chunks);
   const pane = { eol: data.eol, language: null, settings: SETTINGS };
+  const docs = paneDocs(data);
   const center = paneState({
     ...pane,
-    ...centerPane(data.middle, false),
+    kind: "center",
+    doc: docs.center,
     extensions: [field, centerDecorations(field)],
   });
   const statuses = sideStatusField(
@@ -82,7 +86,7 @@ function open(data: FileMergeData): Merge {
   );
   function side(which: Side): EditorState {
     const extensions = [statuses, sideDecorations(statuses, which)];
-    return paneState({ ...pane, kind: "side", doc: data[which], extensions });
+    return paneState({ ...pane, kind: "side", doc: docs[SIDE_PANE[which]], extensions });
   }
   return { field, center, left: side("local"), right: side("remote") };
 }

@@ -8,7 +8,7 @@ import {
   undoSelection,
 } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
-import type { EditorState, StateCommand } from "@codemirror/state";
+import { Text, type EditorState, type StateCommand } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
@@ -18,7 +18,6 @@ import { chunkField } from "./chunkField";
 import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
 import {
-  centerPane,
   languageCompartment,
   paletteHighlight,
   paneState,
@@ -26,6 +25,7 @@ import {
   refuseNativeHistory,
   type PaneSettings,
 } from "./pane";
+import { paneDocs } from "./paneDocs";
 import { sideStatusField } from "./sideStatus";
 
 const PARSE_BUDGET_MS = 5000;
@@ -79,8 +79,19 @@ async function loaded(path: string): Promise<Language> {
   return (await description.load()).language;
 }
 
+function lines(text: string): Text {
+  return Text.of(text.split("\n"));
+}
+
 function center(doc: string, language: Language | null, settings = SETTINGS): EditorState {
-  return paneState({ kind: "center", doc, eol: "Lf", language, settings, extensions: [] });
+  return paneState({
+    kind: "center",
+    doc: lines(doc),
+    eol: "Lf",
+    language,
+    settings,
+    extensions: [],
+  });
 }
 
 function key(text: string): Key {
@@ -190,7 +201,7 @@ async function tintedLeft(): Promise<EditorState> {
   );
   return paneState({
     kind: "side",
-    doc: data.local,
+    doc: paneDocs(data).left,
     eol: data.eol,
     language: null,
     settings: SETTINGS,
@@ -236,7 +247,8 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
   const data = await loadFixture("vue-core-playground-app.vue");
   const field = chunkField(data.chunks);
   const plain = paneState({
-    ...centerPane(data.middle, false),
+    kind: "center",
+    doc: paneDocs(data).center,
     eol: data.eol,
     language: null,
     settings: SETTINGS,
@@ -376,7 +388,7 @@ test("the browser's own undo and redo are refused in the middle; other input pas
 test("a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key", () => {
   const state = paneState({
     kind: "readOnlyCenter",
-    doc: PHP,
+    doc: lines(PHP),
     eol: "Lf",
     language: null,
     settings: SETTINGS,
@@ -413,7 +425,7 @@ test("new preferences turn a side light, rebind its Apply and its find keys", ()
   };
   const before = paneState({
     kind: "side",
-    doc: PHP,
+    doc: lines(PHP),
     eol: "Lf",
     language: null,
     settings: SETTINGS,

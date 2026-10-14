@@ -5,6 +5,7 @@ import {
   type StateField,
   type TransactionSpec,
 } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../../ipc";
@@ -13,13 +14,18 @@ import { chunkField } from "./chunkField";
 import { selectMatch } from "./findMatch";
 import { foldRuns, type Fold, type Hidden } from "./foldRuns";
 import {
-  foldField,
+  foldFields,
+  paneFolds,
   revealKeep,
   showFolds,
   showNextStep,
-  sideFoldField,
   sideFoldPush,
+  sideReveal,
+  waveStarts,
+  type FoldFields,
 } from "./folds";
+import { centerFolds, sideFolds } from "./foldView";
+import type { Pane } from "./geometry";
 import { paneState, type PaneSettings } from "./pane";
 import { paneDocs } from "./paneDocs";
 
@@ -29,9 +35,14 @@ const SETTINGS: PaneSettings = {
 };
 
 type Merge = ApplyTarget & {
+  readonly fields: FoldFields;
   readonly folds: StateField<readonly Fold[]>;
   readonly runs: Fold[];
 };
+
+function noViews(): never {
+  throw new Error("a state test has no views");
+}
 
 function numbered(from: number, to: number): string[] {
   return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
@@ -90,16 +101,28 @@ async function open(): Promise<Merge> {
   const docs = paneDocs(data);
   const runs = foldRuns(data.chunks, docs);
   const field = chunkField(data.chunks);
-  const folds = foldField(runs);
+  const fields = foldFields(runs);
   const state = paneState({
     kind: "center",
     doc: docs.center,
     eol: data.eol,
     language: null,
     settings: SETTINGS,
-    extensions: [field, folds],
+    extensions: [field, centerFolds({ folds: fields, hovered: () => null, views: noViews })],
   });
-  return { state, field, folds, runs, sides: { local: docs.left, remote: docs.right } };
+  const sides = { local: docs.left, remote: docs.right };
+  return { state, field, fields, folds: fields.center, runs, sides };
+}
+
+function sidePane(merge: Merge, pane: "left" | "right"): EditorState {
+  return paneState({
+    kind: "side",
+    doc: pane === "left" ? merge.sides.local : merge.sides.remote,
+    eol: "Lf",
+    language: null,
+    settings: SETTINGS,
+    extensions: sideFolds({ folds: merge.fields, hovered: () => null, views: noViews }, pane),
+  });
 }
 
 function after(merge: Merge, ...specs: TransactionSpec[]): Merge {
@@ -285,42 +308,120 @@ test("a cursor at a range's first or last position shows nothing", async () => {
   }
 });
 
-test("a side and the middle reveal the same levels for the same ranges", async () => {
-  const { runs } = await open();
-  const top = runs[0];
-  if (top === undefined) {
-    throw new Error("no first run");
-  }
-  const left = top.hidden.map((level) => level.left);
-  const center = top.hidden.map((level) => level.center);
+test("a selection with both ends exactly on a range's edges shows it", async () => {
+  const merge = await open();
+  const { from, to } = levelOf(merge, 1, 0);
 
-  const keeps = [50, 150, 180, 400].map((pos) => {
-    const at = EditorSelection.cursor(pos);
-    expect(revealKeep(left, at)).toBe(revealKeep(center, at));
-    return revealKeep(center, at);
-  });
+  expect(centerLines(after(merge, selectMatch({ from, to })), 1)).toEqual(["41-62", "49-54"]);
+});
 
-  expect(keeps).toEqual([0, 1, 2, null]);
-  expect(revealKeep(center, EditorSelection.range(0, 500))).toBeNull();
+test("a side's reveal reads its own ranges and shows what the middle shows for the same line", async () => {
+  const merge = await open();
+  const leftDoc = merge.sides.local;
+  const centerDoc = merge.state.doc;
+  const leftAt = EditorSelection.cursor(leftDoc.line(101).from + 2);
+  const centerAt = EditorSelection.cursor(centerDoc.line(100).from + 2);
+  const centerRanges = merge.runs[2]?.hidden.map((level) => level.center) ?? [];
+  const selected = sidePane(merge, "left").update({ selection: leftAt }).state;
+  const spec = sideReveal(merge.fields, "left", selected);
+  const fromSide = spec === null ? merge : after(merge, spec);
+  const fromMiddle = after(merge, { selection: centerAt });
+
+  expect(leftDoc.lineAt(leftAt.head).text).toBe(centerDoc.lineAt(centerAt.head).text);
+  expect(revealKeep(centerRanges, leftAt)).toBeNull();
+  expect(centerLines(fromMiddle, 2)).toEqual([]);
+  expect(fromSide.state.field(merge.folds)).toEqual(fromMiddle.state.field(merge.folds));
 });
 
 test("the sides are told the counts only when they differ, and mirror them", async () => {
   const merge = await open();
-  const sides = sideFoldField(merge.runs);
-  const side = paneState({
-    kind: "side",
-    doc: merge.sides.local,
-    eol: "Lf",
-    language: null,
-    settings: SETTINGS,
-    extensions: sides,
-  });
+  const sides = merge.fields.sides;
+  const side = sidePane(merge, "left");
   const clicked = click(merge, 1).state.field(merge.folds);
   const effect = sideFoldPush(side.field(sides), clicked);
   const mirrored = effect === null ? side : side.update({ effects: effect }).state;
 
   expect(sideFoldPush(side.field(sides), merge.state.field(merge.folds))).toBeNull();
-  expect(mirrored.field(sides).map((fold) => fold.hidden.length)).toEqual([3, 2, 3]);
-  expect(mirrored.field(sides)[1]?.hidden).toEqual(merge.runs[1]?.hidden.slice(1));
+  expect(mirrored.field(sides)).toEqual([3, 2, 3]);
+  expect(paneFolds(merge.fields, "left", mirrored)[1]?.hidden).toEqual(
+    merge.runs[1]?.hidden.slice(1),
+  );
   expect(sideFoldPush(mirrored.field(sides), clicked)).toBeNull();
+});
+
+function drawnStarts(state: EditorState): number[] {
+  const found: number[] = [];
+  for (const source of state.facet(EditorView.decorations)) {
+    if (typeof source !== "function") {
+      source.between(0, state.doc.length, (from) => {
+        found.push(from);
+      });
+    }
+  }
+  return found;
+}
+
+test("each pane's wave starts are where that pane draws its waves", async () => {
+  const merge = click(click(await open(), 1), 0);
+  const counts = sideFoldPush([], merge.state.field(merge.folds));
+  const effects = counts === null ? [] : [counts];
+  const states: Readonly<Record<Pane, EditorState>> = {
+    left: sidePane(merge, "left").update({ effects }).state,
+    center: merge.state,
+    right: sidePane(merge, "right").update({ effects }).state,
+  };
+  const views = {
+    left: { state: states.left },
+    center: { state: states.center },
+    right: { state: states.right },
+  };
+  const starts = waveStarts(merge.fields, views);
+
+  for (const pane of ["left", "center", "right"] as const) {
+    expect(starts[pane].filter((start) => start !== null)).toEqual(drawnStarts(states[pane]));
+  }
+  expect(starts.left).not.toEqual(starts.center);
+});
+
+function deleting(merge: Merge, cursor: number, spec: TransactionSpec): Merge {
+  return after(after(merge, { selection: EditorSelection.cursor(cursor) }), spec);
+}
+
+test("Delete at a wave's start or Backspace at its end deletes nothing and shows the next step", async () => {
+  const merge = await open();
+  const { from, to } = levelOf(merge, 1, 0);
+  const top = levelOf(merge, 0, 0);
+  const cases = [
+    deleting(merge, from, { changes: { from, to }, userEvent: "delete.forward" }),
+    deleting(merge, to, { changes: { from, to }, userEvent: "delete.backward" }),
+    deleting(merge, from, { changes: { from, to: to + 1 }, userEvent: "delete.line" }),
+  ];
+  const atTop = deleting(merge, 0, {
+    changes: { from: top.from, to: top.to },
+    userEvent: "delete.forward",
+  });
+
+  for (const done of cases) {
+    expect(done.state.doc.eq(merge.state.doc)).toBe(true);
+    expect(centerLines(done, 1)).toEqual(["41-62", "49-54"]);
+  }
+  expect(atTop.state.doc.eq(merge.state.doc)).toBe(true);
+  expect(centerLines(atTop, 0)).toEqual(["1-22", "1-14"]);
+});
+
+test("a selection deleted across a wave and a delete beside one still delete", async () => {
+  const merge = await open();
+  const doc = merge.state.doc;
+  const { to } = levelOf(merge, 1, 0);
+  const across = after(
+    after(merge, { selection: EditorSelection.range(doc.line(36).from, doc.line(68).from) }),
+    { changes: { from: doc.line(36).from, to: doc.line(68).from }, userEvent: "delete.selection" },
+  );
+  const beside = deleting(merge, to + 1, {
+    changes: { from: to, to: to + 1 },
+    userEvent: "delete.backward",
+  });
+
+  expect(across.state.doc.lines).toBe(doc.lines - 32);
+  expect(beside.state.doc.lines).toBe(doc.lines - 1);
 });

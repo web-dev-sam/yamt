@@ -6,7 +6,7 @@ import { chunkField, setStatus } from "./chunkField";
 import { toDocPos } from "./docPos";
 import { foldField, showNextStep } from "./folds";
 import { rangeSpan, rowsChanged, waveRows, type Pane } from "./geometry";
-import { centerPane } from "./pane";
+import { paneDocs } from "./paneDocs";
 import { statusAfterIgnore } from "./status";
 
 const LINE_PX = 20;
@@ -52,9 +52,8 @@ test("an empty document has one point at the top", () => {
 test("chunk rows go stale on a status change, an edit, a fold step or new measurements, not on a cursor move", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
-  const doc = centerPane(data.middle, false).doc;
-  const lines = Text.of(doc.split("\n"));
-  const hidden = { from: toDocPos(lines.line(3).from), to: toDocPos(lines.line(5).to) };
+  const doc = paneDocs(data).center;
+  const hidden = { from: toDocPos(doc.line(3).from), to: toDocPos(doc.line(5).to) };
   const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }]);
   const state = EditorState.create({ doc, extensions: [field, folds] });
   const [first] = state.field(field);

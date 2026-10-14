@@ -10,17 +10,15 @@ import { chunkField, type ChunkSpan } from "./internal/chunkField";
 import { coveredDecorations } from "./internal/covered";
 import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
-import { Folding } from "./internal/folding";
-import { foldRuns, type Fold } from "./internal/foldRuns";
-import { foldField, pushFolds, showNextStep, sideFoldField, sideReveals } from "./internal/folds";
-import { foldView } from "./internal/foldView";
+import { foldRuns } from "./internal/foldRuns";
+import { Folds } from "./internal/foldView";
 import { Frame } from "./internal/frame";
 import { SIDE_PANE, type Pane, type PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
 import { modClicks } from "./internal/modClick";
 import type { Direction } from "./internal/navigation";
-import { centerPane, createPane, paneText, preferenceEffects } from "./internal/pane";
+import { centerKind, createPane, paneText, preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
 import { paneDocs } from "./internal/paneDocs";
 import type { Side } from "./internal/side";
@@ -54,7 +52,7 @@ type ViewSources = {
 
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
-  readonly #folds: Readonly<Record<"center" | "sides", StateField<readonly Fold[]>>>;
+  readonly #folds: Folds;
   readonly #readOnly: boolean;
   #settings: PaneSettings;
   readonly #views: PaneViews;
@@ -62,7 +60,6 @@ export class MergeController {
   readonly #strips: Strips;
   readonly #drag: IconDrag;
   readonly #focus: SideFocus;
-  readonly #folding: Folding;
   readonly #frame: Frame;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
@@ -70,26 +67,21 @@ export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
     const description = languageOf(data.path);
     const docs = paneDocs(data);
-    const runs = foldRuns(data.chunks, docs);
     this.#field = chunkField(data.chunks);
-    this.#folds = { center: foldField(runs), sides: sideFoldField(runs) };
+    this.#folds = new Folds(foldRuns(data.chunks, docs), hosts, () => this.#views);
     this.#readOnly = options.readOnly;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
     const language = description?.support?.language ?? null;
-    this.#folding = new Folding([hosts.left, hosts.center, hosts.right, ...hosts.strips], (run) => {
-      const center = this.#views.center;
-      center.dispatch(showNextStep(center.state.field(this.#folds.center), run));
-    });
     this.#views = this.#createViews({ data, docs, hosts, language });
     this.#focus = this.#createFocus(data.deleted);
     this.#sides = { local: docs.left, remote: docs.right };
-    this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
+    const press = this.#readOnly ? null : this.#press;
+    this.#strips = new Strips(hosts.strips, press, this.#folds.hovered);
     this.#drag = this.#createDrag(hosts.strips);
     this.#frame = new Frame({
       views: this.#views,
       spans: this.#field,
-      folds: this.#folds,
-      hovered: () => this.#folding.hovered(),
+      folds: this.#folds.fields,
       drag: this.#drag,
       strips: this.#strips,
     });
@@ -111,15 +103,13 @@ export class MergeController {
     const shared = { eol: data.eol, language, settings: this.#settings };
     const center = createPane({
       ...shared,
-      kind: centerPane(data.middle, this.#readOnly).kind,
+      kind: centerKind(this.#readOnly),
       doc: docs.center,
       parent: hosts.center,
       extensions: [
         this.#field,
         centerDecorations(this.#field),
-        this.#folds.center,
-        foldView(this.#folds.center, "center", () => this.#folding.hovered()),
-        pushFolds(this.#folds.center, this.#folds.sides, () => this.#views),
+        this.#folds.center(),
         this.#repaint,
         this.#statusSync,
       ],
@@ -147,15 +137,12 @@ export class MergeController {
   }
 
   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
-    const pane = SIDE_PANE[side];
     return [
       statuses,
       sideDecorations(statuses, side),
       focusDecorations(statuses, side),
       coveredDecorations(side),
-      this.#folds.sides,
-      foldView(this.#folds.sides, pane, () => this.#folding.hovered()),
-      sideReveals(this.#folds.sides, pane, () => this.#views.center),
+      this.#folds.side(SIDE_PANE[side]),
       sideRunner.of((command) => {
         this.#focus.run(side, command);
       }),
@@ -287,7 +274,7 @@ export class MergeController {
     this.#summaryListener = null;
     this.#destroyed = true;
     this.#frame.destroy();
-    this.#folding.destroy();
+    this.#folds.destroy();
     this.#focus.destroy();
     this.#drag.destroy();
     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {

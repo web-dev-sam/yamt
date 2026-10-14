@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type FileMergeData } from "../../ipc";
 import { chunkField, type ChunkSpan } from "./chunkField";
-import { centerPane } from "./pane";
+import { paneDocs } from "./paneDocs";
 
 type Center = { state: EditorState; field: StateField<readonly ChunkSpan[]> };
 
@@ -43,7 +43,7 @@ async function synthetic(
 
 function center(data: FileMergeData): Center {
   const field = chunkField(data.chunks);
-  const doc = centerPane(data.middle, false).doc;
+  const doc = paneDocs(data).center;
   const state = EditorState.create({ doc, extensions: [history(), field] });
   return { state, field };
 }

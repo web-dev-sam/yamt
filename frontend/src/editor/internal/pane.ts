@@ -40,7 +40,7 @@ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
 import { find, findKeys, findKeysCompartment } from "./find";
 import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
-import { lineSeparator, middleText, paneDoc } from "./paneDocs";
+import { lineSeparator } from "./paneDocs";
 import { sideKeys } from "./sideKeys";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
@@ -237,16 +237,15 @@ function kindExtensions(kind: PaneKind, doc: Text, settings: PaneSettings): Exte
 
 export function paneState(pane: {
   kind: PaneKind;
-  doc: string | Text;
+  doc: Text;
   eol: FileMergeData["eol"];
   language: Language | null;
   settings: PaneSettings;
   extensions: Extension;
 }): EditorState {
   const { preferences, platform } = pane.settings;
-  const doc = typeof pane.doc === "string" ? paneDoc(pane.doc, pane.eol) : pane.doc;
   return EditorState.create({
-    doc,
+    doc: pane.doc,
     extensions: [
       lineNumbers(),
       lineSeparator(pane.eol),
@@ -258,7 +257,7 @@ export function paneState(pane: {
       languageCompartment.of(pane.language ?? []),
       find,
       findKeysCompartment.of(findKeys(preferences.keys, platform)),
-      kindExtensions(pane.kind, doc, pane.settings),
+      kindExtensions(pane.kind, pane.doc, pane.settings),
       pane.extensions,
     ],
   });
@@ -274,11 +273,6 @@ export function paneText(state: EditorState): string {
   return state.sliceDoc();
 }
 
-type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: string };
-
-export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
-  return {
-    kind: readOnly ? "readOnlyCenter" : "center",
-    doc: middleText(middle),
-  };
+export function centerKind(readOnly: boolean): "center" | "readOnlyCenter" {
+  return readOnly ? "readOnlyCenter" : "center";
 }

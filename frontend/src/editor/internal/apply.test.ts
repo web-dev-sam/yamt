@@ -16,7 +16,8 @@ import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations } from "./decorations";
 import { gapArrows } from "./gap";
 import { lineSpan } from "./lineSpan";
-import { centerPane, paneState, paneText, type PaneSettings } from "./pane";
+import { centerKind, paneState, paneText, type PaneSettings } from "./pane";
+import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
 import { summarize } from "./status";
 
@@ -70,17 +71,16 @@ async function synthetic(
 function open(data: FileMergeData, readOnly = false): ApplyTarget {
   const field = chunkField(data.chunks);
   const pane = { eol: data.eol, language: null, settings: SETTINGS };
+  const docs = paneDocs(data);
   return {
     state: paneState({
       ...pane,
-      ...centerPane(data.middle, readOnly),
+      kind: centerKind(readOnly),
+      doc: docs.center,
       extensions: [field, centerDecorations(field)],
     }),
     field,
-    sides: {
-      local: paneState({ ...pane, kind: "side", doc: data.local, extensions: [] }).doc,
-      remote: paneState({ ...pane, kind: "side", doc: data.remote, extensions: [] }).doc,
-    },
+    sides: { local: docs.left, remote: docs.right },
   };
 }
 
@@ -736,10 +736,11 @@ test("a middle that is not text on disk is an empty document", async () => {
     chunks: [],
   };
 
-  expect(centerPane(notText.middle, true)).toEqual({ kind: "readOnlyCenter", doc: "" });
+  expect(paneDocs(notText).center.length).toBe(0);
   expect(open(notText, true).state.sliceDoc()).toBe("");
-  expect(centerPane(data.middle, false).kind).toBe("center");
-  expect(centerPane(data.middle, true).kind).toBe("readOnlyCenter");
+  expect(open(notText, true).state.readOnly).toBe(true);
+  expect(centerKind(false)).toBe("center");
+  expect(centerKind(true)).toBe("readOnlyCenter");
 });
 
 const SHARED = Array.from({ length: 19 }, (_, line) => `shared-${line}`);

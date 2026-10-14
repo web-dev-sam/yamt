@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorState, type Extension, type Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
@@ -6,7 +6,7 @@ import { loadFixture, type Chunk, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
 import { centerDecorations, focusDecorations, sideDecorations } from "./decorations";
 import type { SideMark } from "./navigation";
-import { centerPane } from "./pane";
+import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
 import { setMark } from "./sideMark";
 import { showStatuses, sideStatusField } from "./sideStatus";
@@ -17,7 +17,7 @@ function sideBands(chunks: readonly Chunk[], side: Side): Extension {
   return [statuses, sideDecorations(statuses, side)];
 }
 
-function decoratedRuns(doc: string, extension: Extension): string[] {
+function decoratedRuns(doc: string | Text, extension: Extension): string[] {
   return runsOf(EditorState.create({ doc, extensions: extension }));
 }
 
@@ -86,10 +86,6 @@ async function synthetic(
   return loadFixture("synthetic.ts", { "synthetic.json": record });
 }
 
-function middleOf(data: FileMergeData): string {
-  return centerPane(data.middle, false).doc;
-}
-
 test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
@@ -108,7 +104,7 @@ test("vueuse-use-magic-keys: each pane colours the chunks its side changed, by t
     "120-123 chunk-modified chunk-band",
     "141-154 chunk-conflict chunk-band",
   ]);
-  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(paneDocs(data).center, [field, centerDecorations(field)])).toEqual([
     "3 chunk-modified chunk-band",
     "22 chunk-modified chunk-band",
     "54 chunk-modified chunk-band",
@@ -150,7 +146,7 @@ test("center colours follow their text when a line is typed above them", async (
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   const state = EditorState.create({
-    doc: middleOf(data),
+    doc: paneDocs(data).center,
     extensions: [field, centerDecorations(field)],
   });
 
@@ -168,7 +164,7 @@ test("an empty range at the end of an unterminated last line is drawn below that
   ]);
   const field = chunkField(data.chunks);
 
-  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(paneDocs(data).center, [field, centerDecorations(field)])).toEqual([
     "2 chunk-marker-inserted chunk-point-below",
   ]);
   expect(decoratedRuns(data.local, sideBands(data.chunks, "local"))).toEqual([
@@ -183,7 +179,7 @@ test("a marker on another chunk's band line keeps its own tone class", async () 
   ]);
   const field = chunkField(data.chunks);
   const state = EditorState.create({
-    doc: middleOf(data),
+    doc: paneDocs(data).center,
     extensions: [field, centerDecorations(field)],
   });
 
@@ -202,7 +198,7 @@ test("a line break pasted at the end of a band line stops at the marker that fol
   ]);
   const field = chunkField(data.chunks);
   const joined = EditorState.create({
-    doc: middleOf(data),
+    doc: paneDocs(data).center,
     extensions: [field, centerDecorations(field)],
   }).update({ changes: { from: 1, to: 2 } }).state;
 
@@ -222,7 +218,7 @@ test("random edits keep center ranges sorted, disjoint, inside the document, and
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   let state = EditorState.create({
-    doc: middleOf(data),
+    doc: paneDocs(data).center,
     extensions: [field, centerDecorations(field)],
   });
   let seed = 7;
@@ -258,7 +254,7 @@ test("a RemoteOnly deletion: center band and right marker are deleted, left is b
   ]);
   const field = chunkField(data.chunks);
 
-  expect(decoratedRuns(middleOf(data), [field, centerDecorations(field)])).toEqual([
+  expect(decoratedRuns(paneDocs(data).center, [field, centerDecorations(field)])).toEqual([
     "1-2 chunk-deleted chunk-band",
   ]);
   expect(decoratedRuns(data.remote, sideBands(data.chunks, "remote"))).toEqual([

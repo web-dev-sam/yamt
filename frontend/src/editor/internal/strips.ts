@@ -34,6 +34,7 @@ export type IconPress = {
 };
 
 type OnPress = (press: IconPress, event: PointerEvent) => void;
+type StripPair = readonly [SVGSVGElement, SVGSVGElement];
 type GapPanes = { readonly left: EditorView; readonly right: EditorView };
 type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
 type ArrowPaint = {
@@ -47,7 +48,6 @@ type GapPaint = {
   readonly arrows: ArrowPaint | null;
 };
 type StripLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
-type StripMarks = { readonly covered: ChunkAction | null; readonly hovered: number | null };
 type ArrowRow = ArrowShape & {
   readonly node: SVGGElement;
   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
@@ -179,16 +179,17 @@ class GapStrip {
   readonly #side: Side;
   readonly #onPress: OnPress | null;
   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
-  readonly #waves = new StripWaves();
+  readonly #waves: StripWaves;
   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
   readonly #platform = navigator.platform;
 
-  constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null) {
+  constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null, waves: StripWaves) {
     this.#strip = strip;
     this.#side = side;
     this.#onPress = onPress;
+    this.#waves = waves;
     strip.replaceChildren(this.#bandLayer, this.#waves.layer, this.#arrowLayer);
     strip.addEventListener("mousedown", keepEditorFocus);
   }
@@ -220,9 +221,9 @@ class GapStrip {
     return { bands, waves, arrows: { placed, layout, onPress: this.#onPress } };
   }
 
-  paint({ bands, waves, arrows }: GapPaint, { covered, hovered }: StripMarks): void {
+  paint({ bands, waves, arrows }: GapPaint, covered: ChunkAction | null): void {
     this.#paintBands(bands);
-    this.#waves.paint(waves, hovered);
+    this.#waves.paint(waves);
     if (arrows !== null) {
       this.#paintArrows(arrows, covered);
     }
@@ -275,16 +276,16 @@ export class Strips {
   readonly #local: GapStrip;
   readonly #remote: GapStrip;
 
-  constructor(strips: readonly [SVGSVGElement, SVGSVGElement], onPress: OnPress | null) {
-    this.#local = new GapStrip(strips[0], "local", onPress);
-    this.#remote = new GapStrip(strips[1], "remote", onPress);
+  constructor(strips: StripPair, onPress: OnPress | null, hovered: () => number | null) {
+    this.#local = new GapStrip(strips[0], "local", onPress, new StripWaves(hovered));
+    this.#remote = new GapStrip(strips[1], "remote", onPress, new StripWaves(hovered));
   }
 
-  paint(views: PaneViews, layout: StripLayout, marks: StripMarks): void {
+  paint(views: PaneViews, layout: StripLayout, covered: ChunkAction | null): void {
     const local = this.#local.measure({ left: views.left, right: views.center }, layout);
     const remote = this.#remote.measure({ left: views.center, right: views.right }, layout);
-    this.#local.paint(local, marks);
-    this.#remote.paint(remote, marks);
+    this.#local.paint(local, covered);
+    this.#remote.paint(remote, covered);
   }
 
   destroy(): void {

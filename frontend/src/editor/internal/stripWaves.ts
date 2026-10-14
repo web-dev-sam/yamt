@@ -21,14 +21,16 @@ function waveNode(run: number, hovered: number | null): SVGGElement {
 export class StripWaves {
   readonly layer = document.createElementNS(SVG_NS, "g");
   readonly #nodes = new Map<number, SVGGElement>();
+  readonly #hovered: () => number | null;
 
-  constructor() {
+  constructor(hovered: () => number | null) {
+    this.#hovered = hovered;
     this.layer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
     this.layer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
     this.layer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
   }
 
-  paint(paints: readonly WavePaint[], hovered: number | null): void {
+  paint(paints: readonly WavePaint[]): void {
     const kept = new Set(paints.map(({ run }) => run));
     for (const [run, group] of this.#nodes) {
       if (!kept.has(run)) {
@@ -39,7 +41,7 @@ export class StripWaves {
     for (const { run, d } of paints) {
       let group = this.#nodes.get(run);
       if (group === undefined) {
-        group = waveNode(run, hovered);
+        group = waveNode(run, this.#hovered());
         this.#nodes.set(run, group);
         this.layer.append(group);
       }

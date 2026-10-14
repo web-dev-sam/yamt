@@ -1,4 +1,4 @@
-import { RangeSet, RangeSetBuilder, type Extension, type StateField } from "@codemirror/state";
+import { RangeSet, RangeSetBuilder, type Extension } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -8,15 +8,24 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 
-import { waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
-import { FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
+import { waveCenterY, waveTile, WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
+import { WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
+import { Folding, FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
 import { displayed, type Fold } from "./foldRuns";
-import type { Pane } from "./geometry";
+import { foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
+import { waveDeletes, type FoldFields } from "./folds";
+import type { Pane, PaneViews } from "./geometry";
 import { LINE_HEIGHT_PX } from "./pane";
 
+type FoldWiring = {
+  readonly folds: FoldFields;
+  readonly hovered: () => number | null;
+  readonly views: () => PaneViews;
+};
+
+type FoldHosts = Readonly<Record<Pane, Element>> & { readonly strips: readonly Element[] };
+
 const WAVE_LABEL = "Show unchanged lines";
-const THIN_STROKE_PX = 1;
-const THICK_STROKE_PX = 2;
 const HALF = 0.5;
 
 class FoldLine extends WidgetType {
@@ -69,6 +78,8 @@ export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationS
   folds.forEach((fold, run) => {
     const hidden = displayed(fold, pane);
     if (hidden !== null) {
+      // Inline, not `block: true`: vertical motion skips block widgets (@codemirror/view
+      // posAtCoords), so the cursor could not stop on the wave line (plan §2 #63).
       builder.add(hidden.from, hidden.to, Decoration.replace({ widget: new FoldLine(run) }));
     }
   });
@@ -125,20 +136,66 @@ const waveTheme = EditorView.theme({
     WebkitMaskRepeat: tile.maskRepeat,
     WebkitMaskPosition: tile.maskPosition,
     WebkitMaskSize: tile.maskSize,
-    ...maskStyle(THIN_STROKE_PX),
+    ...maskStyle(WAVE_STROKE_PX),
   },
-  [`.fold-wave.${HOVER_CLASS}`]: maskStyle(THICK_STROKE_PX),
+  [`.fold-wave.${HOVER_CLASS}`]: maskStyle(WAVE_HOVER_STROKE_PX),
 });
 
-export function foldView(
-  field: StateField<readonly Fold[]>,
-  pane: Pane,
-  hovered: () => number | null,
-): Extension {
+function foldView({ folds, hovered }: FoldWiring, pane: Pane): Extension {
+  const field = pane === "center" ? folds.center : folds.sides;
   return [
-    EditorView.decorations.compute([field], (state) => foldDecorations(state.field(field), pane)),
-    EditorView.atomicRanges.of((view) => foldDecorations(view.state.field(field), pane)),
-    lineNumberMarkers.compute([field], (state) => waveMarkers(state.field(field), pane, hovered)),
+    EditorView.decorations.compute([field], (state) =>
+      foldDecorations(paneFolds(folds, pane, state), pane),
+    ),
+    EditorView.atomicRanges.of((view) => foldDecorations(paneFolds(folds, pane, view.state), pane)),
+    lineNumberMarkers.compute([field], (state) =>
+      waveMarkers(paneFolds(folds, pane, state), pane, hovered),
+    ),
     waveTheme,
   ];
+}
+
+export function centerFolds(wiring: FoldWiring): Extension {
+  const { folds, views } = wiring;
+  return [
+    folds.center,
+    foldView(wiring, "center"),
+    pushFolds(folds, views),
+    waveDeletes(folds.center),
+  ];
+}
+
+export function sideFolds(wiring: FoldWiring, pane: "left" | "right"): Extension {
+  const { folds, views } = wiring;
+  return [folds.sides, foldView(wiring, pane), sideReveals(folds, pane, () => views().center)];
+}
+
+export class Folds {
+  readonly fields: FoldFields;
+  readonly hovered = (): number | null => this.#folding.hovered();
+  readonly #folding: Folding;
+  readonly #wiring: FoldWiring;
+
+  constructor(runs: readonly Fold[], hosts: FoldHosts, views: () => PaneViews) {
+    const fields = foldFields(runs);
+    this.fields = fields;
+    this.#wiring = { folds: fields, hovered: this.hovered, views };
+    const all = [hosts.left, hosts.center, hosts.right, ...hosts.strips];
+    this.#folding = new Folding(all, (run) => {
+      const center = views().center;
+      center.dispatch(showNextStep(center.state.field(fields.center), run));
+    });
+  }
+
+  center(): Extension {
+    return centerFolds(this.#wiring);
+  }
+
+  side(pane: "left" | "right"): Extension {
+    return sideFolds(this.#wiring, pane);
+  }
+
+  destroy(): void {
+    this.#folding.destroy();
+  }
 }

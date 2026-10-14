@@ -7,7 +7,9 @@ import { DEFAULT_KEYS, loadFixture, type Chunk, type FileMergeData } from "../..
 import { actionSteps, dispatchSteps, type ApplyTarget, type Steps } from "./apply";
 import { chunkField, type ChunkSpan } from "./chunkField";
 import { centerDecorations, sideDecorations } from "./decorations";
-import { centerPane, paneState, type PaneSettings } from "./pane";
+import { SIDE_PANE } from "./geometry";
+import { paneState, type PaneSettings } from "./pane";
+import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
@@ -107,7 +109,7 @@ function sidePane(
     language: null,
     settings: SETTINGS,
     kind: "side",
-    doc: data[side],
+    doc: paneDocs(data)[SIDE_PANE[side]],
     extensions: [statuses, sideDecorations(statuses, side)],
   });
 }
@@ -118,7 +120,8 @@ function open(data: FileMergeData): Merge {
     eol: data.eol,
     language: null,
     settings: SETTINGS,
-    ...centerPane(data.middle, false),
+    kind: "center",
+    doc: paneDocs(data).center,
     extensions: [field, centerDecorations(field)],
   });
   const statuses = sideStatusField(
