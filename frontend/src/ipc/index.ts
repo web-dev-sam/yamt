@@ -47,6 +47,16 @@ export {
   type KeysRead,
 } from "./keys";
 export { createTauriSource } from "./tauri";
+export type {
+  HostEvent,
+  ProgramFound,
+  ProjectFile,
+  RunId,
+  ServerCommand,
+  ServerContext,
+  ServerHost,
+  StartReply,
+} from "./ServerHost";
 
 const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
 

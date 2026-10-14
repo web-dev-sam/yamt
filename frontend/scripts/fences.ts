@@ -25,7 +25,9 @@ const FRAMEWORK_FREE_MODULES: Record<string, true> = {
   editor: true,
   model: true,
   connectors: true,
+  lsp: true,
 };
+const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connectors"] as const;
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
@@ -83,6 +85,10 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   }
   if (module === "ui" && isInside(target, "src/model")) {
     return { rule: "PM2", reason: "ui/ never imports model/" };
+  }
+  const forbidden = LSP_FORBIDDEN_MODULES.find((directory) => isInside(target, directory));
+  if (module === "lsp" && forbidden !== undefined) {
+    return { rule: "PM2", reason: `lsp/ never imports ${forbidden.slice("src/".length)}/` };
   }
   const targetModule = MODULE_OF.exec(target)?.[1];
   if (

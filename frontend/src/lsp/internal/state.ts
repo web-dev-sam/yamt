@@ -1,0 +1,70 @@
+import type { StartReply } from "../../ipc";
+import type { InstallHint, ServerSpec } from "./spec";
+
+const MS_PER_SECOND = 1000;
+
+export type FailReason =
+  | { readonly kind: "notFound"; readonly program: string; readonly searched: readonly string[] }
+  | { readonly kind: "spawnFailed"; readonly message: string }
+  | { readonly kind: "initializeFailed"; readonly message: string }
+  | { readonly kind: "timedOut" }
+  | { readonly kind: "noHost" }
+  | { readonly kind: "outsideRepository"; readonly project: string };
+
+export type ServerState =
+  | { readonly kind: "stopped" }
+  | { readonly kind: "starting" }
+  | { readonly kind: "running" }
+  | { readonly kind: "stopping" }
+  | { readonly kind: "crashed"; readonly code: number | null }
+  | { readonly kind: "failed"; readonly reason: FailReason }
+  | { readonly kind: "notInstalled"; readonly hint: InstallHint };
+
+export type ServerView = {
+  readonly name: string;
+  readonly project: string;
+  readonly state: ServerState;
+};
+
+export type StartFailure = Exclude<FailReason, { readonly kind: "noHost" }>;
+
+export function stateAtRest(spec: ServerSpec, hasHost: boolean): ServerState {
+  if (!hasHost) {
+    return { kind: "failed", reason: { kind: "noHost" } };
+  }
+  return spec.install === null ? { kind: "stopped" } : { kind: "notInstalled", hint: spec.install };
+}
+
+export function startFailure(reply: Exclude<StartReply, { kind: "Started" }>): StartFailure {
+  switch (reply.kind) {
+    case "NotFound":
+      return { kind: "notFound", program: reply.program, searched: reply.searched };
+    case "SpawnFailed":
+      return { kind: "spawnFailed", message: reply.message };
+    case "OutsideRepository":
+      return { kind: "outsideRepository", project: reply.project };
+    default: {
+      const _exhaustive: never = reply;
+      return _exhaustive;
+    }
+  }
+}
+
+export function failText(reason: StartFailure, initializeTimeoutMs: number): string {
+  switch (reason.kind) {
+    case "notFound":
+      return `Not found: ${reason.program} (searched ${reason.searched.join(", ")})`;
+    case "spawnFailed":
+      return `Could not start: ${reason.message}`;
+    case "initializeFailed":
+      return `Initialize failed: ${reason.message}`;
+    case "timedOut":
+      return `No answer to initialize within ${initializeTimeoutMs / MS_PER_SECOND} s; stopped`;
+    case "outsideRepository":
+      return `The project folder ${reason.project} is outside the repository`;
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}

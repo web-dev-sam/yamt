@@ -223,3 +223,42 @@ test("a module importing its own internal/ is allowed", () => {
 
   expect(violationsOf(files)).toEqual([]);
 });
+
+test("lsp importing vue or @tauri-apps violates PM3", () => {
+  const files = [
+    { path: "src/lsp/index.ts", text: `import { ref } from "vue";` },
+    { path: "src/lsp/internal/server.ts", text: `import { Channel } from "@tauri-apps/api/core";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/lsp/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/lsp/internal/server.ts", specifier: "@tauri-apps/api/core" },
+  ]);
+});
+
+test("lsp importing editor, ui, model or connectors violates PM2", () => {
+  const files = [
+    { path: "src/lsp/index.ts", text: `import { MergeController } from "../editor";` },
+    { path: "src/lsp/internal/a.ts", text: `import type { Store } from "../../ui/store";` },
+    { path: "src/lsp/internal/b.ts", text: `import "../../model";` },
+    { path: "src/lsp/internal/c.ts", text: `import { bandPath } from "../../connectors";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual([
+    { file: "src/lsp/index.ts", rule: "PM2", reason: "lsp/ never imports editor/" },
+    { file: "src/lsp/internal/a.ts", rule: "PM2", reason: "lsp/ never imports ui/" },
+    { file: "src/lsp/internal/b.ts", rule: "PM2", reason: "lsp/ never imports model/" },
+    { file: "src/lsp/internal/c.ts", rule: "PM2", reason: "lsp/ never imports connectors/" },
+  ]);
+});
+
+test("lsp importing ipc's index and its own internal/ violates nothing", () => {
+  const files = [
+    { path: "src/lsp/index.ts", text: `export { Server } from "./internal/server";` },
+    { path: "src/lsp/internal/server.ts", text: `import type { ServerHost } from "../../ipc";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
