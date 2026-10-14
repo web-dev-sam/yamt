@@ -1,17 +1,5 @@
 {
-  "UnchangedStrips": {
-    "owned": [
-      "frontend/src/connectors/**",
-      "frontend/src/editor/internal/gap.ts",
-      "frontend/src/editor/internal/gap.test.ts",
-      "frontend/src/editor/internal/strips.ts",
-      "frontend/src/editor/internal/strips.test.ts",
-      "frontend/src/editor/internal/geometry.ts",
-      "frontend/src/editor/internal/geometry.test.ts",
-      "frontend/src/editor/internal/frame.ts",
-      "frontend/src/editor/internal/frame.test.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/index.ts"
-    ]
+  "UnchangedPanesR1": {
+    "owned": ["frontend/src/editor/**"]
   }
 }

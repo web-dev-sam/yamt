@@ -1,0 +1,671 @@
+diff --git a/frontend/src/connectors/index.test.ts b/frontend/src/connectors/index.test.ts
+index f5801bf..6669a46 100644
+--- a/frontend/src/connectors/index.test.ts
++++ b/frontend/src/connectors/index.test.ts
+@@ -1,6 +1,13 @@
+ import { expect, test } from "vitest";
+ 
+-import { bandPath, waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from ".";
++import {
++  bandPath,
++  waveCenterY,
++  waveJoinPath,
++  waveTile,
++  WAVE_TILE_HEIGHT_PX,
++  WAVE_TILE_WIDTH_PX,
++} from ".";
+ 
+ test("an aligned band is a rectangle drawn with flat curves", () => {
+   const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
+@@ -41,3 +48,35 @@ test("the wave sits in the middle of a 20 px line", () => {
+   expect(waveCenterY(20)).toBe(10);
+   expect(waveCenterY(30)).toBe(15);
+ });
++
++test("a level join wider than five steps is six half-waves through the middle", () => {
++  expect(waveJoinPath({ left: 10, right: 12 }, 38)).toBe(
++    "M0 10 Q2.5 13 5 13 Q7.5 13 10 11 Q12.5 8 19 8 Q25.5 8 28 11 Q30.5 15 33 15 Q35.5 15 38 12",
++  );
++  expect(waveJoinPath({ left: 10, right: 10 }, 26)).toBe(
++    "M0 10 Q2.5 13 5 13 Q7.5 13 10 10 Q12.5 7 13 7 Q13.5 7 16 10 Q18.5 13 21 13 Q23.5 13 26 10",
++  );
++});
++
++test("a level join of five steps or fewer is one sagging curve", () => {
++  expect(waveJoinPath({ left: 10, right: 12 }, 20)).toBe("M0 10 Q10 17 20 12");
++  expect(waveJoinPath({ left: 10, right: 10 }, 25)).toBe("M0 10 Q12.5 16 25 10");
++});
++
++test("a join falling to the right starts flat on the left and dips before the right end", () => {
++  expect(waveJoinPath({ left: 50, right: 10 }, 38)).toBe(
++    "M0 50 C0.63 50.38 0.63 51.5 2.5 51.5 C28 51.5 28 22 38 10",
++  );
++});
++
++test("a join rising to the right dips after the left end and ends flat on the right", () => {
++  expect(waveJoinPath({ left: 10, right: 50 }, 38)).toBe(
++    "M0 10 C10 22 10 51.5 35.5 51.5 C37.38 51.5 37.38 50.38 38 50",
++  );
++});
++
++test("a slope of exactly one in five is no longer level", () => {
++  expect(waveJoinPath({ left: 0, right: 8 }, 40)).toBe(
++    "M0 0 C10 12 10 9.5 37.5 9.5 C39.38 9.5 39.38 8.38 40 8",
++  );
++});
+diff --git a/frontend/src/connectors/index.ts b/frontend/src/connectors/index.ts
+index e430c3b..2ba2321 100644
+--- a/frontend/src/connectors/index.ts
++++ b/frontend/src/connectors/index.ts
+@@ -26,6 +26,8 @@ const WAVE_HALF_HEIGHT_PX = 3;
+ const WAVE_GAP_PX = 1;
+ const WAVE_STEPS = 4;
+ const HALF = 0.5;
++export const WAVE_STROKE_PX = 1;
++export const WAVE_HOVER_STROKE_PX = 2;
+ export const WAVE_TILE_WIDTH_PX = WAVE_STEPS * WAVE_STEP_PX;
+ export const WAVE_TILE_HEIGHT_PX =
+   WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
+@@ -48,3 +50,98 @@ export function waveTile(): string {
+ export function waveCenterY(lineHeight: number): number {
+   return (lineHeight - WAVE_TILE_HEIGHT_PX) * HALF + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
+ }
++
++const LEVEL_SLOPE = 0.2;
++const LEVEL_WIDE_STEPS = 5;
++const EIGHTH = 0.125;
++const ONE_AND_HALF = 1.5;
++const DOUBLE = 2;
++const TWO_AND_HALF = 2.5;
++const QUADRUPLE = 4;
++
++type Point = readonly [x: number, y: number];
++
++function curve(command: "Q" | "C", points: readonly Point[]): string {
++  return command + points.map(([x, y]) => `${px(x)} ${px(y)}`).join(" ");
++}
++
++function levelJoin(y1: number, y2: number, width: number): string[] {
++  const s = WAVE_STEP_PX;
++  const h = WAVE_HALF_HEIGHT_PX;
++  const midX = width * HALF;
++  const midY = (y1 + y2) * HALF;
++  if (width <= LEVEL_WIDE_STEPS * s) {
++    return [
++      curve("Q", [
++        [midX, midY + DOUBLE * h],
++        [width, y2],
++      ]),
++    ];
++  }
++  return [
++    curve("Q", [
++      [HALF * s, y1 + h],
++      [s, y1 + h],
++    ]),
++    curve("Q", [
++      [ONE_AND_HALF * s, y1 + h],
++      [DOUBLE * s, midY],
++    ]),
++    curve("Q", [
++      [TWO_AND_HALF * s, midY - h],
++      [midX, midY - h],
++    ]),
++    curve("Q", [
++      [width - TWO_AND_HALF * s, midY - h],
++      [width - DOUBLE * s, midY],
++    ]),
++    curve("Q", [
++      [width - ONE_AND_HALF * s, y2 + h],
++      [width - s, y2 + h],
++    ]),
++    curve("Q", [
++      [width - HALF * s, y2 + h],
++      [width, y2],
++    ]),
++  ];
++}
++
++function slopedJoin(y1: number, y2: number, width: number): string[] {
++  const s = WAVE_STEP_PX;
++  const h = WAVE_HALF_HEIGHT_PX;
++  if (y1 > y2) {
++    const x = EIGHTH * s;
++    return [
++      curve("C", [
++        [x, y1 + EIGHTH * h],
++        [x, y1 + HALF * h],
++        [HALF * s, y1 + HALF * h],
++      ]),
++      curve("C", [
++        [width - DOUBLE * s, y1 + HALF * h],
++        [width - DOUBLE * s, y2 + QUADRUPLE * h],
++        [width, y2],
++      ]),
++    ];
++  }
++  const x = width - EIGHTH * s;
++  return [
++    curve("C", [
++      [DOUBLE * s, y1 + QUADRUPLE * h],
++      [DOUBLE * s, y2 + HALF * h],
++      [width - HALF * s, y2 + HALF * h],
++    ]),
++    curve("C", [
++      [x, y2 + HALF * h],
++      [x, y2 + EIGHTH * h],
++      [width, y2],
++    ]),
++  ];
++}
++
++export function waveJoinPath(join: { left: number; right: number }, width: number): string {
++  const { left, right } = join;
++  const level = Math.abs(right - left) / width < LEVEL_SLOPE;
++  const segments = level ? levelJoin(left, right, width) : slopedJoin(left, right, width);
++  return [`M0 ${px(left)}`, ...segments].join(" ");
++}
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index ba20ae3..5fcc163 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -88,7 +88,8 @@ export class MergeController {
+     this.#frame = new Frame({
+       views: this.#views,
+       spans: this.#field,
+-      layoutFields: [this.#field, this.#folds.center, this.#folds.sides],
++      folds: this.#folds,
++      hovered: () => this.#folding.hovered(),
+       drag: this.#drag,
+       strips: this.#strips,
+     });
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index 0ca9351..a9a2007 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -4,22 +4,34 @@ import type { ViewUpdate } from "@codemirror/view";
+ 
+ import type { ChunkSpan } from "./chunkField";
+ import { pushCovered } from "./covered";
++import type { DocPos } from "./docPos";
+ import { coveredAction, type IconDrag } from "./drag";
+ import { syncFindSpace } from "./find";
+-import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./geometry";
++import { displayed, type Fold } from "./foldRuns";
++import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
++import type { ChunkRow, WaveRow } from "./geometry";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
+ import type { Strips } from "./strips";
+ 
+-type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
++type Layout = {
++  readonly rows: readonly ChunkRow[];
++  readonly anchors: readonly Anchor[];
++  readonly waves: readonly WaveRow[];
++};
+ 
+ type FrameParts = {
+   readonly views: PaneViews;
+   readonly spans: StateField<readonly ChunkSpan[]>;
+-  readonly layoutFields: readonly StateField<unknown>[];
++  readonly folds: Readonly<Record<"center" | "sides", StateField<readonly Fold[]>>>;
++  readonly hovered: () => number | null;
+   readonly drag: IconDrag;
+   readonly strips: Strips;
+ };
+ 
++function waveStarts(folds: readonly Fold[], pane: Pane): (DocPos | null)[] {
++  return folds.map((fold) => displayed(fold, pane)?.from ?? null);
++}
++
+ export class Frame {
+   readonly #parts: FrameParts;
+   readonly #scroll: ScrollSync;
+@@ -34,7 +46,8 @@ export class Frame {
+   }
+ 
+   changed(update: ViewUpdate): void {
+-    if (rowsChanged(update, this.#parts.layoutFields)) {
++    const { spans, folds } = this.#parts;
++    if (rowsChanged(update, [spans, folds.center, folds.sides])) {
+       this.#layoutCache = null;
+     }
+     if (
+@@ -48,9 +61,15 @@ export class Frame {
+ 
+   layout(): Layout {
+     if (this.#layoutCache === null) {
+-      const { views, spans } = this.#parts;
++      const { views, spans, folds } = this.#parts;
+       const rows = chunkRows(views, views.center.state.field(spans));
+-      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(views)) };
++      const starts = {
++        left: waveStarts(views.left.state.field(folds.sides), "left"),
++        center: waveStarts(views.center.state.field(folds.center), "center"),
++        right: waveStarts(views.right.state.field(folds.sides), "right"),
++      };
++      const waves = waveRows(starts, (pane, pos) => views[pane].lineBlockAt(pos).top);
++      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(views)), waves };
+     }
+     return this.#layoutCache;
+   }
+@@ -58,14 +77,14 @@ export class Frame {
+   request(): void {
+     this.#frameId ??= requestAnimationFrame(() => {
+       this.#frameId = null;
+-      const { views, drag, strips } = this.#parts;
++      const { views, drag, strips, hovered } = this.#parts;
+       syncFindSpace(views);
+-      const { rows, anchors } = this.layout();
+-      this.#scroll.sync(anchors);
++      const layout = this.layout();
++      this.#scroll.sync(layout.anchors);
+       const press = drag.press;
+-      const covered = press === null ? null : coveredAction(press, rows, views);
++      const covered = press === null ? null : coveredAction(press, layout.rows, views);
+       pushCovered(views, covered);
+-      strips.paint(views, rows, covered);
++      strips.paint(views, layout, { covered, hovered: hovered() });
+     });
+   }
+ 
+diff --git a/frontend/src/editor/internal/gap.test.ts b/frontend/src/editor/internal/gap.test.ts
+index ab955d7..da6ea77 100644
+--- a/frontend/src/editor/internal/gap.test.ts
++++ b/frontend/src/editor/internal/gap.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { bandPath } from "../../connectors";
++import { bandPath, waveJoinPath } from "../../connectors";
+ import { loadFixture, type Chunk } from "../../ipc";
+ import {
+   arrowTitles,
+@@ -10,8 +10,9 @@ import {
+   keepsArrowRow,
+   type Arrow,
+   type ArrowTitles,
++  wavePaints,
+ } from "./gap";
+-import type { ChunkRow } from "./geometry";
++import type { ChunkRow, WaveRow } from "./geometry";
+ import type { Side } from "./side";
+ import { PENDING, type ChunkStatus } from "./status";
+ 
+@@ -243,3 +244,54 @@ test("an icon row built while the other side waited is rebuilt once that side is
+   expect(keepsArrowRow(row, await conflictArrow(PENDING), { ...layout })).toBe(true);
+   expect(keepsArrowRow(row, ignored, layout)).toBe(false);
+ });
++
++const WAVE_SIZE = { ...STRIP, lineHeight: LINE_PX };
++
++function joinedRuns(waves: readonly WaveRow[], side: Side): number[] {
++  return wavePaints({ waves, side }, NO_SHIFT, WAVE_SIZE).map(({ run }) => run);
++}
++
++test("a strip joins a run only where both of its panes show a wave", () => {
++  const waves = [
++    { left: 100, center: 200, right: null },
++    { left: null, center: 300, right: 310 },
++    { left: 400, center: 420, right: 430 },
++    { left: null, center: 500, right: null },
++  ];
++
++  expect(joinedRuns(waves, "local")).toEqual([0, 2]);
++  expect(joinedRuns(waves, "remote")).toEqual([1, 2]);
++});
++
++test("an empty side gets no joins on its strip while the other strip keeps them", () => {
++  const waves = [
++    { left: 100, center: 100, right: null },
++    { left: 400, center: 420, right: null },
++  ];
++
++  expect(joinedRuns(waves, "remote")).toEqual([]);
++  expect(joinedRuns(waves, "local")).toEqual([0, 1]);
++});
++
++test("a join runs between the waves' centres, each pane moved by its own shift", () => {
++  const waves = [{ left: 100, center: 200, right: 260 }];
++  const shifts = { left: 5, right: -7 };
++
++  expect(wavePaints({ waves, side: "local" }, shifts, WAVE_SIZE)).toEqual([
++    { run: 0, d: waveJoinPath({ left: 115, right: 203 }, STRIP.width) },
++  ]);
++  expect(wavePaints({ waves, side: "remote" }, shifts, WAVE_SIZE)).toEqual([
++    { run: 0, d: waveJoinPath({ left: 215, right: 263 }, STRIP.width) },
++  ]);
++});
++
++test("a join is kept while either wave line touches the strip and dropped once both have left it", () => {
++  const waves = [
++    { left: -LINE_PX, center: -LINE_PX - 50, right: null },
++    { left: -LINE_PX - 1, center: -LINE_PX - 50, right: null },
++    { left: STRIP.height + 50, center: STRIP.height, right: null },
++    { left: STRIP.height + 50, center: STRIP.height + 1, right: null },
++  ];
++
++  expect(joinedRuns(waves, "local")).toEqual([0, 2]);
++});
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 6a22e08..507b46e 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -1,7 +1,7 @@
+-import { bandPath } from "../../connectors";
++import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+-import { SIDE_PANE, type ChunkRow } from "./geometry";
++import { SIDE_PANE, type ChunkRow, type WaveRow } from "./geometry";
+ import { modKeyName } from "./modClick";
+ import type { Side } from "./side";
+ import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
+@@ -14,6 +14,7 @@ export type Arrow = {
+   readonly decidesOther: boolean;
+ };
+ export type BandPaint = { readonly chunk: Chunk; readonly tone: Tone; readonly d: string };
++export type WavePaint = { readonly run: number; readonly d: string };
+ export type ArrowTitles = Readonly<Record<ChunkAction["kind"], string>>;
+ export type ButtonLayout = {
+   readonly applyX: number;
+@@ -88,3 +89,26 @@ export function bandPaints(
+   }
+   return paints;
+ }
++
++export function wavePaints(
++  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
++  shifts: { readonly left: number; readonly right: number },
++  size: { readonly width: number; readonly height: number; readonly lineHeight: number },
++): WavePaint[] {
++  const center = waveCenterY(size.lineHeight);
++  const paints = [];
++  for (const [run, wave] of waves.entries()) {
++    const left = side === "local" ? wave.left : wave.center;
++    const right = side === "local" ? wave.center : wave.right;
++    if (left !== null && right !== null) {
++      const onLeft = left + shifts.left;
++      const onRight = right + shifts.right;
++      const top = Math.min(onLeft, onRight);
++      if (crossesStrip(top, Math.max(onLeft, onRight) + size.lineHeight, size.height)) {
++        const join = { left: onLeft + center, right: onRight + center };
++        paints.push({ run, d: waveJoinPath(join, size.width) });
++      }
++    }
++  }
++  return paints;
++}
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
+index e9075f7..a80c4c6 100644
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
+@@ -5,7 +5,7 @@ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
+ import { toDocPos } from "./docPos";
+ import { foldField, showNextStep } from "./folds";
+-import { rangeSpan, rowsChanged } from "./geometry";
++import { rangeSpan, rowsChanged, waveRows, type Pane } from "./geometry";
+ import { centerPane } from "./pane";
+ import { statusAfterIgnore } from "./status";
+ 
+@@ -91,3 +91,29 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
+     rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, fields),
+   ).toBe(true);
+ });
++
++test("each pane's wave top is the block top at the start its own pane shows, null where it shows none", () => {
++  const starts = {
++    left: [toDocPos(11), null, null],
++    center: [toDocPos(20), null, toDocPos(40)],
++    right: [null, null, toDocPos(50)],
++  };
++  const offset: Readonly<Record<Pane, number>> = { left: 1000, center: 2000, right: 3000 };
++
++  const rows = waveRows(starts, (pane, pos) => offset[pane] + pos);
++
++  expect(rows).toEqual([
++    { left: 1011, center: 2020, right: null },
++    { left: null, center: null, right: null },
++    { left: null, center: 2040, right: 3050 },
++  ]);
++});
++
++test("a pane with fewer runs than the middle shows no wave for the missing runs", () => {
++  const starts = { left: [], center: [toDocPos(0), toDocPos(9)], right: [toDocPos(3)] };
++
++  expect(waveRows(starts, (_, pos) => pos)).toEqual([
++    { left: null, center: 0, right: 3 },
++    { left: null, center: 9, right: null },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index ed53070..ed37cda 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -3,6 +3,7 @@ import type { EditorView, ViewUpdate } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ import type { ChunkSpan } from "./chunkField";
++import type { DocPos } from "./docPos";
+ import { lineSpan } from "./lineSpan";
+ import type { Side } from "./side";
+ import type { ChunkState } from "./status";
+@@ -10,6 +11,7 @@ import type { ChunkState } from "./status";
+ export type Pane = "left" | "center" | "right";
+ export type PaneViews = Readonly<Record<Pane, EditorView>>;
+ export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
++export type WaveRow = Readonly<Record<Pane, number | null>>;
+ 
+ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+   local: "left",
+@@ -47,6 +49,21 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]):
+   }));
+ }
+ 
++export function waveRows(
++  starts: Readonly<Record<Pane, readonly (DocPos | null)[]>>,
++  blockTop: (pane: Pane, pos: DocPos) => number,
++): WaveRow[] {
++  function top(pane: Pane, run: number): number | null {
++    const start = starts[pane][run] ?? null;
++    return start === null ? null : blockTop(pane, start);
++  }
++  return starts.center.map((_, run) => ({
++    left: top("left", run),
++    center: top("center", run),
++    right: top("right", run),
++  }));
++}
++
+ export function rowsChanged(
+   update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">,
+   fields: readonly StateField<unknown>[],
+diff --git a/frontend/src/editor/internal/stripWaves.ts b/frontend/src/editor/internal/stripWaves.ts
+new file mode 100644
+index 0000000..31e2bd1
+--- /dev/null
++++ b/frontend/src/editor/internal/stripWaves.ts
+@@ -0,0 +1,51 @@
++import { WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
++import { FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
++import type { WavePaint } from "./gap";
++import { LINE_HEIGHT_PX } from "./pane";
++
++const SVG_NS = "http://www.w3.org/2000/svg";
++const PATH_CLASSES = ["strip-wave-hit", "strip-wave-line"] as const;
++
++function waveNode(run: number, hovered: number | null): SVGGElement {
++  const group = document.createElementNS(SVG_NS, "g");
++  group.setAttribute(FOLD_RUN_ATTRIBUTE, String(run));
++  group.classList.toggle(HOVER_CLASS, run === hovered);
++  for (const name of PATH_CLASSES) {
++    const path = document.createElementNS(SVG_NS, "path");
++    path.setAttribute("class", name);
++    group.append(path);
++  }
++  return group;
++}
++
++export class StripWaves {
++  readonly layer = document.createElementNS(SVG_NS, "g");
++  readonly #nodes = new Map<number, SVGGElement>();
++
++  constructor() {
++    this.layer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
++    this.layer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
++    this.layer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
++  }
++
++  paint(paints: readonly WavePaint[], hovered: number | null): void {
++    const kept = new Set(paints.map(({ run }) => run));
++    for (const [run, group] of this.#nodes) {
++      if (!kept.has(run)) {
++        group.remove();
++        this.#nodes.delete(run);
++      }
++    }
++    for (const { run, d } of paints) {
++      let group = this.#nodes.get(run);
++      if (group === undefined) {
++        group = waveNode(run, hovered);
++        this.#nodes.set(run, group);
++        this.layer.append(group);
++      }
++      for (const path of group.children) {
++        path.setAttribute("d", d);
++      }
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 0e6d2a8..ffdf5ae 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -18,10 +18,14 @@ import {
+   type ArrowShape,
+   type BandPaint,
+   type ButtonLayout,
++  wavePaints,
++  type WavePaint,
+ } from "./gap";
+-import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
++import { SIDE_PANE, type ChunkRow, type PaneViews, type WaveRow } from "./geometry";
++import { LINE_HEIGHT_PX } from "./pane";
+ import type { Side } from "./side";
+ import type { ApplyMode } from "./status";
++import { StripWaves } from "./stripWaves";
+ 
+ export type IconPress = {
+   readonly kind: ChunkAction["kind"];
+@@ -37,7 +41,13 @@ type ArrowPaint = {
+   readonly layout: ButtonLayout;
+   readonly onPress: OnPress;
+ };
+-type GapPaint = { readonly bands: readonly BandPaint[]; readonly arrows: ArrowPaint | null };
++type GapPaint = {
++  readonly bands: readonly BandPaint[];
++  readonly waves: readonly WavePaint[];
++  readonly arrows: ArrowPaint | null;
++};
++type StripLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
++type StripMarks = { readonly covered: ChunkAction | null; readonly hovered: number | null };
+ type ArrowRow = ArrowShape & {
+   readonly node: SVGGElement;
+   readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
+@@ -169,6 +179,7 @@ class GapStrip {
+   readonly #side: Side;
+   readonly #onPress: OnPress | null;
+   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
++  readonly #waves = new StripWaves();
+   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
+   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
+   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
+@@ -178,11 +189,11 @@ class GapStrip {
+     this.#strip = strip;
+     this.#side = side;
+     this.#onPress = onPress;
+-    strip.replaceChildren(this.#bandLayer, this.#arrowLayer);
++    strip.replaceChildren(this.#bandLayer, this.#waves.layer, this.#arrowLayer);
+     strip.addEventListener("mousedown", keepEditorFocus);
+   }
+ 
+-  measure(panes: GapPanes, rows: readonly ChunkRow[]): GapPaint {
++  measure(panes: GapPanes, { rows, waves: waveRows }: StripLayout): GapPaint {
+     const strip = this.#strip;
+     const stripTop = strip.getBoundingClientRect().top;
+     const size = { width: strip.clientWidth, height: strip.clientHeight };
+@@ -191,8 +202,10 @@ class GapStrip {
+       right: panes.right.documentTop - stripTop,
+     };
+     const bands = bandPaints({ rows, side: this.#side }, shifts, size);
++    const waveSize = { ...size, lineHeight: LINE_HEIGHT_PX };
++    const waves = wavePaints({ waves: waveRows, side: this.#side }, shifts, waveSize);
+     if (this.#onPress === null) {
+-      return { bands, arrows: null };
++      return { bands, waves, arrows: null };
+     }
+     const local = this.#side === "local";
+     const pane = SIDE_PANE[this.#side];
+@@ -204,11 +217,12 @@ class GapStrip {
+       .map((arrow) => ({ arrow, y: arrow.top + shift }))
+       .filter(({ y }) => crossesStrip(y, y + lineHeight, size.height));
+     const layout = { applyX, ignoreX, lineHeight };
+-    return { bands, arrows: { placed, layout, onPress: this.#onPress } };
++    return { bands, waves, arrows: { placed, layout, onPress: this.#onPress } };
+   }
+ 
+-  paint({ bands, arrows }: GapPaint, covered: ChunkAction | null): void {
++  paint({ bands, waves, arrows }: GapPaint, { covered, hovered }: StripMarks): void {
+     this.#paintBands(bands);
++    this.#waves.paint(waves, hovered);
+     if (arrows !== null) {
+       this.#paintArrows(arrows, covered);
+     }
+@@ -266,11 +280,11 @@ export class Strips {
+     this.#remote = new GapStrip(strips[1], "remote", onPress);
+   }
+ 
+-  paint(views: PaneViews, rows: readonly ChunkRow[], covered: ChunkAction | null): void {
+-    const local = this.#local.measure({ left: views.left, right: views.center }, rows);
+-    const remote = this.#remote.measure({ left: views.center, right: views.right }, rows);
+-    this.#local.paint(local, covered);
+-    this.#remote.paint(remote, covered);
++  paint(views: PaneViews, layout: StripLayout, marks: StripMarks): void {
++    const local = this.#local.measure({ left: views.left, right: views.center }, layout);
++    const remote = this.#remote.measure({ left: views.center, right: views.right }, layout);
++    this.#local.paint(local, marks);
++    this.#remote.paint(remote, marks);
+   }
+ 
+   destroy(): void {
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 5093d1f..c8f1160 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -113,6 +113,25 @@ path.chunk-band {
+   fill: var(--color-hover);
+ }
+ 
++.strip-wave-hit {
++  fill: none;
++  stroke: transparent;
++  stroke-width: var(--strip-wave-hit);
++  pointer-events: stroke;
++  cursor: pointer;
++}
++
++.strip-wave-line {
++  fill: none;
++  stroke: var(--color-diff-wave);
++  stroke-width: var(--strip-wave-stroke);
++  pointer-events: none;
++}
++
++.fold-wave-hover > .strip-wave-line {
++  stroke-width: var(--strip-wave-hover-stroke);
++}
++
+ .cm-editor .cm-line.chunk-band.chunk-covered {
+   background-image: linear-gradient(var(--chunk-tone), var(--chunk-tone));
+ }
