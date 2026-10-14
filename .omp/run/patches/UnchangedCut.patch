@@ -1,0 +1,88 @@
+diff --git a/frontend/src/editor/internal/cutOnce.test.ts b/frontend/src/editor/internal/cutOnce.test.ts
+new file mode 100644
+index 0000000..a5d2665
+--- /dev/null
++++ b/frontend/src/editor/internal/cutOnce.test.ts
+@@ -0,0 +1,33 @@
++import { expect, test } from "vitest";
++
++import { cutGate } from "./cutOnce";
++
++function gate(): { takes: () => boolean; nextTask: () => void } {
++  const queued: (() => void)[] = [];
++  const takes = cutGate((open) => queued.push(open));
++  return {
++    takes,
++    nextTask: () => {
++      for (const open of queued.splice(0)) {
++        open();
++      }
++    },
++  };
++}
++
++test("one key press's second cut, in the same task, is refused", () => {
++  const { takes } = gate();
++
++  expect([takes(), takes(), takes()]).toEqual([true, false, false]);
++});
++
++test("two presses, each in its own task, cut twice", () => {
++  const { takes, nextTask } = gate();
++
++  expect(takes()).toBe(true);
++  nextTask();
++  expect(takes()).toBe(true);
++  expect(takes()).toBe(false);
++  nextTask();
++  expect(takes()).toBe(true);
++});
+diff --git a/frontend/src/editor/internal/cutOnce.ts b/frontend/src/editor/internal/cutOnce.ts
+new file mode 100644
+index 0000000..135a1f6
+--- /dev/null
++++ b/frontend/src/editor/internal/cutOnce.ts
+@@ -0,0 +1,23 @@
++import type { Extension } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++
++export function cutGate(reopen: (open: () => void) => void): () => boolean {
++  let open = true;
++  return () => {
++    if (!open) {
++      return false;
++    }
++    open = false;
++    reopen(() => {
++      open = true;
++    });
++    return true;
++  };
++}
++
++// WebKitGTK 2.54 runs its Cut command twice for one Ctrl+X on an empty selection: two beforecut/cut
++// pairs in the keydown's task, before a 0 ms timer queued at the first (docs/slices/briefs/3.U-cut.md).
++export function cutOnce(): Extension {
++  const takes = cutGate((open) => setTimeout(open, 0));
++  return EditorView.domEventHandlers({ cut: () => !takes() });
++}
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index 6b6d9de..aef23f5 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -37,6 +37,7 @@ import {
+ import { tags } from "@lezer/highlight";
+ 
+ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
++import { cutOnce } from "./cutOnce";
+ import { find, findKeys, findKeysCompartment } from "./find";
+ import { indentUnitOf } from "./indent";
+ import { cmKeys } from "./keys";
+@@ -250,6 +251,7 @@ export function paneState(pane: {
+       lineNumbers(),
+       lineSeparator(pane.eol),
+       drawSelection(),
++      cutOnce(),
+       selectionOverTints,
+       paneTheme,
+       themeCompartment.of(darkFlag(preferences.theme)),

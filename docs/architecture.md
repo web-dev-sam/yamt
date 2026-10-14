@@ -634,6 +634,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
   covered highlight and the strips; moved out of `index.ts`. `paneDocs.ts` builds the three `Text`s
   once with the file's line separator (the views, the runs and the tests use them); `docPos.ts` is the
   `DocPos` brand (chunk spans and hidden ranges).
+- `cutOnce.ts` — every pane takes one `cut` event per task: WebKitGTK 2.54 runs its Cut command twice
+  for one Ctrl+X on an empty selection (two `cut` events inside the keydown's task), which cut two
+  lines and defeated the wave line's delete filter (#849). The gate reopens on a 0 ms timer, so it
+  needs no `keydown` and separate presses cut again.
 
 ### 5.3 `connectors/` — pure geometry
 

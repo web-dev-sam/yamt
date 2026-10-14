@@ -1,17 +1,1 @@
-{
-  "UnchangedStripsR2": {
-    "owned": [
-      "frontend/src/editor/internal/strips.ts",
-      "frontend/src/editor/internal/drag.ts",
-      "frontend/src/editor/index.ts"
-    ]
-  },
-  "UnchangedCut": {
-    "owned": [
-      "frontend/src/editor/internal/pane.ts",
-      "frontend/src/editor/internal/pane.test.ts",
-      "frontend/src/editor/internal/cutOnce.ts",
-      "frontend/src/editor/internal/cutOnce.test.ts"
-    ]
-  }
-}
+{}
