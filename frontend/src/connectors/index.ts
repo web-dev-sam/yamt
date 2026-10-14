@@ -31,15 +31,49 @@ export const WAVE_HOVER_STROKE_PX = 2;
 export const WAVE_TILE_WIDTH_PX = WAVE_STEPS * WAVE_STEP_PX;
 export const WAVE_TILE_HEIGHT_PX =
   WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
+const WAVE_UP_STEPS = 3;
+export const WAVE_DOWN_X = WAVE_STEP_PX;
+export const WAVE_UP_X = WAVE_UP_STEPS * WAVE_STEP_PX;
 
-export function waveTile(): string {
+export type WaveEnds =
+  | { readonly kind: "leaves"; readonly at: number }
+  | { readonly kind: "enters"; readonly at: number }
+  | { readonly kind: "through"; readonly enters: number; readonly leaves: number };
+export type WavePhase = { readonly offset: number; readonly period: number };
+
+function mod(n: number, period: number): number {
+  return ((n % period) + period) % period;
+}
+
+function pinned(x: number, tileX: number, period: number): WavePhase {
+  return { offset: mod(x - (tileX * period) / WAVE_TILE_WIDTH_PX, period), period };
+}
+
+export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase {
+  switch (ends.kind) {
+    case "leaves":
+      return pinned(ends.at - waveLeft, WAVE_DOWN_X, WAVE_TILE_WIDTH_PX);
+    case "enters":
+      return pinned(ends.at - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
+    case "through": {
+      const span = ends.leaves - ends.enters;
+      if (span <= 0) {
+        return pinned(ends.enters - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
+      }
+      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF);
+      return pinned(ends.enters - waveLeft, WAVE_UP_X, span / (waves + HALF));
+    }
+  }
+}
+
+export function waveTile(periods: number): string {
   const top = WAVE_GAP_PX;
   const mid = WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX;
   const bottom = mid + WAVE_HALF_HEIGHT_PX;
   const level = [top, mid, bottom, mid, top];
-  const segments = Array.from({ length: WAVE_STEPS }, (_, step) => {
-    const from = level[step] ?? mid;
-    const to = level[step + 1] ?? mid;
+  const segments = Array.from({ length: WAVE_STEPS * periods }, (_, step) => {
+    const from = level[step % WAVE_STEPS] ?? mid;
+    const to = level[(step % WAVE_STEPS) + 1] ?? mid;
     const crest = from === mid ? to : from;
     const x = step * WAVE_STEP_PX;
     return `Q${px(x + WAVE_STEP_PX * HALF)} ${px(crest)} ${px(x + WAVE_STEP_PX)} ${px(to)}`;

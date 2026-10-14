@@ -16,14 +16,13 @@ import { foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./f
 import { waveDeletes, type FoldFields } from "./folds";
 import type { Pane, PaneViews } from "./geometry";
 import { LINE_HEIGHT_PX } from "./pane";
+import { WavePhases, WAVE_PHASE_VARS, type WaveHosts } from "./wavePhase";
 
 type FoldWiring = {
   readonly folds: FoldFields;
   readonly hovered: () => number | null;
   readonly views: () => PaneViews;
 };
-
-type FoldHosts = Readonly<Record<Pane, Element>> & { readonly strips: readonly Element[] };
 
 const WAVE_LABEL = "Show unchanged lines";
 const HALF = 0.5;
@@ -101,10 +100,17 @@ function waveMarkers(
   return builder.finish();
 }
 
+// WebKitGTK draws a repeated mask tile at its width rounded to whole device pixels but places it from the
+// unrounded width (measured in slice 3.V-phase: a 19.58 px tile repeats every 19.5 px at ratio 2), so one
+// tile holds many waves and its width is rounded to whole CSS pixels here.
+const MASK_PERIODS = 64;
+const MASK_WIDTH_PX = WAVE_TILE_WIDTH_PX * MASK_PERIODS;
+
 function waveMask(strokePx: number): string {
   const svg =
-    `<svg xmlns='http://www.w3.org/2000/svg' width='${WAVE_TILE_WIDTH_PX}' height='${WAVE_TILE_HEIGHT_PX}'>` +
-    `<path d='${waveTile()}' fill='none' stroke='black' stroke-width='${strokePx}'/></svg>`;
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${MASK_WIDTH_PX}' height='${WAVE_TILE_HEIGHT_PX}' ` +
+    `viewBox='0 0 ${MASK_WIDTH_PX} ${WAVE_TILE_HEIGHT_PX}' preserveAspectRatio='none'>` +
+    `<path d='${waveTile(MASK_PERIODS)}' fill='none' stroke='black' stroke-width='${strokePx}'/></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
@@ -116,8 +122,8 @@ function maskStyle(strokePx: number): Readonly<Record<string, string>> {
 const waveTop = waveCenterY(LINE_HEIGHT_PX) - WAVE_TILE_HEIGHT_PX * HALF;
 const tile = {
   maskRepeat: "repeat-x",
-  maskPosition: `0 ${waveTop}px`,
-  maskSize: `${WAVE_TILE_WIDTH_PX}px ${WAVE_TILE_HEIGHT_PX}px`,
+  maskPosition: `var(${WAVE_PHASE_VARS.offset}, 0px) ${waveTop}px`,
+  maskSize: `round(calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}), 1px) ${WAVE_TILE_HEIGHT_PX}px`,
 };
 
 const waveTheme = EditorView.theme({
@@ -174,9 +180,10 @@ export class Folds {
   readonly fields: FoldFields;
   readonly hovered = (): number | null => this.#folding.hovered();
   readonly #folding: Folding;
+  readonly #phases: WavePhases;
   readonly #wiring: FoldWiring;
 
-  constructor(runs: readonly Fold[], hosts: FoldHosts, views: () => PaneViews) {
+  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews) {
     const fields = foldFields(runs);
     this.fields = fields;
     this.#wiring = { folds: fields, hovered: this.hovered, views };
@@ -185,6 +192,7 @@ export class Folds {
       const center = views().center;
       center.dispatch(showNextStep(center.state.field(fields.center), run));
     });
+    this.#phases = new WavePhases(hosts, views);
   }
 
   center(): Extension {
@@ -197,5 +205,6 @@ export class Folds {
 
   destroy(): void {
     this.#folding.destroy();
+    this.#phases.destroy();
   }
 }
