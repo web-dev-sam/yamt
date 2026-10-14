@@ -18,14 +18,22 @@ const TWISTIE_CENTRE_PX = 8;
 function rowIcon(row: TreeRow): Component {
   switch (row.kind) {
     case "folder":
-      return folderIcon(row.path.slice(row.path.lastIndexOf("/") + 1), row.open);
+      return folderIcon(row.path, row.open);
     case "file":
       return fileIcon(row.file.path);
   }
 }
 
+function rowStart(depth: number): number {
+  return ROW_PADDING_PX + depth * INDENT_PX;
+}
+
+function rowPadding(depth: number): string {
+  return `${rowStart(depth)}px`;
+}
+
 function guideLeft(level: number): string {
-  return `${ROW_PADDING_PX + (level - 1) * INDENT_PX + TWISTIE_CENTRE_PX}px`;
+  return `${rowStart(level - 1) + TWISTIE_CENTRE_PX}px`;
 }
 
 function pressed(row: TreeRow): void {
@@ -54,7 +62,7 @@ function pressed(row: TreeRow): void {
       :aria-expanded="row.kind === 'folder' ? row.open : undefined"
       :aria-selected="row.kind === 'file' ? row.file.path === active : undefined"
       class="relative mx-1 flex cursor-default items-center gap-2 rounded py-1 pr-2 hover:bg-row-hover aria-selected:bg-row-selected"
-      :style="{ paddingLeft: `${ROW_PADDING_PX + row.depth * INDENT_PX}px` }"
+      :style="{ paddingLeft: rowPadding(row.depth) }"
       @click="pressed(row)"
     >
       <span

@@ -7,7 +7,7 @@ import ListTree from "~icons/lucide/list-tree";
 import type { FileEntry } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
-import { folderPaths, treeRows } from "./fileTree";
+import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
 
 const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
@@ -31,9 +31,9 @@ const viewButton = computed(() =>
 watch(
   () => props.active,
   (path) => {
-    const holding = path === null ? [] : folderPaths(path);
-    if (holding.some((folder) => closed.value.has(folder))) {
-      closed.value = new Set([...closed.value].filter((folder) => !holding.includes(folder)));
+    const next = path === null ? closed.value : revealed(closed.value, path);
+    if (next !== closed.value) {
+      closed.value = next;
     }
   },
 );

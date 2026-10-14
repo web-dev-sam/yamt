@@ -107,3 +107,11 @@ export function folderPaths(path: string): readonly string[] {
   const names = path.split("/").slice(0, -1);
   return names.map((_, index) => names.slice(0, index + 1).join("/"));
 }
+
+export function revealed(closed: ReadonlySet<string>, path: string): ReadonlySet<string> {
+  const holding = folderPaths(path);
+  if (!holding.some((folder) => closed.has(folder))) {
+    return closed;
+  }
+  return new Set([...closed].filter((folder) => !holding.includes(folder)));
+}

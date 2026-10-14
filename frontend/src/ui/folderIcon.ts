@@ -114,75 +114,134 @@ import FolderVscodeOpened from "~icons/vscode-icons/folder-type-vscode-opened";
 import FolderWww from "~icons/vscode-icons/folder-type-www";
 import FolderWwwOpened from "~icons/vscode-icons/folder-type-www-opened";
 
-import { iconTable, lookup, type IconRow } from "./fileIcon";
+import { iconTable, lookup, nameKey, type IconRow } from "./iconTable";
 
 type FolderIcons = Readonly<{ closed: Component; opened: Component }>;
 
-// oxfmt-ignore
 export const FOLDER_ICON_ROWS: readonly IconRow<FolderIcons>[] = [
-  [{ closed: FolderApi, opened: FolderApiOpened }, ["api", ".api", "apis", ".apis"]],
-  [{ closed: FolderApp, opened: FolderAppOpened }, ["app", "apps", ".app", "application", "applications"]],
-  [{ closed: FolderAsset, opened: FolderAssetOpened }, ["assets", ".assets"]],
-  [{ closed: FolderAudio, opened: FolderAudioOpened }, ["audio", ".audio", "audios", ".audios", "sound", ".sound", "sounds", ".sounds"]],
-  [{ closed: FolderAuth, opened: FolderAuthOpened }, ["auth", "authentication", "authorisation", "authorization"]],
-  [{ closed: FolderBinary, opened: FolderBinaryOpened }, ["bin", ".bin"]],
-  [{ closed: FolderCargo, opened: FolderCargoOpened }, ["cargo", ".cargo", "crates"]],
-  [{ closed: FolderClient, opened: FolderClientOpened }, ["client", "clients"]],
-  [{ closed: FolderCommon, opened: FolderCommonOpened }, ["common"]],
-  [{ closed: FolderComponent, opened: FolderComponentOpened }, ["component", "components", ".components", "gui", "src-ui", "ui", "widgets"]],
-  [{ closed: FolderConfig, opened: FolderConfigOpened }, ["conf", ".conf", "cfg", ".cfg", "cfgs", ".cfgs", "config", ".config", "configs", ".configs", "configuration", ".configuration", "configurations", ".configurations", "setting", ".setting", "settings", ".settings", "ini", ".ini", "initializers", ".initializers"]],
-  [{ closed: FolderController, opened: FolderControllerOpened }, ["__controller__", "__controllers__", "controller", "controllers", ".controllers", "__handler__", "__handlers__", "handler", ".handler", "handlers", ".handlers"]],
-  [{ closed: FolderCoverage, opened: FolderCoverageOpened }, ["coverage"]],
-  [{ closed: FolderCss, opened: FolderCssOpened }, ["css", "_css"]],
-  [{ closed: FolderDb, opened: FolderDbOpened }, ["db", "database", "sql", "data", "repo", "repository", "repositories", "store", "stores", "storage", "storages"]],
-  [{ closed: FolderDocker, opened: FolderDockerOpened }, ["docker", ".docker"]],
-  [{ closed: FolderDocs, opened: FolderDocsOpened }, ["docs", "doc", "document", "documents"]],
-  [{ closed: FolderDist, opened: FolderDistOpened }, ["dist", ".dist", "dists", "out", "outs", "output", "outputs", "export", "exports", "build", ".build", "builds", "release", "releases", "target", "targets"]],
-  [{ closed: FolderE2e, opened: FolderE2eOpened }, ["e2e"]],
-  [{ closed: FolderFonts, opened: FolderFontsOpened }, ["fonts", "font", "fnt", "webfonts"]],
-  [{ closed: FolderGithub, opened: FolderGithubOpened }, [".github"]],
-  [{ closed: FolderHelper, opened: FolderHelperOpened }, ["helper", ".helper", "helpers", ".helpers"]],
-  [{ closed: FolderHook, opened: FolderHookOpened }, ["hook", ".hook", "hooks", ".hooks"]],
-  [{ closed: FolderHusky, opened: FolderHuskyOpened }, [".husky"]],
-  [{ closed: FolderImages, opened: FolderImagesOpened }, [".fig", ".figs", "images", "image", ".img", "img", ".imgs", "imgs", "icons", "icon", "ico", "screenshot", "screenshots", "svg", "texture", "textures"]],
-  [{ closed: FolderInclude, opened: FolderIncludeOpened }, ["include", "includes", "incl", "inc", ".include", ".includes", ".incl", ".inc", "_include", "_includes", "_incl", "_inc"]],
-  [{ closed: FolderJs, opened: FolderJsOpened }, ["js"]],
-  [{ closed: FolderLibrary, opened: FolderLibraryOpened }, ["lib", "libs", ".lib", ".libs", "__lib__", "__libs__", "library", "libraries"]],
-  [{ closed: FolderLocale, opened: FolderLocaleOpened }, ["lang", "language", "languages", "locale", "locales", "_locale", "_locales", "internationalization", "globalization", "localization", "i18n", "g11n", "l10n", "translation", "translations"]],
-  [{ closed: FolderLog, opened: FolderLogOpened }, ["log", "logs", "logging", "logger", "loggers"]],
-  [{ closed: FolderMiddleware, opened: FolderMiddlewareOpened }, ["middleware", "middlewares"]],
-  [{ closed: FolderMock, opened: FolderMockOpened }, ["mocks", ".mocks", "__mocks__"]],
-  [{ closed: FolderModel, opened: FolderModelOpened }, ["model", ".model", "models", ".models", "entities", ".entities"]],
-  [{ closed: FolderNode, opened: FolderNodeOpened }, ["node_modules"]],
-  [{ closed: FolderPackage, opened: FolderPackageOpened }, ["package", "packages", ".package", ".packages", "pkg"]],
-  [{ closed: FolderPlugin, opened: FolderPluginOpened }, ["plugin", ".plugin", "plugins", ".plugins", "extension", ".extension", "extensions", ".extensions"]],
-  [{ closed: FolderPublic, opened: FolderPublicOpened }, ["public", ".public"]],
-  [{ closed: FolderRoute, opened: FolderRouteOpened }, ["route", "routes", "_route", "_routes", "router", "routers"]],
-  [{ closed: FolderScript, opened: FolderScriptOpened }, ["script", "scripts"]],
-  [{ closed: FolderServer, opened: FolderServerOpened }, ["server"]],
-  [{ closed: FolderServices, opened: FolderServicesOpened }, ["service", "services"]],
-  [{ closed: FolderShared, opened: FolderSharedOpened }, ["share", "shared", ".share", ".shared", "__shared__", "__share__"]],
-  [{ closed: FolderSrc, opened: FolderSrcOpened }, ["src", "source", "sources", "__src__"]],
-  [{ closed: FolderStory, opened: FolderStoryOpened }, ["story", "stories", "__stories__", ".storybook"]],
-  [{ closed: FolderStyle, opened: FolderStyleOpened }, ["style", "styles"]],
-  [{ closed: FolderTauri, opened: FolderTauriOpened }, ["src-tauri"]],
-  [{ closed: FolderTemp, opened: FolderTempOpened }, ["temp", ".temp", "tmp", ".tmp"]],
-  [{ closed: FolderTemplate, opened: FolderTemplateOpened }, ["template", ".template", "templates", ".templates"]],
-  [{ closed: FolderTest, opened: FolderTestOpened }, ["tests", ".tests", "test", ".test", "__tests__", "__test__", "spec", ".spec", "specs", ".specs", "integration"]],
-  [{ closed: FolderTheme, opened: FolderThemeOpened }, ["theme", "themes"]],
-  [{ closed: FolderTools, opened: FolderToolsOpened }, ["tool", "tools", ".tools", "util", "utils", "utilities", "tooling"]],
-  [{ closed: FolderTypings, opened: FolderTypingsOpened }, ["typings", "types", "@types"]],
-  [{ closed: FolderVideo, opened: FolderVideoOpened }, ["video", ".video", "videos", ".videos"]],
-  [{ closed: FolderView, opened: FolderViewOpened }, ["html", "view", "views", "layout", "layouts", "page", "pages", "_view", "_views", "_layout", "_layouts", "_page", "_pages"]],
-  [{ closed: FolderVscode, opened: FolderVscodeOpened }, [".vscode", "vscode"]],
-  [{ closed: FolderWww, opened: FolderWwwOpened }, [".web", "www", "wwwroot", "web"]],
+  [{ closed: FolderApi, opened: FolderApiOpened }, "api .api apis .apis"],
+  [{ closed: FolderApp, opened: FolderAppOpened }, "app apps .app application applications"],
+  [{ closed: FolderAsset, opened: FolderAssetOpened }, "assets .assets"],
+  [
+    { closed: FolderAudio, opened: FolderAudioOpened },
+    "audio .audio audios .audios sound .sound sounds .sounds",
+  ],
+  [
+    { closed: FolderAuth, opened: FolderAuthOpened },
+    "auth authentication authorisation authorization",
+  ],
+  [{ closed: FolderBinary, opened: FolderBinaryOpened }, "bin .bin"],
+  [{ closed: FolderCargo, opened: FolderCargoOpened }, "cargo .cargo crates"],
+  [{ closed: FolderClient, opened: FolderClientOpened }, "client clients"],
+  [{ closed: FolderCommon, opened: FolderCommonOpened }, "common"],
+  [
+    { closed: FolderComponent, opened: FolderComponentOpened },
+    "component components .components gui src-ui ui widgets",
+  ],
+  [
+    { closed: FolderConfig, opened: FolderConfigOpened },
+    "conf .conf cfg .cfg cfgs .cfgs config .config configs .configs configuration .configuration configurations .configurations setting .setting settings .settings ini .ini initializers .initializers",
+  ],
+  [
+    { closed: FolderController, opened: FolderControllerOpened },
+    "__controller__ __controllers__ controller controllers .controllers __handler__ __handlers__ handler .handler handlers .handlers",
+  ],
+  [{ closed: FolderCoverage, opened: FolderCoverageOpened }, "coverage"],
+  [{ closed: FolderCss, opened: FolderCssOpened }, "css _css"],
+  [
+    { closed: FolderDb, opened: FolderDbOpened },
+    "db database sql data repo repository repositories store stores storage storages",
+  ],
+  [{ closed: FolderDocker, opened: FolderDockerOpened }, "docker .docker"],
+  [{ closed: FolderDocs, opened: FolderDocsOpened }, "docs doc document documents"],
+  [
+    { closed: FolderDist, opened: FolderDistOpened },
+    "dist .dist dists out outs output outputs export exports build .build builds release releases target targets",
+  ],
+  [{ closed: FolderE2e, opened: FolderE2eOpened }, "e2e"],
+  [{ closed: FolderFonts, opened: FolderFontsOpened }, "fonts font fnt webfonts"],
+  [{ closed: FolderGithub, opened: FolderGithubOpened }, ".github"],
+  [{ closed: FolderHelper, opened: FolderHelperOpened }, "helper .helper helpers .helpers"],
+  [{ closed: FolderHook, opened: FolderHookOpened }, "hook .hook hooks .hooks"],
+  [{ closed: FolderHusky, opened: FolderHuskyOpened }, ".husky"],
+  [
+    { closed: FolderImages, opened: FolderImagesOpened },
+    ".fig .figs images image .img img .imgs imgs icons icon ico screenshot screenshots svg texture textures",
+  ],
+  [
+    { closed: FolderInclude, opened: FolderIncludeOpened },
+    "include includes incl inc .include .includes .incl .inc _include _includes _incl _inc",
+  ],
+  [{ closed: FolderJs, opened: FolderJsOpened }, "js"],
+  [
+    { closed: FolderLibrary, opened: FolderLibraryOpened },
+    "lib libs .lib .libs __lib__ __libs__ library libraries",
+  ],
+  [
+    { closed: FolderLocale, opened: FolderLocaleOpened },
+    "lang language languages locale locales _locale _locales internationalization globalization localization i18n g11n l10n translation translations",
+  ],
+  [{ closed: FolderLog, opened: FolderLogOpened }, "log logs logging logger loggers"],
+  [{ closed: FolderMiddleware, opened: FolderMiddlewareOpened }, "middleware middlewares"],
+  [{ closed: FolderMock, opened: FolderMockOpened }, "mocks .mocks __mocks__"],
+  [
+    { closed: FolderModel, opened: FolderModelOpened },
+    "model .model models .models entities .entities",
+  ],
+  [{ closed: FolderNode, opened: FolderNodeOpened }, "node_modules"],
+  [
+    { closed: FolderPackage, opened: FolderPackageOpened },
+    "package packages .package .packages pkg",
+  ],
+  [
+    { closed: FolderPlugin, opened: FolderPluginOpened },
+    "plugin .plugin plugins .plugins extension .extension extensions .extensions",
+  ],
+  [{ closed: FolderPublic, opened: FolderPublicOpened }, "public .public"],
+  [
+    { closed: FolderRoute, opened: FolderRouteOpened },
+    "route routes _route _routes router routers",
+  ],
+  [{ closed: FolderScript, opened: FolderScriptOpened }, "script scripts"],
+  [{ closed: FolderServer, opened: FolderServerOpened }, "server"],
+  [{ closed: FolderServices, opened: FolderServicesOpened }, "service services"],
+  [
+    { closed: FolderShared, opened: FolderSharedOpened },
+    "share shared .share .shared __shared__ __share__",
+  ],
+  [{ closed: FolderSrc, opened: FolderSrcOpened }, "src source sources __src__"],
+  [{ closed: FolderStory, opened: FolderStoryOpened }, "story stories __stories__ .storybook"],
+  [{ closed: FolderStyle, opened: FolderStyleOpened }, "style styles"],
+  [{ closed: FolderTauri, opened: FolderTauriOpened }, "src-tauri"],
+  [{ closed: FolderTemp, opened: FolderTempOpened }, "temp .temp tmp .tmp"],
+  [
+    { closed: FolderTemplate, opened: FolderTemplateOpened },
+    "template .template templates .templates",
+  ],
+  [
+    { closed: FolderTest, opened: FolderTestOpened },
+    "tests .tests test .test __tests__ __test__ spec .spec specs .specs integration",
+  ],
+  [{ closed: FolderTheme, opened: FolderThemeOpened }, "theme themes"],
+  [
+    { closed: FolderTools, opened: FolderToolsOpened },
+    "tool tools .tools util utils utilities tooling",
+  ],
+  [{ closed: FolderTypings, opened: FolderTypingsOpened }, "typings types @types"],
+  [{ closed: FolderVideo, opened: FolderVideoOpened }, "video .video videos .videos"],
+  [
+    { closed: FolderView, opened: FolderViewOpened },
+    "html view views layout layouts page pages _view _views _layout _layouts _page _pages",
+  ],
+  [{ closed: FolderVscode, opened: FolderVscodeOpened }, ".vscode vscode"],
+  [{ closed: FolderWww, opened: FolderWwwOpened }, ".web www wwwroot web"],
 ];
 
 const FOLDER_ICONS = iconTable(FOLDER_ICON_ROWS);
 
 const DEFAULT_FOLDER: FolderIcons = { closed: DefaultFolder, opened: DefaultFolderOpened };
 
-export function folderIcon(name: string, open: boolean): Component {
-  const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
+export function folderIcon(path: string, open: boolean): Component {
+  const icons = lookup(FOLDER_ICONS, nameKey(path)) ?? DEFAULT_FOLDER;
   return open ? icons.opened : icons.closed;
 }
