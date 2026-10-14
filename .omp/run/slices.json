@@ -1,41 +1,19 @@
 {
-  "LspStatus": {
+  "LspDetectR1": {
     "owned": [
-      "frontend/src/ui/ServerStatus.vue",
-      "frontend/src/ui/ServerMenu.vue",
-      "frontend/src/ui/ServerLogView.vue",
-      "frontend/src/ui/serverText.ts",
-      "frontend/src/ui/serverText.test.ts",
-      "frontend/src/ui/servers.ts",
-      "frontend/src/ui/servers.test.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/App.vue",
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/MergeToolbar.vue",
-      "frontend/src/ui/ChoiceView.vue",
-      "frontend/src/ui/SettingsButton.vue",
-      "frontend/src/ui/SettingsView.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/main.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
-      "frontend/src/ipc/tauriServers.ts",
-      "frontend/src/ipc/tauriServers.test.ts",
-      "frontend/src/ipc/ServerHost.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/fixtureSettings.ts",
+      "frontend/src/lsp/internal/detect.ts",
+      "frontend/src/lsp/internal/detect.test.ts",
+      "frontend/src/lsp/internal/presets.ts",
+      "frontend/src/lsp/internal/presets.test.ts",
+      "frontend/src/lsp/internal/packageManager.ts",
+      "frontend/src/lsp/internal/packageManager.test.ts",
+      "frontend/src/lsp/internal/added.ts",
+      "frontend/src/lsp/internal/added.test.ts",
+      "frontend/src/lsp/internal/handshake.ts",
+      "frontend/src/lsp/internal/uri.ts",
+      "frontend/src/lsp/internal/uri.test.ts",
       "frontend/src/lsp/index.ts",
-      "frontend/src/lsp/index.test.ts"
-    ]
-  },
-  "SaveWebR2": {
-    "owned": [
-      "frontend/src/editor/internal/apply.ts",
-      "frontend/src/editor/internal/apply.test.ts",
-      "frontend/src/editor/internal/fileText.test.ts"
+      "frontend/src/lsp/AGENTS.md"
     ]
   }
 }
