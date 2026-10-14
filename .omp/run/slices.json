@@ -1,1 +1,26 @@
-{}
+{
+  "LspClient": {
+    "owned": [
+      "frontend/src/lsp/**",
+      "frontend/src/ipc/ServerHost.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts",
+      "frontend/.oxlintrc.json"
+    ]
+  },
+  "LspHost": {
+    "owned": [
+      "crates/lsp-host/**",
+      "crates/settings/**",
+      "src-tauri/Cargo.toml",
+      "src-tauri/src/servers.rs",
+      "src-tauri/src/settings.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/AGENTS.md",
+      "scripts/arch-check.sh"
+    ]
+  }
+}
