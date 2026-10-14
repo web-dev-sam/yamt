@@ -8,17 +8,7 @@
       "frontend/src/ui/MergeView.vue"
     ]
   },
-  "SettingsIpc": {
-    "owned": [
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
-      "frontend/src/ipc/fixtureSettings.ts",
-      "frontend/src/ipc/fixtureSettings.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ui/settings.ts",
-      "frontend/src/ui/settings.test.ts",
-      "frontend/src/ui/store.test.ts"
-    ]
+  "LspClientR1": {
+    "owned": ["frontend/src/lsp/**"]
   }
 }
