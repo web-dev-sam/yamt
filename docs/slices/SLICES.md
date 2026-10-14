@@ -359,6 +359,31 @@ different font or size, per-monitor scale handling, `core.autocrlf=true` reposit
 | 2   | version 0.2.0: Cargo.toml/lock, CHANGELOG `[0.2.0] - 2026-10-13`, `.readmer/readme.json` + `readmer` (Windows install, 0.2.0 names, antialiasing, the toolbar-menu bullet the JSON had lost), `--version` test follows `CARGO_PKG_VERSION` (`briefs/3.X-release-0.2.0.md`) | orchestrator, rust-impl | done   | `7e26f6c`, `1c11c65`; `ReleaseVerify`: `just check` 0, `cargo tauri build --bundles deb` → `yamt_0.2.0_amd64.deb`, `yamt --version` → `yamt 0.2.0`; tag `v0.2.0` at `8ddf740` (made and published by the owner in one command: his `fetch.prunetags` removes local-only tags, #807)      |
 | 3   | release build and publishing (`docs/slices/handoff-release-0.2.0.md`)                                                                                                                                                                                                      | human                   | open   | release run 38465186676 **success**: draft-release, Linux, macOS universal, Windows. Left for the owner: check the draft's files, paste the `[0.2.0]` changelog section, smoke one download, publish                                                                                     |
 
+## File list — hide it with Ctrl/Cmd+B, show it as a list or a tree (session 11)
+
+Intent (owner 2026-10-14, #808; plan §2 #61): Ctrl/Cmd+B opens and closes the file list; an icon-only button at
+the right end of the "Files" header switches between the flat list and a tree as in VS Code, with the same
+vscode-icons icons. No question asked (OR13): the key is a regular Keymap action, the hidden list is not
+remembered, the list/tree choice is (as #58), the tree follows VS Code's defaults (compact folders, folders open,
+reveal of the shown file, indent guides on hover).
+
+Acceptance: in WebKit and in the real app with real input — Ctrl+B hides and shows the list from any pane, find box
+or the settings view, keeps its width and the keyboard, does nothing else and nothing while a question waits or a
+key is recorded, and follows a re-bind; the button switches list ↔ tree without moving the keyboard and is
+remembered after a restart; the tree sorts, joins and opens folders like VS Code's Source Control view, with
+vscode-icons folder icons. Non-goals: keys inside the list or tree, remembering the hidden list, scrolling the shown
+file into view, folder status marks, any Rust or IPC change.
+
+Slices (independent, run in parallel; disjoint files): row 1 owns the keys, the store and `App.vue`; row 2 owns
+`FileList.vue` and the new tree modules. Each patch: commit, `just mutants <commit before>`, both reviews, then one
+final run.
+
+| row | slice                                                                                                                                                                                                         | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | 3.L-key: Ctrl/Cmd+B toggles the file list (`briefs/3.L-toggle-key.md`; `ipc/keys.ts`, `ui/keyText.ts`, `ui/App.vue`, `ui/store.ts`, `ui/listing.ts`, their tests)                                             | web-impl | running |          |
+| 2   | 3.L-tree: list/tree button, tree rows, folder icons, remembered view (`briefs/3.L-tree-view.md`; `ui/FileList.vue`, `ui/FileTree.vue`, `ui/fileTree.ts`, `ui/fileListMode.ts`, `ui/fileIcon.ts`, their tests) | web-impl | running |          |
+| 3   | final run: `just check`, `just mutants <commit before row 1>`, the real app: both features together                                                                                                           | verifier | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
