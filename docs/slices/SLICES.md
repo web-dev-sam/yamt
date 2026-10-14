@@ -471,6 +471,60 @@ reviews, then one final run.
 | 3   | 3.V-toggle: the toolbar toggle, its storage, collapse/show all (`briefs/3.V-toggle.md`, `-rework-1.md`) | web-impl | accepted | round 1 `a200f9e` (`CollapseToggle`): `FoldState`, `foldSelection.ts`, `scrollSnapshot` + `Frame.realign`, `ui/collapsing.ts`, options object; WebKit 1–9 pass. Correctness pass; boundary pass with #870–#872 promoted → rework 1 `0a2bd1b` (`CollapseToggleR1`): `PANES` from geometry, field `selected`, `ui/windowStorage.ts` `storedValue` for three callers; re-check pass. #869 dropped. Notes `.omp/run/notes/CollapseToggle*.md`                                                                                                                                          |
 | 4   | final run (`briefs/3.V-verify.md`): `just check`, `just mutants a040da6`, the real app                  | verifier | done     | `WaveToggleVerify` at `c6e369e`, gate **pass** (notes `.omp/run/notes/WaveToggleVerify.md`): `just check` 0 (377 Rust + 1 skipped, 799 web, 10 goldens, map/arch ok, hooks 16/16); mutants: no Rust, survivors on changed lines only the two judged. Real app: level joins meet ≤ 0.19 device px at scale 1 and ≤ 0.82 at `GDK_SCALE=2` (before ≈4); toggle third, off/on across two files, cursor rule, top line kept, undo, menu, restart, hover/find, colours, scroll no slower. #873 dropped; #874 (Delete at a wave line's end, #869) to the owner; #875 helper for the retro |
 
+## Language servers and saving — problems in the Result, Ctrl/Cmd+S formats and saves (session 15)
+
+Owner (#856, after an exploration of formatters and linters): language servers; "User can see status and logs
+next to the settings button to the left like on the bottom bar in vscode. They can restart/stop/start the server
+there. ctrl+s saves file to disk and it should show a circle on the top bar of the middle results pane (where
+"Result [Reset]" is but on the right) to indicate that the file hasnt been saved yet. Yamt is a tool that just
+reflects what the files on disk are, edits there persist, even when user closes the app. The reset button however
+should reset to the state when they opened the yamt app like its currently working." Earlier in the same
+conversation: Ctrl+S formats with a user-set-up formatter (e.g. oxfmt); linters/type checkers (oxlint, eslint,
+TypeScript) show their problems in the editor.
+
+Status: **building** (owner #876: "Implement the language server plan … youre the product owner"; the whole section,
+Save included, since formatting runs only through Ctrl/Cmd+S). Decisions: plan §2 #65 (Save), #66 (Reset), #67
+(servers, product), #69 (how Save writes and Reset restores), #70 (language-server plumbing); owner answers
+#856–#860; open points decided by the orchestrator as owner (#876), recorded in #69/#70 and the briefs.
+
+Acceptance (real app on a conflict repository inside a project with oxlint and oxfmt installed; WebKit for the
+window parts): **Save** — Ctrl/Cmd+S in any pane of the shown file writes it, git still lists it conflicted; the dot
+lights on an edit and clears after a save or when undo returns to the saved text, and stays lit while typing sits in
+a change whose sides all wait; waiting conflicts are written as git's markers (size, labels, base section, CRLF
+kept), waiting one-sided changes applied; a new run shows those conflicts waiting again; a save never raises the
+"changed on disk" notice; the close question asks only with unsaved work. **Reset** — back to this run's start
+bytes and stages, also after a save in an earlier run. **Servers** — the repository's tools are detected and the
+question comes once; the answer is remembered; the status area left of the gear (all three header rows) shows each
+server's state, with Start, Stop, Restart and Show log working; problems underline the Result with the message on
+hover after a typing pause, none in the side panes; Ctrl+S formats with oxfmt, then saves — one undo step, open
+changes keep their arrows; "not installed", "not found" and a crash are visible; a TypeScript 5.x/6.x project without
+its separate server shows TypeScript "not installed", and its menu and log name the package, the folder and the
+project and all-projects commands in the project's own package manager (`packageManager` field, else the nearest lock
+file, else npm with a note) plus "any other way that puts it on your PATH", each command with a copy button (eslint
+likewise with `vscode-langservers-extracted`); after installing in a terminal and switching back to yamt, the server
+starts without Restart; yamt ships no server and never installs one; no server process outlives yamt.
+Non-goals: autosave; completion, hover info, go-to-definition; problems in the side panes or a problems list;
+next/previous problem keys; restarting a crashed server by itself; reading the login shell's PATH; formatting on
+"Mark resolved"; remembering saves across runs; a config file inside the repository.
+
+Order (two lanes, at most two builds at once): Rust 3 → 6; window 4 → 5 → 7 (needs 3) → 8 (needs 6) → 9; then 10.
+The client (4) and the editor side (5) are split from the design's one "protocol" build (~36 files, over the slice
+size guide). Each patch: commit, both reviews, mutants where not `editor/`; the orchestrator regenerates bindings and
+fixtures between rounds and updates architecture and the project map before row 10.
+
+| row | slice                                                                                                                                                                                                                                                                                                                           | owner     | status   | evidence                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------- | -------------------------------------------------------------------------------------------------- |
+| 1   | design: language-server host, transport, problems, formatting, status area and log, detection (`briefs/3.Y-language-servers-design.md`)                                                                                                                                                                                         | designer  | done     | `LanguageServerDesign`: option A chosen (plan #70); notes `.omp/run/notes/LanguageServerDesign.md` |
+| 2   | design: Save writes "what git wrote", the dot, own write, Reset to this run's start (`briefs/3.Z-save-design.md`)                                                                                                                                                                                                               | designer  | done     | `SaveDesign`: option 1 chosen (plan #69); notes `.omp/run/notes/SaveDesign.md`                     |
+| 3   | 3.Z-rust (`briefs/3.Z-rust.md`): per-change `waiting`, `save_file`, Reset to the at-open bytes, round-trip tests S1–S8                                                                                                                                                                                                          | rust-impl | building | depends on nothing                                                                                 |
+| 4   | 3.Y-client (`briefs/3.Y-client.md`): `frontend/src/lsp/**` (connection, sync, push+pull problems, answers, formatting request, log), `ipc/ServerHost.ts`, the `lsp/` fence                                                                                                                                                      | web-impl  | building | depends on nothing; beside row 3                                                                   |
+| 5   | 3.Y-editor: problems in the Result via `@codemirror/lint` (`serverDoc`, `problems`), `MergeController.format()` + `lineDiff`, `onProblemsChange`, problem colours, WebKit tooltip probe                                                                                                                                         | web-impl  | planned  | after row 4                                                                                        |
+| 6   | 3.Y-host: crate `yamt-lsp-host`, `languageServers` in `yamt-settings`, `src-tauri` servers and settings commands, children killed at close, arch-check                                                                                                                                                                          | rust-impl | planned  | after row 3 (`commands.rs`)                                                                        |
+| 7   | 3.Z-web: Save key, `fileText`, saved point and dot, `store.save` (format step included), close question, `saveFile` in ipc and fixtures                                                                                                                                                                                         | web-impl  | planned  | after rows 3 and 5 (bindings, fixtures, `editor/index.ts`)                                         |
+| 8   | 3.Y-status: status area in three headers, server menu (with the "not installed" hint: package, folder, commands, copy buttons), log view (`screen`), servers wired in `main.ts` and `useMergeController`, the host in `ipc/tauri.ts`, the format outcome shown                                                                  | web-impl  | planned  | after rows 5, 6, 7                                                                                 |
+| 9   | 3.Y-setup: presets and detection (`lsp/internal/presets.ts`, `detect.ts`) at start and again on window focus, the project's package manager for the hint, the once-per-repository question, Settings "Language servers" section, settings IPC; a conflict-repository variant with tool configs and `node_modules` for the smoke | web-impl  | planned  | after row 8                                                                                        |
+| 10  | final run: `just check`, `just mutants <base>`, `pnpm test:browser`, the real app per the acceptance above                                                                                                                                                                                                                      | verifier  | planned  | after row 9                                                                                        |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

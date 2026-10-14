@@ -19,6 +19,7 @@ export default defineConfig({
             "src/ipc/**/*.test.ts",
             "src/ui/**/*.test.ts",
             "src/editor/**/*.test.ts",
+            "src/lsp/**/*.test.ts",
             "scripts/**/*.test.ts",
           ],
           exclude: [...configDefaults.exclude, "**/*.browser.test.ts"],

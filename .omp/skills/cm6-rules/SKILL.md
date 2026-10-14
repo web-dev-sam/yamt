@@ -95,5 +95,6 @@ lines the selection touches by the file's own unit, plan §2 #35). Also `@lezer/
 `@codemirror/language-data` (every official grammar, each loaded on demand, plan §2 #29). The panes
 get only the grammar's `Language`, never its `LanguageSupport` extras (auto-closing tags, Markdown
 list keys). Grammars are reached only through `language-data`, never imported one by one.
-Also `@codemirror/search` (find bar per pane, our own panel, plan §2 #44). Not the `codemirror` bundle,
-not `@codemirror/merge`, not `@codemirror/autocomplete`.
+Also `@codemirror/search` (find bar per pane, our own panel, plan §2 #44) and `@codemirror/lint` (language-server
+problems in the Result pane only, plan §2 #70). Not the `codemirror` bundle, not `@codemirror/merge`, not
+`@codemirror/autocomplete`, not `@codemirror/lsp-client` (plan §2 #70).
