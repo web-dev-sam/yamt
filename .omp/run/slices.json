@@ -1,14 +1,4 @@
 {
-  "LspClient": {
-    "owned": [
-      "frontend/src/lsp/**",
-      "frontend/src/ipc/ServerHost.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts",
-      "frontend/.oxlintrc.json"
-    ]
-  },
   "LspHost": {
     "owned": [
       "crates/lsp-host/**",
@@ -21,6 +11,15 @@
       "src-tauri/src/lib.rs",
       "src-tauri/AGENTS.md",
       "scripts/arch-check.sh"
+    ]
+  },
+  "LspEditor": {
+    "owned": [
+      "frontend/src/editor/**",
+      "frontend/src/style.css",
+      "frontend/src/ui/useMergeController.ts",
+      "frontend/src/ui/useMergeController.test.ts",
+      "frontend/src/ui/MergeView.vue"
     ]
   }
 }
