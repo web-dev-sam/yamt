@@ -12,5 +12,8 @@
       "frontend/src/editor/internal/geometry.ts",
       "frontend/src/editor/internal/geometry.test.ts"
     ]
+  },
+  "UnchangedPanesR2": {
+    "owned": ["frontend/src/editor/internal/folds.ts", "frontend/src/editor/internal/folds.test.ts"]
   }
 }
