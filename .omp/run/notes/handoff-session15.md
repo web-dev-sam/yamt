@@ -39,10 +39,14 @@ round with the rule "formatting never touches a change that still waits, nor its
 
 ## Next steps
 
-1. Re-hydrate (`skill://orchestrate` §0). Re-spawn the two setup reviews and finish the mutants run (above).
-2. Triage (OR12), fix round(s) for row 9 if blocks (it owns `ui/serverSetup.ts`, `LanguageServerSettings.vue`,
-   `question.ts`, `QuestionDialog.vue`, `SettingsView.vue`, `App.vue`, `store.ts`, `settings.ts`, `main.ts`,
-   `scripts/lsp-repo.sh`), re-check, commit.
+1. Re-hydrate (`skill://orchestrate` §0). Both setup reviews and the mutants run are finished (above); do not
+   re-spawn them.
+2. Triage both review files (OR12), log every finding to findings.jsonl, then write
+   `docs/slices/briefs/3.Y-setup-rework-1.md` with the blocks verbatim. Fix round for row 9 owns `ui/serverSetup.ts`,
+   `LanguageServerSettings.vue`, `question.ts`, `QuestionDialog.vue`, `SettingsView.vue`, `App.vue`, `store.ts`,
+   `settings.ts`, `main.ts`, `scripts/lsp-repo.sh`, plus a grant on `ui/asking.ts` (Escape fix), `ui/serverText.ts`
+   (one home for the words) and, if the Don't start should is promoted, `lsp/` for a named halt operation. Re-check
+   with both lenses (both raised findings), commit.
 3. Docs are already updated for the feature (architecture §3.3, §3.5, §3.6, §4, §5.1, §5.2, §5.3b; project map incl.
    setup files, `map-check: ok`; ipc-contract; cm6-rules CM5 + dependency list; risk-register RK5/RK17;
    rust-conventions RS5; CHANGELOG). Update the map's "Verified against commit" line and anything row 9's fix round
