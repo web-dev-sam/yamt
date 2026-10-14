@@ -1,19 +1,17 @@
 {
-  "UnchangedStripsR1": {
+  "UnchangedStripsR2": {
     "owned": [
-      "frontend/src/editor/internal/gap.ts",
-      "frontend/src/editor/internal/gap.test.ts",
       "frontend/src/editor/internal/strips.ts",
-      "frontend/src/editor/internal/strips.test.ts",
-      "frontend/src/editor/internal/stripWaves.ts",
-      "frontend/src/editor/internal/stripWaves.test.ts",
-      "frontend/src/editor/internal/stripIcons.ts",
-      "frontend/src/editor/internal/stripIcons.test.ts",
-      "frontend/src/editor/internal/geometry.ts",
-      "frontend/src/editor/internal/geometry.test.ts"
+      "frontend/src/editor/internal/drag.ts",
+      "frontend/src/editor/index.ts"
     ]
   },
-  "UnchangedPanesR2": {
-    "owned": ["frontend/src/editor/internal/folds.ts", "frontend/src/editor/internal/folds.test.ts"]
+  "UnchangedCut": {
+    "owned": [
+      "frontend/src/editor/internal/pane.ts",
+      "frontend/src/editor/internal/pane.test.ts",
+      "frontend/src/editor/internal/cutOnce.ts",
+      "frontend/src/editor/internal/cutOnce.test.ts"
+    ]
   }
 }

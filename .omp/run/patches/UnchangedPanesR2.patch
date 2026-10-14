@@ -1,0 +1,68 @@
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+index 41444d6..4972de4 100644
+--- a/frontend/src/editor/internal/folds.test.ts
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -409,6 +409,33 @@ test("Delete at a wave's start or Backspace at its end deletes nothing and shows
+   expect(centerLines(atTop, 0)).toEqual(["1-22", "1-14"]);
+ });
+ 
++test("delete-line or a line cut on a wave line deletes nothing and shows the next step", async () => {
++  const merge = await open();
++  const doc = merge.state.doc;
++  const { from } = levelOf(merge, 1, 0);
++  const line = doc.lineAt(from);
++  const cases = [
++    deleting(merge, from, { changes: { from: from - 1, to: line.to }, userEvent: "delete.line" }),
++    deleting(merge, from, { changes: { from, to: line.to + 1 }, userEvent: "delete.cut" }),
++  ];
++
++  for (const done of cases) {
++    expect(done.state.doc.eq(doc)).toBe(true);
++    expect(centerLines(done, 1)).toEqual(["41-62", "49-54"]);
++  }
++});
++
++test("a delete of only the line break before a wave still joins the lines", async () => {
++  const merge = await open();
++  const { from } = levelOf(merge, 1, 0);
++  const joined = deleting(merge, from, {
++    changes: { from: from - 1, to: from },
++    userEvent: "delete.backward",
++  });
++
++  expect(joined.state.doc.lines).toBe(merge.state.doc.lines - 1);
++});
++
+ test("a selection deleted across a wave and a delete beside one still delete", async () => {
+   const merge = await open();
+   const doc = merge.state.doc;
+diff --git a/frontend/src/editor/internal/folds.ts b/frontend/src/editor/internal/folds.ts
+index 6fc874a..b58e54e 100644
+--- a/frontend/src/editor/internal/folds.ts
++++ b/frontend/src/editor/internal/folds.ts
+@@ -175,12 +175,12 @@ export function showNextStep(folds: readonly Fold[], run: number): TransactionSp
+   return showSpec([nextStep(folds, run)]);
+ }
+ 
+-function removesWhole(tr: Transaction, { from, to }: Hidden): boolean {
+-  let whole = false;
++function removesHidden(tr: Transaction, { from, to }: Hidden): boolean {
++  let removes = false;
+   tr.changes.iterChangedRanges((fromA, toA) => {
+-    whole ||= fromA <= from && toA >= to;
++    removes ||= Math.max(fromA, from) < Math.min(toA, to);
+   });
+-  return whole;
++  return removes;
+ }
+ 
+ function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
+@@ -189,7 +189,7 @@ function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
+   }
+   return folds.flatMap((fold, run) => {
+     const hidden = displayed(fold, "center");
+-    return hidden !== null && removesWhole(tr, hidden) ? [nextStep(folds, run)] : [];
++    return hidden !== null && removesHidden(tr, hidden) ? [nextStep(folds, run)] : [];
+   });
+ }
+ 

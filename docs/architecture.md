@@ -556,15 +556,18 @@ Internals (`editor/internal/`, not importable from `ui/`):
   are handled (plan §2 #31, #33).
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
   bar where the side removed text) from `chunk.words` (plan §2 #30, #31).
-- `geometry.ts` (where each chunk sits in each pane), `gap.ts` (what a strip shows: the bands that
-  cross it, each open change's icon row in document space, its hover titles — with the Ctrl/⌘+click
-  line while the click also decides the other side, plan §2 #55 — and whether a drawn row can be
-  kept, `keepsArrowRow`), `strips.ts` (places the icon rows, keeps the nodes of what is in the strip
-  and moves them per frame) — bands and the apply/ignore buttons in the two `<svg>` strips
-  (SVG groups at the side pane's edge; a CodeMirror gutter on the inner edge missed clicks in
-  WebKit). Icons are Lucide SVG markup imported as strings (`~icons/lucide/<name>?raw`), parsed
-  once and cloned per button (plan §2 #34); the apply button turns into "add below" while the
-  other side is applied. A button press only starts a press; none are drawn in read-only mode.
+- `geometry.ts` (where each chunk sits in each pane, each run's wave top per pane — `waveRows` — and
+  `STRIP_PANES`, the two panes each strip sits between), `gap.ts` (what a strip shows: the bands that
+  cross it, the wave joins of runs both its panes fold — `wavePaints` —, each open change's icon row in
+  document space, its hover titles — with the Ctrl/⌘+click line while the click also decides the other
+  side, plan §2 #55 — and whether a drawn row can be kept, `keepsArrowRow`), `strips.ts` (keeps the
+  nodes of what is in the strip — bands, wave joins with a wide transparent hit path, icon rows, one
+  keyed scheme `dropMissing` — and moves them per frame), `stripIcons.ts` (builds an icon row) — bands,
+  wave joins and the apply/ignore buttons in the two `<svg>` strips (SVG groups at the side pane's
+  edge; a CodeMirror gutter on the inner edge missed clicks in WebKit). Icons are Lucide SVG markup
+  imported as strings (`~icons/lucide/<name>?raw`), parsed once and cloned per button (plan §2 #34);
+  the apply button turns into "add below" while the other side is applied. A button press only starts
+  a press; none are drawn in read-only mode (the wave joins are).
 - `drag.ts`, `covered.ts` — the press and drag over the icons (plan §2 #45): pointer capture on the
   persistent `<svg>` strips (a button row exists only while it is in the strip and its side is open;
   its position is updated per frame), the changes covered between the press
@@ -638,15 +641,19 @@ Internals (`editor/internal/`, not importable from `ui/`):
 export type Span = { readonly top: number; readonly bottom: number }; // px from the strip's top; top === bottom is an insertion point
 export type Band = { readonly left: Span; readonly right: Span };
 export function bandPath(band: Band, width: number): string; // closed path, cubic top/bottom edges, control points at width / 2
+export function waveTile(): string; // one 20×8 period of the unchanged-lines wave (plan §2 #63): four quadratic quarter-curves, step 5, half-height 3
+export function waveCenterY(lineHeight: number): number; // the wave's centre in a line: 10 for 20 px
+export function waveJoinPath(join: { left: number; right: number }, width: number): string; // WebStorm's drawConnectorLine: a wave when level (slope < 0.2), an S-curve otherwise
+// WAVE_STROKE_PX = 1, WAVE_HOVER_STROKE_PX = 2: the wave's strokes in the panes and the strips
 ```
 
-`editor/internal/geometry.ts` turns chunk ranges into `Span`s (via `lineBlockAt`); `MergeController`
-caches these rows with the scroll sync's anchors until the document, the measured heights or the
-statuses change (plan §2 #51). `editor/internal/gap.ts` picks the bands that cross each strip and the
-open changes' icon rows; `editor/internal/strips.ts` places the rows, keeps the nodes of what is in
-the strip and moves them once per animation frame, after any pane scroll, center edit or geometry
-change. Each strip is its own compositing layer (plan §2 #51). `connectors/` is unit-tested on
-numbers, no DOM.
+`editor/internal/geometry.ts` turns chunk ranges into `Span`s and each run's displayed wave into a top
+(via `lineBlockAt`); `Frame` caches these rows with the scroll sync's anchors until the document, the
+measured heights, the statuses or the fold steps change (plan §2 #51). `editor/internal/gap.ts` picks
+the bands and wave joins that cross each strip and the open changes' icon rows; `editor/internal/strips.ts`
+places them, keeps the nodes of what is in the strip and moves them once per animation frame, after any
+pane scroll, center edit or geometry change. Each strip is its own compositing layer (plan §2 #51).
+`connectors/` is unit-tested on numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 

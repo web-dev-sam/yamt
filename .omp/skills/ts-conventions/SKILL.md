@@ -60,7 +60,7 @@ Base: `references/typescript-best-practices.md` (rule table) and
   oxlint `no-magic-numbers` (0, 1, -1 ignored).
 - [TS15] Mutable module state is forbidden except: the store singleton in `ui/store.ts`; the
   controller instance held by `useMergeController`; and parse-once caches of constant build-time
-  inputs, read through one function and copied per use (`strips.ts` `parsedIcons`: Lucide markup →
+  inputs, read through one function and copied per use (`stripIcons.ts` `parsedIcons`: Lucide markup →
   parsed `<svg>`, `cloneNode` per button). Everything else is a parameter or a return.
 
 ## Strictness (tsconfig, do not loosen)

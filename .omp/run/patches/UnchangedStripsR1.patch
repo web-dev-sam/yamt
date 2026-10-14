@@ -1,0 +1,559 @@
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 507b46e..1453b3e 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -1,7 +1,7 @@
+ import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+-import { SIDE_PANE, type ChunkRow, type WaveRow } from "./geometry";
++import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
+ import { modKeyName } from "./modClick";
+ import type { Side } from "./side";
+ import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
+@@ -73,11 +73,12 @@ export function bandPaints(
+   shifts: { readonly left: number; readonly right: number },
+   size: { readonly width: number; readonly height: number },
+ ): BandPaint[] {
++  const panes = STRIP_PANES[side];
+   const paints = [];
+   for (const row of rows) {
+     if (isSideOpen(row.chunk, row.status, side)) {
+-      const left = side === "local" ? row.left : row.center;
+-      const right = side === "local" ? row.center : row.right;
++      const left = row[panes.left];
++      const right = row[panes.right];
+       const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+       const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
+       const top = Math.min(onLeft.top, onRight.top);
+@@ -96,10 +97,11 @@ export function wavePaints(
+   size: { readonly width: number; readonly height: number; readonly lineHeight: number },
+ ): WavePaint[] {
+   const center = waveCenterY(size.lineHeight);
++  const panes = STRIP_PANES[side];
+   const paints = [];
+   for (const [run, wave] of waves.entries()) {
+-    const left = side === "local" ? wave.left : wave.center;
+-    const right = side === "local" ? wave.center : wave.right;
++    const left = wave[panes.left];
++    const right = wave[panes.right];
+     if (left !== null && right !== null) {
+       const onLeft = left + shifts.left;
+       const onRight = right + shifts.right;
+diff --git a/frontend/src/editor/internal/geometry.test.ts b/frontend/src/editor/internal/geometry.test.ts
+index c8bf3e9..6e00977 100644
+--- a/frontend/src/editor/internal/geometry.test.ts
++++ b/frontend/src/editor/internal/geometry.test.ts
+@@ -5,7 +5,7 @@ import { loadFixture } from "../../ipc";
+ import { chunkField, setStatus } from "./chunkField";
+ import { toDocPos } from "./docPos";
+ import { foldField, showNextStep } from "./folds";
+-import { rangeSpan, rowsChanged, waveRows, type Pane } from "./geometry";
++import { rangeSpan, rowsChanged, STRIP_PANES, waveRows, type Pane } from "./geometry";
+ import { paneDocs } from "./paneDocs";
+ import { statusAfterIgnore } from "./status";
+ 
+@@ -23,6 +23,13 @@ function spanOf(
+   });
+ }
+ 
++test("each strip sits between its side's pane and the middle, the local pane on its left", () => {
++  expect(STRIP_PANES).toEqual({
++    local: { left: "left", right: "center" },
++    remote: { left: "center", right: "right" },
++  });
++});
++
+ test("lines in the middle span from the first line's top to the next line's top", () => {
+   expect(spanOf(["a", "b", "c"], 2, 4)).toEqual({ top: 20, bottom: 40 });
+ });
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index ed37cda..147c0ae 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -18,6 +18,11 @@ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+   remote: "right",
+ };
+ 
++export const STRIP_PANES: Readonly<Record<Side, { readonly left: Pane; readonly right: Pane }>> = {
++  local: { left: "left", right: "center" },
++  remote: { left: "center", right: "right" },
++};
++
+ export function rangeSpan(
+   doc: Text,
+   range: { readonly from: number; readonly to: number },
+diff --git a/frontend/src/editor/internal/stripIcons.ts b/frontend/src/editor/internal/stripIcons.ts
+new file mode 100644
+index 0000000..013294c
+--- /dev/null
++++ b/frontend/src/editor/internal/stripIcons.ts
+@@ -0,0 +1,119 @@
++import chevronsLeftIcon from "~icons/lucide/chevrons-left?raw";
++import chevronsRightIcon from "~icons/lucide/chevrons-right?raw";
++import cornerLeftDownIcon from "~icons/lucide/corner-left-down?raw";
++import cornerRightDownIcon from "~icons/lucide/corner-right-down?raw";
++import xIcon from "~icons/lucide/x?raw";
++
++import type { Chunk } from "../../ipc";
++import type { ChunkAction } from "./apply";
++import { arrowTitles, type Arrow, type ArrowShape, type ButtonLayout } from "./gap";
++import type { Side } from "./side";
++import type { ApplyMode } from "./status";
++
++export type IconPress = {
++  readonly kind: ChunkAction["kind"];
++  readonly chunk: Chunk;
++  readonly side: Side;
++};
++export type OnPress = (press: IconPress, event: PointerEvent) => void;
++export type ArrowRow = ArrowShape & {
++  readonly node: SVGGElement;
++  readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
++};
++
++const SVG_NS = "http://www.w3.org/2000/svg";
++export const ACTION_WIDTH_PX = 16;
++const ICON_PX = 14;
++const HALF = 0.5;
++const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
++  local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
++  remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
++};
++const parsedIcons = new Map<string, SVGSVGElement>();
++
++function parsedIcon(markup: string): SVGSVGElement {
++  const cached = parsedIcons.get(markup);
++  if (cached !== undefined) {
++    return cached;
++  }
++  const holder = document.createElementNS(SVG_NS, "g");
++  holder.innerHTML = markup;
++  const icon = holder.firstElementChild;
++  if (!(icon instanceof SVGSVGElement)) {
++    throw new Error("icon markup is not an <svg>");
++  }
++  parsedIcons.set(markup, icon);
++  return icon;
++}
++
++function iconElement(markup: string, lineHeight: number): SVGSVGElement {
++  const icon = document.importNode(parsedIcon(markup), true);
++  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * HALF));
++  icon.setAttribute("y", String((lineHeight - ICON_PX) * HALF));
++  icon.setAttribute("width", String(ICON_PX));
++  icon.setAttribute("height", String(ICON_PX));
++  return icon;
++}
++
++export function isCovered(covered: ChunkAction | null, press: IconPress): boolean {
++  return (
++    covered !== null &&
++    covered.kind === press.kind &&
++    covered.side === press.side &&
++    covered.chunks.some((chunk) => chunk.id === press.chunk.id)
++  );
++}
++
++function actionButton(
++  button: { x: number; lineHeight: number; icon: string; title: string },
++  press: IconPress,
++  onPress: OnPress,
++): SVGGElement {
++  const group = document.createElementNS(SVG_NS, "g");
++  group.setAttribute("class", `chunk-action chunk-action-${press.kind}`);
++  group.setAttribute("transform", `translate(${button.x} 0)`);
++  const title = document.createElementNS(SVG_NS, "title");
++  title.textContent = button.title;
++  const hit = document.createElementNS(SVG_NS, "rect");
++  hit.setAttribute("width", String(ACTION_WIDTH_PX));
++  hit.setAttribute("height", String(button.lineHeight));
++  group.append(title, hit, iconElement(button.icon, button.lineHeight));
++  group.addEventListener("pointerdown", (event) => {
++    if (event.button === 0) {
++      onPress(press, event);
++    }
++  });
++  return group;
++}
++
++export function arrowRow(
++  {
++    arrow,
++    side,
++    platform,
++  }: { readonly arrow: Arrow; readonly side: Side; readonly platform: string },
++  layout: ButtonLayout,
++  onPress: OnPress,
++): ArrowRow {
++  const { chunk, mode, decidesOther } = arrow;
++  const { applyX, ignoreX, lineHeight } = layout;
++  const titles = arrowTitles(arrow, platform);
++  const apply: IconPress = { kind: "apply", chunk, side };
++  const ignore: IconPress = { kind: "ignore", chunk, side };
++  const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
++  const applyButton = actionButton({ x: applyX, lineHeight, ...applyIcon }, apply, onPress);
++  const ignoreIcon = { icon: xIcon, title: titles.ignore };
++  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreIcon }, ignore, onPress);
++  const node = document.createElementNS(SVG_NS, "g");
++  node.append(applyButton, ignoreButton);
++  return {
++    node,
++    mode,
++    decidesOther,
++    layout,
++    buttons: [
++      [applyButton, apply],
++      [ignoreButton, ignore],
++    ],
++  };
++}
+diff --git a/frontend/src/editor/internal/stripWaves.ts b/frontend/src/editor/internal/stripWaves.ts
+deleted file mode 100644
+index 5dc6944..0000000
+--- a/frontend/src/editor/internal/stripWaves.ts
++++ /dev/null
+@@ -1,53 +0,0 @@
+-import { WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
+-import { FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
+-import type { WavePaint } from "./gap";
+-import { LINE_HEIGHT_PX } from "./pane";
+-
+-const SVG_NS = "http://www.w3.org/2000/svg";
+-const PATH_CLASSES = ["strip-wave-hit", "strip-wave-line"] as const;
+-
+-function waveNode(run: number, hovered: number | null): SVGGElement {
+-  const group = document.createElementNS(SVG_NS, "g");
+-  group.setAttribute(FOLD_RUN_ATTRIBUTE, String(run));
+-  group.classList.toggle(HOVER_CLASS, run === hovered);
+-  for (const name of PATH_CLASSES) {
+-    const path = document.createElementNS(SVG_NS, "path");
+-    path.setAttribute("class", name);
+-    group.append(path);
+-  }
+-  return group;
+-}
+-
+-export class StripWaves {
+-  readonly layer = document.createElementNS(SVG_NS, "g");
+-  readonly #nodes = new Map<number, SVGGElement>();
+-  readonly #hovered: () => number | null;
+-
+-  constructor(hovered: () => number | null) {
+-    this.#hovered = hovered;
+-    this.layer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
+-    this.layer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
+-    this.layer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
+-  }
+-
+-  paint(paints: readonly WavePaint[]): void {
+-    const kept = new Set(paints.map(({ run }) => run));
+-    for (const [run, group] of this.#nodes) {
+-      if (!kept.has(run)) {
+-        group.remove();
+-        this.#nodes.delete(run);
+-      }
+-    }
+-    for (const { run, d } of paints) {
+-      let group = this.#nodes.get(run);
+-      if (group === undefined) {
+-        group = waveNode(run, this.#hovered());
+-        this.#nodes.set(run, group);
+-        this.layer.append(group);
+-      }
+-      for (const path of group.children) {
+-        path.setAttribute("d", d);
+-      }
+-    }
+-  }
+-}
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 6da7acc..c2a430b 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -1,39 +1,28 @@
+ import "../theme.css";
+ import type { EditorView } from "@codemirror/view";
+-import chevronsLeftIcon from "~icons/lucide/chevrons-left?raw";
+-import chevronsRightIcon from "~icons/lucide/chevrons-right?raw";
+-import cornerLeftDownIcon from "~icons/lucide/corner-left-down?raw";
+-import cornerRightDownIcon from "~icons/lucide/corner-right-down?raw";
+-import xIcon from "~icons/lucide/x?raw";
+ 
++import { WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
++import { FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
+ import {
+-  arrowTitles,
+   bandPaints,
+   crossesStrip,
+   gapArrows,
+   keepsArrowRow,
+   type Arrow,
+-  type ArrowShape,
+   type BandPaint,
+   type ButtonLayout,
+   wavePaints,
+   type WavePaint,
+ } from "./gap";
+-import { SIDE_PANE, type ChunkRow, type PaneViews, type WaveRow } from "./geometry";
++import { SIDE_PANE, STRIP_PANES, type ChunkRow, type PaneViews, type WaveRow } from "./geometry";
+ import { LINE_HEIGHT_PX } from "./pane";
+ import type { Side } from "./side";
+-import type { ApplyMode } from "./status";
+-import { StripWaves } from "./stripWaves";
++import { ACTION_WIDTH_PX, arrowRow, isCovered, type ArrowRow, type OnPress } from "./stripIcons";
+ 
+-export type IconPress = {
+-  readonly kind: ChunkAction["kind"];
+-  readonly chunk: Chunk;
+-  readonly side: Side;
+-};
++export type { IconPress } from "./stripIcons";
+ 
+-type OnPress = (press: IconPress, event: PointerEvent) => void;
+ type StripPair = readonly [SVGSVGElement, SVGSVGElement];
+ type GapPanes = { readonly left: EditorView; readonly right: EditorView };
+ type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
+@@ -48,107 +37,9 @@ type GapPaint = {
+   readonly arrows: ArrowPaint | null;
+ };
+ type StripLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
+-type ArrowRow = ArrowShape & {
+-  readonly node: SVGGElement;
+-  readonly buttons: readonly (readonly [SVGGElement, IconPress])[];
+-};
+ 
+ const SVG_NS = "http://www.w3.org/2000/svg";
+-const ACTION_WIDTH_PX = 16;
+-const ICON_PX = 14;
+-const HALF = 0.5;
+-const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
+-  local: { replace: chevronsRightIcon, append: cornerRightDownIcon },
+-  remote: { replace: chevronsLeftIcon, append: cornerLeftDownIcon },
+-};
+-const parsedIcons = new Map<string, SVGSVGElement>();
+-
+-function parsedIcon(markup: string): SVGSVGElement {
+-  const cached = parsedIcons.get(markup);
+-  if (cached !== undefined) {
+-    return cached;
+-  }
+-  const holder = document.createElementNS(SVG_NS, "g");
+-  holder.innerHTML = markup;
+-  const icon = holder.firstElementChild;
+-  if (!(icon instanceof SVGSVGElement)) {
+-    throw new Error("icon markup is not an <svg>");
+-  }
+-  parsedIcons.set(markup, icon);
+-  return icon;
+-}
+-
+-function iconElement(markup: string, lineHeight: number): SVGSVGElement {
+-  const icon = document.importNode(parsedIcon(markup), true);
+-  icon.setAttribute("x", String((ACTION_WIDTH_PX - ICON_PX) * HALF));
+-  icon.setAttribute("y", String((lineHeight - ICON_PX) * HALF));
+-  icon.setAttribute("width", String(ICON_PX));
+-  icon.setAttribute("height", String(ICON_PX));
+-  return icon;
+-}
+-
+-function isCovered(covered: ChunkAction | null, press: IconPress): boolean {
+-  return (
+-    covered !== null &&
+-    covered.kind === press.kind &&
+-    covered.side === press.side &&
+-    covered.chunks.some((chunk) => chunk.id === press.chunk.id)
+-  );
+-}
+-
+-function actionButton(
+-  button: { x: number; lineHeight: number; icon: string; title: string },
+-  press: IconPress,
+-  onPress: OnPress,
+-): SVGGElement {
+-  const group = document.createElementNS(SVG_NS, "g");
+-  group.setAttribute("class", `chunk-action chunk-action-${press.kind}`);
+-  group.setAttribute("transform", `translate(${button.x} 0)`);
+-  const title = document.createElementNS(SVG_NS, "title");
+-  title.textContent = button.title;
+-  const hit = document.createElementNS(SVG_NS, "rect");
+-  hit.setAttribute("width", String(ACTION_WIDTH_PX));
+-  hit.setAttribute("height", String(button.lineHeight));
+-  group.append(title, hit, iconElement(button.icon, button.lineHeight));
+-  group.addEventListener("pointerdown", (event) => {
+-    if (event.button === 0) {
+-      onPress(press, event);
+-    }
+-  });
+-  return group;
+-}
+-
+-function arrowRow(
+-  {
+-    arrow,
+-    side,
+-    platform,
+-  }: { readonly arrow: Arrow; readonly side: Side; readonly platform: string },
+-  layout: ButtonLayout,
+-  onPress: OnPress,
+-): ArrowRow {
+-  const { chunk, mode, decidesOther } = arrow;
+-  const { applyX, ignoreX, lineHeight } = layout;
+-  const titles = arrowTitles(arrow, platform);
+-  const apply: IconPress = { kind: "apply", chunk, side };
+-  const ignore: IconPress = { kind: "ignore", chunk, side };
+-  const applyIcon = { icon: APPLY_ICON[side][mode], title: titles.apply };
+-  const applyButton = actionButton({ x: applyX, lineHeight, ...applyIcon }, apply, onPress);
+-  const ignoreIcon = { icon: xIcon, title: titles.ignore };
+-  const ignoreButton = actionButton({ x: ignoreX, lineHeight, ...ignoreIcon }, ignore, onPress);
+-  const node = document.createElementNS(SVG_NS, "g");
+-  node.append(applyButton, ignoreButton);
+-  return {
+-    node,
+-    mode,
+-    decidesOther,
+-    layout,
+-    buttons: [
+-      [applyButton, apply],
+-      [ignoreButton, ignore],
+-    ],
+-  };
+-}
++const WAVE_PATH_CLASSES = ["strip-wave-hit", "strip-wave-line"] as const;
+ 
+ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   let next = parent.firstElementChild;
+@@ -161,36 +52,58 @@ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   }
+ }
+ 
+-function dropMissing<T>(
+-  nodes: Map<Chunk["id"], T>,
+-  keptIds: ReadonlySet<Chunk["id"]>,
++function dropMissing<K, T>(
++  nodes: Map<K, T>,
++  keptKeys: ReadonlySet<K>,
+   remove: (node: T) => void,
+ ): void {
+-  for (const [id, node] of nodes) {
+-    if (!keptIds.has(id)) {
++  for (const [key, node] of nodes) {
++    if (!keptKeys.has(key)) {
+       remove(node);
+-      nodes.delete(id);
++      nodes.delete(key);
+     }
+   }
+ }
+ 
++function waveNode(run: number, hovered: number | null): SVGGElement {
++  const group = document.createElementNS(SVG_NS, "g");
++  group.setAttribute(FOLD_RUN_ATTRIBUTE, String(run));
++  group.classList.toggle(HOVER_CLASS, run === hovered);
++  for (const name of WAVE_PATH_CLASSES) {
++    const path = document.createElementNS(SVG_NS, "path");
++    path.setAttribute("class", name);
++    group.append(path);
++  }
++  return group;
++}
++
+ class GapStrip {
+   readonly #strip: SVGSVGElement;
+   readonly #side: Side;
+   readonly #onPress: OnPress | null;
++  readonly #hovered: () => number | null;
+   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
+-  readonly #waves: StripWaves;
++  readonly #waveLayer = document.createElementNS(SVG_NS, "g");
+   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
+   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
++  readonly #waves = new Map<number, SVGGElement>();
+   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
+   readonly #platform = navigator.platform;
+ 
+-  constructor(strip: SVGSVGElement, side: Side, onPress: OnPress | null, waves: StripWaves) {
++  constructor(
++    strip: SVGSVGElement,
++    side: Side,
++    onPress: OnPress | null,
++    hovered: () => number | null,
++  ) {
+     this.#strip = strip;
+     this.#side = side;
+     this.#onPress = onPress;
+-    this.#waves = waves;
+-    strip.replaceChildren(this.#bandLayer, this.#waves.layer, this.#arrowLayer);
++    this.#hovered = hovered;
++    this.#waveLayer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
++    this.#waveLayer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
++    this.#waveLayer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
++    strip.replaceChildren(this.#bandLayer, this.#waveLayer, this.#arrowLayer);
+     strip.addEventListener("mousedown", keepEditorFocus);
+   }
+ 
+@@ -223,7 +136,7 @@ class GapStrip {
+ 
+   paint({ bands, waves, arrows }: GapPaint, covered: ChunkAction | null): void {
+     this.#paintBands(bands);
+-    this.#waves.paint(waves);
++    this.#paintWaves(waves);
+     if (arrows !== null) {
+       this.#paintArrows(arrows, covered);
+     }
+@@ -246,6 +159,23 @@ class GapStrip {
+     placeInOrder(this.#bandLayer, nodes);
+   }
+ 
++  #paintWaves(paints: readonly WavePaint[]): void {
++    dropMissing(this.#waves, new Set(paints.map(({ run }) => run)), (group) => {
++      group.remove();
++    });
++    for (const { run, d } of paints) {
++      let group = this.#waves.get(run);
++      if (group === undefined) {
++        group = waveNode(run, this.#hovered());
++        this.#waves.set(run, group);
++        this.#waveLayer.append(group);
++      }
++      for (const path of group.children) {
++        path.setAttribute("d", d);
++      }
++    }
++  }
++
+   #paintArrows({ placed, layout, onPress }: ArrowPaint, covered: ChunkAction | null): void {
+     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
+       row.node.remove();
+@@ -277,13 +207,13 @@ export class Strips {
+   readonly #remote: GapStrip;
+ 
+   constructor(strips: StripPair, onPress: OnPress | null, hovered: () => number | null) {
+-    this.#local = new GapStrip(strips[0], "local", onPress, new StripWaves(hovered));
+-    this.#remote = new GapStrip(strips[1], "remote", onPress, new StripWaves(hovered));
++    this.#local = new GapStrip(strips[0], "local", onPress, hovered);
++    this.#remote = new GapStrip(strips[1], "remote", onPress, hovered);
+   }
+ 
+   paint(views: PaneViews, layout: StripLayout, covered: ChunkAction | null): void {
+-    const local = this.#local.measure({ left: views.left, right: views.center }, layout);
+-    const remote = this.#remote.measure({ left: views.center, right: views.right }, layout);
++    const local = this.#local.measure(stripViews(views, "local"), layout);
++    const remote = this.#remote.measure(stripViews(views, "remote"), layout);
+     this.#local.paint(local, covered);
+     this.#remote.paint(remote, covered);
+   }
+@@ -294,6 +224,11 @@ export class Strips {
+   }
+ }
+ 
++function stripViews(views: PaneViews, side: Side): GapPanes {
++  const panes = STRIP_PANES[side];
++  return { left: views[panes.left], right: views[panes.right] };
++}
++
+ function keepEditorFocus(event: MouseEvent): void {
+   event.preventDefault();
+ }
