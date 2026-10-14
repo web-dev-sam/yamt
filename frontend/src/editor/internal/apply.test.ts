@@ -607,6 +607,32 @@ test("a side applied where a line break at the change's edge was deleted lands o
   ).toBe("a\nL\nR\nz\n");
 });
 
+test("a side applied after the line break above a waiting conflict was deleted starts on its own line", async () => {
+  const conflict = open(
+    await synthetic(
+      { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n", eol: "Lf" },
+      [{ kind: "Conflict", middle: [1, 1], side: [1, 1], remote: [1, 2] }],
+    ),
+  );
+  function joinedAt(merge: ApplyTarget, from: number): ApplyTarget {
+    return { ...merge, state: merge.state.update({ changes: { from, to: from + 1 } }).state };
+  }
+  const joined = joinedAt(conflict, 1);
+
+  const local = run(joined, applyOne(joined, chunkAt(joined, 0), "local"));
+  const both = run(local, applyOne(local, chunkAt(local, 0), "remote"));
+  const localJoined = joinedAt(local, 1);
+  const appended = run(localJoined, applyOne(localJoined, chunkAt(localJoined, 0), "remote"));
+
+  expect(paneText(local.state)).toBe("a\nL\nz\n");
+  expect(centerText(local, 0)).toBe("L\n");
+  expect(decoratedLines(local.state)).toEqual([2]);
+  expect(paneText(both.state)).toBe("a\nL\nR1\nR2\nz\n");
+  expect(centerText(both, 0)).toBe("L\nR1\nR2\n");
+  expect(paneText(appended.state)).toBe("aL\nR1\nR2\nz\n");
+  expect(centerText(appended, 0)).toBe("L\nR1\nR2\n");
+});
+
 test("a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it", async () => {
   const merge = open(await loadFixture(MAGIC_KEYS), true);
   function refused(target: ApplyTarget, edit: StateCommand): boolean {

@@ -270,6 +270,17 @@ test("a line break deleted at a waiting change's edge is written back, so no mar
   expect(written(halfJoinedBefore)).toBe(block);
 });
 
+test("a side applied after the line break above a waiting conflict was deleted is written as one block with no blank line", async () => {
+  const merge = await opened(
+    { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n" },
+    [CONFLICT],
+  );
+  const local = decided(updated(merge, { changes: { from: 1, to: 2 } }), "apply", "local");
+
+  expect(local.state.doc.toString()).toBe("a\nL\nz\n");
+  expect(written(local)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nR1\nR2\n${CLOSE}\nz\n`);
+});
+
 test("the shown text is left out of the file for a waiting one-sided change and a conflict whose sides both wait, nothing else", async () => {
   const merge = await opened(
     { middle: "a\nb\nc\nd\n", local: "a\nB\nc\nL\n", remote: "a\nb\nc\nR\n" },

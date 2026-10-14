@@ -12,6 +12,7 @@ import {
 
 import type { Chunk } from "../../ipc";
 import { placeSpans, setStatus, type ChunkSpan } from "./chunkField";
+import { toDocPos } from "./docPos";
 import { otherSide, type Side } from "./side";
 import {
   applyMode,
@@ -83,6 +84,20 @@ const OPPOSITE: Readonly<Record<ChunkAction["kind"], ChunkAction["kind"]>> = {
   ignore: "apply",
 };
 
+function startOnOwnLine(
+  state: EditorState,
+  field: StateField<readonly ChunkSpan[]>,
+  id: Chunk["id"],
+): EditorState {
+  const spans = state.field(field).map((span) => {
+    const line = state.doc.lineAt(span.from);
+    return span.chunk.id !== id || span.from === span.to || line.from === span.from
+      ? span
+      : { ...span, from: toDocPos(line.to + 1) };
+  });
+  return state.update({ effects: placeSpans.of(spans) }).state;
+}
+
 function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[]): ChainedAction {
   let state = target.state;
   let changes = ChangeSet.empty(state.doc.length);
@@ -92,6 +107,7 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
       throw new Error(`chunk ${chunk.id} is not in the chunk field`);
     }
     if (isSideOpen(chunk, span.status, side)) {
+      const replaces = kind === "apply" && applyMode(span.status, side) === "replace";
       const status =
         kind === "apply"
           ? statusAfterApply(chunk, span.status, side)
@@ -101,7 +117,7 @@ function chainedChanges(target: ApplyTarget, decisions: readonly SideDecision[])
         effects: setStatus.of({ id: chunk.id, status }),
       });
       changes = changes.compose(click.changes);
-      state = click.state;
+      state = replaces ? startOnOwnLine(click.state, target.field, chunk.id) : click.state;
     }
   }
   return { changes, effect: placeSpans.of(state.field(target.field)) };
