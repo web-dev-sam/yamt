@@ -1,8 +1,7 @@
-import { useStorage, type StorageLike } from "@vueuse/core";
+import type { StorageLike } from "@vueuse/core";
 import type { Ref } from "vue";
 
-import { log } from "../ipc";
-import { unexpected } from "./problem";
+import { storedValue } from "./windowStorage";
 
 export type FileListMode = "list" | "tree";
 
@@ -12,14 +11,13 @@ export function createFileListMode(storage?: StorageLike): {
   readonly mode: Readonly<Ref<FileListMode>>;
   toggle(): void;
 } {
-  const mode = useStorage<FileListMode>(STORAGE_KEY, "list", storage, {
-    serializer: { read: (raw) => (raw === "tree" ? "tree" : "list"), write: (value) => value },
-    flush: "sync",
-    writeDefaults: false,
-    onError: (error) => {
-      log.warn("files.view_storage_failed", { ...unexpected(error) });
-    },
-  });
+  const mode = storedValue<FileListMode>(
+    STORAGE_KEY,
+    "list",
+    { read: (raw) => (raw === "tree" ? "tree" : "list"), write: (value) => value },
+    "files.view_storage_failed",
+    storage,
+  );
   return {
     mode,
     toggle: () => {

@@ -22,7 +22,7 @@ type IconButton = {
   readonly icon: Component;
   readonly keepsKeyboard: boolean;
   readonly run: () => void;
-  readonly pressed: Readonly<Ref<boolean>> | null;
+  readonly selected: Readonly<Ref<boolean>> | null;
 };
 
 const props = defineProps<{ summary: MergeSummary | null }>();
@@ -47,7 +47,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("move", "up");
     },
-    pressed: null,
+    selected: null,
   },
   next: {
     label: "Next change",
@@ -56,14 +56,14 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("move", "down");
     },
-    pressed: null,
+    selected: null,
   },
   collapse: {
     label: "Collapse unchanged fragments",
     icon: ChevronsDownUp,
     keepsKeyboard: true,
     run: toggleCollapsing,
-    pressed: collapsing,
+    selected: collapsing,
   },
   applyLeft: {
     label: "Apply non-conflicting changes from the left",
@@ -72,7 +72,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("applyLeft");
     },
-    pressed: null,
+    selected: null,
   },
   applyRight: {
     label: "Apply non-conflicting changes from the right",
@@ -81,7 +81,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("applyRight");
     },
-    pressed: null,
+    selected: null,
   },
   undo: {
     label: "Undo",
@@ -90,7 +90,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("undo");
     },
-    pressed: null,
+    selected: null,
   },
   redo: {
     label: "Redo",
@@ -99,17 +99,17 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("redo");
     },
-    pressed: null,
+    selected: null,
   },
 };
 
 const menuAt = shallowRef<Point | null>(null);
 
 const shownButtons = computed(() =>
-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => {
-    const button = ICON_BUTTONS[id];
-    return { id, ...button, ariaPressed: button.pressed?.value };
-  }),
+  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
+    id,
+    ...ICON_BUTTONS[id],
+  })),
 );
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -160,7 +160,7 @@ function closeMenu(): void {
       type="button"
       :title="button.label"
       :aria-label="button.label"
-      :aria-pressed="button.ariaPressed"
+      :aria-pressed="button.selected?.value"
       :disabled="summary === null"
       class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
       @mousedown="pressed(button, $event)"

@@ -1,7 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
-import type { Pane, PaneViews } from "./geometry";
+import { PANES, type Pane, type PaneViews } from "./geometry";
 
 export type Anchor = Readonly<Record<Pane, number>>;
 type SpanRow = Readonly<Record<Pane, Span>>;
@@ -10,7 +10,6 @@ type ScrollPane = {
   readonly documentPadding: { readonly top: number };
 };
 
-const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 const ANCHOR_AT = 0.5;
 
 function shifted(anchor: Anchor, by: number): Anchor {

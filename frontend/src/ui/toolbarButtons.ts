@@ -1,8 +1,7 @@
-import { useStorage, type StorageLike } from "@vueuse/core";
+import type { StorageLike } from "@vueuse/core";
 import type { Ref } from "vue";
 
-import { log } from "../ipc";
-import { unexpected } from "./problem";
+import { storedValue } from "./windowStorage";
 
 export const TOOLBAR_BUTTONS = [
   "previous",
@@ -47,14 +46,13 @@ function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
 }
 
 export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
-  const hidden = useStorage<ReadonlySet<ToolbarButtonId>>(STORAGE_KEY, HIDDEN_AT_FIRST, storage, {
-    serializer: { read: readHidden, write: writeHidden },
-    flush: "sync",
-    writeDefaults: false,
-    onError: (error) => {
-      log.warn("toolbar.storage_failed", { ...unexpected(error) });
-    },
-  });
+  const hidden = storedValue<ReadonlySet<ToolbarButtonId>>(
+    STORAGE_KEY,
+    HIDDEN_AT_FIRST,
+    { read: readHidden, write: writeHidden },
+    "toolbar.storage_failed",
+    storage,
+  );
   return {
     hidden,
     toggle: (id) => {

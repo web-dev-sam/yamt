@@ -1,0 +1,485 @@
+commit 8183268c8120322e8cfcd70d7f25dcfa55144d42
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-14 16:27:38 +0200
+
+    fix(editor): mask period decided once, middle pinned at its centre, edges snapped to device px (#861, #866-#868)
+
+diff --git a/frontend/src/connectors/index.test.ts b/frontend/src/connectors/index.test.ts
+index f1db24f..fd0f83f 100644
+--- a/frontend/src/connectors/index.test.ts
++++ b/frontend/src/connectors/index.test.ts
+@@ -6,6 +6,7 @@ import {
+   waveJoinPath,
+   wavePhase,
+   waveTile,
++  MASK_PERIODS,
+   WAVE_DOWN_X,
+   WAVE_TILE_HEIGHT_PX,
+   WAVE_TILE_WIDTH_PX,
+@@ -60,6 +61,10 @@ function tileX(x: number, phase: WavePhase): number {
+   );
+ }
+ 
++function driftPx(x: number, phase: WavePhase, wantedTileX: number): number {
++  return (Math.abs(tileX(x, phase) - wantedTileX) * phase.period) / WAVE_TILE_WIDTH_PX;
++}
++
+ function sweep(step: number, to: number): number[] {
+   return Array.from({ length: Math.floor(to / step) + 1 }, (_, i) => i * step);
+ }
+@@ -220,22 +225,25 @@ test("a wave entering from a strip is on its centre heading up at the strip's ed
+   expect(misses).toEqual([]);
+ });
+ 
+-test("a wave between two strips holds the nearest whole number of waves plus a half", () => {
+-  const middle = wavePhase(0, { kind: "through", enters: 100, leaves: 520 });
+-  expect(middle.period).toBe(420 / 21.5);
+-  expect(middle.offset).toBeCloseTo(100 - 4.75 * (420 / 21.5), 9);
++test("420 px between two strips hold 21.5 waves of 1250/64 px, pinned at the middle", () => {
++  expect(wavePhase(0, { kind: "through", enters: 100, leaves: 520 })).toEqual({
++    offset: 7.265625,
++    period: 1250 / MASK_PERIODS,
++  });
++});
++
++test("a wave between two strips holds the nearest whole number of waves plus a half, in a period the mask draws", () => {
+   const misses = WAVE_LEFTS.flatMap((waveLeft) =>
+     DISTANCES.filter((span) => span > 0).flatMap((span) => {
+       const enters = waveLeft + 3.7;
+       const phase = wavePhase(waveLeft, { kind: "through", enters, leaves: enters + span });
+-      const waves = span / phase.period - 0.5;
+-      const nearest = Math.abs(waves - (span / 20 - 0.5)) <= 0.5 + 1e-9;
++      const waves = Math.round(span / phase.period - 0.5) + 0.5;
+       const ok =
+-        Math.abs(tileX(enters - waveLeft, phase) - WAVE_UP_X) < 1e-9 &&
+-        Math.abs(tileX(enters + span - waveLeft, phase) - WAVE_DOWN_X) < 1e-9 &&
+-        Math.abs(waves - Math.round(waves)) < 1e-9 &&
+-        nearest &&
+-        Math.abs(phase.period - 20) / 20 <= 1 / (2 * Math.round(waves) + 1) + 1e-12 &&
++        driftPx(enters - waveLeft, phase, WAVE_UP_X) <= waves / 256 + 1e-9 &&
++        driftPx(enters + span - waveLeft, phase, WAVE_DOWN_X) <= waves / 256 + 1e-9 &&
++        Number.isInteger(phase.period * MASK_PERIODS) &&
++        Math.abs(waves - span / 20) <= 0.5 + 1e-9 &&
++        Math.abs(phase.period - 20) / 20 <= 1 / (2 * waves) + 1 / (2 * MASK_PERIODS * 20) &&
+         phase.offset >= 0 &&
+         phase.offset < phase.period;
+       return ok ? [] : [{ waveLeft, span, phase }];
+@@ -245,6 +253,14 @@ test("a wave between two strips holds the nearest whole number of waves plus a h
+   expect(misses).toEqual([]);
+ });
+ 
++test("a wave between strips a hair apart is drawn one mask pixel per 64 waves", () => {
++  const phase = wavePhase(0, { kind: "through", enters: 100, leaves: 100.001 });
++
++  expect(phase.period).toBe(1 / MASK_PERIODS);
++  expect(phase.offset).toBeGreaterThanOrEqual(0);
++  expect(phase.offset).toBeLessThan(phase.period);
++});
++
+ test("a wave between two strips that do not leave room falls back to entering", () => {
+   for (const leaves of [100, 70]) {
+     expect(wavePhase(3, { kind: "through", enters: 100, leaves })).toEqual(
+diff --git a/frontend/src/connectors/index.ts b/frontend/src/connectors/index.ts
+index 31e17af..65706f5 100644
+--- a/frontend/src/connectors/index.ts
++++ b/frontend/src/connectors/index.ts
+@@ -34,6 +34,7 @@ export const WAVE_TILE_HEIGHT_PX =
+ const WAVE_UP_STEPS = 3;
+ export const WAVE_DOWN_X = WAVE_STEP_PX;
+ export const WAVE_UP_X = WAVE_UP_STEPS * WAVE_STEP_PX;
++export const MASK_PERIODS = 64;
+ 
+ export type WaveEnds =
+   | { readonly kind: "leaves"; readonly at: number }
+@@ -60,8 +61,11 @@ export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase {
+       if (span <= 0) {
+         return pinned(ends.enters - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
+       }
+-      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF);
+-      return pinned(ends.enters - waveLeft, WAVE_UP_X, span / (waves + HALF));
++      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF) + HALF;
++      const maskWidth = Math.max(1, Math.round((span / waves) * MASK_PERIODS));
++      const middle = (ends.enters + ends.leaves) * HALF - waveLeft;
++      const middleX = WAVE_UP_X + waves * WAVE_TILE_WIDTH_PX * HALF;
++      return pinned(middle, middleX, maskWidth / MASK_PERIODS);
+     }
+   }
+ }
+diff --git a/frontend/src/editor/internal/foldRuns.ts b/frontend/src/editor/internal/foldRuns.ts
+index e79e3df..b09d636 100644
+--- a/frontend/src/editor/internal/foldRuns.ts
++++ b/frontend/src/editor/internal/foldRuns.ts
+@@ -2,7 +2,7 @@ import type { Text } from "@codemirror/state";
+ 
+ import type { Chunk } from "../../ipc";
+ import { toDocPos, type DocPos } from "./docPos";
+-import type { Pane } from "./geometry";
++import { PANES, type Pane } from "./geometry";
+ 
+ export type Hidden = { readonly from: DocPos; readonly to: DocPos };
+ export type FoldLevel = Readonly<Record<Pane, Hidden | null>>;
+@@ -14,7 +14,6 @@ const CONTEXT_LINES = 4;
+ const LEVEL_GROWTH = 2;
+ const LEVELS = 3;
+ export const MIN_HIDDEN_LINES = 2;
+-const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ const CHUNK_RANGE = {
+   left: "local",
+   center: "middle",
+diff --git a/frontend/src/editor/internal/foldView.ts b/frontend/src/editor/internal/foldView.ts
+index b8a730f..211e4cc 100644
+--- a/frontend/src/editor/internal/foldView.ts
++++ b/frontend/src/editor/internal/foldView.ts
+@@ -9,7 +9,7 @@ import {
+ } from "@codemirror/view";
+ 
+ import { waveCenterY, waveTile, WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../../connectors";
+-import { WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
++import { MASK_PERIODS, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
+ import { Folding, FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
+ import { displayed, type Fold } from "./foldRuns";
+ import { collapseSpec, foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
+@@ -101,9 +101,8 @@ function waveMarkers(
+ }
+ 
+ // WebKitGTK draws a repeated mask tile at its width rounded to whole device pixels but places it from the
+-// unrounded width (measured in slice 3.V-phase: a 19.58 px tile repeats every 19.5 px at ratio 2), so one
+-// tile holds many waves and its width is rounded to whole CSS pixels here.
+-const MASK_PERIODS = 64;
++// unrounded width (plan §2 #64), so one tile holds MASK_PERIODS waves: `wavePhase` keeps that width whole
++// CSS pixels, which are whole device pixels because WebKitGTK draws only at whole ratios (plan §3).
+ const MASK_WIDTH_PX = WAVE_TILE_WIDTH_PX * MASK_PERIODS;
+ 
+ function waveMask(strokePx: number): string {
+@@ -123,7 +122,7 @@ const waveTop = waveCenterY(LINE_HEIGHT_PX) - WAVE_TILE_HEIGHT_PX * HALF;
+ const tile = {
+   maskRepeat: "repeat-x",
+   maskPosition: `var(${WAVE_PHASE_VARS.offset}, 0px) ${waveTop}px`,
+-  maskSize: `round(calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}), 1px) ${WAVE_TILE_HEIGHT_PX}px`,
++  maskSize: `calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}) ${WAVE_TILE_HEIGHT_PX}px`,
+ };
+ 
+ const waveTheme = EditorView.theme({
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index 147c0ae..51b76eb 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -9,6 +9,7 @@ import type { Side } from "./side";
+ import type { ChunkState } from "./status";
+ 
+ export type Pane = "left" | "center" | "right";
++export const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ export type PaneViews = Readonly<Record<Pane, EditorView>>;
+ export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+ export type WaveRow = Readonly<Record<Pane, number | null>>;
+diff --git a/frontend/src/editor/internal/wavePhase.test.ts b/frontend/src/editor/internal/wavePhase.test.ts
+index 4e4dfdd..0454394 100644
+--- a/frontend/src/editor/internal/wavePhase.test.ts
++++ b/frontend/src/editor/internal/wavePhase.test.ts
+@@ -1,7 +1,8 @@
+-import { expect, test } from "vitest";
++import { expect, test, vi } from "vitest";
+ 
+ import { wavePhase } from "../../connectors";
+-import { paneEnds, panePhases, phaseStyle, writePhase, type WaveLayout } from "./wavePhase";
++import { layoutOf, paneEnds, panePhases, phaseStyle, writePhase, WavePhases } from "./wavePhase";
++import type { WaveHosts, WaveLayout } from "./wavePhase";
+ 
+ const LAYOUT: WaveLayout = {
+   scrollers: {
+@@ -27,7 +28,10 @@ function shifted(layout: WaveLayout, by: number): WaveLayout {
+   };
+ }
+ 
+-function fakeStyle(): { style: Parameters<typeof writePhase>[0]; writes: string[] } {
++type FakeStyle = { style: Parameters<typeof writePhase>[0]; writes: string[] };
++type Rect = { left: number; right: number };
++
++function fakeStyle(): FakeStyle {
+   const values = new Map<string, string>();
+   const writes: string[] = [];
+   return {
+@@ -111,3 +115,171 @@ test("a phase is written only when it changed, and removed when the pane has non
+     "--fold-wave-period removed",
+   ]);
+ });
++
++function measured(left: number, right: number): { getBoundingClientRect: () => Rect } {
++  return { getBoundingClientRect: () => ({ left, right }) };
++}
++
++type FakeObserver = { observed: unknown[]; disconnected: boolean; resize: () => void };
++type FakeQuery = { media: string; listeners: Set<() => void> };
++type FakeDom = { observers: FakeObserver[]; queries: FakeQuery[]; styles: FakeStyle[] };
++
++function fakeDom(ratio: number): FakeDom {
++  const dom: FakeDom = { observers: [], queries: [], styles: [] };
++  vi.stubGlobal("devicePixelRatio", ratio);
++  vi.stubGlobal(
++    "ResizeObserver",
++    class {
++      readonly observed: unknown[] = [];
++      disconnected = false;
++      readonly resize: () => void;
++      constructor(callback: () => void) {
++        this.resize = callback;
++        dom.observers.push(this);
++      }
++      observe(target: unknown): void {
++        this.observed.push(target);
++      }
++      disconnect(): void {
++        this.disconnected = true;
++      }
++    },
++  );
++  vi.stubGlobal("matchMedia", (media: string) => {
++    const listeners = new Set<() => void>();
++    dom.queries.push({ media, listeners });
++    return {
++      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
++      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
++    };
++  });
++  vi.stubGlobal(
++    "HTMLElement",
++    class {
++      readonly style: FakeStyle["style"];
++      constructor() {
++        const faked = fakeStyle();
++        dom.styles.push(faked);
++        this.style = faked.style;
++      }
++    },
++  );
++  vi.stubGlobal("Element", class {});
++  return dom;
++}
++
++function fakeHosts(local: Rect, remote: Rect): WaveHosts {
++  return {
++    left: new HTMLElement(),
++    center: new HTMLElement(),
++    right: new HTMLElement(),
++    strips: [
++      Object.assign(new Element(), measured(local.left, local.right)),
++      Object.assign(new Element(), measured(remote.left, remote.right)),
++    ],
++  };
++}
++
++test("the layout is read from each pane's scroller and the strips in order, local first", () => {
++  const views = {
++    left: { dom: measured(250, 700), scrollDOM: measured(260, 699) },
++    center: { dom: measured(738, 1179), scrollDOM: measured(739, 1178) },
++    right: { dom: measured(1217, 1658), scrollDOM: measured(1218, 1657) },
++  };
++
++  expect(layoutOf(views, [measured(700, 738), measured(1179, 1217)], 1)).toEqual({
++    scrollers: {
++      left: { left: 260, right: 699 },
++      center: { left: 739, right: 1178 },
++      right: { left: 1218, right: 1657 },
++    },
++    strips: { local: { left: 700, right: 738 }, remote: { left: 1179, right: 1217 } },
++  });
++});
++
++test("every edge is snapped to the device pixels of the ratio", () => {
++  const edge = measured(428.65625, 808.328125);
++  const views = {
++    left: { scrollDOM: edge },
++    center: { scrollDOM: edge },
++    right: { scrollDOM: edge },
++  };
++  const snapped = [1, 1.25, 2].map((ratio) => layoutOf(views, [edge, edge], ratio));
++
++  expect(snapped.map(({ scrollers, strips }) => [scrollers, strips])).toEqual(
++    [
++      { left: 429, right: 808 },
++      { left: 428.8, right: 808 },
++      { left: 428.5, right: 808.5 },
++    ].map((each) => [
++      { left: each, center: each, right: each },
++      { local: each, remote: each },
++    ]),
++  );
++});
++
++test("a change of resolution measures again at the new ratio and watches for the next change", () => {
++  const dom = fakeDom(1);
++  const hosts = fakeHosts(
++    { left: 389.65625, right: 427.65625 },
++    { left: 809.328125, right: 847.328125 },
++  );
++  const views = {
++    left: { scrollDOM: measured(9, 388.65625) },
++    center: { scrollDOM: measured(428.65625, 808.328125) },
++    right: { scrollDOM: measured(848.328125, 1228) },
++  };
++  const phases = new WavePhases(hosts, () => views);
++  function centerPhase(): string[] {
++    return [
++      hosts.center.style.getPropertyValue("--fold-wave-x"),
++      hosts.center.style.getPropertyValue("--fold-wave-period"),
++    ];
++  }
++  function expected(ratio: number): string[] {
++    const phase = panePhases(layoutOf(views, hosts.strips, ratio)).center;
++    return phase === null ? [] : Object.values(phaseStyle(phase));
++  }
++
++  dom.observers[0]?.resize();
++  const atOne = centerPhase();
++  vi.stubGlobal("devicePixelRatio", 2);
++  for (const listener of dom.queries[0]?.listeners ?? []) {
++    listener();
++  }
++  const atTwo = centerPhase();
++  const watched = dom.queries.map(({ media, listeners }) => [media, listeners.size]);
++  phases.destroy();
++  const afterDestroy = dom.queries.map(({ listeners }) => listeners.size);
++  vi.unstubAllGlobals();
++
++  expect(atOne).toEqual(expected(1));
++  expect(atTwo).toEqual(expected(2));
++  expect(atTwo).not.toEqual(atOne);
++  expect(watched).toEqual([
++    ["(resolution: 1dppx)", 0],
++    ["(resolution: 2dppx)", 1],
++  ]);
++  expect(afterDestroy).toEqual([0, 0]);
++});
++
++test("destroying the phases stops observing and removes both properties from every pane", () => {
++  const dom = fakeDom(1);
++  const hosts = fakeHosts({ left: 700, right: 738 }, { left: 1179, right: 1217 });
++  const phases = new WavePhases(hosts, () => {
++    throw new Error("no resize in this test");
++  });
++  for (const pane of ["left", "center", "right"] as const) {
++    writePhase(hosts[pane].style, { offset: 7.5, period: 20 });
++  }
++
++  phases.destroy();
++  vi.unstubAllGlobals();
++
++  expect(dom.observers.map(({ observed, disconnected }) => ({ observed, disconnected }))).toEqual([
++    { observed: [hosts.left, hosts.center, hosts.right], disconnected: true },
++  ]);
++  expect(dom.styles.map(({ writes }) => writes.slice(2))).toEqual(
++    Array.from({ length: 3 }, () => ["--fold-wave-x removed", "--fold-wave-period removed"]),
++  );
++});
+diff --git a/frontend/src/editor/internal/wavePhase.ts b/frontend/src/editor/internal/wavePhase.ts
+index 0af1686..06ce343 100644
+--- a/frontend/src/editor/internal/wavePhase.ts
++++ b/frontend/src/editor/internal/wavePhase.ts
+@@ -1,5 +1,5 @@
+ import { wavePhase, type WaveEnds, type WavePhase } from "../../connectors";
+-import { STRIP_PANES, type Pane, type PaneViews } from "./geometry";
++import { PANES, STRIP_PANES, type Pane } from "./geometry";
+ import { SIDES, type Side } from "./side";
+ 
+ export const WAVE_PHASE_VARS = { offset: "--fold-wave-x", period: "--fold-wave-period" } as const;
+@@ -9,13 +9,14 @@ export type WaveHosts = Readonly<Record<Pane, HTMLElement>> & {
+ };
+ 
+ type Edges = { readonly left: number; readonly right: number };
++type Measured = { getBoundingClientRect(): Edges };
++type MeasuredPanes = Readonly<Record<Pane, { readonly scrollDOM: Measured }>>;
+ export type WaveLayout = {
+   readonly scrollers: Readonly<Record<Pane, Edges>>;
+   readonly strips: Readonly<Record<Side, Edges>>;
+ };
+ type PhaseStyle = Pick<CSSStyleDeclaration, "getPropertyValue" | "setProperty" | "removeProperty">;
+ 
+-const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ const PHASE_KEYS = ["offset", "period"] as const satisfies readonly (keyof WavePhase)[];
+ 
+ function stripEdge(pane: Pane, strips: WaveLayout["strips"], edge: keyof Edges): number | null {
+@@ -44,6 +45,26 @@ export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase
+   return { left: phase("left"), center: phase("center"), right: phase("right") };
+ }
+ 
++export function layoutOf(
++  views: MeasuredPanes,
++  [local, remote]: readonly [Measured, Measured],
++  ratio: number,
++): WaveLayout {
++  // WebKit paints each box, and the mask's origin in it, at whole device pixels (plan §2 #64).
++  function snapped(element: Measured): Edges {
++    const { left, right } = element.getBoundingClientRect();
++    return { left: Math.round(left * ratio) / ratio, right: Math.round(right * ratio) / ratio };
++  }
++  return {
++    scrollers: {
++      left: snapped(views.left.scrollDOM),
++      center: snapped(views.center.scrollDOM),
++      right: snapped(views.right.scrollDOM),
++    },
++    strips: { local: snapped(local), remote: snapped(remote) },
++  };
++}
++
+ export function phaseStyle(phase: WavePhase): Readonly<Record<keyof WavePhase, string>> {
+   return { offset: `${phase.offset}px`, period: `${phase.period}px` };
+ }
+@@ -62,28 +83,37 @@ export function writePhase(style: PhaseStyle, phase: WavePhase | null): void {
+ 
+ export class WavePhases {
+   readonly #hosts: WaveHosts;
++  readonly #views: () => MeasuredPanes;
+   readonly #observer: ResizeObserver;
++  #resolution: MediaQueryList;
+ 
+-  constructor(hosts: WaveHosts, views: () => PaneViews) {
++  constructor(hosts: WaveHosts, views: () => MeasuredPanes) {
+     this.#hosts = hosts;
++    this.#views = views;
+     this.#observer = new ResizeObserver(() => {
+-      this.#measure(views());
++      this.#measure();
+     });
+     for (const pane of PANES) {
+       this.#observer.observe(hosts[pane]);
+     }
++    this.#resolution = this.#watchResolution();
+   }
+ 
+-  #measure(views: PaneViews): void {
+-    const [local, remote] = this.#hosts.strips;
+-    const phases = panePhases({
+-      scrollers: {
+-        left: views.left.scrollDOM.getBoundingClientRect(),
+-        center: views.center.scrollDOM.getBoundingClientRect(),
+-        right: views.right.scrollDOM.getBoundingClientRect(),
+-      },
+-      strips: { local: local.getBoundingClientRect(), remote: remote.getBoundingClientRect() },
+-    });
++  readonly #resolutionChanged = (): void => {
++    this.#resolution.removeEventListener("change", this.#resolutionChanged);
++    this.#resolution = this.#watchResolution();
++    this.#measure();
++  };
++
++  #watchResolution(): MediaQueryList {
++    const query = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
++    query.addEventListener("change", this.#resolutionChanged);
++    return query;
++  }
++
++  #measure(): void {
++    const layout = layoutOf(this.#views(), this.#hosts.strips, devicePixelRatio);
++    const phases = panePhases(layout);
+     for (const pane of PANES) {
+       writePhase(this.#hosts[pane].style, phases[pane]);
+     }
+@@ -91,6 +121,7 @@ export class WavePhases {
+ 
+   destroy(): void {
+     this.#observer.disconnect();
++    this.#resolution.removeEventListener("change", this.#resolutionChanged);
+     for (const pane of PANES) {
+       writePhase(this.#hosts[pane].style, null);
+     }

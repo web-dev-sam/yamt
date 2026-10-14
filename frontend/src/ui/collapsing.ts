@@ -1,8 +1,7 @@
-import { useStorage, type StorageLike } from "@vueuse/core";
+import type { StorageLike } from "@vueuse/core";
 import type { Ref } from "vue";
 
-import { log } from "../ipc";
-import { unexpected } from "./problem";
+import { storedValue } from "./windowStorage";
 
 export type Collapsing = {
   readonly collapsing: Readonly<Ref<boolean>>;
@@ -12,14 +11,13 @@ export type Collapsing = {
 const STORAGE_KEY = "yamt.collapse.unchanged";
 
 export function createCollapsing(storage?: StorageLike): Collapsing {
-  const collapsing = useStorage<boolean>(STORAGE_KEY, true, storage, {
-    serializer: { read: (raw) => raw !== "false", write: (on) => String(on) },
-    flush: "sync",
-    writeDefaults: false,
-    onError: (error) => {
-      log.warn("collapse.storage_failed", { ...unexpected(error) });
-    },
-  });
+  const collapsing = storedValue<boolean>(
+    STORAGE_KEY,
+    true,
+    { read: (raw) => raw !== "false", write: (on) => String(on) },
+    "collapse.storage_failed",
+    storage,
+  );
   return {
     collapsing,
     toggleCollapsing: () => {
