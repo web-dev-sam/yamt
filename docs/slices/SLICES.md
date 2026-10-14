@@ -384,6 +384,29 @@ final run.
 | 2   | 3.L-tree: list/tree button, tree rows, folder icons, remembered view (`briefs/3.L-tree-view.md`, `-rework-1.md`; `ui/FileList.vue`, `ui/FileTree.vue`, `ui/fileTree.ts`, `ui/fileListMode.ts`, `ui/fileIcon.ts`, `ui/folderIcon.ts`, `ui/iconTable.ts`, tests) | web-impl | accepted | round 1 `7b188b3` (`FileTreeView`): real app 15 expected rows, icons, guides, reveal, restart. Correctness fail #815 (describe/it invisible to mutants); #812–#814, #816, #817 promoted, #818 dropped → rework 1 `a1b492d` (`iconTable.ts`, `revealed`, `folderIcon(path)`, top-level tests; Stryker 100/100/100/93.81, 6 equivalents); both re-checks pass |
 | 3   | final run (`briefs/3.L-verify.md`): `just check`, `just mutants 1a57989`, the real app: both features together                                                                                                                                                 | verifier | done     | `FileListVerify` at `4fd906c`, gate **pass** (notes `.omp/run/notes/FileListVerify.md`): `just check` 0 (370 Rust, 694 web, hooks 16/16, map ok); mutants: no new gap (#819 gate-covered); real app steps 1–7 incl. choice and deleted-side views, tree rows, reveal, Keymap row, restart in the tree; helper gaps #820                                     |
 
+## Left header — name the branch or commit checked out (session 12)
+
+Intent (owner 2026-10-14, #821; plan §2 #62): "Local (yours)" shows what is checked out, as the right header shows what
+is merged in (#50): "Local (yours): <branch>" when HEAD is on a branch, "Local (yours): <short id> <subject>" with the
+full message on hover when HEAD is detached (a rebase), plain "Local (yours)" when nothing is found. No question asked
+(OR13): the right header's forms, WebStorm's choice of name (current branch, else HEAD's commit).
+
+Acceptance: in the real app on a fresh conflict repository merging `remote` into `local`, the headers read "Local
+(yours): local" and "Remote (theirs): remote" in the merge view, the deleted-side view and the choice view; on a
+rebase conflict the left header reads HEAD's short id and subject, its hover the full message; a git failure while
+reading one name leaves only that header plain. Non-goals: swapping the sides during a rebase (WebStorm does), WebStorm's
+"Changes from …" words, naming a detached HEAD by a branch, the toolbar or file list.
+
+Slices (a dependency chain): row 1 changes the reply (`remote_name` → `side_names`); the orchestrator regenerates the
+bindings and commits both; row 2 then switches the window to it. Each patch: commit, `just mutants <commit before>`,
+both reviews; then one final run.
+
+| row | slice                                                                                                                                     | owner     | status  | evidence |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
+| 1   | 3.N-rust: `SideNames` read at open, `side_names` command (`briefs/3.N-side-names-rust.md`; `crates/gitio`, `crates/session`, `src-tauri`) | rust-impl | running |          |
+| 2   | 3.N-web: both headers from `sideNames` (`briefs/3.N-side-names-web.md`; `frontend/src/ipc`, `frontend/src/ui`, `main.ts`)                 | web-impl  | planned |          |
+| 3   | final run: `just check`, `just mutants cb0151e`, the real app on merge and rebase conflicts                                               | verifier  | planned |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

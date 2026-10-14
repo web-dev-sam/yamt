@@ -1,1 +1,17 @@
-{}
+{
+  "SideNamesRust": {
+    "owned": [
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/tests/merge_heads.rs",
+      "crates/session/src/remote_name.rs",
+      "crates/session/src/side_names.rs",
+      "crates/session/src/lib.rs",
+      "crates/session/src/open.rs",
+      "crates/session/src/session.rs",
+      "crates/session/tests/remote_name.rs",
+      "crates/session/tests/side_names.rs",
+      "crates/session/AGENTS.md",
+      "src-tauri/src/commands.rs"
+    ]
+  }
+}
