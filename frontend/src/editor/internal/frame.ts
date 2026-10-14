@@ -78,6 +78,10 @@ export class Frame {
     });
   }
 
+  realign(): void {
+    this.#scroll.follow("center");
+  }
+
   destroy(): void {
     if (this.#frameId !== null) {
       cancelAnimationFrame(this.#frameId);

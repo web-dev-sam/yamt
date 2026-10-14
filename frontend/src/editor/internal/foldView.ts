@@ -12,7 +12,7 @@ import { waveCenterY, waveTile, WAVE_HOVER_STROKE_PX, WAVE_STROKE_PX } from "../
 import { WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from "../../connectors";
 import { Folding, FOLD_RUN_ATTRIBUTE, HOVER_CLASS } from "./folding";
 import { displayed, type Fold } from "./foldRuns";
-import { foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
+import { collapseSpec, foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./folds";
 import { waveDeletes, type FoldFields } from "./folds";
 import type { Pane, PaneViews } from "./geometry";
 import { LINE_HEIGHT_PX } from "./pane";
@@ -183,8 +183,8 @@ export class Folds {
   readonly #phases: WavePhases;
   readonly #wiring: FoldWiring;
 
-  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews) {
-    const fields = foldFields(runs);
+  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews, collapsed: boolean) {
+    const fields = foldFields(runs, collapsed);
     this.fields = fields;
     this.#wiring = { folds: fields, hovered: this.hovered, views };
     const all = [hosts.left, hosts.center, hosts.right, ...hosts.strips];
@@ -193,6 +193,13 @@ export class Folds {
       center.dispatch(showNextStep(center.state.field(fields.center), run));
     });
     this.#phases = new WavePhases(hosts, views);
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    const center = this.#wiring.views().center;
+    center.dispatch(collapseSpec(this.fields.center, center.state, collapsed), {
+      effects: center.scrollSnapshot(),
+    });
   }
 
   center(): Extension {

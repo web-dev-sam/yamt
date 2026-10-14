@@ -14,18 +14,24 @@ import { EditorView } from "@codemirror/view";
 import { toDocPos, type DocPos } from "./docPos";
 import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
 import type { Fold, FoldLevel, Hidden } from "./foldRuns";
+import { leaveAllHidden, revealKeep } from "./foldSelection";
 import type { Pane, PaneViews } from "./geometry";
 
 type ShowFolds = { readonly run: number; readonly keep: number };
 
+export type FoldState = {
+  readonly runs: readonly Fold[];
+  readonly hiding: readonly number[];
+};
+
 export type FoldFields = {
   readonly runs: readonly Fold[];
-  readonly center: StateField<readonly Fold[]>;
+  readonly center: StateField<FoldState>;
   readonly sides: StateField<readonly number[]>;
 };
 
 export const showFolds = StateEffect.define<ShowFolds>();
-const showSideFolds = StateEffect.define<readonly number[]>();
+const setHiding = StateEffect.define<readonly number[]>();
 
 function mapHidden(hidden: Hidden, changes: ChangeDesc, doc: Text): Hidden | null {
   const from = changes.mapPos(hidden.from, 1);
@@ -63,27 +69,39 @@ function mapFolds(folds: readonly Fold[], changes: ChangeDesc, doc: Text): reado
   return mapped.every((fold, index) => fold === folds[index]) ? folds : mapped;
 }
 
-function innermost(levels: readonly FoldLevel[], count: number): readonly FoldLevel[] {
-  return levels.slice(Math.max(0, levels.length - count));
+function hidingAll(runs: readonly Fold[], collapsed: boolean): readonly number[] {
+  return runs.map((fold) => (collapsed ? fold.hidden.length : 0));
 }
 
-function shown(folds: readonly Fold[], { run, keep }: ShowFolds): readonly Fold[] {
-  const fold = folds[run];
-  if (fold === undefined || Math.max(0, keep) >= fold.hidden.length) {
+function sameCounts(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((count, run) => count === b[run]);
+}
+
+function hiddenLevels(runs: readonly Fold[], counts: readonly number[]): readonly Fold[] {
+  return runs.map(({ hidden }, run) => ({
+    hidden: hidden.slice(Math.max(0, hidden.length - (counts[run] ?? 0))),
+  }));
+}
+
+function displayedIn(folds: readonly Fold[], pane: Pane): Hidden[] {
+  return folds.flatMap((fold) => displayed(fold, pane) ?? []);
+}
+
+function shown(folds: FoldState, { run, keep }: ShowFolds): FoldState {
+  const count = folds.hiding[run];
+  if (count === undefined || Math.max(0, keep) >= count) {
     return folds;
   }
-  const hidden = innermost(fold.hidden, keep);
-  return folds.map((other, index) => (index === run ? { hidden } : other));
+  const hiding = folds.hiding.map((other, index) => (index === run ? Math.max(0, keep) : other));
+  return { ...folds, hiding };
 }
 
 export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): readonly Fold[] {
   if (pane === "center") {
-    return state.field(fields.center);
+    const { runs, hiding } = state.field(fields.center);
+    return hiddenLevels(runs, hiding);
   }
-  const counts = state.field(fields.sides);
-  return fields.runs.map(({ hidden }, run) => ({
-    hidden: innermost(hidden, counts[run] ?? hidden.length),
-  }));
+  return hiddenLevels(fields.runs, state.field(fields.sides));
 }
 
 function startsIn(fields: FoldFields, pane: Pane, state: EditorState): (DocPos | null)[] {
@@ -101,23 +119,6 @@ export function waveStarts(
   };
 }
 
-function holds({ from, to }: Hidden, selection: SelectionRange): boolean {
-  const { anchor, head } = selection;
-  return (
-    (anchor > from && anchor < to) ||
-    (head > from && head < to) ||
-    (!selection.empty && selection.from >= from && selection.to <= to)
-  );
-}
-
-export function revealKeep(
-  levels: readonly (Hidden | null)[],
-  selection: SelectionRange,
-): number | null {
-  const found = levels.findLastIndex((hidden) => hidden !== null && holds(hidden, selection));
-  return found < 0 ? null : levels.length - found - 1;
-}
-
 function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange): ShowFolds[] {
   return folds.flatMap((fold, run) => {
     const keep = revealKeep(
@@ -128,18 +129,22 @@ function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange):
   });
 }
 
-export function foldField(initial: readonly Fold[]): StateField<readonly Fold[]> {
-  return StateField.define<readonly Fold[]>({
-    create: () => initial,
+export function foldField(runs: readonly Fold[], collapsed: boolean): StateField<FoldState> {
+  return StateField.define<FoldState>({
+    create: () => ({ runs, hiding: hidingAll(runs, collapsed) }),
     update(folds, tr) {
-      let next = tr.docChanged ? mapFolds(folds, tr.changes, tr.state.doc) : folds;
+      const mapped = tr.docChanged ? mapFolds(folds.runs, tr.changes, tr.state.doc) : folds.runs;
+      let next = mapped === folds.runs ? folds : { ...folds, runs: mapped };
       for (const effect of tr.effects) {
         if (effect.is(showFolds)) {
           next = shown(next, effect.value);
+        } else if (effect.is(setHiding) && !sameCounts(effect.value, next.hiding)) {
+          next = { ...next, hiding: effect.value };
         }
       }
       if (tr.selection !== undefined) {
-        for (const reveal of reveals(next, "center", tr.selection.main)) {
+        const hidden = hiddenLevels(next.runs, next.hiding);
+        for (const reveal of reveals(hidden, "center", tr.selection.main)) {
           next = shown(next, reveal);
         }
       }
@@ -148,16 +153,35 @@ export function foldField(initial: readonly Fold[]): StateField<readonly Fold[]>
   });
 }
 
-function sideFoldField(runs: readonly Fold[]): StateField<readonly number[]> {
+function sideFoldField(runs: readonly Fold[], collapsed: boolean): StateField<readonly number[]> {
   return StateField.define<readonly number[]>({
-    create: () => runs.map((fold) => fold.hidden.length),
-    update: (counts, tr) =>
-      tr.effects.findLast((effect) => effect.is(showSideFolds))?.value ?? counts,
+    create: () => hidingAll(runs, collapsed),
+    update: (counts, tr) => tr.effects.findLast((effect) => effect.is(setHiding))?.value ?? counts,
   });
 }
 
-export function foldFields(runs: readonly Fold[]): FoldFields {
-  return { runs, center: foldField(runs), sides: sideFoldField(runs) };
+export function foldFields(runs: readonly Fold[], collapsed: boolean): FoldFields {
+  return {
+    runs,
+    center: foldField(runs, collapsed),
+    sides: sideFoldField(runs, collapsed),
+  };
+}
+
+export function collapseSpec(
+  field: StateField<FoldState>,
+  state: EditorState,
+  collapsed: boolean,
+): TransactionSpec {
+  const { runs } = state.field(field);
+  const hiding = hidingAll(runs, collapsed);
+  const spec = {
+    effects: setHiding.of(hiding),
+    annotations: Transaction.addToHistory.of(false),
+  };
+  const hidden = displayedIn(hiddenLevels(runs, hiding), "center");
+  const selection = leaveAllHidden(state.selection, hidden);
+  return selection === null ? spec : { ...spec, selection };
 }
 
 function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
@@ -167,11 +191,11 @@ function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
   };
 }
 
-function nextStep(folds: readonly Fold[], run: number): ShowFolds {
-  return { run, keep: (folds[run]?.hidden.length ?? 0) - 1 };
+function nextStep(folds: FoldState, run: number): ShowFolds {
+  return { run, keep: (folds.hiding[run] ?? 0) - 1 };
 }
 
-export function showNextStep(folds: readonly Fold[], run: number): TransactionSpec {
+export function showNextStep(folds: FoldState, run: number): TransactionSpec {
   return showSpec([nextStep(folds, run)]);
 }
 
@@ -183,17 +207,17 @@ function removesHidden(tr: Transaction, { from, to }: Hidden): boolean {
   return removes;
 }
 
-function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
+function deletedWaves(tr: Transaction, folds: FoldState): ShowFolds[] {
   if (!tr.isUserEvent("delete") || tr.startState.selection.ranges.some((range) => !range.empty)) {
     return [];
   }
-  return folds.flatMap((fold, run) => {
+  return hiddenLevels(folds.runs, folds.hiding).flatMap((fold, run) => {
     const hidden = displayed(fold, "center");
     return hidden !== null && removesHidden(tr, hidden) ? [nextStep(folds, run)] : [];
   });
 }
 
-export function waveDeletes(field: StateField<readonly Fold[]>): Extension {
+export function waveDeletes(field: StateField<FoldState>): Extension {
   return EditorState.transactionFilter.of((tr) => {
     const steps = deletedWaves(tr, tr.startState.field(field));
     return steps.length === 0 ? tr : showSpec(steps);
@@ -201,26 +225,37 @@ export function waveDeletes(field: StateField<readonly Fold[]>): Extension {
 }
 
 export function sideFoldPush(
-  onSides: readonly number[],
-  folds: readonly Fold[],
-): StateEffect<readonly number[]> | null {
-  if (folds.every((fold, run) => fold.hidden.length === onSides[run])) {
+  fields: FoldFields,
+  pane: "left" | "right",
+  side: EditorState,
+  folds: FoldState,
+): TransactionSpec | null {
+  const before = side.field(fields.sides);
+  const counts = folds.hiding;
+  if (sameCounts(counts, before)) {
     return null;
   }
-  return showSideFolds.of(folds.map((fold) => fold.hidden.length));
+  const effects = setHiding.of(counts);
+  if (counts.every((count, run) => count <= (before[run] ?? 0))) {
+    return { effects };
+  }
+  const hidden = displayedIn(hiddenLevels(fields.runs, counts), pane);
+  const selection = leaveAllHidden(side.selection, hidden);
+  return selection === null ? { effects } : { effects, selection };
 }
 
 export function pushFolds(fields: FoldFields, views: () => PaneViews): Extension {
   return EditorView.updateListener.of((update) => {
     const folds = update.state.field(fields.center);
-    if (folds === update.startState.field(fields.center)) {
+    if (folds.hiding === update.startState.field(fields.center).hiding) {
       return;
     }
-    const { left, right } = views();
-    const effect = sideFoldPush(left.state.field(fields.sides), folds);
-    if (effect !== null) {
-      left.dispatch({ effects: effect });
-      right.dispatch({ effects: effect });
+    for (const pane of ["left", "right"] as const) {
+      const view = views()[pane];
+      const spec = sideFoldPush(fields, pane, view.state, folds);
+      if (spec !== null) {
+        view.dispatch(spec);
+      }
     }
   });
 }

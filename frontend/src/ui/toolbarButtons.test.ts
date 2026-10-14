@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { createHiddenButtons, type HiddenButtons } from "./toolbarButtons";
+import { createHiddenButtons, TOOLBAR_BUTTONS, type HiddenButtons } from "./toolbarButtons";
 
 const KEY = "yamt.toolbar.hidden";
 
@@ -80,6 +80,29 @@ test("stored ids yamt does not know are dropped and duplicates collapse", () => 
   const buttons = createHiddenButtons(storage);
 
   expect([...buttons.hidden.value].sort()).toEqual(["applyLeft", "redo"]);
+});
+
+test("the toolbar order puts the collapse toggle after Next change and before the apply-all buttons", () => {
+  expect(TOOLBAR_BUTTONS).toEqual([
+    "previous",
+    "next",
+    "collapse",
+    "applyLeft",
+    "applyRight",
+    "undo",
+    "redo",
+  ]);
+});
+
+test("a hidden list stored before the collapse toggle existed shows it; hiding it stores it in toolbar order", () => {
+  const storage = memoryStorage({ [KEY]: '["undo","redo"]' });
+  const buttons = createHiddenButtons(storage);
+
+  expect(buttons.hidden.value.has("collapse")).toBe(false);
+
+  buttons.toggle("collapse");
+
+  expect(storage.items.get(KEY)).toBe('["collapse","undo","redo"]');
 });
 
 test.each([

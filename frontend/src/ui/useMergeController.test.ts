@@ -11,17 +11,21 @@ const editor = vi.hoisted(() => {
     destroyed: 0,
     readOnly: new Array<boolean>(),
     themes: new Array<string>(),
+    collapsed: new Array<string>(),
   };
   class MergeController {
+    readonly #id: number;
     constructor(
       data: FileMergeData,
       _hosts: unknown,
-      options: { readOnly: boolean; preferences: { theme: string } },
+      options: { readOnly: boolean; preferences: { theme: string }; collapsed: boolean },
     ) {
       state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
       state.built += 1;
+      this.#id = state.built;
       state.readOnly.push(options.readOnly);
       state.themes.push(`built ${options.preferences.theme}`);
+      state.collapsed.push(`${this.#id} built ${options.collapsed}`);
     }
     summary(): { conflicts: number; changes: number } {
       return { conflicts: 0, changes: 0 };
@@ -29,6 +33,9 @@ const editor = vi.hoisted(() => {
     onSummaryChange(): void {}
     setPreferences(preferences: { theme: string }): void {
       state.themes.push(`set ${preferences.theme}`);
+    }
+    setCollapsed(on: boolean): void {
+      state.collapsed.push(`${this.#id} set ${on}`);
     }
     resultText(): string {
       return state.text;
@@ -45,7 +52,14 @@ vi.mock("../editor", () => ({ MergeController: editor.MergeController }));
 const DARK: Preferences = { theme: "dark", keys: DEFAULT_KEYS };
 
 afterEach(() => {
-  Object.assign(editor.state, { text: "", built: 0, destroyed: 0, readOnly: [], themes: [] });
+  Object.assign(editor.state, {
+    text: "",
+    built: 0,
+    destroyed: 0,
+    readOnly: [],
+    themes: [],
+    collapsed: [],
+  });
 });
 
 function host<T>(present: boolean): ShallowRef<T | null> {
@@ -54,7 +68,12 @@ function host<T>(present: boolean): ShallowRef<T | null> {
 
 function mount(
   data: ShallowRef<FileMergeData | null>,
-  { present = true, readOnly = shallowRef(false), preferences = shallowRef(DARK) } = {},
+  {
+    present = true,
+    readOnly = shallowRef(false),
+    preferences = shallowRef(DARK),
+    collapsed = shallowRef(true),
+  } = {},
 ): { scope: EffectScope; handle: MergeHandle } {
   const scope = effectScope();
   const handle = scope.run(() =>
@@ -66,8 +85,7 @@ function mount(
         right: host(present),
         strips: [host(present), host(present)],
       },
-      readOnly,
-      preferences,
+      { readOnly, preferences, collapsed },
     ),
   );
   if (handle === undefined) {
@@ -182,4 +200,56 @@ test("while the file is still loading, toolbar actions and the undo shortcut do 
     handle.redo();
   }).not.toThrow();
   expect(handle.historyKey(ctrlZ)).toBe(false);
+});
+
+test("flipping collapsing before the file loaded reaches no editor and throws nothing", async () => {
+  const collapsed = shallowRef(true);
+  mount(shallowRef<FileMergeData | null>(null), { collapsed });
+  await nextTick();
+
+  collapsed.value = false;
+
+  await expect(nextTick()).resolves.toBeUndefined();
+  expect(editor.state.collapsed).toEqual([]);
+});
+
+test("an editor built while collapsing is off is told so, and a file loaded later follows the current choice", async () => {
+  const collapsed = shallowRef(false);
+  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  mount(data, { collapsed });
+  await nextTick();
+  collapsed.value = true;
+  await nextTick();
+  data.value = await fileData("b\n");
+  await nextTick();
+
+  expect(editor.state.collapsed).toEqual(["1 built false", "1 set true", "2 built true"]);
+});
+
+test("flipping collapsing tells every live editor once, and a destroyed one never", async () => {
+  const collapsed = shallowRef(true);
+  const rebuilt = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  mount(rebuilt, { collapsed });
+  mount(shallowRef<FileMergeData | null>(await fileData("b\n")), { collapsed });
+  await nextTick();
+  rebuilt.value = await fileData("c\n");
+  await nextTick();
+  editor.state.collapsed = [];
+
+  collapsed.value = false;
+  await nextTick();
+
+  expect([...editor.state.collapsed].sort()).toEqual(["2 set false", "3 set false"]);
+});
+
+test("a preferences change never resets collapsing", async () => {
+  const preferences = shallowRef<Preferences>(DARK);
+  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { preferences });
+  await nextTick();
+
+  preferences.value = { theme: "light", keys: DEFAULT_KEYS };
+  await nextTick();
+
+  expect(editor.state.collapsed).toEqual(["1 built true"]);
+  expect(editor.state.themes).toEqual(["built dark", "set light"]);
 });

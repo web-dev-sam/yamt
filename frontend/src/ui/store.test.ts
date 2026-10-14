@@ -1,3 +1,4 @@
+import { setSSRHandler } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
@@ -2224,4 +2225,29 @@ test("with two toggle-file-list keys, each one toggles the list", async () => {
   store.fileListKey(second, LINUX);
   expect(store.fileListShown.value).toBe(true);
   expect(second.prevents()).toBe(1);
+});
+
+test("toggleCollapsing flips collapsing and keeps the choice in the window's storage", () => {
+  const items = new Map<string, string>();
+  setSSRHandler("getDefaultStorage", () => ({
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => {
+      items.set(key, value);
+    },
+    removeItem: (key) => {
+      items.delete(key);
+    },
+  }));
+  try {
+    const store = createAppStore(handSource([]).source);
+    expect(store.collapsing.value).toBe(true);
+
+    store.toggleCollapsing();
+
+    expect(store.collapsing.value).toBe(false);
+    expect(items.get("yamt.collapse.unchanged")).toBe("false");
+    expect(createAppStore(handSource([]).source).collapsing.value).toBe(false);
+  } finally {
+    setSSRHandler("getDefaultStorage", () => undefined);
+  }
 });

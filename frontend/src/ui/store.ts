@@ -13,6 +13,7 @@ import {
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
+import { createCollapsing, type Collapsing } from "./collapsing";
 import { changedOnDisk } from "./diskChanges";
 import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
@@ -80,7 +81,8 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly allResolved: ComputedRef<boolean>;
   readonly preferences: ComputedRef<Preferences>;
   readonly hiddenButtons: HiddenButtons["hidden"];
-} & Actions;
+} & Actions &
+  Collapsing;
 
 let store: AppStore | null = null;
 
@@ -112,6 +114,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
     preferences: computed(() => preferencesOf(settings.value)),
     hiddenButtons: buttons.hidden,
     ...actions(state, buttons),
+    ...createCollapsing(),
   };
   return store;
 }

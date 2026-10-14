@@ -1,8 +1,8 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import type { Span } from "../../connectors";
 import type { Pane } from "./geometry";
-import { anchorsOf, targets, type Anchor } from "./scrollSync";
+import { anchorsOf, ScrollSync, targets, type Anchor } from "./scrollSync";
 
 const LINE_PX = 20;
 
@@ -120,4 +120,62 @@ test("a 2,000-line file with 40 mixed chunks maps every chunk top exactly and ne
       previous = current;
     }
   }
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+type FakePane = {
+  readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+  readonly documentPadding: { readonly top: number };
+};
+
+function fakePane(scrollTop: number): FakePane {
+  return {
+    scrollDOM: Object.assign(new EventTarget(), { scrollTop, clientHeight: 10 * LINE_PX }),
+    documentPadding: { top: 0 },
+  };
+}
+
+function scrolled(pane: FakePane, scrollTop: number): void {
+  pane.scrollDOM.scrollTop = scrollTop;
+  pane.scrollDOM.dispatchEvent(new Event("scroll"));
+}
+
+function tops(views: Readonly<Record<Pane, FakePane>>): number[] {
+  return [views.left, views.center, views.right].map((pane) => pane.scrollDOM.scrollTop);
+}
+
+test("follow('center') makes the next sync write both sides though the middle did not scroll, and their echoes stay ignored", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), center: fakePane(0), right: fakePane(0) };
+  let requested = 0;
+  const sync = new ScrollSync(views, () => {
+    requested += 1;
+  });
+  const anchors = anchorsOf([], ends(100, 100, 100));
+  scrolled(views.center, 300);
+  sync.sync(anchors);
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+  views.left.scrollDOM.scrollTop = 0;
+  views.right.scrollDOM.scrollTop = 0;
+
+  scrolled(views.center, 300);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([0, 300, 0]);
+
+  const before = requested;
+  sync.follow("center");
+  expect(requested).toBe(before + 1);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([300, 300, 300]);
+
+  scrolled(views.left, 500);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([500, 300, 300]);
 });

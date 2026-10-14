@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, shallowRef, type Component } from "vue";
+import { computed, shallowRef, type Component, type Ref } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
+import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
 import ChevronsLeft from "~icons/lucide/chevrons-left";
 import ChevronsRight from "~icons/lucide/chevrons-right";
 import Redo2 from "~icons/lucide/redo-2";
@@ -21,6 +22,7 @@ type IconButton = {
   readonly icon: Component;
   readonly keepsKeyboard: boolean;
   readonly run: () => void;
+  readonly pressed: Readonly<Ref<boolean>> | null;
 };
 
 const props = defineProps<{ summary: MergeSummary | null }>();
@@ -35,6 +37,8 @@ const emit = defineEmits<{
 
 const SECONDARY_BUTTON = 2;
 
+const { hiddenButtons, collapsing, toggleCollapsing } = useAppStore();
+
 const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
   previous: {
     label: "Previous change",
@@ -43,6 +47,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("move", "up");
     },
+    pressed: null,
   },
   next: {
     label: "Next change",
@@ -51,6 +56,14 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("move", "down");
     },
+    pressed: null,
+  },
+  collapse: {
+    label: "Collapse unchanged fragments",
+    icon: ChevronsDownUp,
+    keepsKeyboard: true,
+    run: toggleCollapsing,
+    pressed: collapsing,
   },
   applyLeft: {
     label: "Apply non-conflicting changes from the left",
@@ -59,6 +72,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("applyLeft");
     },
+    pressed: null,
   },
   applyRight: {
     label: "Apply non-conflicting changes from the right",
@@ -67,6 +81,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("applyRight");
     },
+    pressed: null,
   },
   undo: {
     label: "Undo",
@@ -75,6 +90,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("undo");
     },
+    pressed: null,
   },
   redo: {
     label: "Redo",
@@ -83,17 +99,17 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     run: () => {
       emit("redo");
     },
+    pressed: null,
   },
 };
 
-const { hiddenButtons } = useAppStore();
 const menuAt = shallowRef<Point | null>(null);
 
 const shownButtons = computed(() =>
-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
-    id,
-    ...ICON_BUTTONS[id],
-  })),
+  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => {
+    const button = ICON_BUTTONS[id];
+    return { id, ...button, ariaPressed: button.pressed?.value };
+  }),
 );
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -144,8 +160,9 @@ function closeMenu(): void {
       type="button"
       :title="button.label"
       :aria-label="button.label"
+      :aria-pressed="button.ariaPressed"
       :disabled="summary === null"
-      class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent"
+      class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
       @mousedown="pressed(button, $event)"
       @click="button.run"
     >

@@ -1,0 +1,572 @@
+commit 9e7ff98e91310b8f76bf1c824f76e0a21bccc03f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-14 15:47:55 +0200
+
+    fix(editor): wave meets the strip joins on its centre line at every width (#854, #64)
+    
+    Phase each pane's mask from the strips' measured edges; middle stretched to k+1/2 waves.
+
+diff --git a/frontend/src/connectors/index.test.ts b/frontend/src/connectors/index.test.ts
+index 6669a46..f1db24f 100644
+--- a/frontend/src/connectors/index.test.ts
++++ b/frontend/src/connectors/index.test.ts
+@@ -4,11 +4,69 @@ import {
+   bandPath,
+   waveCenterY,
+   waveJoinPath,
++  wavePhase,
+   waveTile,
++  WAVE_DOWN_X,
+   WAVE_TILE_HEIGHT_PX,
+   WAVE_TILE_WIDTH_PX,
++  WAVE_UP_X,
++  type WavePhase,
+ } from ".";
+ 
++type Point = readonly [x: number, y: number];
++type Segment = { readonly command: string; readonly from: Point; readonly points: Point[] };
++
++function segments(path: string): Segment[] {
++  const [move = "", ...rest] = path.split(/ (?=[QC])/);
++  const [startX = NaN, startY = NaN] = move.slice(1).split(" ").map(Number);
++  let from: Point = [startX, startY];
++  return rest.map((piece) => {
++    const numbers = piece.slice(1).split(" ").map(Number);
++    const points = Array.from({ length: numbers.length / 2 }, (_, i): Point => [
++      numbers[2 * i] ?? NaN,
++      numbers[2 * i + 1] ?? NaN,
++    ]);
++    const segment = { command: piece.charAt(0), from, points };
++    from = points.at(-1) ?? from;
++    return segment;
++  });
++}
++
++function crossings(path: string, centre: number): [x: number, heading: "down" | "up"][] {
++  return segments(path).flatMap(({ command, from, points }) => {
++    expect(command).toBe("Q");
++    const [[cx, cy], [x2, y2]] = [points[0] ?? from, points[1] ?? from];
++    const [x0, y0] = from;
++    const a = y0 - 2 * cy + y2;
++    const b = 2 * (cy - y0);
++    const c = y0 - centre;
++    const roots =
++      a === 0
++        ? [-c / b]
++        : [-1, 1].map((sign) => (-b + sign * Math.sqrt(b * b - 4 * a * c)) / (2 * a));
++    return [...new Set(roots)]
++      .filter((t) => t > 0 && t <= 1)
++      .map((t): [number, "down" | "up"] => [
++        (1 - t) ** 2 * x0 + 2 * (1 - t) * t * cx + t ** 2 * x2,
++        2 * a * t + b > 0 ? "down" : "up",
++      ]);
++  });
++}
++
++function tileX(x: number, phase: WavePhase): number {
++  const into = x - phase.offset;
++  return (
++    ((into - phase.period * Math.floor(into / phase.period)) * WAVE_TILE_WIDTH_PX) / phase.period
++  );
++}
++
++function sweep(step: number, to: number): number[] {
++  return Array.from({ length: Math.floor(to / step) + 1 }, (_, i) => i * step);
++}
++
++const WAVE_LEFTS = [0, 0.4, 237.33];
++const DISTANCES = sweep(0.37, 2000);
++
+ test("an aligned band is a rectangle drawn with flat curves", () => {
+   const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
+ 
+@@ -40,10 +98,16 @@ test("an insertion on the right tapers to the right edge, at fractional line hei
+ });
+ 
+ test("the wave tile is four quarter curves of 5 px with a 3 px half-height, 1 px from the tile edge", () => {
+-  expect(waveTile()).toBe("M0 1 Q2.5 1 5 4 Q7.5 7 10 7 Q12.5 7 15 4 Q17.5 1 20 1");
++  expect(waveTile(1)).toBe("M0 1 Q2.5 1 5 4 Q7.5 7 10 7 Q12.5 7 15 4 Q17.5 1 20 1");
+   expect([WAVE_TILE_WIDTH_PX, WAVE_TILE_HEIGHT_PX]).toEqual([20, 8]);
+ });
+ 
++test("a tile of several waves repeats the four curves every 20 px in one stroke", () => {
++  expect(waveTile(2)).toBe(
++    "M0 1 Q2.5 1 5 4 Q7.5 7 10 7 Q12.5 7 15 4 Q17.5 1 20 1 Q22.5 1 25 4 Q27.5 7 30 7 Q32.5 7 35 4 Q37.5 1 40 1",
++  );
++});
++
+ test("the wave sits in the middle of a 20 px line", () => {
+   expect(waveCenterY(20)).toBe(10);
+   expect(waveCenterY(30)).toBe(15);
+@@ -80,3 +144,111 @@ test("a slope of exactly one in five is no longer level", () => {
+     "M0 0 C10 12 10 9.5 37.5 9.5 C39.38 9.5 39.38 8.38 40 8",
+   );
+ });
++
++test("the tile crosses its centre line heading down at WAVE_DOWN_X and heading up at WAVE_UP_X", () => {
++  const centre = WAVE_TILE_HEIGHT_PX / 2;
++
++  expect(crossings(waveTile(3), centre)).toEqual([
++    [WAVE_DOWN_X, "down"],
++    [WAVE_UP_X, "up"],
++    [WAVE_TILE_WIDTH_PX + WAVE_DOWN_X, "down"],
++    [WAVE_TILE_WIDTH_PX + WAVE_UP_X, "up"],
++    [2 * WAVE_TILE_WIDTH_PX + WAVE_DOWN_X, "down"],
++    [2 * WAVE_TILE_WIDTH_PX + WAVE_UP_X, "up"],
++  ]);
++  expect([WAVE_DOWN_X, WAVE_UP_X]).toEqual([5, 15]);
++});
++
++test("every join leaves the left edge heading down and arrives at the right edge from below", () => {
++  const joins = [
++    { left: 10, right: 10 },
++    { left: 10, right: 12 },
++    { left: 50, right: 10 },
++    { left: 10, right: 50 },
++  ];
++  const paths = [20, 38, 60].flatMap((width) => joins.map((join) => waveJoinPath(join, width)));
++  const ends = paths.map((path) => {
++    const parts = segments(path);
++    const [, firstY] = parts[0]?.points[0] ?? [NaN, NaN];
++    const [, lastControlY] = parts.at(-1)?.points.at(-2) ?? [NaN, NaN];
++    const [, endY] = parts.at(-1)?.points.at(-1) ?? [NaN, NaN];
++    const [, startY] = parts[0]?.from ?? [NaN, NaN];
++    return { path, down: firstY > startY, fromBelow: lastControlY > endY };
++  });
++
++  expect(ends.filter(({ down, fromBelow }) => !down || !fromBelow)).toEqual([]);
++  expect(new Set(paths.map((path) => segments(path).length))).toEqual(new Set([1, 2, 6]));
++});
++
++test("a wave leaving into a strip is on its centre heading down at the strip's edge", () => {
++  expect(wavePhase(0, { kind: "leaves", at: 100 })).toEqual({ offset: 15, period: 20 });
++  expect(wavePhase(110, { kind: "leaves", at: 100 })).toEqual({ offset: 5, period: 20 });
++  const misses = WAVE_LEFTS.flatMap((waveLeft) =>
++    DISTANCES.flatMap((distance) => {
++      const at = waveLeft + distance;
++      const phase = wavePhase(waveLeft, { kind: "leaves", at });
++      const x = tileX(at - waveLeft, phase);
++      const ok =
++        Math.abs(x - WAVE_DOWN_X) < 1e-9 &&
++        phase.period === 20 &&
++        phase.offset >= 0 &&
++        phase.offset < phase.period;
++      return ok ? [] : [{ waveLeft, distance, phase }];
++    }),
++  );
++
++  expect(misses).toEqual([]);
++});
++
++test("a wave entering from a strip is on its centre heading up at the strip's edge", () => {
++  expect(wavePhase(0, { kind: "enters", at: 100 })).toEqual({ offset: 5, period: 20 });
++  expect(wavePhase(110, { kind: "enters", at: 100 })).toEqual({ offset: 15, period: 20 });
++  const misses = WAVE_LEFTS.flatMap((waveLeft) =>
++    DISTANCES.flatMap((distance) => {
++      const at = waveLeft + distance;
++      const phase = wavePhase(waveLeft, { kind: "enters", at });
++      const x = tileX(at - waveLeft, phase);
++      const ok =
++        Math.abs(x - WAVE_UP_X) < 1e-9 &&
++        phase.period === 20 &&
++        phase.offset >= 0 &&
++        phase.offset < phase.period;
++      return ok ? [] : [{ waveLeft, distance, phase }];
++    }),
++  );
++
++  expect(misses).toEqual([]);
++});
++
++test("a wave between two strips holds the nearest whole number of waves plus a half", () => {
++  const middle = wavePhase(0, { kind: "through", enters: 100, leaves: 520 });
++  expect(middle.period).toBe(420 / 21.5);
++  expect(middle.offset).toBeCloseTo(100 - 4.75 * (420 / 21.5), 9);
++  const misses = WAVE_LEFTS.flatMap((waveLeft) =>
++    DISTANCES.filter((span) => span > 0).flatMap((span) => {
++      const enters = waveLeft + 3.7;
++      const phase = wavePhase(waveLeft, { kind: "through", enters, leaves: enters + span });
++      const waves = span / phase.period - 0.5;
++      const nearest = Math.abs(waves - (span / 20 - 0.5)) <= 0.5 + 1e-9;
++      const ok =
++        Math.abs(tileX(enters - waveLeft, phase) - WAVE_UP_X) < 1e-9 &&
++        Math.abs(tileX(enters + span - waveLeft, phase) - WAVE_DOWN_X) < 1e-9 &&
++        Math.abs(waves - Math.round(waves)) < 1e-9 &&
++        nearest &&
++        Math.abs(phase.period - 20) / 20 <= 1 / (2 * Math.round(waves) + 1) + 1e-12 &&
++        phase.offset >= 0 &&
++        phase.offset < phase.period;
++      return ok ? [] : [{ waveLeft, span, phase }];
++    }),
++  );
++
++  expect(misses).toEqual([]);
++});
++
++test("a wave between two strips that do not leave room falls back to entering", () => {
++  for (const leaves of [100, 70]) {
++    expect(wavePhase(3, { kind: "through", enters: 100, leaves })).toEqual(
++      wavePhase(3, { kind: "enters", at: 100 }),
++    );
++  }
++});
+diff --git a/frontend/src/connectors/index.ts b/frontend/src/connectors/index.ts
+index 2ba2321..31e17af 100644
+--- a/frontend/src/connectors/index.ts
++++ b/frontend/src/connectors/index.ts
+@@ -31,15 +31,49 @@ export const WAVE_HOVER_STROKE_PX = 2;
+ export const WAVE_TILE_WIDTH_PX = WAVE_STEPS * WAVE_STEP_PX;
+ export const WAVE_TILE_HEIGHT_PX =
+   WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX + WAVE_HALF_HEIGHT_PX + WAVE_GAP_PX;
++const WAVE_UP_STEPS = 3;
++export const WAVE_DOWN_X = WAVE_STEP_PX;
++export const WAVE_UP_X = WAVE_UP_STEPS * WAVE_STEP_PX;
+ 
+-export function waveTile(): string {
++export type WaveEnds =
++  | { readonly kind: "leaves"; readonly at: number }
++  | { readonly kind: "enters"; readonly at: number }
++  | { readonly kind: "through"; readonly enters: number; readonly leaves: number };
++export type WavePhase = { readonly offset: number; readonly period: number };
++
++function mod(n: number, period: number): number {
++  return ((n % period) + period) % period;
++}
++
++function pinned(x: number, tileX: number, period: number): WavePhase {
++  return { offset: mod(x - (tileX * period) / WAVE_TILE_WIDTH_PX, period), period };
++}
++
++export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase {
++  switch (ends.kind) {
++    case "leaves":
++      return pinned(ends.at - waveLeft, WAVE_DOWN_X, WAVE_TILE_WIDTH_PX);
++    case "enters":
++      return pinned(ends.at - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
++    case "through": {
++      const span = ends.leaves - ends.enters;
++      if (span <= 0) {
++        return pinned(ends.enters - waveLeft, WAVE_UP_X, WAVE_TILE_WIDTH_PX);
++      }
++      const waves = Math.round(span / WAVE_TILE_WIDTH_PX - HALF);
++      return pinned(ends.enters - waveLeft, WAVE_UP_X, span / (waves + HALF));
++    }
++  }
++}
++
++export function waveTile(periods: number): string {
+   const top = WAVE_GAP_PX;
+   const mid = WAVE_GAP_PX + WAVE_HALF_HEIGHT_PX;
+   const bottom = mid + WAVE_HALF_HEIGHT_PX;
+   const level = [top, mid, bottom, mid, top];
+-  const segments = Array.from({ length: WAVE_STEPS }, (_, step) => {
+-    const from = level[step] ?? mid;
+-    const to = level[step + 1] ?? mid;
++  const segments = Array.from({ length: WAVE_STEPS * periods }, (_, step) => {
++    const from = level[step % WAVE_STEPS] ?? mid;
++    const to = level[(step % WAVE_STEPS) + 1] ?? mid;
+     const crest = from === mid ? to : from;
+     const x = step * WAVE_STEP_PX;
+     return `Q${px(x + WAVE_STEP_PX * HALF)} ${px(crest)} ${px(x + WAVE_STEP_PX)} ${px(to)}`;
+diff --git a/frontend/src/editor/internal/foldView.ts b/frontend/src/editor/internal/foldView.ts
+index bd2e33f..727c5e7 100644
+--- a/frontend/src/editor/internal/foldView.ts
++++ b/frontend/src/editor/internal/foldView.ts
+@@ -16,6 +16,7 @@ import { foldFields, paneFolds, pushFolds, showNextStep, sideReveals } from "./f
+ import { waveDeletes, type FoldFields } from "./folds";
+ import type { Pane, PaneViews } from "./geometry";
+ import { LINE_HEIGHT_PX } from "./pane";
++import { WavePhases, WAVE_PHASE_VARS, type WaveHosts } from "./wavePhase";
+ 
+ type FoldWiring = {
+   readonly folds: FoldFields;
+@@ -23,8 +24,6 @@ type FoldWiring = {
+   readonly views: () => PaneViews;
+ };
+ 
+-type FoldHosts = Readonly<Record<Pane, Element>> & { readonly strips: readonly Element[] };
+-
+ const WAVE_LABEL = "Show unchanged lines";
+ const HALF = 0.5;
+ 
+@@ -101,10 +100,17 @@ function waveMarkers(
+   return builder.finish();
+ }
+ 
++// WebKitGTK draws a repeated mask tile at its width rounded to whole device pixels but places it from the
++// unrounded width (measured in slice 3.V-phase: a 19.58 px tile repeats every 19.5 px at ratio 2), so one
++// tile holds many waves and its width is rounded to whole CSS pixels here.
++const MASK_PERIODS = 64;
++const MASK_WIDTH_PX = WAVE_TILE_WIDTH_PX * MASK_PERIODS;
++
+ function waveMask(strokePx: number): string {
+   const svg =
+-    `<svg xmlns='http://www.w3.org/2000/svg' width='${WAVE_TILE_WIDTH_PX}' height='${WAVE_TILE_HEIGHT_PX}'>` +
+-    `<path d='${waveTile()}' fill='none' stroke='black' stroke-width='${strokePx}'/></svg>`;
++    `<svg xmlns='http://www.w3.org/2000/svg' width='${MASK_WIDTH_PX}' height='${WAVE_TILE_HEIGHT_PX}' ` +
++    `viewBox='0 0 ${MASK_WIDTH_PX} ${WAVE_TILE_HEIGHT_PX}' preserveAspectRatio='none'>` +
++    `<path d='${waveTile(MASK_PERIODS)}' fill='none' stroke='black' stroke-width='${strokePx}'/></svg>`;
+   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+ }
+ 
+@@ -116,8 +122,8 @@ function maskStyle(strokePx: number): Readonly<Record<string, string>> {
+ const waveTop = waveCenterY(LINE_HEIGHT_PX) - WAVE_TILE_HEIGHT_PX * HALF;
+ const tile = {
+   maskRepeat: "repeat-x",
+-  maskPosition: `0 ${waveTop}px`,
+-  maskSize: `${WAVE_TILE_WIDTH_PX}px ${WAVE_TILE_HEIGHT_PX}px`,
++  maskPosition: `var(${WAVE_PHASE_VARS.offset}, 0px) ${waveTop}px`,
++  maskSize: `round(calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}), 1px) ${WAVE_TILE_HEIGHT_PX}px`,
+ };
+ 
+ const waveTheme = EditorView.theme({
+@@ -174,9 +180,10 @@ export class Folds {
+   readonly fields: FoldFields;
+   readonly hovered = (): number | null => this.#folding.hovered();
+   readonly #folding: Folding;
++  readonly #phases: WavePhases;
+   readonly #wiring: FoldWiring;
+ 
+-  constructor(runs: readonly Fold[], hosts: FoldHosts, views: () => PaneViews) {
++  constructor(runs: readonly Fold[], hosts: WaveHosts, views: () => PaneViews) {
+     const fields = foldFields(runs);
+     this.fields = fields;
+     this.#wiring = { folds: fields, hovered: this.hovered, views };
+@@ -185,6 +192,7 @@ export class Folds {
+       const center = views().center;
+       center.dispatch(showNextStep(center.state.field(fields.center), run));
+     });
++    this.#phases = new WavePhases(hosts, views);
+   }
+ 
+   center(): Extension {
+@@ -197,5 +205,6 @@ export class Folds {
+ 
+   destroy(): void {
+     this.#folding.destroy();
++    this.#phases.destroy();
+   }
+ }
+diff --git a/frontend/src/editor/internal/wavePhase.test.ts b/frontend/src/editor/internal/wavePhase.test.ts
+new file mode 100644
+index 0000000..4e4dfdd
+--- /dev/null
++++ b/frontend/src/editor/internal/wavePhase.test.ts
+@@ -0,0 +1,113 @@
++import { expect, test } from "vitest";
++
++import { wavePhase } from "../../connectors";
++import { paneEnds, panePhases, phaseStyle, writePhase, type WaveLayout } from "./wavePhase";
++
++const LAYOUT: WaveLayout = {
++  scrollers: {
++    left: { left: 260.4, right: 699.4 },
++    center: { left: 739.4, right: 1178.4 },
++    right: { left: 1218.4, right: 1657.4 },
++  },
++  strips: { local: { left: 700.4, right: 738.4 }, remote: { left: 1179.4, right: 1217.4 } },
++};
++
++function shifted(layout: WaveLayout, by: number): WaveLayout {
++  function move({ left, right }: { left: number; right: number }): { left: number; right: number } {
++    return { left: left + by, right: right + by };
++  }
++  const { scrollers, strips } = layout;
++  return {
++    scrollers: {
++      left: move(scrollers.left),
++      center: move(scrollers.center),
++      right: move(scrollers.right),
++    },
++    strips: { local: move(strips.local), remote: move(strips.remote) },
++  };
++}
++
++function fakeStyle(): { style: Parameters<typeof writePhase>[0]; writes: string[] } {
++  const values = new Map<string, string>();
++  const writes: string[] = [];
++  return {
++    writes,
++    style: {
++      getPropertyValue: (name) => values.get(name) ?? "",
++      setProperty: (name, value) => {
++        writes.push(`${name}: ${value ?? ""}`);
++        values.set(name, value ?? "");
++      },
++      removeProperty: (name) => {
++        writes.push(`${name} removed`);
++        values.delete(name);
++        return "";
++      },
++    },
++  };
++}
++
++test("each pane meets the strip edges next to it: the left leaves, the middle enters and leaves, the right enters", () => {
++  expect(paneEnds(LAYOUT.strips)).toEqual({
++    left: { kind: "leaves", at: 700.4 },
++    center: { kind: "through", enters: 738.4, leaves: 1179.4 },
++    right: { kind: "enters", at: 1217.4 },
++  });
++});
++
++test("the phases come from the scrollers' left edges and the strips' edges", () => {
++  expect(panePhases(LAYOUT)).toEqual({
++    left: wavePhase(260.4, { kind: "leaves", at: 700.4 }),
++    center: wavePhase(739.4, { kind: "through", enters: 738.4, leaves: 1179.4 }),
++    right: wavePhase(1218.4, { kind: "enters", at: 1217.4 }),
++  });
++});
++
++test("a pane whose text stops 15 px short of its strip has the same phases", () => {
++  const { scrollers } = LAYOUT;
++  const scrollbars: WaveLayout = {
++    ...LAYOUT,
++    scrollers: {
++      left: { ...scrollers.left, right: scrollers.left.right - 15 },
++      center: { ...scrollers.center, right: scrollers.center.right - 15 },
++      right: { ...scrollers.right, right: scrollers.right.right - 15 },
++    },
++  };
++
++  expect(panePhases(scrollbars)).toEqual(panePhases(LAYOUT));
++});
++
++test("a layout moved as a whole keeps every offset", () => {
++  const before = panePhases(LAYOUT);
++  for (const by of [-260.4, 0.37, 333.3]) {
++    const after = panePhases(shifted(LAYOUT, by));
++    for (const pane of ["left", "center", "right"] as const) {
++      expect(after[pane]?.offset).toBeCloseTo(before[pane]?.offset ?? NaN, 9);
++      expect(after[pane]?.period).toBeCloseTo(before[pane]?.period ?? NaN, 9);
++    }
++  }
++});
++
++test("a phase is written as two pixel lengths", () => {
++  expect(phaseStyle({ offset: 7.5, period: 19.25 })).toEqual({
++    offset: "7.5px",
++    period: "19.25px",
++  });
++});
++
++test("a phase is written only when it changed, and removed when the pane has none", () => {
++  const { style, writes } = fakeStyle();
++
++  writePhase(style, { offset: 7.5, period: 20 });
++  writePhase(style, { offset: 7.5, period: 20 });
++  writePhase(style, { offset: 3, period: 20 });
++  writePhase(style, null);
++
++  expect(writes).toEqual([
++    "--fold-wave-x: 7.5px",
++    "--fold-wave-period: 20px",
++    "--fold-wave-x: 3px",
++    "--fold-wave-x removed",
++    "--fold-wave-period removed",
++  ]);
++});
+diff --git a/frontend/src/editor/internal/wavePhase.ts b/frontend/src/editor/internal/wavePhase.ts
+new file mode 100644
+index 0000000..0af1686
+--- /dev/null
++++ b/frontend/src/editor/internal/wavePhase.ts
+@@ -0,0 +1,98 @@
++import { wavePhase, type WaveEnds, type WavePhase } from "../../connectors";
++import { STRIP_PANES, type Pane, type PaneViews } from "./geometry";
++import { SIDES, type Side } from "./side";
++
++export const WAVE_PHASE_VARS = { offset: "--fold-wave-x", period: "--fold-wave-period" } as const;
++
++export type WaveHosts = Readonly<Record<Pane, HTMLElement>> & {
++  readonly strips: readonly [Element, Element];
++};
++
++type Edges = { readonly left: number; readonly right: number };
++export type WaveLayout = {
++  readonly scrollers: Readonly<Record<Pane, Edges>>;
++  readonly strips: Readonly<Record<Side, Edges>>;
++};
++type PhaseStyle = Pick<CSSStyleDeclaration, "getPropertyValue" | "setProperty" | "removeProperty">;
++
++const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
++const PHASE_KEYS = ["offset", "period"] as const satisfies readonly (keyof WavePhase)[];
++
++function stripEdge(pane: Pane, strips: WaveLayout["strips"], edge: keyof Edges): number | null {
++  const side = SIDES.find((each) => STRIP_PANES[each][edge] === pane);
++  return side === undefined ? null : strips[side][edge];
++}
++
++export function paneEnds(strips: WaveLayout["strips"]): Readonly<Record<Pane, WaveEnds | null>> {
++  function ends(pane: Pane): WaveEnds | null {
++    const leaves = stripEdge(pane, strips, "left");
++    const enters = stripEdge(pane, strips, "right");
++    if (enters === null) {
++      return leaves === null ? null : { kind: "leaves", at: leaves };
++    }
++    return leaves === null ? { kind: "enters", at: enters } : { kind: "through", enters, leaves };
++  }
++  return { left: ends("left"), center: ends("center"), right: ends("right") };
++}
++
++export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase | null>> {
++  const ends = paneEnds(layout.strips);
++  function phase(pane: Pane): WavePhase | null {
++    const paneEnd = ends[pane];
++    return paneEnd === null ? null : wavePhase(layout.scrollers[pane].left, paneEnd);
++  }
++  return { left: phase("left"), center: phase("center"), right: phase("right") };
++}
++
++export function phaseStyle(phase: WavePhase): Readonly<Record<keyof WavePhase, string>> {
++  return { offset: `${phase.offset}px`, period: `${phase.period}px` };
++}
++
++export function writePhase(style: PhaseStyle, phase: WavePhase | null): void {
++  const values = phase === null ? null : phaseStyle(phase);
++  for (const key of PHASE_KEYS) {
++    const name = WAVE_PHASE_VARS[key];
++    if (values === null) {
++      style.removeProperty(name);
++    } else if (style.getPropertyValue(name) !== values[key]) {
++      style.setProperty(name, values[key]);
++    }
++  }
++}
++
++export class WavePhases {
++  readonly #hosts: WaveHosts;
++  readonly #observer: ResizeObserver;
++
++  constructor(hosts: WaveHosts, views: () => PaneViews) {
++    this.#hosts = hosts;
++    this.#observer = new ResizeObserver(() => {
++      this.#measure(views());
++    });
++    for (const pane of PANES) {
++      this.#observer.observe(hosts[pane]);
++    }
++  }
++
++  #measure(views: PaneViews): void {
++    const [local, remote] = this.#hosts.strips;
++    const phases = panePhases({
++      scrollers: {
++        left: views.left.scrollDOM.getBoundingClientRect(),
++        center: views.center.scrollDOM.getBoundingClientRect(),
++        right: views.right.scrollDOM.getBoundingClientRect(),
++      },
++      strips: { local: local.getBoundingClientRect(), remote: remote.getBoundingClientRect() },
++    });
++    for (const pane of PANES) {
++      writePhase(this.#hosts[pane].style, phases[pane]);
++    }
++  }
++
++  destroy(): void {
++    this.#observer.disconnect();
++    for (const pane of PANES) {
++      writePhase(this.#hosts[pane].style, null);
++    }
++  }
++}

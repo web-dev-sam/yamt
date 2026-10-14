@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
 import { toDocPos } from "./docPos";
-import { foldField, showNextStep } from "./folds";
+import { collapseSpec, foldField, showNextStep } from "./folds";
 import { rangeSpan, rowsChanged, STRIP_PANES, waveRows, type Pane } from "./geometry";
 import { paneDocs } from "./paneDocs";
 import { statusAfterIgnore } from "./status";
@@ -56,12 +56,12 @@ test("an empty document has one point at the top", () => {
   expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
 });
 
-test("chunk rows go stale on a status change, an edit, a fold step or new measurements, not on a cursor move", async () => {
+test("chunk rows go stale on a status change, an edit, a fold step, a toggle or new measurements, not on a cursor move", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
   const doc = paneDocs(data).center;
   const hidden = { from: toDocPos(doc.line(3).from), to: toDocPos(doc.line(5).to) };
-  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }]);
+  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }], true);
   const state = EditorState.create({ doc, extensions: [field, folds] });
   const [first] = state.field(field);
   if (first === undefined) {
@@ -71,6 +71,7 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
   const ignored = state.update({ effects: setStatus.of({ id: first.chunk.id, status }) }).state;
   const edited = state.update({ changes: { from: 0, insert: "x\n" } }).state;
   const folded = state.update(showNextStep(state.field(folds), 0)).state;
+  const toggled = state.update(collapseSpec(folds, state, false)).state;
   const moved = state.update({ selection: EditorSelection.cursor(1) }).state;
   const sidePane = EditorState.create({ doc: data.local });
   const fields = [field, folds];
@@ -82,6 +83,9 @@ test("chunk rows go stale on a status change, an edit, a fold step or new measur
     true,
   );
   expect(rowsChanged({ geometryChanged: false, startState: state, state: folded }, fields)).toBe(
+    true,
+  );
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: toggled }, fields)).toBe(
     true,
   );
   expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, fields)).toBe(

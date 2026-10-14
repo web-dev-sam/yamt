@@ -33,8 +33,18 @@ const center = useTemplateRef<HTMLDivElement>("center");
 const right = useTemplateRef<HTMLDivElement>("right");
 const leftStrip = useTemplateRef<SVGSVGElement>("leftStrip");
 const rightStrip = useTemplateRef<SVGSVGElement>("rightStrip");
-const { track, untrack, finish, reset, takeSide, taken, sideNames, question, preferences } =
-  useAppStore();
+const {
+  track,
+  untrack,
+  finish,
+  reset,
+  takeSide,
+  taken,
+  sideNames,
+  question,
+  preferences,
+  collapsing,
+} = useAppStore();
 const {
   summary,
   applyAllNonConflicting,
@@ -48,8 +58,7 @@ const {
 } = useMergeController(
   () => props.data,
   { left, center, right, strips: [leftStrip, rightStrip] },
-  () => !isEditable(props.data),
-  preferences,
+  { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing },
 );
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {

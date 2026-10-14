@@ -42,7 +42,11 @@ export type MergeHosts = {
   readonly strips: readonly [SVGSVGElement, SVGSVGElement];
 };
 
-export type MergeOptions = { readonly readOnly: boolean; readonly preferences: Preferences };
+export type MergeOptions = {
+  readonly readOnly: boolean;
+  readonly preferences: Preferences;
+  readonly collapsed: boolean;
+};
 
 type ViewSources = {
   data: FileMergeData;
@@ -69,7 +73,8 @@ export class MergeController {
     const description = languageOf(data.path);
     const docs = paneDocs(data);
     this.#field = chunkField(data.chunks);
-    this.#folds = new Folds(foldRuns(data.chunks, docs), hosts, () => this.#views);
+    const runs = foldRuns(data.chunks, docs);
+    this.#folds = new Folds(runs, hosts, () => this.#views, options.collapsed);
     this.#readOnly = options.readOnly;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
     const language = description?.support?.language ?? null;
@@ -239,6 +244,11 @@ export class MergeController {
     for (const side of [left, right]) {
       side.dispatch({ effects: preferenceEffects("side", this.#settings) });
     }
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    this.#folds.setCollapsed(collapsed);
+    this.#frame.realign();
   }
 
   undo(): boolean {

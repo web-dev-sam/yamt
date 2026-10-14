@@ -7,6 +7,7 @@ import { unexpected } from "./problem";
 export const TOOLBAR_BUTTONS = [
   "previous",
   "next",
+  "collapse",
   "applyLeft",
   "applyRight",
   "undo",

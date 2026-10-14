@@ -29,6 +29,12 @@ type Hosts = {
   readonly strips: readonly [Host<SVGSVGElement>, Host<SVGSVGElement>];
 };
 
+type ControllerOptions = {
+  readonly readOnly: MaybeRefOrGetter<boolean>;
+  readonly preferences: MaybeRefOrGetter<Preferences>;
+  readonly collapsed: MaybeRefOrGetter<boolean>;
+};
+
 export type MergeHandle = {
   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
   applyAllNonConflicting(side: Side): void;
@@ -98,8 +104,7 @@ function handleOf(summary: MergeHandle["summary"], current: () => Loaded | null)
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: Hosts,
-  readOnly: MaybeRefOrGetter<boolean>,
-  preferences: MaybeRefOrGetter<Preferences>,
+  { readOnly, preferences, collapsed }: ControllerOptions,
 ): MergeHandle {
   const summary = shallowRef<MergeSummary | null>(null);
   let loaded: Loaded | null = null;
@@ -114,7 +119,11 @@ export function useMergeController(
     [toRef(data), toRef(readOnly), hosts.left, hosts.center, hosts.right, ...hosts.strips],
     ([current, currentReadOnly, ...elements]) => {
       destroyController();
-      const options = { readOnly: currentReadOnly, preferences: toValue(preferences) };
+      const options = {
+        readOnly: currentReadOnly,
+        preferences: toValue(preferences),
+        collapsed: toValue(collapsed),
+      };
       const controller = createController(current, options, elements);
       controller?.onSummaryChange((next) => {
         summary.value = next;
@@ -127,6 +136,10 @@ export function useMergeController(
 
   watch(toRef(preferences), (next) => {
     loaded?.controller.setPreferences(next);
+  });
+
+  watch(toRef(collapsed), (on) => {
+    loaded?.controller.setCollapsed(on);
   });
 
   onScopeDispose(destroyController);

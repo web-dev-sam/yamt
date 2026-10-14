@@ -1,0 +1,4 @@
+just mutants a040da6 (commit 9e7ff98, WavePhase round 1): no Rust; Stryker connectors/index.ts 208 mutants, 207 killed, 1 survived, score 99.52.
+
+[Survived] EqualityOperator src/connectors/index.ts:146:7  if (y1 > y2) → if (y1 >= y2)  (slopedJoin)
+Ruling: (b) equivalent, unchanged from UnchangedStrips.survivors.txt — slopedJoin runs only when |right−left|/width ≥ 0.2, so y1 ≠ y2 for any width > 0. Not on this patch's lines.

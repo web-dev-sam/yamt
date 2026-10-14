@@ -5,6 +5,10 @@ import type { Pane, PaneViews } from "./geometry";
 
 export type Anchor = Readonly<Record<Pane, number>>;
 type SpanRow = Readonly<Record<Pane, Span>>;
+type ScrollPane = {
+  readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+  readonly documentPadding: { readonly top: number };
+};
 
 const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 const ANCHOR_AT = 0.5;
@@ -55,21 +59,23 @@ export function contentEnds(views: PaneViews): Anchor {
   };
 }
 
-function middle(view: EditorView): number {
+function middle(view: ScrollPane): number {
   const { scrollTop, clientHeight } = view.scrollDOM;
   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
 }
 
 export class ScrollSync {
-  readonly #views: PaneViews;
+  readonly #views: Readonly<Record<Pane, ScrollPane>>;
+  readonly #requestFrame: () => void;
   readonly #listeners = new AbortController();
   #source: Pane | null = null;
   #echoes: readonly Pane[] = [];
   #clearEchoes: number | null = null;
   #syncedTops: Readonly<Record<Pane, number>> | null = null;
 
-  constructor(views: PaneViews, requestFrame: () => void) {
+  constructor(views: Readonly<Record<Pane, ScrollPane>>, requestFrame: () => void) {
     this.#views = views;
+    this.#requestFrame = requestFrame;
     for (const pane of PANES) {
       views[pane].scrollDOM.addEventListener(
         "scroll",
@@ -82,6 +88,12 @@ export class ScrollSync {
         { passive: true, signal: this.#listeners.signal },
       );
     }
+  }
+
+  follow(source: Pane): void {
+    this.#source = source;
+    this.#syncedTops = null;
+    this.#requestFrame();
   }
 
   sync(anchors: readonly Anchor[]): void {
