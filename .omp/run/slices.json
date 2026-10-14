@@ -15,7 +15,9 @@
       "frontend/src/ui/useMergeController.ts",
       "frontend/src/style.css",
       "frontend/src/ui/logFollow.ts",
-      "frontend/src/ui/logFollow.test.ts"
+      "frontend/src/ui/logFollow.test.ts",
+      "frontend/src/ui/serverMenuToggle.ts",
+      "frontend/src/ui/serverMenuToggle.test.ts"
     ]
   }
 }
