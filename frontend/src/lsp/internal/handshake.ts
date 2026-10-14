@@ -1,7 +1,7 @@
+import type { ServerHost } from "../../ipc";
 import type { WorkspaceFolder } from "./answers";
 import { parseWith, type Parsed } from "./messages";
 import { INITIALIZE_RESULT } from "./protocol";
-import type { Capabilities } from "./serverDocs";
 import type { ServerSpec } from "./spec";
 import { fileUri } from "./uri";
 
@@ -10,6 +10,18 @@ export type HostContext =
   | { readonly kind: "failed"; readonly message: string };
 
 export type ReadyContext = Extract<HostContext, { kind: "ready" }>;
+
+export type Capabilities = { readonly pulls: boolean; readonly formats: boolean };
+
+export function hostContext(host: ServerHost): Promise<HostContext> {
+  return host.context().then(
+    (context) =>
+      context.root === null
+        ? { kind: "failed", message: "the repository's folder path is not valid UTF-8" }
+        : { kind: "ready", root: context.root, processId: context.process_id },
+    (error: unknown) => ({ kind: "failed", message: String(error) }),
+  );
+}
 
 export const INITIALIZE_TIMEOUT_MS = 30_000;
 

@@ -618,6 +618,7 @@ test("rule 4: an error reply to initialize fails initializeFailed", async () => 
   expect(languageServers.log("oxlint").map((line) => line.text)).toContain(
     "Initialize failed: bad config",
   );
+  expect(host.only("oxlint").methods()).toEqual(["initialize"]);
 });
 
 test("rule 4: a malformed initialize result fails initializeFailed", async () => {
@@ -1065,7 +1066,9 @@ test("rule 11: a malformed message is logged and dropped", async () => {
   expect(doc.shown).toEqual([]);
   const texts = languageServers.log("oxlint").map((line) => line.text);
   expect(texts.filter((text) => text.startsWith("Dropped a malformed message"))).toHaveLength(2);
-  expect(texts.at(-1)).toMatch(/^Dropped malformed problems from the server: /);
+  expect(logOf(languageServers, "oxlint").at(-1)).toMatch(
+    /^yamt: Dropped malformed problems from the server: /,
+  );
 });
 
 function formatter(server: FakeServer, edits: () => unknown): Received[] {
@@ -1200,7 +1203,7 @@ test("rule 8: a formatting request without an answer times out at 5 s total and 
   expect(server.sent("$/cancelRequest").map((message) => message.params)).toEqual([{ id }]);
 });
 
-test("rule 8: noFormatter when no spec formats the document, or no host", async () => {
+test("rule 8: noFormatter when no spec formats the document, the document is closed, or no host", async () => {
   host.setup = (server) => {
     formatter(server, () => []);
   };
@@ -1211,6 +1214,12 @@ test("rule 8: noFormatter when no spec formats the document, or no host", async 
   const open = languageServers.open(new FakeDoc("a.ts", "x"));
   await settle();
   expect(await open.format({ tabSize: 2, insertSpaces: true })).toEqual({ kind: "noFormatter" });
+
+  const formatted = languageServers.open(new FakeDoc("b.css", "x"));
+  await settle();
+  formatted.close();
+  expect(await formatted.format(OPTIONS)).toEqual({ kind: "noFormatter" });
+  expect(host.only("oxfmt").sent("textDocument/formatting")).toEqual([]);
 
   const offline = new LanguageServers(null, TIMERS);
   offline.setSpecs([spec("oxfmt", { formats: true })], { startOnOpen: true });
@@ -1343,6 +1352,24 @@ test("rule 9: a stop before the host replied stops the run once it starts", asyn
   expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
 });
 
+test("rule 9: a stop before the host refused the start ends stopped", async () => {
+  let open: (() => void) | undefined;
+  host.gate = new Promise((resolve) => {
+    open = resolve;
+  });
+  host.reply = (command) => ({ kind: "NotFound", program: command.program, searched: [] });
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  languageServers.stop("oxlint");
+
+  open?.();
+  await settle();
+
+  expect(host.stopped).toEqual([]);
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+});
+
 test("rule 9: a stop before the repository context arrived starts nothing", async () => {
   const languageServers = servers([spec("oxlint")]);
   languageServers.open(new FakeDoc("a.ts", "x"));
@@ -1455,7 +1482,7 @@ test("rule 10: an initialize time-out is logged as cancelled, then as the failur
   expect(logOf(languageServers, "oxlint")).toEqual([
     "yamt: Starting oxlint --lsp in the repository root",
     "yamt: No answer to initialize within 30 s; cancelled",
-    "yamt: No answer to initialize within 30 s; stopped",
+    "yamt: Stopped: the server did not answer initialize",
     "yamt: Exited with code 0",
   ]);
 });
@@ -1679,10 +1706,83 @@ test("rule 9: a server that exits during shutdown is not stopped again", async (
   languageServers.open(new FakeDoc("a.ts", "x"));
   await settle();
   languageServers.stop("oxlint");
-  await vi.advanceTimersByTimeAsync(2000);
+  await settle();
+  const server = host.only("oxlint");
 
   expect(host.stopped).toEqual([]);
   expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+  expect(server.methods().at(-1)).toBe("shutdown");
+  expect(logOf(languageServers, "oxlint").join("\n")).not.toContain("No answer to shutdown within");
+});
+
+function startLines(languageServers: LanguageServers, name: string): string[] {
+  return logOf(languageServers, name).filter((line) => line.startsWith("yamt: Starting"));
+}
+
+async function restartWithoutExit(): Promise<LanguageServers> {
+  host.setup = (server) => {
+    server.ignoresStop = true;
+  };
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  languageServers.restart("oxlint");
+  return languageServers;
+}
+
+test("rule 9: a stop after restart, during the old run's shutdown, keeps it stopped", async () => {
+  const languageServers = await restartWithoutExit();
+  languageServers.stop("oxlint");
+  await settle();
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopping" });
+  host.only("oxlint").exit(0);
+  await settle();
+
+  expect(host.servers).toHaveLength(1);
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+  expect(startLines(languageServers, "oxlint")).toHaveLength(1);
+});
+
+test("rule 3: a spec removed after restart, during the old run's shutdown, starts nothing", async () => {
+  const languageServers = await restartWithoutExit();
+  languageServers.setSpecs([], { startOnOpen: true });
+  await settle();
+  host.only("oxlint").exit(0);
+  await settle();
+
+  expect(host.servers).toHaveLength(1);
+  expect(languageServers.views()).toEqual([]);
+  expect(startLines(languageServers, "oxlint")).toHaveLength(1);
+});
+
+test("destroy after restart, during the old run's shutdown, starts nothing", async () => {
+  const languageServers = await restartWithoutExit();
+  let destroyed = false;
+  void languageServers.destroy().then(() => {
+    destroyed = true;
+  });
+  await settle();
+  host.only("oxlint").exit(0);
+  await settle();
+
+  expect(destroyed).toBe(true);
+  expect(host.servers).toHaveLength(1);
+  expect(startLines(languageServers, "oxlint")).toHaveLength(1);
+});
+
+test("rule 5: a document opened by a listener when its server starts running is opened once", async () => {
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  let opened = false;
+  languageServers.onChange(() => {
+    if (!opened && stateOf(languageServers, "oxlint")?.kind === "running") {
+      opened = true;
+      languageServers.open(new FakeDoc("b.ts", "y"));
+    }
+  });
+  await settle();
+
+  expect(host.only("oxlint").sent("textDocument/didOpen")).toHaveLength(2);
 });
 
 test("rule 8: formatting syncs a pending change once; the pending sync does not repeat it", async () => {

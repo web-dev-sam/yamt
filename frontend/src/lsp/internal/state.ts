@@ -1,8 +1,6 @@
 import type { StartReply } from "../../ipc";
 import type { InstallHint, ServerSpec } from "./spec";
 
-const MS_PER_SECOND = 1000;
-
 export type FailReason =
   | { readonly kind: "notFound"; readonly program: string; readonly searched: readonly string[] }
   | { readonly kind: "spawnFailed"; readonly message: string }
@@ -26,9 +24,14 @@ export type ServerView = {
   readonly state: ServerState;
 };
 
+export type RestState = Extract<
+  ServerState,
+  { readonly kind: "stopped" | "crashed" | "failed" | "notInstalled" }
+>;
+
 export type StartFailure = Exclude<FailReason, { readonly kind: "noHost" }>;
 
-export function stateAtRest(spec: ServerSpec, hasHost: boolean): ServerState {
+export function stateAtRest(spec: ServerSpec, hasHost: boolean): RestState {
   if (!hasHost) {
     return { kind: "failed", reason: { kind: "noHost" } };
   }
@@ -50,7 +53,7 @@ export function startFailure(reply: Exclude<StartReply, { kind: "Started" }>): S
   }
 }
 
-export function failText(reason: StartFailure, initializeTimeoutMs: number): string {
+export function failText(reason: StartFailure): string {
   switch (reason.kind) {
     case "notFound":
       return `Not found: ${reason.program} (searched ${reason.searched.join(", ")})`;
@@ -59,7 +62,7 @@ export function failText(reason: StartFailure, initializeTimeoutMs: number): str
     case "initializeFailed":
       return `Initialize failed: ${reason.message}`;
     case "timedOut":
-      return `No answer to initialize within ${initializeTimeoutMs / MS_PER_SECOND} s; stopped`;
+      return "Stopped: the server did not answer initialize";
     case "outsideRepository":
       return `The project folder ${reason.project} is outside the repository`;
     default: {

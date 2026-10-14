@@ -1,67 +1,119 @@
 import { expect, test, vi } from "vitest";
 
-import type { RunId, ServerHost } from "../../ipc";
-import { Attempt } from "./attempt";
-import { Connection } from "./connection";
+import type {
+  HostEvent,
+  ProgramFound,
+  ProjectFile,
+  RunId,
+  ServerCommand,
+  ServerContext,
+  ServerHost,
+  StartReply,
+} from "../../ipc";
+import { Attempt, type AttemptEvents } from "./attempt";
 import { SYSTEM_TIMERS } from "./timers";
 
 function isRunId(n: number): n is RunId {
   return Number.isSafeInteger(n);
 }
 
-function host(send: ServerHost["send"]): ServerHost {
-  return {
-    context: () => Promise.resolve({ root: "/repo", process_id: 1 }),
-    start: () => Promise.resolve({ kind: "SpawnFailed", program: "x", message: "unused" }),
-    send,
-    stop: () => Promise.resolve(),
-    findProgram: () => Promise.resolve({ kind: "NotFound", searched: [] }),
-    projectFiles: () => Promise.resolve([]),
-  };
+function runId(n: number): RunId {
+  if (!isRunId(n)) {
+    throw new Error("bad run id");
+  }
+  return n;
 }
 
-function attempt(send: ServerHost["send"]): Attempt {
-  return new Attempt(
-    host(send),
-    (self) =>
-      new Connection(
-        {
-          send: (text) => self.send(text),
-          request: () => ({ kind: "result", value: null, log: null }),
-          notification: () => undefined,
-          log: () => undefined,
-        },
-        SYSTEM_TIMERS,
-      ),
-  );
+const RUN = runId(7);
+
+const COMMAND: ServerCommand = { program: "x", args: [], project: "" };
+
+class FakeHost implements ServerHost {
+  readonly sent: [RunId, string][] = [];
+  readonly stopped: RunId[] = [];
+  reply: () => Promise<StartReply>;
+  emit: (event: HostEvent) => void = () => undefined;
+
+  constructor(reply: StartReply) {
+    this.reply = () => Promise.resolve(reply);
+  }
+
+  context(): Promise<ServerContext> {
+    return Promise.resolve({ root: "/repo", process_id: 1 });
+  }
+
+  start(_: ServerCommand, onEvent: (event: HostEvent) => void): Promise<StartReply> {
+    this.emit = onEvent;
+    return this.reply();
+  }
+
+  send(run: RunId, message: string): void {
+    this.sent.push([run, message]);
+  }
+
+  stop(run: RunId): Promise<void> {
+    this.stopped.push(run);
+    return Promise.resolve();
+  }
+
+  findProgram(): Promise<ProgramFound> {
+    return Promise.resolve({ kind: "NotFound", searched: [] });
+  }
+
+  projectFiles(): Promise<readonly ProjectFile[]> {
+    return Promise.resolve([]);
+  }
+}
+
+function attempt(host: ServerHost, events: Partial<AttemptEvents> = {}): Attempt {
+  return new Attempt({
+    host,
+    timers: SYSTEM_TIMERS,
+    answers: { settings: null, folder: { uri: "file:///repo", name: "repo" } },
+    events: { log: () => undefined, exited: () => undefined, docs: () => null, ...events },
+  });
 }
 
 test("an attempt sends nothing until the host started its run", async () => {
-  const send = vi.fn();
-  const pending = attempt(send);
-  pending.send("early");
-  pending.markStarted(null);
-  pending.send("never started");
-  expect(send).not.toHaveBeenCalled();
-  expect(await pending.started).toBeNull();
+  const refused = new FakeHost({ kind: "SpawnFailed", program: "x", message: "no" });
+  const never = attempt(refused);
+  never.connection.notify("early", null);
+  await never.start(COMMAND);
+  never.connection.notify("never started", null);
+  expect(refused.sent).toEqual([]);
 
-  const run = 7;
-  if (!isRunId(run)) {
-    throw new Error("7 is a run id");
-  }
-  const started = attempt(send);
-  started.markStarted(run);
-  started.send("hello");
+  const started = new FakeHost({ kind: "Started", run: RUN });
+  const running = attempt(started);
+  await running.start(COMMAND);
+  running.connection.notify("hello", null);
 
-  expect(send).toHaveBeenCalledWith(run, "hello");
-  expect(await started.started).toBe(run);
+  expect(started.sent).toEqual([[RUN, expect.stringContaining('"hello"')]]);
 });
 
-test("markExited resolves exited and is remembered", async () => {
-  const exited = attempt(vi.fn());
-  expect(exited.hasExited).toBe(false);
-  exited.markExited();
+test("a host that throws while starting is a spawn failure with its message", async () => {
+  const host = new FakeHost({ kind: "SpawnFailed", program: "x", message: "unused" });
+  host.reply = () => Promise.reject(new Error("channel closed"));
 
-  expect(exited.hasExited).toBe(true);
-  await expect(exited.exited).resolves.toBeUndefined();
+  expect(await attempt(host).start(COMMAND)).toEqual({
+    kind: "SpawnFailed",
+    program: "x",
+    message: "Error: channel closed",
+  });
+});
+
+test("an exit closes the connection, logs the code and reports it, so a stop does not stop it again", async () => {
+  const host = new FakeHost({ kind: "Started", run: RUN });
+  const log = vi.fn();
+  const exited = vi.fn();
+  const exiting = attempt(host, { log, exited });
+  await exiting.start(COMMAND);
+  const pending = exiting.connection.request("shutdown", undefined, 2000);
+
+  host.emit({ kind: "Exited", code: 3 });
+
+  expect(await pending).toEqual({ kind: "closed" });
+  expect(log).toHaveBeenCalledWith("yamt", "Exited with code 3");
+  expect(exited).toHaveBeenCalledWith(3);
+  await exiting.stop(true);
+  expect(host.stopped).toEqual([]);
 });

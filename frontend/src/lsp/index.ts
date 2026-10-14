@@ -1,7 +1,7 @@
 import type { ServerHost } from "../ipc";
 import { DocEntry, type ResultDocument } from "./internal/documents";
 import { format, type FormatReply, type FormattingOptions } from "./internal/formatting";
-import type { HostContext } from "./internal/handshake";
+import { hostContext, type HostContext } from "./internal/handshake";
 import { sameValue } from "./internal/json";
 import { LogBook, type LogLine } from "./internal/log";
 import { Server, type ServerEnv } from "./internal/server";
@@ -24,16 +24,6 @@ export interface OpenDocument {
   close(): void;
 }
 
-function readyContext(host: ServerHost): Promise<HostContext> {
-  return host.context().then(
-    (context) =>
-      context.root === null
-        ? { kind: "failed", message: "the repository's folder path is not valid UTF-8" }
-        : { kind: "ready", root: context.root, processId: context.process_id },
-    (error: unknown) => ({ kind: "failed", message: String(error) }),
-  );
-}
-
 export class LanguageServers {
   readonly #host: ServerHost | null;
   readonly #timers: Timers;
@@ -53,7 +43,7 @@ export class LanguageServers {
       host,
       timers,
       context: (host) => {
-        this.#context ??= readyContext(host);
+        this.#context ??= hostContext(host);
         return this.#context;
       },
       documents: () => this.#documents,
@@ -72,7 +62,11 @@ export class LanguageServers {
       (spec) => old.find((server) => sameValue(server.spec, spec)) ?? this.#create(spec, old),
     );
     const removed = old.filter((candidate) => !this.#servers.includes(candidate));
-    removed.forEach((server) => void server.halt());
+    removed.forEach((server) => {
+      void server.halt().then(() => {
+        this.#retired = this.#retired.filter((retired) => retired !== server);
+      });
+    });
     this.#retired = [...this.#retired, ...removed];
     this.#servers.forEach((server) => this.#startIfServing(server));
     this.#changed();
@@ -113,12 +107,13 @@ export class LanguageServers {
   open(doc: ResultDocument): OpenDocument {
     const entry = new DocEntry(doc, this.#timers, {
       synced: (synced, sent) =>
-        this.#servers.forEach((server) => server.docs?.change(synced, sent)),
-      isOpenOnAServer: (open) => this.#servers.some((server) => server.docs?.has(open) === true),
+        this.#servers.forEach((server) => server.running?.docs.change(synced, sent)),
+      isOpenOnAServer: (open) =>
+        this.#servers.some((server) => server.running?.docs.has(open) === true),
     });
     this.#documents = [...this.#documents, entry];
     for (const server of this.#servers.filter((candidate) => candidate.serves(doc.path))) {
-      server.docs?.open(entry);
+      server.running?.docs.open(entry);
       this.#startIfServing(server);
     }
     return {
@@ -156,7 +151,7 @@ export class LanguageServers {
   }
 
   #close(entry: DocEntry): void {
-    this.#servers.forEach((server) => server.docs?.close(entry));
+    this.#servers.forEach((server) => server.running?.docs.close(entry));
     this.#documents = this.#documents.filter((candidate) => candidate !== entry);
   }
 

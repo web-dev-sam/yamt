@@ -1,9 +1,9 @@
+import type { Connection } from "./connection";
 import type { DocEntry } from "./documents";
 import { applyEdits } from "./edits";
 import { parseWith } from "./messages";
 import { TEXT_EDITS } from "./protocol";
 import type { Server } from "./server";
-import type { ServerDocs } from "./serverDocs";
 import type { ServerState } from "./state";
 import type { Timers } from "./timers";
 
@@ -39,16 +39,21 @@ function within(settled: Promise<void>, ms: number, timers: Timers): Promise<boo
 
 type Request = {
   readonly server: string;
-  readonly docs: ServerDocs;
+  readonly connection: Connection;
+  readonly uri: string;
   readonly entry: DocEntry;
   readonly options: FormattingOptions;
   readonly timeoutMs: number;
 };
 
 async function formatOn(request: Request): Promise<FormatReply> {
-  const { server, docs, entry, options, timeoutMs } = request;
+  const { server, connection, uri, entry, options, timeoutMs } = request;
   const sent = entry.current();
-  const reply = await docs.formatting(entry, options, timeoutMs);
+  const reply = await connection.request(
+    "textDocument/formatting",
+    { textDocument: { uri }, options },
+    timeoutMs,
+  );
   switch (reply.kind) {
     case "timedOut":
       return { kind: "timedOut", server };
@@ -91,12 +96,14 @@ export async function format(
     if (!(await within(server.settled(), deadline - timers.now(), timers))) {
       return { kind: "timedOut", server: name };
     }
-    const docs = server.docs;
-    if (docs !== null && docs.capabilities.formats && docs.has(entry)) {
+    const running = server.running;
+    const uri = running?.docs.uriOf(entry) ?? null;
+    if (running !== null && running.capabilities.formats && uri !== null) {
       try {
         return await formatOn({
           server: name,
-          docs,
+          connection: running.attempt.connection,
+          uri,
           entry,
           options,
           timeoutMs: deadline - timers.now(),
@@ -106,7 +113,7 @@ export async function format(
       }
     }
   }
-  const idle = candidates.find((server) => server.state.kind !== "running");
+  const idle = candidates.find((server) => server.running === null);
   return idle === undefined
     ? { kind: "noFormatter" }
     : { kind: "notRunning", server: idle.spec.name, state: idle.state };

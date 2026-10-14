@@ -1,7 +1,5 @@
-import type { HostEvent, ServerHost, StartReply } from "../../ipc";
-import { answer, type Answer } from "./answers";
+import type { ServerHost } from "../../ipc";
 import { Attempt } from "./attempt";
-import { Connection } from "./connection";
 import type { DocEntry } from "./documents";
 import {
   capabilitiesOf,
@@ -12,15 +10,12 @@ import {
   type ReadyContext,
 } from "./handshake";
 import type { LogLine } from "./log";
-import { parseWith } from "./messages";
-import { MESSAGE_PARAMS } from "./protocol";
+import { stateOf, STOPPED, type Halting, type Run, type Running } from "./run";
 import { ServerDocs } from "./serverDocs";
 import { serves, type ServerSpec } from "./spec";
 import { failText, stateAtRest, startFailure, type ServerState, type StartFailure } from "./state";
 import type { Timers } from "./timers";
 import { fileUri } from "./uri";
-
-const SHUTDOWN_TIMEOUT_MS = 2000;
 
 export type ServerEnv = {
   readonly host: ServerHost | null;
@@ -31,33 +26,26 @@ export type ServerEnv = {
   readonly changed: () => void;
 };
 
-const SERVER_MESSAGES: Readonly<Record<string, true>> = {
-  "window/logMessage": true,
-  "window/showMessage": true,
-};
-
 export class Server {
   readonly spec: ServerSpec;
   userStopped: boolean;
   readonly #env: ServerEnv;
-  #state: ServerState;
-  #attempt: Attempt | null = null;
-  #halting: Promise<void> | null = null;
+  #run: Run;
   #settled: (() => void)[] = [];
 
   constructor(spec: ServerSpec, env: ServerEnv, userStopped: boolean) {
     this.spec = spec;
     this.userStopped = userStopped;
     this.#env = env;
-    this.#state = stateAtRest(spec, env.host !== null);
+    this.#run = { kind: "idle", attempt: null, state: stateAtRest(spec, env.host !== null) };
   }
 
   get state(): ServerState {
-    return this.#state;
+    return stateOf(this.#run);
   }
 
-  get docs(): ServerDocs | null {
-    return this.#attempt?.docs ?? null;
+  get running(): Running | null {
+    return this.#run.kind === "running" ? this.#run : null;
   }
 
   serves(path: string): boolean {
@@ -65,7 +53,7 @@ export class Server {
   }
 
   settled(): Promise<void> {
-    if (this.#state.kind !== "starting") {
+    if (this.state.kind !== "starting") {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
@@ -90,87 +78,123 @@ export class Server {
   }
 
   halt(): Promise<void> {
-    const attempt = this.#attempt;
-    if (attempt === null) {
-      return this.#halting ?? Promise.resolve();
+    const run = this.#run;
+    switch (run.kind) {
+      case "idle":
+        return Promise.resolve();
+      case "launching":
+        this.#setRun(STOPPED);
+        return Promise.resolve();
+      case "starting":
+        return this.#halt(run.attempt, null);
+      case "running":
+        return this.#halt(run.attempt, run.docs);
+      case "halting":
+        run.startAfter = false;
+        return run.done;
+      default: {
+        const _exhaustive: never = run;
+        return _exhaustive;
+      }
     }
-    this.#attempt = null;
-    this.#setState({ kind: "stopping" });
-    const halting = this.#release(attempt).then(() => {
-      this.#halting = null;
-      this.#setState({ kind: "stopped" });
-    });
-    this.#halting = halting;
-    return halting;
+  }
+
+  #halt(attempt: Attempt, docs: ServerDocs | null): Promise<void> {
+    docs?.closeAll();
+    const stopped = attempt.stop(docs !== null);
+    const halting: Halting = {
+      kind: "halting",
+      attempt: null,
+      done: stopped.then(() => this.#halted(halting)),
+      startAfter: false,
+    };
+    this.#setRun(halting);
+    return halting.done;
+  }
+
+  #halted(halting: Halting): void {
+    this.#setRun(STOPPED);
+    if (halting.startAfter) {
+      this.#startWhenIdle();
+    }
   }
 
   #startWhenIdle(): void {
+    const run = this.#run;
     const host = this.#env.host;
-    if (this.#halting !== null) {
-      void this.#halting.then(() => this.#startWhenIdle());
-    } else if (this.#attempt === null && host !== null && this.spec.install === null) {
+    if (run.kind === "halting") {
+      run.startAfter = true;
+    } else if (run.kind === "idle" && host !== null && this.spec.install === null) {
       void this.#launch(host);
     }
   }
 
   async #launch(host: ServerHost): Promise<void> {
-    const attempt = new Attempt(host, (self) => this.#connect(self));
-    this.#attempt = attempt;
-    this.#setState({ kind: "starting" });
+    const launching: Run = { kind: "launching", attempt: null };
+    this.#setRun(launching);
     const { program, args } = this.spec.command;
     const where = this.spec.project === "" ? "the repository root" : this.spec.project;
     this.#log("yamt", `Starting ${[program, ...args].join(" ")} in ${where}`);
     const context = await this.#env.context(host);
-    if (this.#attempt !== attempt) {
-      attempt.markStarted(null);
+    if (this.#run !== launching) {
       return;
     }
     if (context.kind !== "ready") {
-      attempt.markStarted(null);
-      this.#fail(attempt, { kind: "initializeFailed", message: context.message });
+      this.#fail({ kind: "initializeFailed", message: context.message }, null);
       return;
     }
-    attempt.folder = projectFolder(this.spec, context.root);
-    const reply = await this.#spawn(attempt);
-    attempt.markStarted(reply.kind === "Started" ? reply.run : null);
-    if (this.#attempt !== attempt) {
+    await this.#startAttempt(host, context);
+  }
+
+  async #startAttempt(host: ServerHost, context: ReadyContext): Promise<void> {
+    const attempt = this.#createAttempt(host, context);
+    this.#setRun({ kind: "starting", attempt });
+    const { program, args } = this.spec.command;
+    const reply = await attempt.start({ program, args, project: this.spec.project });
+    if (this.#run.attempt !== attempt) {
       return;
     }
     if (reply.kind === "Started") {
       await this.#initialize(attempt, context);
     } else {
-      this.#fail(attempt, startFailure(reply));
+      this.#fail(startFailure(reply), attempt);
     }
   }
 
-  async #spawn(attempt: Attempt): Promise<StartReply> {
-    const { program, args } = this.spec.command;
-    try {
-      return await attempt.host.start({ program, args, project: this.spec.project }, (event) =>
-        this.#onEvent(attempt, event),
-      );
-    } catch (error) {
-      return { kind: "SpawnFailed", program, message: String(error) };
-    }
+  #createAttempt(host: ServerHost, context: ReadyContext): Attempt {
+    const attempt: Attempt = new Attempt({
+      host,
+      timers: this.#env.timers,
+      answers: { settings: this.spec.settings, folder: projectFolder(this.spec, context.root) },
+      events: {
+        log: (source, text) => this.#log(source, text),
+        exited: (code) => this.#exited(attempt, code),
+        docs: () => {
+          const running = this.running;
+          return running?.attempt === attempt ? running.docs : null;
+        },
+      },
+    });
+    return attempt;
   }
 
   async #initialize(attempt: Attempt, context: ReadyContext): Promise<void> {
     const params = initializeParams(this.spec, context);
     const reply = await attempt.connection.request("initialize", params, INITIALIZE_TIMEOUT_MS);
-    if (this.#attempt !== attempt || reply.kind === "closed") {
+    if (this.#run.attempt !== attempt) {
       return;
     }
     if (reply.kind !== "result") {
-      const message = reply.kind === "error" ? reply.message : null;
-      this.#fail(
-        attempt,
-        message === null ? { kind: "timedOut" } : { kind: "initializeFailed", message },
-      );
+      const failure: StartFailure =
+        reply.kind === "error"
+          ? { kind: "initializeFailed", message: reply.message }
+          : { kind: "timedOut" };
+      this.#fail(failure, attempt);
       return;
     }
     const capabilities = capabilitiesOf(reply.value);
     if (!capabilities.ok) {
-      this.#fail(attempt, { kind: "initializeFailed", message: capabilities.reason });
+      this.#fail({ kind: "initializeFailed", message: capabilities.reason }, attempt);
       return;
     }
     attempt.connection.notify("initialized", {});
@@ -178,106 +202,37 @@ export class Server {
     const docs = new ServerDocs({
       name: this.spec.name,
       connection: attempt.connection,
-      capabilities: capabilities.value,
+      pulls: capabilities.value.pulls,
       uriOf: (path) => fileUri(context.root, path),
       log: (text) => this.#log("yamt", text),
     });
-    attempt.docs = docs;
-    this.#setState({ kind: "running" });
     this.#env
       .documents()
       .filter((entry) => this.serves(entry.doc.path))
       .forEach((entry) => docs.open(entry));
-  }
-
-  #connect(attempt: Attempt): Connection {
-    return new Connection(
-      {
-        send: (text) => attempt.send(text),
-        request: (method, params) => this.#answer(attempt, method, params),
-        notification: (method, params) => this.#notified(attempt, method, params),
-        log: (text) => this.#log("yamt", text),
-      },
-      this.#env.timers,
-    );
-  }
-
-  #answer(attempt: Attempt, method: string, params: unknown): Answer {
-    if (method === "workspace/diagnostic/refresh") {
-      queueMicrotask(() => attempt.docs?.pullAll());
-    }
-    return answer(method, params, { settings: this.spec.settings, folder: attempt.folder });
-  }
-
-  #notified(attempt: Attempt, method: string, params: unknown): void {
-    if (method === "textDocument/publishDiagnostics") {
-      attempt.docs?.push(params);
-    } else if (Object.hasOwn(SERVER_MESSAGES, method)) {
-      const parsed = parseWith(MESSAGE_PARAMS, params);
-      this.#log("server", parsed.ok ? parsed.value.message : `${method}: ${parsed.reason}`);
-    }
-  }
-
-  #onEvent(attempt: Attempt, event: HostEvent): void {
-    switch (event.kind) {
-      case "Message":
-        attempt.connection.receive(event.text);
-        return;
-      case "Log":
-        this.#log("stderr", event.line);
-        return;
-      case "Exited":
-        this.#exited(attempt, event.code);
-        return;
-      default: {
-        const _exhaustive: never = event;
-        return _exhaustive;
-      }
-    }
+    this.#setRun({ kind: "running", attempt, docs, capabilities: capabilities.value });
   }
 
   #exited(attempt: Attempt, code: number | null): void {
-    this.#log("yamt", code === null ? "Exited without a code" : `Exited with code ${code}`);
-    attempt.markExited();
-    if (this.#attempt === attempt) {
-      this.#attempt = null;
-      attempt.connection.close();
-      attempt.docs?.closeAll();
-      this.#setState({ kind: "crashed", code });
+    if (this.#run.attempt === attempt) {
+      this.running?.docs.closeAll();
+      this.#setRun({ kind: "idle", attempt: null, state: { kind: "crashed", code } });
     }
   }
 
-  #fail(attempt: Attempt, reason: StartFailure): void {
-    this.#log("yamt", failText(reason, INITIALIZE_TIMEOUT_MS));
-    this.#attempt = null;
-    this.#setState({ kind: "failed", reason });
-    void this.#release(attempt);
+  #fail(reason: StartFailure, attempt: Attempt | null): void {
+    this.#log("yamt", failText(reason));
+    this.#setRun({ kind: "idle", attempt: null, state: { kind: "failed", reason } });
+    void attempt?.stop(false);
   }
 
-  async #release(attempt: Attempt): Promise<void> {
-    const docs = attempt.docs;
-    docs?.closeAll();
-    const run = await attempt.started;
-    if (docs !== null && !attempt.hasExited) {
-      await attempt.connection.request("shutdown", undefined, SHUTDOWN_TIMEOUT_MS);
-      attempt.connection.notify("exit", undefined);
+  #setRun(run: Run): void {
+    this.#run = run;
+    if (this.state.kind !== "starting") {
+      const waiting = this.#settled;
+      this.#settled = [];
+      waiting.forEach((resolve) => resolve());
     }
-    if (run !== null && !attempt.hasExited) {
-      await attempt.host.stop(run).catch((error: unknown) => {
-        this.#log("yamt", `Could not stop the server: ${String(error)}`);
-      });
-    }
-    if (run !== null) {
-      await attempt.exited;
-    }
-    attempt.connection.close();
-  }
-
-  #setState(state: ServerState): void {
-    this.#state = state;
-    const waiting = this.#settled;
-    this.#settled = [];
-    waiting.forEach((resolve) => resolve());
     this.#env.changed();
   }
 
