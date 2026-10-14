@@ -332,7 +332,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
   §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
-  `finish_file(path, text, disk_version) -> WriteReply`, `reset_file(path, disk_version) -> WriteReply`,
+  `finish_file(path, text, disk_version) -> WriteReply`, `save_file(path, text, disk_version) -> WriteReply`
+  (`finish_file` without `git add`: the own write updates `seen` only, the disk version stays, plan §2 #65/#69),
+  `reset_file(path, disk_version) -> WriteReply` (back to this run's start: the stages captured at open and the
+  bytes found at open, `FileState.at_open`, #66/#69),
   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
   `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> SideNames`
   (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
@@ -435,12 +438,17 @@ blocked by a hook and caught by `just bindings-check`.
 export type SourceResult<T> = { ok: true; value: T } | { ok: false; failure: SourceFailure }; // SourceFailure = IpcError
 export interface ChunkSource {
   listFiles(): Promise<SourceResult<FileList>>; // settles disk changes, then re-reads git: marks are git's view (plan §2 #49/#53)
-  loadFile(path: string): Promise<SourceResult<FileMergeData>>; // domain Chunk: { id, kind, middle, local, remote, words }; base is not shown, so not carried
+  loadFile(path: string): Promise<SourceResult<FileMergeData>>; // domain Chunk: { id, kind, middle, local, remote, words, waiting }; base is not shown, so not carried; waiting = what Save writes while a side waits (#69)
   finishFile(request: {
     path: string;
     text: string;
     diskVersion: DiskVersion;
   }): Promise<SourceResult<WriteReply>>;
+  saveFile(request: {
+    path: string;
+    text: string;
+    diskVersion: DiskVersion;
+  }): Promise<SourceResult<WriteReply>>; // writes without staging (#65); the file stays conflicted in git
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result

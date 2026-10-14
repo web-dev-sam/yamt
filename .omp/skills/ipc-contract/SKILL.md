@@ -37,9 +37,10 @@ from them and committed.
 
 ```
 list_files()                      -> FileList { files, disk_changes }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53
-load_file(path)                   -> FileMergeData   `middle: Stages{text} | Disk{text} | DiskNotText{found}`, chunks with their middle range and words, `disk_version`; `deleted: Side | null` (#47)
+load_file(path)                   -> FileMergeData   `middle: Stages{text} | Disk{text} | DiskNotText{found}`, chunks with their middle range, words and `waiting` (SideLines | Markers{open, between, close} | AsShown: what Save writes while a side waits, #69), `disk_version`; `deleted: Side | null` (#47)
 finish_file(path, text, disk_version)   -> WriteReply   Written{files} | ChangedOnDisk{files, change} (old version or unseen disk change: nothing written, #53)
-reset_file(path, disk_version)    -> WriteReply
+save_file(path, text, disk_version)     -> WriteReply   finish_file without `git add`: the file stays conflicted; the own write updates `seen` only, never a DiskChange, the disk version stays (#65/#69)
+reset_file(path, disk_version)    -> WriteReply   back to this run's start: captured stages + the bytes found at open (#66/#69)
 describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit), `disk_version`
 take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
 side_names()                      -> SideNames { local, remote }   each SideName Branch{name} | Commit{short_id, subject, message} or null; HEAD's branch or commit, what is merged in; read once at open, #50/#62
@@ -57,7 +58,7 @@ authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u
 
 ## Frontend side
 
-- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`; list/load/finish/reset/describe/take return `SourceResult`, failure =
+- [IPC7] `ChunkSource` (`ipc/ChunkSource.ts`; list/load/finish/save/reset/describe/take return `SourceResult`, failure =
   the generated `IpcError`) is the interface the app talks to. Two implementations: `createTauriSource`
   (`ipc/tauri.ts`, maps the generated `commands`; `forwardLog` stringifies non-finite numbers) and
   the fixture source (`ipc/fixture.ts`, valibot over `fixtures/{golden,showcase}/*.json`, the only
