@@ -1,27 +1,16 @@
 {
-  "FileListKeyR1": {
-    "owned": [
-      "frontend/src/ipc/keys.ts",
-      "frontend/src/ipc/keys.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/editor/internal/historyKey.ts",
-      "frontend/src/editor/internal/historyKey.test.ts"
-    ]
-  },
-  "FileTreeView": {
+  "FileTreeViewR1": {
     "owned": [
       "frontend/src/ui/FileList.vue",
       "frontend/src/ui/FileTree.vue",
       "frontend/src/ui/fileTree.ts",
       "frontend/src/ui/fileTree.test.ts",
-      "frontend/src/ui/fileListMode.ts",
-      "frontend/src/ui/fileListMode.test.ts",
       "frontend/src/ui/fileIcon.ts",
       "frontend/src/ui/fileIcon.test.ts",
       "frontend/src/ui/folderIcon.ts",
-      "frontend/src/ui/folderIcon.test.ts"
+      "frontend/src/ui/folderIcon.test.ts",
+      "frontend/src/ui/iconTable.ts",
+      "frontend/src/ui/iconTable.test.ts"
     ]
   }
 }
