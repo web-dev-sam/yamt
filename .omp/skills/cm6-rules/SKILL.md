@@ -39,7 +39,8 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   numbers, highlighting, `EditorState.lineSeparator` when `eol === "CrLf"`) so line metrics
   are identical — that identity is what makes connector and scroll math trivial.
 - [CM5] Serialise the result with `state.sliceDoc()` (respects the configured separator),
-  never `doc.toString()` (always `\n`). Test: CRLF file ⇒ `resultText()` contains `\r\n`.
+  never `doc.toString()` (always `\n`). Test: CRLF file ⇒ `snapshot().asShown()` and `snapshot().fileText()` contain
+  `\r\n`; a formatter's LF answer is split on any line break and inserted as `Text` lines (plan §2 #70).
 
 ## Transactions
 

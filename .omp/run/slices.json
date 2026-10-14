@@ -1,8 +1,8 @@
 {
-  "SaveRustR1": {
-    "owned": ["crates/session/**", "crates/gitio/src/merge_file.rs", "crates/gitio/src/lib.rs"]
-  },
   "LspClientR2": {
     "owned": ["frontend/src/lsp/**"]
+  },
+  "LspHostR2": {
+    "owned": ["src-tauri/src/servers.rs", "src-tauri/src/commands.rs", "src-tauri/AGENTS.md"]
   }
 }
