@@ -1,0 +1,163 @@
+From 50048d428cd08d9524ecc9a6d97a931b3ce0ed4b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 14 Oct 2026 09:37:37 +0200
+Subject: [PATCH] fix(gitio): current branch via branch --show-current, a
+ same-named tag no longer shows heads/ (#822-#824)
+
+---
+ .omp/run/notes/SideNamesRustR1.md  | 14 ++++++++++++++
+ crates/gitio/src/repo.rs           | 28 ++++++++++++++--------------
+ crates/gitio/tests/merge_heads.rs  |  8 ++++++++
+ crates/session/tests/side_names.rs |  4 ++--
+ 4 files changed, 38 insertions(+), 16 deletions(-)
+ create mode 100644 .omp/run/notes/SideNamesRustR1.md
+
+diff --git a/.omp/run/notes/SideNamesRustR1.md b/.omp/run/notes/SideNamesRustR1.md
+new file mode 100644
+index 0000000..0e0ba1a
+--- /dev/null
++++ b/.omp/run/notes/SideNamesRustR1.md
+@@ -0,0 +1,14 @@
++# SideNamesRustR1 — 3.N-rust, rework 1 (#822–#824)
++
++Brief `docs/slices/briefs/3.N-side-names-rust-rework-1.md`. Transcript `history://SideNamesRustR1`.
++
++- `Repo::current_branch` runs `git branch --show-current` (const `BRANCH`); empty output → `None` (detached, rebase);
++  unborn → its name; outside a repository → `GitFailed`.
++- `without_final_newline(command, output)`: the four rev-parse callers pass `REV_PARSE`, `current_branch` passes
++  `BRANCH` (#823/#824). The `symbolic-ref --quiet` line above `is_unresolved_name` removed (no longer applies).
++- New test `current_branch_ignores_a_tag_with_the_branch_name`: failed on `d5f9e1d` (`heads/local` vs `local`),
++  passes after.
++- `an_unreadable_branch_drops_only_the_local_name`: setup check now asserts the new command's failure ("failed to
++  resolve HEAD", exit 128 on the symbolic-ref loop); still drops only the local name.
++- fmt, clippy `-D warnings`, `cargo test --workspace`, `just arch-check` ok.
++- Open risk: the `UnexpectedOutput { command: "branch" }` path is untested (git always ends the name with a newline).
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index ba73ce2..82d30bd 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -10,6 +10,7 @@ use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+ use crate::{Error, Result, StageEntry};
+ 
+ const REV_PARSE: &str = "rev-parse";
++const BRANCH: &str = "branch";
+ const LOG: &str = "log";
+ const HASH_OBJECT: &str = "hash-object";
+ const MERGE_MSG: &str = "MERGE_MSG";
+@@ -36,7 +37,7 @@ impl Repo {
+     pub fn discover(cwd: &Path) -> Result<Repo> {
+         let git = find_git_on_path()?;
+         let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+-        let output = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
++        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+         let root = path_from_git(&output);
+         Ok(Repo { root, git })
+     }
+@@ -59,19 +60,19 @@ impl Repo {
+             Err(error) if is_unresolved_name(&error) => return Ok(None),
+             Err(error) => return Err(error),
+         };
+-        let line = without_final_newline(output)?;
++        let line = without_final_newline(REV_PARSE, output)?;
+         let hex = String::from_utf8_lossy(&line);
+         Ok(Some(Oid::parse(&hex)?))
+     }
+ 
+-    /// The branch HEAD is on (`symbolic-ref --short`); `None` when HEAD is detached.
++    /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
+     pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
+-        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+-        match run(self.command(Access::Read, &args), None, GIT_TIMEOUT) {
+-            Ok(output) => Ok(Some(without_final_newline(output)?)),
+-            Err(error) if is_unresolved_name(&error) => Ok(None),
+-            Err(error) => Err(error),
++        let command = self.command(Access::Read, &[BRANCH, "--show-current"]);
++        let output = run(command, None, GIT_TIMEOUT)?;
++        if output.is_empty() {
++            return Ok(None);
+         }
++        Ok(Some(without_final_newline(BRANCH, output)?))
+     }
+ 
+     pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
+@@ -93,7 +94,7 @@ impl Repo {
+ 
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
+-        let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
++        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+         let path = self.root.join(path_from_git(&git_path));
+         match fs::read(&path) {
+             Ok(message) => Ok(Some(message)),
+@@ -223,7 +224,7 @@ impl Repo {
+             Err(error) if is_unresolved_name(&error) => return Ok(None),
+             Err(error) => return Err(error),
+         };
+-        let line = without_final_newline(output)?;
++        let line = without_final_newline(REV_PARSE, output)?;
+         Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+     }
+ 
+@@ -239,8 +240,7 @@ impl Repo {
+     }
+ }
+ 
+-// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message;
+-// git-symbolic-ref(1) `--quiet`: a detached HEAD does the same.
++// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
+ fn is_unresolved_name(error: &Error) -> bool {
+     matches!(
+         error,
+@@ -248,12 +248,12 @@ fn is_unresolved_name(error: &Error) -> bool {
+     )
+ }
+ 
+-fn without_final_newline(mut output: Vec<u8>) -> Result<Vec<u8>> {
++fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
+     if output.pop() == Some(b'\n') {
+         return Ok(output);
+     }
+     Err(Error::UnexpectedOutput {
+-        command: REV_PARSE,
++        command,
+         output: String::from_utf8_lossy(&output).into_owned(),
+     })
+ }
+diff --git a/crates/gitio/tests/merge_heads.rs b/crates/gitio/tests/merge_heads.rs
+index 0a57942..500e16e 100644
+--- a/crates/gitio/tests/merge_heads.rs
++++ b/crates/gitio/tests/merge_heads.rs
+@@ -80,6 +80,14 @@ fn current_branch_is_the_short_name_of_the_branch_head_is_on() {
+     assert_eq!(repo.current_branch().unwrap(), Some(b"feature/x".to_vec()));
+ }
+ 
++#[test]
++fn current_branch_ignores_a_tag_with_the_branch_name() {
++    let (dir, repo) = merging();
++    git_ok(dir.path(), &["tag", "local", "remote"]).unwrap();
++
++    assert_eq!(repo.current_branch().unwrap(), Some(b"local".to_vec()));
++}
++
+ #[test]
+ fn current_branch_of_a_branch_without_a_commit_is_its_name() {
+     let (dir, repo) = merging();
+diff --git a/crates/session/tests/side_names.rs b/crates/session/tests/side_names.rs
+index 444b256..583f38e 100644
+--- a/crates/session/tests/side_names.rs
++++ b/crates/session/tests/side_names.rs
+@@ -179,9 +179,9 @@ fn an_unreadable_branch_drops_only_the_local_name() {
+     fs::write(heads.join("loop-a"), "ref: refs/heads/loop-b\n").unwrap();
+     fs::write(heads.join("loop-b"), "ref: refs/heads/loop-a\n").unwrap();
+     fs::write(root.join(".git/HEAD"), "ref: refs/heads/loop-a\n").unwrap();
+-    let branch_read = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap();
++    let branch_read = git(root, &["branch", "--show-current"]).unwrap();
+     let stderr = String::from_utf8(branch_read.stderr).unwrap();
+-    assert!(stderr.contains("No such ref: HEAD"), "{stderr:?}");
++    assert!(stderr.contains("failed to resolve HEAD"), "{stderr:?}");
+ 
+     let expected = SideNames {
+         local: None,
+-- 
+2.56.0
+

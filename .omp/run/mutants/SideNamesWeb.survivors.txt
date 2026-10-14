@@ -1,0 +1,10 @@
+just mutants d5f9e1d (commit b744640), Stryker --ignoreStatic; whole files mutated, survivors on lines the patch changed:
+
+src/ipc/fixture.ts:221:23 BlockStatement NoCoverage    — fixture `sideNames()` body (constant reply; its test deleted by the brief as constant-only)
+src/ipc/fixture.ts:222:14 ObjectLiteral NoCoverage     — `{ local: null, remote: null }` → `{}`
+src/ipc/tauri.ts:79:17 BlockStatement NoCoverage       — `sideNames() { return commands.sideNames(); }` forwarder (its test deleted by the brief as forwarding-only)
+src/ui/sideHeaders.ts:23:5 ConditionalExpression NoCoverage — `default:` exhaustive `never` branch (unreachable by type)
+src/ui/sideHeaders.ts:23:14 BlockStatement NoCoverage  — same branch
+
+Scores: listing.ts 100, store.ts 97.49 (survivors at 176, 182, 273: lines this patch did not change), sideHeaders.ts 88.24 (only the two above), tauri.ts 98.25, fixture.ts 70.00 (older lines 31–124 untouched by this patch).
+Full log: .omp/run/mutants/SideNamesWeb.log

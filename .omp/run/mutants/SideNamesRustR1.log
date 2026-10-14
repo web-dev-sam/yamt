@@ -1,0 +1,5 @@
+Found 16 mutants to test
+ok       Unmutated baseline in 3s build + 0s test
+ INFO Auto-set test timeout to 20s
+16 mutants tested in 22s: 13 caught, 3 unviable
+mutants: no TypeScript changes since 5bda317

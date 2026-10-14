@@ -1,0 +1,941 @@
+mutants: no Rust changes since d5f9e1d
+[32m09:35:14 (434741) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m09:35:14 (434741) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m09:35:14 (434741) INFO ProjectReader[39m Found 8 of 338 file(s) to be mutated.
+[32m09:35:15 (434741) INFO Instrumenter[39m Instrumented 8 source file(s) with 555 mutant(s)
+[32m09:35:15 (434741) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m09:35:16 (434741) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m09:35:24 (434741) INFO DryRunExecutor[39m Initial test run succeeded. Ran 449 tests in 7 seconds (net 1779.7709179999952 ms, overhead 5606.229082000005 ms).
+
+All tests
+  editor/internal
+    apply.test.ts
+      ~ apply local: the change gets the left text, resolves, and loses colour and arrow (covered 102)
+      ~ apply remote inserts the right lines at an empty middle range (covered 102)
+      ~ a conflict applied from both sides holds local then remote text (covered 102)
+      ~ ignore keeps the text and resolves a change or a half-applied conflict (covered 102)
+      ~ applying after an edit inside the change replaces the current range (covered 102)
+      ~ undo after apply restores text and status; redo re-applies (covered 102)
+      ~ undo after ignore brings the change back; redo ignores it again (covered 102)
+      ~ undo and redo after an arrow or × show that change, not the old cursor at line 1 (covered 102)
+      ~ redo of an insert-only apply puts the cursor on the first inserted line (covered 102)
+      ~ typing right after an arrow click is an undo step of its own (covered 102)
+      ~ bulk apply moves a cursor outside the visible lines to the first one; undo returns there (covered 102)
+      ~ bulk apply from the left resolves every LocalOnly change; one undo restores all (covered 102)
+      ~ a BothSame change resolves from either arrow and from either bulk apply (covered 75)
+      ~ bulk apply from the right inserts every RemoteOnly change in place (covered 102)
+      ~ bulk apply over touching spans whose last deletes an unterminated final line equals clicking each (covered 75)
+      ~ deleting all of a change's lines in the middle pane ignores it (covered 102)
+      ~ resultText of a CRLF file keeps CRLF after an apply (covered 75)
+      ~ a conflict applied from both sides after its separator line is deleted pushes the next change (covered 75)
+      ~ a change on an unterminated last line keeps the file without a final line break (covered 75)
+      ~ a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it (covered 102)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (Lf) (covered 75)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (CrLf) (covered 75)
+      ~ a chunk spans its middle range, not where its base range would put it (covered 75)
+      ~ a middle that is not text on disk is an empty document (covered 75)
+      ~ an add/add file reopened from the disk: a one-sided apply stays a conflict until the other side is settled (covered 75)
+      ~ Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step (covered 102)
+      ~ Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step (covered 102)
+      ~ Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied (covered 102)
+      ~ Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is (covered 102)
+      ~ Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome (covered 102)
+      ~ a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step (covered 75)
+      ~ Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it (covered 75)
+      ~ a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each (covered 75)
+      ~ a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each (covered 75)
+      ~ an apply drag over a change and a touching zero-line conflict equals clicking each (covered 75)
+    chunkField.test.ts
+      ~ a real fixture's chunks start at line starts; an empty middle range is a point (covered 102)
+      ~ a chunk ending on the last line ends at the document end (covered 75)
+      ~ typing at the end of an unterminated last line stays inside its chunk (covered 75)
+      ~ typing at an empty chunk's point in the middle of a line lands after it (covered 75)
+      ~ an edit before a chunk shifts it (covered 75)
+      ~ typing inside a chunk, including at its first line's start, grows it (covered 75)
+      ~ typing at the start of the line after a chunk stays outside it (covered 75)
+      ~ text typed at an empty chunk's point lands after it (covered 75)
+      ~ deleting all of a chunk's lines collapses it; undo restores the range (covered 75)
+      ~ one undo restores a merged history event; redo re-applies it (covered 75)
+    decorations.test.ts
+      ~ vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone (covered 102)
+      ~ a side pane drops a block once its own side is handled, even in an open conflict (covered 102)
+      ~ center colours follow their text when a line is typed above them (covered 102)
+      ~ an empty range at the end of an unterminated last line is drawn below that line (covered 75)
+      ~ a marker on another chunk's band line keeps its own tone class (covered 75)
+      ~ a line break pasted at the end of a band line stops at the marker that follows it (covered 75)
+      ~ random edits keep center ranges sorted, disjoint, inside the document, and drawable (covered 102)
+      ~ a RemoteOnly deletion: center band and right marker are deleted, left is bare (covered 75)
+      ~ a focused 8-line change is outlined on every line, with its first and last lines marked (covered 102)
+      ~ a focused zero-line change outlines the line carrying its bar, on the band's own edge (covered 75)
+      ~ a side alone draws no outline on any change (covered 102)
+    drag.test.ts
+      ~ dragging down covers the pressed icon and every open icon whose row the pointer reached (covered 102)
+      ~ dragging up covers every open icon whose row the pointer reached, down to the pressed one (covered 102)
+      ~ a pointer between icons covers nothing beyond the last icon it passed (covered 102)
+      ~ closed sides are skipped: a handled change and changes of the other side are never covered (covered 102)
+    find.test.ts
+      ✘ an empty field shows nothing and a text without matches shows No results (covered 0)
+      ✘ a selection off a match counts every case-insensitive match (covered 0)
+      ✘ a selection on a match shows its place; next from the last wraps to the first (covered 0)
+      ✘ the count is recomputed after a document, selection or query change and only then (covered 0)
+      ✘ the space above the first line stays from show to hide, across edits; the last effect wins (covered 0)
+      ✘ the Close button's title names the first Close find key, or none (covered 0)
+    gap.test.ts
+      ✘ a shape is drawn while any part of it touches the strip, edges included (covered 0)
+      ✘ a shape wholly above or below the strip is left out (covered 0)
+      ~ each strip joins its own pane pair, each edge moved by its own pane's shift (covered 102)
+      ~ a band is kept while one edge is still in the strip and the other has left it (covered 102)
+      ~ a band 1 px above or below the strip on both edges is dropped (covered 102)
+      ~ a chunk whose local side is applied leaves the local strip and stays on the remote one (covered 102)
+      ~ a chunk whose local side is ignored leaves the local strip and stays on the remote one (covered 102)
+      ~ each strip paints a chunk in its own side's tone (covered 75)
+      ~ a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided (covered 102)
+      ~ on macOS the hint says ⌘+click (covered 102)
+      ~ a change that is not a conflict never has the hint, even when both sides changed it (covered 102)
+      ~ an icon row built while the other side waited is rebuilt once that side is ignored (covered 102)
+    geometry.test.ts
+      ✘ lines in the middle span from the first line's top to the next line's top (covered 0)
+      ✘ an empty range at a line start is a point at that line's top (covered 0)
+      ✘ a range to the end of an unterminated last line ends at that line's bottom (covered 0)
+      ✘ an empty range at the end of an unterminated last line is a point at its bottom (covered 0)
+      ✘ a range to the end of a newline-terminated document ends at the empty last line's top (covered 0)
+      ✘ an empty document has one point at the top (covered 0)
+      ~ chunk rows go stale on a status change, an edit or new measurements, not on a cursor move (covered 102)
+    historyKey.test.ts
+      ✘ Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing (covered 0)
+      ✘ macOS: Cmd+Z undoes, Cmd+Shift+Z and Cmd+Y redo, Ctrl+Z does nothing (covered 0)
+      ✘ Alt, a key someone already handled and a text field never undo here (covered 0)
+      ✘ a non-Latin layout undoes and redoes by the physical key (covered 0)
+      ✘ a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript (covered 0)
+      ✘ a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes (covered 0)
+      ✘ a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing (covered 0)
+      ✘ a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing (covered 0)
+      ✘ a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only (covered 0)
+    keys.test.ts
+      ✘ Shift with a letter alone is the upper-case letter, as CodeMirror matches it (covered 0)
+      ✘ Shift with Mod, Alt or a named key keeps the Shift- prefix (covered 0)
+      ✘ named keys and plain characters pass through (covered 0)
+      ✘ a macOS Ctrl key is not bound on Linux and is Ctrl- on macOS (covered 0)
+    language.test.ts
+      ✘ App.vue is coloured as Vue (covered 0)
+      ✘ src/components/Provider.tsx is coloured as TSX (covered 0)
+      ✘ use-magic-keys.ts is coloured as TypeScript (covered 0)
+      ✘ vite.config.mts is coloured as TypeScript (covered 0)
+      ✘ public/index.php is coloured as PHP (covered 0)
+      ✘ src/docker/Dockerfile is coloured as Dockerfile (covered 0)
+      ✘ a file name no language claims stays plain (covered 0)
+    modClick.test.ts
+      ✘ Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not (covered 0)
+      ✘ without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens (covered 0)
+      ✘ Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't (covered 0)
+      ✘ only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key (covered 0)
+    navigation.test.ts
+      ✘ Down and Up pass over a change already decided on that side and stop at it on the other (covered 0)
+      ✘ Down on the lowest waiting change and Up on the top-most stay put (covered 0)
+      ✘ after deciding the lowest waiting change the pick is the top-most still waiting, not the one above (covered 0)
+      ✘ with nothing left on that side there is no pick, even while the other side waits (covered 0)
+      ✘ Left/Right from a conflict half lands on its other half while it waits, else the remembered change, else alone (covered 0)
+      ✘ a change made the same way on both sides crosses to its other half (covered 0)
+      ✘ from a local-only change, Right uses the right side's remembered change (covered 0)
+      ✘ from the screen, Down takes a change straddling the top and skips one ending exactly at it (covered 0)
+      ✘ from the screen, Up takes a change straddling the bottom and skips one starting exactly at it (covered 0)
+      ~ from the screen, a zero-line change exactly at the edge counts (covered 102)
+      ✘ a side alone with waiting changes only above the area stays put; with none waiting it falls back (covered 0)
+      ~ a click hits a band by its px span and a zero-line change near its bar, never a decided side (covered 102)
+      ✘ the keyboard moves to the other side only when the decision emptied the focused side, never to the hidden side (covered 0)
+      ✘ a decision on the other side never moves the keyboard off a side that was already empty (covered 0)
+      ✘ after a decision that moved the focused side's mark on, the view reveals its new change (covered 0)
+      ✘ after a decision on another change the mark stays and the view does not move (covered 0)
+      ✘ after a decision that left the focused side alone the view does not move (covered 0)
+      ✘ a handover wins over revealing on the emptied side (covered 0)
+    pane.test.ts
+      ✘ a Vue file draws template tags in the tag colour and its script setup as TypeScript (covered 0)
+      ✘ a TSX file draws JSX tags in the tag colour (covered 0)
+      ✘ a character literal is drawn in the string colour (covered 0)
+      ~ recolouring the center pane adds no undo step and keeps the chunks (covered 102)
+      ~ a selection across a word mark is the innermost mark, drawn over block and word tints (covered 92)
+      ✘ Tab adds the file's four-space unit to each of three selected lines and Shift+Tab removes it (covered 0)
+      ✘ Tab adds a tab to each selected line of a tab-indented file (covered 0)
+      ✘ Shift+Tab on lines with less than one unit removes what is there (covered 0)
+      ✘ one undo takes back a whole Tab on three lines (covered 0)
+      ✘ the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults (covered 0)
+      ✘ Indent on Mod-i runs before the default keymap's selectParentSyntax (covered 0)
+      ✘ Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection (covered 0)
+      ✘ Indent without keys: Tab indents nothing in the middle (covered 0)
+      ✘ CodeMirror's dark flag follows the theme (covered 0)
+      ✘ the browser's own undo and redo are refused in the middle; other input passes through (covered 0)
+      ✘ a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key (covered 0)
+      ✘ new preferences turn the middle light, move its Undo and rebind its find keys (covered 0)
+      ✘ new preferences turn a side light, rebind its Apply and its find keys (covered 0)
+    sideKeys.test.ts
+      ✘ a focused side applies with Enter and Space, ignores with Backspace (macOS Delete), Delete and x, and moves with the arrows (covered 0)
+      ✘ Apply rebound to a: a applies and Enter is bound to nothing (covered 0)
+      ✘ a side action without keys binds nothing, and a macOS-only key is not bound on Linux (covered 0)
+      ✘ a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it (covered 0)
+    sideMark.test.ts
+      ✘ deciding the marked change moves the mark to the next change waiting below on that side (covered 0)
+      ✘ a push that reopens changes, as undo does, leaves the mark where it is (covered 0)
+      ✘ a remembered change decided while its side is alone moves by the same rule and stays alone (covered 0)
+      ✘ the last change decided on that side leaves the side alone with nothing remembered (covered 0)
+      ✘ setMark wins over a status push in the same transaction (covered 0)
+    sides.test.ts
+      ~ × on a conflict's left side keeps the middle and the right side; « then replaces the middle (covered 102)
+      ~ » then « on a conflict appends; the right arrow offers that only while the left side is applied (covered 102)
+      ~ applying a side of a conflict whose other side deleted the block resolves it whole (covered 75)
+      ~ × and apply on a block that is not a conflict resolve the whole block (covered 102)
+      ~ deleting a whole open or half-applied conflict in the middle pane ignores every side (covered 102)
+      ~ a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step (covered 75)
+      ~ touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves (covered 75)
+    tone.test.ts
+      ~ a side that adds lines where the middle has none is inserted, whatever base held (covered 75)
+      ~ a side that removes middle lines is deleted (covered 75)
+      ~ a side that replaces middle lines is modified (covered 75)
+      ~ BothSame takes its tone from the side's own range on each side (covered 75)
+      ~ a conflict is conflict on both sides, even where one side is empty (covered 75)
+      ~ the center takes its tone from remote for RemoteOnly and from local otherwise (covered 75)
+    words.test.ts
+      ~ side panes mark exactly the changed words, in a CRLF file and after an emoji (covered 102)
+      ~ side panes draw one bar per removal point in a CRLF file: line start, mid-line, line end (covered 102)
+      ~ a bar equals another pane's bar of the same tone and differs from a bar of another tone (covered 102)
+      ~ a resolved block loses its word marks and bars on every side pane and undo brings them back (covered 102)
+      ~ applying one side of a conflict drops that side's tint, word marks and bars; the other keeps them (covered 102)
+      ~ the middle pane tints its blocks without word marks or bars: open, half-applied, applied, undone (covered 102)
+      ~ vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes (covered 102)
+  ipc
+    fixture.test.ts
+      ✓ the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes (killed 40)
+      ✓ each committed fixture loads with its JSON's chunk count, its stages middle and version 0 (killed 5)
+      ✓ a conflict of vueuse-use-magic-keys.ts arrives intact, with its words (killed 9)
+      ✓ in-memory records are listed sorted by path and keep every field (killed 2)
+      ✓ a middle from the disk, or not text on disk, and its disk version arrive as they are (killed 7)
+      ~ a record deleted on the local side keeps that side (covered 107)
+      ~ a record deleted on the remote side keeps that side (covered 107)
+      ✓ a record with an unknown chunk kind is rejected naming the file (killed 5)
+      ~ a record with an unknown eol is rejected naming the file (covered 16)
+      ~ a record with an unknown deleted side is rejected naming the file (covered 16)
+      ~ a record with missing deleted is rejected naming the file (covered 16)
+      ~ a record with missing chunks is rejected naming the file (covered 16)
+      ~ a record with missing middle is rejected naming the file (covered 16)
+      ~ a record with missing disk_version is rejected naming the file (covered 16)
+      ~ a record with a missing middle range is rejected naming the file (covered 16)
+      ~ a record with an unknown middle kind is rejected naming the file (covered 16)
+      ~ a record with an unknown not-text reason is rejected naming the file (covered 16)
+      ~ a record with a string word column is rejected naming the file (covered 16)
+      ~ a record with a string point column is rejected naming the file (covered 16)
+      ~ a record with the old flat word shape is rejected naming the file (covered 16)
+      ~ a record with a string line is rejected naming the file (covered 16)
+      ~ a record with a string middle line is rejected naming the file (covered 16)
+      ✓ a record with a negative middle line is rejected naming the file and field (killed 9)
+      ✓ a record with a negative middle len is rejected naming the file and field (killed 3)
+      ✓ a record with a negative local line is rejected naming the file and field (killed 1)
+      ✓ a record with a negative remote line is rejected naming the file and field (killed 1)
+      ~ a record with a non-integer local line is rejected naming the file and field (covered 52)
+      ~ a record with an unsafe remote line is rejected naming the file and field (covered 55)
+      ~ a record with a non-integer len is rejected naming the file and field (covered 48)
+      ~ a record with a negative len is rejected naming the file and field (covered 55)
+      ✓ a record with a negative chunk id is rejected naming the file and field (killed 3)
+      ~ a record with a non-integer chunk id is rejected naming the file and field (covered 34)
+      ✓ a record with disk version -1 is rejected (killed 3)
+      ~ a record with disk version 0.5 is rejected (covered 102)
+      ~ a record with disk version 9007199254740992 is rejected (covered 102)
+      ✓ a record with words of another chunk is rejected naming its words (killed 4)
+      ✓ a record with a negative word line is rejected naming its words (killed 5)
+      ✓ a record with a non-integer remote word line is rejected naming its words (killed 1)
+      ✓ a record with a negative word column is rejected naming its words (killed 3)
+      ✓ a record with an empty word range is rejected naming its words (killed 6)
+      ~ a record with a fractional word length is rejected naming its words (covered 78)
+      ✓ a record with a negative point line is rejected naming its words (killed 4)
+      ✓ a record with a negative point column is rejected naming its words (killed 3)
+      ~ a record with a fractional point column is rejected naming its words (covered 77)
+      ~ a record with an unsafe point column is rejected naming its words (covered 97)
+      ✓ an unknown path is an UnknownPath failure naming it, and changes nothing (killed 18)
+      ✓ finish marks the file resolved and logs its text once; reset returns it unresolved (killed 13)
+      ✓ takeSide marks the file resolved and logs the side; reset returns it unresolved (killed 4)
+      ✓ describeFile counts "" as 0 lines, like the app (killed 11)
+      ✓ describeFile counts "one" as 1 lines, like the app (killed 3)
+      ~ describeFile counts "one\n" as 1 lines, like the app (covered 122)
+      ~ describeFile counts "one\ntwo" as 2 lines, like the app (covered 123)
+      ~ describeFile counts "one\r\ntwo\r\n" as 2 lines, like the app (covered 122)
+      ~ describeFile counts "one\n\n" as 2 lines, like the app (covered 122)
+      ✓ loadFixture reads a committed or an in-memory record and rejects an unknown path (killed 3)
+    tauri.test.ts
+      ✓ listFiles returns the app's entries and disk changes, and its failure unchanged (killed 21)
+      ✓ a string error from listFiles rejects the call with that message (killed 5)
+      ✓ loadFile turns the app's data into domain data: the middle range, not base (killed 14)
+      ✓ loadFile rejects data whose chunk has a negative middle line, naming the field (killed 3)
+      ✓ each command's error arrives as the failure, unchanged (killed 4)
+      ~ finishFile and resetFile send their arguments with the disk version and return the reply (covered 98)
+      ✓ describeFile and takeSide send their arguments and return the app's answer (killed 4)
+      ~ a rejected command rejects the call (covered 5)
+      ~ a string error from Tauri's IPC layer rejects the call with that message (covered 105)
+      ~ a string error from describeFile or takeSide rejects the call with that message (covered 106)
+      ✓ a null error from Tauri's IPC layer rejects the call (killed 1)
+      ~ a 404 error from Tauri's IPC layer rejects the call (covered 105)
+      ✓ the forward stringifies non-finite numbers and keeps every other value (killed 11)
+      ✓ the five settings commands send their arguments and return the read with its default path (killed 13)
+      ~ a settings failure comes back as the app's error (covered 21)
+  ui
+    choiceText.test.ts
+      ✘ {"kind":"Missing"} reads "Deleted in this branch." (covered 0)
+      ✘ {"kind":"Text","lines":120} reads "A text file, 120 lines." (covered 0)
+      ✘ {"kind":"Text","lines":1} reads "A text file, 1 line." (covered 0)
+      ✘ {"kind":"Text","lines":0} reads "A text file, 0 lines." (covered 0)
+      ✘ {"kind":"Binary","bytes":12697} reads "A binary file, 12.4 KB." (covered 0)
+      ✘ {"kind":"NonUtf8","bytes":3174} reads "Not UTF-8 text, 3.1 KB." (covered 0)
+      ✘ {"kind":"TooLarge","bytes":9646899} reads "A text file too large to show, 9.2 MB." (covered 0)
+      ✘ {"kind":"Link","target":"../shared/config.json"} reads "A symbolic link to ../shared/config.json." (covered 0)
+      ✘ {"kind":"Commit","id":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"} reads "Submodule at commit 1a2b3c4." (covered 0)
+      ✘ 0 bytes are 0 B (covered 0)
+      ✘ 1023 bytes are 1023 B (covered 0)
+      ✘ 1024 bytes are 1 KB (covered 0)
+      ✘ 1536 bytes are 1.5 KB (covered 0)
+      ✘ 1048524 bytes are 1023.9 KB (covered 0)
+      ✘ 1048575 bytes are 1 MB (covered 0)
+      ✘ 1048576 bytes are 1 MB (covered 0)
+      ✘ 1572864 bytes are 1.5 MB (covered 0)
+      ✘ 2147483648 bytes are 2048 MB (covered 0)
+      ✘ only a submodule side has a tooltip, its full commit id (covered 0)
+      ✘ both sides present: Take left and Take right (covered 0)
+      ✘ deleted on the local side: Delete there, Keep on the other (covered 0)
+      ✘ deleted on the remote side: Delete there, Keep on the other (covered 0)
+      ✘ after a choice the Result column names the side taken, or the deletion (covered 0)
+      ✘ a file the disk resolved says so in the Result column, whatever its sides (covered 0)
+      ✘ before a choice the Result column says what there is to choose (covered 0)
+      ✘ a middle that is Deleted on disk reads "Deleted on disk — staged as deleted." (covered 0)
+      ✘ a middle that is Binary on disk reads "Not shown: the file on disk is binary — staged as it is." (covered 0)
+      ✘ a middle that is NonUtf8 on disk reads "Not shown: the file on disk is not UTF-8 — staged as it is." (covered 0)
+      ✘ a middle that is TooLarge on disk reads "Not shown: the file on disk is too large — staged as it is." (covered 0)
+      ✘ a middle that is Link on disk reads "A link on disk now — staged as it is." (covered 0)
+      ✘ a middle that is Directory on disk reads "A folder on disk now — staged as deleted." (covered 0)
+    fileListMode.test.ts
+      ✘ starts as the list, toggles to the tree and back, storing the plain name (covered 0)
+      ✘ a second start over the same storage keeps the tree (covered 0)
+      ✘ a stored value that is upper case starts the list (covered 0)
+      ✘ a stored value that is empty starts the list (covered 0)
+      ✘ a stored value that is JSON starts the list (covered 0)
+      ✘ a stored value that is quoted starts the list (covered 0)
+      ✘ a stored value that is the list starts the list (covered 0)
+      ✘ a storage that throws starts the list, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    keyField.test.ts
+      ✘ Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded (covered 0)
+      ✘ plain Enter confirms the shown key, and is recorded when no key is shown (covered 0)
+      ✘ plain Escape cancels; with Shift or Ctrl it is recorded (covered 0)
+      ✘ a key with its modifiers replaces the shown one; a modifier alone changes nothing (covered 0)
+    keymapEdit.test.ts
+      ✘ adding a key the action already has does nothing (covered 0)
+      ✘ adding a free key sends the action's whole list (covered 0)
+      ✘ adding a key another action holds asks, and Move takes it from the owner in the same changes (covered 0)
+      ✘ an owner left with exactly its defaults is sent back to them as null (covered 0)
+      ✘ changing a key replaces it in place (covered 0)
+      ✘ changing to a key another action holds asks first (covered 0)
+      ✘ changing to a key the action already has drops the old one; to itself or from a missing key does nothing (covered 0)
+      ✘ changing back to the defaults sends null (covered 0)
+      ✘ removing a key sends the rest; removing a key the action lacks does nothing (covered 0)
+      ✘ removing the one added key goes back to the defaults as null (covered 0)
+      ✘ remove all sends an empty list, unless there is nothing left to remove (covered 0)
+      ✘ reset sends null (covered 0)
+      ✘ a list is the defaults when it holds exactly the default keys, in any order (covered 0)
+      ✘ a key's owners are every other action holding it, never the action itself (covered 0)
+    keyText.test.ts
+      ✘ the keymap groups list every action once, in the settings order (covered 0)
+      ✘ each action says where it acts, matching its group (covered 0)
+      ✘ giving Ctrl/⌘B to another action clashes with Toggle file list (covered 0)
+      ✘ the edit menu changes and removes each key by its label; default keys offer no reset (covered 0)
+      ✘ Remove All shows past two keys, and Reset Shortcuts follows it without a separator (covered 0)
+      ✘ an action left without keys offers Add and Reset with one separator between (covered 0)
+      ✘ the + menu sets Enter, Escape, Tab and Shift+Tab, labelled for the platform (covered 0)
+      ✘ the conflict line names every action already using the key (covered 0)
+    problemText.test.ts
+      ✘ a failed open names the file and what failed (covered 0)
+      ✘ a failed finish names the file and what failed (covered 0)
+      ✘ a failed take names the file and what failed (covered 0)
+      ✘ a failed reset names the file and what failed (covered 0)
+      ✘ a failed list says the list could not be read, with the cause (covered 0)
+      ✘ Git carries git's own message (covered 0)
+      ✘ UnknownPath names the path (covered 0)
+      ✘ WriteFailed names the path and the system's message (covered 0)
+      ✘ NotAFile says nothing was written because the path is not a regular file (covered 0)
+      ✘ ReadFailed names the path and the system's message (covered 0)
+      ✘ Unsupported Binary says why the file cannot be shown (covered 0)
+      ✘ Unsupported NonUtf8 says why the file cannot be shown (covered 0)
+      ✘ Unsupported TooLarge says why the file cannot be shown (covered 0)
+      ✘ Unsupported LocalDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported RemoteDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported Symlink says why the file cannot be shown (covered 0)
+      ✘ Unsupported Submodule says why the file cannot be shown (covered 0)
+      ✘ a broken settings file names its line and column and what to do (covered 0)
+      ✘ a broken settings entry without a position names the error only (covered 0)
+      ✘ the other settings failures say the settings file could not be used and why (covered 0)
+      ✘ key problems name the action, the key and what yamt does instead (covered 0)
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ each question carries WebStorm's title and buttons, and the exit one lists its files (covered 0)
+      ✘ the clash question names the key in the platform's words, its owner and the asking action (covered 0)
+    settings.test.ts
+      ✘ antialiasing is shown on Linux platforms only (covered 0)
+    sideHeaders.test.ts
+      ✓ a branch names the local header, the same text on hover (killed 8)
+      ~ a branch names the remote header, the same text on hover (covered 9)
+      ✓ a commit shows its short id and subject in the local header; hovering shows the full message (killed 4)
+      ~ a commit shows its short id and subject in the remote header; hovering shows the full message (covered 9)
+      ✓ no name leaves the plain local header (killed 3)
+      ~ no name leaves the plain remote header (covered 6)
+      ~ each header reads its own side's name; the unnamed side stays plain (covered 15)
+    store.test.ts
+      ✓ useAppStore throws before createAppStore, then returns the created store (killed 9)
+      ✓ loading the list opens the first file the editor can show and logs file.loaded (killed 51)
+      ✓ an empty list opens nothing (killed 1)
+      ✓ a rejected list opens nothing, resolves, and shows an Unexpected list problem (killed 7)
+      ✓ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (killed 4)
+      ✓ re-clicking the shown file keeps the problem and lets a pending load win (killed 6)
+      ✓ switching to an opened file wins over a load that resolves later and clears the problem (killed 2)
+      ~ a later open wins when the earlier load resolves last (covered 140)
+      ✓ a stale failed open is logged but shows no problem (killed 4)
+      ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 147)
+      ~ a rejected load is an Unexpected problem and keeps the previous file (covered 147)
+      ✓ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (killed 18)
+      ✓ a finish of a file no longer shown does not switch files (killed 4)
+      ✓ settings open and close; picking a file while they show closes them and shows it, the shown file too (killed 7)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 192)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 190)
+      ✓ a file the user opens while a finish runs wins over the next file, though still loading (killed 1)
+      ✓ a file the user opens while a take runs wins over the next file, though still loading (killed 16)
+      ✓ a finish with work left asks; Back writes nothing, Save writes the text (killed 5)
+      ✓ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (killed 5)
+      ~ a rejected finish is an Unexpected problem (covered 154)
+      ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 167)
+      ~ closing asks only with unsaved work and answers with the choice (covered 140)
+      ✓ everything is resolved only when every listed file is (killed 13)
+      ✓ reset of A replaces only A in place with a new object and keeps B opened (killed 9)
+      ✓ a failed reset keeps the current file and names the path (killed 4)
+      ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 156)
+      ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 163)
+      ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 158)
+      ✓ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (killed 2)
+      ✓ a list of files the editor cannot show opens the first one's choice and loads nothing (killed 1)
+      ~ opening a file the editor cannot show describes it once and never loads it (covered 166)
+      ~ a failed describe is a failed open of that file and shows no choice (covered 169)
+      ✓ taking a side updates the list, marks only that file taken, and clears a problem about it (killed 7)
+      ~ a take keeps a problem about another file (covered 97)
+      ~ a failed take keeps the list and the choice and names the file (covered 69)
+      ✓ reset of a taken choice forgets only its side at once and describes the file again (killed 8)
+      ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 110)
+      ~ choices count toward everything resolved (covered 102)
+      ✓ a take on the shown file opens the next unresolved file, wrapping to the top (killed 1)
+      ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 216)
+      ✓ a list refresh changes the marks only: same file shown, same views, another file's problem kept (killed 3)
+      ✓ a failed refresh is a list problem and keeps the marks; the next good one clears only that (killed 3)
+      ✓ both side names are asked for once; a failure leaves none and logs a warning (killed 7)
+      ✓ a running change to an opened file rebuilds it and drops its side taken (edits: true) (killed 2)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 198)
+      ~ a change to a file that is not shown gives only its notice and its mark (covered 164)
+      ✓ changes reported by the first list are start notices; the file then opens from the disk (killed 1)
+      ✓ a newer change replaces the notice for its path; dismissNotice removes just one (killed 6)
+      ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 201)
+      ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 162)
+      ~ a change git could not stage is a warning notice, not a problem (covered 162)
+      ✓ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (killed 3)
+      ✓ a take refused because the file changed on disk shows the change and the disk view (killed 3)
+      ✓ a reset refused because the file changed on disk shows the change and the disk view (killed 3)
+      ~ finish, take and reset forward the disk version they are given (covered 233)
+      ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 195)
+      ✓ settings start with the start theme and the default keys, before any file is read (killed 1)
+      ~ a load on focus applies a file changed by hand since the last load (covered 21)
+      ~ a loaded file sets the theme and keys every opened file follows (covered 21)
+      ~ a failed load or change keeps the settings in use and shows a settings problem (covered 21)
+      ~ key problems in the file show one settings problem, which a clean read clears (covered 21)
+      ~ setTheme sends the settings in use and applies the reply (covered 21)
+      ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 21)
+      ~ a load whose only difference is the antialiasing is adopted (covered 21)
+      ~ a key another action holds asks; Move writes both changes in one call (covered 21)
+      ~ Cancel on the clash question writes nothing (covered 21)
+      ~ each key edit sends only the changed actions, as key texts (covered 21)
+      ~ an identical load keeps the settings object and does not show the same key problems again (covered 22)
+      ~ a key problem shown again replaces a settings failure the file no longer has (covered 21)
+      ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 21)
+      ~ a load that started before a change and answers after it does not put the old file back (covered 21)
+      ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 21)
+      ~ moveSettings sends the path with the settings in use and uses the file found there (covered 21)
+      ✓ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (killed 10)
+      ✓ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (killed 3)
+      ✓ a key press another handler already took does not toggle the list (killed 2)
+      ✓ while a question waits the key does nothing; once answered it toggles again (killed 1)
+      ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 36)
+      ~ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 34)
+      ~ with two toggle-file-list keys, each one toggles the list (covered 35)
+    toolbarButtons.test.ts
+      ✘ Undo and Redo start hidden; toggling shows or hides a button and stores the hidden ones in toolbar order (covered 0)
+      ✘ a second start over the same storage keeps the choice, also once every button shows (covered 0)
+      ✘ stored ids yamt does not know are dropped and duplicates collapse (covered 0)
+      ✘ a stored value that is not JSON hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a JSON object hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a number hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a string hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is null hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is an array holding a non-string hides Undo and Redo, as at first (covered 0)
+      ✘ a missing key hides Undo and Redo and writes nothing until a toggle (covered 0)
+      ✘ a storage that throws hides Undo and Redo, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    useMergeController.test.ts
+      ~ unsaved: false when built, true after an edit, false after markSaved, false after the file changed on disk (covered 102)
+      ~ without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored (covered 102)
+      ~ the editor is read-only as the view says, and is rebuilt when that changes (covered 102)
+      ~ the editor is built with the preferences in use and follows a change without a rebuild (covered 102)
+      ~ a preferences change before the file loaded reaches the editor built later (covered 102)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+    views.test.ts
+      ✘ deleted on side null with a {"kind":"Stages","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"Disk","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"DiskNotText","found":"Binary"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"Stages","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side local with a {"kind":"Disk","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"DiskNotText","found":"Deleted"} middle is editable: false (covered 0)
+
+[Survived] StringLiteral
+src/ipc/domain.ts:248:62
+-     return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
++     return { ...sides, diskVersion: toDiskVersion(diskVersion, "") };
+Tests ran:
+    describeFile and takeSide send their arguments and return the app's answer
+
+
+[NoCoverage] BlockStatement
+src/ipc/fixture.ts:221:23
+-       async sideNames() {
+-         return { local: null, remote: null };
+-       },
++       async sideNames() {},
+
+[NoCoverage] ObjectLiteral
+src/ipc/fixture.ts:222:14
+-         return { local: null, remote: null };
++         return {};
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:124:99
+-       throw new Error(`fixture ${file}: ${error instanceof Error ? error.message : String(error)}`, {
+-         cause: error,
+-       });
++       throw new Error(`fixture ${file}: ${error instanceof Error ? error.message : String(error)}`, {});
+Tests ran:
+    a record with a negative middle line is rejected naming the file and field
+    a record with a negative middle len is rejected naming the file and field
+    a record with a negative local line is rejected naming the file and field
+  and 20 more tests!
+
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:31:66
+-   const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {
+-     LocalOnly: true,
+-     RemoteOnly: true,
+-     BothSame: true,
+-     Conflict: true,
+-   };
++   const CHUNK_KINDS: Readonly<Record<Generated.ChunkKind, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:34:13
+-     BothSame: true,
++     BothSame: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:33:15
+-     RemoteOnly: true,
++     RemoteOnly: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:32:14
+-     LocalOnly: true,
++     LocalOnly: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:35:13
+-     Conflict: true,
++     Conflict: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:38:71
+-   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
++   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: false, Mixed: true };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:38:53
+-   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
++   const EOLS: Readonly<Record<Generated.Eol, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:40:64
+-   const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
++   const SIDES: Readonly<Record<Generated.Side, true>> = { local: false, remote: true };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:40:55
+-   const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
++   const SIDES: Readonly<Record<Generated.Side, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:38:59
+-   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
++   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: false, CrLf: true, Mixed: true };
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:38:84
+-   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: true };
++   const EOLS: Readonly<Record<Generated.Eol, true>> = { Lf: true, CrLf: true, Mixed: false };
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:40:78
+-   const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: true };
++   const SIDES: Readonly<Record<Generated.Side, true>> = { local: true, remote: false };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:42:61
+-   const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {
+-     Deleted: true,
+-     Binary: true,
+-     NonUtf8: true,
+-     TooLarge: true,
+-     Link: true,
+-     Directory: true,
+-   };
++   const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:46:13
+-     TooLarge: true,
++     TooLarge: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:43:12
+-     Deleted: true,
++     Deleted: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:44:11
+-     Binary: true,
++     Binary: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:47:9
+-     Link: true,
++     Link: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:45:12
+-     NonUtf8: true,
++     NonUtf8: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixture.ts:48:14
+-     Directory: true,
++     Directory: false,
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/ipc/fixture.ts:53:5
+-       (input) => typeof input === "string" && Object.hasOwn(members, input),
++       () => undefined,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:54:50
+-       `expected one of ${Object.keys(members).join(", ")}`,
++       `expected one of ${Object.keys(members).join("")}`,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:54:5
+-       `expected one of ${Object.keys(members).join(", ")}`,
++       ``,
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:63:24
+-   const CHUNK = v.object({
+-     id: v.number(),
+-     kind: memberOf(CHUNK_KINDS),
+-     base: LINE_RANGE,
+-     local: LINE_RANGE,
+-     remote: LINE_RANGE,
+-   } satisfies SchemaOf<Generated.Chunk>);
++   const CHUNK = v.object({} satisfies SchemaOf<Generated.Chunk>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:71:31
+-   const INLINE_RANGE = v.object({
+-     line: v.number(),
+-     start: v.number(),
+-     len: v.number(),
+-   } satisfies SchemaOf<Generated.InlineRange<number>>);
++   const INLINE_RANGE = v.object({} satisfies SchemaOf<Generated.InlineRange<number>>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:82:36
+-   const SIDE_WORD_CHANGES = v.object({
+-     changed: v.array(INLINE_RANGE),
+-     removed_at: v.array(INLINE_POINT),
+-   } satisfies SchemaOf<Generated.SideWordChanges<number>>);
++   const SIDE_WORD_CHANGES = v.object({} satisfies SchemaOf<Generated.SideWordChanges<number>>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:87:31
+-   const WORD_CHANGES = v.object({
+-     chunk: v.number(),
+-     local: SIDE_WORD_CHANGES,
+-     remote: SIDE_WORD_CHANGES,
+-   } satisfies SchemaOf<Generated.WordChanges>);
++   const WORD_CHANGES = v.object({} satisfies SchemaOf<Generated.WordChanges>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:58:29
+-   const LINE_RANGE = v.object({
+-     start: v.number(),
+-     len: v.number(),
+-   } satisfies SchemaOf<Generated.LineRange<number>>);
++   const LINE_RANGE = v.object({} satisfies SchemaOf<Generated.LineRange<number>>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:93:30
+-   const MERGE_CHUNK = v.object({
+-     chunk: CHUNK,
+-     middle: LINE_RANGE,
+-     words: WORD_CHANGES,
+-   } satisfies SchemaOf<Generated.MergeChunk>);
++   const MERGE_CHUNK = v.object({} satisfies SchemaOf<Generated.MergeChunk>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:77:31
+-   const INLINE_POINT = v.object({
+-     line: v.number(),
+-     column: v.number(),
+-   } satisfies SchemaOf<Generated.InlinePoint<number>>);
++   const INLINE_POINT = v.object({} satisfies SchemaOf<Generated.InlinePoint<number>>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:100:12
+-     v.object({ kind: v.literal("Stages"), text: v.string() }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:99:61
+-   const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", [
++   const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixture.ts:99:69
+-   const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", [
+-     v.object({ kind: v.literal("Stages"), text: v.string() }),
+-     v.object({ kind: v.literal("Disk"), text: v.string() }),
+-     v.object({ kind: v.literal("DiskNotText"), found: memberOf(NOT_TEXT) }),
+-   ]);
++   const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", []);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:101:12
+-     v.object({ kind: v.literal("Disk"), text: v.string() }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:100:30
+-     v.object({ kind: v.literal("Stages"), text: v.string() }),
++     v.object({ kind: v.literal(""), text: v.string() }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:101:30
+-     v.object({ kind: v.literal("Disk"), text: v.string() }),
++     v.object({ kind: v.literal(""), text: v.string() }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixture.ts:102:30
+-     v.object({ kind: v.literal("DiskNotText"), found: memberOf(NOT_TEXT) }),
++     v.object({ kind: v.literal(""), found: memberOf(NOT_TEXT) }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:105:34
+-   const FILE_MERGE_DATA = v.object({
+-     path: v.string(),
+-     middle: MIDDLE,
+-     local: v.string(),
+-     remote: v.string(),
+-     deleted: v.nullable(memberOf(SIDES)),
+-     eol: memberOf(EOLS),
+-     chunks: v.array(MERGE_CHUNK),
+-     disk_version: v.number(),
+-   } satisfies SchemaOf<Generated.FileMergeData>);
++   const FILE_MERGE_DATA = v.object({} satisfies SchemaOf<Generated.FileMergeData>);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixture.ts:102:12
+-     v.object({ kind: v.literal("DiskNotText"), found: memberOf(NOT_TEXT) }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/fixture.ts:53:16
+-       (input) => typeof input === "string" && Object.hasOwn(members, input),
++       (input) => true && Object.hasOwn(members, input),
+Ran all tests for this mutant.
+
+[NoCoverage] BlockStatement
+src/ipc/index.ts:55:80
+-   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
+-     return IN_APP ? guardWindowClose(mayClose) : Promise.resolve();
+-   }
++   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {}
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:51:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = true;
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:51:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = false;
+Ran all tests for this mutant.
+
+[Survived] EqualityOperator
+src/ipc/index.ts:51:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE !== "tauri";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/index.ts:51:54
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "";
+Ran all tests for this mutant.
+
+[NoCoverage] BlockStatement
+src/ipc/tauri.ts:79:17
+-       sideNames() {
+-         return commands.sideNames();
+-       },
++       sideNames() {},
+
+[NoCoverage] ConditionalExpression
+src/ui/sideHeaders.ts:23:5
+-       default: {
+-         const _exhaustive: never = name;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/sideHeaders.ts:23:14
+-       default: {
+-         const _exhaustive: never = name;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[Survived] AssignmentOperator
+src/ui/store.ts:176:3
+-     state.latestOpen += 1;
++     state.latestOpen -= 1;
+Tests ran:
+    opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing
+    switching to an opened file wins over a load that resolves later and clears the problem
+    reset of A replaces only A in place with a new object and keeps B opened
+  and 4 more tests!
+
+
+[Survived] AssignmentOperator
+src/ui/store.ts:182:3
+-     state.latestOpen += 1;
++     state.latestOpen -= 1;
+Tests ran:
+    loading the list opens the first file the editor can show and logs file.loaded
+    opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing
+    re-clicking the shown file keeps the problem and lets a pending load win
+  and 50 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/store.ts:273:78
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => false));
+Tests ran:
+    reset of a taken choice forgets only its side at once and describes the file again
+    a failed describe after a reset is a failed open; opening the file again describes it
+    a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each
+  and 1 more test!
+
+
+[Survived] ArrayDeclaration
+src/ui/store.ts:273:31
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([].filter(([takenPath]) => takenPath !== path));
+Tests ran:
+    reset of A replaces only A in place with a new object and keeps B opened
+    a failed reload after a reset keeps A's old view and reports it as a failed open
+    reset A, open B, open A, then the reset resolves: A shows its fresh view
+  and 6 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/store.ts:273:61
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([...state.taken.value].filter(() => undefined));
+Tests ran:
+    reset of A replaces only A in place with a new object and keeps B opened
+    a failed reload after a reset keeps A's old view and reports it as a failed open
+    reset A, open B, open A, then the reset resolves: A shows its fresh view
+  and 6 more tests!
+
+
+Ran 5.17 tests per mutant on average.
+-----------------|------------------|----------|-----------|------------|----------|----------|
+                 | % Mutation score |          |           |            |          |          |
+File             |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+All files        |  89.74 |   90.74 |      490 |         0 |         50 |        6 |        0 |
+ ipc             |  84.24 |   85.34 |      262 |         0 |         45 |        4 |        0 |
+  domain.ts      |  99.08 |   99.08 |      108 |         0 |          1 |        0 |        0 |
+  fixture.ts     |  70.00 |   71.01 |       98 |         0 |         40 |        2 |        0 |
+  index.ts       |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
+  tauri.ts       |  98.25 |  100.00 |       56 |         0 |          0 |        1 |        0 |
+ ui              |  97.02 |   97.85 |      228 |         0 |          5 |        2 |        0 |
+  listing.ts     | 100.00 |  100.00 |       19 |         0 |          0 |        0 |        0 |
+  sideHeaders.ts |  88.24 |  100.00 |       15 |         0 |          0 |        2 |        0 |
+  store.ts       |  97.49 |   97.49 |      194 |         0 |          5 |        0 |        0 |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m09:35:43 (434741) INFO MutationTestExecutor[39m Done in 28 seconds.

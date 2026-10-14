@@ -1,9 +1,1 @@
-{
-  "SideNamesRustR1": {
-    "owned": [
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/tests/merge_heads.rs",
-      "crates/session/tests/side_names.rs"
-    ]
-  }
-}
+{}
