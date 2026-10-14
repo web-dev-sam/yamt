@@ -26,6 +26,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A "Collapse unchanged fragments" button in the toolbar (third, after the arrows) turns the collapsing
   off and on for every opened file; turning it back on hides every run again as when the file opened. The
   choice is remembered across restarts, and the toolbar's right-click menu can hide the button.
+- Ctrl+S (Cmd+S on macOS) saves the Result to the file on disk without marking it resolved: git still lists
+  the file as conflicted until "Mark resolved". Changes still waiting are written as git wrote them: a
+  conflict as its conflict markers, a one-sided change applied, so no side is lost and yamt finds those
+  conflicts again next time. A dot at the right end of the Result header shows unsaved work; undoing back
+  to the saved text clears it, and closing the window asks only when something is not saved. The key can
+  be changed in settings ("Save").
+- Reset now brings back the file as it was when this run of yamt opened it, so saves made in earlier runs
+  stay.
+- Language servers: yamt finds oxlint, oxfmt, TypeScript and eslint in the repository's projects and asks
+  once per repository whether to start them. Their problems underline the Result as you type, with the
+  message on hover. Ctrl+S formats with oxfmt first (as one undo step, never touching changes that still
+  wait). Left of the settings gear, each server's state; its menu has Start, Stop, Restart and Show log.
+  A server that needs a separate package (typescript-language-server for TypeScript 5 and 6,
+  vscode-langservers-extracted for eslint) shows "Not installed" with the install command for the
+  project's own package manager and a Copy button; yamt starts it when you come back to the window.
+  Other servers can be added in Settings → Language servers. yamt ships no language server.
 
 ### Fixed
 
