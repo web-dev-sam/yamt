@@ -1,16 +1,1 @@
-{
-  "FileTreeViewR1": {
-    "owned": [
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/FileTree.vue",
-      "frontend/src/ui/fileTree.ts",
-      "frontend/src/ui/fileTree.test.ts",
-      "frontend/src/ui/fileIcon.ts",
-      "frontend/src/ui/fileIcon.test.ts",
-      "frontend/src/ui/folderIcon.ts",
-      "frontend/src/ui/folderIcon.test.ts",
-      "frontend/src/ui/iconTable.ts",
-      "frontend/src/ui/iconTable.test.ts"
-    ]
-  }
-}
+{}
