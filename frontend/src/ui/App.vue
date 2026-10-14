@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useWindowFocus } from "@vueuse/core";
+import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { onMounted, watch } from "vue";
 
 import ChoiceView from "./ChoiceView.vue";
@@ -17,6 +17,7 @@ const {
   choices,
   active,
   settingsOpen,
+  fileListShown,
   problem,
   notices,
   question,
@@ -29,9 +30,13 @@ const {
   dismissNotice,
   answer,
   watchWindowClose,
+  fileListKey,
 } = useAppStore();
 
 const focused = useWindowFocus();
+useEventListener(window, "keydown", (event) => {
+  fileListKey(event, navigator.platform);
+});
 
 watch(focused, (now) => {
   if (now) {
@@ -55,7 +60,7 @@ onMounted(() => {
 
 <template>
   <div class="flex h-full gap-island p-island">
-    <FileList :files="files" :active="active" @select="pick" />
+    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />

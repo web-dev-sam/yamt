@@ -29,6 +29,7 @@ export const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
   "close-find": "Close find",
   indent: "Indent",
   outdent: "Outdent",
+  "toggle-file-list": "Toggle file list",
 };
 
 export const ACTION_PLACES: Readonly<Record<KeyAction, string>> = {
@@ -46,6 +47,7 @@ export const ACTION_PLACES: Readonly<Record<KeyAction, string>> = {
   "close-find": "in a pane or its find box",
   indent: "in the Result pane",
   outdent: "in the Result pane",
+  "toggle-file-list": "anywhere in the window",
 };
 
 export const KEYMAP_GROUPS: readonly {
@@ -59,6 +61,7 @@ export const KEYMAP_GROUPS: readonly {
   { title: "Anywhere in the file", actions: ["undo", "redo"] },
   { title: "Find", actions: ["find", "find-next", "find-previous", "close-find"] },
   { title: "Result pane", actions: ["indent", "outdent"] },
+  { title: "Window", actions: ["toggle-file-list"] },
 ];
 
 const SEPARATOR: KeymapMenuEntry = { kind: "separator" };

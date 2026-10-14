@@ -68,6 +68,7 @@ test("the actions are listed in the settings order", () => {
     "close-find",
     "indent",
     "outdent",
+    "toggle-file-list",
   ]);
 });
 
@@ -95,6 +96,8 @@ test("the defaults are the keys yamt bound before settings existed", () => {
     // pane.ts indentWithTab at 9b717cb (plan §2 #35)
     indent: ["Tab"],
     outdent: ["Shift-Tab"],
+    // plan §2 #61
+    "toggle-file-list": ["Mod-b"],
   });
 });
 
@@ -205,6 +208,12 @@ test("Linux: Ctrl is Mod and Meta is no key; macOS: Cmd is Mod and Ctrl is MacCt
   expect(pressed(MAC, { key: "z", ctrl: true })).toBe("MacCtrl-z");
   expect(pressed(MAC, { key: "z", ctrl: true, meta: true })).toBe("Mod-MacCtrl-z");
   expect(pressed(LINUX, { key: "Backspace", alt: true })).toBe("Alt-Backspace");
+});
+
+test("Ctrl+B on Linux and ⌘B on macOS are Mod-b; ⌃B on macOS is MacCtrl-b", () => {
+  expect(pressed(LINUX, { key: "b", code: "KeyB", ctrl: true })).toBe("Mod-b");
+  expect(pressed(MAC, { key: "b", code: "KeyB", meta: true })).toBe("Mod-b");
+  expect(pressed(MAC, { key: "b", code: "KeyB", ctrl: true })).toBe("MacCtrl-b");
 });
 
 test("a non-Latin layout falls back to the physical letter only with a modifier", () => {

@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, KEY_ACTIONS, parseKey, type Key } from "../ipc";
+import { keyOwners } from "./keymapEdit";
 import {
+  ACTION_NAMES,
   ACTION_PLACES,
   KEYMAP_GROUPS,
   keymapMenu,
@@ -32,7 +34,9 @@ test("the keymap groups list every action once, in the settings order", () => {
     "Anywhere in the file",
     "Find",
     "Result pane",
+    "Window",
   ]);
+  expect(KEYMAP_GROUPS.at(-1)).toEqual({ title: "Window", actions: ["toggle-file-list"] });
 });
 
 test("each action says where it acts, matching its group", () => {
@@ -40,6 +44,14 @@ test("each action says where it acts, matching its group", () => {
   expect(ACTION_PLACES.undo).toBe("anywhere in the shown file");
   expect(ACTION_PLACES["close-find"]).toContain("find box");
   expect(ACTION_PLACES.indent).toBe("in the Result pane");
+  expect(ACTION_PLACES["toggle-file-list"]).toBe("anywhere in the window");
+  expect(ACTION_NAMES["toggle-file-list"]).toBe("Toggle file list");
+});
+
+test("giving Ctrl/⌘B to another action clashes with Toggle file list", () => {
+  expect(usedByText(keyOwners(DEFAULT_KEYS, "find", key("Mod-b")))).toBe(
+    "Already used by: Toggle file list",
+  );
 });
 
 test("the edit menu changes and removes each key by its label; default keys offer no reset", () => {

@@ -21,7 +21,9 @@
       "frontend/src/ui/fileListMode.ts",
       "frontend/src/ui/fileListMode.test.ts",
       "frontend/src/ui/fileIcon.ts",
-      "frontend/src/ui/fileIcon.test.ts"
+      "frontend/src/ui/fileIcon.test.ts",
+      "frontend/src/ui/folderIcon.ts",
+      "frontend/src/ui/folderIcon.test.ts"
     ]
   }
 }

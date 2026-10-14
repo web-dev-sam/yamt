@@ -14,7 +14,8 @@ export type KeyAction =
   | "find-previous"
   | "close-find"
   | "indent"
-  | "outdent";
+  | "outdent"
+  | "toggle-file-list";
 
 export const KEY_ACTIONS: readonly KeyAction[] = [
   "apply",
@@ -31,6 +32,7 @@ export const KEY_ACTIONS: readonly KeyAction[] = [
   "close-find",
   "indent",
   "outdent",
+  "toggle-file-list",
 ];
 
 export type KeyName = string & { readonly __brand: "KeyName" };
@@ -216,6 +218,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   "close-find": defaultKeys("Escape"),
   indent: defaultKeys("Tab"),
   outdent: defaultKeys("Shift-Tab"),
+  "toggle-file-list": defaultKeys("Mod-b"),
 };
 
 type Pressed = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;

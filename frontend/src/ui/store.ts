@@ -1,7 +1,8 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
-  log,
+  keyOfEvent,
+  sameKey,
   type ChunkSource,
   type DiskVersion,
   type FileEntry,
@@ -13,10 +14,11 @@ import {
 } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
-import { applyDiskChanges, changedOnDisk } from "./diskChanges";
+import { changedOnDisk } from "./diskChanges";
+import { loadRemoteName, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, clearProblemAbout, logProblem, report, unexpected } from "./problem";
+import { attempt, clearProblemAbout, logProblem, report } from "./problem";
 import type { Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
@@ -30,6 +32,9 @@ type FinishRequest = Parameters<ChunkSource["finishFile"]>[0] & {
   readonly summary: MergeSummary;
 };
 
+type KeyPress = Parameters<typeof keyOfEvent>[0] &
+  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
+
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
@@ -41,6 +46,7 @@ type Refs = {
   readonly problem: ShallowRef<Problem | null>;
   readonly settingsOpen: ShallowRef<boolean>;
   readonly settings: ShallowRef<SettingsInUse>;
+  readonly fileListShown: ShallowRef<boolean>;
 };
 
 type State = Refs & {
@@ -67,6 +73,7 @@ type Actions = Omit<CloseGuard, "markSaved"> &
     closeSettings(): void;
     answer(yes: boolean): void;
     toggleButton(id: ToolbarButtonId): void;
+    fileListKey(event: KeyPress, platform: string): void;
   };
 
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
@@ -90,6 +97,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
     problem: shallowRef<Problem | null>(null),
     settingsOpen: shallowRef(false),
     settings: shallowRef(startSettings(startTheme)),
+    fileListShown: shallowRef(true),
   };
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
@@ -138,6 +146,9 @@ function actions(state: State, buttons: HiddenButtons): Actions {
     },
     answer: state.asking.answer,
     toggleButton: buttons.toggle,
+    fileListKey: (event, platform) => {
+      fileListKey(state, event, platform);
+    },
     track: state.guard.track,
     untrack: state.guard.untrack,
     unsavedFiles: state.guard.unsavedFiles,
@@ -152,32 +163,6 @@ async function loadFiles(state: State): Promise<void> {
   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
   if (first !== undefined) {
     await open(state, first.path);
-  }
-}
-
-async function refreshFiles(
-  state: State,
-  when: Notice["when"],
-): Promise<readonly FileEntry[] | null> {
-  const listed = await attempt(() => state.source.listFiles());
-  if (!listed.ok) {
-    report(state, { action: "list", cause: listed.cause });
-    return null;
-  }
-  const { files, diskChanges } = listed.value;
-  state.files.value = files;
-  if (state.problem.value?.action === "list") {
-    state.problem.value = null;
-  }
-  await applyDiskChanges(state, diskChanges, when);
-  return files;
-}
-
-async function loadRemoteName(state: State): Promise<void> {
-  try {
-    state.remoteName.value = await state.source.remoteName();
-  } catch (error) {
-    log.warn("store.remote_name_failed", { ...unexpected(error) });
   }
 }
 
@@ -290,6 +275,21 @@ async function reset(state: State, path: string, diskVersion: DiskVersion): Prom
   if (await reload(state, path)) {
     clearProblemAbout(state, path);
   }
+}
+
+function fileListKey(state: State, event: KeyPress, platform: string): void {
+  const pressed = keyOfEvent(event, platform);
+  const bound = state.settings.value.keys.bindings["toggle-file-list"];
+  if (
+    event.defaultPrevented ||
+    state.asking.question.value !== null ||
+    pressed === null ||
+    !bound.some((key) => sameKey(key, pressed))
+  ) {
+    return;
+  }
+  event.preventDefault();
+  state.fileListShown.value = !state.fileListShown.value;
 }
 
 export function useAppStore(): AppStore {

@@ -2072,3 +2072,118 @@ test("moveSettings sends the path with the settings in use and uses the file fou
   expect(store.settings.value.read).toEqual(moved);
   expect(store.settings.value.theme).toBe("light");
 });
+
+const LINUX = "Linux x86_64";
+const MAC = "MacIntel";
+
+type Held = {
+  readonly ctrl?: boolean;
+  readonly meta?: boolean;
+  readonly alt?: boolean;
+  readonly shift?: boolean;
+  readonly prevented?: boolean;
+};
+
+type FakePress = Parameters<AppStore["fileListKey"]>[0] & { readonly prevents: () => number };
+
+function press(key: string, held: Held = {}): FakePress {
+  let prevents = 0;
+  return {
+    key,
+    code: `Key${key.toUpperCase()}`,
+    ctrlKey: held.ctrl ?? false,
+    metaKey: held.meta ?? false,
+    altKey: held.alt ?? false,
+    shiftKey: held.shift ?? false,
+    defaultPrevented: held.prevented ?? false,
+    preventDefault: () => {
+      prevents += 1;
+    },
+    prevents: () => prevents,
+  };
+}
+
+test("the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press", () => {
+  const store = createAppStore(handSource([]).source);
+  expect(store.fileListShown.value).toBe(true);
+
+  const hide = press("b", { ctrl: true });
+  store.fileListKey(hide, LINUX);
+  expect(store.fileListShown.value).toBe(false);
+  expect(hide.prevents()).toBe(1);
+
+  const show = press("b", { ctrl: true });
+  store.fileListKey(show, LINUX);
+  expect(store.fileListShown.value).toBe(true);
+  expect(show.prevents()).toBe(1);
+});
+
+test("⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone", () => {
+  const store = createAppStore(handSource([]).source);
+  const others: [FakePress, string][] = [
+    [press("b", { ctrl: true }), MAC],
+    [press("B", { ctrl: true, shift: true }), LINUX],
+    [press("b", { alt: true }), LINUX],
+    [press("b"), LINUX],
+    [press("b", { meta: true }), LINUX],
+  ];
+
+  for (const [other, platform] of others) {
+    store.fileListKey(other, platform);
+    expect(store.fileListShown.value).toBe(true);
+    expect(other.prevents()).toBe(0);
+  }
+
+  const command = press("b", { meta: true });
+  store.fileListKey(command, MAC);
+  expect(store.fileListShown.value).toBe(false);
+  expect(command.prevents()).toBe(1);
+});
+
+test("a key press another handler already took does not toggle the list", () => {
+  const store = createAppStore(handSource([]).source);
+  const taken = press("b", { ctrl: true, prevented: true });
+
+  store.fileListKey(taken, LINUX);
+
+  expect(store.fileListShown.value).toBe(true);
+  expect(taken.prevents()).toBe(0);
+});
+
+test("while a question waits the key does nothing; once answered it toggles again", async () => {
+  const { source } = settingsSource({});
+  const store = createAppStore(source);
+  const adding = store.addKey("undo", parsed("Mod-f"));
+  await vi.waitFor(() => {
+    expect(store.question.value?.kind).toBe("clash");
+  });
+
+  const asked = press("b", { ctrl: true });
+  store.fileListKey(asked, LINUX);
+  expect(store.fileListShown.value).toBe(true);
+  expect(asked.prevents()).toBe(0);
+
+  store.answer(false);
+  await adding;
+  store.fileListKey(press("b", { ctrl: true }), LINUX);
+  expect(store.fileListShown.value).toBe(false);
+});
+
+test("a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does", async () => {
+  const { source } = settingsSource({
+    loadSettings: () =>
+      Promise.resolve(read({ ...DARK, keys: { "toggle-file-list": ["Mod-Shift-l"] } })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+
+  const old = press("b", { ctrl: true });
+  store.fileListKey(old, LINUX);
+  expect(store.fileListShown.value).toBe(true);
+  expect(old.prevents()).toBe(0);
+
+  const bound = press("L", { ctrl: true, shift: true });
+  store.fileListKey(bound, LINUX);
+  expect(store.fileListShown.value).toBe(false);
+  expect(bound.prevents()).toBe(1);
+});
