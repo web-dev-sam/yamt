@@ -8,7 +8,15 @@
       "frontend/src/ui/MergeView.vue"
     ]
   },
-  "LspClientR1": {
-    "owned": ["frontend/src/lsp/**"]
+  "LspHostR1": {
+    "owned": [
+      "crates/lsp-host/**",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/servers.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/mock_window.rs",
+      "src-tauri/AGENTS.md"
+    ]
   }
 }
