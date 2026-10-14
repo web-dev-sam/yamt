@@ -1,7 +1,7 @@
 import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
-import { SIDE_PANE, type ChunkRow, type WaveRow } from "./geometry";
+import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
 import { modKeyName } from "./modClick";
 import type { Side } from "./side";
 import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
@@ -73,11 +73,12 @@ export function bandPaints(
   shifts: { readonly left: number; readonly right: number },
   size: { readonly width: number; readonly height: number },
 ): BandPaint[] {
+  const panes = STRIP_PANES[side];
   const paints = [];
   for (const row of rows) {
     if (isSideOpen(row.chunk, row.status, side)) {
-      const left = side === "local" ? row.left : row.center;
-      const right = side === "local" ? row.center : row.right;
+      const left = row[panes.left];
+      const right = row[panes.right];
       const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
       const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
       const top = Math.min(onLeft.top, onRight.top);
@@ -96,10 +97,11 @@ export function wavePaints(
   size: { readonly width: number; readonly height: number; readonly lineHeight: number },
 ): WavePaint[] {
   const center = waveCenterY(size.lineHeight);
+  const panes = STRIP_PANES[side];
   const paints = [];
   for (const [run, wave] of waves.entries()) {
-    const left = side === "local" ? wave.left : wave.center;
-    const right = side === "local" ? wave.center : wave.right;
+    const left = wave[panes.left];
+    const right = wave[panes.right];
     if (left !== null && right !== null) {
       const onLeft = left + shifts.left;
       const onRight = right + shifts.right;

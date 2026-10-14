@@ -5,7 +5,7 @@ import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
 import { toDocPos } from "./docPos";
 import { foldField, showNextStep } from "./folds";
-import { rangeSpan, rowsChanged, waveRows, type Pane } from "./geometry";
+import { rangeSpan, rowsChanged, STRIP_PANES, waveRows, type Pane } from "./geometry";
 import { paneDocs } from "./paneDocs";
 import { statusAfterIgnore } from "./status";
 
@@ -22,6 +22,13 @@ function spanOf(
     return { top, bottom: top + LINE_PX };
   });
 }
+
+test("each strip sits between its side's pane and the middle, the local pane on its left", () => {
+  expect(STRIP_PANES).toEqual({
+    local: { left: "left", right: "center" },
+    remote: { left: "center", right: "right" },
+  });
+});
 
 test("lines in the middle span from the first line's top to the next line's top", () => {
   expect(spanOf(["a", "b", "c"], 2, 4)).toEqual({ top: 20, bottom: 40 });
