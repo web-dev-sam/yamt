@@ -18,16 +18,12 @@
       "frontend/src/ui/useMergeController.test.ts"
     ]
   },
-  "LspDetect": {
+  "LspEditorR2": {
     "owned": [
-      "frontend/src/lsp/internal/presets.ts",
-      "frontend/src/lsp/internal/presets.test.ts",
-      "frontend/src/lsp/internal/detect.ts",
-      "frontend/src/lsp/internal/detect.test.ts",
-      "frontend/src/lsp/internal/packageManager.ts",
-      "frontend/src/lsp/internal/packageManager.test.ts",
-      "frontend/src/lsp/index.ts",
-      "frontend/src/lsp/AGENTS.md"
+      "frontend/src/editor/internal/format.ts",
+      "frontend/src/editor/internal/format.test.ts",
+      "frontend/src/editor/internal/lineDiff.ts",
+      "frontend/src/editor/internal/lineDiff.test.ts"
     ]
   }
 }
