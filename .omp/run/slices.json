@@ -1,15 +1,4 @@
 {
-  "LspHostR1": {
-    "owned": [
-      "crates/lsp-host/**",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/servers.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/src/mock_window.rs",
-      "src-tauri/AGENTS.md"
-    ]
-  },
   "SaveWeb": {
     "owned": [
       "frontend/src/editor/**",
@@ -37,5 +26,8 @@
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts"
     ]
+  },
+  "SaveRustR1": {
+    "owned": ["crates/session/**", "crates/gitio/src/merge_file.rs", "crates/gitio/src/lib.rs"]
   }
 }
