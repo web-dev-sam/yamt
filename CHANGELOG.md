@@ -23,10 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wave shows 4, then 8 more lines next to each change, then the rest. Hovering the wave thickens it;
   finding text in hidden lines shows them, and a Delete, Backspace or cut on the wave line shows lines
   instead of removing hidden ones.
+- A "Collapse unchanged fragments" button in the toolbar (third, after the arrows) turns the collapsing
+  off and on for every opened file; turning it back on hides every run again as when the file opened. The
+  choice is remembered across restarts, and the toolbar's right-click menu can hide the button.
 
 ### Fixed
 
 - Ctrl+X with nothing selected cut two lines instead of one in the result pane on Linux.
+- The wavy line now meets the curves between the panes on its middle line at every window width and
+  screen; before, it met them up to 3 px off.
 
 ## [0.2.0] - 2026-10-13
 

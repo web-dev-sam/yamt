@@ -1,0 +1,361 @@
+commit 0a2bd1b1616d290fe073e589bd7e6733b05dccb4
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-14 16:34:27 +0200
+
+    refactor(ui): one window-storage helper, PANES from geometry, toggle field named selected (#870-#872)
+
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index a2aa158..c1b5a64 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -1,7 +1,7 @@
+ import type { EditorView } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+-import type { Pane, PaneViews } from "./geometry";
++import { PANES, type Pane, type PaneViews } from "./geometry";
+ 
+ export type Anchor = Readonly<Record<Pane, number>>;
+ type SpanRow = Readonly<Record<Pane, Span>>;
+@@ -10,7 +10,6 @@ type ScrollPane = {
+   readonly documentPadding: { readonly top: number };
+ };
+ 
+-const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ const ANCHOR_AT = 0.5;
+ 
+ function shifted(anchor: Anchor, by: number): Anchor {
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index a8d90e0..c1f83df 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -22,7 +22,7 @@ type IconButton = {
+   readonly icon: Component;
+   readonly keepsKeyboard: boolean;
+   readonly run: () => void;
+-  readonly pressed: Readonly<Ref<boolean>> | null;
++  readonly selected: Readonly<Ref<boolean>> | null;
+ };
+ 
+ const props = defineProps<{ summary: MergeSummary | null }>();
+@@ -47,7 +47,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("move", "up");
+     },
+-    pressed: null,
++    selected: null,
+   },
+   next: {
+     label: "Next change",
+@@ -56,14 +56,14 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("move", "down");
+     },
+-    pressed: null,
++    selected: null,
+   },
+   collapse: {
+     label: "Collapse unchanged fragments",
+     icon: ChevronsDownUp,
+     keepsKeyboard: true,
+     run: toggleCollapsing,
+-    pressed: collapsing,
++    selected: collapsing,
+   },
+   applyLeft: {
+     label: "Apply non-conflicting changes from the left",
+@@ -72,7 +72,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("applyLeft");
+     },
+-    pressed: null,
++    selected: null,
+   },
+   applyRight: {
+     label: "Apply non-conflicting changes from the right",
+@@ -81,7 +81,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("applyRight");
+     },
+-    pressed: null,
++    selected: null,
+   },
+   undo: {
+     label: "Undo",
+@@ -90,7 +90,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("undo");
+     },
+-    pressed: null,
++    selected: null,
+   },
+   redo: {
+     label: "Redo",
+@@ -99,17 +99,17 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     run: () => {
+       emit("redo");
+     },
+-    pressed: null,
++    selected: null,
+   },
+ };
+ 
+ const menuAt = shallowRef<Point | null>(null);
+ 
+ const shownButtons = computed(() =>
+-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => {
+-    const button = ICON_BUTTONS[id];
+-    return { id, ...button, ariaPressed: button.pressed?.value };
+-  }),
++  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
++    id,
++    ...ICON_BUTTONS[id],
++  })),
+ );
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -160,7 +160,7 @@ function closeMenu(): void {
+       type="button"
+       :title="button.label"
+       :aria-label="button.label"
+-      :aria-pressed="button.ariaPressed"
++      :aria-pressed="button.selected?.value"
+       :disabled="summary === null"
+       class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+       @mousedown="pressed(button, $event)"
+diff --git a/frontend/src/ui/collapsing.ts b/frontend/src/ui/collapsing.ts
+index 0514c69..13f05c7 100644
+--- a/frontend/src/ui/collapsing.ts
++++ b/frontend/src/ui/collapsing.ts
+@@ -1,8 +1,7 @@
+-import { useStorage, type StorageLike } from "@vueuse/core";
++import type { StorageLike } from "@vueuse/core";
+ import type { Ref } from "vue";
+ 
+-import { log } from "../ipc";
+-import { unexpected } from "./problem";
++import { storedValue } from "./windowStorage";
+ 
+ export type Collapsing = {
+   readonly collapsing: Readonly<Ref<boolean>>;
+@@ -12,14 +11,13 @@ export type Collapsing = {
+ const STORAGE_KEY = "yamt.collapse.unchanged";
+ 
+ export function createCollapsing(storage?: StorageLike): Collapsing {
+-  const collapsing = useStorage<boolean>(STORAGE_KEY, true, storage, {
+-    serializer: { read: (raw) => raw !== "false", write: (on) => String(on) },
+-    flush: "sync",
+-    writeDefaults: false,
+-    onError: (error) => {
+-      log.warn("collapse.storage_failed", { ...unexpected(error) });
+-    },
+-  });
++  const collapsing = storedValue<boolean>(
++    STORAGE_KEY,
++    true,
++    { read: (raw) => raw !== "false", write: (on) => String(on) },
++    "collapse.storage_failed",
++    storage,
++  );
+   return {
+     collapsing,
+     toggleCollapsing: () => {
+diff --git a/frontend/src/ui/fileListMode.ts b/frontend/src/ui/fileListMode.ts
+index aab30bf..114e386 100644
+--- a/frontend/src/ui/fileListMode.ts
++++ b/frontend/src/ui/fileListMode.ts
+@@ -1,8 +1,7 @@
+-import { useStorage, type StorageLike } from "@vueuse/core";
++import type { StorageLike } from "@vueuse/core";
+ import type { Ref } from "vue";
+ 
+-import { log } from "../ipc";
+-import { unexpected } from "./problem";
++import { storedValue } from "./windowStorage";
+ 
+ export type FileListMode = "list" | "tree";
+ 
+@@ -12,14 +11,13 @@ export function createFileListMode(storage?: StorageLike): {
+   readonly mode: Readonly<Ref<FileListMode>>;
+   toggle(): void;
+ } {
+-  const mode = useStorage<FileListMode>(STORAGE_KEY, "list", storage, {
+-    serializer: { read: (raw) => (raw === "tree" ? "tree" : "list"), write: (value) => value },
+-    flush: "sync",
+-    writeDefaults: false,
+-    onError: (error) => {
+-      log.warn("files.view_storage_failed", { ...unexpected(error) });
+-    },
+-  });
++  const mode = storedValue<FileListMode>(
++    STORAGE_KEY,
++    "list",
++    { read: (raw) => (raw === "tree" ? "tree" : "list"), write: (value) => value },
++    "files.view_storage_failed",
++    storage,
++  );
+   return {
+     mode,
+     toggle: () => {
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index f166fb7..b0772b7 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -1,8 +1,7 @@
+-import { useStorage, type StorageLike } from "@vueuse/core";
++import type { StorageLike } from "@vueuse/core";
+ import type { Ref } from "vue";
+ 
+-import { log } from "../ipc";
+-import { unexpected } from "./problem";
++import { storedValue } from "./windowStorage";
+ 
+ export const TOOLBAR_BUTTONS = [
+   "previous",
+@@ -47,14 +46,13 @@ function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
+ }
+ 
+ export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
+-  const hidden = useStorage<ReadonlySet<ToolbarButtonId>>(STORAGE_KEY, HIDDEN_AT_FIRST, storage, {
+-    serializer: { read: readHidden, write: writeHidden },
+-    flush: "sync",
+-    writeDefaults: false,
+-    onError: (error) => {
+-      log.warn("toolbar.storage_failed", { ...unexpected(error) });
+-    },
+-  });
++  const hidden = storedValue<ReadonlySet<ToolbarButtonId>>(
++    STORAGE_KEY,
++    HIDDEN_AT_FIRST,
++    { read: readHidden, write: writeHidden },
++    "toolbar.storage_failed",
++    storage,
++  );
+   return {
+     hidden,
+     toggle: (id) => {
+diff --git a/frontend/src/ui/windowStorage.test.ts b/frontend/src/ui/windowStorage.test.ts
+new file mode 100644
+index 0000000..8db46e1
+--- /dev/null
++++ b/frontend/src/ui/windowStorage.test.ts
+@@ -0,0 +1,91 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { storedValue } from "./windowStorage";
++
++const KEY = "yamt.test.value";
++const EVENT = "test.storage_failed";
++const UPPER = {
++  read: (raw: string) => raw.toUpperCase(),
++  write: (value: string) => value.toLowerCase(),
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function spyWarnings(): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  return lines;
++}
++
++test("a missing key gives the fallback and writes nothing", () => {
++  const storage = memoryStorage({ other: "x" });
++
++  const value = storedValue(KEY, "FALLBACK", UPPER, EVENT, storage);
++
++  expect(value.value).toBe("FALLBACK");
++  expect([...storage.items.entries()]).toEqual([["other", "x"]]);
++});
++
++test("a stored value is read through the caller's read", () => {
++  expect(storedValue(KEY, "FALLBACK", UPPER, EVENT, memoryStorage({ [KEY]: "tree" })).value).toBe(
++    "TREE",
++  );
++});
++
++test("a change is written through the caller's write before the assignment returns", () => {
++  const storage = memoryStorage();
++  const value = storedValue(KEY, "FALLBACK", UPPER, EVENT, storage);
++
++  value.value = "Tree";
++
++  expect(storage.items.get(KEY)).toBe("tree");
++});
++
++test("a storage that throws gives the fallback and logs under the caller's event name", () => {
++  const warnings = spyWarnings();
++  const failing: StorageLike = {
++    getItem: () => {
++      throw new Error("storage disabled");
++    },
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++    removeItem: () => {
++      throw new Error("storage disabled");
++    },
++  };
++
++  const value = storedValue(KEY, "FALLBACK", UPPER, EVENT, failing);
++  expect(value.value).toBe("FALLBACK");
++  expect(warnings).toEqual([
++    '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++
++  value.value = "Tree";
++  expect(value.value).toBe("Tree");
++  expect(warnings).toEqual([
++    '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++    '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++});
+diff --git a/frontend/src/ui/windowStorage.ts b/frontend/src/ui/windowStorage.ts
+new file mode 100644
+index 0000000..0c68d5c
+--- /dev/null
++++ b/frontend/src/ui/windowStorage.ts
+@@ -0,0 +1,22 @@
++import { useStorage, type Serializer, type StorageLike } from "@vueuse/core";
++import type { Ref } from "vue";
++
++import { log } from "../ipc";
++import { unexpected } from "./problem";
++
++export function storedValue<T>(
++  key: string,
++  fallback: T,
++  serializer: Serializer<T>,
++  warnEvent: string,
++  storage?: StorageLike,
++): Ref<T> {
++  return useStorage<T>(key, fallback, storage, {
++    serializer,
++    flush: "sync",
++    writeDefaults: false,
++    onError: (error) => {
++      log.warn(warnEvent, { ...unexpected(error) });
++    },
++  });
++}
