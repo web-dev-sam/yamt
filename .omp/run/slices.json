@@ -1,5 +1,16 @@
 {
-  "UnchangedPanesR1": {
-    "owned": ["frontend/src/editor/**"]
+  "UnchangedStripsR1": {
+    "owned": [
+      "frontend/src/editor/internal/gap.ts",
+      "frontend/src/editor/internal/gap.test.ts",
+      "frontend/src/editor/internal/strips.ts",
+      "frontend/src/editor/internal/strips.test.ts",
+      "frontend/src/editor/internal/stripWaves.ts",
+      "frontend/src/editor/internal/stripWaves.test.ts",
+      "frontend/src/editor/internal/stripIcons.ts",
+      "frontend/src/editor/internal/stripIcons.test.ts",
+      "frontend/src/editor/internal/geometry.ts",
+      "frontend/src/editor/internal/geometry.test.ts"
+    ]
   }
 }
