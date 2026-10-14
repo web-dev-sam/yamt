@@ -1,15 +1,24 @@
-import { commands, type LogValue, type SettingsRead as SettingsReadDto } from "./bindings";
+import { Channel } from "@tauri-apps/api/core";
+
+import {
+  commands,
+  type HostEvent,
+  type LogValue,
+  type SettingsRead as SettingsReadDto,
+} from "./bindings";
 import type { ChunkSource, SettingsSource } from "./ChunkSource";
 import {
   toDomain,
   toFileList,
   toSettingsRead,
   toSides,
+  toStartReply,
   type SettingsRead,
   type SourceFailure,
   type SourceResult,
 } from "./domain";
 import type { LogEntry } from "./log";
+import type { ServerHost } from "./ServerHost";
 
 // `typedError` (bindings.ts) re-throws only `Error`s and returns any other rejection as the command's
 // error. Tauri rejects invalid arguments, unknown commands and ACL denials with a plain JSON value, a
@@ -89,6 +98,24 @@ export function createTauriSource(): ChunkSource {
       return commands.sideNames();
     },
     ...createTauriSettings(),
+  };
+}
+
+export function createTauriServerHost(): ServerHost {
+  return {
+    context: () => commands.serversContext(),
+    async start(command, onEvent) {
+      const events = new Channel<HostEvent>(onEvent);
+      return toStartReply(
+        await commands.startServer({ ...command, args: [...command.args] }, events),
+      );
+    },
+    send(run, message) {
+      void commands.sendToServer(run, message);
+    },
+    stop: (run) => commands.stopServer(run),
+    findProgram: (program, project) => commands.findProgram(program, project),
+    projectFiles: (paths) => commands.projectFiles([...paths]),
   };
 }
 

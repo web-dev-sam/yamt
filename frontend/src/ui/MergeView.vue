@@ -7,6 +7,7 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
+import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
@@ -46,14 +47,29 @@ const {
   preferences,
   settings,
   collapsing,
+  servers,
 } = useAppStore();
 const handle = useMergeController(
   () => props.data,
   { left, center, right, strips: [leftStrip, rightStrip] },
-  { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing, servers: null },
+  {
+    readOnly: () => !isEditable(props.data),
+    preferences,
+    collapsed: collapsing,
+    servers,
+  },
 );
-const { summary, unsaved, applyAllNonConflicting, moveToChange, undo, redo, historyKey, snapshot } =
-  handle;
+const {
+  summary,
+  problems,
+  unsaved,
+  applyAllNonConflicting,
+  moveToChange,
+  undo,
+  redo,
+  historyKey,
+  snapshot,
+} = handle;
 const work: FileWork = { unsaved: () => unsaved.value };
 if (props.data.deleted === null) {
   track(props.data.path, work);
@@ -145,6 +161,8 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
     <MergeToolbar
       v-if="editable"
       :summary="summary"
+      :path="data.path"
+      :problems="problems"
       @move="moveToChange"
       @apply-left="applyAllNonConflicting('local')"
       @apply-right="applyAllNonConflicting('remote')"
@@ -153,6 +171,7 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
       @finish="markResolved"
     />
     <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
+      <ServerStatus class="ml-auto" :path="null" :problems="null" />
       <SettingsButton />
     </header>
     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->

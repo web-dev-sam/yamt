@@ -11,6 +11,7 @@ import {
   type SideNames,
   type Theme,
 } from "../ipc";
+import type { LanguageServers } from "../lsp";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
@@ -22,6 +23,7 @@ import type { Problem } from "./problem";
 import type { Question } from "./question";
 import { afterWrite, createSaving, finish, whileWriting } from "./saving";
 import type { FinishRequest, Saving, Writing } from "./saving";
+import { createServers, type Screen, type Servers } from "./servers";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
@@ -41,7 +43,7 @@ type Refs = {
   readonly sideNames: ShallowRef<SideNames>;
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
-  readonly settingsOpen: ShallowRef<boolean>;
+  readonly screen: ShallowRef<Screen>;
   readonly settings: ShallowRef<SettingsInUse>;
   readonly fileListShown: ShallowRef<boolean>;
 };
@@ -81,7 +83,8 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions &
   Collapsing &
-  Saving;
+  Saving &
+  Servers;
 
 let store: AppStore | null = null;
 
@@ -95,13 +98,17 @@ function createRefs(startTheme: Theme): Refs {
     sideNames: shallowRef<SideNames>({ local: null, remote: null }),
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
-    settingsOpen: shallowRef(false),
+    screen: shallowRef<Screen>({ kind: "files" }),
     settings: shallowRef(startSettings(startTheme)),
     fileListShown: shallowRef(true),
   };
 }
 
-export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore {
+export function createAppStore(
+  source: ChunkSource,
+  startTheme: Theme,
+  servers: LanguageServers,
+): AppStore {
   const refs = createRefs(startTheme);
   const asking = createAsking();
   const guard = createCloseGuard(asking, refs.opened);
@@ -127,6 +134,7 @@ export function createAppStore(source: ChunkSource, startTheme: Theme): AppStore
     ...actions(state, buttons),
     ...createCollapsing(),
     ...createSaving(state),
+    ...createServers(refs.screen, servers),
   };
   return store;
 }
@@ -140,7 +148,7 @@ function actions(state: State, buttons: HiddenButtons): Actions {
     loadSideNames: () => loadSideNames(state),
     open: (path) => open(state, path),
     pick: async (path) => {
-      state.settingsOpen.value = false;
+      state.screen.value = { kind: "files" };
       await open(state, path);
     },
     finish: (request) => finishThenMoveOn(state, request),
@@ -153,10 +161,10 @@ function actions(state: State, buttons: HiddenButtons): Actions {
       state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
     },
     openSettings: () => {
-      state.settingsOpen.value = true;
+      state.screen.value = { kind: "settings" };
     },
     closeSettings: () => {
-      state.settingsOpen.value = false;
+      state.screen.value = { kind: "files" };
     },
     answer: state.asking.answer,
     toggleButton: buttons.toggle,

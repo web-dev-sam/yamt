@@ -1,5 +1,12 @@
-import type { AddedServer, RepositoryAnswer, SettingsSource } from "./ChunkSource";
-import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
+import type { SettingsSource } from "./ChunkSource";
+import type {
+  AddedServer,
+  KeysChange,
+  RepositoryAnswer,
+  SettingsRead,
+  SourceResult,
+  StoredSettings,
+} from "./domain";
 
 type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 

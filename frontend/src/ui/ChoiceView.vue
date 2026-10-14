@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
@@ -48,6 +49,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
     :class="{ invisible: !shown }"
   >
     <header class="flex h-10 shrink-0 items-center justify-end px-2">
+      <ServerStatus class="ml-auto" :path="null" :problems="null" />
       <SettingsButton />
     </header>
     <section

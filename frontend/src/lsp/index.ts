@@ -99,6 +99,10 @@ export class LanguageServers {
     return this.#logs.lines(name);
   }
 
+  serving(path: string): boolean {
+    return this.#servers.some((server) => server.state.kind === "running" && server.serves(path));
+  }
+
   onChange(listener: () => void): () => void {
     function own(): void {
       listener();

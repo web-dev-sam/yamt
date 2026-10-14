@@ -54,6 +54,30 @@ export type StoredSettings = Generated.StoredSettings;
 
 export type KeysChange = Generated.KeysChange;
 
+export type LanguageServerSettings = Generated.LanguageServerSettings;
+
+export type RepositoryAnswer = Generated.RepositoryAnswer;
+
+export type AddedServer = Generated.AddedServer;
+
+export type RunId = number & { readonly __brand: "RunId" };
+
+export type ServerCommand = Omit<Generated.ServerCommand, "args"> & {
+  readonly args: readonly string[];
+};
+
+export type HostEvent = Generated.HostEvent;
+
+export type StartReply =
+  | Exclude<Generated.StartReply, { kind: "Started" }>
+  | { readonly kind: "Started"; readonly run: RunId };
+
+export type ServerContext = Generated.ServerContext;
+
+export type ProgramFound = Generated.ProgramFound;
+
+export type ProjectFile = Generated.ProjectFile;
+
 export type SettingsRead = {
   readonly path: string;
   readonly defaultPath: string;
@@ -103,6 +127,10 @@ function isRemoteLine(n: number): n is RemoteLine {
 }
 
 function isChunkId(n: number): n is ChunkId {
+  return isNonNegativeInteger(n);
+}
+
+function isRunId(n: number): n is RunId {
   return isNonNegativeInteger(n);
 }
 
@@ -256,4 +284,15 @@ export function toFileList(dto: Generated.FileList): FileList {
 
 export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
   return { path: dto.path, defaultPath: dto.default_path, stored: dto.stored };
+}
+
+export function toStartReply(dto: Generated.StartReply): StartReply {
+  if (dto.kind !== "Started") {
+    return dto;
+  }
+  const { run } = dto;
+  if (!isRunId(run)) {
+    throw invalid("run", run);
+  }
+  return { kind: "Started", run };
 }

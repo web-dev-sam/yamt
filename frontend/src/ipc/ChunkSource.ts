@@ -1,10 +1,12 @@
 import type {
+  AddedServer,
   Antialiasing,
   DiskVersion,
   FileList,
   FileMergeData,
   FileSides,
   KeysChange,
+  RepositoryAnswer,
   SettingsRead,
   Side,
   SideNames,
@@ -13,10 +15,6 @@ import type {
   Theme,
   WriteReply,
 } from "./domain";
-
-export type LanguageServerSettings = StoredSettings["languageServers"];
-export type RepositoryAnswer = LanguageServerSettings["repositories"][string];
-export type AddedServer = LanguageServerSettings["added"][number];
 
 export type WriteRequest = {
   readonly path: string;

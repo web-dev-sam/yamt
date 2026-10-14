@@ -2,15 +2,9 @@ import { createLog } from "./log";
 import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
+export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
 export type {
   AddedServer,
-  ChunkSource,
-  LanguageServerSettings,
-  RepositoryAnswer,
-  SettingsSource,
-  WriteRequest,
-} from "./ChunkSource";
-export type {
   Antialiasing,
   Chunk,
   DiskChange,
@@ -20,8 +14,16 @@ export type {
   FileList,
   FileMergeData,
   FileSides,
+  HostEvent,
   KeysChange,
+  LanguageServerSettings,
   NotText,
+  ProgramFound,
+  ProjectFile,
+  RepositoryAnswer,
+  RunId,
+  ServerCommand,
+  ServerContext,
   SettingsRead,
   Side,
   SideContent,
@@ -29,6 +31,7 @@ export type {
   SideNames,
   SourceFailure,
   SourceResult,
+  StartReply,
   StoredSettings,
   Theme,
   WriteReply,
@@ -53,17 +56,8 @@ export {
   type KeyProblem,
   type KeysRead,
 } from "./keys";
-export { createTauriSource } from "./tauri";
-export type {
-  HostEvent,
-  ProgramFound,
-  ProjectFile,
-  RunId,
-  ServerCommand,
-  ServerContext,
-  ServerHost,
-  StartReply,
-} from "./ServerHost";
+export { createTauriServerHost, createTauriSource } from "./tauri";
+export type { ServerHost } from "./ServerHost";
 
 const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
 

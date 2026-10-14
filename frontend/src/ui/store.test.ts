@@ -22,8 +22,10 @@ import {
   type StoredSettings,
   type WriteReply,
 } from "../ipc";
+import { LanguageServers } from "../lsp";
 import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
+import { formatNote } from "./serverText";
 import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
 import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
 
@@ -68,7 +70,7 @@ afterEach(() => {
 });
 
 function createAppStore(source: ChunkSource): AppStore {
-  return createStoreWithTheme(source, "dark");
+  return createStoreWithTheme(source, "dark", new LanguageServers(null));
 }
 
 function entry(path: string): FileEntry {
@@ -184,7 +186,7 @@ test("useAppStore throws before createAppStore, then returns the created store",
   const fresh = await import("./store");
   expect(() => fresh.useAppStore()).toThrow("useAppStore() called before createAppStore()");
 
-  const created = fresh.createAppStore(handSource([]).source, "dark");
+  const created = fresh.createAppStore(handSource([]).source, "dark", new LanguageServers(null));
 
   expect(fresh.useAppStore()).toBe(created);
 });
@@ -479,16 +481,16 @@ test("settings open and close; picking a file while they show closes them and sh
   const { source, pending } = handSource([]);
   const store = createAppStore(source);
   await openNow(store, pending, "a.ts");
-  expect(store.settingsOpen.value).toBe(false);
+  expect(store.screen.value).toEqual({ kind: "files" });
 
   store.openSettings();
-  expect(store.settingsOpen.value).toBe(true);
+  expect(store.screen.value).toEqual({ kind: "settings" });
   store.closeSettings();
-  expect(store.settingsOpen.value).toBe(false);
+  expect(store.screen.value).toEqual({ kind: "files" });
 
   store.openSettings();
   const picking = store.pick("b.ts");
-  expect(store.settingsOpen.value).toBe(false);
+  expect(store.screen.value).toEqual({ kind: "files" });
   await vi.waitFor(() => {
     expect(pending.at(-1)?.path).toBe("b.ts");
   });
@@ -499,9 +501,28 @@ test("settings open and close; picking a file while they show closes them and sh
   store.openSettings();
   await store.pick("b.ts");
 
-  expect(store.settingsOpen.value).toBe(false);
+  expect(store.screen.value).toEqual({ kind: "files" });
   expect(store.active.value).toBe("b.ts");
   expect(pending).toHaveLength(2);
+});
+
+test("screen: a server's log opens from the files or from settings, and Back returns to the files", () => {
+  const store = createAppStore(handSource([]).source);
+
+  store.showServerLog("oxlint");
+  expect(store.screen.value).toEqual({ kind: "serverLog", name: "oxlint" });
+  store.closeServerLog();
+  expect(store.screen.value).toEqual({ kind: "files" });
+
+  store.openSettings();
+  store.showServerLog("oxfmt");
+  expect(store.screen.value).toEqual({ kind: "serverLog", name: "oxfmt" });
+  store.closeServerLog();
+  expect(store.screen.value).toEqual({ kind: "files" });
+
+  store.showServerLog("oxlint");
+  store.openSettings();
+  expect(store.screen.value).toEqual({ kind: "settings" });
 });
 
 test.each([true, false])(
@@ -525,7 +546,7 @@ test.each([true, false])(
     await loading;
 
     expect(store.active.value).toBe("a.ts");
-    expect(store.settingsOpen.value).toBe(settingsOpen);
+    expect(store.screen.value.kind === "settings").toBe(settingsOpen);
 
     const finishing = store.finish({
       path: "a.ts",
@@ -540,7 +561,7 @@ test.each([true, false])(
     await finishing;
 
     expect(store.active.value).toBe("b.ts");
-    expect(store.settingsOpen.value).toBe(settingsOpen);
+    expect(store.screen.value.kind === "settings").toBe(settingsOpen);
   },
 );
 
@@ -1799,7 +1820,7 @@ function settingsSource(overrides: Partial<ChunkSource>): {
 }
 
 test("settings start with the start theme and the default keys, before any file is read", () => {
-  const store = createStoreWithTheme(handSource([]).source, "light");
+  const store = createStoreWithTheme(handSource([]).source, "light", new LanguageServers(null));
 
   expect(store.settings.value).toEqual({
     read: null,
@@ -2441,3 +2462,38 @@ test.each(["reset", "finish"] as const)(
     expect(saves).toEqual([]);
   },
 );
+
+test("the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save", async () => {
+  spyConsole();
+  const { source } = savingSource([entry("a.ts")], () => Promise.resolve(written([entry("a.ts")])));
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "a\n");
+  const outcomes: [FormatOutcome, string | null][] = [
+    [
+      { kind: "notRunning", server: "oxfmt", state: { kind: "stopped" } },
+      "Not formatted: oxfmt is not running",
+    ],
+    [{ kind: "formatted", server: "oxfmt" }, null],
+    [{ kind: "failed", server: "oxfmt", message: "boom" }, "Not formatted: oxfmt failed: boom"],
+    [{ kind: "unchanged", server: "oxfmt" }, null],
+    [{ kind: "timedOut", server: "oxfmt" }, "Not formatted: oxfmt did not answer in time"],
+    [{ kind: "noFormatter" }, null],
+    [
+      { kind: "changedMeanwhile", server: "oxfmt" },
+      "Not formatted: the Result changed while oxfmt was formatting",
+    ],
+  ];
+  expect(formatNote(store.formatOutcomes.value.get("a.ts"))).toBeNull();
+
+  for (const [outcome, note] of outcomes) {
+    view.text = `${outcome.kind}\n`;
+    await store.save({
+      path: "a.ts",
+      diskVersion: VERSION_0,
+      handle: editorHandle(view, () => Promise.resolve(outcome)),
+    });
+
+    expect(formatNote(store.formatOutcomes.value.get("a.ts"))).toBe(note);
+  }
+});

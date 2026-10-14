@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
 import type { DiskVersion } from "./domain";
-import { createTauriSource, forwardLog } from "./tauri";
+import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
 
 const commands = vi.hoisted(() => ({
   listFiles: vi.fn(),
@@ -21,9 +21,25 @@ const commands = vi.hoisted(() => ({
   moveSettings: vi.fn(),
   setServerAnswer: vi.fn(),
   setAddedServers: vi.fn(),
+  serversContext: vi.fn(),
+  startServer: vi.fn(),
+  sendToServer: vi.fn(),
+  stopServer: vi.fn(),
+  findProgram: vi.fn(),
+  projectFiles: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class {
+    readonly onmessage: (message: unknown) => void;
+
+    constructor(onmessage: (message: unknown) => void) {
+      this.onmessage = onmessage;
+    }
+  },
+}));
 
 const LINE = { start: 0, len: 1 };
 
@@ -407,4 +423,72 @@ test("setServerAnswer and setAddedServers return the app's error", async () => {
 
   expect(await source.setServerAnswer(STORED, "start")).toEqual({ ok: false, failure: broken });
   expect(await source.setAddedServers(STORED, [])).toEqual({ ok: false, failure: broken });
+});
+
+type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };
+
+test("the server host starts a run with a channel whose messages reach onEvent, branding the run", async () => {
+  const channels: ChannelLike[] = [];
+  commands.startServer.mockImplementation(
+    (_: Generated.ServerCommand, events: ChannelLike): Promise<Generated.StartReply> => {
+      channels.push(events);
+      return Promise.resolve({ kind: "Started", run: 7 });
+    },
+  );
+  const heard: Generated.HostEvent[] = [];
+  const command = { program: "oxlint", args: ["--lsp"], project: "frontend" };
+
+  const reply = await createTauriServerHost().start(command, (event) => heard.push(event));
+  channels[0]?.onmessage({ kind: "Message", text: "{}" });
+  channels[0]?.onmessage({ kind: "Exited", code: 0 });
+
+  expect(reply).toEqual({ kind: "Started", run: 7 });
+  expect(commands.startServer).toHaveBeenCalledWith(command, channels[0]);
+  expect(heard).toEqual([
+    { kind: "Message", text: "{}" },
+    { kind: "Exited", code: 0 },
+  ]);
+});
+
+test("the server host passes a refused start through and rejects a run id that is not one", async () => {
+  const notFound = {
+    kind: "NotFound",
+    program: "oxlint",
+    searched: ["frontend/node_modules/.bin"],
+  };
+  commands.startServer.mockResolvedValueOnce(notFound);
+  commands.startServer.mockResolvedValueOnce({ kind: "Started", run: -1 });
+  const host = createTauriServerHost();
+  const command = { program: "oxlint", args: [], project: "" };
+
+  expect(await host.start(command, () => undefined)).toEqual(notFound);
+  await expect(host.start(command, () => undefined)).rejects.toThrow("run");
+});
+
+test("the server host maps send, stop, context, findProgram and projectFiles onto the commands", async () => {
+  const context = { root: "/repo", process_id: 42 };
+  const found = { kind: "Found", path: "/repo/node_modules/.bin/oxlint", place: "Project" };
+  const files = [{ kind: "Missing" }, { kind: "Text", text: "{}" }];
+  commands.sendToServer.mockResolvedValue(undefined);
+  commands.stopServer.mockResolvedValue(undefined);
+  commands.serversContext.mockResolvedValue(context);
+  commands.findProgram.mockResolvedValue(found);
+  commands.projectFiles.mockResolvedValue(files);
+  commands.startServer.mockResolvedValue({ kind: "Started", run: 3 });
+  const host = createTauriServerHost();
+  const reply = await host.start({ program: "a", args: [], project: "" }, () => undefined);
+  if (reply.kind !== "Started") {
+    throw new Error("not started");
+  }
+
+  host.send(reply.run, '{"id":1}');
+  await host.stop(reply.run);
+
+  expect(commands.sendToServer).toHaveBeenCalledWith(3, '{"id":1}');
+  expect(commands.stopServer).toHaveBeenCalledWith(3);
+  expect(await host.context()).toEqual(context);
+  expect(await host.findProgram("oxlint", "frontend")).toEqual(found);
+  expect(commands.findProgram).toHaveBeenCalledWith("oxlint", "frontend");
+  expect(await host.projectFiles(["a", "package.json"])).toEqual(files);
+  expect(commands.projectFiles).toHaveBeenCalledWith(["a", "package.json"]);
 });

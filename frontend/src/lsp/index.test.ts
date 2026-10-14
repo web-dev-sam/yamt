@@ -349,6 +349,30 @@ test("rule 1: a spec serves a path by its extension and its project folder", asy
   ]);
 });
 
+test("rule 1: serving(path) is true only while a running server serves the path", async () => {
+  const languageServers = servers(
+    [
+      spec("oxlint", { project: "frontend", fileTypes: ["ts"] }),
+      spec("oxfmt", { fileTypes: ["md"] }),
+    ],
+    false,
+  );
+  expect(languageServers.serving("frontend/a.ts")).toBe(false);
+
+  languageServers.start("oxlint");
+  await settle();
+
+  expect(languageServers.serving("frontend/a.ts")).toBe(true);
+  expect(languageServers.serving("frontend/a.md")).toBe(false);
+  expect(languageServers.serving("backend/a.ts")).toBe(false);
+
+  languageServers.stop("oxlint");
+  await settle();
+
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+  expect(languageServers.serving("frontend/a.ts")).toBe(false);
+});
+
 test("rule 2: a spec starts when the first document it serves opens", async () => {
   const languageServers = servers([spec("oxlint")]);
   expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });

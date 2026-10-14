@@ -8,6 +8,7 @@ import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
+import ServerLogView from "./ServerLogView.vue";
 import SettingsView from "./SettingsView.vue";
 import { useAppStore } from "./store";
 
@@ -16,7 +17,7 @@ const {
   opened,
   choices,
   active,
-  settingsOpen,
+  screen,
   fileListShown,
   problem,
   notices,
@@ -76,15 +77,20 @@ onMounted(() => {
           v-for="file in opened"
           :key="file.path"
           :data="file"
-          :shown="file.path === active && !settingsOpen"
+          :shown="file.path === active && screen.kind === 'files'"
         />
         <ChoiceView
           v-for="sides in choices"
           :key="sides.path"
           :sides="sides"
-          :shown="sides.path === active && !settingsOpen"
+          :shown="sides.path === active && screen.kind === 'files'"
         />
-        <SettingsView v-if="settingsOpen" />
+        <SettingsView v-if="screen.kind === 'settings'" />
+        <ServerLogView
+          v-else-if="screen.kind === 'serverLog'"
+          :key="screen.name"
+          :name="screen.name"
+        />
       </div>
     </div>
     <QuestionDialog v-if="question !== null" :question="question" @answer="answer" />

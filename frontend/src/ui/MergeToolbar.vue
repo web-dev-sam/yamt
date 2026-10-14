@@ -10,12 +10,13 @@ import Undo2 from "~icons/lucide/undo-2";
 
 import type { Point } from "./menuPosition";
 import { finishMustAsk } from "./question";
+import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useAppStore } from "./store";
 import { summaryLabel } from "./summaryLabel";
 import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
 import ToolbarMenu from "./ToolbarMenu.vue";
-import type { Direction, MergeSummary } from "./useMergeController";
+import type { Direction, MergeHandle, MergeSummary } from "./useMergeController";
 
 type IconButton = {
   readonly label: string;
@@ -25,7 +26,11 @@ type IconButton = {
   readonly selected: Readonly<Ref<boolean>> | null;
 };
 
-const props = defineProps<{ summary: MergeSummary | null }>();
+const props = defineProps<{
+  summary: MergeSummary | null;
+  path: string;
+  problems: MergeHandle["problems"]["value"];
+}>();
 const emit = defineEmits<{
   move: [direction: Direction];
   applyLeft: [];
@@ -169,7 +174,8 @@ function closeMenu(): void {
       <component :is="button.icon" class="size-4" aria-hidden="true" />
     </button>
     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
-    <SettingsButton class="ml-auto" />
+    <ServerStatus class="ml-auto" :path="path" :problems="problems" />
+    <SettingsButton />
     <ToolbarMenu v-if="menuAt !== null" :at="menuAt" :buttons="ICON_BUTTONS" @close="closeMenu" />
   </header>
 </template>
