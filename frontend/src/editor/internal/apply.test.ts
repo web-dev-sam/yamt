@@ -29,6 +29,13 @@ const SETTINGS: PaneSettings = {
 
 type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
 
+const MARKERS = {
+  kind: "Markers",
+  open: "<<<<<<< ours",
+  between: ["======="],
+  close: ">>>>>>> theirs",
+};
+
 async function synthetic(
   texts: { middle: string; local: string; remote: string; eol: FileMergeData["eol"] },
   chunks: readonly {
@@ -62,6 +69,7 @@ async function synthetic(
           local: { changed: [], removed_at: [] },
           remote: { changed: [], removed_at: [] },
         },
+        waiting: chunk.kind === "Conflict" ? MARKERS : { kind: "SideLines" },
       };
     }),
   };
@@ -671,6 +679,7 @@ async function diskSeeded({ middle, base, at, side, eol }: Seeded): Promise<File
           local: { changed: [], removed_at: [] },
           remote: { changed: [], removed_at: [] },
         },
+        waiting: MARKERS,
       },
     ],
   };
@@ -763,6 +772,7 @@ function addedConflict(
       local: { changed: [], removed_at: [] },
       remote: { changed: [], removed_at: [] },
     },
+    waiting: MARKERS,
   };
 }
 

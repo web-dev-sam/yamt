@@ -66,6 +66,9 @@ export function createTauriSource(): ChunkSource {
     async finishFile({ path, text, diskVersion }) {
       return toResult(await commands.finishFile(path, text, diskVersion));
     },
+    async saveFile({ path, text, diskVersion }) {
+      return toResult(await commands.saveFile(path, text, diskVersion));
+    },
     async resetFile(path, diskVersion) {
       return toResult(await commands.resetFile(path, diskVersion));
     },

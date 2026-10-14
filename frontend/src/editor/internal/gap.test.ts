@@ -82,6 +82,7 @@ async function oneLineDeletedOnEachSide(): Promise<readonly Chunk[]> {
         },
         middle: { start: 0, len: 1 },
         words: noWords(0),
+        waiting: { kind: "SideLines" },
       },
       {
         chunk: {
@@ -93,6 +94,7 @@ async function oneLineDeletedOnEachSide(): Promise<readonly Chunk[]> {
         },
         middle: { start: 2, len: 1 },
         words: noWords(1),
+        waiting: { kind: "SideLines" },
       },
     ],
   };

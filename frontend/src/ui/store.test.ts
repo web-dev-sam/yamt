@@ -106,6 +106,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
         pending.push({ path, resolve, reject });
       }),
     finishFile: () => Promise.reject(new Error("not used")),
+    saveFile: () => Promise.reject(new Error("not used")),
     resetFile: () => Promise.reject(new Error("not used")),
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
@@ -950,6 +951,7 @@ function choiceSource(
       return ok(await dataFor(path));
     },
     finishFile: () => Promise.reject(new Error("not used")),
+    saveFile: () => Promise.reject(new Error("not used")),
     resetFile: (path) => {
       calls.push(`resetFile ${path}`);
       return Promise.resolve(written(files));

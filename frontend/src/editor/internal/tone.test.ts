@@ -30,6 +30,15 @@ async function chunkWith(
           local: { changed: [], removed_at: [] },
           remote: { changed: [], removed_at: [] },
         },
+        waiting:
+          kind === "Conflict"
+            ? {
+                kind: "Markers",
+                open: "<<<<<<< ours",
+                between: ["======="],
+                close: ">>>>>>> theirs",
+              }
+            : { kind: "SideLines" },
       },
     ],
   };

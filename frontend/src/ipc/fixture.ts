@@ -7,7 +7,6 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
-  type SideContent,
   type SourceResult,
   type WriteReply,
 } from "./domain";
@@ -90,10 +89,22 @@ const WORD_CHANGES = v.object({
   remote: SIDE_WORD_CHANGES,
 } satisfies SchemaOf<Generated.WordChanges>);
 
+const WAITING: v.GenericSchema<Generated.Waiting> = v.variant("kind", [
+  v.object({ kind: v.literal("SideLines") }),
+  v.object({
+    kind: v.literal("Markers"),
+    open: v.string(),
+    between: v.array(v.string()),
+    close: v.string(),
+  }),
+  v.object({ kind: v.literal("AsShown") }),
+]);
+
 const MERGE_CHUNK = v.object({
   chunk: CHUNK,
   middle: LINE_RANGE,
   words: WORD_CHANGES,
+  waiting: WAITING,
 } satisfies SchemaOf<Generated.MergeChunk>);
 
 const MIDDLE: v.GenericSchema<Generated.Middle> = v.variant("kind", [
@@ -138,20 +149,20 @@ function unknownPath(path: string): SourceResult<never> {
 }
 
 // The app counts lines with Rust's `str::lines`, which does not count an empty last line.
-function textSide(text: string): SideContent {
+function lineCount(text: string): number {
   const breaks = text.split("\n").length - 1;
-  return { kind: "Text", lines: text === "" || text.endsWith("\n") ? breaks : breaks + 1 };
+  return text === "" || text.endsWith("\n") ? breaks : breaks + 1;
 }
 
 function describeRecord(path: string, data: FileMergeData | undefined): SourceResult<FileSides> {
   if (data === undefined) {
     return unknownPath(path);
   }
-  const sides = {
+  const sides: FileSides = {
     path,
     reason: null,
-    local: textSide(data.local),
-    remote: textSide(data.remote),
+    local: { kind: "Text", lines: lineCount(data.local) },
+    remote: { kind: "Text", lines: lineCount(data.remote) },
     diskVersion: data.diskVersion,
   };
   return { ok: true, value: sides };
@@ -184,6 +195,36 @@ export async function loadFixture(
   return data;
 }
 
+function fixtureWrites(
+  log: Log,
+  records: Records,
+): Pick<ChunkSource, "finishFile" | "saveFile" | "resetFile" | "takeSide"> {
+  return {
+    async finishFile({ path, text }) {
+      return updateKnown(records, path, () => {
+        records.finished.add(path);
+        log.info("fixture.finish", { path, text });
+      });
+    },
+    async saveFile({ path, text }) {
+      return updateKnown(records, path, () => {
+        log.info("fixture.save", { path, length: text.length, lines: lineCount(text) });
+      });
+    },
+    async resetFile(path) {
+      return updateKnown(records, path, () => {
+        records.finished.delete(path);
+      });
+    },
+    async takeSide(path, side) {
+      return updateKnown(records, path, () => {
+        records.finished.add(path);
+        log.info("fixture.take", { path, side });
+      });
+    },
+  };
+}
+
 export function createFixtureSource(
   log: Log,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
@@ -198,29 +239,13 @@ export function createFixtureSource(
       const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
-    async finishFile({ path, text }) {
-      return updateKnown(records, path, () => {
-        records.finished.add(path);
-        log.info("fixture.finish", { path, text });
-      });
-    },
-    async resetFile(path) {
-      return updateKnown(records, path, () => {
-        records.finished.delete(path);
-      });
-    },
     async describeFile(path) {
       return describeRecord(path, records.fixtures.get(path));
-    },
-    async takeSide(path, side) {
-      return updateKnown(records, path, () => {
-        records.finished.add(path);
-        log.info("fixture.take", { path, side });
-      });
     },
     async sideNames() {
       return { local: null, remote: null };
     },
+    ...fixtureWrites(log, records),
     ...createFixtureSettings(),
   };
 }

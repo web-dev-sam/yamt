@@ -192,6 +192,12 @@ async function tintedLeft(): Promise<EditorState> {
             local: { changed: [{ line: 0, start: 10, len: 4 }], removed_at: [] },
             remote: { changed: [{ line: 0, start: 10, len: 6 }], removed_at: [] },
           },
+          waiting: {
+            kind: "Markers",
+            open: "<<<<<<< ours",
+            between: ["======="],
+            close: ">>>>>>> theirs",
+          },
         },
       ],
     },

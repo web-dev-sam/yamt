@@ -81,6 +81,7 @@ async function twoChanges(): Promise<FileMergeData> {
         },
         middle: { start: 30, len: 2 },
         words: noWords(0),
+        waiting: { kind: "SideLines" },
       },
       {
         chunk: {
@@ -92,6 +93,7 @@ async function twoChanges(): Promise<FileMergeData> {
         },
         middle: { start: 70, len: 1 },
         words: noWords(1),
+        waiting: { kind: "SideLines" },
       },
     ],
   };

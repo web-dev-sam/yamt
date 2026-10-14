@@ -60,6 +60,15 @@ function merged({
     chunk: { id, kind, base: block(line), local: block(line), remote: block(line) },
     middle: block(line),
     words: { chunk: id, ...chunkWords },
+    waiting:
+      kind === "Conflict"
+        ? {
+            kind: "Markers",
+            open: "<<<<<<< ours",
+            between: ["======="],
+            close: ">>>>>>> theirs",
+          }
+        : { kind: "SideLines" },
   };
 }
 

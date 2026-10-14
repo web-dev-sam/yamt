@@ -22,6 +22,11 @@ export interface ChunkSource {
     readonly text: string;
     readonly diskVersion: DiskVersion;
   }): Promise<SourceResult<WriteReply>>;
+  saveFile(request: {
+    readonly path: string;
+    readonly text: string;
+    readonly diskVersion: DiskVersion;
+  }): Promise<SourceResult<WriteReply>>;
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;

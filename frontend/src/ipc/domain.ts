@@ -21,6 +21,7 @@ export type Chunk = {
   readonly local: LineRange<LocalLine>;
   readonly remote: LineRange<RemoteLine>;
   readonly words: ChunkWords;
+  readonly waiting: Generated.Waiting;
 };
 
 export type FileEntry = Generated.FileEntry;
@@ -220,6 +221,7 @@ function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
     local: toRange({ range: chunk.local, isLine: isLocalLine, field: `${field}.chunk.local` }),
     remote: toRange({ range: chunk.remote, isLine: isRemoteLine, field: `${field}.chunk.remote` }),
     words: toWords({ words: merged.words, chunkId: id, field: `${field}.words` }),
+    waiting: merged.waiting,
   };
 }
 

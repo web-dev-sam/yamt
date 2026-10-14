@@ -8,6 +8,7 @@ const commands = vi.hoisted(() => ({
   listFiles: vi.fn(),
   loadFile: vi.fn(),
   finishFile: vi.fn(),
+  saveFile: vi.fn(),
   resetFile: vi.fn(),
   describeFile: vi.fn(),
   takeSide: vi.fn(),
@@ -23,6 +24,13 @@ const commands = vi.hoisted(() => ({
 vi.mock("./bindings", () => ({ commands }));
 
 const LINE = { start: 0, len: 1 };
+
+const MARKERS: Generated.Waiting = {
+  kind: "Markers",
+  open: "<<<<<<< ours",
+  between: ["||||||| base", "b", "======="],
+  close: ">>>>>>> theirs",
+};
 
 const DTO: Generated.FileMergeData = {
   path: "src/a.ts",
@@ -41,6 +49,7 @@ const DTO: Generated.FileMergeData = {
         local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
         remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
       },
+      waiting: MARKERS,
     },
   ],
 };
@@ -123,6 +132,7 @@ test("loadFile turns the app's data into domain data: the middle range, not base
             local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [] },
             remote: { changed: [], removedAt: [{ line: 0, column: 1 }] },
           },
+          waiting: MARKERS,
         },
       ],
     },
@@ -203,6 +213,28 @@ test("finishFile and resetFile send their arguments with the disk version and re
   expect(await source.resetFile("src/a.ts", version)).toEqual({ ok: true, value: WRITTEN });
   expect(commands.finishFile).toHaveBeenCalledWith("src/a.ts", "merged\r\n", 2);
   expect(commands.resetFile).toHaveBeenCalledWith("src/a.ts", 2);
+});
+
+test("saveFile sends its three arguments and returns the reply or the app's error", async () => {
+  const version = await versionOfLoaded();
+  const failed: Generated.IpcError = {
+    kind: "WriteFailed",
+    path: "src/a.ts",
+    message: "disk full",
+  };
+  commands.saveFile.mockResolvedValueOnce({ status: "ok", data: WRITTEN });
+  commands.saveFile.mockResolvedValueOnce({ status: "error", error: failed });
+  const source = createTauriSource();
+
+  expect(
+    await source.saveFile({ path: "src/a.ts", text: "saved\r\n", diskVersion: version }),
+  ).toEqual({ ok: true, value: WRITTEN });
+  expect(await source.saveFile({ path: "src/a.ts", text: "x", diskVersion: version })).toEqual({
+    ok: false,
+    failure: failed,
+  });
+  expect(commands.saveFile).toHaveBeenNthCalledWith(1, "src/a.ts", "saved\r\n", 2);
+  expect(commands.finishFile).not.toHaveBeenCalled();
 });
 
 test("describeFile and takeSide send their arguments and return the app's answer", async () => {

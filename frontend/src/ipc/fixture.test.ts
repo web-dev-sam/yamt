@@ -59,10 +59,18 @@ const DOMAIN_WORDS = {
   remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
 };
 
+const WAITING = {
+  kind: "Markers",
+  open: "<<<<<<< ours",
+  between: ["||||||| base", "b", "======="],
+  close: ">>>>>>> theirs",
+};
+
 type Overrides = {
   readonly chunk?: Record<string, unknown>;
   readonly words?: Record<string, unknown>;
   readonly merged?: Record<string, unknown>;
+  readonly waiting?: unknown;
 };
 
 function record(path: string, overrides: Overrides = {}): Record<string, unknown> {
@@ -79,6 +87,7 @@ function record(path: string, overrides: Overrides = {}): Record<string, unknown
         chunk: { ...CHUNK, ...overrides.chunk },
         middle: MIDDLE_RANGE,
         words: { chunk: 0, ...WORDS, ...overrides.words },
+        waiting: "waiting" in overrides ? overrides.waiting : WAITING,
         ...overrides.merged,
       },
     ],
@@ -102,6 +111,7 @@ function loaded(path: string): Record<string, unknown> {
         local: CHUNK.local,
         remote: CHUNK.remote,
         words: DOMAIN_WORDS,
+        waiting: WAITING,
       },
     ],
   };
@@ -115,7 +125,7 @@ function withoutMiddleRange(path: string): Record<string, unknown> {
   const { chunks: _chunks, ...rest } = record(path);
   return {
     ...rest,
-    chunks: [{ chunk: CHUNK, words: { chunk: 0, ...WORDS } }],
+    chunks: [{ chunk: CHUNK, words: { chunk: 0, ...WORDS }, waiting: WAITING }],
   };
 }
 
@@ -158,6 +168,27 @@ test("each committed fixture loads with its JSON's chunk count, its stages middl
   }
 });
 
+test("each committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
+  const source = createFixtureSource(quietLog().log);
+  let conflicts = 0;
+  for (const { path } of valueOf(await source.listFiles()).files) {
+    for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
+      if (kind !== "Conflict") {
+        expect(waiting).toEqual({ kind: "SideLines" });
+        continue;
+      }
+      if (waiting.kind !== "Markers") {
+        throw new Error(`${path}: a conflict waits as ${waiting.kind}`);
+      }
+      conflicts += 1;
+      expect(waiting.open).toMatch(/^<<<<<<< /);
+      expect(waiting.between.at(-1)).toBe("=======");
+      expect(waiting.close).toMatch(/^>>>>>>> /);
+    }
+  }
+  expect(conflicts).toBeGreaterThanOrEqual(11);
+});
+
 test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
   const source = createFixtureSource(quietLog().log);
 
@@ -169,6 +200,12 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
     middle: { start: 128, len: 10 },
     local: { start: 128, len: 8 },
     remote: { start: 140, len: 14 },
+    waiting: {
+      kind: "Markers",
+      open: "<<<<<<< ours",
+      between: ["======="],
+      close: ">>>>>>> theirs",
+    },
   });
   expect(data.chunks[8]).not.toHaveProperty("base");
   expect(data.local.split("\n")[128]).toBe(
@@ -211,6 +248,15 @@ test("in-memory records are listed sorted by path and keep every field", async (
     value: { ...loaded("a.ts"), eol: "CrLf" },
   });
 });
+
+test.each([{ kind: "SideLines" }, { kind: "AsShown" }, WAITING])(
+  "a chunk waiting as %j arrives as it is",
+  async (waiting) => {
+    const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts", { waiting }) });
+
+    expect(valueOf(await source.loadFile("a.ts")).chunks[0]?.waiting).toEqual(waiting);
+  },
+);
 
 test("a middle from the disk, or not text on disk, and its disk version arrive as they are", async () => {
   const files = {
@@ -295,6 +341,24 @@ test.each([
     record("x.ts", { merged: { middle: { start: "1", len: 1 } } }),
     "chunks.0.middle.start",
   ],
+  [
+    "a waiting of unknown kind",
+    record("x.ts", { waiting: { kind: "Ours" } }),
+    "chunks.0.waiting.kind",
+  ],
+  [
+    "markers without their close line",
+    record("x.ts", { waiting: { kind: "Markers", open: "<<<<<<< ours", between: [] } }),
+    "chunks.0.waiting.close",
+  ],
+  [
+    "markers whose between is one string",
+    record("x.ts", {
+      waiting: { kind: "Markers", open: "<<<<<<< ours", between: "=======", close: ">>>>>>>" },
+    }),
+    "chunks.0.waiting.between",
+  ],
+  ["a missing waiting", record("x.ts", { waiting: undefined }), "chunks.0.waiting"],
 ])("a record with %s is rejected naming the file", (_case, json, detail) => {
   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
     /^fixture bad\.json: /,
@@ -516,6 +580,30 @@ test("finish marks the file resolved and logs its text once; reset returns it un
   expect(valueOf(await source.listFiles())).toEqual({ files: unresolved, diskChanges: [] });
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
+});
+
+test("save writes the file, logs its length and lines, and leaves it unresolved", async () => {
+  const { log, entries } = quietLog();
+  const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+  const source = createFixtureSource(log, files);
+  const version = await versionOf("a.ts", files);
+  const unresolved = [
+    { path: "a.ts", status: "Unresolved", unsupported: null },
+    { path: "b.ts", status: "Unresolved", unsupported: null },
+  ];
+
+  expect(
+    await source.saveFile({ path: "a.ts", text: "one\ntwo\nthree", diskVersion: version }),
+  ).toEqual({ ok: true, value: { kind: "Written", files: unresolved } });
+  expect(await source.saveFile({ path: "nope.ts", text: "x", diskVersion: version })).toEqual({
+    ok: false,
+    failure: { kind: "UnknownPath", path: "nope.ts" },
+  });
+
+  expect(entries).toEqual([
+    { level: "info", event: "fixture.save", fields: { path: "a.ts", length: 13, lines: 3 } },
+  ]);
+  expect(valueOf(await source.listFiles()).files).toEqual(unresolved);
 });
 
 test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {

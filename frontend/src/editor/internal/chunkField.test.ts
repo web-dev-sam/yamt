@@ -36,6 +36,12 @@ async function synthetic(
         local: { changed: [], removed_at: [] },
         remote: { changed: [], removed_at: [] },
       },
+      waiting: {
+        kind: "Markers",
+        open: "<<<<<<< ours",
+        between: ["======="],
+        close: ">>>>>>> theirs",
+      },
     })),
   };
   return loadFixture("synthetic.ts", { "synthetic.json": record });
