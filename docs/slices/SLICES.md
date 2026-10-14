@@ -407,6 +407,32 @@ both reviews; then one final run.
 | 2   | 3.N-web: both headers from `sideNames` (`briefs/3.N-side-names-web.md`; `frontend/src/ipc`, `frontend/src/ui`, `main.ts`)                                 | web-impl  | accepted | round 1 `b744640` (`SideNamesWeb`, notes `.omp/run/notes/SideNamesWeb.md`): one `sideHeader` rule; 695 tests; real app merge "Local (yours): local" / "Remote (theirs): remote" in all three views, rebase "Local (yours): 26c5817 remote". Both reviews pass; nits #825/#826 dropped; survivors judged (`.omp/run/mutants/SideNamesWeb.survivors.txt`)                                       |
 | 3   | final run (`briefs/3.N-verify.md`): `just check`, `just mutants cb0151e`, the real app on merge, same-named tag, detached HEAD and rebase                 | verifier  | done     | `SideNamesVerify` at `1a7a8d6`, gate **pass** (notes `.omp/run/notes/SideNamesVerify.md`): `just check` 0 (377 Rust, 695 web, map ok, hooks 16/16); mutants: Rust 0 missed, no new TS survivor; real app: merge "local"/"remote" in all three views, tag `local` → no `heads/`, detached "a66ce0f Detached subject" with the full message on hover, rebase "d8ac39b remote" / "7eef99f local" |
 
+## Unchanged lines — collapse behind a wavy line, click to show more (session 13)
+
+Intent (owner 2026-10-14, #827; plan §2 #63): WebStorm's collapsed unchanged fragments in the merge view, copied as
+is — runs of lines outside the changes hide behind one wavy line spanning the line numbers, the text and both strips
+of all three panes; a click shows a bit more in all three panes, so every change of a file is in view with little
+scrolling. The owner left no questions to ask; the orchestrator decides as owner from WebStorm's source.
+
+Acceptance: in WebKit and in the real app with real input, on a golden with several changes far apart — every run
+outside the changes beyond 4 lines next to a change shows as one wave line at the same height in all three panes,
+drawn on through both strips; hovering it thickens it everywhere with a hand pointer; each click shows 4, then 8,
+then all hidden lines next to each change in all three panes at once, from any pane or strip, the keyboard staying
+where it was; unchanged lines stay row-aligned across the panes and the locked scroll follows; applying, ignoring,
+undo and redo leave hidden lines hidden; a find match on hidden lines shows them; dark and light colours from
+WebStorm's wave; scrolling no slower than before. Non-goals: a setting to turn it off or change the 4 lines,
+collapsing again, "Expand all", keys for the wave, function names on the wave, remembering shown runs across a rebuild,
+any Rust or IPC change.
+
+Slices: row 1 designs (read-only), row 2 builds in `frontend/src/editor/**` and `frontend/src/style.css`; each patch:
+commit, both reviews (`editor/` is not mutated: hand failing-path proofs), then one final run.
+
+| row | slice                                                                                                     | owner    | status  | evidence |
+| --- | --------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: hidden ranges per pane, shared steps, wave in panes and strips (`briefs/3.U-unchanged-design.md`) | designer | running |          |
+| 2   | 3.U build (`briefs/3.U-unchanged.md`; `frontend/src/editor/**`, `frontend/src/style.css`)                 | web-impl | todo    |          |
+| 3   | final run (`briefs/3.U-verify.md`): `just check`, `just mutants 72e68d1`, the real app                    | verifier | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
