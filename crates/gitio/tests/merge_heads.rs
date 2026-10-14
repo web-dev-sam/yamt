@@ -67,6 +67,50 @@ fn commit_named_without_a_repository_is_a_git_failure_not_a_missing_head() {
 }
 
 #[test]
+fn current_branch_is_the_short_name_of_the_branch_head_is_on() {
+    let (dir, repo) = merging();
+    assert_eq!(repo.current_branch().unwrap(), Some(b"local".to_vec()));
+
+    git_ok(dir.path(), &["branch", "feature/x", "local"]).unwrap();
+    git_ok(
+        dir.path(),
+        &["symbolic-ref", "HEAD", "refs/heads/feature/x"],
+    )
+    .unwrap();
+    assert_eq!(repo.current_branch().unwrap(), Some(b"feature/x".to_vec()));
+}
+
+#[test]
+fn current_branch_of_a_branch_without_a_commit_is_its_name() {
+    let (dir, repo) = merging();
+    git_ok(dir.path(), &["symbolic-ref", "HEAD", "refs/heads/unborn"]).unwrap();
+
+    assert_eq!(repo.current_branch().unwrap(), Some(b"unborn".to_vec()));
+}
+
+#[test]
+fn current_branch_is_none_when_head_is_detached() {
+    let dir = diverged_repo(&FILES).unwrap();
+    git_ok(dir.path(), &["checkout", "--quiet", "--detach"]).unwrap();
+    let repo = Repo::discover(dir.path()).unwrap();
+
+    assert_eq!(repo.current_branch().unwrap(), None);
+}
+
+#[test]
+fn current_branch_without_a_repository_is_a_git_failure_not_a_detached_head() {
+    let (dir, repo) = merging();
+    std::fs::remove_dir_all(dir.path().join(".git")).unwrap();
+
+    let error = repo.current_branch().unwrap_err();
+
+    let Error::GitFailed { stderr, .. } = error else {
+        panic!("expected GitFailed, got {error:?}");
+    };
+    assert!(stderr.contains("not a git repository"), "{stderr}");
+}
+
+#[test]
 fn branches_at_lists_local_and_remote_tracking_branches_but_not_symbolic_refs() {
     let (dir, repo) = merging();
     let root = dir.path();

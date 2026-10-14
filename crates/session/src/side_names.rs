@@ -4,15 +4,17 @@ use yamt_gitio::{Oid, Repo};
 
 use crate::Result;
 use crate::session::LOG_TARGET;
+use crate::sides::Side;
 
+const HEAD: &str = "HEAD";
 const MERGE_HEAD: &str = "MERGE_HEAD";
 const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
 const QUOTE: char = '\'';
 
-/// What is merged in: the one branch at `MERGE_HEAD`, else the commit being merged or replayed.
+/// What one side of the merge is: a branch, else a commit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]
-pub enum RemoteName {
+pub enum SideName {
     Branch {
         name: String,
     },
@@ -23,17 +25,43 @@ pub enum RemoteName {
     },
 }
 
-pub(crate) fn read_remote_name(repo: &Repo) -> Option<RemoteName> {
-    match merged_in(repo) {
+/// Both sides' names, read once when the session opens; `None` when nothing names that side.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct SideNames {
+    pub local: Option<SideName>,
+    pub remote: Option<SideName>,
+}
+
+pub(crate) fn read_side_names(repo: &Repo) -> SideNames {
+    SideNames {
+        local: name_or_warn(Side::Local, checked_out(repo)),
+        remote: name_or_warn(Side::Remote, merged_in(repo)),
+    }
+}
+
+fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName> {
+    match read {
         Ok(name) => name,
         Err(error) => {
-            tracing::warn!(target: LOG_TARGET, event = "remote_name_unread", %error, "the merged-in name is left out");
+            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", ?side, %error, "this side's name is left out");
             None
         }
     }
 }
 
-fn merged_in(repo: &Repo) -> Result<Option<RemoteName>> {
+fn checked_out(repo: &Repo) -> Result<Option<SideName>> {
+    if let Some(branch) = repo.current_branch()? {
+        return Ok(Some(SideName::Branch {
+            name: text(&branch),
+        }));
+    }
+    match repo.commit_named(HEAD)? {
+        Some(commit) => Ok(Some(commit_name(repo, &commit)?)),
+        None => Ok(None),
+    }
+}
+
+fn merged_in(repo: &Repo) -> Result<Option<SideName>> {
     if let Some(commit) = repo.commit_named(MERGE_HEAD)? {
         return Ok(Some(merge_head_name(repo, &commit)?));
     }
@@ -45,7 +73,7 @@ fn merged_in(repo: &Repo) -> Result<Option<RemoteName>> {
     Ok(None)
 }
 
-fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<RemoteName> {
+fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let branches: Vec<String> = repo
         .branches_at(commit)?
         .iter()
@@ -61,14 +89,14 @@ fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<RemoteName> {
         }
     };
     match branch {
-        Some(name) => Ok(RemoteName::Branch { name }),
+        Some(name) => Ok(SideName::Branch { name }),
         None => commit_name(repo, commit),
     }
 }
 
-fn commit_name(repo: &Repo, commit: &Oid) -> Result<RemoteName> {
+fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
-    Ok(RemoteName::Commit {
+    Ok(SideName::Commit {
         short_id: text(&summary.short_id),
         subject: text(&summary.subject),
         message: text(&summary.message).trim().to_owned(),

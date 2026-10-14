@@ -6,8 +6,8 @@ use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
 use crate::disk::{MarkerRule, Seen, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
-use crate::remote_name::read_remote_name;
 use crate::session::{Content, FileState, FileStatus, MergeSession};
+use crate::side_names::read_side_names;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
 use crate::stages::{CapturedStages, group_by_path};
 use crate::start::{Attributes, StartCheck, StartFile, StartLook};
@@ -32,11 +32,11 @@ impl MergeSession {
         let attributes = repo.attributes(&paths)?;
         let config = repo.merge_config()?;
         let files = open_files(&repo, groups, &attributes, &config)?;
-        let remote_name = read_remote_name(&repo);
+        let side_names = read_side_names(&repo);
         Ok(MergeSession {
             repo,
             files,
-            remote_name,
+            side_names,
         })
     }
 }

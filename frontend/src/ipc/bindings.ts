@@ -10,7 +10,7 @@ export const commands = {
 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
-	remoteName: () => __TAURI_INVOKE<{ kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | null>("remote_name"),
+	sideNames: () => __TAURI_INVOKE<SideNames>("side_names"),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
@@ -178,9 +178,6 @@ export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
-/**  What is merged in: the one branch at `MERGE_HEAD`, else the commit being merged or replayed. */
-export type RemoteName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
-
 export type SettingsRead = {
 	path: string,
 	default_path: string,
@@ -190,6 +187,15 @@ export type SettingsRead = {
 export type Side = "local" | "remote";
 
 export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
+
+/**  What one side of the merge is: a branch, else a commit. */
+export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
+
+/**  Both sides' names, read once when the session opens; `None` when nothing names that side. */
+export type SideNames = {
+	local: SideName | null,
+	remote: SideName | null,
+};
 
 /**  One side of a chunk compared with base, line by line. */
 export type SideWordChanges<L> = {

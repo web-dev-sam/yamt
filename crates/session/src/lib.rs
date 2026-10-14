@@ -7,9 +7,9 @@ mod locate;
 mod markers;
 mod merge_data;
 mod open;
-mod remote_name;
 mod seed;
 mod session;
+mod side_names;
 mod sides;
 mod stages;
 mod start;
@@ -18,8 +18,8 @@ mod writes;
 pub use decode::{Eol, UnsupportedReason};
 pub use disk::{DiskChange, DiskResult, DiskVersion};
 pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, merge_data};
-pub use remote_name::RemoteName;
 pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
+pub use side_names::{SideName, SideNames};
 pub use sides::{FileSides, Side, SideContent};
 
 #[derive(Debug, thiserror::Error)]

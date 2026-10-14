@@ -64,6 +64,16 @@ impl Repo {
         Ok(Some(Oid::parse(&hex)?))
     }
 
+    /// The branch HEAD is on (`symbolic-ref --short`); `None` when HEAD is detached.
+    pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
+        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+        match run(self.command(Access::Read, &args), None, GIT_TIMEOUT) {
+            Ok(output) => Ok(Some(without_final_newline(output)?)),
+            Err(error) if is_unresolved_name(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
         let args = [
             "for-each-ref",
@@ -229,7 +239,8 @@ impl Repo {
     }
 }
 
-// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
+// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message;
+// git-symbolic-ref(1) `--quiet`: a detached HEAD does the same.
 fn is_unresolved_name(error: &Error) -> bool {
     matches!(
         error,

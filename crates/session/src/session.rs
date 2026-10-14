@@ -10,7 +10,7 @@ use crate::disk::{
     settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
-use crate::remote_name::RemoteName;
+use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
 use crate::stages::CapturedStages;
 use crate::{Error, Result};
@@ -53,7 +53,7 @@ pub(crate) const LOG_TARGET: &str = "session";
 pub struct MergeSession {
     pub(crate) repo: Repo,
     pub(crate) files: Vec<FileState>,
-    pub(crate) remote_name: Option<RemoteName>,
+    pub(crate) side_names: SideNames,
 }
 
 pub(crate) struct FileState {
@@ -85,8 +85,8 @@ impl MergeSession {
     }
 
     #[must_use]
-    pub fn remote_name(&self) -> Option<RemoteName> {
-        self.remote_name.clone()
+    pub fn side_names(&self) -> &SideNames {
+        &self.side_names
     }
 
     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.

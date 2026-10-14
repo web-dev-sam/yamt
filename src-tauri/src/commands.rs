@@ -2,7 +2,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
 use yamt_session::{
-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, RemoteName, Side, WriteReply,
+    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
 };
 
 use crate::frontend_log::LogEntry;
@@ -19,7 +19,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         reset_file,
         describe_file,
         take_side,
-        remote_name,
+        side_names,
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
@@ -52,8 +52,8 @@ fn list_files(state: State<'_, SessionState>) -> Result<FileList, IpcError> {
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn remote_name(state: State<'_, SessionState>) -> Option<RemoteName> {
-    lock(&state).remote_name()
+fn side_names(state: State<'_, SessionState>) -> SideNames {
+    lock(&state).side_names().clone()
 }
 
 #[tauri::command]
@@ -253,10 +253,13 @@ mod tests {
     }
 
     #[test]
-    fn remote_name_names_the_merged_branch() {
+    fn side_names_names_both_branches_of_the_merge() {
         let window = open_window();
-        let branch = json!({ "kind": "Branch", "name": "remote" });
-        assert_eq!(window.invoke("remote_name", json!({})), Ok(branch));
+        let names = json!({
+            "local": { "kind": "Branch", "name": "local" },
+            "remote": { "kind": "Branch", "name": "remote" },
+        });
+        assert_eq!(window.invoke("side_names", json!({})), Ok(names));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
-use yamt_session::{MergeSession, RemoteName};
+use yamt_session::{MergeSession, SideName, SideNames};
 
 const FILE: &str = "cart.ts";
 
@@ -44,31 +44,48 @@ fn short_id_as_gitio_reads_config(root: &Path, revision: &str) -> String {
         .to_owned()
 }
 
-fn remote_name_of(root: &Path) -> Option<RemoteName> {
-    MergeSession::open(root).unwrap().remote_name()
+fn side_names_of(root: &Path) -> SideNames {
+    MergeSession::open(root).unwrap().side_names().clone()
 }
 
-fn branch(name: &str) -> RemoteName {
-    RemoteName::Branch {
+fn branch(name: &str) -> SideName {
+    SideName::Branch {
         name: name.to_owned(),
     }
 }
 
-fn assert_names_commit(root: &Path, revision: &str, subject: &str, message: &str) {
-    let expected = RemoteName::Commit {
+fn commit(root: &Path, revision: &str, subject: &str, message: &str) -> SideName {
+    SideName::Commit {
         short_id: short_id_as_gitio_reads_config(root, revision),
         subject: subject.to_owned(),
         message: message.to_owned(),
-    };
-    assert_eq!(remote_name_of(root), Some(expected));
+    }
 }
 
 #[test]
-fn merging_a_branch_names_the_branch() {
+fn merging_a_branch_names_both_branches() {
     let dir = diverged();
     require_conflict(dir.path(), &["merge", "remote"]);
 
-    assert_eq!(remote_name_of(dir.path()), Some(branch("remote")));
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(dir.path()), expected);
+}
+
+#[test]
+fn merging_from_a_detached_checkout_names_the_checked_out_commit() {
+    let dir = diverged();
+    let root = dir.path();
+    git_ok(root, &["checkout", "--quiet", "--detach", "local"]).unwrap();
+    require_conflict(root, &["merge", "remote"]);
+
+    let expected = SideNames {
+        local: Some(commit(root, "HEAD", "local", "local")),
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
@@ -86,12 +103,16 @@ fn merging_a_commit_no_branch_points_at_names_the_commit() {
     git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
     require_conflict(root, &["merge", &detached]);
 
-    assert_names_commit(
-        root,
-        &detached,
-        "detached subject",
-        "detached subject\n\ndetached body",
-    );
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(commit(
+            root,
+            &detached,
+            "detached subject",
+            "detached subject\n\ndetached body",
+        )),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
@@ -110,7 +131,11 @@ fn two_branches_at_the_merged_commit_are_told_apart_by_the_merge_message() {
     .unwrap();
     require_conflict(root, &["merge", "remote"]);
 
-    assert_eq!(remote_name_of(root), Some(branch("remote")));
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
@@ -121,11 +146,15 @@ fn two_branches_and_a_merge_message_naming_neither_give_the_commit() {
     let remote = stdout_line(root, &["rev-parse", "remote"]);
     require_conflict(root, &["merge", &remote]);
 
-    assert_names_commit(root, "remote", "remote", "remote");
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(commit(root, "remote", "remote", "remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
-fn an_unreadable_merge_message_drops_the_name() {
+fn an_unreadable_merge_message_drops_only_the_remote_name() {
     let dir = diverged();
     let root = dir.path();
     git_ok(root, &["branch", "also", "remote"]).unwrap();
@@ -134,30 +163,62 @@ fn an_unreadable_merge_message_drops_the_name() {
     fs::remove_file(&merge_msg).unwrap();
     fs::create_dir(&merge_msg).unwrap();
 
-    assert_eq!(remote_name_of(root), None);
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: None,
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
-fn a_cherry_pick_names_the_picked_commit() {
+fn an_unreadable_branch_drops_only_the_local_name() {
+    let dir = diverged();
+    let root = dir.path();
+    require_conflict(root, &["merge", "remote"]);
+    let heads = root.join(".git/refs/heads");
+    fs::write(heads.join("loop-a"), "ref: refs/heads/loop-b\n").unwrap();
+    fs::write(heads.join("loop-b"), "ref: refs/heads/loop-a\n").unwrap();
+    fs::write(root.join(".git/HEAD"), "ref: refs/heads/loop-a\n").unwrap();
+    let branch_read = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap();
+    let stderr = String::from_utf8(branch_read.stderr).unwrap();
+    assert!(stderr.contains("No such ref: HEAD"), "{stderr:?}");
+
+    let expected = SideNames {
+        local: None,
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
+}
+
+#[test]
+fn a_cherry_pick_names_the_branch_and_the_picked_commit() {
     let dir = diverged();
     let root = dir.path();
     require_conflict(root, &["cherry-pick", "remote"]);
 
-    assert_names_commit(root, "remote", "remote", "remote");
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(commit(root, "remote", "remote", "remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
-fn a_rebase_names_the_replayed_commit() {
+fn a_rebase_names_the_commit_it_stands_on_and_the_replayed_commit() {
     let dir = diverged();
     let root = dir.path();
     let local = stdout_line(root, &["rev-parse", "local"]);
     require_conflict(root, &["rebase", "remote"]);
 
-    assert_names_commit(root, &local, "local", "local");
+    let expected = SideNames {
+        local: Some(commit(root, "remote", "remote", "remote")),
+        remote: Some(commit(root, &local, "local", "local")),
+    };
+    assert_eq!(side_names_of(root), expected);
 }
 
 #[test]
-fn a_conflict_from_stash_pop_has_no_name() {
+fn a_conflict_from_stash_pop_names_only_the_branch() {
     let dir = diverged();
     let root = dir.path();
     git_ok(root, &["checkout", "--quiet", "remote"]).unwrap();
@@ -168,5 +229,9 @@ fn a_conflict_from_stash_pop_has_no_name() {
 
     let session = MergeSession::open(root).unwrap();
     assert_eq!(session.files().len(), 1);
-    assert_eq!(session.remote_name(), None);
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: None,
+    };
+    assert_eq!(session.side_names(), &expected);
 }
