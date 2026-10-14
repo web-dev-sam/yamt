@@ -409,6 +409,33 @@ test("Delete at a wave's start or Backspace at its end deletes nothing and shows
   expect(centerLines(atTop, 0)).toEqual(["1-22", "1-14"]);
 });
 
+test("delete-line or a line cut on a wave line deletes nothing and shows the next step", async () => {
+  const merge = await open();
+  const doc = merge.state.doc;
+  const { from } = levelOf(merge, 1, 0);
+  const line = doc.lineAt(from);
+  const cases = [
+    deleting(merge, from, { changes: { from: from - 1, to: line.to }, userEvent: "delete.line" }),
+    deleting(merge, from, { changes: { from, to: line.to + 1 }, userEvent: "delete.cut" }),
+  ];
+
+  for (const done of cases) {
+    expect(done.state.doc.eq(doc)).toBe(true);
+    expect(centerLines(done, 1)).toEqual(["41-62", "49-54"]);
+  }
+});
+
+test("a delete of only the line break before a wave still joins the lines", async () => {
+  const merge = await open();
+  const { from } = levelOf(merge, 1, 0);
+  const joined = deleting(merge, from, {
+    changes: { from: from - 1, to: from },
+    userEvent: "delete.backward",
+  });
+
+  expect(joined.state.doc.lines).toBe(merge.state.doc.lines - 1);
+});
+
 test("a selection deleted across a wave and a delete beside one still delete", async () => {
   const merge = await open();
   const doc = merge.state.doc;

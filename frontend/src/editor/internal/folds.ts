@@ -175,12 +175,12 @@ export function showNextStep(folds: readonly Fold[], run: number): TransactionSp
   return showSpec([nextStep(folds, run)]);
 }
 
-function removesWhole(tr: Transaction, { from, to }: Hidden): boolean {
-  let whole = false;
+function removesHidden(tr: Transaction, { from, to }: Hidden): boolean {
+  let removes = false;
   tr.changes.iterChangedRanges((fromA, toA) => {
-    whole ||= fromA <= from && toA >= to;
+    removes ||= Math.max(fromA, from) < Math.min(toA, to);
   });
-  return whole;
+  return removes;
 }
 
 function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
@@ -189,7 +189,7 @@ function deletedWaves(tr: Transaction, folds: readonly Fold[]): ShowFolds[] {
   }
   return folds.flatMap((fold, run) => {
     const hidden = displayed(fold, "center");
-    return hidden !== null && removesWhole(tr, hidden) ? [nextStep(folds, run)] : [];
+    return hidden !== null && removesHidden(tr, hidden) ? [nextStep(folds, run)] : [];
   });
 }
 
