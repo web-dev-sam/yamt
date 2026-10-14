@@ -102,7 +102,7 @@ export async function finish(
   { path, snapshot, summary, diskVersion }: FinishRequest,
 ): Promise<boolean> {
   const unprocessed: Question = { kind: "unprocessed", summary };
-  if (finishMustAsk(summary) && !(await target.asking.ask(unprocessed))) {
+  if (finishMustAsk(summary) && (await target.asking.ask(unprocessed)) !== "yes") {
     return false;
   }
   const text = snapshot.asShown();

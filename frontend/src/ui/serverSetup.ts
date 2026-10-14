@@ -8,36 +8,41 @@ import {
   type ServerHost,
 } from "../ipc";
 import { addedSpecs, detect, type LanguageServers, type ServerSpec } from "../lsp";
-import type { Asking } from "./asking";
+import type { Asking, Reply } from "./asking";
 import { unexpected } from "./problem";
-import type { Question } from "./question";
 import type { SettingsActions, SettingsInUse } from "./settings";
 
-type SetupTarget = Pick<SettingsActions, "setServerAnswer" | "setAddedServers"> & {
+type SetupTarget = Pick<SettingsActions, "loadSettings" | "setServerAnswer" | "setAddedServers"> & {
   readonly host: ServerHost | null;
-  readonly servers: Pick<LanguageServers, "setSpecs">;
+  readonly servers: Pick<LanguageServers, "setSpecs" | "haltAll">;
   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
-  readonly asking: Pick<Asking, "question" | "ask" | "answer">;
+  readonly asking: Pick<Asking, "ask">;
+  loadFiles(): Promise<void>;
+  refreshFiles(): Promise<void>;
 };
 
 type Setup = SetupTarget & {
   readonly root: ShallowRef<string | null>;
   readonly found: ShallowRef<readonly ServerSpec[]>;
   started: boolean;
-  dismissals: number;
   latestLook: number;
 };
 
 export type ServerSetup = {
   readonly serverRoot: Readonly<ShallowRef<string | null>>;
   readonly foundServers: Readonly<ShallowRef<readonly ServerSpec[]>>;
-  setUpServers(): Promise<void>;
-  findServers(): Promise<void>;
+  startUp(): Promise<void>;
+  refocus(): Promise<void>;
   answerServers(answer: RepositoryAnswer): Promise<void>;
   addServer(server: AddedServer): Promise<void>;
   removeServer(index: number): Promise<void>;
-  dismissQuestion(): void;
+};
+
+const STORED_REPLIES: Readonly<Record<Reply, RepositoryAnswer | null>> = {
+  yes: "start",
+  no: "dontStart",
+  dismissed: null,
 };
 
 export function parseAddedServer(command: string, fileTypes: string): AddedServer | null {
@@ -46,7 +51,8 @@ export function parseAddedServer(command: string, fileTypes: string): AddedServe
     .split(/[\s,]+/)
     .map((type) => type.replace(/^\.+/, "").toLowerCase())
     .filter((type) => type !== "");
-  return words.length === 0 || types.length === 0 ? null : { command: words, fileTypes: types };
+  const valid = words.length > 0 && types.length > 0 && !types.some((type) => type.includes("."));
+  return valid ? { command: words, fileTypes: types } : null;
 }
 
 async function look(setup: Setup, host: ServerHost): Promise<boolean> {
@@ -86,51 +92,50 @@ function apply(setup: Setup, answer: RepositoryAnswer | null): void {
   setup.servers.setSpecs(specs, { startOnOpen: answer === "start" });
 }
 
-async function ask(setup: Setup): Promise<RepositoryAnswer | null> {
-  if (setup.asking.question.value !== null) {
-    return null;
-  }
-  const dismissals = setup.dismissals;
-  const question: Question = { kind: "servers", found: setup.found.value, added: addedOf(setup) };
-  const yes = await setup.asking.ask(question);
-  if (setup.dismissals !== dismissals) {
-    return null;
-  }
-  return yes ? "start" : "dontStart";
-}
-
-async function setUp(setup: Setup): Promise<void> {
-  if (setup.host === null || !(await look(setup, setup.host))) {
+async function setUp(setup: Setup, host: ServerHost): Promise<void> {
+  if (!(await look(setup, host)) || setup.found.value.length + addedOf(setup).length === 0) {
     return;
   }
-  if (setup.found.value.length + addedOf(setup).length > 0) {
-    const stored = storedAnswer(setup);
-    const answer = stored ?? (await ask(setup));
-    if (stored === null && answer !== null) {
-      await setup.setServerAnswer(answer);
+  if (storedAnswer(setup) === null) {
+    const reply = await setup.asking.ask({
+      kind: "servers",
+      found: setup.found.value,
+      added: addedOf(setup),
+    });
+    const given = STORED_REPLIES[reply];
+    if (given !== null) {
+      await setup.setServerAnswer(given);
     }
-    apply(setup, answer);
+  }
+  apply(setup, storedAnswer(setup));
+}
+
+async function startUp(setup: Setup): Promise<void> {
+  await Promise.all([setup.loadFiles(), setup.loadSettings()]);
+  if (setup.host !== null) {
+    await setUp(setup, setup.host);
   }
   setup.started = true;
 }
 
-async function findAgain(setup: Setup): Promise<void> {
+async function refocus(setup: Setup): Promise<void> {
+  await Promise.all([setup.refreshFiles(), setup.loadSettings()]);
   if (setup.host !== null && setup.started && (await look(setup, setup.host))) {
     apply(setup, storedAnswer(setup));
   }
 }
 
 async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
+  const before = storedAnswer(setup);
   await setup.setServerAnswer(given);
   if (setup.root.value === null) {
     return;
   }
-  if (given === "dontStart") {
-    // Removed specs are halted, not stopped by the user, so a later Start answer starts their
-    // successors on open (`LanguageServers.#create` in lsp/index.ts carries only `userStopped`).
-    setup.servers.setSpecs([], { startOnOpen: false });
+  const now = storedAnswer(setup);
+  if (before !== "dontStart" && now === "dontStart") {
+    setup.servers.haltAll();
   }
-  apply(setup, given);
+  apply(setup, now);
 }
 
 async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise<void> {
@@ -146,7 +151,6 @@ export function createServerSetup(target: SetupTarget): ServerSetup {
     root: shallowRef<string | null>(null),
     found: shallowRef<readonly ServerSpec[]>([]),
     started: false,
-    dismissals: 0,
     latestLook: 0,
   };
   function added(): readonly AddedServer[] {
@@ -155,8 +159,8 @@ export function createServerSetup(target: SetupTarget): ServerSetup {
   return {
     serverRoot: setup.root,
     foundServers: setup.found,
-    setUpServers: () => setUp(setup),
-    findServers: () => findAgain(setup),
+    startUp: () => startUp(setup),
+    refocus: () => refocus(setup),
     answerServers: (given) => answer(setup, given),
     addServer: (server) => changeAdded(setup, [...added(), server]),
     removeServer: (index) =>
@@ -164,9 +168,5 @@ export function createServerSetup(target: SetupTarget): ServerSetup {
         setup,
         added().filter((_, at) => at !== index),
       ),
-    dismissQuestion: () => {
-      setup.dismissals += 1;
-      setup.asking.answer(false);
-    },
   };
 }

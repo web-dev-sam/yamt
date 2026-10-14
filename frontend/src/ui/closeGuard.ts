@@ -29,7 +29,7 @@ export function createCloseGuard(
 
   async function mayClose(): Promise<boolean> {
     const files = unsavedFiles();
-    return exitMustAsk(files) ? asking.ask({ kind: "exit", files }) : true;
+    return !exitMustAsk(files) || (await asking.ask({ kind: "exit", files })) === "yes";
   }
 
   return {

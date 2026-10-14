@@ -9,6 +9,7 @@ import type {
   SourceResult,
   StoredSettings,
 } from "../ipc";
+import type { Reply } from "./asking";
 import type { Problem } from "./problem";
 import {
   settingsActions,
@@ -74,7 +75,7 @@ function settingsTarget(loads: StoredSettings[]): {
     source,
     settings: shallowRef(startSettings("dark")),
     problem: shallowRef<Problem | null>(null),
-    asking: { ask: async () => false },
+    asking: { ask: async (): Promise<Reply> => "no" },
     latestSettings: 0,
   };
   return { actions: settingsActions(target), target, sent };

@@ -1,13 +1,15 @@
 import { expect, test } from "vitest";
 
-import type { InstallHint, PackageManager, ServerState } from "../lsp";
+import type { InstallHint, PackageManager, ServerSpec, ServerState } from "../lsp";
 import {
   dotKind,
   formatNote,
   installText,
   logTime,
   problemsTitle,
+  projectLabel,
   serverActions,
+  serverLabel,
   stateLine,
 } from "./serverText";
 
@@ -140,6 +142,28 @@ test('rule 4: the folder line names the project folder, or the repository root f
     "Or for all projects:",
   ]);
   expect(installText(ESLINT_HINT).steps[0].label).toBe("In the repository root:");
+});
+
+test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+  expect(projectLabel("frontend")).toBe("frontend/");
+  expect(projectLabel("packages/web")).toBe("packages/web/");
+  expect(projectLabel("")).toBe("the repository root");
+});
+
+test("a server reads as its name, marked when it is not installed", () => {
+  const installed: ServerSpec = {
+    name: "TypeScript",
+    project: "frontend",
+    command: { program: "typescript-language-server", args: ["--stdio"] },
+    fileTypes: ["ts"],
+    settings: null,
+    initializationOptions: null,
+    formats: false,
+    install: null,
+  };
+
+  expect(serverLabel(installed)).toBe("TypeScript");
+  expect(serverLabel({ ...installed, install: TS_HINT })).toBe("TypeScript (not installed)");
 });
 
 test("rule 2: the format note is shown for the four refusals and hidden otherwise", () => {

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { parseKey } from "../ipc";
 import type { ServerSpec } from "../lsp";
-import { exitMustAsk, finishMustAsk, projectLabel, questionText } from "./question";
+import { exitMustAsk, finishMustAsk, questionText } from "./question";
 
 const LINUX = "Linux x86_64";
 
@@ -116,7 +116,7 @@ test("the servers question lists the found servers per project folder, the added
       kind: "servers",
       lines: [
         "oxfmt, oxlint, TypeScript (not installed) — frontend/",
-        "oxlint (repository root) — repository root",
+        "oxlint (repository root) — the repository root",
         "pylsp, gopls — added by you",
       ],
     },
@@ -131,13 +131,7 @@ test("the servers question lists the found servers per project folder, the added
     kind: "servers",
     lines: [
       "oxfmt, oxlint, TypeScript (not installed) — frontend/",
-      "oxlint (repository root) — repository root",
+      "oxlint (repository root) — the repository root",
     ],
   });
-});
-
-test("a project folder reads as the folder with a slash, the root as the repository root", () => {
-  expect(projectLabel("frontend")).toBe("frontend/");
-  expect(projectLabel("packages/web")).toBe("packages/web/");
-  expect(projectLabel("")).toBe("repository root");
 });

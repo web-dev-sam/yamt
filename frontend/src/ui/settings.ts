@@ -197,7 +197,10 @@ async function editKeys(target: SettingsTarget, edit: KeyEdit): Promise<void> {
   if (plan.kind === "nothing") {
     return;
   }
-  if (plan.kind === "ask" && !(await target.asking.ask({ kind: "clash", ...plan.clash }))) {
+  if (
+    plan.kind === "ask" &&
+    (await target.asking.ask({ kind: "clash", ...plan.clash })) !== "yes"
+  ) {
     return;
   }
   const replanned = planKeyEdit(target.settings.value.keys.bindings, edit);

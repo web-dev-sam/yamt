@@ -64,14 +64,15 @@ export class LanguageServers {
     this.#servers = specs.map(
       (spec) => old.find((server) => sameValue(server.spec, spec)) ?? this.#create(spec, old),
     );
-    const removed = old.filter((candidate) => !this.#servers.includes(candidate));
-    removed.forEach((server) => {
-      void server.halt().then(() => {
-        this.#retired = this.#retired.filter((retired) => retired !== server);
-      });
-    });
-    this.#retired = [...this.#retired, ...removed];
+    this.#retire(old.filter((candidate) => !this.#servers.includes(candidate)));
     this.#servers.forEach((server) => this.#startIfServing(server));
+    this.#changed();
+  }
+
+  haltAll(): void {
+    const old = this.#servers;
+    this.#servers = old.map((server) => new Server(server.spec, this.#env, server.userStopped));
+    this.#retire(old);
     this.#changed();
   }
 
@@ -144,6 +145,15 @@ export class LanguageServers {
       (previous) => previous.spec.name === spec.name && previous.userStopped,
     );
     return new Server(spec, this.#env, stopped);
+  }
+
+  #retire(removed: readonly Server[]): void {
+    removed.forEach((server) => {
+      void server.halt().then(() => {
+        this.#retired = this.#retired.filter((retired) => retired !== server);
+      });
+    });
+    this.#retired = [...this.#retired, ...removed];
   }
 
   #startIfServing(server: Server): void {

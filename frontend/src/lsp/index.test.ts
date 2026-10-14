@@ -447,6 +447,110 @@ test("rule 2: a user stop survives setSpecs, even with startOnOpen, until start"
   expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "running" });
 });
 
+test("haltAll stops every run without a user stop; Start on open starts them again", async () => {
+  const languageServers = servers([spec("oxlint"), spec("oxfmt")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  const [lint, format] = [host.only("oxlint"), host.only("oxfmt")];
+
+  languageServers.haltAll();
+  languageServers.setSpecs([spec("oxlint"), spec("oxfmt")], { startOnOpen: false });
+  await settle();
+  expect(host.stopped).toEqual([lint.run, format.run]);
+  expect(languageServers.views().map((view) => view.state.kind)).toEqual(["stopped", "stopped"]);
+
+  languageServers.setSpecs([spec("oxlint"), spec("oxfmt")], { startOnOpen: true });
+  await settle();
+  expect(languageServers.views().map((view) => view.state.kind)).toEqual(["running", "running"]);
+  expect(host.servers).toHaveLength(4);
+});
+
+test("haltAll shows a crashed server as stopped and tells onChange listeners", async () => {
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  host.only("oxlint").exit(3);
+  await settle();
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "crashed", code: 3 });
+  const listener = vi.fn();
+  languageServers.onChange(listener);
+
+  languageServers.haltAll();
+
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+});
+
+test("haltAll leaves startOnOpen as it was and starts nothing until a document opens", async () => {
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+
+  languageServers.haltAll();
+  await settle();
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "stopped" });
+  expect(host.servers).toHaveLength(1);
+
+  languageServers.open(new FakeDoc("b.ts", "y"));
+  await settle();
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "running" });
+});
+
+test("a Start on open right after haltAll, while the old run still stops, starts a new run", async () => {
+  host.setup = (server) => {
+    server.ignoresStop = true;
+  };
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+
+  languageServers.haltAll();
+  languageServers.setSpecs([spec("oxlint")], { startOnOpen: true });
+  await settle();
+
+  expect(host.servers).toHaveLength(2);
+  expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "running" });
+});
+
+test("a server the user stopped stays stopped after haltAll and a Start on open", async () => {
+  const languageServers = servers([spec("oxlint"), spec("oxfmt")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  languageServers.stop("oxlint");
+  await settle();
+
+  languageServers.haltAll();
+  languageServers.setSpecs([spec("oxlint"), spec("oxfmt")], { startOnOpen: true });
+  await settle();
+
+  expect(languageServers.views().map((view) => view.state.kind)).toEqual(["stopped", "running"]);
+  expect(host.servers.map((server) => server.command.program)).toEqual([
+    "oxlint",
+    "oxfmt",
+    "oxfmt",
+  ]);
+});
+
+test("destroy waits for runs halted by haltAll", async () => {
+  host.setup = (server) => {
+    server.ignoresStop = true;
+  };
+  const languageServers = servers([spec("oxlint")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  languageServers.haltAll();
+  let destroyed = false;
+  void languageServers.destroy().then(() => {
+    destroyed = true;
+  });
+  await settle();
+  expect(destroyed).toBe(false);
+
+  host.only("oxlint").exit(0);
+  await settle();
+  expect(destroyed).toBe(true);
+});
+
 test("rule 9: stop sends didClose, shutdown, exit, then host.stop, and waits for Exited", async () => {
   const languageServers = servers([spec("oxlint")]);
   languageServers.open(new FakeDoc("a.ts", "x"));

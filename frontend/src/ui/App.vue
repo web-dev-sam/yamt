@@ -24,9 +24,7 @@ const {
   question,
   allResolved,
   pick,
-  refreshFiles,
-  loadSettings,
-  findServers,
+  refocus,
   settings,
   dismissProblem,
   dismissNotice,
@@ -41,10 +39,9 @@ useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
 
-watch(focused, async (now) => {
+watch(focused, (now) => {
   if (now) {
-    await Promise.all([refreshFiles(), loadSettings()]);
-    await findServers();
+    void refocus();
   }
 });
 watch(

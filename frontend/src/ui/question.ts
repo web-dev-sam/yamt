@@ -2,6 +2,7 @@ import { keyLabel } from "../ipc";
 import type { ServerSpec } from "../lsp";
 import type { Clash } from "./keymapEdit";
 import { ACTION_NAMES } from "./keyText";
+import { projectLabel, serverLabel } from "./serverText";
 import type { MergeSummary } from "./useMergeController";
 
 export type Question =
@@ -27,14 +28,6 @@ export type QuestionText = {
   readonly confirm: string;
   readonly cancel: string;
 };
-
-export function projectLabel(folder: string): string {
-  return folder === "" ? "repository root" : `${folder}/`;
-}
-
-function serverLabel(spec: ServerSpec): string {
-  return spec.install === null ? spec.name : `${spec.name} (not installed)`;
-}
 
 function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
   const folders = [...new Set(found.map((spec) => spec.project))];

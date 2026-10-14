@@ -19,8 +19,7 @@ import { createCollapsing, type Collapsing } from "./collapsing";
 import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
-import { attempt, clearProblemAbout, logProblem, report } from "./problem";
-import type { Problem } from "./problem";
+import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import { afterWrite, createSaving, finish, whileWriting } from "./saving";
 import type { FinishRequest, Saving, Writing } from "./saving";
@@ -75,6 +74,7 @@ type Actions = CloseGuard &
     openSettings(): void;
     closeSettings(): void;
     answer(yes: boolean): void;
+    dismissQuestion(): void;
     toggleButton(id: ToolbarButtonId): void;
     fileListKey(event: KeyPress, platform: string): void;
   };
@@ -116,18 +116,18 @@ export function createAppStore(
 ): AppStore {
   const refs = createRefs(startTheme);
   const asking = createAsking();
-  const guard = createCloseGuard(asking, refs.opened);
   const buttons = createHiddenButtons();
   const state: State = {
     ...refs,
     source,
     asking,
-    guard,
+    guard: createCloseGuard(asking, refs.opened),
     writing: new Map(),
     latestOpen: 0,
     latestSettings: 0,
   };
   const { files, settings } = refs;
+  const acts = actions(state, buttons, settingsActions(state));
   store = {
     ...refs,
     question: asking.question,
@@ -136,16 +136,16 @@ export function createAppStore(
     ),
     preferences: computed(() => preferencesOf(settings.value)),
     hiddenButtons: buttons.hidden,
-    ...actions(state, buttons),
+    ...acts,
     ...createCollapsing(),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
-    ...createServerSetup({ ...state, host, servers, ...settingsActions(state) }),
+    ...createServerSetup({ ...state, ...acts, host, servers }),
   };
   return store;
 }
 
-function actions(state: State, buttons: HiddenButtons): Actions {
+function actions(state: State, buttons: HiddenButtons, settings: SettingsActions): Actions {
   return {
     loadFiles: () => loadFiles(state),
     refreshFiles: async () => {
@@ -173,12 +173,13 @@ function actions(state: State, buttons: HiddenButtons): Actions {
       state.screen.value = { kind: "files" };
     },
     answer: state.asking.answer,
+    dismissQuestion: state.asking.dismiss,
     toggleButton: buttons.toggle,
     fileListKey: (event, platform) => {
       fileListKey(state, event, platform);
     },
     ...state.guard,
-    ...settingsActions(state),
+    ...settings,
   };
 }
 

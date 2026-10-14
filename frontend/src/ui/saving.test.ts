@@ -137,7 +137,7 @@ function writeTarget(
           .map(([path]) => path),
     },
     writing: new Map(),
-    asking: { ask: () => Promise.resolve(true) },
+    asking: { ask: () => Promise.resolve("yes") },
   };
 }
 

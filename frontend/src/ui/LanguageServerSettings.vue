@@ -4,8 +4,8 @@ import { computed, shallowRef } from "vue";
 import type { RepositoryAnswer } from "../ipc";
 import type { ServerSpec } from "../lsp";
 import ChoiceButtons from "./ChoiceButtons.vue";
-import { projectLabel } from "./question";
 import { parseAddedServer } from "./serverSetup";
+import { NOT_INSTALLED, projectLabel } from "./serverText";
 import { useAppStore } from "./store";
 
 const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: string }[] = [
@@ -29,7 +29,7 @@ const newServer = computed(() => parseAddedServer(commandText.value, fileTypesTe
 function commandOf(spec: ServerSpec): string {
   return spec.install === null
     ? [spec.command.program, ...spec.command.args].join(" ")
-    : "not installed";
+    : NOT_INSTALLED;
 }
 
 async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {

@@ -801,6 +801,11 @@ test("closing asks only with unsaved work and answers with the choice", async ()
   expect(await cancelled).toBe(false);
   expect(store.question.value).toBeNull();
 
+  const dismissed = store.mayClose();
+  store.dismissQuestion();
+  expect(await dismissed).toBe(false);
+  expect(store.question.value).toBeNull();
+
   const exited = store.mayClose();
   store.answer(true);
   expect(await exited).toBe(true);
@@ -1863,6 +1868,24 @@ test("a load on focus applies a file changed by hand since the last load", async
     ["loadSettings", { ...DARK, keys: {} }],
     ["loadSettings", { ...DARK, keys: {} }],
   ]);
+});
+
+test("start-up loads the file list and the settings; focus loads both again", async () => {
+  const { source, sent } = settingsSource({
+    loadSettings: () => Promise.resolve(read({ ...LIGHT, keys: {} })),
+  });
+  const lists = vi.fn(() => source.listFiles());
+  const store = createAppStore({ ...source, listFiles: lists });
+
+  await store.startUp();
+
+  expect(lists).toHaveBeenCalledTimes(1);
+  expect(store.settings.value.theme).toBe("light");
+
+  await store.refocus();
+
+  expect(lists).toHaveBeenCalledTimes(2);
+  expect(sent.map(([call]) => call)).toEqual(["loadSettings", "loadSettings"]);
 });
 
 test("a loaded file sets the theme and keys every opened file follows", async () => {

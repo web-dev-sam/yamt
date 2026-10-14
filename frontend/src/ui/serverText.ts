@@ -1,4 +1,4 @@
-import type { FailReason, InstallHint, PackageManager, ServerState } from "../lsp";
+import type { FailReason, InstallHint, PackageManager, ServerSpec, ServerState } from "../lsp";
 import type { FormatOutcome, ProblemCounts } from "./useMergeController";
 
 export type DotKind = "running" | "busy" | "stopped" | "problem" | "warning";
@@ -33,6 +33,8 @@ export const COPIED = "Copied";
 
 export const BACK = "Back";
 
+export const NOT_INSTALLED = "Not installed";
+
 const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
 
 const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
@@ -42,6 +44,14 @@ const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
   yarnBerry: { project: "yarn add -D", global: NPM.global },
   bun: { project: "bun add --dev", global: "bun add -g" },
 };
+
+export function projectLabel(folder: string): string {
+  return folder === "" ? "the repository root" : `${folder}/`;
+}
+
+export function serverLabel(spec: ServerSpec): string {
+  return spec.install === null ? spec.name : `${spec.name} (${NOT_INSTALLED.toLowerCase()})`;
+}
 
 function failLine(reason: FailReason): string {
   switch (reason.kind) {
@@ -78,7 +88,7 @@ export function stateLine(state: ServerState): string {
     case "failed":
       return failLine(state.reason);
     case "notInstalled":
-      return "Not installed";
+      return NOT_INSTALLED;
     default: {
       const _exhaustive: never = state;
       return _exhaustive;
@@ -144,11 +154,10 @@ function reasonSentence(hint: InstallHint): string {
 
 export function installText(hint: InstallHint): InstallText {
   const commands = MANAGER_COMMANDS[hint.manager ?? "npm"];
-  const folder = hint.folder === "" ? "the repository root" : `${hint.folder}/`;
   return {
     reason: reasonSentence(hint),
     steps: [
-      { label: `In ${folder}:`, command: `${commands.project} ${hint.package}` },
+      { label: `In ${projectLabel(hint.folder)}:`, command: `${commands.project} ${hint.package}` },
       { label: "Or for all projects:", command: `${commands.global} ${hint.package}` },
     ],
     managerNote: hint.manager === null ? "Or the same with your package manager." : null,
