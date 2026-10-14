@@ -4,7 +4,7 @@ use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
 
 use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
-use crate::disk::{AtOpen, MarkerRule, Seen, read_on_disk, warn_unread};
+use crate::disk::{AtOpen, MarkerRule, OnDisk, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
 use crate::session::{Content, FileState, FileStatus, MergeSession};
 use crate::side_names::read_side_names;
@@ -41,6 +41,17 @@ impl MergeSession {
     }
 }
 
+/// A file as read at open, before the start check tells whether git's output is untouched.
+struct Opened {
+    path: PathBuf,
+    stages: CapturedStages,
+    content: Content,
+    rule: MarkerRule,
+    marker_size: usize,
+    /// `None`: the worktree entry could not be read.
+    disk: Option<OnDisk>,
+}
+
 fn open_files(
     repo: &Repo,
     groups: Vec<(PathBuf, CapturedStages)>,
@@ -49,39 +60,22 @@ fn open_files(
 ) -> Result<Vec<FileState>> {
     let mut blobs = repo.blob_reader()?;
     let mut check = StartCheck::new(repo);
-    let mut files = Vec::with_capacity(groups.len());
+    let mut opened = Vec::with_capacity(groups.len());
     let mut looks = Vec::with_capacity(groups.len());
     for ((path, stages), found) in groups.into_iter().zip(attributes) {
         let attributes = Attributes::from_git(found, config);
         let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, &attributes)?;
-        files.push(file);
+        opened.push(file);
         looks.push(look);
     }
-    let paths = files.iter().map(|file| file.path.as_path());
+    let paths = opened.iter().map(|file| file.path.as_path());
     let looks: Vec<(&Path, StartLook)> = paths.zip(looks).collect();
     let untouched = check.untouched(&looks);
-    let mut checked = Vec::with_capacity(files.len());
-    for (file, untouched) in files.into_iter().zip(untouched) {
-        checked.push(if untouched {
-            file
-        } else {
-            changed_at_open(file)
-        });
+    let mut files = Vec::with_capacity(opened.len());
+    for (file, untouched) in opened.into_iter().zip(untouched) {
+        files.push(file_state(file, untouched));
     }
-    Ok(checked)
-}
-
-/// `file` as read at open, once found different from what git wrote.
-fn changed_at_open(file: FileState) -> FileState {
-    let at_open = match file.at_open {
-        AtOpen::Untouched(disk) | AtOpen::Changed(disk) => AtOpen::Changed(disk),
-        AtOpen::Unread => AtOpen::Unread,
-    };
-    FileState {
-        seen: Seen::GitOutput,
-        at_open,
-        ..file
-    }
+    Ok(files)
 }
 
 fn open_file(
@@ -91,52 +85,55 @@ fn open_file(
     path: PathBuf,
     stages: CapturedStages,
     attributes: &Attributes,
-) -> Result<(FileState, StartLook)> {
+) -> Result<(Opened, StartLook)> {
     let stored = stored(blobs, &stages)?;
-    let disk = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
-        Ok(disk) => disk,
+    let (disk, look) = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
+        Ok(disk) => {
+            let sides = match &stored {
+                Stored::Regular { sides, .. } => Some(sides),
+                Stored::Submodule | Stored::Symlink | Stored::BothDeleted => None,
+            };
+            let start = StartFile {
+                path: &path,
+                stages: &stages,
+                sides,
+                attributes,
+                disk: &disk,
+            };
+            let look = check.look(&start, blobs)?;
+            (Some(disk), look)
+        }
         Err(error) => {
             warn_unread(&path.to_string_lossy(), &error);
-            let file = file_state(path, stages, stored, attributes, AtOpen::Unread);
-            return Ok((file, StartLook::Changed));
+            (None, StartLook::Changed)
         }
     };
-    let sides = match &stored {
-        Stored::Regular { sides, .. } => Some(sides),
-        Stored::Submodule | Stored::Symlink | Stored::BothDeleted => None,
-    };
-    let start = StartFile {
-        path: &path,
-        stages: &stages,
-        sides,
-        attributes,
-        disk: &disk,
-    };
-    let look = check.look(&start, blobs)?;
-    let file = file_state(path, stages, stored, attributes, AtOpen::Untouched(disk));
-    Ok((file, look))
-}
-
-fn file_state(
-    path: PathBuf,
-    stages: CapturedStages,
-    stored: Stored,
-    attributes: &Attributes,
-    at_open: AtOpen,
-) -> FileState {
     let content = content(&path, stored);
-    let seen = match &at_open {
-        AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
-        AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
-    };
-    FileState {
+    let opened = Opened {
         rule: marker_rule(&content, attributes),
         path,
         stages,
-        status: FileStatus::Unresolved,
         content,
         marker_size: attributes.marker_size,
-        seen,
+        disk,
+    };
+    Ok((opened, look))
+}
+
+fn file_state(opened: Opened, untouched: bool) -> FileState {
+    let at_open = match opened.disk {
+        Some(disk) if untouched => AtOpen::Untouched(disk),
+        Some(disk) => AtOpen::Changed(disk),
+        None => AtOpen::Unread,
+    };
+    FileState {
+        path: opened.path,
+        stages: opened.stages,
+        status: FileStatus::Unresolved,
+        content: opened.content,
+        marker_size: opened.marker_size,
+        rule: opened.rule,
+        seen: at_open.first_seen(),
         settled: None,
         at_open,
     }

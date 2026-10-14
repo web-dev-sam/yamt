@@ -10,6 +10,12 @@ use crate::{Error, Result};
 // conflicts otherwise (truncated to 127 if there are more than that many conflicts)."
 const FIRST_ERROR_STATUS: i32 = 128;
 
+/// The label `merge_file` writes after the open marker of every conflict.
+pub const OURS_LABEL: &str = "ours";
+const BASE_LABEL: &str = "base";
+/// The label `merge_file` writes after the close marker of every conflict.
+pub const THEIRS_LABEL: &str = "theirs";
+
 /// How `git merge-file` merges: marker length, `--union`, and `--diff-algorithm=histogram`.
 #[derive(Clone, Copy, Debug)]
 pub struct MergeFileOptions {
@@ -19,9 +25,9 @@ pub struct MergeFileOptions {
 }
 
 impl Repo {
-    /// git's merge of `base`, `local` and `remote`, written with the labels `ours`, `base` and
-    /// `theirs`; the three inputs are written to files in `scratch`, an existing directory the
-    /// caller removes.
+    /// git's merge of `base`, `local` and `remote`, written with the labels `OURS_LABEL`,
+    /// `BASE_LABEL` and `THEIRS_LABEL`; the three inputs are written to files in `scratch`, an
+    /// existing directory the caller removes.
     pub fn merge_file(
         &self,
         scratch: &Path,
@@ -41,7 +47,7 @@ impl Repo {
         if options.histogram {
             args.push("--diff-algorithm=histogram");
         }
-        args.extend(["-L", "ours", "-L", "base", "-L", "theirs", "--"]);
+        args.extend(["-L", OURS_LABEL, "-L", BASE_LABEL, "-L", THEIRS_LABEL, "--"]);
         let mut command = self.command(Access::Read, &args);
         command.args([&local, &base, &remote]);
         run_accepting(command, None, GIT_TIMEOUT, is_conflict_count)

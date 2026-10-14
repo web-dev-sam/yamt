@@ -105,20 +105,17 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         let now = file.read_disk(&self.repo)?;
-        let entry = file.at_open.regular_entry().cloned();
-        if entry.is_some() && matches!(now, OnDisk::Submodule(_) | OnDisk::Other) {
+        let reset_to = file.at_open.reset_to();
+        if reset_to.is_some() && matches!(now, OnDisk::Submodule(_) | OnDisk::Other) {
             return Err(Error::NotAFile {
                 path: file.display_path(),
             });
         }
         let index_before = index_before(&self.repo, file)?;
         self.repo.restore_stages(&file.stages.entries())?;
-        let worktree = match &entry {
-            Some(OnDisk::File(bytes)) => put_entry(&self.repo, file, Some(bytes), &now),
-            Some(OnDisk::Missing) => put_entry(&self.repo, file, None, &now),
-            Some(OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other) | None => {
-                rebuild_markers(&self.repo, file)
-            }
+        let worktree = match &reset_to {
+            Some(reset_to) => put_entry(&self.repo, file, reset_to.bytes.as_deref(), &now),
+            None => rebuild_markers(&self.repo, file),
         };
         if let Err(error) = worktree {
             if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
@@ -128,8 +125,8 @@ impl MergeSession {
             return Err(error);
         }
         file.status = FileStatus::Unresolved;
-        match entry {
-            Some(disk) => file.seen = file.at_open.seen_after_reset(disk),
+        match reset_to {
+            Some(reset_to) => file.seen = reset_to.seen,
             None => read_back(&self.repo, file),
         }
         Ok(self.written_reply())

@@ -4,7 +4,7 @@ use yamt_merge_core::{BaseLine, Chunk, ChunkId, ChunkKind, LineRange, word_chang
 
 use crate::decode::{Eol, detect_eol};
 use crate::locate::{Located, Maps, line_number, side_view};
-use crate::markers::{Piece, parse, split_lines};
+use crate::markers::{Block, Piece, parse, split_lines};
 use crate::merge_data::{MergeChunk, MiddleLine, Texts};
 use crate::waiting::{Waiting, block_markers};
 
@@ -24,8 +24,8 @@ struct MiddleText<'a> {
     line_count: u32,
     previous_base_end: u32,
     chunks: Vec<Chunk>,
-    ranges: Vec<LineRange<MiddleLine>>,
-    waiting: Vec<Waiting>,
+    /// Each chunk's lines in the middle and what Save writes while it waits, in `chunks` order.
+    placed: Vec<(LineRange<MiddleLine>, Waiting)>,
 }
 
 pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
@@ -42,8 +42,7 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
         line_count: 0,
         previous_base_end: 0,
         chunks: Vec::new(),
-        ranges: Vec::new(),
-        waiting: Vec::new(),
+        placed: Vec::new(),
     };
     let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
     for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
@@ -51,16 +50,11 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
             Piece::Settled(lines) => middle.push_disk_lines(lines),
             Piece::Block(block) => {
                 let located = maps.block(block, ours_start, theirs_start);
-                let waiting = if located.exact {
-                    block_markers(&disk_lines, block)
-                } else {
-                    Waiting::AsShown
-                };
-                middle.push_conflict(&located, maps.base(&located), &block.whole, waiting);
+                middle.push_conflict(&located, maps.base(&located), &block.whole, Some(block));
             }
             Piece::Raw(lines) => {
                 let located = maps.raw(ours_start, theirs_start);
-                middle.push_conflict(&located, maps.base(&located), lines, Waiting::AsShown);
+                middle.push_conflict(&located, maps.base(&located), lines, None);
             }
         }
     }
@@ -94,24 +88,31 @@ impl MiddleText<'_> {
         }
     }
 
+    /// `block` is `None` for a raw region.
     fn push_conflict(
         &mut self,
         located: &Located,
         base: LineRange<BaseLine>,
         disk_lines: &Range<usize>,
-        waiting: Waiting,
+        block: Option<&Block>,
     ) {
         let base = self.after_previous_base(base);
         let start = self.line_count;
-        if located.exact {
-            self.push_base_lines(base);
-        } else {
-            self.push_disk_lines(disk_lines);
-        }
-        self.ranges.push(LineRange {
+        let waiting = match block {
+            Some(block) if located.exact => {
+                self.push_base_lines(base);
+                block_markers(self.disk_lines, block)
+            }
+            Some(_) | None => {
+                self.push_disk_lines(disk_lines);
+                Waiting::AsShown
+            }
+        };
+        let middle = LineRange {
             start: MiddleLine(start),
             len: self.line_count - start,
-        });
+        };
+        self.placed.push((middle, waiting));
         self.chunks.push(Chunk {
             id: ChunkId(line_number(self.chunks.len())),
             kind: ChunkKind::Conflict,
@@ -119,7 +120,6 @@ impl MiddleText<'_> {
             local: located.local,
             remote: located.remote,
         });
-        self.waiting.push(waiting);
     }
 
     /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
@@ -136,8 +136,8 @@ impl MiddleText<'_> {
     fn seeded(self, texts: &Texts) -> Seeded {
         let words = word_changes(&texts.base, &texts.local, &texts.remote, &self.chunks);
         let mut chunks = Vec::with_capacity(self.chunks.len());
-        let placed = self.chunks.into_iter().zip(self.ranges).zip(self.waiting);
-        for (((chunk, middle), waiting), words) in placed.zip(words) {
+        let placed = self.chunks.into_iter().zip(self.placed);
+        for ((chunk, (middle, waiting)), words) in placed.zip(words) {
             chunks.push(MergeChunk {
                 chunk,
                 middle,

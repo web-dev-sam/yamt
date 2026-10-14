@@ -4,7 +4,7 @@ use std::fs;
 use std::time::{Duration, SystemTime};
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
-use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, WriteReply};
+use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Middle, WriteReply};
 
 const TEXT: &str = "src/cart.ts";
 const BASE: &[u8] = b"one\ntwo\nthree\n";
@@ -173,6 +173,8 @@ fn reset_after_a_save_brings_back_the_bytes_and_the_stages_of_this_run_s_start()
 
     assert_written(&reply);
     assert_eq!(read(&dir), at_open);
+    let middle = session.load(TEXT).unwrap().middle;
+    assert!(matches!(middle, Middle::Stages { .. }), "{middle:?}");
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status(&session), FileStatus::Unresolved);
     assert_eq!(session.refresh().unwrap().disk_changes, []);
@@ -208,6 +210,11 @@ fn reset_of_a_file_changed_by_hand_before_start_brings_back_the_hand_edit() {
     session.reset(TEXT, DiskVersion(1)).unwrap();
 
     assert_eq!(read(&dir), FOREIGN);
+    let foreign = String::from_utf8(FOREIGN.to_vec()).unwrap();
+    assert_eq!(
+        session.load(TEXT).unwrap().middle,
+        Middle::Disk { text: foreign }
+    );
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status(&session), FileStatus::Unresolved);
     assert_eq!(session.refresh().unwrap().disk_changes, []);

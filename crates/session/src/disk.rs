@@ -105,26 +105,37 @@ impl Seen {
     }
 }
 
+/// What Reset writes back and what yamt has seen once it did.
+pub(crate) struct ResetTo {
+    /// The file's bytes; `None`: no file.
+    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) seen: Seen,
+}
+
 impl AtOpen {
-    /// The regular file, or its absence, that reset writes back; `None` when only git can
-    /// rebuild the entry (a link, a submodule, something else, or unread at open).
-    pub(crate) fn regular_entry(&self) -> Option<&OnDisk> {
+    /// What yamt has seen at open: git's untouched output is the stages view.
+    pub(crate) fn first_seen(&self) -> Seen {
         match self {
-            AtOpen::Untouched(disk) | AtOpen::Changed(disk) => match disk {
-                OnDisk::File(_) | OnDisk::Missing => Some(disk),
-                OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => None,
-            },
-            AtOpen::Unread => None,
+            AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
+            AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
         }
     }
 
-    /// What yamt has seen once reset put `disk` back: git's output selects the stages view,
-    /// anything else the disk view.
-    pub(crate) fn seen_after_reset(&self, disk: OnDisk) -> Seen {
-        match self {
-            AtOpen::Untouched(_) => Seen::ViewFromStages(disk),
-            AtOpen::Changed(_) | AtOpen::Unread => Seen::ViewFromDisk(disk),
-        }
+    /// The regular file, or its absence, that Reset writes back, seen in the stages view when git
+    /// wrote it and in the disk view otherwise; `None` when only git can rebuild the entry (a link,
+    /// a submodule, something else, or unread at open).
+    pub(crate) fn reset_to(&self) -> Option<ResetTo> {
+        let (disk, seen) = match self {
+            AtOpen::Untouched(disk) => (disk, Seen::ViewFromStages(disk.clone())),
+            AtOpen::Changed(disk) => (disk, Seen::ViewFromDisk(disk.clone())),
+            AtOpen::Unread => return None,
+        };
+        let bytes = match disk {
+            OnDisk::File(bytes) => Some(bytes.clone()),
+            OnDisk::Missing => None,
+            OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => return None,
+        };
+        Some(ResetTo { bytes, seen })
     }
 }
 

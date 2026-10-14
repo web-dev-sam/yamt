@@ -173,4 +173,31 @@ mod tests {
             "{chunk:?}"
         );
     }
+
+    #[test]
+    fn a_file_that_is_one_raw_region_links_it_to_every_side_line_with_or_without_a_last_line_break()
+    {
+        for (local, remote) in [("L\n", "R\n"), ("L", "R")] {
+            let texts = Texts {
+                base: String::new(),
+                local: local.to_owned(),
+                remote: remote.to_owned(),
+                deleted: None,
+            };
+            let disk = "<<<<<<< ours\nL\nR\n>>>>>>> theirs\n";
+
+            let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+
+            let [chunk] = &seeded.chunks[..] else {
+                panic!("expected one chunk: {:?}", seeded.chunks);
+            };
+            assert_eq!(chunk.waiting, Waiting::AsShown);
+            let local = chunk.chunk.local;
+            let remote = chunk.chunk.remote;
+            assert_eq!(
+                [(local.start.0, local.len), (remote.start.0, remote.len)],
+                [(0, 1), (0, 1)]
+            );
+        }
+    }
 }

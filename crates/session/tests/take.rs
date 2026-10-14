@@ -196,6 +196,8 @@ fn take_of_a_submodule_stages_the_chosen_commit_and_leaves_its_worktree_alone() 
     }
 }
 
+/// RK17's proving test for the `checkout -m` half of Reset (plan §2 #69): links, submodules and
+/// files unread at open are rebuilt by git, not written back by yamt.
 #[test]
 fn reset_after_take_brings_back_the_stages_of_every_kind() {
     let kinds = [
@@ -223,4 +225,9 @@ fn reset_after_take_brings_back_the_stages_of_every_kind() {
 
     assert_eq!(unmerged(&dir), before);
     assert_eq!(session.remaining(), kinds.len());
+    #[cfg(unix)]
+    assert_ne!(
+        fs::read_link(dir.path().join(SYMLINK)).unwrap(),
+        Path::new("remote-target")
+    );
 }

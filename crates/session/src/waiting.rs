@@ -1,12 +1,9 @@
 use serde::Serialize;
 use specta::Type;
+use yamt_gitio::{OURS_LABEL, THEIRS_LABEL};
 use yamt_merge_core::{Chunk, ChunkKind};
 
 use crate::markers::{Block, Piece, parse, split_lines};
-
-// The labels `start.rs` passes to `git merge-file` (`-L ours -L base -L theirs`).
-const OURS_LABEL: &str = "ours";
-const THEIRS_LABEL: &str = "theirs";
 
 /// What Save writes for this change while a side of it still waits (plan §2 #69).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -54,7 +51,8 @@ impl MarkerStyle {
         }
     }
 
-    /// Merge style with the labels `ours` and `theirs`.
+    /// Merge style with the labels `Repo::merge_file` passes to `git merge-file` (gitio
+    /// `merge_file.rs`).
     #[must_use]
     pub fn fallback(marker_size: usize) -> MarkerStyle {
         MarkerStyle {

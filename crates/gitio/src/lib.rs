@@ -16,7 +16,7 @@ pub use attributes::{AttributeValue, MergeAttributes};
 pub use blob::BlobReader;
 pub use entry::{Oid, Stage, StageEntry};
 pub use merge_config::MergeConfig;
-pub use merge_file::MergeFileOptions;
+pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
 pub use repo::{CommitSummary, Repo};
 pub use version::GitVersion;
 
