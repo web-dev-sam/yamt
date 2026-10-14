@@ -1,0 +1,2340 @@
+mutants: no Rust changes since 801b835
+[32m08:13:54 (198833) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m08:13:54 (198833) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m08:13:55 (198833) INFO ProjectReader[39m Found 7 of 336 file(s) to be mutated.
+[32m08:13:55 (198833) INFO Instrumenter[39m Instrumented 7 source file(s) with 1613 mutant(s)
+[32m08:13:55 (198833) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m08:13:57 (198833) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m08:14:05 (198833) INFO DryRunExecutor[39m Initial test run succeeded. Ran 425 tests in 8 seconds (net 1627.5353539999849 ms, overhead 6468.464646000015 ms).
+
+All tests
+  editor/internal
+    apply.test.ts
+      ~ apply local: the change gets the left text, resolves, and loses colour and arrow (covered 27)
+      ~ apply remote inserts the right lines at an empty middle range (covered 27)
+      ~ a conflict applied from both sides holds local then remote text (covered 27)
+      ~ ignore keeps the text and resolves a change or a half-applied conflict (covered 27)
+      ~ applying after an edit inside the change replaces the current range (covered 27)
+      ~ undo after apply restores text and status; redo re-applies (covered 27)
+      ~ undo after ignore brings the change back; redo ignores it again (covered 27)
+      ~ undo and redo after an arrow or × show that change, not the old cursor at line 1 (covered 27)
+      ~ redo of an insert-only apply puts the cursor on the first inserted line (covered 27)
+      ~ typing right after an arrow click is an undo step of its own (covered 27)
+      ~ bulk apply moves a cursor outside the visible lines to the first one; undo returns there (covered 27)
+      ~ bulk apply from the left resolves every LocalOnly change; one undo restores all (covered 27)
+      ~ a BothSame change resolves from either arrow and from either bulk apply (covered 27)
+      ~ bulk apply from the right inserts every RemoteOnly change in place (covered 27)
+      ~ bulk apply over touching spans whose last deletes an unterminated final line equals clicking each (covered 27)
+      ~ deleting all of a change's lines in the middle pane ignores it (covered 27)
+      ~ resultText of a CRLF file keeps CRLF after an apply (covered 27)
+      ~ a conflict applied from both sides after its separator line is deleted pushes the next change (covered 27)
+      ~ a change on an unterminated last line keeps the file without a final line break (covered 27)
+      ~ a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it (covered 27)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (Lf) (covered 27)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (CrLf) (covered 27)
+      ~ a chunk spans its middle range, not where its base range would put it (covered 27)
+      ~ a middle that is not text on disk is an empty document (covered 27)
+      ~ an add/add file reopened from the disk: a one-sided apply stays a conflict until the other side is settled (covered 27)
+      ~ Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step (covered 27)
+      ~ Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step (covered 27)
+      ~ Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied (covered 27)
+      ~ Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is (covered 27)
+      ~ Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome (covered 27)
+      ~ a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step (covered 27)
+      ~ Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it (covered 27)
+      ~ a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each (covered 27)
+      ~ a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each (covered 27)
+      ~ an apply drag over a change and a touching zero-line conflict equals clicking each (covered 27)
+    chunkField.test.ts
+      ✘ a real fixture's chunks start at line starts; an empty middle range is a point (covered 0)
+      ✘ a chunk ending on the last line ends at the document end (covered 0)
+      ✘ typing at the end of an unterminated last line stays inside its chunk (covered 0)
+      ✘ typing at an empty chunk's point in the middle of a line lands after it (covered 0)
+      ✘ an edit before a chunk shifts it (covered 0)
+      ✘ typing inside a chunk, including at its first line's start, grows it (covered 0)
+      ✘ typing at the start of the line after a chunk stays outside it (covered 0)
+      ✘ text typed at an empty chunk's point lands after it (covered 0)
+      ✘ deleting all of a chunk's lines collapses it; undo restores the range (covered 0)
+      ✘ one undo restores a merged history event; redo re-applies it (covered 0)
+    decorations.test.ts
+      ✘ vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone (covered 0)
+      ✘ a side pane drops a block once its own side is handled, even in an open conflict (covered 0)
+      ✘ center colours follow their text when a line is typed above them (covered 0)
+      ✘ an empty range at the end of an unterminated last line is drawn below that line (covered 0)
+      ✘ a marker on another chunk's band line keeps its own tone class (covered 0)
+      ✘ a line break pasted at the end of a band line stops at the marker that follows it (covered 0)
+      ✘ random edits keep center ranges sorted, disjoint, inside the document, and drawable (covered 0)
+      ✘ a RemoteOnly deletion: center band and right marker are deleted, left is bare (covered 0)
+      ✘ a focused 8-line change is outlined on every line, with its first and last lines marked (covered 0)
+      ✘ a focused zero-line change outlines the line carrying its bar, on the band's own edge (covered 0)
+      ✘ a side alone draws no outline on any change (covered 0)
+    drag.test.ts
+      ✘ dragging down covers the pressed icon and every open icon whose row the pointer reached (covered 0)
+      ✘ dragging up covers every open icon whose row the pointer reached, down to the pressed one (covered 0)
+      ✘ a pointer between icons covers nothing beyond the last icon it passed (covered 0)
+      ✘ closed sides are skipped: a handled change and changes of the other side are never covered (covered 0)
+    find.test.ts
+      ✘ an empty field shows nothing and a text without matches shows No results (covered 0)
+      ✘ a selection off a match counts every case-insensitive match (covered 0)
+      ✘ a selection on a match shows its place; next from the last wraps to the first (covered 0)
+      ✘ the count is recomputed after a document, selection or query change and only then (covered 0)
+      ✘ the space above the first line stays from show to hide, across edits; the last effect wins (covered 0)
+      ~ the Close button's title names the first Close find key, or none (covered 58)
+    gap.test.ts
+      ✘ a shape is drawn while any part of it touches the strip, edges included (covered 0)
+      ✘ a shape wholly above or below the strip is left out (covered 0)
+      ✘ each strip joins its own pane pair, each edge moved by its own pane's shift (covered 0)
+      ✘ a band is kept while one edge is still in the strip and the other has left it (covered 0)
+      ✘ a band 1 px above or below the strip on both edges is dropped (covered 0)
+      ✘ a chunk whose local side is applied leaves the local strip and stays on the remote one (covered 0)
+      ✘ a chunk whose local side is ignored leaves the local strip and stays on the remote one (covered 0)
+      ✘ each strip paints a chunk in its own side's tone (covered 0)
+      ~ a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided (covered 1)
+      ~ on macOS the hint says ⌘+click (covered 1)
+      ✘ a change that is not a conflict never has the hint, even when both sides changed it (covered 0)
+      ✘ an icon row built while the other side waited is rebuilt once that side is ignored (covered 0)
+    geometry.test.ts
+      ✘ lines in the middle span from the first line's top to the next line's top (covered 0)
+      ✘ an empty range at a line start is a point at that line's top (covered 0)
+      ✘ a range to the end of an unterminated last line ends at that line's bottom (covered 0)
+      ✘ an empty range at the end of an unterminated last line is a point at its bottom (covered 0)
+      ✘ a range to the end of a newline-terminated document ends at the empty last line's top (covered 0)
+      ✘ an empty document has one point at the top (covered 0)
+      ✘ chunk rows go stale on a status change, an edit or new measurements, not on a cursor move (covered 0)
+    historyKey.test.ts
+      ~ Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing (covered 77)
+      ~ macOS: Cmd+Z undoes, Cmd+Shift+Z and Cmd+Y redo, Ctrl+Z does nothing (covered 74)
+      ~ Alt, a key someone already handled and a text field never undo here (covered 65)
+      ~ a non-Latin layout undoes and redoes by the physical key (covered 80)
+      ~ a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript (covered 71)
+      ~ a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes (covered 65)
+      ~ a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing (covered 68)
+      ~ a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing (covered 104)
+      ~ a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only (covered 108)
+    keys.test.ts
+      ~ Shift with a letter alone is the upper-case letter, as CodeMirror matches it (covered 49)
+      ~ Shift with Mod, Alt or a named key keeps the Shift- prefix (covered 51)
+      ~ named keys and plain characters pass through (covered 41)
+      ~ a macOS Ctrl key is not bound on Linux and is Ctrl- on macOS (covered 52)
+    language.test.ts
+      ✘ App.vue is coloured as Vue (covered 0)
+      ✘ src/components/Provider.tsx is coloured as TSX (covered 0)
+      ✘ use-magic-keys.ts is coloured as TypeScript (covered 0)
+      ✘ vite.config.mts is coloured as TypeScript (covered 0)
+      ✘ public/index.php is coloured as PHP (covered 0)
+      ✘ src/docker/Dockerfile is coloured as Dockerfile (covered 0)
+      ✘ a file name no language claims stays plain (covered 0)
+    modClick.test.ts
+      ~ Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not (covered 1)
+      ~ without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens (covered 1)
+      ~ Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't (covered 1)
+      ~ only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key (covered 1)
+    navigation.test.ts
+      ✘ Down and Up pass over a change already decided on that side and stop at it on the other (covered 0)
+      ✘ Down on the lowest waiting change and Up on the top-most stay put (covered 0)
+      ✘ after deciding the lowest waiting change the pick is the top-most still waiting, not the one above (covered 0)
+      ✘ with nothing left on that side there is no pick, even while the other side waits (covered 0)
+      ✘ Left/Right from a conflict half lands on its other half while it waits, else the remembered change, else alone (covered 0)
+      ✘ a change made the same way on both sides crosses to its other half (covered 0)
+      ✘ from a local-only change, Right uses the right side's remembered change (covered 0)
+      ✘ from the screen, Down takes a change straddling the top and skips one ending exactly at it (covered 0)
+      ✘ from the screen, Up takes a change straddling the bottom and skips one starting exactly at it (covered 0)
+      ✘ from the screen, a zero-line change exactly at the edge counts (covered 0)
+      ✘ a side alone with waiting changes only above the area stays put; with none waiting it falls back (covered 0)
+      ✘ a click hits a band by its px span and a zero-line change near its bar, never a decided side (covered 0)
+      ✘ the keyboard moves to the other side only when the decision emptied the focused side, never to the hidden side (covered 0)
+      ✘ a decision on the other side never moves the keyboard off a side that was already empty (covered 0)
+      ✘ after a decision that moved the focused side's mark on, the view reveals its new change (covered 0)
+      ✘ after a decision on another change the mark stays and the view does not move (covered 0)
+      ✘ after a decision that left the focused side alone the view does not move (covered 0)
+      ✘ a handover wins over revealing on the emptied side (covered 0)
+    pane.test.ts
+      ~ a Vue file draws template tags in the tag colour and its script setup as TypeScript (covered 27)
+      ~ a TSX file draws JSX tags in the tag colour (covered 27)
+      ~ a character literal is drawn in the string colour (covered 27)
+      ~ recolouring the center pane adds no undo step and keeps the chunks (covered 27)
+      ~ a selection across a word mark is the innermost mark, drawn over block and word tints (covered 27)
+      ~ Tab adds the file's four-space unit to each of three selected lines and Shift+Tab removes it (covered 27)
+      ~ Tab adds a tab to each selected line of a tab-indented file (covered 27)
+      ~ Shift+Tab on lines with less than one unit removes what is there (covered 27)
+      ~ one undo takes back a whole Tab on three lines (covered 27)
+      ~ the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults (covered 27)
+      ~ Indent on Mod-i runs before the default keymap's selectParentSyntax (covered 66)
+      ~ Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection (covered 59)
+      ~ Indent without keys: Tab indents nothing in the middle (covered 27)
+      ~ CodeMirror's dark flag follows the theme (covered 27)
+      ✘ the browser's own undo and redo are refused in the middle; other input passes through (covered 0)
+      ~ a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key (covered 27)
+      ~ new preferences turn the middle light, move its Undo and rebind its find keys (covered 59)
+      ~ new preferences turn a side light, rebind its Apply and its find keys (covered 62)
+    sideKeys.test.ts
+      ✘ a focused side applies with Enter and Space, ignores with Backspace (macOS Delete), Delete and x, and moves with the arrows (covered 0)
+      ~ Apply rebound to a: a applies and Enter is bound to nothing (covered 33)
+      ~ a side action without keys binds nothing, and a macOS-only key is not bound on Linux (covered 40)
+      ✘ a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it (covered 0)
+    sideMark.test.ts
+      ✘ deciding the marked change moves the mark to the next change waiting below on that side (covered 0)
+      ✘ a push that reopens changes, as undo does, leaves the mark where it is (covered 0)
+      ✘ a remembered change decided while its side is alone moves by the same rule and stays alone (covered 0)
+      ✘ the last change decided on that side leaves the side alone with nothing remembered (covered 0)
+      ✘ setMark wins over a status push in the same transaction (covered 0)
+    sides.test.ts
+      ~ × on a conflict's left side keeps the middle and the right side; « then replaces the middle (covered 27)
+      ~ » then « on a conflict appends; the right arrow offers that only while the left side is applied (covered 27)
+      ~ applying a side of a conflict whose other side deleted the block resolves it whole (covered 27)
+      ~ × and apply on a block that is not a conflict resolve the whole block (covered 27)
+      ~ deleting a whole open or half-applied conflict in the middle pane ignores every side (covered 27)
+      ~ a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step (covered 27)
+      ~ touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves (covered 27)
+    tone.test.ts
+      ✘ a side that adds lines where the middle has none is inserted, whatever base held (covered 0)
+      ✘ a side that removes middle lines is deleted (covered 0)
+      ✘ a side that replaces middle lines is modified (covered 0)
+      ✘ BothSame takes its tone from the side's own range on each side (covered 0)
+      ✘ a conflict is conflict on both sides, even where one side is empty (covered 0)
+      ✘ the center takes its tone from remote for RemoteOnly and from local otherwise (covered 0)
+    words.test.ts
+      ~ side panes mark exactly the changed words, in a CRLF file and after an emoji (covered 27)
+      ~ side panes draw one bar per removal point in a CRLF file: line start, mid-line, line end (covered 27)
+      ~ a bar equals another pane's bar of the same tone and differs from a bar of another tone (covered 27)
+      ~ a resolved block loses its word marks and bars on every side pane and undo brings them back (covered 27)
+      ~ applying one side of a conflict drops that side's tint, word marks and bars; the other keeps them (covered 27)
+      ~ the middle pane tints its blocks without word marks or bars: open, half-applied, applied, undone (covered 27)
+      ~ vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes (covered 27)
+  ipc/keys.test.ts
+    ✘ the actions are listed in the settings order (covered 0)
+    ~ the defaults are the keys yamt bound before settings existed (covered 6)
+    ✓ the file form reads modifiers in order, a named key or one character, and prints back exactly (killed 28)
+    ✓ anything else is refused (killed 12)
+    ✓ sameKey compares every modifier and the name (killed 8)
+    ✓ pressesKey: no keys are never pressed (killed 2)
+    ✓ pressesKey: each of two keys is pressed, a near miss is not (killed 17)
+    ✓ pressesKey on macOS: ⌘B presses Mod-b, ⌃B does not (killed 1)
+    ✓ Linux labels: Ctrl, Alt, Shift and WebStorm's key names (killed 24)
+    ✓ macOS labels: Apple's order ⌃⌥⇧⌘ and its key symbols (killed 14)
+    ✓ a macOS Ctrl key on Linux is shown the macOS way and marked as macOS (killed 3)
+    ~ a modifier pressed alone is no key (covered 18)
+    ✓ Linux: Ctrl is Mod and Meta is no key; macOS: Cmd is Mod and Ctrl is MacCtrl (killed 6)
+    ~ Ctrl+B on Linux and ⌘B on macOS are Mod-b; ⌃B on macOS is MacCtrl-b (covered 53)
+    ✓ a non-Latin layout falls back to the physical letter only with a modifier (killed 17)
+    ~ a Latin key wins over the physical one, and a non-letter stays as typed: Dvorak's ; on KeyZ (covered 55)
+    ✓ a shifted symbol carries no Shift, a shifted letter or named key does, and a space is Space (killed 3)
+    ✓ bindingsOf: no entry keeps the defaults, an entry replaces them, [] leaves no key (killed 22)
+    ✓ bindingsOf: a malformed key keeps that action's defaults and is reported (killed 2)
+    ~ bindingsOf: Shift before a symbol is unreadable, since no key press gives it (covered 100)
+    ✓ bindingsOf: a key on two actions stays with the first in list order and is reported (killed 5)
+    ✓ bindingsOf: the same key twice in one entry counts once (killed 2)
+  ui
+    choiceText.test.ts
+      ✘ {"kind":"Missing"} reads "Deleted in this branch." (covered 0)
+      ✘ {"kind":"Text","lines":120} reads "A text file, 120 lines." (covered 0)
+      ✘ {"kind":"Text","lines":1} reads "A text file, 1 line." (covered 0)
+      ✘ {"kind":"Text","lines":0} reads "A text file, 0 lines." (covered 0)
+      ✘ {"kind":"Binary","bytes":12697} reads "A binary file, 12.4 KB." (covered 0)
+      ✘ {"kind":"NonUtf8","bytes":3174} reads "Not UTF-8 text, 3.1 KB." (covered 0)
+      ✘ {"kind":"TooLarge","bytes":9646899} reads "A text file too large to show, 9.2 MB." (covered 0)
+      ✘ {"kind":"Link","target":"../shared/config.json"} reads "A symbolic link to ../shared/config.json." (covered 0)
+      ✘ {"kind":"Commit","id":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"} reads "Submodule at commit 1a2b3c4." (covered 0)
+      ✘ 0 bytes are 0 B (covered 0)
+      ✘ 1023 bytes are 1023 B (covered 0)
+      ✘ 1024 bytes are 1 KB (covered 0)
+      ✘ 1536 bytes are 1.5 KB (covered 0)
+      ✘ 1048524 bytes are 1023.9 KB (covered 0)
+      ✘ 1048575 bytes are 1 MB (covered 0)
+      ✘ 1048576 bytes are 1 MB (covered 0)
+      ✘ 1572864 bytes are 1.5 MB (covered 0)
+      ✘ 2147483648 bytes are 2048 MB (covered 0)
+      ✘ only a submodule side has a tooltip, its full commit id (covered 0)
+      ✘ both sides present: Take left and Take right (covered 0)
+      ✘ deleted on the local side: Delete there, Keep on the other (covered 0)
+      ✘ deleted on the remote side: Delete there, Keep on the other (covered 0)
+      ✘ after a choice the Result column names the side taken, or the deletion (covered 0)
+      ✘ a file the disk resolved says so in the Result column, whatever its sides (covered 0)
+      ✘ before a choice the Result column says what there is to choose (covered 0)
+      ✘ a middle that is Deleted on disk reads "Deleted on disk — staged as deleted." (covered 0)
+      ✘ a middle that is Binary on disk reads "Not shown: the file on disk is binary — staged as it is." (covered 0)
+      ✘ a middle that is NonUtf8 on disk reads "Not shown: the file on disk is not UTF-8 — staged as it is." (covered 0)
+      ✘ a middle that is TooLarge on disk reads "Not shown: the file on disk is too large — staged as it is." (covered 0)
+      ✘ a middle that is Link on disk reads "A link on disk now — staged as it is." (covered 0)
+      ✘ a middle that is Directory on disk reads "A folder on disk now — staged as deleted." (covered 0)
+    fileIcon.test.ts
+      ~ fileIcon prefers the file name over the extension (covered 21)
+      ~ fileIcon knows literal file names without an extension (covered 10)
+      ✘ fileIcon names every key once across the name rows and once across the extension rows (covered 0)
+      ~ fileIcon prefers the longer extension over its suffix (covered 22)
+      ~ fileIcon maps languages the editor colours (covered 20)
+      ~ fileIcon matches extensions and names regardless of case (covered 21)
+      ~ fileIcon looks only at the last path segment (covered 21)
+      ~ fileIcon falls back to the generic file icon (covered 21)
+      ~ fileIcon ignores keys inherited from Object.prototype (covered 21)
+      ~ fileIcon does not take a dotfile's name as its extension (covered 13)
+    fileListMode.test.ts
+      ✓ starts as the list, toggles to the tree and back, storing the plain name (killed 15)
+      ✓ a second start over the same storage keeps the tree (killed 5)
+      ✓ a stored value that is upper case starts the list (killed 2)
+      ~ a stored value that is empty starts the list (covered 14)
+      ~ a stored value that is JSON starts the list (covered 14)
+      ~ a stored value that is quoted starts the list (covered 14)
+      ~ a stored value that is the list starts the list (covered 14)
+      ✓ a storage that throws starts the list, still toggles in memory and logs warnings (killed 3)
+      ~ a storage that throws only on write keeps the toggle and logs the write's message (covered 18)
+    fileTree.test.ts
+      ~ treeRows puts folders before files at each level (covered 60)
+      ~ treeRows orders names naturally and ignoring case, with a total tie-break (covered 37)
+      ~ treeRows orders folders naturally and ignoring case too (covered 66)
+      ~ treeRows joins a chain of single folders into one row (covered 67)
+      ~ treeRows ends a chain at a folder holding files and folders (covered 63)
+      ~ treeRows never joins a folder holding a file to its child (covered 63)
+      ~ treeRows does not join a folder holding one file to anything (covered 62)
+      ~ treeRows keeps top-level files at depth 0 beside top-level folders (covered 54)
+      ~ treeRows hides every descendant of a closed folder and only those (covered 60)
+      ~ treeRows keys a chained row by its last folder (covered 62)
+      ~ treeRows ignores a closed key that names no folder (covered 55)
+      ~ treeRows gives the whole entry to a file row (covered 54)
+      ~ treeRows shows nothing for no files (covered 14)
+      ~ folderPaths names every folder holding a file, outermost first (covered 8)
+      ~ folderPaths is empty for a top-level file (covered 5)
+    folderIcon.test.ts
+      ~ folderIcon matches a table name in any case, closed and open (covered 4)
+      ~ folderIcon gives an unknown name the generic folder pair (covered 4)
+      ~ folderIcon takes one folder name, so a chained row passes its last segment (covered 4)
+      ~ folderIcon ignores keys inherited from Object.prototype (covered 4)
+      ~ folderIcon resolves every table name to its row's icons (covered 4)
+      ✘ folderIcon names every folder once and only in lower case (covered 0)
+    keyField.test.ts
+      ~ Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded (covered 48)
+      ~ plain Enter confirms the shown key, and is recorded when no key is shown (covered 58)
+      ~ plain Escape cancels; with Shift or Ctrl it is recorded (covered 58)
+      ~ a key with its modifiers replaces the shown one; a modifier alone changes nothing (covered 74)
+    keymapEdit.test.ts
+      ~ adding a key the action already has does nothing (covered 37)
+      ~ adding a free key sends the action's whole list (covered 45)
+      ~ adding a key another action holds asks, and Move takes it from the owner in the same changes (covered 56)
+      ~ an owner left with exactly its defaults is sent back to them as null (covered 93)
+      ~ changing a key replaces it in place (covered 52)
+      ~ changing to a key another action holds asks first (covered 56)
+      ~ changing to a key the action already has drops the old one; to itself or from a missing key does nothing (covered 52)
+      ~ changing back to the defaults sends null (covered 74)
+      ~ removing a key sends the rest; removing a key the action lacks does nothing (covered 56)
+      ~ removing the one added key goes back to the defaults as null (covered 83)
+      ~ remove all sends an empty list, unless there is nothing left to remove (covered 37)
+      ~ reset sends null (covered 37)
+      ~ a list is the defaults when it holds exactly the default keys, in any order (covered 60)
+      ~ a key's owners are every other action holding it, never the action itself (covered 52)
+    keyText.test.ts
+      ✘ the keymap groups list every action once, in the settings order (covered 0)
+      ✘ each action says where it acts, matching its group (covered 0)
+      ~ giving Ctrl/⌘B to another action clashes with Toggle file list (covered 50)
+      ~ the edit menu changes and removes each key by its label; default keys offer no reset (covered 95)
+      ~ Remove All shows past two keys, and Reset Shortcuts follows it without a separator (covered 70)
+      ✘ an action left without keys offers Add and Reset with one separator between (covered 0)
+      ~ the + menu sets Enter, Escape, Tab and Shift+Tab, labelled for the platform (covered 67)
+      ✘ the conflict line names every action already using the key (covered 0)
+    problemText.test.ts
+      ✘ a failed open names the file and what failed (covered 0)
+      ✘ a failed finish names the file and what failed (covered 0)
+      ✘ a failed take names the file and what failed (covered 0)
+      ✘ a failed reset names the file and what failed (covered 0)
+      ✘ a failed list says the list could not be read, with the cause (covered 0)
+      ✘ Git carries git's own message (covered 0)
+      ✘ UnknownPath names the path (covered 0)
+      ✘ WriteFailed names the path and the system's message (covered 0)
+      ✘ NotAFile says nothing was written because the path is not a regular file (covered 0)
+      ✘ ReadFailed names the path and the system's message (covered 0)
+      ✘ Unsupported Binary says why the file cannot be shown (covered 0)
+      ✘ Unsupported NonUtf8 says why the file cannot be shown (covered 0)
+      ✘ Unsupported TooLarge says why the file cannot be shown (covered 0)
+      ✘ Unsupported LocalDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported RemoteDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported Symlink says why the file cannot be shown (covered 0)
+      ✘ Unsupported Submodule says why the file cannot be shown (covered 0)
+      ✘ a broken settings file names its line and column and what to do (covered 0)
+      ✘ a broken settings entry without a position names the error only (covered 0)
+      ✘ the other settings failures say the settings file could not be used and why (covered 0)
+      ~ key problems name the action, the key and what yamt does instead (covered 70)
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ each question carries WebStorm's title and buttons, and the exit one lists its files (covered 0)
+      ~ the clash question names the key in the platform's words, its owner and the asking action (covered 70)
+    settings.test.ts
+      ✘ antialiasing is shown on Linux platforms only (covered 0)
+    store.test.ts
+      ✓ useAppStore throws before createAppStore, then returns the created store (killed 79)
+      ✓ loading the list opens the first file the editor can show and logs file.loaded (killed 27)
+      ✓ an empty list opens nothing (killed 1)
+      ✓ a rejected list opens nothing, resolves, and shows an Unexpected list problem (killed 3)
+      ✓ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (killed 4)
+      ✓ re-clicking the shown file keeps the problem and lets a pending load win (killed 6)
+      ✓ switching to an opened file wins over a load that resolves later and clears the problem (killed 2)
+      ~ a later open wins when the earlier load resolves last (covered 72)
+      ✓ a stale failed open is logged but shows no problem (killed 4)
+      ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 79)
+      ~ a rejected load is an Unexpected problem and keeps the previous file (covered 79)
+      ✓ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (killed 18)
+      ✓ a finish of a file no longer shown does not switch files (killed 4)
+      ✓ settings open and close; picking a file while they show closes them and shows it, the shown file too (killed 7)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 114)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 112)
+      ✓ a file the user opens while a finish runs wins over the next file, though still loading (killed 1)
+      ✓ a file the user opens while a take runs wins over the next file, though still loading (killed 16)
+      ✓ a finish with work left asks; Back writes nothing, Save writes the text (killed 5)
+      ✓ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (killed 5)
+      ~ a rejected finish is an Unexpected problem (covered 86)
+      ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 99)
+      ~ closing asks only with unsaved work and answers with the choice (covered 72)
+      ✓ everything is resolved only when every listed file is (killed 13)
+      ✓ reset of A replaces only A in place with a new object and keeps B opened (killed 9)
+      ✓ a failed reset keeps the current file and names the path (killed 4)
+      ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 88)
+      ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 95)
+      ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 90)
+      ✓ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (killed 2)
+      ✓ a list of files the editor cannot show opens the first one's choice and loads nothing (killed 1)
+      ~ opening a file the editor cannot show describes it once and never loads it (covered 88)
+      ~ a failed describe is a failed open of that file and shows no choice (covered 91)
+      ✓ taking a side updates the list, marks only that file taken, and clears a problem about it (killed 7)
+      ~ a take keeps a problem about another file (covered 121)
+      ~ a failed take keeps the list and the choice and names the file (covered 93)
+      ✓ reset of a taken choice forgets only its side at once and describes the file again (killed 8)
+      ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 134)
+      ~ choices count toward everything resolved (covered 126)
+      ✓ a take on the shown file opens the next unresolved file, wrapping to the top (killed 1)
+      ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 138)
+      ✓ a list refresh changes the marks only: same file shown, same views, another file's problem kept (killed 1)
+      ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 74)
+      ✓ the remote name is asked for once; a failure leaves none and logs a warning (killed 1)
+      ✓ a running change to an opened file rebuilds it and drops its side taken (edits: true) (killed 2)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 120)
+      ~ a change to a file that is not shown gives only its notice and its mark (covered 86)
+      ✓ changes reported by the first list are start notices; the file then opens from the disk (killed 1)
+      ✓ a newer change replaces the notice for its path; dismissNotice removes just one (killed 6)
+      ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 123)
+      ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 84)
+      ~ a change git could not stage is a warning notice, not a problem (covered 84)
+      ✓ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (killed 3)
+      ✓ a take refused because the file changed on disk shows the change and the disk view (killed 3)
+      ✓ a reset refused because the file changed on disk shows the change and the disk view (killed 3)
+      ~ finish, take and reset forward the disk version they are given (covered 155)
+      ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 117)
+      ✓ settings start with the start theme and the default keys, before any file is read (killed 3)
+      ✓ a load on focus applies a file changed by hand since the last load (killed 5)
+      ~ a loaded file sets the theme and keys every opened file follows (covered 101)
+      ~ a failed load or change keeps the settings in use and shows a settings problem (covered 55)
+      ✓ key problems in the file show one settings problem, which a clean read clears (killed 8)
+      ~ setTheme sends the settings in use and applies the reply (covered 55)
+      ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 55)
+      ~ a load whose only difference is the antialiasing is adopted (covered 55)
+      ✓ a key another action holds asks; Move writes both changes in one call (killed 5)
+      ~ Cancel on the clash question writes nothing (covered 100)
+      ✓ each key edit sends only the changed actions, as key texts (killed 2)
+      ~ an identical load keeps the settings object and does not show the same key problems again (covered 94)
+      ~ a key problem shown again replaces a settings failure the file no longer has (covered 93)
+      ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 93)
+      ~ a load that started before a change and answers after it does not put the old file back (covered 55)
+      ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 113)
+      ~ moveSettings sends the path with the settings in use and uses the file found there (covered 55)
+      ✓ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (killed 14)
+      ✓ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (killed 5)
+      ✓ a key press another handler already took does not toggle the list (killed 2)
+      ✓ while a question waits the key does nothing; once answered it toggles again (killed 1)
+      ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 174)
+      ✓ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (killed 1)
+      ~ with two toggle-file-list keys, each one toggles the list (covered 173)
+    toolbarButtons.test.ts
+      ✘ Undo and Redo start hidden; toggling shows or hides a button and stores the hidden ones in toolbar order (covered 0)
+      ✘ a second start over the same storage keeps the choice, also once every button shows (covered 0)
+      ✘ stored ids yamt does not know are dropped and duplicates collapse (covered 0)
+      ✘ a stored value that is not JSON hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a JSON object hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a number hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a string hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is null hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is an array holding a non-string hides Undo and Redo, as at first (covered 0)
+      ✘ a missing key hides Undo and Redo and writes nothing until a toggle (covered 0)
+      ✘ a storage that throws hides Undo and Redo, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    useMergeController.test.ts
+      ✘ unsaved: false when built, true after an edit, false after markSaved, false after the file changed on disk (covered 0)
+      ✘ without data or hosts there is no editor: no text, nothing unsaved, markSaved is ignored (covered 0)
+      ✘ the editor is read-only as the view says, and is rebuilt when that changes (covered 0)
+      ~ the editor is built with the preferences in use and follows a change without a rebuild (covered 81)
+      ✘ a preferences change before the file loaded reaches the editor built later (covered 0)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+    views.test.ts
+      ✘ deleted on side null with a {"kind":"Stages","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"Disk","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"DiskNotText","found":"Binary"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"Stages","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side local with a {"kind":"Disk","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"DiskNotText","found":"Deleted"} middle is editable: false (covered 0)
+
+[NoCoverage] BlockStatement
+src/ipc/index.ts:54:80
+-   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
+-     return IN_APP ? guardWindowClose(mayClose) : Promise.resolve();
+-   }
++   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {}
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:50:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = true;
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:50:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = false;
+Ran all tests for this mutant.
+
+[Survived] EqualityOperator
+src/ipc/index.ts:50:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE !== "tauri";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/index.ts:50:54
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "";
+Ran all tests for this mutant.
+
+[NoCoverage] BlockStatement
+src/ipc/keys.ts:193:23
+-       if (key === null) {
+-         throw new Error(`default key ${text} does not parse`);
+-       }
++       if (key === null) {}
+
+[NoCoverage] StringLiteral
+src/ipc/keys.ts:194:23
+-         throw new Error(`default key ${text} does not parse`);
++         throw new Error(``);
+
+[Survived] OptionalChaining
+src/ipc/keys.ts:225:20
+-       const letter = LETTER_CODE.exec(code)?.[1];
++       const letter = LETTER_CODE.exec(code)[1];
+Tests ran:
+    a non-Latin layout falls back to the physical letter only with a modifier
+    a non-Latin layout undoes and redoes by the physical key
+    a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript
+  and 1 more test!
+
+
+[Survived] ConditionalExpression
+src/ipc/keys.ts:226:9
+-       if (letter !== undefined) {
++       if (true) {
+Tests ran:
+    a non-Latin layout falls back to the physical letter only with a modifier
+    a non-Latin layout undoes and redoes by the physical key
+    a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript
+  and 1 more test!
+
+
+[Survived] BlockStatement
+src/ipc/keys.ts:245:39
+-     if (!ONE_CHARACTER.test(event.key)) {
+-       return null;
+-     }
++     if (!ONE_CHARACTER.test(event.key)) {}
+Tests ran:
+    a modifier pressed alone is no key
+    a key with its modifiers replaces the shown one; a modifier alone changes nothing
+
+
+[Survived] BooleanLiteral
+src/ipc/keys.ts:248:66
+-     const character = characterOf(event, mod || macCtrl || (alt && !mac));
++     const character = characterOf(event, mod || macCtrl || (alt && mac));
+Tests ran:
+    ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone
+    a Latin key wins over the physical one, and a non-letter stays as typed: Dvorak's ; on KeyZ
+
+
+[Survived] ConditionalExpression
+src/ipc/keys.ts:248:59
+-     const character = characterOf(event, mod || macCtrl || (alt && !mac));
++     const character = characterOf(event, mod || macCtrl || (false));
+Tests ran:
+    ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone
+    an empty toggle-file-list binding leaves Ctrl+B and a plain b alone
+    pressesKey: no keys are never pressed
+  and 4 more tests!
+
+
+[Survived] ConditionalExpression
+src/ipc/keys.ts:245:7
+-     if (!ONE_CHARACTER.test(event.key)) {
++     if (false) {
+Tests ran:
+    the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press
+    ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone
+    while a question waits the key does nothing; once answered it toggles again
+  and 22 more tests!
+
+
+[Survived] ObjectLiteral
+src/ipc/keys.ts:282:51
+-     const read: Record<KeyAction, readonly Key[]> = { ...DEFAULT_KEYS };
++     const read: Record<KeyAction, readonly Key[]> = {};
+Tests ran:
+    useAppStore throws before createAppStore, then returns the created store
+    loading the list opens the first file the editor can show and logs file.loaded
+    an empty list opens nothing
+  and 89 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ipc/keys.ts:20:50
+-   export const KEY_ACTIONS: readonly KeyAction[] = [
+-     "apply",
+-     "ignore",
+-     "next-change",
+-     "previous-change",
+-     "left-side",
+-     "right-side",
+-     "undo",
+-     "redo",
+-     "find",
+-     "find-next",
+-     "find-previous",
+-     "close-find",
+-     "indent",
+-     "outdent",
+-     "toggle-file-list",
+-   ];
++   export const KEY_ACTIONS: readonly KeyAction[] = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:63:15
+-     { modifier: "mod", prefix: "Mod-" },
++     { modifier: "", prefix: "Mod-" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/keys.ts:65:3
+-     { modifier: "alt", prefix: "Alt-" },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:64:15
+-     { modifier: "macCtrl", prefix: "MacCtrl-" },
++     { modifier: "", prefix: "MacCtrl-" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:64:34
+-     { modifier: "macCtrl", prefix: "MacCtrl-" },
++     { modifier: "macCtrl", prefix: "" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/keys.ts:64:3
+-     { modifier: "macCtrl", prefix: "MacCtrl-" },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:65:15
+-     { modifier: "alt", prefix: "Alt-" },
++     { modifier: "", prefix: "Alt-" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:65:30
+-     { modifier: "alt", prefix: "Alt-" },
++     { modifier: "alt", prefix: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:66:15
+-     { modifier: "shift", prefix: "Shift-" },
++     { modifier: "", prefix: "Shift-" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:79:5
+-       "Insert",
++       "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:80:5
+-       "Home",
++       "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:82:5
+-       "PageUp",
++       "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:81:5
+-       "End",
++       "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:83:5
+-       "PageDown",
++       "",
+Ran all tests for this mutant.
+
+[Survived] ArithmeticOperator
+src/ipc/keys.ts:88:69
+-       ...Array.from({ length: FUNCTION_KEY_COUNT }, (_, index) => `F${index + 1}`),
++       ...Array.from({ length: FUNCTION_KEY_COUNT }, (_, index) => `F${index - 1}`),
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:92:23
+-   const ONE_CHARACTER = /^.$/su;
++   const ONE_CHARACTER = /.$/su;
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/keys.ts:89:26
+-     ].map((name) => [name, true]),
++     ].map((name) => [name, false]),
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:93:20
+-   const WHITESPACE = /^\s$/u;
++   const WHITESPACE = /^\s/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:93:20
+-   const WHITESPACE = /^\s$/u;
++   const WHITESPACE = /\s$/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:92:23
+-   const ONE_CHARACTER = /^.$/su;
++   const ONE_CHARACTER = /^./su;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:94:22
+-   const LATIN_LETTER = /^[a-z]$/i;
++   const LATIN_LETTER = /[a-z]$/i;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:94:22
+-   const LATIN_LETTER = /^[a-z]$/i;
++   const LATIN_LETTER = /^[a-z]/i;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:95:24
+-   const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++   const LETTER_OR_MARK = /^[\p{L}\p{M}]/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:95:24
+-   const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++   const LETTER_OR_MARK = /[\p{L}\p{M}]$/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:94:22
+-   const LATIN_LETTER = /^[a-z]$/i;
++   const LATIN_LETTER = /^[^a-z]$/i;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:95:24
+-   const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++   const LETTER_OR_MARK = /^[^\p{L}\p{M}]$/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:96:21
+-   const LETTER_CODE = /^Key([A-Z])$/;
++   const LETTER_CODE = /^Key([A-Z])/;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:95:24
+-   const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++   const LETTER_OR_MARK = /^[\p{L}\P{M}]$/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:95:24
+-   const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
++   const LETTER_OR_MARK = /^[\P{L}\p{M}]$/u;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:96:21
+-   const LETTER_CODE = /^Key([A-Z])$/;
++   const LETTER_CODE = /Key([A-Z])$/;
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/ipc/keys.ts:96:21
+-   const LETTER_CODE = /^Key([A-Z])$/;
++   const LETTER_CODE = /^Key([^A-Z])$/;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:133:11
+-     PageUp: "Page Up",
++     PageUp: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/keys.ts:132:55
+-   const LINUX_NAMES: Readonly<Record<string, string>> = {
+-     PageUp: "Page Up",
+-     PageDown: "Page Down",
+-     ArrowUp: "↑",
+-     ArrowDown: "↓",
+-     ArrowLeft: "←",
+-     ArrowRight: "→",
+-   };
++   const LINUX_NAMES: Readonly<Record<string, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:134:13
+-     PageDown: "Page Down",
++     PageDown: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:135:12
+-     ArrowUp: "↑",
++     ArrowUp: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/keys.ts:142:53
+-   const MAC_NAMES: Readonly<Record<string, string>> = {
+-     Enter: "⏎",
+-     Tab: "⇥",
+-     Escape: "⎋",
+-     Backspace: "⌫",
+-     Delete: "⌦",
+-     Home: "↖",
+-     End: "↘",
+-     PageUp: "⇞",
+-     PageDown: "⇟",
+-     ArrowUp: "↑",
+-     ArrowDown: "↓",
+-     ArrowLeft: "←",
+-     ArrowRight: "→",
+-   };
++   const MAC_NAMES: Readonly<Record<string, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:136:14
+-     ArrowDown: "↓",
++     ArrowDown: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:143:10
+-     Enter: "⏎",
++     Enter: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:145:11
+-     Escape: "⎋",
++     Escape: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:150:11
+-     PageUp: "⇞",
++     PageUp: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:137:14
+-     ArrowLeft: "←",
++     ArrowLeft: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:151:13
+-     PageDown: "⇟",
++     PageDown: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:147:11
+-     Delete: "⌦",
++     Delete: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:148:9
+-     Home: "↖",
++     Home: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:144:8
+-     Tab: "⇥",
++     Tab: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:138:15
+-     ArrowRight: "→",
++     ArrowRight: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:146:14
+-     Backspace: "⌫",
++     Backspace: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:149:8
+-     End: "↘",
++     End: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:153:14
+-     ArrowDown: "↓",
++     ArrowDown: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:152:12
+-     ArrowUp: "↑",
++     ArrowUp: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:155:15
+-     ArrowRight: "→",
++     ArrowRight: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/keys.ts:154:14
+-     ArrowLeft: "←",
++     ArrowLeft: "",
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/keys.ts:193:9
+-       if (key === null) {
++       if (false) {
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/keys.ts:118:36
+-       if (rest.startsWith(prefix) && rest.length > prefix.length) {
++       if (rest.startsWith(prefix) && true) {
+Ran all tests for this mutant.
+
+[Survived] EqualityOperator
+src/ipc/keys.ts:118:36
+-       if (rest.startsWith(prefix) && rest.length > prefix.length) {
++       if (rest.startsWith(prefix) && rest.length >= prefix.length) {
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ui/fileIcon.ts:285:7
+-     if (icon !== undefined) {
++     if (false) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileIcon.ts:289:53
+-       const extensionIcon = lookup(ICONS.byExtension, name.slice(dot + 1));
++       const extensionIcon = lookup(ICONS.byExtension, name);
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:282:51
+-   export function fileIcon(path: string): Component {
+-     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+-     const icon = lookup(ICONS.byName, name);
+-     if (icon !== undefined) {
+-       return icon;
+-     }
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
+-       const extensionIcon = lookup(ICONS.byExtension, name.slice(dot + 1));
+-       if (extensionIcon !== undefined) {
+-         return extensionIcon;
+-       }
+-     }
+-     return DefaultFile;
+-   }
++   export function fileIcon(path: string): Component {}
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileIcon.ts:283:16
+-     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
++     const name = path.slice(path.lastIndexOf("/") + 1).toUpperCase();
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileIcon.ts:290:9
+-       if (extensionIcon !== undefined) {
++       if (true) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileIcon.ts:285:7
+-     if (icon !== undefined) {
++     if (true) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileIcon.ts:283:16
+-     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
++     const name = path.toLowerCase();
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileIcon.ts:285:7
+-     if (icon !== undefined) {
++     if (icon === undefined) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] ArithmeticOperator
+src/ui/fileIcon.ts:283:27
+-     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
++     const name = path.slice(path.lastIndexOf("/") - 1).toLowerCase();
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:285:27
+-     if (icon !== undefined) {
+-       return icon;
+-     }
++     if (icon !== undefined) {}
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon matches extensions and names regardless of case
+  and 1 more test!
+
+
+[Survived] StringLiteral
+src/ui/fileIcon.ts:283:44
+-     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
++     const name = path.slice(path.lastIndexOf("") + 1).toLowerCase();
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 6 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileIcon.ts:288:31
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf("", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 5 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileIcon.ts:290:9
+-       if (extensionIcon !== undefined) {
++       if (extensionIcon === undefined) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileIcon.ts:288:40
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf(".", 1); false; dot = name.indexOf(".", dot + 1)) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 5 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:290:38
+-       if (extensionIcon !== undefined) {
+-         return extensionIcon;
+-       }
++       if (extensionIcon !== undefined) {}
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 2 more tests!
+
+
+[Survived] ArithmeticOperator
+src/ui/fileIcon.ts:288:76
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot - 1)) {
+Tests ran:
+    fileIcon prefers the longer extension over its suffix
+    fileIcon falls back to the generic file icon
+    fileIcon ignores keys inherited from Object.prototype
+
+
+[Survived] EqualityOperator
+src/ui/fileIcon.ts:288:40
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf(".", 1); dot === -1; dot = name.indexOf(".", dot + 1)) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 5 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:288:86
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
+-       const extensionIcon = lookup(ICONS.byExtension, name.slice(dot + 1));
+-       if (extensionIcon !== undefined) {
+-         return extensionIcon;
+-       }
+-     }
++     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {}
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileIcon.ts:288:71
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf("", dot + 1)) {
+Tests ran:
+    fileIcon prefers the longer extension over its suffix
+    fileIcon falls back to the generic file icon
+    fileIcon ignores keys inherited from Object.prototype
+
+
+[Survived] ArithmeticOperator
+src/ui/fileIcon.ts:289:64
+-       const extensionIcon = lookup(ICONS.byExtension, name.slice(dot + 1));
++       const extensionIcon = lookup(ICONS.byExtension, name.slice(dot - 1));
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[Survived] UnaryOperator
+src/ui/fileIcon.ts:288:48
+-     for (let dot = name.indexOf(".", 1); dot !== -1; dot = name.indexOf(".", dot + 1)) {
++     for (let dot = name.indexOf(".", 1); dot !== +1; dot = name.indexOf(".", dot + 1)) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 5 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:136:76
+-   export function lookup<T>(table: IconTable<T>, key: string): T | undefined {
+-     return Object.hasOwn(table, key) ? table[key] : undefined;
+-   }
++   export function lookup<T>(table: IconTable<T>, key: string): T | undefined {}
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon knows literal file names without an extension
+    fileIcon prefers the longer extension over its suffix
+  and 11 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileIcon.ts:290:9
+-       if (extensionIcon !== undefined) {
++       if (false) {
+Tests ran:
+    fileIcon prefers the file name over the extension
+    fileIcon prefers the longer extension over its suffix
+    fileIcon maps languages the editor colours
+  and 4 more tests!
+
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:30:16
+-     if (a === b) {
+-       return 0;
+-     }
++     if (a === b) {}
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:66:29
+-       if (only === undefined) {
+-         break;
+-       }
++       if (only === undefined) {}
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:25:53
+-   function compareNames(a: string, b: string): number {
+-     const natural = NAME_ORDER.compare(a, b);
+-     if (natural !== 0) {
+-       return natural;
+-     }
+-     if (a === b) {
+-       return 0;
+-     }
+-     return a < b ? -1 : 1;
+-   }
++   function compareNames(a: string, b: string): number {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (false) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (true) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (true) {
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:27:22
+-     if (natural !== 0) {
+-       return natural;
+-     }
++     if (natural !== 0) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return false ? -1 : 1;
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (a !== b) {
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return true ? -1 : 1;
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (natural === 0) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (false) {
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:33:18
+-     return a < b ? -1 : 1;
++     return a < b ? +1 : 1;
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:36:58
+-   function folderTree(files: readonly FileEntry[]): Folder {
+-     const root: Folder = { folders: new Map(), files: [] };
+-     for (const file of files) {
+-       const names = file.path.split("/");
+-       let folder = root;
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
+-     }
+-     return root;
+-   }
++   function folderTree(files: readonly FileEntry[]): Folder {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return a >= b ? -1 : 1;
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return a <= b ? -1 : 1;
+Tests ran:
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:37:24
+-     const root: Folder = { folders: new Map(), files: [] };
++     const root: Folder = {};
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:37:53
+-     const root: Folder = { folders: new Map(), files: [] };
++     const root: Folder = { folders: new Map(), files: ["Stryker was here"] };
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:38:29
+-     for (const file of files) {
+-       const names = file.path.split("/");
+-       let folder = root;
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
+-     }
++     for (const file of files) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:39:35
+-       const names = file.path.split("/");
++       const names = file.path.split("");
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:43:67
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known ?? { folders: new Map(), files: ["Stryker was here"] };
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:41:39
+-       for (const name of names.slice(0, -1)) {
++       for (const name of names.slice(0, +1)) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (false) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:41:24
+-       for (const name of names.slice(0, -1)) {
++       for (const name of names) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (known !== undefined) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:49:23
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({});
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:41:44
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
++       for (const name of names.slice(0, -1)) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:43:29
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known && {
++     folders: new Map(),
++     files: []
++   };
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:61:9
+-   ): void {
+-     const names = [name];
+-     let shown = folder;
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
+-       const [only] = [...shown.folders];
+-       if (only === undefined) {
+-         break;
+-       }
+-       names.push(only[0]);
+-       shown = only[1];
+-     }
+-     const label = names.join("/");
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
+-     const open = !closed.has(path);
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
+-     if (open) {
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
+-     }
+-   }
++   ): void {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:43:38
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known ?? {};
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:44:32
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
++         if (known === undefined) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (false) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:49:40
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({ name: names.at(+1) ?? file.path, file });
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] CallExpression
+src/ui/fileTree.ts:45:9
+-           folder.folders.set(name, child);
++           ;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:49:31
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({ name: names.at(-1) && file.path, file });
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:62:17
+-     const names = [name];
++     const names = [];
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (true) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (true && shown.folders.size === 1) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 || shown.folders.size === 1) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length !== 0 && shown.folders.size === 1) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:64:64
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
+-       const [only] = [...shown.folders];
+-       if (only === undefined) {
+-         break;
+-       }
+-       names.push(only[0]);
+-       shown = only[1];
+-     }
++     while (shown.files.length === 0 && shown.folders.size === 1) {}
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (true) {
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:64:38
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 && shown.folders.size !== 1) {
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 2 more tests!
+
+
+[Survived] CallExpression
+src/ui/fileTree.ts:69:5
+-       names.push(only[0]);
++       ;
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:65:20
+-       const [only] = [...shown.folders];
++       const [only] = [];
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:38
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 && true) {
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 2 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:73:33
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent === "Stryker was here!" ? label : `${place.parent}/${label}`;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:72:28
+-     const label = names.join("/");
++     const label = names.join("");
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (false) {
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = false ? label : `${place.parent}/${label}`;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = true ? label : `${place.parent}/${label}`;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (only !== undefined) {
+Tests ran:
+    treeRows joins a chain of single folders into one row
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 1 more test!
+
+
+[Survived] BooleanLiteral
+src/ui/fileTree.ts:74:16
+-     const open = !closed.has(path);
++     const open = closed.has(path);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:73:46
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent === "" ? label : ``;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows ends a chain at a folder holding files and folders
+    treeRows never joins a folder holding a file to its child
+  and 3 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:75:13
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
++     rows.push({});
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:75:21
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
++     rows.push({ kind: "", path, label, depth: place.depth, open });
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:76:13
+-     if (open) {
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
+-     }
++     if (open) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:76:7
+-     if (open) {
++     if (true) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent !== "" ? label : `${place.parent}/${label}`;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:76:7
+-     if (open) {
++     if (false) {
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ArithmeticOperator
+src/ui/fileTree.ts:77:50
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
++       pushRows(rows, shown, { parent: path, depth: place.depth - 1 }, closed);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:86:9
+-   ): void {
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
+-     for (const entry of folders) {
+-       pushFolderRows(rows, entry, place, closed);
+-     }
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
+-     for (const { name, file } of files) {
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
+-     }
+-   }
++   ): void {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:87:44
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [...folder.folders].sort(() => undefined);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:77:27
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
++       pushRows(rows, shown, {}, closed);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:87:19
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [...folder.folders];
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:88:32
+-     for (const entry of folders) {
+-       pushFolderRows(rows, entry, place, closed);
+-     }
++     for (const entry of folders) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:91:40
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [...folder.files].sort(() => undefined);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:87:19
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [].sort(([a], [b]) => compareNames(a, b));
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] CallExpression
+src/ui/fileTree.ts:89:5
+-       pushFolderRows(rows, entry, place, closed);
++       ;
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders folders naturally and ignoring case too
+    treeRows joins a chain of single folders into one row
+  and 8 more tests!
+
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:91:17
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [...folder.files];
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:100:23
+-   ): readonly TreeRow[] {
+-     const rows: TreeRow[] = [];
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
+-     return rows;
+-   }
++   ): readonly TreeRow[] {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:91:17
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [].sort((a, b) => compareNames(a.name, b.name));
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:93:15
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
++       rows.push({});
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:101:27
+-     const rows: TreeRow[] = [];
++     const rows: TreeRow[] = ["Stryker was here"];
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:92:39
+-     for (const { name, file } of files) {
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
+-     }
++     for (const { name, file } of files) {}
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:102:37
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
++     pushRows(rows, folderTree(files), {}, closed);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:107:42
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("/").slice(0, +1);
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+    folderPaths is empty for a top-level file
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:93:23
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
++       rows.push({ kind: "", file, label: name, depth: place.depth });
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 9 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:108:20
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map(() => undefined);
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+    folderPaths is empty for a top-level file
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:107:28
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("").slice(0, -1);
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+    folderPaths is empty for a top-level file
+
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:107:17
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("/");
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+    folderPaths is empty for a top-level file
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:102:47
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
++     pushRows(rows, folderTree(files), { parent: "Stryker was here!", depth: 0 }, closed);
+Tests ran:
+    treeRows puts folders before files at each level
+    treeRows orders names naturally and ignoring case, with a total tie-break
+    treeRows orders folders naturally and ignoring case too
+  and 10 more tests!
+
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:106:62
+-   export function folderPaths(path: string): readonly string[] {
+-     const names = path.split("/").slice(0, -1);
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
+-   }
++   export function folderPaths(path: string): readonly string[] {}
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+    folderPaths is empty for a top-level file
+
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:108:34
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.join("/"));
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+
+
+[Survived] ArithmeticOperator
+src/ui/fileTree.ts:108:49
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.slice(0, index - 1).join("/"));
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:108:65
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.slice(0, index + 1).join(""));
+Tests ran:
+    folderPaths names every folder holding a file, outermost first
+
+
+[Survived] BlockStatement
+src/ui/folderIcon.ts:185:68
+-   export function folderIcon(name: string, open: boolean): Component {
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
+-     return open ? icons.opened : icons.closed;
+-   }
++   export function folderIcon(name: string, open: boolean): Component {}
+Tests ran:
+    folderIcon matches a table name in any case, closed and open
+    folderIcon gives an unknown name the generic folder pair
+    folderIcon takes one folder name, so a chained row passes its last segment
+  and 2 more tests!
+
+
+[Survived] MethodExpression
+src/ui/folderIcon.ts:186:38
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
++     const icons = lookup(FOLDER_ICONS, name.toUpperCase()) ?? DEFAULT_FOLDER;
+Tests ran:
+    folderIcon matches a table name in any case, closed and open
+    folderIcon gives an unknown name the generic folder pair
+    folderIcon takes one folder name, so a chained row passes its last segment
+  and 2 more tests!
+
+
+[Survived] LogicalOperator
+src/ui/folderIcon.ts:186:17
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
++     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) && DEFAULT_FOLDER;
+Tests ran:
+    folderIcon matches a table name in any case, closed and open
+    folderIcon gives an unknown name the generic folder pair
+    folderIcon takes one folder name, so a chained row passes its last segment
+  and 2 more tests!
+
+
+[Survived] AssignmentOperator
+src/ui/store.ts:176:3
+-     state.latestOpen += 1;
++     state.latestOpen -= 1;
+Tests ran:
+    opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing
+    switching to an opened file wins over a load that resolves later and clears the problem
+    reset of A replaces only A in place with a new object and keeps B opened
+  and 4 more tests!
+
+
+[Survived] AssignmentOperator
+src/ui/store.ts:182:3
+-     state.latestOpen += 1;
++     state.latestOpen -= 1;
+Tests ran:
+    loading the list opens the first file the editor can show and logs file.loaded
+    opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing
+    re-clicking the shown file keeps the problem and lets a pending load win
+  and 50 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/store.ts:273:78
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => false));
+Tests ran:
+    reset of a taken choice forgets only its side at once and describes the file again
+    a failed describe after a reset is a failed open; opening the file again describes it
+    a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each
+  and 1 more test!
+
+
+[Survived] ArrayDeclaration
+src/ui/store.ts:273:31
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([].filter(([takenPath]) => takenPath !== path));
+Tests ran:
+    reset of A replaces only A in place with a new object and keeps B opened
+    a failed reload after a reset keeps A's old view and reports it as a failed open
+    reset A, open B, open A, then the reset resolves: A shows its fresh view
+  and 6 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/store.ts:273:61
+-     state.taken.value = new Map([...state.taken.value].filter(([takenPath]) => takenPath !== path));
++     state.taken.value = new Map([...state.taken.value].filter(() => undefined));
+Tests ran:
+    reset of A replaces only A in place with a new object and keeps B opened
+    a failed reload after a reset keeps A's old view and reports it as a failed open
+    reset A, open B, open A, then the reset resolves: A shows its fresh view
+  and 6 more tests!
+
+
+Ran 1.48 tests per mutant on average.
+------------------|------------------|----------|-----------|------------|----------|----------|
+                  | % Mutation score |          |           |            |          |          |
+File              |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+------------------|--------|---------|----------|-----------|------------|----------|----------|
+All files         |  72.24 |   72.78 |      484 |         0 |        181 |        5 |        0 |
+ ipc              |  79.40 |   80.12 |      266 |         0 |         66 |        3 |        0 |
+  index.ts        |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
+  keys.ts         |  80.61 |   81.10 |      266 |         0 |         62 |        2 |        0 |
+ ui               |  65.07 |   65.47 |      218 |         0 |        115 |        2 |        0 |
+  fileIcon.ts     |   0.00 |    0.00 |        0 |         0 |         23 |        0 |        0 |
+  fileListMode.ts | 100.00 |  100.00 |       25 |         0 |          0 |        0 |        0 |
+  fileTree.ts     |   0.00 |    0.00 |        0 |         0 |         84 |        2 |        0 |
+  folderIcon.ts   |   0.00 |    0.00 |        0 |         0 |          3 |        0 |        0 |
+  store.ts        |  97.47 |   97.47 |      193 |         0 |          5 |        0 |        0 |
+------------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m08:14:24 (198833) INFO MutationTestExecutor[39m Done in 29 seconds.

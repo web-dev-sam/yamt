@@ -1,0 +1,568 @@
+just mutants 801b835 (after 7557c40 + 7b188b3), StrykerJS. Scores: fileListMode.ts 100, fileTree.ts 0 (84 survived, 2 no coverage, 0 killed),
+folderIcon.ts 0 (3 survived), fileIcon.ts 0 (23 survived, whole file), store.ts 97.47, keys.ts 80.61.
+Fix round 7557c40: 0 survivors on its changed lines (store.ts:287 some->every now killed).
+
+Orchestrator observation [INFERENCE, not yet proven]: the three files with 0 kills are exactly the three whose tests use
+describe()/it() (fileIcon.test.ts, fileTree.test.ts, folderIcon.test.ts); every other test file in src/ uses top-level test(),
+and fileListMode.test.ts (top-level test) scored 100. Mutants such as fileTree.ts:27 `if (natural !== 0)` -> `if (false)` must
+fail "orders names naturally..." yet survived, so the runner likely ran none of those tests for the mutant. This may also be the
+old fileIcon.ts anomaly (#402).
+
+Survivors on lines changed by 7b188b3 (90):
+
+[Survived] BlockStatement
+src/ui/fileIcon.ts:136:76
+-   export function lookup<T>(table: IconTable<T>, key: string): T | undefined {
+-     return Object.hasOwn(table, key) ? table[key] : undefined;
+-   }
++   export function lookup<T>(table: IconTable<T>, key: string): T | undefined {}
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:30:16
+-     if (a === b) {
+-       return 0;
+-     }
++     if (a === b) {}
+
+[NoCoverage] BlockStatement
+src/ui/fileTree.ts:66:29
+-       if (only === undefined) {
+-         break;
+-       }
++       if (only === undefined) {}
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:25:53
+-   function compareNames(a: string, b: string): number {
+-     const natural = NAME_ORDER.compare(a, b);
+-     if (natural !== 0) {
+-       return natural;
+-     }
+-     if (a === b) {
+-       return 0;
+-     }
+-     return a < b ? -1 : 1;
+-   }
++   function compareNames(a: string, b: string): number {}
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (false) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (true) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (true) {
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:27:22
+-     if (natural !== 0) {
+-       return natural;
+-     }
++     if (natural !== 0) {}
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return false ? -1 : 1;
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (a !== b) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return true ? -1 : 1;
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:27:7
+-     if (natural !== 0) {
++     if (natural === 0) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:30:7
+-     if (a === b) {
++     if (false) {
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:33:18
+-     return a < b ? -1 : 1;
++     return a < b ? +1 : 1;
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:36:58
+-   function folderTree(files: readonly FileEntry[]): Folder {
+-     const root: Folder = { folders: new Map(), files: [] };
+-     for (const file of files) {
+-       const names = file.path.split("/");
+-       let folder = root;
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
+-     }
+-     return root;
+-   }
++   function folderTree(files: readonly FileEntry[]): Folder {}
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return a >= b ? -1 : 1;
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:33:10
+-     return a < b ? -1 : 1;
++     return a <= b ? -1 : 1;
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:37:24
+-     const root: Folder = { folders: new Map(), files: [] };
++     const root: Folder = {};
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:37:53
+-     const root: Folder = { folders: new Map(), files: [] };
++     const root: Folder = { folders: new Map(), files: ["Stryker was here"] };
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:38:29
+-     for (const file of files) {
+-       const names = file.path.split("/");
+-       let folder = root;
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
+-     }
++     for (const file of files) {}
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:39:35
+-       const names = file.path.split("/");
++       const names = file.path.split("");
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:43:67
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known ?? { folders: new Map(), files: ["Stryker was here"] };
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:41:39
+-       for (const name of names.slice(0, -1)) {
++       for (const name of names.slice(0, +1)) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (false) {
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:41:24
+-       for (const name of names.slice(0, -1)) {
++       for (const name of names) {
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (known !== undefined) {
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:49:23
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({});
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:41:44
+-       for (const name of names.slice(0, -1)) {
+-         const known = folder.folders.get(name);
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
+-         folder = child;
+-       }
++       for (const name of names.slice(0, -1)) {}
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:43:29
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known && {
++     folders: new Map(),
++     files: []
++   };
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:61:9
+-   ): void {
+-     const names = [name];
+-     let shown = folder;
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
+-       const [only] = [...shown.folders];
+-       if (only === undefined) {
+-         break;
+-       }
+-       names.push(only[0]);
+-       shown = only[1];
+-     }
+-     const label = names.join("/");
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
+-     const open = !closed.has(path);
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
+-     if (open) {
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
+-     }
+-   }
++   ): void {}
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:43:38
+-         const child: Folder = known ?? { folders: new Map(), files: [] };
++         const child: Folder = known ?? {};
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:44:32
+-         if (known === undefined) {
+-           folder.folders.set(name, child);
+-         }
++         if (known === undefined) {}
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (false) {
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:49:40
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({ name: names.at(+1) ?? file.path, file });
+
+[Survived] CallExpression
+src/ui/fileTree.ts:45:9
+-           folder.folders.set(name, child);
++           ;
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:49:31
+-       folder.files.push({ name: names.at(-1) ?? file.path, file });
++       folder.files.push({ name: names.at(-1) && file.path, file });
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:62:17
+-     const names = [name];
++     const names = [];
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:44:11
+-         if (known === undefined) {
++         if (true) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (true && shown.folders.size === 1) {
+
+[Survived] LogicalOperator
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 || shown.folders.size === 1) {
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:64:10
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length !== 0 && shown.folders.size === 1) {
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:64:64
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
+-       const [only] = [...shown.folders];
+-       if (only === undefined) {
+-         break;
+-       }
+-       names.push(only[0]);
+-       shown = only[1];
+-     }
++     while (shown.files.length === 0 && shown.folders.size === 1) {}
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (true) {
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:64:38
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 && shown.folders.size !== 1) {
+
+[Survived] CallExpression
+src/ui/fileTree.ts:69:5
+-       names.push(only[0]);
++       ;
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:65:20
+-       const [only] = [...shown.folders];
++       const [only] = [];
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:64:38
+-     while (shown.files.length === 0 && shown.folders.size === 1) {
++     while (shown.files.length === 0 && true) {
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:73:33
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent === "Stryker was here!" ? label : `${place.parent}/${label}`;
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:72:28
+-     const label = names.join("/");
++     const label = names.join("");
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (false) {
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = false ? label : `${place.parent}/${label}`;
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = true ? label : `${place.parent}/${label}`;
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:66:9
+-       if (only === undefined) {
++       if (only !== undefined) {
+
+[Survived] BooleanLiteral
+src/ui/fileTree.ts:74:16
+-     const open = !closed.has(path);
++     const open = closed.has(path);
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:73:46
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent === "" ? label : ``;
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:75:13
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
++     rows.push({});
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:75:21
+-     rows.push({ kind: "folder", path, label, depth: place.depth, open });
++     rows.push({ kind: "", path, label, depth: place.depth, open });
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:76:13
+-     if (open) {
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
+-     }
++     if (open) {}
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:76:7
+-     if (open) {
++     if (true) {
+
+[Survived] EqualityOperator
+src/ui/fileTree.ts:73:16
+-     const path = place.parent === "" ? label : `${place.parent}/${label}`;
++     const path = place.parent !== "" ? label : `${place.parent}/${label}`;
+
+[Survived] ConditionalExpression
+src/ui/fileTree.ts:76:7
+-     if (open) {
++     if (false) {
+
+[Survived] ArithmeticOperator
+src/ui/fileTree.ts:77:50
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
++       pushRows(rows, shown, { parent: path, depth: place.depth - 1 }, closed);
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:86:9
+-   ): void {
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
+-     for (const entry of folders) {
+-       pushFolderRows(rows, entry, place, closed);
+-     }
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
+-     for (const { name, file } of files) {
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
+-     }
+-   }
++   ): void {}
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:87:44
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [...folder.folders].sort(() => undefined);
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:77:27
+-       pushRows(rows, shown, { parent: path, depth: place.depth + 1 }, closed);
++       pushRows(rows, shown, {}, closed);
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:87:19
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [...folder.folders];
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:88:32
+-     for (const entry of folders) {
+-       pushFolderRows(rows, entry, place, closed);
+-     }
++     for (const entry of folders) {}
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:91:40
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [...folder.files].sort(() => undefined);
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:87:19
+-     const folders = [...folder.folders].sort(([a], [b]) => compareNames(a, b));
++     const folders = [].sort(([a], [b]) => compareNames(a, b));
+
+[Survived] CallExpression
+src/ui/fileTree.ts:89:5
+-       pushFolderRows(rows, entry, place, closed);
++       ;
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:91:17
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [...folder.files];
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:100:23
+-   ): readonly TreeRow[] {
+-     const rows: TreeRow[] = [];
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
+-     return rows;
+-   }
++   ): readonly TreeRow[] {}
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:91:17
+-     const files = [...folder.files].sort((a, b) => compareNames(a.name, b.name));
++     const files = [].sort((a, b) => compareNames(a.name, b.name));
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:93:15
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
++       rows.push({});
+
+[Survived] ArrayDeclaration
+src/ui/fileTree.ts:101:27
+-     const rows: TreeRow[] = [];
++     const rows: TreeRow[] = ["Stryker was here"];
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:92:39
+-     for (const { name, file } of files) {
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
+-     }
++     for (const { name, file } of files) {}
+
+[Survived] ObjectLiteral
+src/ui/fileTree.ts:102:37
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
++     pushRows(rows, folderTree(files), {}, closed);
+
+[Survived] UnaryOperator
+src/ui/fileTree.ts:107:42
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("/").slice(0, +1);
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:93:23
+-       rows.push({ kind: "file", file, label: name, depth: place.depth });
++       rows.push({ kind: "", file, label: name, depth: place.depth });
+
+[Survived] ArrowFunction
+src/ui/fileTree.ts:108:20
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map(() => undefined);
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:107:28
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("").slice(0, -1);
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:107:17
+-     const names = path.split("/").slice(0, -1);
++     const names = path.split("/");
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:102:47
+-     pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
++     pushRows(rows, folderTree(files), { parent: "Stryker was here!", depth: 0 }, closed);
+
+[Survived] BlockStatement
+src/ui/fileTree.ts:106:62
+-   export function folderPaths(path: string): readonly string[] {
+-     const names = path.split("/").slice(0, -1);
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
+-   }
++   export function folderPaths(path: string): readonly string[] {}
+
+[Survived] MethodExpression
+src/ui/fileTree.ts:108:34
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.join("/"));
+
+[Survived] ArithmeticOperator
+src/ui/fileTree.ts:108:49
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.slice(0, index - 1).join("/"));
+
+[Survived] StringLiteral
+src/ui/fileTree.ts:108:65
+-     return names.map((_, index) => names.slice(0, index + 1).join("/"));
++     return names.map((_, index) => names.slice(0, index + 1).join(""));
+
+[Survived] BlockStatement
+src/ui/folderIcon.ts:185:68
+-   export function folderIcon(name: string, open: boolean): Component {
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
+-     return open ? icons.opened : icons.closed;
+-   }
++   export function folderIcon(name: string, open: boolean): Component {}
+
+[Survived] MethodExpression
+src/ui/folderIcon.ts:186:38
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
++     const icons = lookup(FOLDER_ICONS, name.toUpperCase()) ?? DEFAULT_FOLDER;
+
+[Survived] LogicalOperator
+src/ui/folderIcon.ts:186:17
+-     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) ?? DEFAULT_FOLDER;
++     const icons = lookup(FOLDER_ICONS, name.toLowerCase()) && DEFAULT_FOLDER;

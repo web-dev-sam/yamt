@@ -489,6 +489,8 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | the page's theme attribute (`<html data-theme>`)                                                        | set before the first frame by the shell's start script; `main.ts` reads it as the start theme; afterwards written only by `App.vue` from `settings.theme`                                                                                                                                                        | one palette per theme in `style.css` (plan §2 #57)                                                                                |
 | each pane's dark flag and key bindings                                                                  | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                           | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                           |
 | toolbar buttons the user hid                                                                            | `HiddenButtons` (`ui/toolbarButtons.ts`, `useStorage`) held by the store: read as `hiddenButtons`, changed only by `toggleButton` from the toolbar's right-click menu; Undo/Redo hidden at first; stored in localStorage `yamt.toolbar.hidden` as the hidden ids in toolbar order                                | one choice for every file, remembered across restarts; a button added later shows until hidden (plan §2 #58)                      |
+| whether the file list shows                                                                             | `fileListShown` shallowRef in `ui/store.ts`, true at every start (never stored); flipped only by the store's `fileListKey`, which `App.vue` calls from a window `keydown`: nothing on a press already handled, while a question waits, or for a key not bound to "Toggle file list" (`pressesKey`)               | `App.vue` hides `FileList` with `v-show`, so its width, view and closed folders survive (plan §2 #61)                             |
+| the file list's view (list or tree) and its closed folders                                              | `FileList.vue`'s own state: the view from `createFileListMode` (`ui/fileListMode.ts`, `useStorage`, localStorage `yamt.files.view`, anything but `tree` is the list); closed folder paths in a session-only `shallowRef`, the shown file's folders opened whenever `active` changes                              | one reader and one writer, both in `FileList`; the view is remembered across restarts like #58, folders are not (plan §2 #61)     |
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
 text passes through once, from `resultText()` to `store.finish` (and back into that file's own
@@ -592,8 +594,9 @@ Internals (`editor/internal/`, not importable from `ui/`):
   focused side's `scrollTop` is written, with WebStorm's placement from `viewport.ts`
   (`SyncScrollSupport.getTargetOffsets`), nothing when the change is fully visible; the other panes
   follow through the sync. `wheel.ts` turns wheel bursts into steps (the first event of a burst steps
-  at once, then one per 90 px — under one 96 px X11 notch). `historyKey.ts` matches the bound
-  Undo/Redo keys through `keyOfEvent` (`ipc/keys.ts`), which falls back to the physical key only when
+  at once, then one per 90 px — under one 96 px X11 notch). `historyKey.ts` asks `pressesKey`
+  (`ipc/keys.ts`, the one "is this press one of these keys" match, shared with the store's file-list
+  key, #61) for the bound Undo/Redo keys; `keyOfEvent` falls back to the physical key only when
   the layout gives a single non-Latin letter or combining mark; `ui/MergeView.vue` calls `historyKey`
   from a window `keydown` only while its file is shown and no question is open.
 - `scrollSync.ts` — one pure function `targets(anchors, source, y)` using piecewise-linear
@@ -620,7 +623,10 @@ numbers, no DOM.
 
 ### 5.4 `ui/` — Vue 3
 
-Components: `App.vue`, `FileList.vue` (file list, resolved mark, vscode-icons), `MergeView.vue`
+Components: `App.vue`, `FileList.vue` (the file list panel: its width, the "View as tree/list" button,
+the flat list — paths, resolved mark, vscode-icons — or `FileTree.vue`'s rows built by the pure
+`fileTree.ts` (`treeRows`: folders first, natural order, compact folder chains; `folderPaths` for
+revealing the shown file), folder icons from `folderIcon.ts`, plan §2 #61), `MergeView.vue`
 (toolbar + three `<div>` hosts + two `<svg>`, each in a bordered wrapper on its own compositing layer;
 one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
 paint, editors, scroll positions and work kept, plan §2 #51;

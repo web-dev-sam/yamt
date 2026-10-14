@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Ctrl+B (Cmd+B on macOS) hides and shows the file list, from anywhere in the window; the merge view
+  takes its room. The key is listed in settings as "Toggle file list" and can be changed there.
+- A button at the right of the file list's "Files" header shows the files as a tree, as VS Code's
+  Source Control view does: folders first, a chain of single folders on one row, every folder open at
+  first and the shown file's folders opened when it changes, folder icons from vscode-icons. Pressing it
+  again shows the flat list. The choice is remembered after a restart.
+
 ## [0.2.0] - 2026-10-13
 
 ### Added
