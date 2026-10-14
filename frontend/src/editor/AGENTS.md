@@ -1,1 +1,3 @@
 Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit).
+
+An editable Result is one document of `lsp/` (plan §2 #67, #70): `internal/serverDoc.ts` opens it on `LanguageServers`, says changed on each edit and closes it on destroy; `problems.ts` keeps the versions handed out and shows each server's problems through `@codemirror/lint` in the middle pane only (tooltips in `document.body`); `format.ts` applies a formatter's result as yamt's own line diff (`lineDiff.ts`) in one `yamt.format` transaction.

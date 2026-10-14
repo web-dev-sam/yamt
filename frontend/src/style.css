@@ -29,6 +29,9 @@
   --color-on-primary: #ffffff;
   --color-problem: #56272b;
   --color-problem-border: #80383e;
+  --color-problem-error: #f75464;
+  --color-problem-warning: #f2c55c;
+  --color-problem-info: #868a91;
   --color-success: #203b2a;
   --color-success-border: #29583c;
   --color-info: #233558;
@@ -80,6 +83,9 @@
   --color-on-primary: #ffffff;
   --color-problem: #fff6f5;
   --color-problem-border: #ffc4c5;
+  --color-problem-error: #e55230;
+  --color-problem-warning: #e8a33e;
+  --color-problem-info: #8c8c8c;
   --color-success: #f5faf3;
   --color-success-border: #bbdbc2;
   --color-info: #f7f8ff;

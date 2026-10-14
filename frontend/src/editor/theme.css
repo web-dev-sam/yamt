@@ -226,3 +226,57 @@ path.chunk-band {
   background-color: var(--color-hover);
   color: var(--color-fg);
 }
+
+:root .cm-editor .cm-lintRange {
+  padding-bottom: 0;
+  background-image: none;
+  text-decoration: underline wavy var(--problem-tone);
+  text-decoration-skip-ink: none;
+}
+
+:root .cm-lintRange-error,
+:root .cm-lintPoint-error,
+:root .cm-diagnostic-error {
+  --problem-tone: var(--color-problem-error);
+}
+
+:root .cm-lintRange-warning,
+:root .cm-lintPoint-warning,
+:root .cm-diagnostic-warning {
+  --problem-tone: var(--color-problem-warning);
+}
+
+:root .cm-lintRange-info,
+:root .cm-lintRange-hint,
+:root .cm-lintPoint-info,
+:root .cm-lintPoint-hint,
+:root .cm-diagnostic-info,
+:root .cm-diagnostic-hint {
+  --problem-tone: var(--color-problem-info);
+}
+
+:root .cm-editor .cm-lintPoint::after {
+  border-bottom-color: var(--problem-tone);
+}
+
+:root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint) {
+  max-width: 480px;
+  border: 1px solid var(--color-control-border);
+  border-radius: 4px;
+  background-color: var(--color-panel);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+:root .cm-tooltip-lint .cm-diagnostic {
+  padding: 4px 8px;
+  border-left: 3px solid var(--problem-tone);
+}
+
+:root .cm-tooltip-lint .cm-diagnosticSource {
+  margin-top: 2px;
+  font-size: inherit;
+  color: var(--color-fg-muted);
+  opacity: 1;
+}

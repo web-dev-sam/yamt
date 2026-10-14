@@ -1,37 +1,39 @@
 import { redo, undo } from "@codemirror/commands";
-import type { Language } from "@codemirror/language";
-import type { Extension, StateField, Text } from "@codemirror/state";
+import type { StateField } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import type { FileMergeData } from "../ipc";
+import type { LanguageServers } from "../lsp";
 import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
 import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
-import { coveredDecorations } from "./internal/covered";
-import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
 import { foldRuns } from "./internal/foldRuns";
 import { Folds } from "./internal/foldView";
+import type { FormatOutcome } from "./internal/format";
 import { Frame } from "./internal/frame";
-import { SIDE_PANE, type Pane, type PaneViews } from "./internal/geometry";
+import type { PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
-import { modClicks } from "./internal/modClick";
 import type { Direction } from "./internal/navigation";
-import { centerKind, createPane, paneText, preferenceEffects } from "./internal/pane";
+import { paneText, preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
 import { paneDocs } from "./internal/paneDocs";
+import { createPaneViews, type ViewSources } from "./internal/paneViews";
+import { problemCounts, problemsField, type ProblemCounts } from "./internal/problems";
+import { openResult, type ServerDoc } from "./internal/serverDoc";
 import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
-import { sideRunner } from "./internal/sideKeys";
-import { showStatuses, sideStatusField } from "./internal/sideStatus";
-import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+import { showStatuses } from "./internal/sideStatus";
+import { summarize, type MergeSummary } from "./internal/status";
 import type { IconPress } from "./internal/stripIcons";
 import { Strips } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
 export type { Direction } from "./internal/navigation";
+export type { FormatOutcome } from "./internal/format";
 export type { Preferences } from "./internal/pane";
+export type { ProblemCounts } from "./internal/problems";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 
@@ -46,13 +48,7 @@ export type MergeOptions = {
   readonly readOnly: boolean;
   readonly preferences: Preferences;
   readonly collapsed: boolean;
-};
-
-type ViewSources = {
-  data: FileMergeData;
-  docs: Readonly<Record<Pane, Text>>;
-  hosts: MergeHosts;
-  language: Language | null;
+  readonly servers: LanguageServers | null;
 };
 
 export class MergeController {
@@ -66,6 +62,7 @@ export class MergeController {
   readonly #drag: IconDrag;
   readonly #focus: SideFocus;
   readonly #frame: Frame;
+  readonly #server: ServerDoc | null;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
@@ -95,6 +92,8 @@ export class MergeController {
     if (description !== null && description.support === undefined) {
       void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
     }
+    const result = { path: data.path, readOnly: this.#readOnly };
+    this.#server = openResult(options.servers, result, () => this.#views);
   }
 
   readonly #repaint = EditorView.updateListener.of((update) => {
@@ -105,63 +104,26 @@ export class MergeController {
     this.#statusesChanged(update);
   });
 
-  #createViews({ data, docs, hosts, language }: ViewSources): PaneViews {
-    const shared = { eol: data.eol, language, settings: this.#settings };
-    const center = createPane({
-      ...shared,
-      kind: centerKind(this.#readOnly),
-      doc: docs.center,
-      parent: hosts.center,
-      extensions: [
-        this.#field,
-        centerDecorations(this.#field),
-        this.#folds.center(),
-        this.#repaint,
-        this.#statusSync,
-      ],
-    });
-    const statuses = sideStatusField(
-      center.state.field(this.#field).map(({ chunk, status }) => ({ chunk, status })),
-    );
-    return {
-      left: createPane({
-        ...shared,
-        kind: "side",
-        doc: docs.left,
-        parent: hosts.left,
-        extensions: this.#sideExtensions(statuses, "local"),
-      }),
-      center,
-      right: createPane({
-        ...shared,
-        kind: "side",
-        doc: docs.right,
-        parent: hosts.right,
-        extensions: this.#sideExtensions(statuses, "remote"),
-      }),
-    };
-  }
+  readonly #serverSync = EditorView.updateListener.of((update) => {
+    this.#server?.updated(update);
+  });
 
-  #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
-    return [
-      statuses,
-      sideDecorations(statuses, side),
-      focusDecorations(statuses, side),
-      coveredDecorations(side),
-      this.#folds.side(SIDE_PANE[side]),
-      sideRunner.of((command) => {
+  #createViews(sources: ViewSources): PaneViews {
+    return createPaneViews(sources, {
+      field: this.#field,
+      folds: this.#folds,
+      readOnly: this.#readOnly,
+      settings: this.#settings,
+      center: [this.#repaint, this.#statusSync, problemsField, this.#serverSync],
+      repaint: this.#repaint,
+      run: (side, command) => {
         this.#focus.run(side, command);
-      }),
-      this.#repaint,
-      this.#readOnly
-        ? []
-        : modClicks(side, {
-            rows: () => this.#frame.layout().rows,
-            act: (action) => {
-              this.#act(action, "side");
-            },
-          }),
-    ];
+      },
+      rows: () => this.#frame.layout().rows,
+      act: (action) => {
+        this.#act(action, "side");
+      },
+    });
   }
 
   #createFocus(hidden: Side | null): SideFocus {
@@ -281,9 +243,22 @@ export class MergeController {
     this.#summaryListener = listener;
   }
 
+  format(): Promise<FormatOutcome> {
+    return this.#server?.format() ?? Promise.resolve({ kind: "noFormatter" });
+  }
+
+  problems(): ProblemCounts {
+    return problemCounts(this.#views.center.state);
+  }
+
+  onProblemsChange(listener: (counts: ProblemCounts) => void): void {
+    this.#server?.onProblemsChange(listener);
+  }
+
   destroy(): void {
     this.#summaryListener = null;
     this.#destroyed = true;
+    this.#server?.close();
     this.#frame.destroy();
     this.#folds.destroy();
     this.#focus.destroy();

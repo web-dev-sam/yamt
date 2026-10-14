@@ -58,7 +58,7 @@ const {
 } = useMergeController(
   () => props.data,
   { left, center, right, strips: [leftStrip, rightStrip] },
-  { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing },
+  { readOnly: () => !isEditable(props.data), preferences, collapsed: collapsing, servers: null },
 );
 const work: FileWork = { unsaved, markSaved };
 if (props.data.deleted === null) {

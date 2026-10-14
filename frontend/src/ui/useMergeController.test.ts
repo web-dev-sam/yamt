@@ -2,7 +2,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
 
 import { bindingsOf, DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
+import { LanguageServers } from "../lsp";
 import { useMergeController, type MergeHandle, type Preferences } from "./useMergeController";
+
+type Counts = { errors: number; warnings: number; other: number };
 
 const editor = vi.hoisted(() => {
   const state = {
@@ -12,13 +15,21 @@ const editor = vi.hoisted(() => {
     readOnly: new Array<boolean>(),
     themes: new Array<string>(),
     collapsed: new Array<string>(),
+    servers: new Array<unknown>(),
+    counts: { errors: 0, warnings: 0, other: 0 },
+    countsListener: (_counts: Counts): void => {},
   };
   class MergeController {
     readonly #id: number;
     constructor(
       data: FileMergeData,
       _hosts: unknown,
-      options: { readOnly: boolean; preferences: { theme: string }; collapsed: boolean },
+      options: {
+        readOnly: boolean;
+        preferences: { theme: string };
+        collapsed: boolean;
+        servers: unknown;
+      },
     ) {
       state.text = data.middle.kind === "DiskNotText" ? "" : data.middle.text;
       state.built += 1;
@@ -26,11 +37,21 @@ const editor = vi.hoisted(() => {
       state.readOnly.push(options.readOnly);
       state.themes.push(`built ${options.preferences.theme}`);
       state.collapsed.push(`${this.#id} built ${options.collapsed}`);
+      state.servers.push(options.servers);
     }
     summary(): { conflicts: number; changes: number } {
       return { conflicts: 0, changes: 0 };
     }
     onSummaryChange(): void {}
+    problems(): Counts {
+      return state.counts;
+    }
+    onProblemsChange(listener: (counts: Counts) => void): void {
+      state.countsListener = listener;
+    }
+    format(): Promise<{ kind: "formatted"; server: string }> {
+      return Promise.resolve({ kind: "formatted", server: `oxfmt in editor ${this.#id}` });
+    }
     setPreferences(preferences: { theme: string }): void {
       state.themes.push(`set ${preferences.theme}`);
     }
@@ -59,6 +80,9 @@ afterEach(() => {
     readOnly: [],
     themes: [],
     collapsed: [],
+    servers: [],
+    counts: { errors: 0, warnings: 0, other: 0 },
+    countsListener: () => {},
   });
 });
 
@@ -73,6 +97,7 @@ function mount(
     readOnly = shallowRef(false),
     preferences = shallowRef(DARK),
     collapsed = shallowRef(true),
+    servers = shallowRef<LanguageServers | null>(null),
   } = {},
 ): { scope: EffectScope; handle: MergeHandle } {
   const scope = effectScope();
@@ -85,7 +110,7 @@ function mount(
         right: host(present),
         strips: [host(present), host(present)],
       },
-      { readOnly, preferences, collapsed },
+      { readOnly, preferences, collapsed, servers },
     ),
   );
   if (handle === undefined) {
@@ -252,4 +277,73 @@ test("a preferences change never resets collapsing", async () => {
 
   expect(editor.state.collapsed).toEqual(["1 built true"]);
   expect(editor.state.themes).toEqual(["built dark", "set light"]);
+});
+
+test("problems: the editor's counts when built, then each change it reports; null once it is gone", async () => {
+  editor.state.counts = { errors: 2, warnings: 1, other: 0 };
+  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  const { scope, handle } = mount(data);
+  await nextTick();
+
+  expect(handle.problems.value).toEqual({ errors: 2, warnings: 1, other: 0 });
+
+  editor.state.countsListener({ errors: 0, warnings: 0, other: 3 });
+
+  expect(handle.problems.value).toEqual({ errors: 0, warnings: 0, other: 3 });
+
+  data.value = null;
+  await nextTick();
+
+  expect(handle.problems.value).toBeNull();
+
+  data.value = await fileData("b\n");
+  await nextTick();
+  scope.stop();
+
+  expect(handle.problems.value).toBeNull();
+});
+
+test("problems and format are null while no editor is built", async () => {
+  const { handle } = mount(shallowRef<FileMergeData | null>(null));
+  await nextTick();
+
+  expect(handle.problems.value).toBeNull();
+  await expect(handle.format()).resolves.toBeNull();
+});
+
+test("format answers with the outcome of the editor in use, a rebuilt one after a rebuild", async () => {
+  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  const { handle } = mount(data);
+  await nextTick();
+
+  await expect(handle.format()).resolves.toEqual({
+    kind: "formatted",
+    server: "oxfmt in editor 1",
+  });
+
+  data.value = await fileData("b\n");
+  await nextTick();
+
+  await expect(handle.format()).resolves.toEqual({
+    kind: "formatted",
+    server: "oxfmt in editor 2",
+  });
+});
+
+test("the editor gets the language servers in use and is rebuilt when they change", async () => {
+  const first = new LanguageServers(null);
+  const second = new LanguageServers(null);
+  const servers = shallowRef<LanguageServers | null>(first);
+  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { servers });
+  await nextTick();
+
+  servers.value = second;
+  await nextTick();
+  servers.value = null;
+  await nextTick();
+
+  expect(editor.state.servers).toEqual([first, second, null]);
+  expect(editor.state.servers[0]).toBe(first);
+  expect(editor.state.servers[1]).toBe(second);
+  expect(editor.state.destroyed).toBe(2);
 });

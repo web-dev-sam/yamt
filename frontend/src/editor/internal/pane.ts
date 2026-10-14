@@ -73,7 +73,7 @@ const selectionHistoryKeymap = historyKeymap.filter(
 );
 
 const paneTheme = EditorView.theme({
-  "&": {
+  "&.cm-editor": {
     height: "100%",
     backgroundColor: "var(--color-panel)",
     color: "var(--color-code)",
