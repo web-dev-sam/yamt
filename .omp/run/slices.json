@@ -26,7 +26,17 @@
       "frontend/src/ipc/domain.ts",
       "frontend/src/ipc/index.ts",
       "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/fixtureSettings.ts"
+      "frontend/src/ipc/fixtureSettings.ts",
+      "frontend/src/lsp/index.ts",
+      "frontend/src/lsp/index.test.ts"
+    ]
+  },
+  "LspEditorR3": {
+    "owned": [
+      "frontend/src/editor/internal/format.ts",
+      "frontend/src/editor/internal/format.test.ts",
+      "frontend/src/editor/internal/lineDiff.ts",
+      "frontend/src/editor/internal/lineDiff.test.ts"
     ]
   }
 }
