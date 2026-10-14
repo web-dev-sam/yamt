@@ -1,6 +1,6 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tauri::{Runtime, State};
+use tauri::{Manager, Runtime, State};
 use yamt_session::{
     DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
 };
@@ -45,6 +45,11 @@ pub(crate) fn with_session<R: Runtime>(
     servers::manage(builder, session.root())
         .manage(Mutex::new(session))
         .invoke_handler(specta_builder().invoke_handler())
+        // A reloaded page's channels still take events (tauri 2.12 ipc/channel.rs:409-449 fails a
+        // send only when `eval` fails), so its runs would never stop themselves.
+        .on_page_load(|webview, page| {
+            servers::stop_runs_on_page_start(&webview.state(), page.event());
+        })
 }
 
 pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {

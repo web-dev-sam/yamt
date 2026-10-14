@@ -5,7 +5,7 @@ use std::thread;
 
 use tauri::ipc::Channel;
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, Runtime, State};
+use tauri::{Runtime, State};
 use yamt_lsp_host::{
     Host, HostEvent, ProgramFound, ProjectFile, RunId, ServerCommand, ServerContext, StartReply,
 };
@@ -18,14 +18,10 @@ pub(crate) fn lock(state: &HostState) -> MutexGuard<'_, Host> {
 
 pub(crate) fn manage<R: Runtime>(builder: tauri::Builder<R>, root: &Path) -> tauri::Builder<R> {
     let host: HostState = Mutex::new(Host::new(root));
-    // A reloaded page's channels still take events (tauri 2.12 ipc/channel.rs:409-449 fails a send
-    // only when `eval` fails), so its runs would never stop themselves.
-    builder
-        .manage(host)
-        .on_page_load(|webview, page| stop_runs_on_page_start(&webview.state(), page.event()))
+    builder.manage(host)
 }
 
-fn stop_runs_on_page_start(host: &HostState, event: PageLoadEvent) {
+pub(crate) fn stop_runs_on_page_start(host: &HostState, event: PageLoadEvent) {
     match event {
         PageLoadEvent::Started => lock(host).stop_every(),
         PageLoadEvent::Finished => {}
@@ -165,6 +161,7 @@ mod run_tests {
     use std::time::{Duration, Instant};
 
     use serde_json::{Value, json};
+    use tauri::Manager;
     use tauri::ipc::InvokeResponseBody;
 
     use super::*;
