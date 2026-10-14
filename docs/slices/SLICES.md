@@ -424,14 +424,16 @@ WebStorm's wave; scrolling no slower than before. Non-goals: a setting to turn i
 collapsing again, "Expand all", keys for the wave, function names on the wave, remembering shown runs across a rebuild,
 any Rust or IPC change.
 
-Slices: row 1 designs (read-only), row 2 builds in `frontend/src/editor/**` and `frontend/src/style.css`; each patch:
-commit, both reviews (`editor/` is not mutated: hand failing-path proofs), then one final run.
+Slices (a dependency chain, at the design's size the build is split): row 2 builds the panes and the shared contract;
+row 3 adds the wave in the strips on top of it once row 2's first round is committed. Each patch: commit, both reviews
+(`editor/` is not mutated: hand failing-path proofs; `connectors/` is), then one final run.
 
-| row | slice                                                                                                     | owner    | status  | evidence |
-| --- | --------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1   | design: hidden ranges per pane, shared steps, wave in panes and strips (`briefs/3.U-unchanged-design.md`) | designer | running |          |
-| 2   | 3.U build (`briefs/3.U-unchanged.md`; `frontend/src/editor/**`, `frontend/src/style.css`)                 | web-impl | todo    |          |
-| 3   | final run (`briefs/3.U-verify.md`): `just check`, `just mutants 72e68d1`, the real app                    | verifier | todo    |          |
+| row | slice                                                                                                                                                         | owner    | status  | evidence                                                                                                                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | design: hidden ranges per pane, shared steps, wave in panes and strips (`briefs/3.U-unchanged-design.md`)                                                     | designer | done    | `UnchangedDesign` (notes `.omp/run/notes/UnchangedDesign.md`): 3 options; option 1 chosen (the middle's field owns the steps, sides mirror counts; gutter overlay with a CSS mask); its two questions answered in plan #63 (Ctrl/Cmd+A keeps folds; no re-align after a click) |
+| 2   | 3.U-panes: runs, steps, pane waves, hover and click, find reveal (`briefs/3.U-panes.md`; `frontend/src/editor/**`, `frontend/src/connectors/**`, `style.css`) | web-impl | running |                                                                                                                                                                                                                                                                                |
+| 3   | 3.U-strips: the wave joined across both strips (`briefs/3.U-strips.md`)                                                                                       | web-impl | todo    |                                                                                                                                                                                                                                                                                |
+| 4   | final run (`briefs/3.U-verify.md`): `just check`, `just mutants 72e68d1`, the real app                                                                        | verifier | todo    |                                                                                                                                                                                                                                                                                |
 
 ## Open product questions
 

@@ -1,1 +1,5 @@
-{}
+{
+  "UnchangedPanes": {
+    "owned": ["frontend/src/editor/**", "frontend/src/connectors/**", "frontend/src/style.css"]
+  }
+}
