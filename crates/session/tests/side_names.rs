@@ -179,9 +179,9 @@ fn an_unreadable_branch_drops_only_the_local_name() {
     fs::write(heads.join("loop-a"), "ref: refs/heads/loop-b\n").unwrap();
     fs::write(heads.join("loop-b"), "ref: refs/heads/loop-a\n").unwrap();
     fs::write(root.join(".git/HEAD"), "ref: refs/heads/loop-a\n").unwrap();
-    let branch_read = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap();
+    let branch_read = git(root, &["branch", "--show-current"]).unwrap();
     let stderr = String::from_utf8(branch_read.stderr).unwrap();
-    assert!(stderr.contains("No such ref: HEAD"), "{stderr:?}");
+    assert!(stderr.contains("failed to resolve HEAD"), "{stderr:?}");
 
     let expected = SideNames {
         local: None,

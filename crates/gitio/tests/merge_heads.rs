@@ -81,6 +81,14 @@ fn current_branch_is_the_short_name_of_the_branch_head_is_on() {
 }
 
 #[test]
+fn current_branch_ignores_a_tag_with_the_branch_name() {
+    let (dir, repo) = merging();
+    git_ok(dir.path(), &["tag", "local", "remote"]).unwrap();
+
+    assert_eq!(repo.current_branch().unwrap(), Some(b"local".to_vec()));
+}
+
+#[test]
 fn current_branch_of_a_branch_without_a_commit_is_its_name() {
     let (dir, repo) = merging();
     git_ok(dir.path(), &["symbolic-ref", "HEAD", "refs/heads/unborn"]).unwrap();

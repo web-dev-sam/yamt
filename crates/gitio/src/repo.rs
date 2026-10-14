@@ -10,6 +10,7 @@ use crate::run::{Access, GIT_TIMEOUT, git_command, run};
 use crate::{Error, Result, StageEntry};
 
 const REV_PARSE: &str = "rev-parse";
+const BRANCH: &str = "branch";
 const LOG: &str = "log";
 const HASH_OBJECT: &str = "hash-object";
 const MERGE_MSG: &str = "MERGE_MSG";
@@ -36,7 +37,7 @@ impl Repo {
     pub fn discover(cwd: &Path) -> Result<Repo> {
         let git = find_git_on_path()?;
         let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
-        let output = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
         let root = path_from_git(&output);
         Ok(Repo { root, git })
     }
@@ -59,19 +60,19 @@ impl Repo {
             Err(error) if is_unresolved_name(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let line = without_final_newline(output)?;
+        let line = without_final_newline(REV_PARSE, output)?;
         let hex = String::from_utf8_lossy(&line);
         Ok(Some(Oid::parse(&hex)?))
     }
 
-    /// The branch HEAD is on (`symbolic-ref --short`); `None` when HEAD is detached.
+    /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
     pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
-        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
-        match run(self.command(Access::Read, &args), None, GIT_TIMEOUT) {
-            Ok(output) => Ok(Some(without_final_newline(output)?)),
-            Err(error) if is_unresolved_name(&error) => Ok(None),
-            Err(error) => Err(error),
+        let command = self.command(Access::Read, &[BRANCH, "--show-current"]);
+        let output = run(command, None, GIT_TIMEOUT)?;
+        if output.is_empty() {
+            return Ok(None);
         }
+        Ok(Some(without_final_newline(BRANCH, output)?))
     }
 
     pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
@@ -93,7 +94,7 @@ impl Repo {
 
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
-        let git_path = without_final_newline(run(command, None, GIT_TIMEOUT)?)?;
+        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
         let path = self.root.join(path_from_git(&git_path));
         match fs::read(&path) {
             Ok(message) => Ok(Some(message)),
@@ -223,7 +224,7 @@ impl Repo {
             Err(error) if is_unresolved_name(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let line = without_final_newline(output)?;
+        let line = without_final_newline(REV_PARSE, output)?;
         Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
     }
 
@@ -239,8 +240,7 @@ impl Repo {
     }
 }
 
-// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message;
-// git-symbolic-ref(1) `--quiet`: a detached HEAD does the same.
+// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
 fn is_unresolved_name(error: &Error) -> bool {
     matches!(
         error,
@@ -248,12 +248,12 @@ fn is_unresolved_name(error: &Error) -> bool {
     )
 }
 
-fn without_final_newline(mut output: Vec<u8>) -> Result<Vec<u8>> {
+fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
     if output.pop() == Some(b'\n') {
         return Ok(output);
     }
     Err(Error::UnexpectedOutput {
-        command: REV_PARSE,
+        command,
         output: String::from_utf8_lossy(&output).into_owned(),
     })
 }
