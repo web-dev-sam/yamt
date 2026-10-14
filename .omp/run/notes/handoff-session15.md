@@ -13,18 +13,15 @@ round with the rule "formatting never touches a change that still waits, nor its
 
 ## State at handoff
 
-- Rows 1–9, 3b, 6b, 9a: **done** (built, both reviews, fix rounds, re-checks pass). Row 9's round 1 is `2ed501d`
-  (#966–#976; survivors #977–#981 dropped; notes `LspSetup*.md`). Docs, map (`Verified against commit: 2ed501d`) and
-  the final brief are current.
-- Row 10 (final run): **running** as `LspVerify` (verifier alone). If its result did not arrive, re-spawn it with
-  `docs/slices/briefs/3.YZ-verify.md` and an empty `.omp/run/slices.json`.
+- **Feature complete.** Rows 1–10, 3b, 6b, 9a done. Row 9's round 1 is `2ed501d` (#966–#976; survivors #977–#981
+  dropped). Final run `LspVerify` at `71896bd`: `just check` pass, every survivor judged (#983), real app 4.1–4.14
+  and the fixture page pass (notes `LspVerify.md`). Map verified at `2ed501d`.
 
 ## Next steps
 
-1. Collect the final run: evidence on board row 10. `gate: fail` → a fix round for the owning row (§5 of the
-   orchestrate skill), never a new row; survivors per VF7, then OR12.
-2. Report to the owner in plain words (OR-h): what was built, the decisions taken as owner (plan #71, #952), and the
-   known limits below.
+1. Owner report sent at the end of session 15 (what was built, the decisions taken as owner — plan #71, #952 — and
+   the known limits below). Next: the owner's call; before the next milestone's first spawn, a retro with `curator`
+   over `findings.jsonl` since the last retro (orchestrate §7).
 
 ## Known limits (accepted, logged; not blocks)
 
