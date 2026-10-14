@@ -36,7 +36,10 @@
       "frontend/src/editor/internal/format.ts",
       "frontend/src/editor/internal/format.test.ts",
       "frontend/src/editor/internal/lineDiff.ts",
-      "frontend/src/editor/internal/lineDiff.test.ts"
+      "frontend/src/editor/internal/lineDiff.test.ts",
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/internal/serverDoc.ts",
+      "frontend/src/editor/internal/serverDoc.test.ts"
     ]
   }
 }
