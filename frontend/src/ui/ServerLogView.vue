@@ -3,8 +3,11 @@ import { useEventListener } from "@vueuse/core";
 import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 
-import { EMPTY_LOG, logTime, logTitle, YAMT_MARK } from "./serverText";
+import { droppedAbove } from "./logFollow";
+import { BACK, EMPTY_LOG, logTime, logTitle, YAMT_MARK } from "./serverText";
 import { useAppStore } from "./store";
+
+type Anchor = { readonly key: number; readonly offset: number; readonly scrollTop: number };
 
 defineProps<{ name: string }>();
 
@@ -12,10 +15,13 @@ const { shownLog, closeServerLog, question } = useAppStore();
 const back = useTemplateRef<HTMLButtonElement>("back");
 const scroller = useTemplateRef<HTMLDivElement>("scroller");
 const following = shallowRef(true);
+const firstKey = shallowRef(0);
+let anchor: Anchor | null = null;
 useEventListener(window, "keydown", escapePressed);
 
 const lines = computed(() =>
-  shownLog.value.map((line) => ({
+  shownLog.value.map((line, index) => ({
+    key: firstKey.value + index,
     time: logTime(line.at),
     muted: line.source === "stderr",
     mark: line.source === "yamt" ? YAMT_MARK : null,
@@ -23,7 +29,20 @@ const lines = computed(() =>
   })),
 );
 
-watch(shownLog, followEnd, { flush: "post" });
+watch(
+  shownLog,
+  (now, before) => {
+    firstKey.value += droppedAbove(before, now);
+    const userScrolled = anchor === null || scroller.value?.scrollTop !== anchor.scrollTop;
+    if (following.value) {
+      anchor = null;
+    } else if (userScrolled) {
+      anchor = topRow();
+    }
+  },
+  { flush: "pre" },
+);
+watch(shownLog, keepPlace, { flush: "post" });
 
 onMounted(async () => {
   back.value?.focus();
@@ -37,9 +56,38 @@ function scrollToEnd(): void {
   }
 }
 
-function followEnd(): void {
+function topRow(): Anchor | null {
+  const element = scroller.value;
+  if (element === null) {
+    return null;
+  }
+  const top = element.getBoundingClientRect().top;
+  for (const row of element.querySelectorAll<HTMLElement>("[data-key]")) {
+    const { top: rowTop, bottom } = row.getBoundingClientRect();
+    if (bottom > top) {
+      return {
+        key: Number(row.dataset["key"]),
+        offset: rowTop - top,
+        scrollTop: element.scrollTop,
+      };
+    }
+  }
+  return null;
+}
+
+function keepPlace(): void {
+  const element = scroller.value;
   if (following.value) {
     scrollToEnd();
+  } else if (element !== null && anchor !== null) {
+    const row = element.querySelector(`[data-key="${anchor.key}"]`);
+    if (row === null) {
+      anchor = null;
+    } else {
+      const moved = row.getBoundingClientRect().top - element.getBoundingClientRect().top;
+      element.scrollTop += moved - anchor.offset;
+      anchor = { ...anchor, scrollTop: element.scrollTop };
+    }
   }
 }
 
@@ -71,7 +119,7 @@ function escapePressed(event: KeyboardEvent): void {
         @click="closeServerLog"
       >
         <ArrowLeft class="size-4" aria-hidden="true" />
-        Back
+        {{ BACK }}
       </button>
       <h2 class="font-semibold">{{ logTitle(name) }}</h2>
     </header>
@@ -83,8 +131,9 @@ function escapePressed(event: KeyboardEvent): void {
       @scroll="scrolled"
     >
       <p
-        v-for="(line, index) in lines"
-        :key="index"
+        v-for="line in lines"
+        :key="line.key"
+        :data-key="line.key"
         class="flex gap-3"
         :class="{ 'text-fg-muted': line.muted }"
       >

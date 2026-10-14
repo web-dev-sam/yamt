@@ -1,9 +1,10 @@
 import { expect, test, vi } from "vitest";
-import { shallowRef, type ShallowRef } from "vue";
+import { computed, shallowRef, type ShallowRef } from "vue";
 
 import type { HostEvent, RunId, ServerHost, StartReply } from "../ipc";
 import { LanguageServers, type ServerSpec } from "../lsp";
-import { createServers, type Screen, type Servers } from "./servers";
+import type { Screen } from "./screen";
+import { createServers, type Servers } from "./servers";
 
 type Request = { readonly id?: number; readonly method?: string };
 
@@ -102,6 +103,7 @@ test("the actions map onto start, stop and restart by name", () => {
 
 test("a shown log follows new lines; other logs and other screens show none", async () => {
   const { servers, screen, slice } = created(answeringHost());
+  expect(slice.shownLog.value).toEqual([]);
   servers.setSpecs([spec("oxlint", ""), spec("oxfmt", "")], { startOnOpen: false });
 
   slice.showServerLog("oxlint");
@@ -125,9 +127,28 @@ test("a shown log follows new lines; other logs and other screens show none", as
   expect(screen.value).toEqual({ kind: "files" });
 });
 
-test("serving is true only while a running server serves the path", async () => {
+test.each<Screen>([{ kind: "files" }, { kind: "settings" }])(
+  "leaving a shown log for $kind by any writer empties shownLog",
+  async (next) => {
+    const { servers, screen, slice } = created(answeringHost());
+    servers.setSpecs([spec("oxlint", "")], { startOnOpen: false });
+    slice.showServerLog("oxlint");
+    slice.startServer("oxlint");
+    await vi.waitFor(() => {
+      expect(slice.shownLog.value).not.toEqual([]);
+    });
+
+    screen.value = next;
+
+    expect(slice.shownLog.value).toEqual([]);
+  },
+);
+
+test("serving follows lsp's rule per path, whatever the other servers do", async () => {
   const { servers, slice } = created(answeringHost());
-  servers.setSpecs([spec("oxlint", "frontend")], { startOnOpen: false });
+  servers.setSpecs([spec("oxlint", "frontend"), spec("oxfmt", "frontend")], {
+    startOnOpen: false,
+  });
   expect(slice.serving("frontend/a.ts")).toBe(false);
 
   slice.startServer("oxlint");
@@ -135,6 +156,21 @@ test("serving is true only while a running server serves the path", async () => 
     expect(slice.serverViews.value[0]?.state).toEqual({ kind: "running" });
   });
 
+  expect(slice.serverViews.value[1]?.state).toEqual({ kind: "stopped" });
   expect(slice.serving("frontend/a.ts")).toBe(true);
   expect(slice.serving("backend/a.ts")).toBe(false);
+});
+
+test("a computed over serving turns true when the server starts", async () => {
+  const { servers, slice } = created(answeringHost());
+  servers.setSpecs([spec("oxlint", "frontend")], { startOnOpen: false });
+  const served = computed(() => slice.serving("frontend/a.ts"));
+  expect(served.value).toBe(false);
+
+  slice.startServer("oxlint");
+  await vi.waitFor(() => {
+    expect(slice.serverViews.value[0]?.state).toEqual({ kind: "running" });
+  });
+
+  expect(served.value).toBe(true);
 });

@@ -1,11 +1,7 @@
-import { shallowRef, type ShallowRef } from "vue";
+import { shallowRef, watch, type ShallowRef } from "vue";
 
 import type { LanguageServers, LogLine, ServerView } from "../lsp";
-
-export type Screen =
-  | { readonly kind: "files" }
-  | { readonly kind: "settings" }
-  | { readonly kind: "serverLog"; readonly name: string };
+import type { Screen } from "./screen";
 
 export type Servers = {
   readonly servers: LanguageServers;
@@ -29,18 +25,21 @@ export function createServers(screen: ShallowRef<Screen>, servers: LanguageServe
     serverViews.value = servers.views();
     readLog();
   });
+  watch(screen, readLog, { flush: "sync" });
   return {
     servers,
     serverViews,
     shownLog,
-    serving: (path) =>
-      serverViews.value.some((view) => view.state.kind === "running") && servers.serving(path),
+    serving: (path) => {
+      // Reading serverViews subscribes a caller's computed to onChange; servers.serving is not reactive.
+      void serverViews.value;
+      return servers.serving(path);
+    },
     startServer: (name) => servers.start(name),
     stopServer: (name) => servers.stop(name),
     restartServer: (name) => servers.restart(name),
     showServerLog: (name) => {
       screen.value = { kind: "serverLog", name };
-      readLog();
     },
     closeServerLog: () => {
       screen.value = { kind: "files" };

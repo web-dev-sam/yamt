@@ -1,7 +1,5 @@
 import type { FailReason, InstallHint, PackageManager, ServerState } from "../lsp";
-import type { FormatOutcome, MergeHandle } from "./useMergeController";
-
-type ProblemCounts = NonNullable<MergeHandle["problems"]["value"]>;
+import type { FormatOutcome, ProblemCounts } from "./useMergeController";
 
 export type DotKind = "running" | "busy" | "stopped" | "problem" | "warning";
 
@@ -32,6 +30,8 @@ export const EMPTY_LOG = "Nothing logged yet.";
 export const COPY = "Copy";
 
 export const COPIED = "Copied";
+
+export const BACK = "Back";
 
 const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
 
@@ -116,8 +116,9 @@ export function serverActions(state: ServerState): readonly ServerAction[] {
     case "running":
       return ["stop", "restart"];
     case "crashed":
-    case "failed":
       return ["start", "restart"];
+    case "failed":
+      return state.reason.kind === "noHost" ? [] : ["start", "restart"];
     case "stopping":
     case "notInstalled":
       return [];

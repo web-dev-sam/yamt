@@ -16,7 +16,7 @@ import {
 } from "./serverText";
 import { useAppStore } from "./store";
 
-const props = defineProps<{ name: string; at: Point }>();
+const props = defineProps<{ name: string; at: Point; opener: HTMLElement }>();
 const emit = defineEmits<{ close: [] }>();
 
 const { serverViews, startServer, stopServer, restartServer, showServerLog } = useAppStore();
@@ -89,7 +89,11 @@ function keyPressed(event: KeyboardEvent): void {
 }
 
 function pressedElsewhere(event: PointerEvent): void {
-  if (!(event.target instanceof Node && panel.value?.contains(event.target) === true)) {
+  const target = event.target;
+  const inside =
+    target instanceof Node &&
+    (panel.value?.contains(target) === true || props.opener.contains(target));
+  if (!inside) {
     emit("close");
   }
 }

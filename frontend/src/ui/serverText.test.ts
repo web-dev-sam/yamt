@@ -91,6 +91,7 @@ test("rule 3: the actions that apply per state", () => {
     "start",
     "restart",
   ]);
+  expect(serverActions({ kind: "failed", reason: { kind: "noHost" } })).toEqual([]);
   expect(serverActions({ kind: "notInstalled", hint: TS_HINT })).toEqual([]);
 });
 

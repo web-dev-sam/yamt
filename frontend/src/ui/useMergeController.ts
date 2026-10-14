@@ -27,6 +27,7 @@ export type {
   FormatOutcome,
   MergeSummary,
   Preferences,
+  ProblemCounts,
   ResultSnapshot,
 } from "../editor";
 

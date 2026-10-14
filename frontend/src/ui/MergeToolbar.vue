@@ -16,7 +16,7 @@ import { useAppStore } from "./store";
 import { summaryLabel } from "./summaryLabel";
 import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
 import ToolbarMenu from "./ToolbarMenu.vue";
-import type { Direction, MergeHandle, MergeSummary } from "./useMergeController";
+import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
 
 type IconButton = {
   readonly label: string;
@@ -29,7 +29,7 @@ type IconButton = {
 const props = defineProps<{
   summary: MergeSummary | null;
   path: string;
-  problems: MergeHandle["problems"]["value"];
+  problems: ProblemCounts | null;
 }>();
 const emit = defineEmits<{
   move: [direction: Direction];

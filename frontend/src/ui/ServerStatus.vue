@@ -5,19 +5,20 @@ import TriangleAlert from "~icons/lucide/triangle-alert";
 
 import type { Point } from "./menuPosition";
 import ServerMenu from "./ServerMenu.vue";
+import { menuAfterClick } from "./serverMenuToggle";
 import { dotKind, formatNote, problemsTitle, stateLine, type DotKind } from "./serverText";
 import { useAppStore } from "./store";
-import type { MergeHandle } from "./useMergeController";
+import type { ProblemCounts } from "./useMergeController";
 
-type OpenMenu = { readonly name: string; readonly at: Point };
+type OpenMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
 
 const props = defineProps<{
   path: string | null;
-  problems: MergeHandle["problems"]["value"];
+  problems: ProblemCounts | null;
 }>();
 
 const DOT_CLASSES: Readonly<Record<DotKind, string>> = {
-  running: "bg-success-border",
+  running: "bg-success-signal",
   busy: "bg-fg-muted",
   stopped: "border border-fg-muted",
   problem: "bg-problem-error",
@@ -45,7 +46,11 @@ const note = computed(() =>
 function openMenu(name: string, event: MouseEvent): void {
   if (event.currentTarget instanceof HTMLElement) {
     const { left, bottom } = event.currentTarget.getBoundingClientRect();
-    menu.value = { name, at: { x: left, y: bottom } };
+    menu.value = menuAfterClick(menu.value, {
+      name,
+      at: { x: left, y: bottom },
+      opener: event.currentTarget,
+    });
   }
 }
 
@@ -88,7 +93,13 @@ function closeMenu(): void {
         <span class="size-2 shrink-0 rounded-full" :class="button.dot" aria-hidden="true" />
         {{ button.name }}
       </button>
-      <ServerMenu v-if="menu !== null" :name="menu.name" :at="menu.at" @close="closeMenu" />
+      <ServerMenu
+        v-if="menu !== null"
+        :name="menu.name"
+        :at="menu.at"
+        :opener="menu.opener"
+        @close="closeMenu"
+      />
     </template>
   </div>
 </template>
