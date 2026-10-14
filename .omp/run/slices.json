@@ -1,19 +1,21 @@
 {
-  "LspDetectR1": {
+  "LspStatusR1": {
     "owned": [
-      "frontend/src/lsp/internal/detect.ts",
-      "frontend/src/lsp/internal/detect.test.ts",
-      "frontend/src/lsp/internal/presets.ts",
-      "frontend/src/lsp/internal/presets.test.ts",
-      "frontend/src/lsp/internal/packageManager.ts",
-      "frontend/src/lsp/internal/packageManager.test.ts",
-      "frontend/src/lsp/internal/added.ts",
-      "frontend/src/lsp/internal/added.test.ts",
-      "frontend/src/lsp/internal/handshake.ts",
-      "frontend/src/lsp/internal/uri.ts",
-      "frontend/src/lsp/internal/uri.test.ts",
-      "frontend/src/lsp/index.ts",
-      "frontend/src/lsp/AGENTS.md"
+      "frontend/src/ui/ServerStatus.vue",
+      "frontend/src/ui/ServerMenu.vue",
+      "frontend/src/ui/ServerLogView.vue",
+      "frontend/src/ui/serverText.ts",
+      "frontend/src/ui/serverText.test.ts",
+      "frontend/src/ui/servers.ts",
+      "frontend/src/ui/servers.test.ts",
+      "frontend/src/ui/screen.ts",
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/MergeToolbar.vue",
+      "frontend/src/ui/useMergeController.ts",
+      "frontend/src/style.css",
+      "frontend/src/ui/logFollow.ts",
+      "frontend/src/ui/logFollow.test.ts"
     ]
   }
 }
