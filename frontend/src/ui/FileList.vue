@@ -1,19 +1,42 @@
 <script setup lang="ts">
-import { computed, shallowRef, useTemplateRef } from "vue";
+import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import Check from "~icons/lucide/check";
+import ListIcon from "~icons/lucide/list";
+import ListTree from "~icons/lucide/list-tree";
 
 import type { FileEntry } from "../ipc";
 import { fileIcon } from "./fileIcon";
+import { createFileListMode } from "./fileListMode";
+import { folderPaths, treeRows } from "./fileTree";
+import FileTree from "./FileTree.vue";
 
-defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
 const emit = defineEmits<{ select: [path: string] }>();
 
 const list = useTemplateRef<HTMLElement>("list");
 const handle = useTemplateRef<HTMLDivElement>("handle");
 const width = shallowRef<number | null>(null);
+const { mode, toggle } = createFileListMode();
+const closed = shallowRef<ReadonlySet<string>>(new Set());
 let grabOffset = 0;
 
 const widthStyle = computed(() => (width.value === null ? {} : { width: `${width.value}px` }));
+const rows = computed(() => treeRows(props.files, closed.value));
+const viewButton = computed(() =>
+  mode.value === "list"
+    ? { icon: ListIcon, label: "View as tree" }
+    : { icon: ListTree, label: "View as list" },
+);
+
+watch(
+  () => props.active,
+  (path) => {
+    const holding = path === null ? [] : folderPaths(path);
+    if (holding.some((folder) => closed.value.has(folder))) {
+      closed.value = new Set([...closed.value].filter((folder) => !holding.includes(folder)));
+    }
+  },
+);
 
 function startResize(event: PointerEvent): void {
   event.preventDefault();
@@ -28,6 +51,14 @@ function resize(event: PointerEvent): void {
     width.value = event.clientX - grabOffset - list.value.getBoundingClientRect().left;
   }
 }
+
+function toggleFolder(path: string): void {
+  const next = new Set(closed.value);
+  if (!next.delete(path)) {
+    next.add(path);
+  }
+  closed.value = next;
+}
 </script>
 
 <template>
@@ -36,8 +67,28 @@ function resize(event: PointerEvent): void {
     class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col rounded-island bg-panel pb-1"
     :style="widthStyle"
   >
-    <h2 class="px-3 py-2 font-semibold">Files</h2>
+    <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
+      <h2 class="font-semibold">Files</h2>
+      <button
+        type="button"
+        :title="viewButton.label"
+        :aria-label="viewButton.label"
+        class="rounded p-1.5 hover:bg-hover"
+        @mousedown.prevent
+        @click="toggle"
+      >
+        <component :is="viewButton.icon" class="size-4" aria-hidden="true" />
+      </button>
+    </div>
+    <FileTree
+      v-if="mode === 'tree'"
+      :rows="rows"
+      :active="active"
+      @select="emit('select', $event)"
+      @toggle="toggleFolder"
+    />
     <ul
+      v-else
       role="listbox"
       aria-label="Conflicted files"
       class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-scroller"

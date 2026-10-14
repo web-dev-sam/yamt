@@ -126,14 +126,14 @@ import Xsl from "~icons/vscode-icons/file-type-xsl";
 import Yaml from "~icons/vscode-icons/file-type-yaml";
 import Yarn from "~icons/vscode-icons/file-type-yarn";
 
-type IconTable = Readonly<Record<string, Component>>;
-type IconRow = readonly [icon: Component, keys: readonly string[]];
+type IconTable<T> = Readonly<Record<string, T>>;
+export type IconRow<T = Component> = readonly [icon: T, keys: readonly string[]];
 
-function iconTable(rows: readonly IconRow[]): IconTable {
+export function iconTable<T>(rows: readonly IconRow<T>[]): IconTable<T> {
   return Object.fromEntries(rows.flatMap(([icon, keys]) => keys.map((key) => [key, icon])));
 }
 
-function lookup(table: IconTable, key: string): Component | undefined {
+export function lookup<T>(table: IconTable<T>, key: string): T | undefined {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
@@ -274,7 +274,7 @@ export const ICON_ROWS: Readonly<{ byName: readonly IconRow[]; byExtension: read
     ],
   };
 
-const ICONS: Readonly<{ byName: IconTable; byExtension: IconTable }> = {
+const ICONS: Readonly<{ byName: IconTable<Component>; byExtension: IconTable<Component> }> = {
   byName: iconTable(ICON_ROWS.byName),
   byExtension: iconTable(ICON_ROWS.byExtension),
 };
