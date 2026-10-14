@@ -60,7 +60,7 @@ function fileText(eol: Eol, block: readonly string[]): string {
   return [...before, ...block, ...after, ""].join(separator(eol));
 }
 
-function chunkRecord(): unknown {
+function chunkRecord(middleLen: number): unknown {
   return {
     chunk: {
       id: 0,
@@ -69,7 +69,7 @@ function chunkRecord(): unknown {
       local: { start: BLOCK.start, len: 2 },
       remote: { start: BLOCK.start, len: 4 },
     },
-    middle: BLOCK,
+    middle: { start: BLOCK.start, len: middleLen },
     words: {
       chunk: 0,
       local: { changed: [], removed_at: [] },
@@ -84,17 +84,17 @@ function chunkRecord(): unknown {
   };
 }
 
-async function conflicted(eol: Eol = "Lf"): Promise<Merge> {
+async function conflicted(eol: Eol = "Lf", middleLen = BLOCK.len): Promise<Merge> {
   const data = await loadFixture("synthetic.ts", {
     "synthetic.json": {
       path: "synthetic.ts",
       deleted: null,
-      middle: { kind: "Stages", text: fileText(eol, numbered("block", BLOCK.len)) },
+      middle: { kind: "Stages", text: fileText(eol, numbered("block", middleLen)) },
       local: fileText(eol, numbered("ours", 2)),
       remote: fileText(eol, numbered("theirs", 4)),
       eol,
       disk_version: 0,
-      chunks: [chunkRecord()],
+      chunks: [chunkRecord(middleLen)],
     },
   });
   const field = chunkField(data.chunks);
@@ -251,6 +251,55 @@ test("rule 5: reindenting the line before an open block and its first line leave
   expect(blockText(merge)).toBe("  block 1\nblock 2\nblock 3\n");
 });
 
+test.each([
+  {
+    name: "(A) a line split before the block, its first line reindented",
+    middleLen: 3,
+    old: "line 199\nblock 1\n",
+    next: "line\n  199\n  block 1\n",
+    block: "  block 1\nblock 2\nblock 3\n",
+  },
+  {
+    name: "(B) two lines joined before a one-line block, the block reindented",
+    middleLen: 1,
+    old: "line 198\nline 199\nblock 1\n",
+    next: "line 198 line 199\n  block 1\n",
+    block: "  block 1\n",
+  },
+  {
+    name: "(B2) two lines joined before a two-line block, its first line reindented",
+    middleLen: 2,
+    old: "line 198\nline 199\nblock 1\n",
+    next: "line 198 line 199\n  block 1\n",
+    block: "  block 1\nblock 2\n",
+  },
+  {
+    name: "(C) a blank line added after the block's reindented last line",
+    middleLen: 3,
+    old: "block 3\nline 203\n",
+    next: "  block 3\n\nline 203\n",
+    block: "block 1\nblock 2\n  block 3\n",
+  },
+])(
+  "rule 5: $name keeps the block pending on both sides with its own lines, its arrows, in one undo step",
+  async ({ middleLen, old, next, block }) => {
+    const merge = await conflicted("Lf", middleLen);
+    const { pane } = merge;
+    const sent = paneText(pane.state);
+    const result = sent.replace(old, next);
+
+    await formatting(pane, (text) => ({ kind: "formatted", server: SERVER, sent: text, result }));
+
+    expect(result).not.toBe(sent);
+    expect(paneText(pane.state)).toBe(result);
+    expect(status(merge)).toBe("pending pending");
+    expect(blockText(merge)).toBe(block);
+    expect(arrows(merge, "local")).toEqual(["replace"]);
+    expect(arrows(merge, "remote")).toEqual(["replace"]);
+    expect(undoDepth(pane.state)).toBe(1);
+  },
+);
+
 test("rule 5: a formatter's LF answer to a CRLF Result is split on every line break, and the Result stays CRLF", async () => {
   const merge = await conflicted("CrLf");
   const { pane } = merge;
@@ -405,6 +454,35 @@ test.each<Eol>(["Lf", "CrLf"])(
 
       expect(paneText(pane.state)).toBe(result);
       expect(pane.state.doc.lines).toBe(result.split(separator(eol)).length);
+    }
+  },
+);
+
+test.each<Eol>(["Lf", "CrLf"])(
+  "rule 5: a result differing mostly in whitespace, lines split and joined, is applied exactly (%s)",
+  async (eol) => {
+    let seed = 7;
+    function random(below: number): number {
+      seed = (seed * 48_271) % 2_147_483_647;
+      return seed % below;
+    }
+    const words = ["a", "  a", "b c", "b", "c", "\tb c", "", "  ", "d;", " d ;"];
+    function lines(): string[] {
+      return Array.from({ length: random(12) + 1 }, () => words[random(words.length)] ?? "");
+    }
+    const lineBreak = eol === "CrLf" ? [EditorState.lineSeparator.of("\r\n")] : [];
+
+    for (let round = 0; round < 300; round += 1) {
+      const old = lines();
+      const next = old.flatMap((line) => (random(3) === 0 ? lines().slice(0, random(3)) : [line]));
+      const pane = new FakePane(
+        EditorState.create({ doc: old.join(separator(eol)), extensions: lineBreak }),
+      );
+      const result = next.join(separator(eol));
+
+      await formatting(pane, (sent) => ({ kind: "formatted", server: SERVER, sent, result }));
+
+      expect(paneText(pane.state)).toBe(result);
     }
   },
 );

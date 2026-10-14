@@ -70,6 +70,31 @@ function lineChanges(doc: Text, { from, to, lines }: LineEdit): ChangeSpec[] {
   return [...changes, extraLines(doc, extra, paired > 0)];
 }
 
+function keyedEdits(doc: Text, { from, to, lines }: LineEdit): LineEdit[] {
+  const oldKeys = Array.from({ length: to - from }, (_, index) =>
+    doc.line(from + index + 1).text.replaceAll(/\s+/g, ""),
+  );
+  const nextKeys = lines.map((line) => line.replaceAll(/\s+/g, ""));
+  const pieces: LineEdit[] = [];
+  let oldAt = 0;
+  let nextAt = 0;
+  for (const unmatched of lineDiff(oldKeys, nextKeys)) {
+    const nextFrom = nextAt + unmatched.from - oldAt;
+    const nextTo = nextFrom + unmatched.lines.length;
+    pieces.push(
+      { from: from + oldAt, to: from + unmatched.from, lines: lines.slice(nextAt, nextFrom) },
+      {
+        from: from + unmatched.from,
+        to: from + unmatched.to,
+        lines: lines.slice(nextFrom, nextTo),
+      },
+    );
+    oldAt = unmatched.to;
+    nextAt = nextTo;
+  }
+  return [...pieces, { from: from + oldAt, to, lines: lines.slice(nextAt) }];
+}
+
 export async function formatResult(
   open: Pick<OpenDocument, "format">,
   pane: () => ResultPane,
@@ -89,7 +114,9 @@ export async function formatResult(
   if (edits.length === 0) {
     return { kind: "unchanged", server };
   }
-  const changes = edits.flatMap((edit) => lineChanges(doc, edit));
+  const changes = edits
+    .flatMap((edit) => keyedEdits(doc, edit))
+    .flatMap((piece) => lineChanges(doc, piece));
   pane().dispatch({ changes, userEvent: "yamt.format" });
   return { kind: "formatted", server };
 }
