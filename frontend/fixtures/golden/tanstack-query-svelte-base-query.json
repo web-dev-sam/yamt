@@ -40,6 +40,14 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "Markers",
+        "open": "<<<<<<< ours",
+        "between": [
+          "======="
+        ],
+        "close": ">>>>>>> theirs"
       }
     }
   ],

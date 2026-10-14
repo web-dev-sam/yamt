@@ -7,6 +7,7 @@ export const commands = {
 	listFiles: () => typedError<FileList, IpcError>(__TAURI_INVOKE("list_files")),
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
 	finishFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("finish_file", { path, text, diskVersion })),
+	saveFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("save_file", { path, text, diskVersion })),
 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
@@ -164,6 +165,7 @@ export type MergeChunk = {
 	chunk: Chunk,
 	middle: LineRange<MiddleLine>,
 	words: WordChanges,
+	waiting: Waiting,
 };
 
 /**  Where the middle pane starts: yamt's merge of the stages (base), or the file as found on disk. */
@@ -221,6 +223,18 @@ export type StoredSettings = {
 export type Theme = "dark" | "light";
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
+
+/**  What Save writes for this change while a side of it still waits (plan §2 #69). */
+export type Waiting = 
+/**  One side changed these lines, or both the same way: written applied, as git wrote it. */
+{ kind: "SideLines" } | 
+/**
+ *  A conflict: `open`, the local section, `between` (base section if any, then the separator),
+ *  the remote section, `close`. Lines without line breaks.
+ */
+{ kind: "Markers"; open: string; between: string[]; close: string } | 
+/**  A region yamt could not place: written as the Result shows it. */
+{ kind: "AsShown" };
 
 /**  Where one chunk's sides differ from base. */
 export type WordChanges = {

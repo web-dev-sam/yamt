@@ -55,6 +55,15 @@ pub(crate) enum Seen {
     ViewFromDisk(OnDisk),
 }
 
+/// The file as this run of yamt found it at open: what Reset puts back (plan §2 #66).
+pub(crate) enum AtOpen {
+    /// What git wrote, untouched.
+    Untouched(OnDisk),
+    /// Different from what git wrote.
+    Changed(OnDisk),
+    Unread,
+}
+
 /// How a change to a file that is still present is settled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MarkerRule {
@@ -84,6 +93,37 @@ impl Seen {
         match self {
             Seen::GitOutput => false,
             Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
+        }
+    }
+
+    /// What yamt has seen once it wrote `written` itself; the view stays.
+    pub(crate) fn after_own_write(&self, written: OnDisk) -> Seen {
+        match self {
+            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(written),
+            Seen::ViewFromStages(_) | Seen::GitOutput => Seen::ViewFromStages(written),
+        }
+    }
+}
+
+impl AtOpen {
+    /// The regular file, or its absence, that reset writes back; `None` when only git can
+    /// rebuild the entry (a link, a submodule, something else, or unread at open).
+    pub(crate) fn regular_entry(&self) -> Option<&OnDisk> {
+        match self {
+            AtOpen::Untouched(disk) | AtOpen::Changed(disk) => match disk {
+                OnDisk::File(_) | OnDisk::Missing => Some(disk),
+                OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => None,
+            },
+            AtOpen::Unread => None,
+        }
+    }
+
+    /// What yamt has seen once reset put `disk` back: git's output selects the stages view,
+    /// anything else the disk view.
+    pub(crate) fn seen_after_reset(&self, disk: OnDisk) -> Seen {
+        match self {
+            AtOpen::Untouched(_) => Seen::ViewFromStages(disk),
+            AtOpen::Changed(_) | AtOpen::Unread => Seen::ViewFromDisk(disk),
         }
     }
 }

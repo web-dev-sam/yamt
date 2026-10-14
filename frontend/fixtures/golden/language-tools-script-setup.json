@@ -56,6 +56,9 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "SideLines"
       }
     },
     {
@@ -109,6 +112,9 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "SideLines"
       }
     },
     {
@@ -148,6 +154,9 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "SideLines"
       }
     },
     {
@@ -392,6 +401,14 @@
             }
           ]
         }
+      },
+      "waiting": {
+        "kind": "Markers",
+        "open": "<<<<<<< ours",
+        "between": [
+          "======="
+        ],
+        "close": ">>>>>>> theirs"
       }
     }
   ],

@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-pub(crate) const DEFAULT_MARKER_SIZE: usize = 7;
+/// git's `conflict-marker-size` when the attribute is not set (gitattributes(5)).
+pub const DEFAULT_MARKER_SIZE: usize = 7;
 
 /// A stretch of a worktree file, as line indexes into `split_lines` of its bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]

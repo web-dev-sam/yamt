@@ -4,7 +4,7 @@ use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
 
 use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
-use crate::disk::{MarkerRule, Seen, read_on_disk, warn_unread};
+use crate::disk::{AtOpen, MarkerRule, Seen, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
 use crate::session::{Content, FileState, FileStatus, MergeSession};
 use crate::side_names::read_side_names;
@@ -60,12 +60,28 @@ fn open_files(
     let paths = files.iter().map(|file| file.path.as_path());
     let looks: Vec<(&Path, StartLook)> = paths.zip(looks).collect();
     let untouched = check.untouched(&looks);
-    for (file, untouched) in files.iter_mut().zip(untouched) {
-        if !untouched {
-            file.seen = Seen::GitOutput;
-        }
+    let mut checked = Vec::with_capacity(files.len());
+    for (file, untouched) in files.into_iter().zip(untouched) {
+        checked.push(if untouched {
+            file
+        } else {
+            changed_at_open(file)
+        });
     }
-    Ok(files)
+    Ok(checked)
+}
+
+/// `file` as read at open, once found different from what git wrote.
+fn changed_at_open(file: FileState) -> FileState {
+    let at_open = match file.at_open {
+        AtOpen::Untouched(disk) | AtOpen::Changed(disk) => AtOpen::Changed(disk),
+        AtOpen::Unread => AtOpen::Unread,
+    };
+    FileState {
+        seen: Seen::GitOutput,
+        at_open,
+        ..file
+    }
 }
 
 fn open_file(
@@ -81,7 +97,7 @@ fn open_file(
         Ok(disk) => disk,
         Err(error) => {
             warn_unread(&path.to_string_lossy(), &error);
-            let file = file_state(path, stages, stored, attributes, Seen::GitOutput);
+            let file = file_state(path, stages, stored, attributes, AtOpen::Unread);
             return Ok((file, StartLook::Changed));
         }
     };
@@ -97,8 +113,7 @@ fn open_file(
         disk: &disk,
     };
     let look = check.look(&start, blobs)?;
-    let seen = Seen::ViewFromStages(disk);
-    let file = file_state(path, stages, stored, attributes, seen);
+    let file = file_state(path, stages, stored, attributes, AtOpen::Untouched(disk));
     Ok((file, look))
 }
 
@@ -107,9 +122,13 @@ fn file_state(
     stages: CapturedStages,
     stored: Stored,
     attributes: &Attributes,
-    seen: Seen,
+    at_open: AtOpen,
 ) -> FileState {
     let content = content(&path, stored);
+    let seen = match &at_open {
+        AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
+        AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
+    };
     FileState {
         rule: marker_rule(&content, attributes),
         path,
@@ -119,6 +138,7 @@ fn file_state(
         marker_size: attributes.marker_size,
         seen,
         settled: None,
+        at_open,
     }
 }
 

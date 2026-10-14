@@ -6,6 +6,7 @@ use crate::decode::{Eol, MAX_TEXT_BYTES, detect_eol, is_binary};
 use crate::disk::{DiskVersion, OnDisk};
 use crate::seed::{Seeded, seed};
 use crate::sides::Side;
+use crate::waiting::{MarkerStyle, Waiting};
 
 /// 0-based line of the middle pane's starting text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Type)]
@@ -16,6 +17,7 @@ pub struct MergeChunk {
     pub chunk: Chunk,
     pub middle: LineRange<MiddleLine>,
     pub words: WordChanges,
+    pub waiting: Waiting,
 }
 
 /// Why the file on disk cannot be shown as the middle text.
@@ -64,20 +66,24 @@ pub fn merge_data(
     local: &str,
     remote: &str,
     deleted: Option<Side>,
+    style: &MarkerStyle,
     disk_version: DiskVersion,
 ) -> FileMergeData {
     let chunks = compute_chunks(base, local, remote, &Options::default());
     let words = word_changes(base, local, remote, &chunks);
+    let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
     let mut merge_chunks = Vec::with_capacity(chunks.len());
     for (chunk, words) in chunks.into_iter().zip(words) {
         let middle = LineRange {
             start: MiddleLine(chunk.base.start.0),
             len: chunk.base.len,
         };
+        let waiting = style.waiting(&chunk, &base_lines);
         merge_chunks.push(MergeChunk {
             chunk,
             middle,
             words,
+            waiting,
         });
     }
     FileMergeData {

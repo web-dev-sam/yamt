@@ -82,6 +82,14 @@
             }
           ]
         }
+      },
+      "waiting": {
+        "kind": "Markers",
+        "open": "<<<<<<< ours",
+        "between": [
+          "======="
+        ],
+        "close": ">>>>>>> theirs"
       }
     },
     {
@@ -115,6 +123,9 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "SideLines"
       }
     },
     {
@@ -159,6 +170,9 @@
           ],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "SideLines"
       }
     },
     {
@@ -192,6 +206,14 @@
           "changed": [],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "Markers",
+        "open": "<<<<<<< ours",
+        "between": [
+          "======="
+        ],
+        "close": ">>>>>>> theirs"
       }
     },
     {
@@ -1542,6 +1564,14 @@
           ],
           "removed_at": []
         }
+      },
+      "waiting": {
+        "kind": "Markers",
+        "open": "<<<<<<< ours",
+        "between": [
+          "======="
+        ],
+        "close": ">>>>>>> theirs"
       }
     }
   ],

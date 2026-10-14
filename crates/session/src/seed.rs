@@ -6,6 +6,7 @@ use crate::decode::{Eol, detect_eol};
 use crate::locate::{Located, Maps, line_number, side_view};
 use crate::markers::{Piece, parse, split_lines};
 use crate::merge_data::{MergeChunk, MiddleLine, Texts};
+use crate::waiting::{Waiting, block_markers};
 
 /// The middle pane's starting text built from a worktree file, and its open conflicts.
 pub(crate) struct Seeded {
@@ -24,6 +25,7 @@ struct MiddleText<'a> {
     previous_base_end: u32,
     chunks: Vec<Chunk>,
     ranges: Vec<LineRange<MiddleLine>>,
+    waiting: Vec<Waiting>,
 }
 
 pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
@@ -41,6 +43,7 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
         previous_base_end: 0,
         chunks: Vec::new(),
         ranges: Vec::new(),
+        waiting: Vec::new(),
     };
     let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
     for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
@@ -48,11 +51,16 @@ pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
             Piece::Settled(lines) => middle.push_disk_lines(lines),
             Piece::Block(block) => {
                 let located = maps.block(block, ours_start, theirs_start);
-                middle.push_conflict(&located, maps.base(&located), &block.whole);
+                let waiting = if located.exact {
+                    block_markers(&disk_lines, block)
+                } else {
+                    Waiting::AsShown
+                };
+                middle.push_conflict(&located, maps.base(&located), &block.whole, waiting);
             }
             Piece::Raw(lines) => {
                 let located = maps.raw(ours_start, theirs_start);
-                middle.push_conflict(&located, maps.base(&located), lines);
+                middle.push_conflict(&located, maps.base(&located), lines, Waiting::AsShown);
             }
         }
     }
@@ -91,6 +99,7 @@ impl MiddleText<'_> {
         located: &Located,
         base: LineRange<BaseLine>,
         disk_lines: &Range<usize>,
+        waiting: Waiting,
     ) {
         let base = self.after_previous_base(base);
         let start = self.line_count;
@@ -110,6 +119,7 @@ impl MiddleText<'_> {
             local: located.local,
             remote: located.remote,
         });
+        self.waiting.push(waiting);
     }
 
     /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
@@ -126,11 +136,13 @@ impl MiddleText<'_> {
     fn seeded(self, texts: &Texts) -> Seeded {
         let words = word_changes(&texts.base, &texts.local, &texts.remote, &self.chunks);
         let mut chunks = Vec::with_capacity(self.chunks.len());
-        for ((chunk, middle), words) in self.chunks.into_iter().zip(self.ranges).zip(words) {
+        let placed = self.chunks.into_iter().zip(self.ranges).zip(self.waiting);
+        for (((chunk, middle), waiting), words) in placed.zip(words) {
             chunks.push(MergeChunk {
                 chunk,
                 middle,
                 words,
+                waiting,
             });
         }
         Seeded {

@@ -16,6 +16,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         list_files,
         load_file,
         finish_file,
+        save_file,
         reset_file,
         describe_file,
         take_side,
@@ -73,6 +74,18 @@ fn finish_file(
     disk_version: DiskVersion,
 ) -> Result<WriteReply, IpcError> {
     Ok(lock(&state).finish(path, text, disk_version)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn save_file(
+    state: State<'_, SessionState>,
+    path: &str,
+    text: &str,
+    disk_version: DiskVersion,
+) -> Result<WriteReply, IpcError> {
+    Ok(lock(&state).save(path, text, disk_version)?)
 }
 
 #[tauri::command]
@@ -307,6 +320,26 @@ mod tests {
         let worktree = fs::read_to_string(window.repo.path().join(CRLF_PATH)).unwrap();
         assert!(worktree.contains("<<<<<<<"), "{worktree}");
         assert_eq!(window.exit_on_close(), Exit::Unresolved);
+    }
+
+    #[test]
+    fn save_file_writes_the_text_and_leaves_the_file_listed_conflicted() {
+        let window = open_window();
+        let unmerged_before = window.unmerged();
+        let text = "a\r\nsaved\r\n";
+        let args = json!({ "path": CRLF_PATH, "text": text, "diskVersion": 0 });
+
+        let saved = window.invoke("save_file", args);
+
+        let unresolved = ["Unresolved", "Unresolved", "Unresolved"];
+        assert_eq!(saved, Ok(written(unresolved)));
+        assert_eq!(
+            fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
+            text.as_bytes()
+        );
+        assert_eq!(window.unmerged(), unmerged_before);
+        let listed = json!({ "files": entries(unresolved), "disk_changes": [] });
+        assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
     }
 
     #[test]

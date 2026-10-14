@@ -6,13 +6,14 @@ use yamt_gitio::Repo;
 
 use crate::decode::UnsupportedReason;
 use crate::disk::{
-    DiskChange, DiskResult, DiskVersion, MarkerRule, OnDisk, Seen, Settlement, read_on_disk,
-    settlement, stage, warn_unread,
+    AtOpen, DiskChange, DiskResult, DiskVersion, MarkerRule, OnDisk, Seen, Settlement,
+    read_on_disk, settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
 use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
 use crate::stages::CapturedStages;
+use crate::waiting::MarkerStyle;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
@@ -65,6 +66,8 @@ pub(crate) struct FileState {
     pub(crate) rule: MarkerRule,
     pub(crate) seen: Seen,
     pub(crate) settled: Option<Settled>,
+    /// Set once by `open`, never written again.
+    pub(crate) at_open: AtOpen,
 }
 
 /// The latest settle of a file's disk change.
@@ -180,6 +183,7 @@ impl MergeSession {
                 &texts.local,
                 &texts.remote,
                 texts.deleted,
+                &file.marker_style(),
                 version,
             )),
         }
@@ -252,6 +256,18 @@ impl FileState {
         self.settled
             .as_ref()
             .map_or(DiskVersion(0), |settled| settled.version)
+    }
+
+    /// The marker lines git wrote into this file, as found at open.
+    fn marker_style(&self) -> MarkerStyle {
+        match &self.at_open {
+            AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
+                MarkerStyle::found_in(bytes, self.marker_size)
+            }
+            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
+                MarkerStyle::fallback(self.marker_size)
+            }
+        }
     }
 
     pub(crate) fn read_disk(&self, repo: &Repo) -> Result<OnDisk> {

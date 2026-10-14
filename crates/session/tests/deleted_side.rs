@@ -144,22 +144,22 @@ fn a_deleted_file_whose_other_side_or_base_is_not_text_keeps_its_deleted_reason(
 }
 
 #[test]
-fn keep_or_delete_then_reset_brings_the_stages_back_and_leaves_the_worktree() {
+fn keep_or_delete_then_reset_brings_the_stages_and_the_file_at_open_back() {
     let dir = deleted_on_one_side();
     let mut session = MergeSession::open(dir.path()).unwrap();
     let before = unmerged(&dir);
     for side in [Side::Remote, Side::Local] {
         session.take(LOCAL_DELETED, side, DiskVersion(0)).unwrap();
-        let worktree_after_take = fs::read(dir.path().join(LOCAL_DELETED)).ok();
         assert!(!unmerged(&dir).contains(LOCAL_DELETED), "{side:?}");
         git_ok(dir.path(), &["update-index", "--clear-resolve-undo"]).unwrap();
 
         session.reset(LOCAL_DELETED, DiskVersion(0)).unwrap();
 
         assert_eq!(unmerged(&dir), before, "{side:?}");
-        let worktree = fs::read(dir.path().join(LOCAL_DELETED)).ok();
-        assert_eq!(worktree, worktree_after_take, "{side:?}");
+        let worktree = fs::read(dir.path().join(LOCAL_DELETED)).unwrap();
+        assert_eq!(worktree, KEPT, "{side:?}");
         assert_eq!(session.files()[0].status, FileStatus::Unresolved);
+        assert_eq!(session.refresh().unwrap().disk_changes, [], "{side:?}");
     }
 }
 
