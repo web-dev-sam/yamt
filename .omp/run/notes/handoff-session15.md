@@ -13,46 +13,17 @@ round with the rule "formatting never touches a change that still waits, nor its
 
 ## State at handoff
 
-- Rows 1–8, 3b, 6b, 9a: **done** (built, both reviews, fix rounds, re-checks pass). Last code commit before this note:
-  `1d31e9d` (setup); docs after it.
-- Row 9 (`3.Y-setup`, `1d31e9d`): **review**.
-  - Boundary review **done**: verdict fail, saved verbatim in `.omp/run/notes/LspSetupBoundary.md` (not yet triaged
-    or logged to findings.jsonl). Blocks: Escape is told apart from No through a `dismissals` counter in
-    serverSetup.ts instead of by asking.ts (fix: asking answers yes / no / dismissed; needs a grant on
-    `ui/asking.ts`); `projectLabel` and "not installed" copied across question.ts, LanguageServerSettings.vue and
-    serverText.ts (fix: one home in serverText.ts). Shoulds: start/focus ordering split over main.ts, App.vue and
-    serverSetup.ts; Don't start depends on `setSpecs([])` and a private lsp carry-over (fix: a named lsp operation);
-    `settingsActions(state)` built twice in store.ts. Read the file for the rest.
-  - Correctness review **done**: verdict fail, saved verbatim in `.omp/run/notes/LspSetupCorrectness.md` (not yet
-    triaged or logged). Blocks: `answer()` applies the new choice even when `setServerAnswer` fails, so the servers
-    and the stored answer disagree and the next focus undoes the click (fix: apply what the settings now hold, as
-    `changeAdded` does); the same Escape/`dismissals` finding as the boundary review (one fix covers both). Shoulds:
-    a failed start look leaves `started` false, so focus never looks again (fix: set `started` in a `finally`);
-    `parseAddedServer` accepts `d.ts`, which `extensionOf` can never match (fix: refuse inner dots). The reviewer
-    did not get the mutants survivors.
-  - `just mutants 0b4c487` finished: `target/mutants-setup.log` (serverSetup.ts 9, settings.ts 14, store.ts 3,
-    question.ts 1 survivors over the whole files). Filter them to the lines changed in `1d31e9d` and hand them to the
-    fix round (and its correctness re-check); the implementer judged 11 `serverSetup.ts` survivors unobservable
-    (`LspSetup.md`).
-- Row 10 (final run): **planned**. Brief written: `docs/slices/briefs/3.YZ-verify.md` (verifier alone, OR10).
-- `.omp/run/slices.json` still lists `LspSetup` (dead task): rewrite it with only live names before the next spawn.
+- Rows 1–9, 3b, 6b, 9a: **done** (built, both reviews, fix rounds, re-checks pass). Row 9's round 1 is `2ed501d`
+  (#966–#976; survivors #977–#981 dropped; notes `LspSetup*.md`). Docs, map (`Verified against commit: 2ed501d`) and
+  the final brief are current.
+- Row 10 (final run): **running** as `LspVerify` (verifier alone). If its result did not arrive, re-spawn it with
+  `docs/slices/briefs/3.YZ-verify.md` and an empty `.omp/run/slices.json`.
 
 ## Next steps
 
-1. Re-hydrate (`skill://orchestrate` §0). Both setup reviews and the mutants run are finished (above); do not
-   re-spawn them.
-2. Triage both review files (OR12), log every finding to findings.jsonl, then write
-   `docs/slices/briefs/3.Y-setup-rework-1.md` with the blocks verbatim. Fix round for row 9 owns `ui/serverSetup.ts`,
-   `LanguageServerSettings.vue`, `question.ts`, `QuestionDialog.vue`, `SettingsView.vue`, `App.vue`, `store.ts`,
-   `settings.ts`, `main.ts`, `scripts/lsp-repo.sh`, plus a grant on `ui/asking.ts` (Escape fix), `ui/serverText.ts`
-   (one home for the words) and, if the Don't start should is promoted, `lsp/` for a named halt operation. Re-check
-   with both lenses (both raised findings), commit.
-3. Docs are already updated for the feature (architecture §3.3, §3.5, §3.6, §4, §5.1, §5.2, §5.3b; project map incl.
-   setup files, `map-check: ok`; ipc-contract; cm6-rules CM5 + dependency list; risk-register RK5/RK17;
-   rust-conventions RS5; CHANGELOG). Update the map's "Verified against commit" line and anything row 9's fix round
-   adds.
-4. Spawn the verifier with `briefs/3.YZ-verify.md` (base `16bc7f8`). Fix rounds for failures go to the owning row.
-5. Report to the owner in plain words (OR-h): what was built, the decisions taken as owner (plan #71, #952), and the
+1. Collect the final run: evidence on board row 10. `gate: fail` → a fix round for the owning row (§5 of the
+   orchestrate skill), never a new row; survivors per VF7, then OR12.
+2. Report to the owner in plain words (OR-h): what was built, the decisions taken as owner (plan #71, #952), and the
    known limits below.
 
 ## Known limits (accepted, logged; not blocks)
