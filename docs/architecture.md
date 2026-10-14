@@ -854,8 +854,9 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   public signatures beyond `&str`/`&[T]`/`&Path` parameters; a generic needs two concrete
   uses, a trait needs two implementations, else write the concrete thing; derive macros only
   (`serde`, `thiserror`, `specta`), no `macro_rules!`; iterator chains of at most three
-  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s single
-  `Mutex<MergeSession>`; no async (git subprocesses and diffs are synchronous and fast).
+  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s two `Mutex`es
+  (`MergeSession`, the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
+  diffs are synchronous and fast; the language-server host uses std threads and channels).
   Per milestone the orchestrator writes `docs/walkthroughs/M<n>.md`: what was built and the
   handful of non-obvious Rust constructs, with the reason each was chosen.
 
