@@ -12,7 +12,7 @@ The owner runs this. Publishing to GitHub is the owner's action (the safety hook
 - **Checked.** The final run passed at `a4faa91`: the full check, licences unchanged, the `.deb` builds as
   `yamt_0.3.0_amd64.deb`, `yamt --version` prints `yamt 0.3.0`, and the release binary works on the conflict and
   language-server projects (board "Release 0.3.0" row 3). CI on `main` at `2dd7675` (run 38632852557) covers all
-  product code of this release: frontend, Linux and macOS passed; Windows was still running when this was written.
+  product code of this release and passed on all three systems: frontend, ubuntu-22.04, macos-14, windows-2025.
 - **Tag.** None made. Your `fetch.prunetags` deletes local-only tags (#807), so tag and push in one command.
 
 ## Steps
