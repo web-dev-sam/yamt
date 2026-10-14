@@ -1,18 +1,4 @@
 {
-  "LspHost": {
-    "owned": [
-      "crates/lsp-host/**",
-      "crates/settings/**",
-      "src-tauri/Cargo.toml",
-      "src-tauri/src/servers.rs",
-      "src-tauri/src/settings.rs",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/AGENTS.md",
-      "scripts/arch-check.sh"
-    ]
-  },
   "LspEditor": {
     "owned": [
       "frontend/src/editor/**",
@@ -20,6 +6,19 @@
       "frontend/src/ui/useMergeController.ts",
       "frontend/src/ui/useMergeController.test.ts",
       "frontend/src/ui/MergeView.vue"
+    ]
+  },
+  "SettingsIpc": {
+    "owned": [
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/fixtureSettings.ts",
+      "frontend/src/ipc/fixtureSettings.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ui/settings.ts",
+      "frontend/src/ui/settings.test.ts",
+      "frontend/src/ui/store.test.ts"
     ]
   }
 }
