@@ -18,6 +18,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The left pane's header names what is checked out, as the right one names what is merged in:
   "Local (yours): main", or the commit's short id and subject when no branch is checked out (during a
   rebase), with the full commit message on hover.
+- Lines no change touches are collapsed behind a wavy line across all three panes and the space between
+  them, as in WebStorm's merge window: 4 lines stay visible next to each change, and each click on the
+  wave shows 4, then 8 more lines next to each change, then the rest. Hovering the wave thickens it;
+  finding text in hidden lines shows them, and a Delete, Backspace or cut on the wave line shows lines
+  instead of removing hidden ones.
+
+### Fixed
+
+- Ctrl+X with nothing selected cut two lines instead of one in the result pane on Linux.
 
 ## [0.2.0] - 2026-10-13
 

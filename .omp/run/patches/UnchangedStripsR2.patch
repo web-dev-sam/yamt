@@ -1,0 +1,40 @@
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 52d394a..f4c6326 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -26,7 +26,8 @@ import { SideFocus } from "./internal/sideFocus";
+ import { sideRunner } from "./internal/sideKeys";
+ import { showStatuses, sideStatusField } from "./internal/sideStatus";
+ import { summarize, type ChunkState, type MergeSummary } from "./internal/status";
+-import { Strips, type IconPress } from "./internal/strips";
++import type { IconPress } from "./internal/stripIcons";
++import { Strips } from "./internal/strips";
+ import { visibleLines } from "./internal/viewport";
+ 
+ export type { Direction } from "./internal/navigation";
+diff --git a/frontend/src/editor/internal/drag.ts b/frontend/src/editor/internal/drag.ts
+index ac34a73..00baa98 100644
+--- a/frontend/src/editor/internal/drag.ts
++++ b/frontend/src/editor/internal/drag.ts
+@@ -3,7 +3,7 @@ import type { ChunkAction, Reach } from "./apply";
+ import { gapArrows } from "./gap";
+ import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
+ import { isModHeld } from "./modClick";
+-import type { IconPress } from "./strips";
++import type { IconPress } from "./stripIcons";
+ 
+ type Press = IconPress & { readonly pointerId: number; readonly clientY: number };
+ 
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index c2a430b..63a44ea 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -21,8 +21,6 @@ import { LINE_HEIGHT_PX } from "./pane";
+ import type { Side } from "./side";
+ import { ACTION_WIDTH_PX, arrowRow, isCovered, type ArrowRow, type OnPress } from "./stripIcons";
+ 
+-export type { IconPress } from "./stripIcons";
+-
+ type StripPair = readonly [SVGSVGElement, SVGSVGElement];
+ type GapPanes = { readonly left: EditorView; readonly right: EditorView };
+ type PlacedArrow = { readonly arrow: Arrow; readonly y: number };
