@@ -259,7 +259,7 @@ impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ### 3.3 `session` — the state machine
 
 ```rust
-pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages, decoded content, `seen` (what the disk looked like), `settled` (last disk result + version) */ }
+pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages, decoded content, `at_open` (the entry this run found, set once, #66), `seen` (what the disk looked like), `settled` (last disk result + version) */ }
 
 pub enum Eol { Lf, CrLf, Mixed }
 pub enum FileStatus { Unresolved, Resolved }
@@ -270,7 +270,8 @@ pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported
 pub struct MiddleLine(pub u32);   // a line of the middle pane's starting text
 pub struct DiskVersion(pub u32);  // bumped by each settle of the file (plan §2 #53)
 pub enum Middle { Stages { text: String } /* base; "" for add/add */, Disk { text: String }, DiskNotText { found: NotText } }
-pub struct MergeChunk { pub chunk: Chunk, pub middle: LineRange<MiddleLine>, pub words: WordChanges }
+pub struct MergeChunk { pub chunk: Chunk, pub middle: LineRange<MiddleLine>, pub words: WordChanges, pub waiting: Waiting }
+pub enum Waiting { SideLines, Markers { open: String, between: Vec<String>, close: String }, AsShown } // what Save writes while a side waits (#69): the side applied; git's marker lines copied from the file's first block (`MarkerStyle`, size, labels, diff3 base section) or a disk block's own; the Result as shown
 pub struct FileMergeData { pub path: String, pub middle: Middle, pub local: String, pub remote: String,
                            pub deleted: Option<Side>, pub eol: Eol, pub chunks: Vec<MergeChunk>, pub disk_version: DiskVersion }
 pub enum DiskResult { Staged, MarkersLeft { conflicts: u32 }, LeftAsIs, StageFailed { message: String } }
@@ -284,9 +285,10 @@ impl MergeSession {
     pub fn files(&self) -> Vec<FileEntry>;
     pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // from the stages (base + compute_chunks), or from the disk (one Conflict per open block)
     pub fn finish(&mut self, path: &str, result: &str, v: DiskVersion) -> Result<WriteReply>; // look first; write worktree, git add, Resolved; on a failed add the worktree is put back
+    pub fn save(&mut self, path: &str, text: &str, v: DiskVersion) -> Result<WriteReply>; // finish without git add (#65/#69): look first; skips identical bytes; the own write updates `seen` only, no DiskChange, the disk version stays
     pub fn describe(&mut self, path: &str) -> Result<FileSides>;     // per side: Missing | Text{lines} | Binary/NonUtf8/TooLarge{bytes} | Link{target} | Commit{id}
     pub fn take(&mut self, path: &str, side: Side, v: DiskVersion) -> Result<WriteReply>; // look first; resolve with one side (plan §2 #36): stage 0 first, then worktree; deleted side = git rm
-    pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages (+ checkout -m when both sides exist), Unresolved
+    pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages, then the at-open bytes (`AtOpen::reset_to`, #66); checkout -m only for a link, submodule, other entry or unread file; all or nothing
     pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
 }
@@ -382,10 +384,12 @@ Plan §2 #57. Owns the file, never what a key means (the window does, `frontend/
 
 - `Places::new(config_dir, home)`: the default file `<config>/yamt/settings.json` and the location
   file `<config>/yamt/settings-location` (one line: the file in use when it is not the default).
-- `StoredSettings { theme, antialiasing, keys }`: `antialiasing` is `subpixel` (default) or
+- `StoredSettings { theme, antialiasing, keys, languageServers }`: `antialiasing` is `subpixel` (default) or
   `greyscale` (#60); `keys` maps an action id to key strings, only for actions whose keys differ
-  from the window's defaults; ids and key strings are opaque text here.
-- `read`, `set_theme`, `set_antialiasing`, `set_keys`, `relocate`, `stored_at_start`. A read never
+  from the window's defaults; ids and key strings are opaque text here; `languageServers { repositories:
+  { <root>: "start" | "dontStart" }, added: [{ command, fileTypes }] }` (#67/#70), written only when not empty.
+- `read`, `set_theme`, `set_antialiasing`, `set_keys`, `set_repository_answer`, `set_added_servers`, `relocate`,
+  `stored_at_start`. A read never
   rewrites an existing file; a change re-reads the file, changes one entry, and writes `theme` and
   `antialiasing` always, `keys` when not empty and every other entry as it was, through a temporary
   file and a rename (the end of a symlink chain is written, the links stay); broken JSON →
@@ -522,10 +526,12 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | the hovered wave run                                                                                    | `Folding` (`editor/internal/folding.ts`), one listener set on the three pane hosts and both strips; toggles `fold-wave-hover` on every `[data-fold-run]` node of that run; nodes made later ask `hovered()`                                                                                                                                                                                                                                                                                                                                                                                                       | no history; pointer state only (plan §2 #63)                                                                                                                              |
 | each pane's wave phase (`--fold-wave-x`, `--fold-wave-period` on the pane hosts)                        | `WavePhases` (`editor/internal/wavePhase.ts`): written on a pane-host resize or a resolution change, only when the value changed, from the scrollers' and strips' edges rounded to device pixels; removed by `destroy()`                                                                                                                                                                                                                                                                                                                                                                                          | derived from layout, never read per scroll frame (plan §2 #51, #64)                                                                                                       |
 | file list, opened files, active file, the shown failure, notices about disk changes                     | `ui/store.ts` (module singleton via `useAppStore()`, no Pinia); each opened file's `MergeView` registers `{ unsaved, markSaved }` with `store.track`; the marks are git's view, re-read on window focus (plan §2 #49); `notices` (one per path) set by `ui/diskChanges.ts` from Rust's `DiskChange`s (#52)                                                                                                                                                                                                                                                                                                        | chrome only; what the disk looked like lives in Rust's `MergeSession`                                                                                                     |
-| saved baseline per opened file (loaded text, then the last text marked resolved)                        | non-reactive `let` in `useMergeController`, set when the controller is built, replaced by `markSaved` after a successful finish                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | one place decides "unsaved work" (plan §2 #37)                                                                                                                            |
+| saved point per opened file (the dot)                                                                   | `MergeController`'s `SavedPoint` (`editor/internal/savedPoint.ts`): the Result's text, every change's statuses and which text was written (`fileText` or `asShown`), set at open, by each Save and by Mark resolved; `useMergeController.unsaved` follows `onUnsavedChange`; `ui/saving.ts` holds the per-file write claims and the last format outcome per file                                                                                                                                                                                                                                                  | one place decides "unsaved work" (plan §2 #37, #65, #69, #71)                                                                                                             |
+| language-server problems in the Result                                                                  | `@codemirror/lint`'s field plus `problemsField` (`editor/internal/problems.ts`: each server's answer, the versions still answerable) in the middle pane; counts out through `onProblemsChange` into `useMergeController.problems`                                                                                                                                                                                                                                                                                                                                                                                 | the lsp client owns the order of answers; the editor only maps them (plan §2 #70)                                                                                         |
+| language servers: specs, runs, states, logs                                                             | the app's one `LanguageServers` (`lsp/`), built in `main.ts` and held by the store; `serverViews` mirrors `views()` on `onChange` (`ui/servers.ts`); processes are Rust's `Host` (`yamt-lsp-host`); the per-repository answer and added servers are the settings file's `languageServers`                                                                                                                                                                                                                                                                                                                         | one owner per fact; Vue holds a mirror only (plan §2 #67, #70)                                                                                                            |
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files) | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map (`Taken`: by a side, or by the disk) set by `takeSide` and by a disk change that staged a choice file; a deleted-side file "resolved on disk" comes from its `middle` kind; deleted by reset                                                                                                                                                                                                                                                                                                        | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47, #52)                                                    |
 | summary counts of the open file                                                                         | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | per controller                                                                                                                                                            |
-| whether the settings view shows instead of the shown file                                               | `settingsOpen` shallowRef in `ui/store.ts`: set by the gear (`openSettings`), cleared by "Back" (`closeSettings`) and by a file picked in the list (`pick`), never by the app's own `open`                                                                                                                                                                                                                                                                                                                                                                                                                        | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56)                                                                           |
+| what the files' grid cell shows                                                                         | `screen` shallowRef in `ui/store.ts` (`Screen` = files \| settings \| serverLog{name}): the gear (`openSettings`), "Back" (`closeSettings`, `closeServerLog`), Show log (`showServerLog`), a file picked in the list (`pick`); never by the app's own `open`                                                                                                                                                                                                                                                                                                                                                      | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56, #70)                                                                      |
 | the settings in use (theme, key bindings, the file's path)                                              | `settings` shallowRef in `ui/store.ts`, changed only by the replies of the four settings calls (`ui/settings.ts`), re-read on window focus with the file list; `preferences` is computed from it and handed to every opened file's controller                                                                                                                                                                                                                                                                                                                                                                     | the file is the truth (Rust `yamt-settings`); a failed call keeps the settings in use (plan §2 #57)                                                                       |
 | the page's theme attribute (`<html data-theme>`)                                                        | set before the first frame by the shell's start script; `main.ts` reads it as the start theme; afterwards written only by `App.vue` from `settings.theme`                                                                                                                                                                                                                                                                                                                                                                                                                                                         | one palette per theme in `style.css` (plan §2 #57)                                                                                                                        |
 | each pane's dark flag and key bindings                                                                  | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                                                                   |
@@ -537,15 +543,15 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
 (`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event.
 
-Rule: **Vue state never holds an `EditorView`, a position, or document text.** The result
-text passes through once, from `resultText()` to `store.finish` (and back into that file's own
-baseline in `useMergeController`).
+Rule: **Vue state never holds an `EditorView`, a position, or document text.** The text to write passes through
+once, from `snapshot().fileText()` or `asShown()` to `source.saveFile`/`finishFile` (`ui/saving.ts`), and the written
+snapshot then marks its own saved point (`markSaved`).
 
 ### 5.2 `editor/` — public surface is one class
 
 ```ts
 export class MergeController {
-  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68) }
+  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), servers: LanguageServers | null (plan §2 #70) }
   setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
   setCollapsed(on: boolean): void; // the collapse toggle: off shows every hidden line, on hides every run back to its start; keeps the middle's top line, re-aligns the sides at once; not in history (plan §2 #68)
   applyAllNonConflicting(side: Side): void; // one undo step
@@ -553,7 +559,11 @@ export class MergeController {
   redo(): boolean;
   historyKey(event: KeyboardEvent): boolean; // the bound Undo/Redo keys (default Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y) from anywhere in the shown file's window, unless already handled (the middle's own keymap) or typed in a text field (plan §2 #54, #57)
   moveToChange(direction: Direction): void; // the toolbar arrows: Up/Down on the side that has the keyboard, else the left side takes it first (plan §2 #56)
-  resultText(): string; // state.sliceDoc() — respects lineSeparator; NEVER doc.toString()
+  snapshot(): ResultSnapshot; // { asShown(), fileText() (what Save writes: git's markers for waiting conflicts, #69), unsaved, markSaved("asShown" | "fileText") } — state.sliceDoc()/state.lineBreak, NEVER doc.toString()
+  onUnsavedChange(listener: (unsaved: boolean) => void): void; // the dot (#65)
+  format(): Promise<FormatOutcome>; // the formatter's answer as paired line edits, one `yamt.format` undo step; never touches a change that still waits or its edge lines (#70/#71); never rejects
+  problems(): ProblemCounts; // { errors, warnings, other } in the Result
+  onProblemsChange(listener: (counts: ProblemCounts) => void): void;
   summary(): MergeSummary; // { changes, conflicts } still to decide
   onSummaryChange(listener: (s: MergeSummary) => void): void;
   destroy(): void;
@@ -713,6 +723,40 @@ the bands and wave joins that cross each strip and the open changes' icon rows; 
 places them, keeps the nodes of what is in the strip and moves them once per animation frame, after any
 pane scroll, center edit or geometry change. Each strip is its own compositing layer (plan §2 #51).
 `connectors/` is unit-tested on numbers, no DOM.
+
+### 5.3b `lsp/` — yamt's own language-server client
+
+Framework-free like `editor/` (PM3); imports only `ipc/` (the `ServerHost` interface and its generated types); the
+editor and the chrome reach it only through `lsp/index.ts` (plan §2 #70, #71).
+
+```ts
+export class LanguageServers {
+  constructor(host: ServerHost | null, timers?: Timers); // null in fixture mode: every server "Runs only in the app"
+  setSpecs(specs: readonly ServerSpec[], options: { startOnOpen: boolean }): void; // reconciles: an unchanged spec keeps its run
+  start(name) / stop(name) / restart(name); views(): readonly ServerView[]; log(name): readonly LogLine[]; // last 2,000 lines
+  onChange(listener): () => void; serving(path): boolean; open(doc: ResultDocument): OpenDocument; destroy(): Promise<void>;
+}
+export function detect(paths, lookups: ProjectLookups, root): Promise<readonly ServerSpec[]>; // oxlint, oxfmt, TypeScript, eslint per project; install hints
+export function addedSpecs(added, taken): readonly ServerSpec[];
+```
+
+- **One server** (`internal/server.ts`): its run is one sum type (`run.ts`: idle, launching, starting, running,
+  halting) — the only answer to "is it running"; one process run (`attempt.ts`) routes its messages; `handshake.ts`
+  sends `initialize` (processId, rootUri and one workspace folder = the project, `positionEncodings: utf-16`) and keeps
+  the `Capabilities`; `connection.ts` owns request ids and time-outs; server requests are answered from one table
+  (`answers.ts`: configuration from the spec, file watching accepted and ignored).
+- **Documents** (`documents.ts`, `serverDocs.ts`): every opened editable Result is open on every server that serves
+  it (extension and project folder, `spec.ts`), synced as full text 300 ms after typing stops; `problems.ts`
+  (`DocProblems`) puts pushed and pulled problems into one slot per server and never shows an answer older than the
+  last one shown.
+- **Formatting** (`formatting.ts`): the first running spec that may format and offers it; 5 s in total; the edits are
+  applied to the text sent (`edits.ts`) and handed back as `{ sent, result }` — the editor turns them into its own line
+  diff (`editor/internal/format.ts`).
+- **Detection** (`presets.ts`, `detect.ts`, `packageManager.ts`, `added.ts`): pure over the host's `findProgram` and
+  `projectFiles`; a tool whose server is missing gets an `InstallHint` (package, program, project folder, the
+  project's package manager from `packageManager` or the nearest lock file).
+- **Rust side**: `yamt-lsp-host` (§3.5) starts the programs, frames `Content-Length` messages and stops them; it never
+  parses a message and never learns a server's name.
 
 ### 5.4 `ui/` — Vue 3
 
