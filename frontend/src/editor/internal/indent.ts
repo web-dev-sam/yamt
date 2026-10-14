@@ -1,12 +1,12 @@
 const DEFAULT_WIDTH = 2;
 const SMALLEST_INDENT_STEP = 2;
 
-export function indentUnitOf(text: string): string {
+export function indentUnitOf(lines: Iterable<string>): string {
   const steps = new Map<number, number>();
   let tabLines = 0;
   let spaceLines = 0;
   let previous = 0;
-  for (const line of text.split("\n")) {
+  for (const line of lines) {
     if (line.trim() === "") {
       continue;
     }

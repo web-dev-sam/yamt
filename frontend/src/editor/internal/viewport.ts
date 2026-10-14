@@ -1,4 +1,5 @@
-import type { EditorView } from "@codemirror/view";
+import type { Text } from "@codemirror/state";
+import type { BlockInfo, EditorView } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 import type { VisibleLines } from "./apply";
@@ -6,18 +7,35 @@ import type { VisibleLines } from "./apply";
 const REVEAL_GAP_LINES = 2;
 const REVEAL_PARTS = 3;
 
+type Block = Pick<BlockInfo, "from" | "to" | "top" | "bottom">;
+
+export function textLineEdges(
+  doc: Text,
+  { first, last, area }: { readonly first: Block; readonly last: Block; readonly area: Span },
+): VisibleLines {
+  const firstIsWave = doc.lineAt(first.from).number !== doc.lineAt(first.to).number;
+  const lastIsWave = doc.lineAt(last.from).number !== doc.lineAt(last.to).number;
+  const firstLine = firstIsWave
+    ? Math.min(doc.lineAt(first.to).number + 1, doc.lines)
+    : doc.lineAt(first.from).number;
+  const lastLine = lastIsWave
+    ? Math.max(doc.lineAt(last.from).number - 1, 1)
+    : doc.lineAt(last.from).number;
+  return {
+    first: !firstIsWave && first.top < area.top && firstLine < lastLine ? firstLine + 1 : firstLine,
+    last:
+      !lastIsWave && last.bottom > area.bottom && lastLine > firstLine ? lastLine - 1 : lastLine,
+  };
+}
+
 export function visibleLines(view: EditorView): VisibleLines {
   const top = view.scrollDOM.getBoundingClientRect().top - view.documentTop;
   const bottom = top + view.scrollDOM.clientHeight;
-  const first = view.lineBlockAtHeight(top);
-  const last = view.lineBlockAtHeight(bottom);
-  const doc = view.state.doc;
-  const firstLine = doc.lineAt(first.from).number;
-  const lastLine = doc.lineAt(last.from).number;
-  return {
-    first: first.top < top && firstLine < lastLine ? firstLine + 1 : firstLine,
-    last: last.bottom > bottom && lastLine > firstLine ? lastLine - 1 : lastLine,
-  };
+  return textLineEdges(view.state.doc, {
+    first: view.lineBlockAtHeight(top),
+    last: view.lineBlockAtHeight(bottom),
+    area: { top, bottom },
+  });
 }
 
 export function visibleArea(view: EditorView): Span {

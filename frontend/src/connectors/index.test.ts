@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { bandPath } from ".";
+import { bandPath, waveCenterY, waveTile, WAVE_TILE_HEIGHT_PX, WAVE_TILE_WIDTH_PX } from ".";
 
 test("an aligned band is a rectangle drawn with flat curves", () => {
   const band = { left: { top: 0, bottom: 20 }, right: { top: 0, bottom: 20 } };
@@ -30,4 +30,14 @@ test("an insertion on the right tapers to the right edge, at fractional line hei
   expect(bandPath(band, 39)).toBe(
     "M0 18.2 C19.5 18.2 19.5 36.4 39 36.4 L39 36.4 C19.5 36.4 19.5 54.6 0 54.6 Z",
   );
+});
+
+test("the wave tile is four quarter curves of 5 px with a 3 px half-height, 1 px from the tile edge", () => {
+  expect(waveTile()).toBe("M0 1 Q2.5 1 5 4 Q7.5 7 10 7 Q12.5 7 15 4 Q17.5 1 20 1");
+  expect([WAVE_TILE_WIDTH_PX, WAVE_TILE_HEIGHT_PX]).toEqual([20, 8]);
+});
+
+test("the wave sits in the middle of a 20 px line", () => {
+  expect(waveCenterY(20)).toBe(10);
+  expect(waveCenterY(30)).toBe(15);
 });

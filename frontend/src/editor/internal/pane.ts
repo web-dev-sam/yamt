@@ -23,6 +23,7 @@ import {
   type Extension,
   type StateCommand,
   type StateEffect,
+  type Text,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -39,6 +40,7 @@ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
 import { find, findKeys, findKeysCompartment } from "./find";
 import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
+import { lineSeparator, middleText, paneDoc } from "./paneDocs";
 import { sideKeys } from "./sideKeys";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
@@ -51,6 +53,8 @@ export const languageCompartment = new Compartment();
 const themeCompartment = new Compartment();
 const middleKeysCompartment = new Compartment();
 const sideKeysCompartment = new Compartment();
+
+export const LINE_HEIGHT_PX = 20;
 
 const MIDDLE_COMMANDS: readonly {
   readonly action: KeyAction;
@@ -77,7 +81,7 @@ const paneTheme = EditorView.theme({
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
     fontVariantLigatures: "none",
-    lineHeight: "20px",
+    lineHeight: `${LINE_HEIGHT_PX}px`,
     // Chromium (WebView2) keeps subpixel text in a scroller it composites only when the
     // scroller paints an opaque background (plan §2 #60).
     backgroundColor: "var(--color-panel)",
@@ -198,11 +202,11 @@ const nativeHistoryBlocked = Prec.highest(
   EditorView.domEventHandlers({ beforeinput: refuseNativeHistory }),
 );
 
-function centerExtensions(doc: string, { preferences, platform }: PaneSettings): Extension {
+function centerExtensions(doc: Text, { preferences, platform }: PaneSettings): Extension {
   return [
     nativeHistoryBlocked,
     history(),
-    indentUnit.of(indentUnitOf(doc)),
+    indentUnit.of(indentUnitOf(doc.iterLines())),
     middleKeysCompartment.of(middleKeys(preferences.keys, platform)),
     keymap.of([...defaultKeymap, ...selectionHistoryKeymap]),
     highlightActiveLine(),
@@ -210,7 +214,7 @@ function centerExtensions(doc: string, { preferences, platform }: PaneSettings):
   ];
 }
 
-function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Extension {
+function kindExtensions(kind: PaneKind, doc: Text, settings: PaneSettings): Extension {
   switch (kind) {
     case "side":
       return [
@@ -233,18 +237,19 @@ function kindExtensions(kind: PaneKind, doc: string, settings: PaneSettings): Ex
 
 export function paneState(pane: {
   kind: PaneKind;
-  doc: string;
+  doc: string | Text;
   eol: FileMergeData["eol"];
   language: Language | null;
   settings: PaneSettings;
   extensions: Extension;
 }): EditorState {
   const { preferences, platform } = pane.settings;
+  const doc = typeof pane.doc === "string" ? paneDoc(pane.doc, pane.eol) : pane.doc;
   return EditorState.create({
-    doc: pane.doc,
+    doc,
     extensions: [
       lineNumbers(),
-      pane.eol === "CrLf" ? EditorState.lineSeparator.of("\r\n") : [],
+      lineSeparator(pane.eol),
       drawSelection(),
       selectionOverTints,
       paneTheme,
@@ -253,7 +258,7 @@ export function paneState(pane: {
       languageCompartment.of(pane.language ?? []),
       find,
       findKeysCompartment.of(findKeys(preferences.keys, platform)),
-      kindExtensions(pane.kind, pane.doc, pane.settings),
+      kindExtensions(pane.kind, doc, pane.settings),
       pane.extensions,
     ],
   });
@@ -274,6 +279,6 @@ type CenterPane = { readonly kind: "center" | "readOnlyCenter"; readonly doc: st
 export function centerPane(middle: FileMergeData["middle"], readOnly: boolean): CenterPane {
   return {
     kind: readOnly ? "readOnlyCenter" : "center",
-    doc: middle.kind === "DiskNotText" ? "" : middle.text,
+    doc: middleText(middle),
   };
 }

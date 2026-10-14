@@ -1,25 +1,28 @@
 import { redo, undo } from "@codemirror/commands";
 import type { Language } from "@codemirror/language";
-import { searchPanelOpen } from "@codemirror/search";
-import type { Extension, StateField } from "@codemirror/state";
+import type { Extension, StateField, Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import type { FileMergeData } from "../ipc";
 import { actionSteps, bulkApplySteps, dispatchSteps, type ApplyTarget } from "./internal/apply";
 import type { ChunkAction, Reach, SideDocs, Steps } from "./internal/apply";
 import { chunkField, type ChunkSpan } from "./internal/chunkField";
-import { coveredDecorations, pushCovered } from "./internal/covered";
+import { coveredDecorations } from "./internal/covered";
 import { centerDecorations, focusDecorations, sideDecorations } from "./internal/decorations";
 import { coveredAction, IconDrag } from "./internal/drag";
-import { syncFindSpace } from "./internal/find";
-import { chunkRows, rowsChanged, type ChunkRow, type PaneViews } from "./internal/geometry";
+import { Folding } from "./internal/folding";
+import { foldRuns, type Fold } from "./internal/foldRuns";
+import { foldField, pushFolds, showNextStep, sideFoldField, sideReveals } from "./internal/folds";
+import { foldView } from "./internal/foldView";
+import { Frame } from "./internal/frame";
+import { SIDE_PANE, type Pane, type PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
 import { modClicks } from "./internal/modClick";
 import type { Direction } from "./internal/navigation";
 import { centerPane, createPane, paneText, preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
-import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./internal/scrollSync";
+import { paneDocs } from "./internal/paneDocs";
 import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
 import { sideRunner } from "./internal/sideKeys";
@@ -44,93 +47,90 @@ export type MergeOptions = { readonly readOnly: boolean; readonly preferences: P
 
 type ViewSources = {
   data: FileMergeData;
+  docs: Readonly<Record<Pane, Text>>;
   hosts: MergeHosts;
   language: Language | null;
 };
-type Layout = { readonly rows: readonly ChunkRow[]; readonly anchors: readonly Anchor[] };
 
 export class MergeController {
   readonly #field: StateField<readonly ChunkSpan[]>;
+  readonly #folds: Readonly<Record<"center" | "sides", StateField<readonly Fold[]>>>;
   readonly #readOnly: boolean;
   #settings: PaneSettings;
   readonly #views: PaneViews;
   readonly #sides: SideDocs;
   readonly #strips: Strips;
-  readonly #scroll: ScrollSync;
   readonly #drag: IconDrag;
   readonly #focus: SideFocus;
-  #frameId: number | null = null;
-  #layoutCache: Layout | null = null;
+  readonly #folding: Folding;
+  readonly #frame: Frame;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
   #destroyed = false;
 
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
     const description = languageOf(data.path);
+    const docs = paneDocs(data);
+    const runs = foldRuns(data.chunks, docs);
     this.#field = chunkField(data.chunks);
+    this.#folds = { center: foldField(runs), sides: sideFoldField(runs) };
     this.#readOnly = options.readOnly;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
     const language = description?.support?.language ?? null;
-    this.#views = this.#createViews({ data, hosts, language });
-    this.#focus = new SideFocus({
-      views: this.#views,
-      states: () => this.#views.center.state.field(this.#field),
-      rows: () => this.#layout().rows,
-      decide: (action) => this.#decide(action, "side"),
-      readOnly: this.#readOnly,
-      hidden: data.deleted,
+    this.#folding = new Folding([hosts.left, hosts.center, hosts.right, ...hosts.strips], (run) => {
+      const center = this.#views.center;
+      center.dispatch(showNextStep(center.state.field(this.#folds.center), run));
     });
-    this.#sides = { local: this.#views.left.state.doc, remote: this.#views.right.state.doc };
+    this.#views = this.#createViews({ data, docs, hosts, language });
+    this.#focus = this.#createFocus(data.deleted);
+    this.#sides = { local: docs.left, remote: docs.right };
     this.#strips = new Strips(hosts.strips, this.#readOnly ? null : this.#press);
-    this.#drag = new IconDrag(hosts.strips, {
-      changed: () => {
-        this.#requestFrame();
-      },
-      released: (press, reach) => {
-        this.#act(coveredAction(press, this.#layout().rows, this.#views), reach);
-      },
+    this.#drag = this.#createDrag(hosts.strips);
+    this.#frame = new Frame({
+      views: this.#views,
+      spans: this.#field,
+      layoutFields: [this.#field, this.#folds.center, this.#folds.sides],
+      drag: this.#drag,
+      strips: this.#strips,
     });
-    this.#scroll = new ScrollSync(this.#views, () => {
-      this.#requestFrame();
-    });
-    this.#requestFrame();
+    this.#frame.request();
     if (description !== null && description.support === undefined) {
       void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
     }
   }
 
   readonly #repaint = EditorView.updateListener.of((update) => {
-    if (rowsChanged(update, this.#field)) {
-      this.#layoutCache = null;
-    }
-    if (
-      update.docChanged ||
-      update.geometryChanged ||
-      searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
-    ) {
-      this.#requestFrame();
-    }
+    this.#frame.changed(update);
   });
 
-  #createViews({ data, hosts, language }: ViewSources): PaneViews {
-    const field = this.#field;
-    const statusSync = EditorView.updateListener.of((update) => {
-      this.#statusesChanged(update);
-    });
+  readonly #statusSync = EditorView.updateListener.of((update) => {
+    this.#statusesChanged(update);
+  });
+
+  #createViews({ data, docs, hosts, language }: ViewSources): PaneViews {
     const shared = { eol: data.eol, language, settings: this.#settings };
     const center = createPane({
       ...shared,
-      ...centerPane(data.middle, this.#readOnly),
+      kind: centerPane(data.middle, this.#readOnly).kind,
+      doc: docs.center,
       parent: hosts.center,
-      extensions: [field, centerDecorations(field), this.#repaint, statusSync],
+      extensions: [
+        this.#field,
+        centerDecorations(this.#field),
+        this.#folds.center,
+        foldView(this.#folds.center, "center", () => this.#folding.hovered()),
+        pushFolds(this.#folds.center, this.#folds.sides, () => this.#views),
+        this.#repaint,
+        this.#statusSync,
+      ],
     });
     const statuses = sideStatusField(
-      center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
+      center.state.field(this.#field).map(({ chunk, status }) => ({ chunk, status })),
     );
     return {
       left: createPane({
         ...shared,
         kind: "side",
-        doc: data.local,
+        doc: docs.left,
         parent: hosts.left,
         extensions: this.#sideExtensions(statuses, "local"),
       }),
@@ -138,7 +138,7 @@ export class MergeController {
       right: createPane({
         ...shared,
         kind: "side",
-        doc: data.remote,
+        doc: docs.right,
         parent: hosts.right,
         extensions: this.#sideExtensions(statuses, "remote"),
       }),
@@ -146,11 +146,15 @@ export class MergeController {
   }
 
   #sideExtensions(statuses: StateField<readonly ChunkState[]>, side: Side): Extension {
+    const pane = SIDE_PANE[side];
     return [
       statuses,
       sideDecorations(statuses, side),
       focusDecorations(statuses, side),
       coveredDecorations(side),
+      this.#folds.sides,
+      foldView(this.#folds.sides, pane, () => this.#folding.hovered()),
+      sideReveals(this.#folds.sides, pane, () => this.#views.center),
       sideRunner.of((command) => {
         this.#focus.run(side, command);
       }),
@@ -158,12 +162,34 @@ export class MergeController {
       this.#readOnly
         ? []
         : modClicks(side, {
-            rows: () => this.#layout().rows,
+            rows: () => this.#frame.layout().rows,
             act: (action) => {
               this.#act(action, "side");
             },
           }),
     ];
+  }
+
+  #createFocus(hidden: Side | null): SideFocus {
+    return new SideFocus({
+      views: this.#views,
+      states: () => this.#views.center.state.field(this.#field),
+      rows: () => this.#frame.layout().rows,
+      decide: (action) => this.#decide(action, "side"),
+      readOnly: this.#readOnly,
+      hidden,
+    });
+  }
+
+  #createDrag(strips: MergeHosts["strips"]): IconDrag {
+    return new IconDrag(strips, {
+      changed: () => {
+        this.#frame.request();
+      },
+      released: (press, reach) => {
+        this.#act(coveredAction(press, this.#frame.layout().rows, this.#views), reach);
+      },
+    });
   }
 
   #target(): ApplyTarget {
@@ -199,34 +225,13 @@ export class MergeController {
     const states = after.map(({ chunk, status }) => ({ chunk, status }));
     this.#views.left.dispatch({ effects: showStatuses.of(states) });
     this.#views.right.dispatch({ effects: showStatuses.of(states) });
-    this.#requestFrame();
+    this.#frame.request();
     this.#summaryListener?.(summarize(after));
-  }
-
-  #layout(): Layout {
-    if (this.#layoutCache === null) {
-      const rows = chunkRows(this.#views, this.#views.center.state.field(this.#field));
-      this.#layoutCache = { rows, anchors: anchorsOf(rows, contentEnds(this.#views)) };
-    }
-    return this.#layoutCache;
   }
 
   readonly #press = (press: IconPress, event: PointerEvent): void => {
     this.#drag.start(press, event);
   };
-
-  #requestFrame(): void {
-    this.#frameId ??= requestAnimationFrame(() => {
-      this.#frameId = null;
-      syncFindSpace(this.#views);
-      const { rows, anchors } = this.#layout();
-      this.#scroll.sync(anchors);
-      const press = this.#drag.press;
-      const covered = press === null ? null : coveredAction(press, rows, this.#views);
-      pushCovered(this.#views, covered);
-      this.#strips.paint(this.#views, rows, covered);
-    });
-  }
 
   applyAllNonConflicting(side: Side): void {
     this.#dispatch(
@@ -280,10 +285,8 @@ export class MergeController {
   destroy(): void {
     this.#summaryListener = null;
     this.#destroyed = true;
-    if (this.#frameId !== null) {
-      cancelAnimationFrame(this.#frameId);
-    }
-    this.#scroll.destroy();
+    this.#frame.destroy();
+    this.#folding.destroy();
     this.#focus.destroy();
     this.#drag.destroy();
     for (const view of [this.#views.left, this.#views.center, this.#views.right]) {

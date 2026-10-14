@@ -80,33 +80,33 @@ const MOSTLY_FOUR = `class A:
 `;
 
 test("a two-space TypeScript text indents by two spaces", () => {
-  expect(indentUnitOf(TS_TWO)).toBe("  ");
+  expect(indentUnitOf(TS_TWO.split("\n"))).toBe("  ");
 });
 
 test("a four-space PHP text whose doc comments step by one space indents by four spaces", () => {
-  expect(indentUnitOf(PHP_DOC)).toBe("    ");
+  expect(indentUnitOf(PHP_DOC.split("\n"))).toBe("    ");
 });
 
 test("a tab-indented text indents with a tab", () => {
-  expect(indentUnitOf(TABS)).toBe("\t");
+  expect(indentUnitOf(TABS.split("\n"))).toBe("\t");
 });
 
 test("a tab-indented text whose doc comment has more lines than its tab-led lines indents with a tab", () => {
-  expect(indentUnitOf(TABS_WITH_JSDOC)).toBe("\t");
+  expect(indentUnitOf(TABS_WITH_JSDOC.split("\n"))).toBe("\t");
 });
 
 test("blank lines between deeper statements do not count as steps", () => {
-  expect(indentUnitOf(TWO_WITH_BLANKS)).toBe("  ");
+  expect(indentUnitOf(TWO_WITH_BLANKS.split("\n"))).toBe("  ");
 });
 
 test("whitespace-only lines between deeper statements do not count as steps", () => {
-  expect(indentUnitOf(FOUR_WITH_WHITESPACE_ONLY)).toBe("    ");
+  expect(indentUnitOf(FOUR_WITH_WHITESPACE_ONLY.split("\n"))).toBe("    ");
 });
 
 test("a text without indentation indents by two spaces", () => {
-  expect(indentUnitOf("a\nb\nc\n")).toBe("  ");
+  expect(indentUnitOf(["a", "b", "c", ""])).toBe("  ");
 });
 
 test("the most common step wins over a few smaller ones", () => {
-  expect(indentUnitOf(MOSTLY_FOUR)).toBe("    ");
+  expect(indentUnitOf(MOSTLY_FOUR.split("\n"))).toBe("    ");
 });

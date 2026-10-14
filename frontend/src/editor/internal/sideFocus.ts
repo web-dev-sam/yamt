@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 
 import type { ChunkAction } from "./apply";
+import { foldRunAt } from "./folding";
 import { SIDE_PANE, type ChunkRow, type PaneViews } from "./geometry";
 import { isModHeld, modClickAction } from "./modClick";
 import {
@@ -188,7 +189,7 @@ export class SideFocus {
 
   #pressed(side: Side, event: MouseEvent, platform: string): void {
     const view = this.#view(side);
-    if (event.button !== 0 || event.target === view.scrollDOM) {
+    if (event.button !== 0 || event.target === view.scrollDOM || foldRunAt(event.target) !== null) {
       return;
     }
     const rows = this.#sources.rows();

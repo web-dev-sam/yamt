@@ -49,10 +49,12 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): 
 
 export function rowsChanged(
   update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">,
-  field: StateField<readonly ChunkSpan[]>,
+  fields: readonly StateField<unknown>[],
 ): boolean {
   return (
     update.geometryChanged ||
-    update.startState.field(field, false) !== update.state.field(field, false)
+    fields.some(
+      (field) => update.startState.field(field, false) !== update.state.field(field, false),
+    )
   );
 }

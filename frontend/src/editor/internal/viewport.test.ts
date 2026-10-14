@@ -1,6 +1,7 @@
+import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { revealScrollTop } from "./viewport";
+import { revealScrollTop, textLineEdges } from "./viewport";
 
 const LINE_PX = 20;
 const FIND_SPACE_PX = 29;
@@ -32,4 +33,37 @@ test("a change taller than the pane minus two gaps starts two lines below the to
 test("a change near line 1 clamps at 0, keeping the space above line 1 in view", () => {
   expect(revealScrollTop({ top: 20, bottom: 40 }, PANE)).toBe(0);
   expect(revealScrollTop({ top: 20, bottom: 40 }, { ...PANE, paddingTop: FIND_SPACE_PX })).toBe(0);
+});
+
+const DOC = Text.of(Array.from({ length: 100 }, (_, index) => `line ${index + 1}`));
+
+function textBlock(line: number, top: number) {
+  const { from, to } = DOC.line(line);
+  return { from, to, top, bottom: top + LINE_PX };
+}
+
+test("a wave line at the top or bottom of the pane is skipped: the visible lines are text lines", () => {
+  const wave = { from: DOC.line(1).from, to: DOC.line(40).to, top: 0, bottom: LINE_PX };
+  const bottomWave = { ...wave, from: DOC.line(60).from, to: DOC.line(100).to, top: 200 };
+
+  expect(
+    textLineEdges(DOC, { first: wave, last: textBlock(50, 180), area: { top: 5, bottom: 195 } }),
+  ).toEqual({
+    first: 41,
+    last: 49,
+  });
+  expect(
+    textLineEdges(DOC, {
+      first: textBlock(45, 0),
+      last: bottomWave,
+      area: { top: 0, bottom: 210 },
+    }),
+  ).toEqual({ first: 45, last: 59 });
+  expect(
+    textLineEdges(DOC, {
+      first: textBlock(45, 0),
+      last: textBlock(50, 100),
+      area: { top: 5, bottom: 110 },
+    }),
+  ).toEqual({ first: 46, last: 49 });
 });

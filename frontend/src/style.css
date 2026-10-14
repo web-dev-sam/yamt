@@ -34,6 +34,7 @@
   --color-info: #233558;
   --color-info-border: #2e4d89;
   --color-search-match: #2d543f;
+  --color-diff-wave: #555555;
 
   --color-syntax-keyword: #cf8e6d;
   --color-syntax-string: #6aab73;
@@ -84,6 +85,7 @@
   --color-info: #f7f8ff;
   --color-info-border: #bdd3ff;
   --color-search-match: #ccccff;
+  --color-diff-wave: #d0d0d0;
 
   --color-syntax-keyword: #0033b3;
   --color-syntax-string: #067d17;

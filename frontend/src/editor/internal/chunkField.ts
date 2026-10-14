@@ -8,11 +8,11 @@ import {
 } from "@codemirror/state";
 
 import type { Chunk } from "../../ipc";
+import { toDocPos, type DocPos } from "./docPos";
 import { lineSpan } from "./lineSpan";
 import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
 import { chunkTone, type Tone } from "./tone";
 
-type DocPos = number & { readonly __brand: "DocPos" };
 type StatusChanges = ReadonlyMap<Chunk["id"], ChunkStatus>;
 
 export type ChunkSpan = ChunkState & {
@@ -25,17 +25,6 @@ export const setStatus = StateEffect.define<{
   readonly id: Chunk["id"];
   readonly status: ChunkStatus;
 }>();
-
-function isDocPos(n: number): n is DocPos {
-  return Number.isSafeInteger(n) && n >= 0;
-}
-
-function toDocPos(n: number): DocPos {
-  if (!isDocPos(n)) {
-    throw new Error(`${n} is not a document position`);
-  }
-  return n;
-}
 
 function endsMidLine(span: ChunkSpan, doc: Text | null): boolean {
   return doc !== null && span.from < span.to && doc.lineAt(span.to).from !== span.to;

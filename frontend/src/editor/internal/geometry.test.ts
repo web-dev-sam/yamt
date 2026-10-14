@@ -3,6 +3,8 @@ import { expect, test } from "vitest";
 
 import { loadFixture } from "../../ipc";
 import { chunkField, setStatus } from "./chunkField";
+import { toDocPos } from "./docPos";
+import { foldField, showNextStep } from "./folds";
 import { rangeSpan, rowsChanged } from "./geometry";
 import { centerPane } from "./pane";
 import { statusAfterIgnore } from "./status";
@@ -47,13 +49,14 @@ test("an empty document has one point at the top", () => {
   expect(spanOf([""], 0, 0)).toEqual({ top: 0, bottom: 0 });
 });
 
-test("chunk rows go stale on a status change, an edit or new measurements, not on a cursor move", async () => {
+test("chunk rows go stale on a status change, an edit, a fold step or new measurements, not on a cursor move", async () => {
   const data = await loadFixture("vueuse-use-magic-keys.ts");
   const field = chunkField(data.chunks);
-  const state = EditorState.create({
-    doc: centerPane(data.middle, false).doc,
-    extensions: field,
-  });
+  const doc = centerPane(data.middle, false).doc;
+  const lines = Text.of(doc.split("\n"));
+  const hidden = { from: toDocPos(lines.line(3).from), to: toDocPos(lines.line(5).to) };
+  const folds = foldField([{ hidden: [{ left: null, center: hidden, right: null }] }]);
+  const state = EditorState.create({ doc, extensions: [field, folds] });
   const [first] = state.field(field);
   if (first === undefined) {
     throw new Error("fixture lost its chunks");
@@ -61,23 +64,30 @@ test("chunk rows go stale on a status change, an edit or new measurements, not o
   const status = statusAfterIgnore(first.chunk, first.status, "local");
   const ignored = state.update({ effects: setStatus.of({ id: first.chunk.id, status }) }).state;
   const edited = state.update({ changes: { from: 0, insert: "x\n" } }).state;
+  const folded = state.update(showNextStep(state.field(folds), 0)).state;
   const moved = state.update({ selection: EditorSelection.cursor(1) }).state;
   const sidePane = EditorState.create({ doc: data.local });
+  const fields = [field, folds];
 
-  expect(rowsChanged({ geometryChanged: false, startState: state, state: ignored }, field)).toBe(
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: ignored }, fields)).toBe(
     true,
   );
-  expect(rowsChanged({ geometryChanged: false, startState: state, state: edited }, field)).toBe(
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: edited }, fields)).toBe(
     true,
   );
-  expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, field)).toBe(
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: folded }, fields)).toBe(
+    true,
+  );
+  expect(rowsChanged({ geometryChanged: false, startState: state, state: moved }, fields)).toBe(
     false,
   );
-  expect(rowsChanged({ geometryChanged: true, startState: state, state: moved }, field)).toBe(true);
-  expect(
-    rowsChanged({ geometryChanged: false, startState: sidePane, state: sidePane }, field),
-  ).toBe(false);
-  expect(rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, field)).toBe(
+  expect(rowsChanged({ geometryChanged: true, startState: state, state: moved }, fields)).toBe(
     true,
   );
+  expect(
+    rowsChanged({ geometryChanged: false, startState: sidePane, state: sidePane }, fields),
+  ).toBe(false);
+  expect(
+    rowsChanged({ geometryChanged: true, startState: sidePane, state: sidePane }, fields),
+  ).toBe(true);
 });
