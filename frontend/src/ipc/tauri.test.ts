@@ -19,6 +19,8 @@ const commands = vi.hoisted(() => ({
   setAntialiasing: vi.fn(),
   setKeys: vi.fn(),
   moveSettings: vi.fn(),
+  setServerAnswer: vi.fn(),
+  setAddedServers: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -326,6 +328,7 @@ const STORED: Generated.StoredSettings = {
   theme: "light",
   antialiasing: "subpixel",
   keys: { undo: ["Alt-Backspace"] },
+  languageServers: { repositories: { "/home/me/yamt": "start" }, added: [] },
 };
 const SETTINGS_DTO: Generated.SettingsRead = {
   path: "/home/me/.config/yamt/settings.json",
@@ -375,4 +378,33 @@ test("a settings failure comes back as the app's error", async () => {
   commands.loadSettings.mockResolvedValue({ status: "error", error: broken });
 
   expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
+});
+
+test("setServerAnswer and setAddedServers send their arguments and return the read", async () => {
+  commands.setServerAnswer.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
+  commands.setAddedServers.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
+  const source = createTauriSource();
+  const added = [{ command: ["taplo", "lsp", "stdio"], fileTypes: ["toml"] }];
+
+  expect(await source.setServerAnswer(STORED, "dontStart")).toEqual({
+    ok: true,
+    value: SETTINGS_READ,
+  });
+  expect(await source.setServerAnswer(STORED, null)).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.setAddedServers(STORED, added)).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(commands.setServerAnswer.mock.calls).toEqual([
+    [STORED, "dontStart"],
+    [STORED, null],
+  ]);
+  expect(commands.setAddedServers).toHaveBeenCalledWith(STORED, added);
+});
+
+test("setServerAnswer and setAddedServers return the app's error", async () => {
+  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
+  commands.setServerAnswer.mockResolvedValue({ status: "error", error: broken });
+  commands.setAddedServers.mockResolvedValue({ status: "error", error: broken });
+  const source = createTauriSource();
+
+  expect(await source.setServerAnswer(STORED, "start")).toEqual({ ok: false, failure: broken });
+  expect(await source.setAddedServers(STORED, [])).toEqual({ ok: false, failure: broken });
 });

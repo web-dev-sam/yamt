@@ -4,13 +4,16 @@ import {
   bindingsOf,
   KEY_ACTIONS,
   keyText,
+  type AddedServer,
   type Antialiasing,
-  type ChunkSource,
   type Key,
   type KeyAction,
   type KeyProblem,
   type KeysRead,
+  type LanguageServerSettings,
+  type RepositoryAnswer,
   type SettingsRead,
+  type SettingsSource,
   type SourceResult,
   type StoredSettings,
   type Theme,
@@ -25,10 +28,11 @@ export type SettingsInUse = {
   readonly theme: Theme;
   readonly antialiasing: Antialiasing;
   readonly keys: KeysRead;
+  readonly languageServers: LanguageServerSettings;
 };
 
 type SettingsTarget = {
-  readonly source: ChunkSource;
+  readonly source: SettingsSource;
   readonly settings: ShallowRef<SettingsInUse>;
   readonly problem: ShallowRef<Problem | null>;
   readonly asking: Pick<Asking, "ask">;
@@ -45,12 +49,20 @@ export type SettingsActions = {
   removeAllKeys(action: KeyAction): Promise<void>;
   resetKeys(action: KeyAction): Promise<void>;
   moveSettings(path: string): Promise<void>;
+  setServerAnswer(answer: RepositoryAnswer | null): Promise<void>;
+  setAddedServers(added: readonly AddedServer[]): Promise<void>;
 };
 
 type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
 
 export function startSettings(theme: Theme): SettingsInUse {
-  return { read: null, theme, antialiasing: "subpixel", keys: bindingsOf({}) };
+  return {
+    read: null,
+    theme,
+    antialiasing: "subpixel",
+    keys: bindingsOf({}),
+    languageServers: { repositories: {}, added: [] },
+  };
 }
 
 export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
@@ -61,12 +73,18 @@ export function showsAntialiasing(platform: string): boolean {
   return platform.startsWith("Linux");
 }
 
-function storedSettings({ theme, antialiasing, keys }: SettingsInUse): StoredSettings {
+function storedSettings({
+  theme,
+  antialiasing,
+  keys,
+  languageServers,
+}: SettingsInUse): StoredSettings {
   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
   return {
     theme,
     antialiasing,
     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
+    languageServers,
   };
 }
 
@@ -74,12 +92,30 @@ function sameTexts(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((text, index) => text === b[index]);
 }
 
+function sameServers(a: LanguageServerSettings, b: LanguageServerSettings): boolean {
+  const answers = Object.entries(a.repositories);
+  return (
+    answers.length === Object.keys(b.repositories).length &&
+    answers.every(([root, answer]) => b.repositories[root] === answer) &&
+    a.added.length === b.added.length &&
+    a.added.every((server, index) => {
+      const other = b.added[index];
+      return (
+        other !== undefined &&
+        sameTexts(server.command, other.command) &&
+        sameTexts(server.fileTypes, other.fileTypes)
+      );
+    })
+  );
+}
+
 function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
   if (
     inUse === null ||
     inUse.path !== read.path ||
     inUse.stored.theme !== read.stored.theme ||
-    inUse.stored.antialiasing !== read.stored.antialiasing
+    inUse.stored.antialiasing !== read.stored.antialiasing ||
+    !sameServers(inUse.stored.languageServers, read.stored.languageServers)
   ) {
     return false;
   }
@@ -121,8 +157,8 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
 function adopt(target: SettingsTarget, read: SettingsRead): void {
   const before = target.settings.value;
   if (!sameStored(before.read, read)) {
-    const { theme, antialiasing, keys } = read.stored;
-    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys) };
+    const { theme, antialiasing, keys, languageServers } = read.stored;
+    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys), languageServers };
   }
   showKeyProblems(target, read, before);
 }
@@ -175,5 +211,7 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
     removeAllKeys: (action) => editKeys(target, { kind: "removeAll", action }),
     resetKeys: (action) => editKeys(target, { kind: "reset", action }),
     moveSettings: (path) => send(target, (current) => source.moveSettings(current, path)),
+    setServerAnswer: (answer) => send(target, (current) => source.setServerAnswer(current, answer)),
+    setAddedServers: (added) => send(target, (current) => source.setAddedServers(current, added)),
   };
 }

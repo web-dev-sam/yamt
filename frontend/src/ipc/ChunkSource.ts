@@ -14,6 +14,10 @@ import type {
   WriteReply,
 } from "./domain";
 
+export type LanguageServerSettings = StoredSettings["languageServers"];
+export type RepositoryAnswer = LanguageServerSettings["repositories"][string];
+export type AddedServer = LanguageServerSettings["added"][number];
+
 export interface ChunkSource {
   listFiles(): Promise<SourceResult<FileList>>;
   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
@@ -42,9 +46,23 @@ export interface ChunkSource {
     changes: readonly KeysChange[],
   ): Promise<SourceResult<SettingsRead>>;
   moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
+  setServerAnswer(
+    current: StoredSettings,
+    answer: RepositoryAnswer | null,
+  ): Promise<SourceResult<SettingsRead>>;
+  setAddedServers(
+    current: StoredSettings,
+    added: readonly AddedServer[],
+  ): Promise<SourceResult<SettingsRead>>;
 }
 
 export type SettingsSource = Pick<
   ChunkSource,
-  "loadSettings" | "setTheme" | "setAntialiasing" | "setKeys" | "moveSettings"
+  | "loadSettings"
+  | "setTheme"
+  | "setAntialiasing"
+  | "setKeys"
+  | "moveSettings"
+  | "setServerAnswer"
+  | "setAddedServers"
 >;

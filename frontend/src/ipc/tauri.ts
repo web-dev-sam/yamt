@@ -50,6 +50,12 @@ function createTauriSettings(): SettingsSource {
     async moveSettings(current, path) {
       return toSettingsResult(await commands.moveSettings(current, path));
     },
+    async setServerAnswer(current, answer) {
+      return toSettingsResult(await commands.setServerAnswer(current, answer));
+    },
+    async setAddedServers(current, added) {
+      return toSettingsResult(await commands.setAddedServers(current, [...added]));
+    },
   };
 }
 

@@ -1,4 +1,4 @@
-import type { SettingsSource } from "./ChunkSource";
+import type { AddedServer, RepositoryAnswer, SettingsSource } from "./ChunkSource";
 import type { KeysChange, SettingsRead, SourceResult, StoredSettings } from "./domain";
 
 type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
@@ -6,12 +6,24 @@ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 const DEFAULT_PATH = "/fixture/settings.json";
 const HOME = "/fixture/home/";
 const HOME_PREFIX = "~/";
+const REPOSITORY = "/fixture/repository";
 
-function copied({ theme, antialiasing, keys }: StoredSettings): StoredSettings {
+function copiedServers(added: readonly AddedServer[]): AddedServer[] {
+  return added.map(({ command, fileTypes }) => ({
+    command: [...command],
+    fileTypes: [...fileTypes],
+  }));
+}
+
+function copied({ theme, antialiasing, keys, languageServers }: StoredSettings): StoredSettings {
   return {
     theme,
     antialiasing,
     keys: Object.fromEntries(Object.entries(keys).map(([action, texts]) => [action, [...texts]])),
+    languageServers: {
+      repositories: { ...languageServers.repositories },
+      added: copiedServers(languageServers.added),
+    },
   };
 }
 
@@ -38,6 +50,16 @@ function withKeys(
     }
   }
   return changed;
+}
+
+function withAnswer(stored: StoredSettings, answer: RepositoryAnswer | null): StoredSettings {
+  const repositories = { ...stored.languageServers.repositories };
+  if (answer === null) {
+    delete repositories[REPOSITORY];
+  } else {
+    repositories[REPOSITORY] = answer;
+  }
+  return { ...stored, languageServers: { ...stored.languageServers, repositories } };
 }
 
 function change(
@@ -83,6 +105,15 @@ export function createFixtureSettings(): SettingsSource {
       const stored = readOrCreate(files, target, current);
       files.inUse = target;
       return replied(target, stored);
+    },
+    async setServerAnswer(current, answer) {
+      return change(files, current, (stored) => withAnswer(stored, answer));
+    },
+    async setAddedServers(current, added) {
+      return change(files, current, (stored) => ({
+        ...stored,
+        languageServers: { ...stored.languageServers, added: copiedServers(added) },
+      }));
     },
   };
 }

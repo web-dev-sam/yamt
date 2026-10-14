@@ -42,9 +42,20 @@ const NO_SETTINGS: SettingsSource = {
   setAntialiasing: () => Promise.reject(new Error("not used")),
   setKeys: () => Promise.reject(new Error("not used")),
   moveSettings: () => Promise.reject(new Error("not used")),
+  setServerAnswer: () => Promise.reject(new Error("not used")),
+  setAddedServers: () => Promise.reject(new Error("not used")),
 };
-const DARK = { theme: "dark", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
-const LIGHT = { theme: "light", antialiasing: "subpixel" } satisfies Omit<StoredSettings, "keys">;
+const NO_SERVERS = { repositories: {}, added: [] };
+const DARK = {
+  theme: "dark",
+  antialiasing: "subpixel",
+  languageServers: NO_SERVERS,
+} satisfies Omit<StoredSettings, "keys">;
+const LIGHT = {
+  theme: "light",
+  antialiasing: "subpixel",
+  languageServers: NO_SERVERS,
+} satisfies Omit<StoredSettings, "keys">;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1727,6 +1738,7 @@ test("settings start with the start theme and the default keys, before any file 
     theme: "light",
     antialiasing: "subpixel",
     keys: { bindings: DEFAULT_KEYS, problems: [] },
+    languageServers: NO_SERVERS,
   });
   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
 });
@@ -1851,7 +1863,7 @@ test("setAntialiasing sends the settings in use with the new value and applies t
 
   expect(sent.at(-1)).toEqual([
     "setTheme",
-    { theme: "dark", antialiasing: "greyscale", keys: {} },
+    { ...DARK, antialiasing: "greyscale", keys: {} },
     "light",
   ]);
 });
