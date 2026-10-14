@@ -171,15 +171,13 @@ mod tests {
 
     #[test]
     fn a_length_above_64_mib_is_too_large_and_64_mib_is_read() {
-        let too_large = format!("Content-Length: {}\r\n\r\n", MAX_MESSAGE_BYTES + 1);
+        let too_large = b"Content-Length: 67108865\r\n\r\n";
         assert_eq!(
-            read_frame(&mut too_large.as_bytes()),
-            Frame::TooLarge {
-                bytes: MAX_MESSAGE_BYTES + 1
-            }
+            read_frame(&mut &too_large[..]),
+            Frame::TooLarge { bytes: 67_108_865 }
         );
-        let at_limit = format!("Content-Length: {MAX_MESSAGE_BYTES}\r\n\r\n");
-        let Frame::Broken { reason } = read_frame(&mut at_limit.as_bytes()) else {
+        let at_limit = b"Content-Length: 67108864\r\n\r\n";
+        let Frame::Broken { reason } = read_frame(&mut &at_limit[..]) else {
             panic!("a 64 MiB length was refused");
         };
         assert_eq!(reason, "the output ended inside a message");
@@ -206,10 +204,16 @@ mod tests {
     }
 
     #[test]
-    fn a_header_line_without_end_is_broken_after_8_kib() {
-        let endless = vec![b'x'; MAX_HEADER_LINE_BYTES * 4];
+    fn a_header_line_of_8_kib_is_read_and_a_longer_one_is_broken() {
+        let header_line = |bytes: usize| format!("X: {}\r\n", "x".repeat(bytes - "X: \r".len()));
+        let accepted = format!("{}Content-Length: 1\r\n\r\na", header_line(8192));
+        assert_eq!(
+            read_frame(&mut accepted.as_bytes()),
+            Frame::Message("a".to_owned())
+        );
+        let refused = format!("{}Content-Length: 1\r\n\r\na", header_line(8193));
         let expected = broken("a header line is too long");
-        assert_eq!(read_frame(&mut &endless[..]), expected);
+        assert_eq!(read_frame(&mut refused.as_bytes()), expected);
     }
 
     #[test]

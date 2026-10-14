@@ -128,13 +128,17 @@ impl Host {
         }
     }
 
-    /// Stops every run and returns once each program has been reaped.
-    pub fn stop_all(&mut self) {
-        let runs = mem::take(&mut self.runs);
-        for running in runs.values() {
+    /// Signals every run to stop and returns at once; each run's `Exited` follows.
+    pub fn stop_every(&self) {
+        for running in self.runs.values() {
             running.stop();
         }
-        for running in runs.into_values() {
+    }
+
+    /// Stops every run and returns once each program has been reaped.
+    pub fn stop_all(&mut self) {
+        self.stop_every();
+        for running in mem::take(&mut self.runs).into_values() {
             running.wait();
         }
     }

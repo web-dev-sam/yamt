@@ -1,9 +1,11 @@
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 
-use tauri::State;
 use tauri::ipc::Channel;
+use tauri::webview::PageLoadEvent;
+use tauri::{Manager, Runtime, State};
 use yamt_lsp_host::{
     Host, HostEvent, ProgramFound, ProjectFile, RunId, ServerCommand, ServerContext, StartReply,
 };
@@ -12,6 +14,22 @@ pub(crate) type HostState = Mutex<Host>;
 
 pub(crate) fn lock(state: &HostState) -> MutexGuard<'_, Host> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub(crate) fn manage<R: Runtime>(builder: tauri::Builder<R>, root: &Path) -> tauri::Builder<R> {
+    let host: HostState = Mutex::new(Host::new(root));
+    // A reloaded page's channels still take events (tauri 2.12 ipc/channel.rs:409-449 fails a send
+    // only when `eval` fails), so its runs would never stop themselves.
+    builder
+        .manage(host)
+        .on_page_load(|webview, page| stop_runs_on_page_start(&webview.state(), page.event()))
+}
+
+fn stop_runs_on_page_start(host: &HostState, event: PageLoadEvent) {
+    match event {
+        PageLoadEvent::Started => lock(host).stop_every(),
+        PageLoadEvent::Finished => {}
+    }
 }
 
 #[tauri::command]
@@ -89,8 +107,8 @@ mod tests {
     use serde_json::json;
     use tauri::Manager;
 
-    use crate::commands::tests::{Window, open_window};
     use crate::commands::{SessionState, lock as lock_session};
+    use crate::mock_window::{Window, open_window};
 
     fn session_root(window: &Window) -> std::path::PathBuf {
         lock_session(&window.app.state::<SessionState>())
@@ -136,5 +154,115 @@ mod tests {
         let text = json!({ "kind": "Text", "text": "{}" });
         let answers = json!([text, { "kind": "Folder" }, { "kind": "Missing" }]);
         assert_eq!(files, Ok(answers));
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod run_tests {
+    use std::process::Command;
+    use std::sync::mpsc::{RecvTimeoutError, Sender};
+    use std::time::{Duration, Instant};
+
+    use serde_json::{Value, json};
+    use tauri::ipc::InvokeResponseBody;
+
+    use super::*;
+    use crate::mock_window::{Window, open_window};
+
+    const WAIT: Duration = Duration::from_secs(10);
+    const POLL: Duration = Duration::from_millis(50);
+
+    /// `sh` writes its pid to stderr and becomes `cat`: framed messages come back as they went.
+    fn start_cat(window: &Window, events: Channel<HostEvent>) -> RunId {
+        let command = ServerCommand {
+            program: "sh".to_owned(),
+            args: vec!["-c".to_owned(), "echo $$ >&2; exec cat".to_owned()],
+            project: String::new(),
+        };
+        let reply = start_server(window.app.state(), command, events);
+        let StartReply::Started { run } = reply else {
+            panic!("{reply:?}");
+        };
+        run
+    }
+
+    /// A channel that hands each event to `events` and answers like a page that takes it or not.
+    fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
+        Channel::new(move |body| {
+            let InvokeResponseBody::Json(json) = body else {
+                panic!("an event that is not JSON");
+            };
+            events.send(serde_json::from_str(&json).unwrap()).unwrap();
+            if takes_events {
+                Ok(())
+            } else {
+                Err(tauri::Error::WebviewNotFound)
+            }
+        })
+    }
+
+    fn next(events: &Receiver<Value>) -> Value {
+        events.recv_timeout(WAIT).unwrap()
+    }
+
+    fn pid_of(first_event: &Value) -> u32 {
+        first_event["line"].as_str().unwrap().parse().unwrap()
+    }
+
+    fn is_alive(pid: u32) -> bool {
+        let status = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .unwrap();
+        status.success()
+    }
+
+    #[test]
+    fn a_run_s_messages_reach_its_channel_and_stop_ends_it_with_one_exited() {
+        let window = open_window();
+        let (sender, events) = mpsc::channel();
+        let run = start_cat(&window, channel_into(sender, true));
+        let pid = pid_of(&next(&events));
+        send_to_server(window.app.state(), run, "{\"id\":1}".to_owned());
+        let message = json!({ "kind": "Message", "text": "{\"id\":1}" });
+        assert_eq!(next(&events), message);
+        stop_server(window.app.state(), run);
+        assert_eq!(next(&events), json!({ "kind": "Exited", "code": 0 }));
+        assert_eq!(
+            events.recv_timeout(WAIT),
+            Err(RecvTimeoutError::Disconnected)
+        );
+        assert!(!is_alive(pid));
+    }
+
+    #[test]
+    fn a_run_whose_page_refuses_its_events_stops_at_its_next_output() {
+        let window = open_window();
+        let (sender, events) = mpsc::channel();
+        let run = start_cat(&window, channel_into(sender, false));
+        let pid = pid_of(&next(&events));
+        send_to_server(window.app.state(), run, "anyone there".to_owned());
+        let deadline = Instant::now() + WAIT;
+        while is_alive(pid) && Instant::now() < deadline {
+            thread::sleep(POLL);
+        }
+        assert!(!is_alive(pid));
+    }
+
+    #[test]
+    fn a_page_that_starts_loading_stops_the_runs_of_the_page_before() {
+        let window = open_window();
+        let (sender, events) = mpsc::channel();
+        let run = start_cat(&window, channel_into(sender, true));
+        let pid = pid_of(&next(&events));
+        let host = window.app.state::<HostState>();
+        stop_runs_on_page_start(&host, PageLoadEvent::Finished);
+        send_to_server(window.app.state(), run, "still here".to_owned());
+        let message = json!({ "kind": "Message", "text": "still here" });
+        assert_eq!(next(&events), message);
+        stop_runs_on_page_start(&host, PageLoadEvent::Started);
+        assert_eq!(next(&events), json!({ "kind": "Exited", "code": 0 }));
+        assert!(!is_alive(pid));
     }
 }

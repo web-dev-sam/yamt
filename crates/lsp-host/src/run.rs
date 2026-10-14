@@ -1,7 +1,7 @@
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -65,8 +65,8 @@ impl Running {
         let (writes, queued) = mpsc::channel();
         thread::spawn(move || write_messages(stdin, &queued));
         let readers = vec![
-            spawn_reader(stdout, &events, &stop, read_messages),
-            spawn_reader(stderr, &events, &stop, read_log),
+            spawn_message_reader(stdout, &events, &stop),
+            spawn_log_reader(stderr, &events, &stop),
         ];
         let close = writes.clone();
         let supervisor =
@@ -111,17 +111,31 @@ fn command(program: &Path, args: &[String], folder: &Path) -> Command {
     command
 }
 
-fn spawn_reader<Pipe: Send + 'static>(
-    pipe: Pipe,
+fn spawn_message_reader(
+    stdout: ChildStdout,
     events: &Sender<HostEvent>,
     stop: &Sender<StopReason>,
-    read: fn(Pipe, &Sender<HostEvent>) -> StopReason,
 ) -> JoinHandle<()> {
     let events = events.clone();
     let stop = stop.clone();
     thread::spawn(move || {
-        let reason = read(pipe, &events);
+        let reason = read_messages(stdout, &events);
         let _ = stop.send(reason);
+    })
+}
+
+/// The end of stderr stops nothing: a server may close it and keep serving over stdout.
+fn spawn_log_reader(
+    stderr: ChildStderr,
+    events: &Sender<HostEvent>,
+    stop: &Sender<StopReason>,
+) -> JoinHandle<()> {
+    let events = events.clone();
+    let stop = stop.clone();
+    thread::spawn(move || {
+        if read_log(stderr, &events).is_err() {
+            let _ = stop.send(StopReason::EventsGone);
+        }
     })
 }
 
@@ -154,14 +168,13 @@ fn stop_with_log(events: &Sender<HostEvent>, line: String) -> StopReason {
     StopReason::OutputBroken
 }
 
-fn read_log(stderr: ChildStderr, events: &Sender<HostEvent>) -> StopReason {
+/// `Err` once nobody takes the events; `Ok` when stderr ends or cannot be read.
+fn read_log(stderr: ChildStderr, events: &Sender<HostEvent>) -> Result<(), SendError<HostEvent>> {
     let mut reader = BufReader::new(stderr);
     while let Ok(Some(line)) = frame::log_line(&mut reader) {
-        if events.send(HostEvent::Log { line }).is_err() {
-            return StopReason::EventsGone;
-        }
+        events.send(HostEvent::Log { line })?;
     }
-    StopReason::OutputClosed
+    Ok(())
 }
 
 fn write_messages(mut stdin: ChildStdin, queued: &Receiver<ToServer>) {

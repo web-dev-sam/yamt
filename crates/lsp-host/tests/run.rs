@@ -13,6 +13,11 @@ const ECHO: &str = env!("CARGO_BIN_EXE_lsp-echo");
 const WAIT: Duration = Duration::from_secs(10);
 const STOP_GRACE: Duration = Duration::from_secs(2);
 const LOG_LINE_BYTES: usize = 8 * 1024;
+const IDLE: Duration = Duration::from_millis(300);
+const BURST_LINES: usize = 1000;
+const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
+const DRAIN_SLACK: Duration = Duration::from_secs(1);
+const BURST_PADDING: usize = 40;
 
 struct Echo {
     _repo: TempDir,
@@ -79,17 +84,25 @@ fn next_log(events: &Receiver<HostEvent>) -> String {
     }
 }
 
-/// The exit code of the one `Exited`, after checking nothing follows it.
-fn exited_once(events: &Receiver<HostEvent>) -> Option<i32> {
+/// Every event before the one `Exited`, and its code, after checking nothing follows it.
+fn events_until_exited(events: &Receiver<HostEvent>) -> (Vec<HostEvent>, Option<i32>) {
+    let mut before = Vec::new();
     loop {
-        if let HostEvent::Exited { code } = next_event(events) {
-            assert_eq!(
-                events.recv_timeout(WAIT),
-                Err(RecvTimeoutError::Disconnected)
-            );
-            return code;
+        match next_event(events) {
+            HostEvent::Exited { code } => {
+                assert_eq!(
+                    events.recv_timeout(WAIT),
+                    Err(RecvTimeoutError::Disconnected)
+                );
+                return (before, code);
+            }
+            event @ (HostEvent::Message { .. } | HostEvent::Log { .. }) => before.push(event),
         }
     }
+}
+
+fn exited_once(events: &Receiver<HostEvent>) -> Option<i32> {
+    events_until_exited(events).1
 }
 
 #[cfg(unix)]
@@ -183,6 +196,62 @@ fn a_server_exiting_by_itself_reports_its_code() {
 }
 
 #[test]
+fn an_idle_server_keeps_running_and_answers_later() {
+    let echo = start_echo(&[]);
+    thread::sleep(IDLE);
+    assert!(is_alive(echo.pid));
+    echo.host.send(echo.run, "still here".to_owned());
+    assert_eq!(next_message(&echo.events), "still here");
+}
+
+#[test]
+fn stderr_lines_written_after_the_server_exited_all_come_before_its_exited() {
+    let echo = start_echo(&[]);
+    echo.host.send(echo.run, format!("burst {BURST_LINES}"));
+    let (before, code) = events_until_exited(&echo.events);
+    assert_eq!(code, Some(0));
+    let burst: Vec<HostEvent> = before
+        .into_iter()
+        .filter(
+            |event| matches!(event, HostEvent::Log { line } if line.starts_with("lsp-echo burst ")),
+        )
+        .collect();
+    let padding = "-".repeat(BURST_PADDING);
+    let expected: Vec<HostEvent> = (0..BURST_LINES)
+        .map(|line| HostEvent::Log {
+            line: format!("lsp-echo burst {line} {padding}"),
+        })
+        .collect();
+    assert_eq!(burst, expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_server_whose_child_holds_its_output_exits_after_at_most_the_drain() {
+    let echo = start_echo(&[]);
+    let asked = Instant::now();
+    echo.host.send(echo.run, "orphan".to_owned());
+    let code = loop {
+        if let HostEvent::Exited { code } = next_event(&echo.events) {
+            break code;
+        }
+    };
+    let took = asked.elapsed();
+    assert_eq!(code, Some(3));
+    assert!(took < OUTPUT_DRAIN + DRAIN_SLACK, "{took:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_server_that_closes_its_stderr_keeps_serving() {
+    let echo = start_echo(&[]);
+    echo.host.send(echo.run, "close-stderr".to_owned());
+    assert_eq!(next_message(&echo.events), "stderr closed");
+    echo.host.send(echo.run, "still here".to_owned());
+    assert_eq!(next_message(&echo.events), "still here");
+}
+
+#[test]
 fn a_dropped_event_receiver_stops_the_run_at_its_next_output() {
     let Echo {
         _repo,
@@ -219,6 +288,26 @@ fn stop_all_returns_with_no_child_left_also_one_that_ignores_stop() {
     }
     for events in &receivers {
         exited_once(events);
+    }
+}
+
+#[test]
+fn stop_every_signals_each_run_and_returns_before_they_exit() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut host = Host::new(repo.path());
+    let mut runs = Vec::new();
+    for args in [&[][..], &["--ignore-stop"][..]] {
+        let (sender, events) = mpsc::channel();
+        let reply = host.start(&echo_command(args, ""), sender);
+        assert!(matches!(reply, StartReply::Started { .. }), "{reply:?}");
+        runs.push((pid_of(&next_log(&events)), events));
+    }
+    host.stop_every();
+    let (ignoring, _) = &runs[1];
+    assert!(is_alive(*ignoring));
+    for (pid, events) in &runs {
+        exited_once(events);
+        assert!(!is_alive(*pid), "{pid} is still running");
     }
 }
 
