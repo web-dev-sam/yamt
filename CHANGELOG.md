@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-14
+
 ### Added
 
 - Ctrl+B (Cmd+B on macOS) hides and shows the file list, from anywhere in the window; the merge view
@@ -36,8 +38,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stay.
 - Language servers: yamt finds oxlint, oxfmt, TypeScript and eslint in the repository's projects and asks
   once per repository whether to start them. Their problems underline the Result as you type, with the
-  message on hover. Ctrl+S formats with oxfmt first (as one undo step, never touching changes that still
-  wait). Left of the settings gear, each server's state; its menu has Start, Stop, Restart and Show log.
+  message on hover. Ctrl+S formats first, with oxfmt or an added server that formats (as one undo step,
+  never touching changes that still wait). Left of the settings gear, each server's state; its menu has
+  Start, Stop, Restart and Show log.
   A server that needs a separate package (typescript-language-server for TypeScript 5 and 6,
   vscode-langservers-extracted for eslint) shows "Not installed" with the install command for the
   project's own package manager and a Copy button; yamt starts it when you come back to the window.
@@ -136,6 +139,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.2.0...HEAD
+[Unreleased]: ../../compare/v0.3.0...HEAD
+[0.3.0]: ../../compare/v0.2.0...v0.3.0
 [0.2.0]: ../../compare/v0.1.1...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0
