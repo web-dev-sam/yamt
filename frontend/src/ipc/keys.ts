@@ -184,13 +184,7 @@ export function keyLabel(key: Key, platform: string): string {
 }
 
 export function sameKey(a: Key, b: Key): boolean {
-  return (
-    a.name === b.name &&
-    a.mod === b.mod &&
-    a.macCtrl === b.macCtrl &&
-    a.alt === b.alt &&
-    a.shift === b.shift
-  );
+  return a.name === b.name && MODIFIERS.every(({ modifier }) => a[modifier] === b[modifier]);
 }
 
 function defaultKeys(...texts: string[]): readonly Key[] {
@@ -254,6 +248,11 @@ export function keyOfEvent(event: Pressed, platform: string): Key | null {
   const character = characterOf(event, mod || macCtrl || (alt && !mac));
   const shift = event.shiftKey && isLetter(character);
   return isKeyName(character) ? { mod, macCtrl, alt, shift, name: character } : null;
+}
+
+export function pressesKey(event: Pressed, keys: readonly Key[], platform: string): boolean {
+  const pressed = keyOfEvent(event, platform);
+  return pressed !== null && keys.some((key) => sameKey(key, pressed));
 }
 
 function storedKeys(

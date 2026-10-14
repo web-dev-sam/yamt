@@ -9,6 +9,7 @@ import {
   keyOfEvent,
   keyText,
   parseKey,
+  pressesKey,
   sameKey,
   type Key,
 } from "./keys";
@@ -37,18 +38,19 @@ function texts(keys: readonly Key[]): string[] {
   return keys.map(keyText);
 }
 
+function event(press: Press): Parameters<typeof keyOfEvent>[0] {
+  return {
+    key: press.key,
+    code: press.code ?? "",
+    ctrlKey: press.ctrl ?? false,
+    metaKey: press.meta ?? false,
+    altKey: press.alt ?? false,
+    shiftKey: press.shift ?? false,
+  };
+}
+
 function pressed(platform: string, press: Press): string | null {
-  const found = keyOfEvent(
-    {
-      key: press.key,
-      code: press.code ?? "",
-      ctrlKey: press.ctrl ?? false,
-      metaKey: press.meta ?? false,
-      altKey: press.alt ?? false,
-      shiftKey: press.shift ?? false,
-    },
-    platform,
-  );
+  const found = keyOfEvent(event(press), platform);
   return found === null ? null : keyText(found);
 }
 
@@ -163,6 +165,29 @@ test("sameKey compares every modifier and the name", () => {
   for (const other of ["z", "Mod-y", "MacCtrl-z", "Mod-Alt-z", "Mod-Shift-z", "Mod-MacCtrl-z"]) {
     expect(sameKey(base, key(other))).toBe(false);
   }
+});
+
+test("pressesKey: no keys are never pressed", () => {
+  const presses: Press[] = [{ key: "b", ctrl: true }, { key: "b" }];
+  for (const press of presses) {
+    expect(pressesKey(event(press), [], LINUX)).toBe(false);
+  }
+});
+
+test("pressesKey: each of two keys is pressed, a near miss is not", () => {
+  const keys = [key("Mod-b"), key("Mod-Shift-l")];
+
+  expect(pressesKey(event({ key: "b", ctrl: true }), keys, LINUX)).toBe(true);
+  expect(pressesKey(event({ key: "L", ctrl: true, shift: true }), keys, LINUX)).toBe(true);
+  expect(pressesKey(event({ key: "B", ctrl: true, shift: true }), keys, LINUX)).toBe(false);
+  expect(pressesKey(event({ key: "l", ctrl: true }), keys, LINUX)).toBe(false);
+});
+
+test("pressesKey on macOS: ⌘B presses Mod-b, ⌃B does not", () => {
+  const keys = [key("Mod-b")];
+
+  expect(pressesKey(event({ key: "b", meta: true }), keys, MAC)).toBe(true);
+  expect(pressesKey(event({ key: "b", ctrl: true }), keys, MAC)).toBe(false);
 });
 
 test("Linux labels: Ctrl, Alt, Shift and WebStorm's key names", () => {

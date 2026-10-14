@@ -1,8 +1,7 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
-  keyOfEvent,
-  sameKey,
+  pressesKey,
   type ChunkSource,
   type DiskVersion,
   type FileEntry,
@@ -32,7 +31,7 @@ type FinishRequest = Parameters<ChunkSource["finishFile"]>[0] & {
   readonly summary: MergeSummary;
 };
 
-type KeyPress = Parameters<typeof keyOfEvent>[0] &
+type KeyPress = Parameters<typeof pressesKey>[0] &
   Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
 
 type Refs = {
@@ -278,13 +277,10 @@ async function reset(state: State, path: string, diskVersion: DiskVersion): Prom
 }
 
 function fileListKey(state: State, event: KeyPress, platform: string): void {
-  const pressed = keyOfEvent(event, platform);
-  const bound = state.settings.value.keys.bindings["toggle-file-list"];
   if (
     event.defaultPrevented ||
     state.asking.question.value !== null ||
-    pressed === null ||
-    !bound.some((key) => sameKey(key, pressed))
+    !pressesKey(event, state.settings.value.keys.bindings["toggle-file-list"], platform)
   ) {
     return;
   }

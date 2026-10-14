@@ -1,4 +1,4 @@
-import { keyOfEvent, sameKey, type KeyBindings } from "../../ipc";
+import { pressesKey, type KeyBindings } from "../../ipc";
 
 type HistoryKey = Pick<
   KeyboardEvent,
@@ -24,12 +24,8 @@ export function historyCommand(
   if (event.defaultPrevented || inTextField(event.target)) {
     return null;
   }
-  const pressed = keyOfEvent(event, platform);
-  if (pressed === null) {
-    return null;
-  }
-  if (keys.undo.some((key) => sameKey(key, pressed))) {
+  if (pressesKey(event, keys.undo, platform)) {
     return "undo";
   }
-  return keys.redo.some((key) => sameKey(key, pressed)) ? "redo" : null;
+  return pressesKey(event, keys.redo, platform) ? "redo" : null;
 }

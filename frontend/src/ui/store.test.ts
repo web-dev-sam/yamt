@@ -2187,3 +2187,36 @@ test("a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no lo
   expect(store.fileListShown.value).toBe(false);
   expect(bound.prevents()).toBe(1);
 });
+
+test("an empty toggle-file-list binding leaves Ctrl+B and a plain b alone", async () => {
+  const { source } = settingsSource({
+    loadSettings: () => Promise.resolve(read({ ...DARK, keys: { "toggle-file-list": [] } })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+
+  for (const unbound of [press("b", { ctrl: true }), press("b")]) {
+    store.fileListKey(unbound, LINUX);
+    expect(store.fileListShown.value).toBe(true);
+    expect(unbound.prevents()).toBe(0);
+  }
+});
+
+test("with two toggle-file-list keys, each one toggles the list", async () => {
+  const { source } = settingsSource({
+    loadSettings: () =>
+      Promise.resolve(read({ ...DARK, keys: { "toggle-file-list": ["Mod-b", "Mod-Shift-l"] } })),
+  });
+  const store = createAppStore(source);
+  await store.loadSettings();
+
+  const first = press("b", { ctrl: true });
+  store.fileListKey(first, LINUX);
+  expect(store.fileListShown.value).toBe(false);
+  expect(first.prevents()).toBe(1);
+
+  const second = press("L", { ctrl: true, shift: true });
+  store.fileListKey(second, LINUX);
+  expect(store.fileListShown.value).toBe(true);
+  expect(second.prevents()).toBe(1);
+});

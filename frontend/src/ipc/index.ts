@@ -36,6 +36,7 @@ export {
   keyOfEvent,
   keyText,
   parseKey,
+  pressesKey,
   sameKey,
   type Key,
   type KeyAction,
