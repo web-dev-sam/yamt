@@ -4,12 +4,15 @@ import {
   type ChangeSpec,
   type EditorState,
   type Line,
+  type StateField,
   type TransactionSpec,
 } from "@codemirror/state";
 
 import type { FormatRefusal, FormattingOptions, OpenDocument } from "../../lsp";
+import type { ChunkSpan } from "./chunkField";
 import { lineDiff, type LineEdit } from "./lineDiff";
 import { paneText } from "./pane";
+import { isResolved } from "./status";
 
 export type FormatOutcome =
   | { readonly kind: "formatted" | "unchanged" | "changedMeanwhile"; readonly server: string }
@@ -19,6 +22,8 @@ export type ResultPane = {
   readonly state: EditorState;
   dispatch(spec: TransactionSpec): void;
 };
+
+type LeftAlone = { readonly first: number; readonly last: number };
 
 export function formattingOptions(state: EditorState): FormattingOptions {
   const unit = state.facet(indentUnit);
@@ -95,9 +100,31 @@ function keyedEdits(doc: Text, { from, to, lines }: LineEdit): LineEdit[] {
   return [...pieces, { from: from + oldAt, to, lines: lines.slice(nextAt) }];
 }
 
+function lineByLine(edit: LineEdit): LineEdit[] {
+  if (edit.to - edit.from !== edit.lines.length) {
+    return [edit];
+  }
+  return edit.lines.map((line, index) => ({
+    from: edit.from + index,
+    to: edit.from + index + 1,
+    lines: [line],
+  }));
+}
+
+function openChangeLines(doc: Text, spans: readonly ChunkSpan[]): LeftAlone[] {
+  return spans
+    .filter(({ chunk, status }) => !isResolved(chunk, status))
+    .map(({ from, to }) => {
+      const firstIndex = doc.lineAt(from).number - 1;
+      const after = doc.lineAt(to);
+      return { first: firstIndex - 1, last: after.from === to ? after.number - 1 : after.number };
+    });
+}
+
 export async function formatResult(
   open: Pick<OpenDocument, "format">,
   pane: () => ResultPane,
+  field: StateField<readonly ChunkSpan[]>,
   closed: () => boolean,
 ): Promise<FormatOutcome> {
   const reply = await open.format(formattingOptions(pane().state));
@@ -110,13 +137,15 @@ export async function formatResult(
   if (closed() || paneText(state) !== reply.sent) {
     return { kind: "changedMeanwhile", server };
   }
-  const edits = lineDiff(doc.toJSON(), reply.result.split(/\r\n?|\n/));
-  if (edits.length === 0) {
+  const leftAlone = openChangeLines(doc, state.field(field));
+  const changes = lineDiff(doc.toJSON(), reply.result.split(/\r\n?|\n/))
+    .flatMap((edit) => keyedEdits(doc, edit))
+    .flatMap((piece) => lineByLine(piece))
+    .filter(({ from, to }) => leftAlone.every(({ first, last }) => from > last || to <= first))
+    .flatMap((piece) => lineChanges(doc, piece));
+  if (changes.length === 0) {
     return { kind: "unchanged", server };
   }
-  const changes = edits
-    .flatMap((edit) => keyedEdits(doc, edit))
-    .flatMap((piece) => lineChanges(doc, piece));
   pane().dispatch({ changes, userEvent: "yamt.format" });
   return { kind: "formatted", server };
 }

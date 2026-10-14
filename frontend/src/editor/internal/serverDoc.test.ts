@@ -11,6 +11,7 @@ import {
   type ResultDocument,
   type ServerProblem,
 } from "../../lsp";
+import { chunkField } from "./chunkField";
 import type { ResultPane } from "./format";
 import { paneState, type PaneSettings } from "./pane";
 import { paneDocs } from "./paneDocs";
@@ -32,6 +33,7 @@ const ERROR: ServerProblem = {
   source: null,
   code: null,
 };
+const NO_CHUNKS = chunkField([]);
 
 class FakePane implements ResultPane {
   state: EditorState;
@@ -90,7 +92,7 @@ function pane(text: string, eol: Eol = "Lf"): FakePane {
       eol,
       language: null,
       settings: SETTINGS,
-      extensions: problemsField,
+      extensions: [problemsField, NO_CHUNKS],
     }),
   );
 }
@@ -104,7 +106,7 @@ function opened(
   views: Panes = panes(),
   readOnly = false,
 ): { doc: ServerDoc; views: Panes } {
-  const doc = openResult(servers, { path: PATH, readOnly }, () => views);
+  const doc = openResult(servers, { path: PATH, readOnly }, () => views, NO_CHUNKS);
   if (doc === null) {
     throw new Error("expected an opened Result");
   }
@@ -129,8 +131,8 @@ test("rule 1: an editable Result is opened under its path, says changed on each 
 test("rule 1: a read-only Result, or no servers, opens nothing", () => {
   const servers = new FakeServers();
 
-  expect(openResult(servers, { path: PATH, readOnly: true }, () => panes())).toBeNull();
-  expect(openResult(null, { path: PATH, readOnly: false }, () => panes())).toBeNull();
+  expect(openResult(servers, { path: PATH, readOnly: true }, () => panes(), NO_CHUNKS)).toBeNull();
+  expect(openResult(null, { path: PATH, readOnly: false }, () => panes(), NO_CHUNKS)).toBeNull();
   expect(servers.calls).toEqual([]);
 });
 

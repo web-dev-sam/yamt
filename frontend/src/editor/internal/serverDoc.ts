@@ -1,5 +1,5 @@
 import { setDiagnosticsEffect } from "@codemirror/lint";
-import type { EditorState, Transaction } from "@codemirror/state";
+import type { EditorState, StateField, Transaction } from "@codemirror/state";
 
 import type {
   DocVersion,
@@ -8,6 +8,7 @@ import type {
   ResultDocument,
   ServerProblem,
 } from "../../lsp";
+import type { ChunkSpan } from "./chunkField";
 import { formatResult, type FormatOutcome, type ResultPane } from "./format";
 import type { Pane } from "./geometry";
 import { paneText } from "./pane";
@@ -25,14 +26,21 @@ export type PaneUpdate = {
 export class ServerDoc implements ResultDocument {
   readonly path: string;
   readonly #pane: () => ResultPane;
+  readonly #field: StateField<readonly ChunkSpan[]>;
   readonly #open: OpenDocument;
   #listener: ((counts: ProblemCounts) => void) | null = null;
   #formatting: Promise<FormatOutcome> | null = null;
   #closed = false;
 
-  constructor(servers: Servers, path: string, pane: () => ResultPane) {
+  constructor(
+    servers: Servers,
+    path: string,
+    pane: () => ResultPane,
+    field: StateField<readonly ChunkSpan[]>,
+  ) {
     this.path = path;
     this.#pane = pane;
+    this.#field = field;
     this.#open = servers.open(this);
   }
 
@@ -77,7 +85,12 @@ export class ServerDoc implements ResultDocument {
   }
 
   format(): Promise<FormatOutcome> {
-    this.#formatting ??= formatResult(this.#open, this.#pane, () => this.#closed).finally(() => {
+    this.#formatting ??= formatResult(
+      this.#open,
+      this.#pane,
+      this.#field,
+      () => this.#closed,
+    ).finally(() => {
       this.#formatting = null;
     });
     return this.#formatting;
@@ -94,6 +107,9 @@ export function openResult(
   servers: Servers | null,
   { path, readOnly }: { readonly path: string; readonly readOnly: boolean },
   panes: () => Readonly<Record<Pane, ResultPane>>,
+  field: StateField<readonly ChunkSpan[]>,
 ): ServerDoc | null {
-  return servers === null || readOnly ? null : new ServerDoc(servers, path, () => panes().center);
+  return servers === null || readOnly
+    ? null
+    : new ServerDoc(servers, path, () => panes().center, field);
 }

@@ -98,7 +98,7 @@ export class MergeController {
       void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
     }
     const result = { path: data.path, readOnly: this.#readOnly };
-    this.#server = openResult(options.servers, result, () => this.#views);
+    this.#server = openResult(options.servers, result, () => this.#views, this.#field);
   }
 
   readonly #repaint = EditorView.updateListener.of((update) => {
