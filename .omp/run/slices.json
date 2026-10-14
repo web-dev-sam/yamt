@@ -1,23 +1,21 @@
 {
-  "LspStatusR1": {
+  "LspSetup": {
     "owned": [
-      "frontend/src/ui/ServerStatus.vue",
-      "frontend/src/ui/ServerMenu.vue",
-      "frontend/src/ui/ServerLogView.vue",
-      "frontend/src/ui/serverText.ts",
-      "frontend/src/ui/serverText.test.ts",
-      "frontend/src/ui/servers.ts",
-      "frontend/src/ui/servers.test.ts",
-      "frontend/src/ui/screen.ts",
+      "frontend/src/ui/LanguageServerSettings.vue",
+      "frontend/src/ui/serverSetup.ts",
+      "frontend/src/ui/serverSetup.test.ts",
+      "frontend/src/ui/question.ts",
+      "frontend/src/ui/question.test.ts",
+      "frontend/src/ui/QuestionDialog.vue",
+      "frontend/src/ui/SettingsView.vue",
+      "frontend/src/ui/App.vue",
       "frontend/src/ui/store.ts",
       "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/MergeToolbar.vue",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/style.css",
-      "frontend/src/ui/logFollow.ts",
-      "frontend/src/ui/logFollow.test.ts",
-      "frontend/src/ui/serverMenuToggle.ts",
-      "frontend/src/ui/serverMenuToggle.test.ts"
+      "frontend/src/ui/settings.ts",
+      "frontend/src/ui/settings.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "scripts/conflict-repo.sh",
+      "scripts/lsp-repo.sh"
     ]
   }
 }
