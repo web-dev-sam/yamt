@@ -327,7 +327,8 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 
 ### 3.5 `src-tauri`
 
-- One `tauri::State<Mutex<MergeSession>>`.
+- `tauri::State<Mutex<MergeSession>>` and `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never
+  locked together.
 - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
   (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
   §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
@@ -352,7 +353,19 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   initialization script that sets `<html data-theme>` before the first frame, and on Linux
   `font_rendering::apply(antialiasing)` on GTK's own settings (`gtk-xft-antialias`, `gtk-xft-rgba`)
   before the webview exists (WebKitGTK fixes its subpixel layout at start, #60); a changed
-  antialiasing takes effect at the next start.
+  antialiasing takes effect at the next start. Two more answer `SettingsRead` for the language servers (plan §2 #67,
+  #70): `set_server_answer(current, answer: "start" | "dontStart" | null)` (keyed by the host's repository root, the
+  string `servers_context().root` gives; `null` forgets it) and `set_added_servers(current, added)`; the file's entry
+  is `languageServers { repositories, added: [{ command, fileTypes }] }`.
+- Language-server commands (`servers.rs`, crate `yamt-lsp-host`, plan §2 #70; Rust never parses a server message):
+  `servers_context() -> ServerContext { root, process_id }`, `start_server(command: ServerCommand { program, args,
+  project }, events: Channel<HostEvent>) -> StartReply` (`Started{run}` | `NotFound{program, searched}` |
+  `SpawnFailed` | `OutsideRepository`; events `Message{text}` | `Log{line}` | `Exited{code}`, `Exited` once and last),
+  `send_to_server(run, message)`, `stop_server(run)` (signals; the child is killed 2 s later if it has not exited),
+  `find_program(program, project) -> ProgramFound` (the project's `node_modules/.bin`, its parents up to the root,
+  then PATH; `searched` in order), `project_files(paths) -> Vec<ProjectFile>` (repo-relative, text up to 64 KiB). A
+  page load stops the previous page's runs (`on_page_load` in `with_session`); `stop_all` after `run_return` leaves no
+  child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
   `NoConfigFolder`) mirrored into TS; no stringly errors. A disk change is never an error.
@@ -466,6 +479,16 @@ export interface ChunkSource {
     changes: readonly KeysChange[],
   ): Promise<SourceResult<SettingsRead>>;
   moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
+  // language servers (plan §2 #67/#70): the answer keyed by the host's repository root (null forgets it; the
+  // fixture keys it by /fixture/repository) and the servers added by hand
+  setServerAnswer(
+    current: StoredSettings,
+    answer: RepositoryAnswer | null,
+  ): Promise<SourceResult<SettingsRead>>;
+  setAddedServers(
+    current: StoredSettings,
+    added: readonly AddedServer[],
+  ): Promise<SourceResult<SettingsRead>>;
 }
 ```
 
