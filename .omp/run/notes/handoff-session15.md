@@ -23,12 +23,17 @@ round with the rule "formatting never touches a change that still waits, nor its
     serverText.ts (fix: one home in serverText.ts). Shoulds: start/focus ordering split over main.ts, App.vue and
     serverSetup.ts; Don't start depends on `setSpecs([])` and a private lsp carry-over (fix: a named lsp operation);
     `settingsActions(state)` built twice in store.ts. Read the file for the rest.
-  - Correctness review `LspSetupCorrectness` was still running at handoff; its result will not reach the next
-    session. Re-spawn it on `git show 1d31e9d` (brief `docs/slices/briefs/3.Y-setup.md`, report
-    `.omp/run/notes/LspSetup.md`).
+  - Correctness review **done**: verdict fail, saved verbatim in `.omp/run/notes/LspSetupCorrectness.md` (not yet
+    triaged or logged). Blocks: `answer()` applies the new choice even when `setServerAnswer` fails, so the servers
+    and the stored answer disagree and the next focus undoes the click (fix: apply what the settings now hold, as
+    `changeAdded` does); the same Escape/`dismissals` finding as the boundary review (one fix covers both). Shoulds:
+    a failed start look leaves `started` false, so focus never looks again (fix: set `started` in a `finally`);
+    `parseAddedServer` accepts `d.ts`, which `extensionOf` can never match (fix: refuse inner dots). The reviewer
+    did not get the mutants survivors.
   - `just mutants 0b4c487` finished: `target/mutants-setup.log` (serverSetup.ts 9, settings.ts 14, store.ts 3,
-    question.ts 1 survivors over the whole files). Filter them to the lines changed in `1d31e9d` and send them to the
-    correctness reviewer; the implementer judged 11 `serverSetup.ts` survivors unobservable (`LspSetup.md`).
+    question.ts 1 survivors over the whole files). Filter them to the lines changed in `1d31e9d` and hand them to the
+    fix round (and its correctness re-check); the implementer judged 11 `serverSetup.ts` survivors unobservable
+    (`LspSetup.md`).
 - Row 10 (final run): **planned**. Brief written: `docs/slices/briefs/3.YZ-verify.md` (verifier alone, OR10).
 - `.omp/run/slices.json` still lists `LspSetup` (dead task): rewrite it with only live names before the next spawn.
 
