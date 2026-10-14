@@ -13,6 +13,7 @@ use yamt_settings::{StoredSettings, Theme};
 
 use crate::commands::{SessionState, lock, with_session};
 use crate::outcome::{Ending, ending_on_close};
+use crate::servers::{self, HostState};
 use crate::settings;
 
 const WINDOW_LABEL: &str = "main";
@@ -53,6 +54,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+    servers::lock(&handle.state::<HostState>()).stop_all();
     Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
 }
 

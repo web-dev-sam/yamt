@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use tempfile::TempDir;
-use yamt_settings::{Antialiasing, Places, StoredSettings, Theme};
+use yamt_settings::{Antialiasing, LanguageServerSettings, Places, StoredSettings, Theme};
 
 pub struct Config {
     pub dir: TempDir,
@@ -69,5 +69,6 @@ pub fn light_with_apply() -> StoredSettings {
         theme: Theme::Light,
         antialiasing: Antialiasing::Subpixel,
         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
+        language_servers: LanguageServerSettings::default(),
     }
 }

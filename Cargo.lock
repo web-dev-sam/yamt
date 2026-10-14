@@ -4608,6 +4608,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "yamt-conflict-repo",
+ "yamt-lsp-host",
  "yamt-session",
  "yamt-settings",
 ]
@@ -4641,6 +4642,16 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "yamt-conflict-repo",
+]
+
+[[package]]
+name = "yamt-lsp-host"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "specta",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

@@ -6,11 +6,12 @@ use std::process;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::{Error, StoredSettings};
+use crate::{Error, LanguageServerSettings, StoredSettings};
 
 const THEME: &str = "theme";
 const ANTIALIASING: &str = "antialiasing";
 const KEYS: &str = "keys";
+const LANGUAGE_SERVERS: &str = "languageServers";
 
 /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
 const MAX_LINK_HOPS: usize = 40;
@@ -29,7 +30,7 @@ impl Loaded {
         }
     }
 
-    fn entries(self) -> Map<String, Value> {
+    fn entries(self, path: &Path) -> Result<Map<String, Value>, Error> {
         let mut entries = self.others;
         entries.insert(THEME.to_owned(), Value::from(self.stored.theme.name()));
         entries.insert(
@@ -43,7 +44,16 @@ impl Loaded {
             }
             entries.insert(KEYS.to_owned(), Value::Object(keys));
         }
-        entries
+        if self.stored.language_servers != LanguageServerSettings::default() {
+            let servers = serde_json::to_value(self.stored.language_servers).map_err(|error| {
+                Error::WriteFailed {
+                    path: path.to_owned(),
+                    message: error.to_string(),
+                }
+            })?;
+            entries.insert(LANGUAGE_SERVERS.to_owned(), servers);
+        }
+        Ok(entries)
     }
 }
 
@@ -77,6 +87,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
         theme: entry(path, THEME, others.remove(THEME))?,
         antialiasing: entry(path, ANTIALIASING, others.remove(ANTIALIASING))?,
         keys: entry(path, KEYS, others.remove(KEYS))?,
+        language_servers: entry(path, LANGUAGE_SERVERS, others.remove(LANGUAGE_SERVERS))?,
     };
     Ok(Loaded { others, stored })
 }
@@ -111,7 +122,8 @@ fn broken(path: &Path, message: String) -> Error {
 }
 
 pub(crate) fn write_entries(path: &Path, loaded: Loaded) -> Result<(), Error> {
-    write_text(path, &format!("{:#}\n", Value::Object(loaded.entries())))
+    let entries = loaded.entries(path)?;
+    write_text(path, &format!("{:#}\n", Value::Object(entries)))
 }
 
 /// Writes through a temporary file and a rename into the file at the end of the symlinks at

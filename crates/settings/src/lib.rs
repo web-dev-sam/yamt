@@ -58,6 +58,32 @@ pub struct StoredSettings {
     pub theme: Theme,
     pub antialiasing: Antialiasing,
     pub keys: BTreeMap<String, Vec<String>>,
+    #[serde(rename = "languageServers")]
+    pub language_servers: LanguageServerSettings,
+}
+
+/// `repositories`: the answer to "Start this project's language servers?" per repository root
+/// (the exact path text the window gets); `added`: the servers the user added by hand.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct LanguageServerSettings {
+    pub repositories: BTreeMap<String, RepositoryAnswer>,
+    pub added: Vec<AddedServer>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryAnswer {
+    Start,
+    DontStart,
+}
+
+/// A server the user added: the program and its arguments, and the file extensions it serves
+/// (without dots).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddedServer {
+    pub command: Vec<String>,
+    pub file_types: Vec<String>,
 }
 
 /// `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -142,6 +168,36 @@ pub fn set_keys(
     })
 }
 
+/// `None` forgets the answer for `root`, so the window asks again.
+pub fn set_repository_answer(
+    places: &Places,
+    current: &StoredSettings,
+    root: &str,
+    answer: Option<RepositoryAnswer>,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| {
+        let repositories = &mut stored.language_servers.repositories;
+        match answer {
+            Some(answer) => {
+                repositories.insert(root.to_owned(), answer);
+            }
+            None => {
+                repositories.remove(root);
+            }
+        }
+    })
+}
+
+pub fn set_added_servers(
+    places: &Places,
+    current: &StoredSettings,
+    added: Vec<AddedServer>,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| {
+        stored.language_servers.added = added;
+    })
+}
+
 /// Makes `to` the file in use: an existing file there is used, a missing one is created from
 /// `current`; the location is recorded only once that file is readable.
 pub fn relocate(
@@ -198,5 +254,26 @@ mod tests {
                 serde_json::Value::from(antialiasing.name())
             );
         }
+    }
+
+    #[test]
+    fn the_language_server_entry_crosses_the_ipc_spelled_as_in_the_file() {
+        let mut stored = StoredSettings::default();
+        let servers = &mut stored.language_servers;
+        servers
+            .repositories
+            .insert("/r".to_owned(), RepositoryAnswer::DontStart);
+        servers.added.push(AddedServer {
+            command: vec!["pylsp".to_owned()],
+            file_types: vec!["py".to_owned()],
+        });
+        let expected = serde_json::json!({
+            "repositories": { "/r": "dontStart" },
+            "added": [{ "command": ["pylsp"], "fileTypes": ["py"] }],
+        });
+        assert_eq!(
+            serde_json::to_value(&stored).unwrap()["languageServers"],
+            expected
+        );
     }
 }

@@ -11,6 +11,7 @@ mod frontend_log;
 mod graphics;
 mod ipc_error;
 mod outcome;
+mod servers;
 mod settings;
 mod window;
 

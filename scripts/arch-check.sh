@@ -27,10 +27,17 @@ if [ -n "$forbidden_in_settings" ]; then
     failed=1
 fi
 
+lsp_host_deps=$(normal_deps yamt-lsp-host)
+forbidden_in_lsp_host=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$lsp_host_deps" | grep -vx 'yamt-lsp-host' || true)
+if [ -n "$forbidden_in_lsp_host" ]; then
+    echo "arch-check: yamt-lsp-host must not depend on:" $forbidden_in_lsp_host >&2
+    failed=1
+fi
+
 app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings)' || true)
+forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host)' || true)
 if [ -n "$forbidden_in_app" ]; then
-    echo "arch-check: yamt-app depends on yamt-session and yamt-settings only, not:" $forbidden_in_app >&2
+    echo "arch-check: yamt-app depends on yamt-session, yamt-settings and yamt-lsp-host only, not:" $forbidden_in_app >&2
     failed=1
 fi
 

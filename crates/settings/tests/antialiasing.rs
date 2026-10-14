@@ -7,7 +7,8 @@ use std::fs;
 
 use serde_json::json;
 use yamt_settings::{
-    Antialiasing, Error, StoredSettings, Theme, read, set_antialiasing, set_theme,
+    Antialiasing, Error, LanguageServerSettings, StoredSettings, Theme, read, set_antialiasing,
+    set_theme,
 };
 
 use crate::config::{Config, json_at, keys, write};
@@ -73,6 +74,7 @@ fn set_antialiasing_keeps_unknown_entries_and_the_other_settings() {
         theme: Theme::Light,
         antialiasing: Antialiasing::Greyscale,
         keys: keys(&[("apply", &["F2"])]),
+        language_servers: LanguageServerSettings::default(),
     };
     assert_eq!(settings.stored, expected);
     assert_eq!(

@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::json;
 use yamt_settings::{
-    Antialiasing, Error, KeysChange, StoredSettings, Theme, read, relocate, set_keys, set_theme,
-    stored_at_start,
+    Antialiasing, Error, KeysChange, LanguageServerSettings, StoredSettings, Theme, read, relocate,
+    set_keys, set_theme, stored_at_start,
 };
 
 use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
@@ -366,6 +366,7 @@ fn stored_at_start_gives_the_defaults_whenever_anything_is_missing_or_broken() {
         theme: Theme::Light,
         antialiasing: Antialiasing::Greyscale,
         keys: keys(&[("apply", &["F2"])]),
+        language_servers: LanguageServerSettings::default(),
     };
     assert_eq!(stored_at_start(&config.places), stored);
     write(&config.default_file(), r#"{"keys": {}}"#);

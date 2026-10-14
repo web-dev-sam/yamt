@@ -1,13 +1,14 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::{Runtime, State};
+use yamt_lsp_host::Host;
 use yamt_session::{
     DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
 };
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
-use crate::settings;
+use crate::{servers, settings};
 
 pub(crate) type SessionState = Mutex<MergeSession>;
 
@@ -27,6 +28,14 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         settings::set_antialiasing::<tauri::Wry>,
         settings::set_keys::<tauri::Wry>,
         settings::move_settings::<tauri::Wry>,
+        settings::set_server_answer::<tauri::Wry>,
+        settings::set_added_servers::<tauri::Wry>,
+        servers::servers_context,
+        servers::start_server,
+        servers::send_to_server,
+        servers::stop_server,
+        servers::find_program,
+        servers::project_files,
     ])
 }
 
@@ -34,8 +43,10 @@ pub(crate) fn with_session<R: Runtime>(
     builder: tauri::Builder<R>,
     session: MergeSession,
 ) -> tauri::Builder<R> {
+    let host = Host::new(session.root());
     builder
         .manage(Mutex::new(session))
+        .manage(Mutex::new(host))
         .invoke_handler(specta_builder().invoke_handler())
 }
 
@@ -125,7 +136,7 @@ fn log(entry: LogEntry) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::fs;
 
     use serde_json::{Value, json};
@@ -143,9 +154,9 @@ mod tests {
 
     const CRLF_PATH: &str = "crlf.ts";
 
-    struct Window {
+    pub(crate) struct Window {
         repo: TempDir,
-        app: App<MockRuntime>,
+        pub(crate) app: App<MockRuntime>,
         webview: WebviewWindow<MockRuntime>,
     }
 
@@ -164,7 +175,7 @@ mod tests {
         }
     }
 
-    fn open_window() -> Window {
+    pub(crate) fn open_window() -> Window {
         open_window_on(&[
             file("added.ts", None, b"local\n", b"remote\n"),
             file(
@@ -190,7 +201,7 @@ mod tests {
     }
 
     impl Window {
-        fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
+        pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
             let request = InvokeRequest {
                 cmd: cmd.to_owned(),
                 callback: CallbackFn(0),
