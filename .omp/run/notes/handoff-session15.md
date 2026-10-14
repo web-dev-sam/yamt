@@ -19,8 +19,9 @@ round with the rule "formatting never touches a change that still waits, nor its
   session; re-spawn them):
   - boundary review `LspSetupBoundary` and correctness review `LspSetupCorrectness` of `git show 1d31e9d` (prompts
     as in this session: brief `docs/slices/briefs/3.Y-setup.md`, report `.omp/run/notes/LspSetup.md`);
-  - `just mutants 0b4c487 > target/mutants-setup.log` (TypeScript only). If the log is incomplete, re-run it, then
-    filter survivors to the lines changed in `1d31e9d` and send them to the correctness reviewer.
+  - `just mutants 0b4c487` finished: `target/mutants-setup.log` (serverSetup.ts 9, settings.ts 14, store.ts 3,
+    question.ts 1 survivors over the whole files). Filter them to the lines changed in `1d31e9d` and send them to the
+    correctness reviewer; the implementer judged 11 `serverSetup.ts` survivors unobservable (`LspSetup.md`).
 - Row 10 (final run): **planned**. Brief written: `docs/slices/briefs/3.YZ-verify.md` (verifier alone, OR10).
 - `.omp/run/slices.json` still lists `LspSetup` (dead task): rewrite it with only live names before the next spawn.
 
