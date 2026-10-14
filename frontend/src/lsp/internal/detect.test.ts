@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { ProgramFound, ProjectFile } from "../../ipc";
-import { addedSpecs, detect, type ProjectLookups } from "./detect";
+import { detect, type ProjectLookups } from "./detect";
 import type { ServerSpec } from "./spec";
 
 type Tree = Readonly<Record<string, string | ProjectFile>>;
@@ -188,7 +188,7 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
       name: "TypeScript",
       command: { program: "tsc", args: ["--lsp", "--stdio"] },
       project: "",
-      fileTypes: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
+      fileTypes: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
       formats: false,
       settings: null,
       initializationOptions: null,
@@ -197,17 +197,15 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
   ]);
 });
 
-test("TypeScript 5 with the native preview installed: tsgo", async () => {
-  const tree = {
-    ...NO_SERVERS,
-    ...typescriptAt("", "5.9.3"),
-    "node_modules/@typescript/native-preview/package.json": "{}",
-  };
+test("TypeScript 5 with the project's own tsgo: the native preview; tsgo on PATH does not count", async () => {
+  const tree = { ...NO_SERVERS, ...typescriptAt("", "5.9.3") };
 
-  const specs = await detect(["a.ts"], lookups(tree), ROOT);
+  const specs = await detect(["a.ts"], lookups({ ...tree, ...bins("", "tsgo") }), ROOT);
+  const onPath = await detect(["a.ts"], lookups(tree, ["tsgo"]), ROOT);
 
   expect(summary(specs)).toEqual(["TypeScript tsgo --lsp --stdio @"]);
   expect(specs[0]?.install).toBeNull();
+  expect(summary(onPath)).toEqual(["TypeScript typescript-language-server --stdio @"]);
 });
 
 test("TypeScript 6: typescript-language-server from the project or PATH, else an install hint", async () => {
@@ -273,6 +271,14 @@ test("TypeScript: the nearest typescript package decides the version", async () 
   expect(summary(specs)).toEqual(["TypeScript tsc --lsp --stdio @app"]);
 });
 
+test("TypeScript: the whole leading number is the major version", async () => {
+  const tree = { ...NO_SERVERS, ...typescriptAt("", "10.0.0") };
+
+  const specs = await detect(["a.ts"], lookups(tree), ROOT);
+
+  expect(summary(specs)).toEqual(["TypeScript tsc --lsp --stdio @"]);
+});
+
 test("TypeScript: not detected without a config, without the package, or with no version", async () => {
   const noConfig = {
     ...NO_SERVERS,
@@ -285,12 +291,22 @@ test("TypeScript: not detected without a config, without the package, or with no
     "node_modules/typescript/package.json": "{ not json",
   };
   const noVersion = { ...malformed, "node_modules/typescript/package.json": '{"version":"next"}' };
+  const numberVersion = { ...malformed, "node_modules/typescript/package.json": '{"version":7}' };
+  const notLeading = { ...NO_SERVERS, ...typescriptAt("", "x7.0.0") };
   const notText: Tree = {
     ...malformed,
     "node_modules/typescript/package.json": { kind: "NotText" },
   };
 
-  for (const tree of [noConfig, noPackage, malformed, noVersion, notText]) {
+  for (const tree of [
+    noConfig,
+    noPackage,
+    malformed,
+    noVersion,
+    numberVersion,
+    notLeading,
+    notText,
+  ]) {
     expect(await detect(["a.ts"], lookups(tree, ["typescript-language-server"]), ROOT)).toEqual([]);
   }
 });
@@ -394,7 +410,9 @@ test("package manager: the project's field beats a lock file; a malformed packag
     "yarnBerry",
   );
   expect(await managerFor({ "app/package.json": "{", "app/pnpm-lock.yaml": "" })).toBe("pnpm");
-  expect(await managerFor({ "app/package.json": '{"packageManager":3}' })).toBeNull();
+  expect(
+    await managerFor({ "app/package.json": '{"packageManager":["pnpm@9"]}', "app/yarn.lock": "" }),
+  ).toBe("yarn");
   expect(
     await managerFor({ "app/package.json": "{}", "package.json": '{"packageManager":"bun@1.1"}' }),
   ).toBeNull();
@@ -420,52 +438,4 @@ test("a short answer from projectFiles leaves the rest missing", async () => {
   const short = { ...fake, projectFiles: async () => [] };
 
   expect(await detect(["a.ts"], short, ROOT)).toEqual([]);
-});
-
-test("addedSpecs: the program's file name, served at the repository root, formatting allowed", () => {
-  const specs = addedSpecs(
-    [
-      { command: ["/opt/bin/pylsp", "--check"], fileTypes: ["py"] },
-      { command: ["C:\\tools\\taplo.exe", "lsp", "stdio"], fileTypes: ["toml"] },
-    ],
-    [],
-  );
-
-  expect(specs).toEqual([
-    {
-      name: "pylsp",
-      command: { program: "/opt/bin/pylsp", args: ["--check"] },
-      project: "",
-      fileTypes: ["py"],
-      formats: true,
-      settings: null,
-      initializationOptions: null,
-      install: null,
-    },
-    {
-      name: "taplo.exe",
-      command: { program: "C:\\tools\\taplo.exe", args: ["lsp", "stdio"] },
-      project: "",
-      fileTypes: ["toml"],
-      formats: true,
-      settings: null,
-      initializationOptions: null,
-      install: null,
-    },
-  ]);
-});
-
-test("addedSpecs: a repeated or taken name gets (2), (3) …; an empty command is skipped", () => {
-  const specs = addedSpecs(
-    [
-      { command: ["oxlint", "--lsp"], fileTypes: ["ts"] },
-      { command: [], fileTypes: ["ts"] },
-      { command: ["pylsp"], fileTypes: ["py"] },
-      { command: ["bin/pylsp"], fileTypes: ["pyi"] },
-      { command: ["oxlint"], fileTypes: ["vue"] },
-    ],
-    ["oxlint", "oxlint (2)"],
-  );
-
-  expect(specs.map(({ name }) => name)).toEqual(["oxlint (3)", "pylsp", "pylsp (2)", "oxlint (4)"]);
 });

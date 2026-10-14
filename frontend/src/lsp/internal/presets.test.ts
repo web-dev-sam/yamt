@@ -22,13 +22,7 @@ test("each preset serves its file types", () => {
     ..."json jsonc json5 css scss less html vue md yaml yml toml graphql".split(" "),
   ]);
   expect(preset("oxlint").fileTypes).toEqual([...scripts, "vue"]);
-  expect(preset("TypeScript").fileTypes).toEqual([
-    "ts",
-    "tsx",
-    "mts",
-    "cts",
-    ...scripts.slice(0, 4),
-  ]);
+  expect(preset("TypeScript").fileTypes).toEqual(scripts);
   expect(preset("eslint").fileTypes).toEqual([...scripts, "vue"]);
 });
 

@@ -10,7 +10,7 @@ export type Look =
       readonly package: string;
       readonly firstLspMajor: number;
       readonly compiler: Command;
-      readonly nativePreview: { readonly package: string; readonly command: Command };
+      readonly nativePreview: Command;
       readonly server: Installable;
     }
   | {
@@ -30,7 +30,6 @@ export type Preset = {
 };
 
 const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
-const TS_FIRST = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 const TS_LSP_ARGS = ["--lsp", "--stdio"];
 const STDIO = ["--stdio"];
 
@@ -75,16 +74,13 @@ export const PRESETS: readonly Preset[] = [
       package: "typescript",
       firstLspMajor: 7,
       compiler: { program: "tsc", args: TS_LSP_ARGS },
-      nativePreview: {
-        package: "@typescript/native-preview",
-        command: { program: "tsgo", args: TS_LSP_ARGS },
-      },
+      nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
       server: {
         command: { program: "typescript-language-server", args: STDIO },
         package: "typescript-language-server",
       },
     },
-    fileTypes: TS_FIRST,
+    fileTypes: SCRIPTS,
     formats: false,
     settings: null,
     initializationOptions: null,

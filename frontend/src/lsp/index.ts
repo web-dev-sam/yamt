@@ -11,7 +11,8 @@ import { SYSTEM_TIMERS, type Timers } from "./internal/timers";
 
 export type { DocVersion } from "./internal/version";
 export { isDocVersion } from "./internal/version";
-export { addedSpecs, detect } from "./internal/detect";
+export { addedSpecs } from "./internal/added";
+export { detect } from "./internal/detect";
 export type { ProjectLookups } from "./internal/detect";
 export type { ResultDocument } from "./internal/documents";
 export type { FormatRefusal, FormatReply, FormattingOptions } from "./internal/formatting";

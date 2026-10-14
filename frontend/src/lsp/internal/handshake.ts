@@ -25,10 +25,16 @@ export function hostContext(host: ServerHost): Promise<HostContext> {
 
 export const INITIALIZE_TIMEOUT_MS = 30_000;
 
+export type ProjectAt = { readonly folder: string; readonly root: string };
+
+export function projectUri({ folder, root }: ProjectAt): string {
+  return fileUri(root, folder);
+}
+
 export function projectFolder(spec: ServerSpec, root: string): WorkspaceFolder {
   const segments = `${root.replaceAll("\\", "/")}/${spec.project}`.split("/");
   const name = segments.filter((segment) => segment !== "").at(-1) ?? root;
-  return { uri: fileUri(root, spec.project), name };
+  return { uri: projectUri({ folder: spec.project, root }), name };
 }
 
 export function initializeParams(
