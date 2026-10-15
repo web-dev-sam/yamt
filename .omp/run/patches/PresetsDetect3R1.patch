@@ -1,0 +1,811 @@
+commit 02b46a8836be45dc244e8d93dee0207fe5721de8
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 13:10:49 +0200
+
+    fix(lsp): tsgo Vue note, help/notes keep the run, Phpactor formats from its integrations, one hint builder, one path join (#1020-#1031)
+
+diff --git a/frontend/src/lsp/AGENTS.md b/frontend/src/lsp/AGENTS.md
+index 27175c6..ec5a75c 100644
+--- a/frontend/src/lsp/AGENTS.md
++++ b/frontend/src/lsp/AGENTS.md
+@@ -2,6 +2,6 @@ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own langu
+ 
+ A server's run is one sum type, `Run` in `internal/run.ts` (idle, launching, starting, running, halting), held by `internal/server.ts` (the lifecycle); its `state` and `running` (the documents, the capabilities, the attempt) are derived from it. `internal/attempt.ts` is one process run: it starts and stops the process and routes its messages.
+ 
+-Which specs exist (plan §2 #70 "Detection", "Not installed", #72): `internal/detect.ts` `detect(paths, lookups, root)` is a pure function over the host's two generic lookups (`findProgram`, `projectFiles`; Rust never learns a server's name or an ecosystem). `internal/ecosystems.ts` is the one table of ecosystems (node, python, rust, go, php, clang): each one's project rule (manifests tried in order, nearest folder up to the repository root; rust prefers the nearest `Cargo.toml` with a `[workspace]` table, go `go.work` over `go.mod`, clang's `build/compile_commands.json` makes the folder holding `build/` the project) and its `ProgramFolders` (project folders such as `node_modules/.bin`, `.venv/bin`, `vendor/bin`; home folders such as `go/bin`, `.cargo/bin`, `.local/bin`); the folder walking lives there once, as do the TOML table-header rule (`tomlTable`) and its check (`fileHolds`). A path joins an ecosystem only when some detected preset of that ecosystem serves its file type. Each project folder is read in one `projectFiles` batch — the names come from `internal/candidates.ts` (each preset's signs and configs, Phpactor's integration files, the Vue packages, and the files the install hints read, `install.ts` `HINT_FILES`) — and run through the one preset table `internal/presets.ts` (vocabulary in `internal/tool.ts`; formatters first: oxfmt, Biome, oxlint, TypeScript, eslint, rust-analyzer, gopls, ruff, ty, basedpyright, pyright, Phpactor else Intelephense, clangd, then Deno and bash-language-server, which have `ecosystem: null`: Settings list only, never detected; `DETECTED_PRESETS` is the rest). A `used` look counts a config file, a `pyproject.toml` section or the ecosystem's manifest wherever `findProgram` finds the server (`Project`, `Path`, `Home`), else its spec carries an `InstallHint` (`internal/install.ts`: node's manager from `internal/packageManager.ts` — the `packageManager` field, else the nearest lock file; python's from the nearest `uv.lock`/`poetry.lock`/`pdm.lock`); a found preset server carries that same hint as `help` (null for oxfmt, Biome, oxlint, tsc/tsgo and Intelephense, which have none); a program-only sign (oxfmt, Biome, oxlint; ruff, ty, basedpyright without their config) counts only `place: "Project"`, so detected and can start agree. A tool's `fromProject` adds what only the project knows: Phpactor's integrations (`internal/integrations.ts`: PHPStan, Psalm, PHP-CS-Fixer, phpcs, each on with `vendor/bin/<tool>` and its config in the project folder; Phpactor formats only with a formatting one on), pyright's `python.pythonPath` (the project venv's `python`, `place: "Project"`). `internal/vue.ts`: in a TypeScript 5/6 project (typescript-language-server) with `vue` up the chain, `@vue/typescript-plugin` up the chain makes the TypeScript spec serve `vue` with the plugin loaded from the project folder; without it a never-started "Vue" spec carries the plugin's hint; TypeScript 7 or tsgo with `vue` gets the `vueNeedsTypeScript6` note. A changed spec (the plugin installed) is a new spec to `setSpecs`: the old run stops, the new one starts. `internal/project.ts` holds what one (ecosystem, folder) project reads: its files, its program lookups with the ecosystem's folders, the nearest of a set of files. A project's workspace URI is `handshake.ts` `projectUri`, the one the handshake sends. A rejecting lookup means "not found"; nothing throws. `internal/choices.ts` lists each preset's own server (`presetChoices` for Settings, in table order, PHP as Phpactor then Intelephense). `internal/added.ts` `addedSpecs(added, taken, root)` turns the settings file's added servers into specs served at the repository root; an entry whose program has no file name is skipped; one whose program file name (folder and `.exe`/`.cmd`/`.bat` dropped) and arguments equal a preset server's gets its name, settings, start options for the root, formats unless "never", and help. Every detected spec carries its ecosystem's folders as `ServerSpec.folders`; added specs carry `ecosystems.ts` `EVERY_ECOSYSTEM_FOLDERS`; the start command sends `spec.folders`.
++Which specs exist (plan §2 #70 "Detection", "Not installed", #72): `internal/detect.ts` `detect(paths, lookups, root)` is a pure function over the host's two generic lookups (`findProgram`, `projectFiles`; Rust never learns a server's name or an ecosystem). `internal/ecosystems.ts` is the one table of ecosystems (node, python, rust, go, php, clang): each one's project rule (manifests tried in order, nearest folder up to the repository root; rust prefers the nearest `Cargo.toml` with a `[workspace]` table, go `go.work` over `go.mod`, clang's `build/compile_commands.json` makes the folder holding `build/` the project) and its `ProgramFolders` (project folders such as `node_modules/.bin`, `.venv/bin`, `vendor/bin`; home folders such as `go/bin`, `.cargo/bin`, `.local/bin`); the folder walking lives there once, as do the TOML table-header rule (`tomlTable`) and its check (`fileHolds`). A path joins an ecosystem only when some detected preset of that ecosystem serves its file type. Each project folder is read in one `projectFiles` batch — the names come from `internal/candidates.ts` (each preset's signs and configs, Phpactor's integration files, the Vue packages, and the files the install hints read, `install.ts` `HINT_FILES`) — and run through the one preset table `internal/presets.ts` (vocabulary in `internal/tool.ts`; formatters first: oxfmt, Biome, oxlint, TypeScript, eslint, rust-analyzer, gopls, ruff, ty, basedpyright, pyright, Phpactor else Intelephense, clangd, then Deno and bash-language-server, which have `ecosystem: null`: Settings list only, never detected; `DETECTED_PRESETS` is the rest). A `used` look counts a config file, a `pyproject.toml` section or the ecosystem's manifest wherever `findProgram` finds the server (`Project`, `Path`, `Home`), else its spec carries an `InstallHint` (`internal/install.ts`: node's manager from `internal/packageManager.ts` — the `packageManager` field, else the nearest lock file; python's from the nearest `uv.lock`/`poetry.lock`/`pdm.lock`); a found preset server carries that same hint as `help` (null for oxfmt, Biome, oxlint, tsc/tsgo and Intelephense, which have none); a `used` or eslint server's hint is `install.ts` `serverHint`, for detection and the Settings list alike. A program-only sign (oxfmt, Biome, oxlint; ruff, ty, basedpyright without their config) counts only `place: "Project"`, so detected and can start agree. A tool's `fromProject` adds what only the project knows: Phpactor's integrations (`internal/integrations.ts`: PHPStan, Psalm, PHP-CS-Fixer, phpcs, each on with `vendor/bin/<tool>` and its config in the project folder; Phpactor's own formats rule is "never", so it formats only with an integration on whose own `formats` flag is set; `tool.ts` `mayFormat` is the same rule without a project, for servers added by hand), pyright's `python.pythonPath` (the project venv's `python`, `place: "Project"`). `internal/vue.ts`: in a TypeScript 5/6 project (typescript-language-server) with `vue` up the chain, `@vue/typescript-plugin` up the chain makes the TypeScript spec serve `vue` with the plugin loaded from the project folder (`uri.ts` `absolutePath`: `fileUri`'s root handling in the root's own separators); without it a never-started "Vue" spec carries the plugin's hint; TypeScript 7 or tsgo with `vue` gets the `vueNeedsTypeScript6` note naming the program that runs (`tsc` or `tsgo`). A changed spec (the plugin installed) is a new spec to `setSpecs`: the old run stops, the new one starts; `help` and `notes` are display only, so a spec that differs in nothing else keeps its run (`Server.runsAs`) and shows the new ones. `internal/project.ts` holds what one (ecosystem, folder) project reads: its files, its program lookups with the ecosystem's folders, the nearest of a set of files. A project's workspace URI is `handshake.ts` `projectUri`, the one the handshake sends. A rejecting lookup means "not found"; nothing throws. `internal/choices.ts` lists each preset's own server (`presetChoices` for Settings, in table order, PHP as Phpactor then Intelephense). `internal/added.ts` `addedSpecs(added, taken, root)` turns the settings file's added servers into specs served at the repository root; an entry whose program has no file name is skipped; one whose program file name (folder and `.exe`/`.cmd`/`.bat` dropped) and arguments equal a preset server's gets its name, settings, start options for the root, formats when the tool may (`mayFormat`), and help. Every detected spec carries its ecosystem's folders as `ServerSpec.folders`; added specs carry `ecosystems.ts` `EVERY_ECOSYSTEM_FOLDERS`; the start command sends `spec.folders`.
+ 
+ Reading path of one message from a server: `ServerHost` event → `internal/attempt.ts` `#onEvent` → `connection.ts` `receive` (parse) → a response settles its request; a request goes to `answers.ts` (pure table) and back through `send`; a notification goes to `attempt.ts` `#notified` → `problems.ts` `pushProblems` → `DocProblems` → `ResultDocument.showProblems`. Outward: `index.ts` `open` → `documents.ts` (`DocEntry`: version, 300 ms sync) → `serverDocs.ts` (`didOpen`/`didChange`/`didClose`) → `connection.ts` → `ServerHost.send`; pulls go from `problems.ts` `DocProblems.pull`, the formatting request from `formatting.ts`.
+diff --git a/frontend/src/lsp/index.test.ts b/frontend/src/lsp/index.test.ts
+index 03083bc..f3e14b8 100644
+--- a/frontend/src/lsp/index.test.ts
++++ b/frontend/src/lsp/index.test.ts
+@@ -642,7 +642,7 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
+   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint"]);
+ 
+   const help = { kind: "system", program: "tsserver" } as const;
+-  const notes = [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }] as const;
++  const notes = [{ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" }] as const;
+   languageServers.setSpecs(
+     [spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver", { help, notes })],
+     { startOnOpen: true },
+@@ -718,17 +718,33 @@ test("rule 3: once Vue's plugin is installed, the next detection drops Vue and r
+   expect(languageServers.serving("App.vue")).toBe(true);
+ });
+ 
+-test("a spec's notes are part of it: a TypeScript 7 spec gaining the Vue note is a changed spec", async () => {
+-  const note: SpecNote = { kind: "vueNeedsTypeScript6", version: "7.0.0" };
++test("rule 3: a help-only or notes-only change keeps the run and shows the new words; a command change restarts", async () => {
++  const help: InstallHint = { kind: "system", program: "tsc" };
++  const note: SpecNote = { kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" };
+   const languageServers = servers([spec("TypeScript")]);
+   languageServers.open(new FakeDoc("a.ts", "x"));
+   await settle();
+   const before = host.only("TypeScript");
+ 
+-  languageServers.setSpecs([spec("TypeScript", { notes: [note] })], { startOnOpen: true });
++  languageServers.setSpecs([spec("TypeScript", { help })], { startOnOpen: true });
++  await settle();
++  languageServers.setSpecs([spec("TypeScript", { help, notes: [note] })], { startOnOpen: true });
++  await settle();
++
++  expect(host.stopped).toEqual([]);
++  expect(host.only("TypeScript")).toBe(before);
++  expect(languageServers.views()).toEqual([
++    { name: "TypeScript", project: "", state: { kind: "running" }, help, notes: [note] },
++  ]);
++
++  const command = { program: "tsgo", args: ["--lsp", "--stdio"] };
++  languageServers.setSpecs([spec("TypeScript", { help, notes: [note], command })], {
++    startOnOpen: true,
++  });
+   await settle();
+ 
+   expect(host.stopped).toEqual([before.run]);
++  expect(host.servers.map((server) => server.command.program)).toEqual(["TypeScript", "tsgo"]);
+ });
+ 
+ test("presetChoices is the public preset list for Settings", () => {
+diff --git a/frontend/src/lsp/index.ts b/frontend/src/lsp/index.ts
+index 1b7373c..8a5db73 100644
+--- a/frontend/src/lsp/index.ts
++++ b/frontend/src/lsp/index.ts
+@@ -2,7 +2,6 @@ import type { ServerHost } from "../ipc";
+ import { DocEntry, type ResultDocument } from "./internal/documents";
+ import { format, type FormatReply, type FormattingOptions } from "./internal/formatting";
+ import { hostContext, type HostContext } from "./internal/handshake";
+-import { sameValue } from "./internal/json";
+ import { LogBook, type LogLine } from "./internal/log";
+ import { Server, type ServerEnv } from "./internal/server";
+ import type { ServerSpec } from "./internal/spec";
+@@ -68,9 +67,11 @@ export class LanguageServers {
+   setSpecs(specs: readonly ServerSpec[], options: { readonly startOnOpen: boolean }): void {
+     this.#startOnOpen = options.startOnOpen;
+     const old = this.#servers;
+-    this.#servers = specs.map(
+-      (spec) => old.find((server) => sameValue(server.spec, spec)) ?? this.#create(spec, old),
+-    );
++    this.#servers = specs.map((spec) => {
++      const kept = old.find((server) => server.runsAs(spec));
++      kept?.takeDisplay(spec);
++      return kept ?? this.#create(spec, old);
++    });
+     this.#retire(old.filter((candidate) => !this.#servers.includes(candidate)));
+     this.#servers.forEach((server) => this.#startIfServing(server));
+     this.#changed();
+diff --git a/frontend/src/lsp/internal/added.test.ts b/frontend/src/lsp/internal/added.test.ts
+index 1d56d10..c022a79 100644
+--- a/frontend/src/lsp/internal/added.test.ts
++++ b/frontend/src/lsp/internal/added.test.ts
+@@ -97,7 +97,7 @@ test("addedSpecs: `intelephense.cmd --stdio` in a folder matches Intelephense an
+   );
+ });
+ 
+-test("addedSpecs: a preset's start options are built for the repository root; a non-never formats rule formats", () => {
++test("addedSpecs: a preset's start options are built for the repository root; a tool that may format (its rule or a formatting integration) formats", () => {
+   const specs = addedSpecs(
+     [
+       { command: ["oxlint", "--lsp"], fileTypes: ["ts"] },
+diff --git a/frontend/src/lsp/internal/added.ts b/frontend/src/lsp/internal/added.ts
+index 4480461..5d1857d 100644
+--- a/frontend/src/lsp/internal/added.ts
++++ b/frontend/src/lsp/internal/added.ts
+@@ -4,6 +4,7 @@ import { EVERY_ECOSYSTEM_FOLDERS } from "./ecosystems";
+ import { projectUri } from "./handshake";
+ import { sameValue } from "./json";
+ import type { ServerSpec } from "./spec";
++import { mayFormat } from "./tool";
+ 
+ const FIRST_REPEAT = 2;
+ const WINDOWS_RUNNABLE = /\.(exe|cmd|bat)$/i;
+@@ -25,7 +26,7 @@ function presetPart(
+   const { tool, help } = preset;
+   const workspaceUri = projectUri({ folder: "", root });
+   return {
+-    formats: tool.formats.kind !== "never",
++    formats: mayFormat(tool),
+     settings: tool.settings,
+     initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
+     help,
+diff --git a/frontend/src/lsp/internal/choices.ts b/frontend/src/lsp/internal/choices.ts
+index 7b88645..d27ad02 100644
+--- a/frontend/src/lsp/internal/choices.ts
++++ b/frontend/src/lsp/internal/choices.ts
+@@ -1,4 +1,4 @@
+-import { nodeHint, recipeHint } from "./install";
++import { serverHint } from "./install";
+ import { PRESETS, type Preset } from "./presets";
+ import type { Place } from "./project";
+ import type { InstallHint } from "./spec";
+@@ -28,21 +28,17 @@ function serversOf(preset: Preset): readonly PresetServer[] {
+   switch (look.kind) {
+     case "projectProgram":
+       return [{ tool: preset, command: look.command, fileTypes, help: null }];
+-    case "used": {
+-      const help = recipeHint(AT_ROOT, look.recipe, look.command.program);
++    case "used":
+       return [
+-        { tool: preset, command: look.command, fileTypes, help },
++        { tool: preset, command: look.command, fileTypes, help: serverHint(AT_ROOT, look) },
+         ...look.orElse.map((tool) => ({ tool, command: tool.command, fileTypes, help: null })),
+       ];
+-    }
+     case "typescript":
+       return [{ tool: preset, command: look.server.command, fileTypes, help: null }];
+-    case "eslint": {
+-      const { command } = look.server;
+-      const server = { package: look.server.package, program: command.program };
+-      const help = nodeHint(AT_ROOT, server, { kind: "eslint" });
+-      return [{ tool: preset, command, fileTypes, help }];
+-    }
++    case "eslint":
++      return [
++        { tool: preset, command: look.server.command, fileTypes, help: serverHint(AT_ROOT, look) },
++      ];
+   }
+ }
+ 
+diff --git a/frontend/src/lsp/internal/detect.test.ts b/frontend/src/lsp/internal/detect.test.ts
+index dac83f0..fc51dc8 100644
+--- a/frontend/src/lsp/internal/detect.test.ts
++++ b/frontend/src/lsp/internal/detect.test.ts
+@@ -1003,7 +1003,7 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
+   ]);
+ });
+ 
+-test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the project's version", async () => {
++test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the program that runs and the project's version", async () => {
+   const seven = { ...vueProject("7.0.0"), ...VUE_PACKAGE, ...VUE_PLUGIN };
+   const preview = { ...vueProject("5.9.3"), ...VUE_PACKAGE, ...bins("web/", "tsgo") };
+ 
+@@ -1015,13 +1015,13 @@ test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carri
+       command: { program: "tsc", args: ["--lsp", "--stdio"] },
+       fileTypes: SCRIPT_TYPES,
+       initializationOptions: null,
+-      notes: [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }],
++      notes: [{ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" }],
+     }),
+   ]);
+   expect(tsgo).toEqual([
+     expect.objectContaining({
+       command: { program: "tsgo", args: ["--lsp", "--stdio"] },
+-      notes: [{ kind: "vueNeedsTypeScript6", version: "5.9.3" }],
++      notes: [{ kind: "vueNeedsTypeScript6", program: "tsgo", version: "5.9.3" }],
+     }),
+   ]);
+ });
+@@ -1040,6 +1040,21 @@ test("Vue: without the vue package nothing changes, plugin or not", async () =>
+   expect((await detect(["web/a.ts"], lookups(seven), ROOT))[0]?.notes).toEqual([]);
+ });
+ 
++test("Vue: oxlint and eslint in a project with vue and no TypeScript config are their no-vue specs, with no Vue spec or note", async () => {
++  const plain = { "web/package.json": "{}", ...bins("web/", "oxlint"), ...eslintAt("web/") };
++  const server = ["vscode-eslint-language-server"];
++
++  const withVue = await detect(["web/a.ts"], lookups({ ...plain, ...VUE_PACKAGE }, server), ROOT);
++  const without = await detect(["web/a.ts"], lookups(plain, server), ROOT);
++
++  expect(summary(withVue)).toEqual([
++    "oxlint oxlint --lsp @web",
++    "eslint vscode-eslint-language-server --stdio @web",
++  ]);
++  expect(withVue).toEqual(without);
++  expect(withVue.flatMap(({ notes }) => notes)).toEqual([]);
++});
++
+ test("help: a found server carries the hint it would have had missing; a missing one only its install", async () => {
+   const tree = vueProject("5.9.3");
+ 
+@@ -1197,6 +1212,21 @@ test("reads: a node-only project reads its configs, packages and lock files, not
+   ]);
+ });
+ 
++test("reads: a python-only project reads its tools' configs and the lock files, nothing of other ecosystems", async () => {
++  const fake = lookups({ "py/pyproject.toml": "[tool.ruff]\n" }, ["ruff"]);
++
++  await detect(["py/a.py"], fake, ROOT);
++
++  const locks = ["uv.lock", "poetry.lock", "pdm.lock"];
++  expect(fake.fileCalls[1]).toEqual([
++    ...["ruff.toml", ".ruff.toml", "pyproject.toml", "ty.toml", "pyrightconfig.json"].map(
++      (name) => `py/${name}`,
++    ),
++    ...locks.map((name) => `py/${name}`),
++    ...locks,
++  ]);
++});
++
+ test("reads: a rust-only project reads nothing beyond its manifests; a php project reads its tools", async () => {
+   const rust = lookups({ "Cargo.toml": "" }, ["rust-analyzer"]);
+   const php = lookups({ "composer.json": "" }, ["phpactor"]);
+diff --git a/frontend/src/lsp/internal/detect.ts b/frontend/src/lsp/internal/detect.ts
+index 80c759d..3ebdcc6 100644
+--- a/frontend/src/lsp/internal/detect.ts
++++ b/frontend/src/lsp/internal/detect.ts
+@@ -9,7 +9,7 @@ import {
+   type Ecosystem,
+ } from "./ecosystems";
+ import { projectUri, type ProjectAt } from "./handshake";
+-import { nodeHint, recipeHint, type NodeHint } from "./install";
++import { nodeHint, serverHint, type NodeHint } from "./install";
+ import { integrationsOn } from "./integrations";
+ import { isObject } from "./json";
+ import { DETECTED_PRESETS, type DetectedPreset } from "./presets";
+@@ -26,7 +26,7 @@ import {
+   type ProjectLookups,
+ } from "./project";
+ import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
+-import type { Command, Look, Sign, Tool } from "./tool";
++import type { Command, Formats, Look, Sign, Tool } from "./tool";
+ import { withVue, type TypeScriptRun } from "./vue";
+ 
+ type Detected = {
+@@ -85,11 +85,9 @@ function signHolds(project: Project, sign: Sign): boolean {
+ async function serverOf(
+   project: Project,
+   tool: Tool,
+-  server: Extract<Look, { kind: "typescript" | "eslint" }>["server"],
+-  reason: NodeHint["reason"],
++  command: Command,
++  hint: InstallHint,
+ ): Promise<Detected> {
+-  const { command } = server;
+-  const hint = nodeHint(project, { package: server.package, program: command.program }, reason);
+   return (await foundAnywhere(project, command.program))
+     ? installed(tool, command, hint)
+     : { tool, command, install: hint, help: null, typescript: null };
+@@ -105,15 +103,19 @@ async function typescript(
+   if (version === null || major === undefined || !hasConfig(project, look.configs)) {
+     return null;
+   }
+-  const noPlugins = { version, runsPlugins: false };
+   if (Number(major) >= look.firstLspMajor) {
+-    return { ...installed(preset, look.compiler, null), typescript: noPlugins };
++    const run = { kind: "noPlugins", program: "tsc", version } satisfies TypeScriptRun;
++    return { ...installed(preset, look.compiler, null), typescript: run };
+   }
+   if (await inProject(project, look.nativePreview.program)) {
+-    return { ...installed(preset, look.nativePreview, null), typescript: noPlugins };
++    const run = { kind: "noPlugins", program: "tsgo", version } satisfies TypeScriptRun;
++    return { ...installed(preset, look.nativePreview, null), typescript: run };
+   }
+-  const server = await serverOf(project, preset, look.server, { kind: "typescript", version });
+-  return { ...server, typescript: { version, runsPlugins: true } };
++  const { command, package: name } = look.server;
++  const reason: NodeHint["reason"] = { kind: "typescript", version };
++  const hint = nodeHint(project, { package: name, program: command.program }, reason);
++  const server = await serverOf(project, preset, command, hint);
++  return { ...server, typescript: { kind: "plugins" } };
+ }
+ 
+ async function used(
+@@ -122,7 +124,7 @@ async function used(
+   look: Extract<Look, { kind: "used" }>,
+ ): Promise<Detected | null> {
+   const { command } = look;
+-  const hint = recipeHint(project, look.recipe, command.program);
++  const hint = serverHint(project, look);
+   if (look.signs.some((sign) => signHolds(project, sign))) {
+     if (await foundAnywhere(project, command.program)) {
+       return installed(preset, command, hint);
+@@ -153,13 +155,13 @@ async function lookIn(project: Project, preset: DetectedPreset): Promise<Detecte
+     case "eslint": {
+       const configured = hasConfig(project, look.configs);
+       return configured && nearestPackage(project, look.package) !== undefined
+-        ? serverOf(project, preset, look.server, { kind: "eslint" })
++        ? serverOf(project, preset, look.server.command, serverHint(project, look))
+         : null;
+     }
+   }
+ }
+ 
+-function formatsIn(project: Project, { formats, fromProject }: Tool): boolean {
++function formatsIn(project: Project, formats: Formats): boolean {
+   switch (formats.kind) {
+     case "always":
+       return true;
+@@ -167,11 +169,6 @@ function formatsIn(project: Project, { formats, fromProject }: Tool): boolean {
+       return false;
+     case "withConfig":
+       return nearest(project, formats.files) !== null;
+-    case "withIntegration":
+-      return (
+-        fromProject.kind === "integrations" &&
+-        integrationsOn(project, fromProject.integrations).some((on) => on.formats)
+-      );
+   }
+ }
+ 
+@@ -182,8 +179,10 @@ async function fromProject(project: Project, tool: Tool, spec: ServerSpec): Prom
+       return spec;
+     case "integrations": {
+       const own = isObject(spec.initializationOptions) ? spec.initializationOptions : {};
+-      const on = integrationsOn(project, from.integrations).map(({ key }) => [key, true]);
+-      return { ...spec, initializationOptions: { ...own, ...Object.fromEntries(on) } };
++      const on = integrationsOn(project, from.integrations);
++      const keys = Object.fromEntries(on.map(({ key }) => [key, true]));
++      const formats = spec.formats || on.some((integration) => integration.formats);
++      return { ...spec, formats, initializationOptions: { ...own, ...keys } };
+     }
+     case "venvPython": {
+       const pythonPath = await projectProgram(project, PYTHON);
+@@ -206,7 +205,7 @@ async function specsOf(
+     project: project.folder,
+     folders: ECOSYSTEMS[preset.ecosystem].folders,
+     fileTypes: preset.fileTypes,
+-    formats: formatsIn(project, tool),
++    formats: formatsIn(project, tool.formats),
+     settings: tool.settings,
+     initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
+     install: detected.install,
+diff --git a/frontend/src/lsp/internal/install.ts b/frontend/src/lsp/internal/install.ts
+index e1b3400..d5bc532 100644
+--- a/frontend/src/lsp/internal/install.ts
++++ b/frontend/src/lsp/internal/install.ts
+@@ -7,7 +7,7 @@ import {
+ } from "./packageManager";
+ import { jsonField, nearest, type Place, type Wanted } from "./project";
+ import type { InstallHint } from "./spec";
+-import type { Recipe } from "./tool";
++import type { Look, Recipe } from "./tool";
+ 
+ export type NodeHint = Extract<InstallHint, { kind: "node" }>;
+ 
+@@ -35,7 +35,7 @@ export function nodeHint(
+   return { kind: "node", package: name, program, folder: project.folder, manager, reason };
+ }
+ 
+-export function recipeHint(project: Place, recipe: Recipe, program: string): InstallHint {
++function recipeHint(project: Place, recipe: Recipe, program: string): InstallHint {
+   switch (recipe.kind) {
+     case "python": {
+       const lock = nearest(project, PYTHON_LOCK_FILES);
+@@ -52,3 +52,17 @@ export function recipeHint(project: Place, recipe: Recipe, program: string): Ins
+       return { kind: "system", program };
+   }
+ }
++
++export function serverHint(
++  place: Place,
++  look: Extract<Look, { kind: "used" | "eslint" }>,
++): InstallHint {
++  switch (look.kind) {
++    case "used":
++      return recipeHint(place, look.recipe, look.command.program);
++    case "eslint": {
++      const { command, package: name } = look.server;
++      return nodeHint(place, { package: name, program: command.program }, { kind: "eslint" });
++    }
++  }
++}
+diff --git a/frontend/src/lsp/internal/presets.test.ts b/frontend/src/lsp/internal/presets.test.ts
+index 8440a24..35bfac5 100644
+--- a/frontend/src/lsp/internal/presets.test.ts
++++ b/frontend/src/lsp/internal/presets.test.ts
+@@ -64,7 +64,7 @@ test("presets run formatters first, in the table's order, each in its ecosystem"
+     ["ty", "never"],
+     ["basedpyright", "never"],
+     ["pyright", "never"],
+-    ["Phpactor", "withIntegration"],
++    ["Phpactor", "never"],
+     ["clangd", "withConfig"],
+     ["Deno", "always"],
+     ["bash-language-server", "always"],
+diff --git a/frontend/src/lsp/internal/presets.ts b/frontend/src/lsp/internal/presets.ts
+index 410a024..5bacebe 100644
+--- a/frontend/src/lsp/internal/presets.ts
++++ b/frontend/src/lsp/internal/presets.ts
+@@ -240,7 +240,7 @@ export const PRESETS: readonly Preset[] = [
+       ],
+     },
+     fileTypes: ["php"],
+-    formats: { kind: "withIntegration" },
++    formats: NEVER,
+     settings: null,
+     initializationOptions: () => ({ "language_server.enable_trust_check": false }),
+     fromProject: { kind: "integrations", integrations: PHPACTOR_INTEGRATIONS },
+diff --git a/frontend/src/lsp/internal/server.ts b/frontend/src/lsp/internal/server.ts
+index 4efaca6..d3f8411 100644
+--- a/frontend/src/lsp/internal/server.ts
++++ b/frontend/src/lsp/internal/server.ts
+@@ -9,6 +9,7 @@ import {
+   type HostContext,
+   type ReadyContext,
+ } from "./handshake";
++import { sameValue } from "./json";
+ import type { LogLine } from "./log";
+ import { stateOf, STOPPED, type Halting, type Run, type Running } from "./run";
+ import { ServerDocs } from "./serverDocs";
+@@ -26,20 +27,34 @@ export type ServerEnv = {
+   readonly changed: () => void;
+ };
+ 
++const DISPLAY_ONLY: Pick<ServerSpec, "help" | "notes"> = { help: null, notes: [] };
++
+ export class Server {
+-  readonly spec: ServerSpec;
+   userStopped: boolean;
+   readonly #env: ServerEnv;
++  #spec: ServerSpec;
+   #run: Run;
+   #settled: (() => void)[] = [];
+ 
+   constructor(spec: ServerSpec, env: ServerEnv, userStopped: boolean) {
+-    this.spec = spec;
++    this.#spec = spec;
+     this.userStopped = userStopped;
+     this.#env = env;
+     this.#run = { kind: "idle", attempt: null, state: stateAtRest(spec, env.host !== null) };
+   }
+ 
++  get spec(): ServerSpec {
++    return this.#spec;
++  }
++
++  runsAs(spec: ServerSpec): boolean {
++    return sameValue({ ...this.#spec, ...DISPLAY_ONLY }, { ...spec, ...DISPLAY_ONLY });
++  }
++
++  takeDisplay({ help, notes }: ServerSpec): void {
++    this.#spec = { ...this.#spec, help, notes };
++  }
++
+   get state(): ServerState {
+     return stateOf(this.#run);
+   }
+diff --git a/frontend/src/lsp/internal/spec.ts b/frontend/src/lsp/internal/spec.ts
+index 26b3768..8cb874f 100644
+--- a/frontend/src/lsp/internal/spec.ts
++++ b/frontend/src/lsp/internal/spec.ts
+@@ -4,7 +4,13 @@ export type PackageManager = "npm" | "pnpm" | "yarn" | "yarnBerry" | "bun";
+ 
+ export type PythonManager = "uv" | "poetry" | "pdm";
+ 
+-export type SpecNote = { readonly kind: "vueNeedsTypeScript6"; readonly version: string };
++export type TypeScriptProgram = "tsc" | "tsgo";
++
++export type SpecNote = {
++  readonly kind: "vueNeedsTypeScript6";
++  readonly program: TypeScriptProgram;
++  readonly version: string;
++};
+ 
+ export type InstallHint =
+   | {
+diff --git a/frontend/src/lsp/internal/tool.ts b/frontend/src/lsp/internal/tool.ts
+index df75969..97502c9 100644
+--- a/frontend/src/lsp/internal/tool.ts
++++ b/frontend/src/lsp/internal/tool.ts
+@@ -5,8 +5,7 @@ type Installable = { readonly command: Command; readonly package: string };
+ export type Formats =
+   | { readonly kind: "always" }
+   | { readonly kind: "never" }
+-  | { readonly kind: "withConfig"; readonly files: readonly string[] }
+-  | { readonly kind: "withIntegration" };
++  | { readonly kind: "withConfig"; readonly files: readonly string[] };
+ 
+ export type Integration = {
+   readonly key: string;
+@@ -28,6 +27,11 @@ export type Tool = {
+   readonly fromProject: FromProject;
+ };
+ 
++export function mayFormat({ formats, fromProject }: Tool): boolean {
++  const integrations = fromProject.kind === "integrations" ? fromProject.integrations : [];
++  return formats.kind !== "never" || integrations.some((integration) => integration.formats);
++}
++
+ export type Recipe =
+   | { readonly kind: "python"; readonly package: string }
+   | { readonly kind: "rustup"; readonly component: string }
+diff --git a/frontend/src/lsp/internal/uri.test.ts b/frontend/src/lsp/internal/uri.test.ts
+index 4513185..416a81d 100644
+--- a/frontend/src/lsp/internal/uri.test.ts
++++ b/frontend/src/lsp/internal/uri.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { fileUri, sameFile } from "./uri";
++import { absolutePath, fileUri, sameFile } from "./uri";
+ 
+ test("a POSIX root and a repo-relative path make a file URI", () => {
+   expect(fileUri("/home/me/repo", "src/a.ts")).toBe("file:///home/me/repo/src/a.ts");
+@@ -35,6 +35,28 @@ test("a UNC root keeps its server as the URI authority", () => {
+   expect(fileUri("\\\\server\\share\\repo", "a.ts")).toBe("file://server/share/repo/a.ts");
+ });
+ 
++test("absolutePath joins a POSIX root, with or without a trailing slash, and a folder with /", () => {
++  expect(absolutePath("/home/me/repo", "web/app")).toBe("/home/me/repo/web/app");
++  expect(absolutePath("/home/me/repo/", "web")).toBe("/home/me/repo/web");
++  expect(absolutePath("/home/me/repo/", "")).toBe("/home/me/repo");
++});
++
++test("absolutePath keeps a Windows root's backslashes and drops a trailing one", () => {
++  expect(absolutePath("C:\\Users\\me\\repo", "web/app")).toBe("C:\\Users\\me\\repo\\web\\app");
++  expect(absolutePath("C:\\repo\\", "web")).toBe("C:\\repo\\web");
++  expect(absolutePath("C:\\repo\\", "")).toBe("C:\\repo");
++});
++
++test("absolutePath drops a verbatim Windows root's \\\\?\\ prefix, as fileUri does", () => {
++  expect(absolutePath("\\\\?\\D:\\repo", "web")).toBe("D:\\repo\\web");
++  expect(absolutePath("\\\\?\\D:\\repo\\", "")).toBe("D:\\repo");
++  expect(fileUri("\\\\?\\D:\\repo\\", "web")).toBe("file:///D:/repo/web");
++});
++
++test("absolutePath keeps a UNC root's two leading backslashes", () => {
++  expect(absolutePath("\\\\server\\share\\repo", "web")).toBe("\\\\server\\share\\repo\\web");
++});
++
+ test("a URI that does not decode is never the same", () => {
+   expect(sameFile("file:///a%25.ts", "file:///a%E0.ts")).toBe(false);
+ });
+diff --git a/frontend/src/lsp/internal/uri.ts b/frontend/src/lsp/internal/uri.ts
+index 19a0c79..fc7afff 100644
+--- a/frontend/src/lsp/internal/uri.ts
++++ b/frontend/src/lsp/internal/uri.ts
+@@ -1,5 +1,6 @@
+ const DRIVE = /^[A-Za-z]:$/;
+ const DRIVE_URI = /^file:\/\/\/([A-Za-z]):/;
++const SLASHED_DRIVE = /^\/([A-Za-z]:)/;
+ const VERBATIM_PREFIX = "//?/";
+ const UNC_PREFIX = "//";
+ 
+@@ -7,17 +8,26 @@ function encodeSegment(segment: string): string {
+   return DRIVE.test(segment) ? segment.toUpperCase() : encodeURIComponent(segment);
+ }
+ 
+-export function fileUri(root: string, path: string): string {
++function slashedPath(root: string, path: string): string {
+   let slashed = root.replaceAll("\\", "/");
+   if (slashed.startsWith(VERBATIM_PREFIX)) {
+     slashed = slashed.slice(VERBATIM_PREFIX.length);
+   }
+   const folder = (slashed.startsWith("/") ? slashed : `/${slashed}`).replace(/\/$/, "");
+-  const joined = path === "" ? folder : `${folder}/${path}`;
++  return path === "" ? folder : `${folder}/${path}`;
++}
++
++export function fileUri(root: string, path: string): string {
++  const joined = slashedPath(root, path);
+   const encoded = joined.split("/").map(encodeSegment).join("/");
+   return joined.startsWith(UNC_PREFIX) ? `file:${encoded}` : `file://${encoded}`;
+ }
+ 
++export function absolutePath(root: string, path: string): string {
++  const joined = slashedPath(root, path).replace(SLASHED_DRIVE, "$1");
++  return root.includes("\\") ? joined.replaceAll("/", "\\") : joined;
++}
++
+ export function sameFile(ours: string, theirs: string): boolean {
+   try {
+     const decoded = decodeURIComponent(theirs).replace(
+diff --git a/frontend/src/lsp/internal/vue.ts b/frontend/src/lsp/internal/vue.ts
+index f9d4f09..a59f4a6 100644
+--- a/frontend/src/lsp/internal/vue.ts
++++ b/frontend/src/lsp/internal/vue.ts
+@@ -1,19 +1,17 @@
+ import { nodeHint } from "./install";
+ import { modulePackage, nearestPackage, type Place } from "./project";
+-import type { ServerSpec } from "./spec";
++import type { ServerSpec, TypeScriptProgram } from "./spec";
++import { absolutePath } from "./uri";
+ 
+-export type TypeScriptRun = { readonly version: string; readonly runsPlugins: boolean };
++export type TypeScriptRun =
++  | { readonly kind: "noPlugins"; readonly program: TypeScriptProgram; readonly version: string }
++  | { readonly kind: "plugins" };
+ 
+ const VUE = "vue";
+ const PLUGIN = "@vue/typescript-plugin";
+ 
+ export const VUE_FILES: readonly string[] = [modulePackage(VUE), modulePackage(PLUGIN)];
+ 
+-function absoluteFolder(root: string, folder: string): string {
+-  const separator = root.includes("\\") ? "\\" : "/";
+-  return folder === "" ? root : [root, ...folder.split("/")].join(separator);
+-}
+-
+ export function withVue(
+   project: Place,
+   typescript: ServerSpec,
+@@ -23,11 +21,12 @@ export function withVue(
+   if (nearestPackage(project, VUE) === undefined) {
+     return [typescript];
+   }
+-  if (!run.runsPlugins) {
+-    return [{ ...typescript, notes: [{ kind: "vueNeedsTypeScript6", version: run.version }] }];
++  if (run.kind === "noPlugins") {
++    const { program, version } = run;
++    return [{ ...typescript, notes: [{ kind: "vueNeedsTypeScript6", program, version }] }];
+   }
+   if (nearestPackage(project, PLUGIN) !== undefined) {
+-    const location = absoluteFolder(root, project.folder);
++    const location = absolutePath(root, project.folder);
+     return [
+       {
+         ...typescript,
+diff --git a/frontend/src/ui/serverSetup.test.ts b/frontend/src/ui/serverSetup.test.ts
+index 4f96f98..4096e16 100644
+--- a/frontend/src/ui/serverSetup.test.ts
++++ b/frontend/src/ui/serverSetup.test.ts
+@@ -563,6 +563,53 @@ test("focus: an older detection that answers last is dropped", async () => {
+   expect(setup.foundServers.value).toEqual([]);
+ });
+ 
++test("focus: a look that finds no root applies nothing; the running servers keep their run", async () => {
++  const host = new FakeHost(PROJECT);
++  const { setup, servers } = setUpWith({ host, answer: "start" });
++  await setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(FOUND_RUNNING);
++  });
++  const setSpecs = vi.spyOn(servers, "setSpecs");
++  host.root = null;
++
++  await setup.refocus();
++
++  expect(setSpecs).not.toHaveBeenCalled();
++  expect(states(servers)).toEqual(FOUND_RUNNING);
++  expect(host.stopped).toEqual([]);
++});
++
++test("focus: a detection that rejects is logged and applies nothing", async () => {
++  const warn = vi.spyOn(log, "warn").mockReturnValue();
++  const host = new FakeHost(PROJECT);
++  const { setup, servers } = setUpWith({ host, answer: "start" });
++  await setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(FOUND_RUNNING);
++  });
++  const setSpecs = vi.spyOn(servers, "setSpecs");
++  const unreadable = new Proxy<readonly ProjectFile[]>([], {
++    get(_, key) {
++      if (key === "then") {
++        return undefined;
++      }
++      throw new Error("unreadable answer");
++    },
++  });
++  vi.spyOn(host, "projectFiles").mockResolvedValue(unreadable);
++
++  await setup.refocus();
++
++  expect(warn).toHaveBeenCalledWith("servers.detect_failed", {
++    kind: "Unexpected",
++    message: "unreadable answer",
++  });
++  expect(setSpecs).not.toHaveBeenCalled();
++  expect(states(servers)).toEqual(FOUND_RUNNING);
++  warn.mockRestore();
++});
++
+ test("focus: before the start set-up has finished, focus refreshes but does not detect", async () => {
+   const host = new FakeHost(PROJECT);
+   const { setup, servers, asking, done, events } = await asked({ host });
+diff --git a/frontend/src/ui/serverSetup.ts b/frontend/src/ui/serverSetup.ts
+index 9b8a4eb..0285a6a 100644
+--- a/frontend/src/ui/serverSetup.ts
++++ b/frontend/src/ui/serverSetup.ts
+@@ -82,9 +82,8 @@ function addedOf(setup: Setup, root: string): readonly ServerSpec[] {
+   return addedSpecs(setup.settings.value.languageServers.added, taken, root);
+ }
+ 
+-function storedAnswer(setup: Setup): RepositoryAnswer | null {
+-  const root = setup.root.value;
+-  return root === null ? null : (setup.settings.value.languageServers.repositories[root] ?? null);
++function storedAnswer(setup: Setup, root: string): RepositoryAnswer | null {
++  return setup.settings.value.languageServers.repositories[root] ?? null;
+ }
+ 
+ function apply(setup: Setup, root: string, answer: RepositoryAnswer | null): void {
+@@ -97,7 +96,7 @@ async function setUp(setup: Setup, host: ServerHost): Promise<void> {
+   if (root === null || setup.found.value.length + addedOf(setup, root).length === 0) {
+     return;
+   }
+-  if (storedAnswer(setup) === null) {
++  if (storedAnswer(setup, root) === null) {
+     const reply = await setup.asking.ask({
+       kind: "servers",
+       found: setup.found.value,
+@@ -108,7 +107,7 @@ async function setUp(setup: Setup, host: ServerHost): Promise<void> {
+       await setup.setServerAnswer(given);
+     }
+   }
+-  apply(setup, root, storedAnswer(setup));
++  apply(setup, root, storedAnswer(setup, root));
+ }
+ 
+ async function startUp(setup: Setup): Promise<void> {
+@@ -126,18 +125,18 @@ async function refocus(setup: Setup): Promise<void> {
+   }
+   const root = await look(setup, setup.host);
+   if (root !== null) {
+-    apply(setup, root, storedAnswer(setup));
++    apply(setup, root, storedAnswer(setup, root));
+   }
+ }
+ 
+ async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
+-  const before = storedAnswer(setup);
+-  await setup.setServerAnswer(given);
+   const root = setup.root.value;
++  const before = root === null ? null : storedAnswer(setup, root);
++  await setup.setServerAnswer(given);
+   if (root === null) {
+     return;
+   }
+-  const now = storedAnswer(setup);
++  const now = storedAnswer(setup, root);
+   if (before !== "dontStart" && now === "dontStart") {
+     setup.servers.haltAll();
+   }
+@@ -148,7 +147,7 @@ async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise
+   await setup.setAddedServers(added);
+   const root = setup.root.value;
+   if (root !== null) {
+-    apply(setup, root, storedAnswer(setup));
++    apply(setup, root, storedAnswer(setup, root));
+   }
+ }
+ 
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index 252b5ed..fd6d4c8 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -84,11 +84,17 @@ test("rule 3: the actions that apply per state", () => {
+ });
+ 
+ test("the TypeScript 7 Vue note names the project's TypeScript version", () => {
+-  expect(noteLine({ kind: "vueNeedsTypeScript6", version: "7.0.2" })).toBe(
++  expect(noteLine({ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.2" })).toBe(
+     "Vue files get no type problems: TypeScript 7.0.2 runs no plugins, and Vue needs TypeScript 6.",
+   );
+ });
+ 
++test("the tsgo Vue note names the native preview, not the typescript package's version", () => {
++  expect(noteLine({ kind: "vueNeedsTypeScript6", program: "tsgo", version: "5.9.3" })).toBe(
++    "Vue files get no type problems: TypeScript's native preview (tsgo) runs no plugins, and Vue needs TypeScript 6.",
++  );
++});
++
+ test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+   expect(projectLabel("frontend")).toBe("frontend/");
+   expect(projectLabel("packages/web")).toBe("packages/web/");
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index 55bdf98..e88a329 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -122,7 +122,12 @@ export function serverActions(state: ServerState): readonly ServerAction[] {
+ }
+ 
+ export function noteLine(note: SpecNote): string {
+-  return `Vue files get no type problems: TypeScript ${note.version} runs no plugins, and Vue needs TypeScript 6.`;
++  switch (note.program) {
++    case "tsc":
++      return `Vue files get no type problems: TypeScript ${note.version} runs no plugins, and Vue needs TypeScript 6.`;
++    case "tsgo":
++      return "Vue files get no type problems: TypeScript's native preview (tsgo) runs no plugins, and Vue needs TypeScript 6.";
++  }
+ }
+ 
+ export function formatNote(outcome: FormatOutcome | undefined): string | null {
