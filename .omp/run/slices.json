@@ -1,1 +1,18 @@
-{}
+{
+  "PresetsFolders": {
+    "owned": [
+      "crates/lsp-host/**",
+      "src-tauri/src/servers.rs",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/ServerHost.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/lsp/**",
+      "frontend/src/ui/**/*.test.ts"
+    ]
+  },
+  "PresetsSmokeRepo": {
+    "owned": ["scripts/lsp-repo.sh", "scripts/lsp-servers.sh", ".vscode/tasks.json"]
+  }
+}
