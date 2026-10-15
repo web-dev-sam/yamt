@@ -51,7 +51,7 @@ Download from the [releases page](../../releases):
   `yamt` on your PATH:
 
   ```sh
-  sudo mkdir -p /usr/local/bin && sudo ln -s /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt
+  sudo mkdir -p /usr/local/bin && sudo ln -sf /Applications/yamt.app/Contents/MacOS/yamt /usr/local/bin/yamt
   ```
 
 - **Windows 10/11**: the `_x64-setup.exe`; it installs for your user only, without admin rights.
