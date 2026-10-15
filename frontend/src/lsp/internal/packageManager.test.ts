@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
 
-import { LOCK_FILES, packageManager } from "./packageManager";
+import {
+  LOCK_FILES,
+  packageManager,
+  PYTHON_LOCK_FILES,
+  PYTHON_LOCK_MANAGER,
+} from "./packageManager";
 
 test("the packageManager field names the manager; yarn 1 is classic yarn, yarn 2+ is berry", () => {
   expect(packageManager("pnpm@12.0.0", null)).toBe("pnpm");
@@ -32,4 +37,12 @@ test("a field beats a lock file; an unknown or versionless field falls back to t
 
 test("no field and no lock file: no manager", () => {
   expect(packageManager(null, null)).toBeNull();
+});
+
+test("every Python lock file names its manager", () => {
+  expect(PYTHON_LOCK_FILES.map((lock) => [lock, PYTHON_LOCK_MANAGER[lock]])).toEqual([
+    ["uv.lock", "uv"],
+    ["poetry.lock", "poetry"],
+    ["pdm.lock", "pdm"],
+  ]);
 });

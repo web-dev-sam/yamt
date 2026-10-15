@@ -1,146 +1,171 @@
-import type { ProgramFound, ProjectFile, ServerHost } from "../../ipc";
+import type { ProjectFile } from "../../ipc";
+import {
+  ECOSYSTEMS,
+  foldersUp,
+  joined,
+  manifestPaths,
+  PACKAGE_JSON,
+  parentOf,
+  present,
+  projectOf,
+  type Ecosystem,
+} from "./ecosystems";
 import { projectUri, type ProjectAt } from "./handshake";
-import { sectionOf } from "./json";
-import { LOCK_FILES, packageManager } from "./packageManager";
-import { PRESETS, type Look, type Preset } from "./presets";
-import { PROGRAM_FOLDERS, type InstallHint, type PackageManager, type ServerSpec } from "./spec";
+import { nodeHint, recipeHint, type NodeHint } from "./install";
+import { LOCK_FILES, PYTHON_LOCK_FILES } from "./packageManager";
+import { PRESETS, type Formats, type Look, type Preset, type Sign, type Tool } from "./presets";
+import {
+  foundAnywhere,
+  hasConfig,
+  inProject,
+  jsonField,
+  nearest,
+  readFiles,
+  type Project,
+  type ProjectLookups,
+} from "./project";
+import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
 
-export type ProjectLookups = Pick<ServerHost, "findProgram" | "projectFiles">;
+type Command = ServerSpec["command"];
 
-type Files = ReadonlyMap<string, ProjectFile>;
-
-type Project = {
-  readonly folder: string;
-  readonly files: Files;
-  readonly lookups: ProjectLookups;
-  readonly manager: PackageManager | null;
+type Detected = {
+  readonly tool: Tool;
+  readonly command: Command;
+  readonly install: InstallHint | null;
 };
 
-type Detected = { readonly command: ServerSpec["command"]; readonly install: InstallHint | null };
+type Wanted = { readonly here: readonly string[]; readonly up: readonly string[] };
 
-type ServerLook = Extract<Look, { kind: "typescript" | "eslint" }>;
-
-const PACKAGE_JSON = "package.json";
 const ROOT_LABEL = "repository root";
 
-function joined(folder: string, name: string): string {
-  return folder === "" ? name : `${folder}/${name}`;
+function modulePackage(name: string): string {
+  return `node_modules/${name}/${PACKAGE_JSON}`;
 }
 
-function parentOf(path: string): string {
-  return path.slice(0, Math.max(path.lastIndexOf("/"), 0));
+function servingEcosystems(path: string): readonly Ecosystem[] {
+  const extension = extensionOf(path);
+  const serving = PRESETS.filter((preset) => preset.fileTypes.includes(extension));
+  return [...new Set(serving.map((preset) => preset.ecosystem))];
 }
 
-function foldersUp(folder: string): readonly string[] {
-  return folder === "" ? [""] : [folder, ...foldersUp(parentOf(folder))];
-}
-
-function modulePackage(folder: string, name: string): string {
-  return joined(folder, `node_modules/${name}/${PACKAGE_JSON}`);
-}
-
-function present(file: ProjectFile | undefined): file is ProjectFile {
-  return file !== undefined && file.kind !== "Missing" && file.kind !== "Folder";
-}
-
-function jsonField(file: ProjectFile | undefined, field: string): string | null {
-  if (file?.kind !== "Text") {
-    return null;
-  }
-  try {
-    const value = sectionOf(JSON.parse(file.text), field);
-    return typeof value === "string" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-async function readFiles(lookups: ProjectLookups, paths: readonly string[]): Promise<Files> {
-  const unique = [...new Set(paths)];
-  const answers = await lookups.projectFiles(unique).catch((): readonly ProjectFile[] => []);
-  return new Map(
-    unique.map((path, index): [string, ProjectFile] => [
-      path,
-      answers[index] ?? { kind: "Missing" },
-    ]),
-  );
-}
-
-function findProgram(project: Project, program: string): Promise<ProgramFound> {
-  return project.lookups
-    .findProgram(program, project.folder, PROGRAM_FOLDERS)
-    .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
-}
-
-async function inProject(project: Project, program: string): Promise<boolean> {
-  const found = await findProgram(project, program);
-  return found.kind === "Found" && found.place === "Project";
-}
-
-async function projectFolders(
+async function projectsOf(
   lookups: ProjectLookups,
   paths: readonly string[],
-): Promise<readonly string[]> {
-  const chains = paths.map((path) => foldersUp(parentOf(path)));
-  const manifests = chains.flat().map((folder) => joined(folder, PACKAGE_JSON));
-  const files = await readFiles(lookups, manifests);
-  const projects = chains.flatMap(
-    (chain) => chain.find((folder) => present(files.get(joined(folder, PACKAGE_JSON)))) ?? [],
+): Promise<readonly (readonly [string, ReadonlySet<Ecosystem>])[]> {
+  const joins = paths.flatMap((path) =>
+    servingEcosystems(path).map((ecosystem) => ({ ecosystem, folder: parentOf(path) })),
   );
-  return [...new Set(projects)].sort();
+  const files = await readFiles(
+    lookups,
+    joins.flatMap(({ ecosystem, folder }) => manifestPaths(ecosystem, folder)),
+  );
+  const projects = new Map<string, Set<Ecosystem>>();
+  for (const { ecosystem, folder } of joins) {
+    const project = projectOf(ecosystem, folder, files);
+    if (project !== null) {
+      projects.set(project, (projects.get(project) ?? new Set()).add(ecosystem));
+    }
+  }
+  return [...projects].sort(([a], [b]) => (a < b ? -1 : 1));
 }
 
-function lookedFor(look: Look): { configs: readonly string[]; packages: readonly string[] } {
-  switch (look.kind) {
-    case "projectProgram":
-      return { configs: [], packages: [] };
-    case "typescript":
-      return { configs: look.configs, packages: [look.package] };
-    case "eslint":
-      return { configs: look.configs, packages: [look.package] };
+function signFile(sign: Sign): readonly string[] {
+  switch (sign.kind) {
+    case "manifest":
+      return [];
+    case "file":
+      return [sign.name];
+    case "section":
+      return [sign.file];
   }
 }
 
-function candidates(folder: string): readonly string[] {
-  const wanted = PRESETS.map((preset) => lookedFor(preset.look));
-  return [
-    joined(folder, PACKAGE_JSON),
-    ...wanted.flatMap(({ configs }) => configs.map((config) => joined(folder, config))),
-    ...foldersUp(folder).flatMap((at) => [
-      ...wanted.flatMap(({ packages }) => packages.map((name) => modulePackage(at, name))),
-      ...LOCK_FILES.map((lock) => joined(at, lock)),
-    ]),
+function formatConfigs(formats: Formats): readonly string[] {
+  return formats.kind === "withConfig" ? formats.files : [];
+}
+
+function lookedFor(preset: Preset): Wanted {
+  const { look } = preset;
+  switch (look.kind) {
+    case "projectProgram":
+      return { here: [], up: formatConfigs(preset.formats) };
+    case "used": {
+      const tools = [preset, ...look.orElse];
+      return {
+        here: look.signs.flatMap(signFile),
+        up: tools.flatMap((tool) => formatConfigs(tool.formats)),
+      };
+    }
+    case "typescript":
+    case "eslint":
+      return {
+        here: look.configs,
+        up: [...formatConfigs(preset.formats), modulePackage(look.package)],
+      };
+  }
+}
+
+function ecosystemFiles(ecosystem: Ecosystem): Wanted {
+  switch (ecosystem) {
+    case "node":
+      return { here: [PACKAGE_JSON], up: LOCK_FILES };
+    case "python":
+      return { here: [], up: PYTHON_LOCK_FILES };
+    case "rust":
+    case "go":
+    case "php":
+    case "clang":
+      return { here: [], up: [] };
+  }
+}
+
+function candidates(folder: string, ecosystems: ReadonlySet<Ecosystem>): readonly string[] {
+  const wanted = [
+    ...PRESETS.filter((preset) => ecosystems.has(preset.ecosystem)).map(lookedFor),
+    ...[...ecosystems].map(ecosystemFiles),
   ];
+  return [
+    ...wanted.flatMap(({ here }) => here.map((name) => joined(folder, name))),
+    ...foldersUp(folder).flatMap((at) =>
+      wanted.flatMap(({ up }) => up.map((name) => joined(at, name))),
+    ),
+  ];
+}
+
+function signHolds(project: Project, sign: Sign): boolean {
+  switch (sign.kind) {
+    case "manifest":
+      return true;
+    case "file":
+      return hasConfig(project, [sign.name]);
+    case "section": {
+      const file = project.files.get(joined(project.folder, sign.file));
+      return file?.kind === "Text" && sign.line.test(file.text);
+    }
+  }
 }
 
 function nearestPackage(project: Project, name: string): ProjectFile | undefined {
   return foldersUp(project.folder)
-    .map((at) => project.files.get(modulePackage(at, name)))
+    .map((at) => project.files.get(joined(at, modulePackage(name))))
     .find(present);
-}
-
-function hasConfig(project: Project, configs: readonly string[]): boolean {
-  return configs.some((config) => present(project.files.get(joined(project.folder, config))));
 }
 
 async function serverOf(
   project: Project,
-  server: ServerLook["server"],
-  reason: InstallHint["reason"],
+  tool: Tool,
+  server: Extract<Look, { kind: "typescript" | "eslint" }>["server"],
+  reason: NodeHint["reason"],
 ): Promise<Detected> {
-  const found = await findProgram(project, server.command.program);
-  const install = {
-    package: server.package,
-    program: server.command.program,
-    folder: project.folder,
-    manager: project.manager,
-    reason,
-  };
-  return { command: server.command, install: found.kind === "Found" ? null : install };
+  const { command } = server;
+  const install = nodeHint(project, { package: server.package, program: command.program }, reason);
+  const installed = await foundAnywhere(project, command.program);
+  return { tool, command, install: installed ? null : install };
 }
 
 async function typescript(
   project: Project,
+  preset: Preset,
   look: Extract<Look, { kind: "typescript" }>,
 ): Promise<Detected | null> {
   const version = jsonField(nearestPackage(project, look.package), "version");
@@ -149,58 +174,91 @@ async function typescript(
     return null;
   }
   if (Number(major) >= look.firstLspMajor) {
-    return { command: look.compiler, install: null };
+    return { tool: preset, command: look.compiler, install: null };
   }
   if (await inProject(project, look.nativePreview.program)) {
-    return { command: look.nativePreview, install: null };
+    return { tool: preset, command: look.nativePreview, install: null };
   }
-  return serverOf(project, look.server, { kind: "typescript", version });
+  return serverOf(project, preset, look.server, { kind: "typescript", version });
 }
 
-async function lookIn(project: Project, look: Look): Promise<Detected | null> {
+async function used(
+  project: Project,
+  preset: Preset,
+  look: Extract<Look, { kind: "used" }>,
+): Promise<Detected | null> {
+  const { command } = look;
+  if (look.signs.some((sign) => signHolds(project, sign))) {
+    for (const choice of [{ ...preset, command }, ...look.orElse]) {
+      if (await foundAnywhere(project, choice.command.program)) {
+        return { tool: choice, command: choice.command, install: null };
+      }
+    }
+    return { tool: preset, command, install: recipeHint(project, look.recipe, command.program) };
+  }
+  return look.orProjectProgram && (await inProject(project, command.program))
+    ? { tool: preset, command, install: null }
+    : null;
+}
+
+async function lookIn(project: Project, preset: Preset): Promise<Detected | null> {
+  const { look } = preset;
   switch (look.kind) {
     case "projectProgram":
       return (await inProject(project, look.command.program))
-        ? { command: look.command, install: null }
+        ? { tool: preset, command: look.command, install: null }
         : null;
+    case "used":
+      return used(project, preset, look);
     case "typescript":
-      return typescript(project, look);
+      return typescript(project, preset, look);
     case "eslint": {
-      const used = hasConfig(project, look.configs);
-      return used && nearestPackage(project, look.package) !== undefined
-        ? serverOf(project, look.server, { kind: "eslint" })
+      const configured = hasConfig(project, look.configs);
+      return configured && nearestPackage(project, look.package) !== undefined
+        ? serverOf(project, preset, look.server, { kind: "eslint" })
         : null;
     }
   }
 }
 
-function specOf(preset: Preset, detected: Detected, at: ProjectAt): ServerSpec {
+function formatsIn(project: Project, formats: Formats): boolean {
+  switch (formats.kind) {
+    case "always":
+      return true;
+    case "never":
+      return false;
+    case "withConfig":
+      return nearest(project, formats.files) !== null;
+  }
+}
+
+function specOf(project: Project, preset: Preset, detected: Detected, root: string): ServerSpec {
+  const { tool } = detected;
+  const workspaceUri = projectUri({ folder: project.folder, root });
   return {
-    name: preset.name,
+    name: tool.name,
     command: detected.command,
-    project: at.folder,
-    folders: PROGRAM_FOLDERS,
+    project: project.folder,
+    folders: ECOSYSTEMS[preset.ecosystem].folders,
     fileTypes: preset.fileTypes,
-    formats: preset.formats,
-    settings: preset.settings,
-    initializationOptions: preset.initializationOptions?.(projectUri(at)) ?? null,
+    formats: formatsIn(project, tool.formats),
+    settings: tool.settings,
+    initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
     install: detected.install,
   };
 }
 
-async function detectIn(lookups: ProjectLookups, at: ProjectAt): Promise<readonly ServerSpec[]> {
-  const { folder } = at;
-  const files = await readFiles(lookups, candidates(folder));
-  const nearestLock = foldersUp(folder)
-    .flatMap((up) => LOCK_FILES.filter((lock) => present(files.get(joined(up, lock)))))
-    .at(0);
-  const declared = jsonField(files.get(joined(folder, PACKAGE_JSON)), "packageManager");
-  const manager = packageManager(declared, nearestLock ?? null);
-  const project = { folder, files, lookups, manager };
+async function detectIn(
+  lookups: ProjectLookups,
+  { folder, root }: ProjectAt,
+  ecosystems: ReadonlySet<Ecosystem>,
+): Promise<readonly ServerSpec[]> {
+  const files = await readFiles(lookups, candidates(folder, ecosystems));
   const found = await Promise.all(
-    PRESETS.map(async (preset) => {
-      const detected = await lookIn(project, preset.look);
-      return detected === null ? [] : [specOf(preset, detected, at)];
+    PRESETS.filter((preset) => ecosystems.has(preset.ecosystem)).map(async (preset) => {
+      const project = { ecosystem: preset.ecosystem, folder, files, lookups };
+      const detected = await lookIn(project, preset);
+      return detected === null ? [] : [specOf(project, preset, detected, root)];
     }),
   );
   return found.flat();
@@ -211,9 +269,11 @@ export async function detect(
   lookups: ProjectLookups,
   root: string,
 ): Promise<readonly ServerSpec[]> {
-  const folders = await projectFolders(lookups, paths);
+  const projects = await projectsOf(lookups, paths);
   const found = (
-    await Promise.all(folders.map((folder) => detectIn(lookups, { folder, root })))
+    await Promise.all(
+      projects.map(([folder, ecosystems]) => detectIn(lookups, { folder, root }, ecosystems)),
+    )
   ).flat();
   return found.map((spec) => {
     const shared = found.filter((other) => other.name === spec.name).length > 1;

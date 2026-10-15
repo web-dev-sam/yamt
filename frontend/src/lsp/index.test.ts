@@ -281,6 +281,7 @@ function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
 const MANAGER: PackageManager = "pnpm";
 
 const INSTALL_HINT: InstallHint = {
+  kind: "node",
   package: "typescript-language-server",
   program: "typescript-language-server",
   folder: "frontend",

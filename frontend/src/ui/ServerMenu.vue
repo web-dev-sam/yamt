@@ -151,7 +151,7 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
         <p class="wrap-break-word text-fg-muted">{{ line }}</p>
       </div>
       <div v-if="hint !== null" class="flex flex-col gap-2 px-2 pt-1 pb-2">
-        <p class="wrap-break-word">{{ hint.reason }}</p>
+        <p v-if="hint.reason !== null" class="wrap-break-word">{{ hint.reason }}</p>
         <div v-for="step in hint.steps" :key="step.label">
           <p>{{ step.label }}</p>
           <div class="mt-1 flex items-center gap-1">
@@ -170,8 +170,8 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
             </button>
           </div>
         </div>
-        <p v-if="hint.managerNote !== null">{{ hint.managerNote }}</p>
-        <p class="wrap-break-word">{{ hint.otherWay }}</p>
+        <p v-for="note in hint.notes" :key="note" class="wrap-break-word">{{ note }}</p>
+        <p v-if="hint.otherWay !== null" class="wrap-break-word">{{ hint.otherWay }}</p>
         <p class="text-fg-muted">{{ hint.comeBack }}</p>
       </div>
       <button

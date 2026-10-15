@@ -17,7 +17,7 @@ export type { ResultDocument } from "./internal/documents";
 export type { FormatRefusal, FormatReply, FormattingOptions } from "./internal/formatting";
 export type { LogLine } from "./internal/log";
 export type { LinePosition, ProblemSeverity, ServerProblem } from "./internal/problems";
-export type { InstallHint, PackageManager, ServerSpec } from "./internal/spec";
+export type { InstallHint, PackageManager, PythonManager, ServerSpec } from "./internal/spec";
 export type { FailReason, ServerState, ServerView } from "./internal/state";
 export type { Timers } from "./internal/timers";
 

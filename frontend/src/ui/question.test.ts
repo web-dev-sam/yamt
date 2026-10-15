@@ -92,6 +92,7 @@ function spec(name: string, project: string, installed = true): ServerSpec {
     install: installed
       ? null
       : {
+          kind: "node",
           package: "typescript-language-server",
           program: "typescript-language-server",
           folder: project,

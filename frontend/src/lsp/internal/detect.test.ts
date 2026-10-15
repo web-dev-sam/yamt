@@ -1,8 +1,9 @@
 import { expect, test } from "vitest";
 
 import type { ProgramFolders, ProgramFound, ProjectFile } from "../../ipc";
-import { detect, type ProjectLookups } from "./detect";
-import type { ServerSpec } from "./spec";
+import { detect } from "./detect";
+import type { ProjectLookups } from "./project";
+import type { InstallHint, ServerSpec } from "./spec";
 
 type Tree = Readonly<Record<string, string | ProjectFile>>;
 
@@ -31,6 +32,27 @@ function fileOf(tree: Tree, path: string): ProjectFile {
   return folder ? { kind: "Folder" } : { kind: "Missing" };
 }
 
+function joinedPath(folder: string, name: string): string {
+  return folder === "" ? name : `${folder}/${name}`;
+}
+
+function inProjectFolders(
+  tree: Tree,
+  [program, project, folders]: [string, string, ProgramFolders],
+): string | null {
+  for (let at = project; ; at = parentOf(at)) {
+    const hit = folders.project
+      .map((folder) => joinedPath(at, `${folder}/${program}`))
+      .find((path) => tree[path] !== undefined);
+    if (hit !== undefined) {
+      return hit;
+    }
+    if (at === "") {
+      return null;
+    }
+  }
+}
+
 function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
   const fileCalls: (readonly string[])[] = [];
   const programCalls: [string, string, ProgramFolders][] = [];
@@ -43,18 +65,17 @@ function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
     },
     async findProgram(program, project, folders): Promise<ProgramFound> {
       programCalls.push([program, project, folders]);
-      for (let at = project; ; at = parentOf(at)) {
-        const bin = `${at === "" ? "" : `${at}/`}node_modules/.bin/${program}`;
-        if (tree[bin] !== undefined) {
-          return { kind: "Found", path: `${ROOT}/${bin}`, place: "Project" };
-        }
-        if (at === "") {
-          break;
-        }
+      const local = inProjectFolders(tree, [program, project, folders]);
+      if (local !== null) {
+        return { kind: "Found", path: `${ROOT}/${local}`, place: "Project" };
       }
-      return onPath.includes(program)
-        ? { kind: "Found", path: `/usr/bin/${program}`, place: "Path" }
-        : { kind: "NotFound", searched: ["/usr/bin"] };
+      if (onPath.includes(program)) {
+        return { kind: "Found", path: `/usr/bin/${program}`, place: "Path" };
+      }
+      const home = folders.home.find((folder) => tree[`~/${folder}/${program}`] !== undefined);
+      return home === undefined
+        ? { kind: "NotFound", searched: ["/usr/bin"] }
+        : { kind: "Found", path: `/home/u/${home}/${program}`, place: "Home" };
     },
   };
 }
@@ -118,10 +139,10 @@ test("project folders: a file at the root belongs to the root project", async ()
   ]);
 });
 
-test("project folders: files with no package.json above them are served by no preset", async () => {
-  const fake = lookups({ "crates/session/Cargo.toml": "", ...bins("", "oxlint") });
+test("project folders: files with no package.json above them are served by no preset; a Cargo.toml brings no node project", async () => {
+  const fake = lookups({ "crates/session/Cargo.toml": "[workspace]", ...bins("", "oxlint") });
 
-  expect(await detect(["crates/session/src/lib.rs"], fake, ROOT)).toEqual([]);
+  expect(await detect(["crates/session/src/lib.ts"], fake, ROOT)).toEqual([]);
   expect(fake.fileCalls).toHaveLength(1);
   expect(fake.programCalls).toEqual([]);
 });
@@ -245,6 +266,7 @@ test("TypeScript 5.9 without its server: install hint with the version, folder a
       project: "frontend",
       folders: NODE_BIN,
       install: {
+        kind: "node",
         package: "typescript-language-server",
         program: "typescript-language-server",
         folder: "frontend",
@@ -352,6 +374,7 @@ test("eslint: without its server, an install hint for vscode-langservers-extract
 
   expect(specs.map(({ install }) => install)).toEqual([
     {
+      kind: "node",
       package: "vscode-langservers-extracted",
       program: "vscode-eslint-language-server",
       folder: "",
@@ -394,7 +417,10 @@ test("names are unique across projects; a tool in one project keeps its plain na
 
 function managerFor(tree: Tree): Promise<unknown> {
   const withHint = { ...tree, ...typescriptAt("app/", "5.9.3") };
-  return detect(["app/a.ts"], lookups(withHint), ROOT).then((specs) => specs[0]?.install?.manager);
+  return detect(["app/a.ts"], lookups(withHint), ROOT).then((specs) => {
+    const install = specs[0]?.install;
+    return install?.kind === "node" ? install.manager : undefined;
+  });
 }
 
 test("package manager: the lock file nearest the project folder, up to the root", async () => {
@@ -437,9 +463,9 @@ test("a rejecting lookup means not found", async () => {
   expect(summary(await detect(["a.ts"], noPrograms, ROOT))).toEqual([
     "eslint vscode-eslint-language-server --stdio @",
   ]);
-  expect((await detect(["a.ts"], noPrograms, ROOT))[0]?.install?.reason).toEqual({
-    kind: "eslint",
-  });
+  expect((await detect(["a.ts"], noPrograms, ROOT))[0]?.install).toEqual(
+    expect.objectContaining({ kind: "node", reason: { kind: "eslint" } }),
+  );
 });
 
 test("a short answer from projectFiles leaves the rest missing", async () => {
@@ -447,4 +473,389 @@ test("a short answer from projectFiles leaves the rest missing", async () => {
   const short = { ...fake, projectFiles: async () => [] };
 
   expect(await detect(["a.ts"], short, ROOT)).toEqual([]);
+});
+
+const RUST_BIN: ProgramFolders = { project: [], home: [".cargo/bin"] };
+const GO_BIN: ProgramFolders = { project: [], home: ["go/bin"] };
+const PYTHON_BIN: ProgramFolders = {
+  project: [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"],
+  home: [".local/bin"],
+};
+const PHP_BIN: ProgramFolders = {
+  project: ["vendor/bin"],
+  home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
+};
+const CLANG_BIN: ProgramFolders = { project: [], home: [] };
+const PYTHON_TYPES = ["py", "pyi"];
+const PHPACTOR_HINT: InstallHint = {
+  kind: "download",
+  program: "phpactor",
+  command:
+    "curl -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
+  needs: "PHP 8.2 or later",
+};
+
+function venv(folder: string, ...programs: string[]): Tree {
+  return Object.fromEntries(programs.map((program) => [`${folder}.venv/bin/${program}`, ""]));
+}
+
+function home(folder: string, program: string): Tree {
+  return { [`~/${folder}/${program}`]: "" };
+}
+
+function installOf(specs: readonly ServerSpec[]): (InstallHint | null)[] {
+  return specs.map(({ install }) => install);
+}
+
+test("ecosystems: a path joins only the ecosystems that serve its type", async () => {
+  const tree = {
+    ...NO_SERVERS,
+    "Cargo.toml": "[workspace]\n",
+    "pyproject.toml": "[tool.ruff]\n",
+    ...bins("", "oxlint"),
+  };
+  const servers = ["rust-analyzer", "ruff"];
+  const typescriptFake = lookups(tree, servers);
+  const rustFake = lookups(tree, servers);
+
+  const typescriptOnly = await detect(["src/a.ts"], typescriptFake, ROOT);
+  const rustOnly = await detect(["src/lib.rs"], rustFake, ROOT);
+
+  expect(summary(typescriptOnly)).toEqual(["oxlint oxlint --lsp @"]);
+  expect(typescriptFake.programCalls.map(([program]) => program)).not.toContain("rust-analyzer");
+  expect(summary(rustOnly)).toEqual(["rust-analyzer rust-analyzer @"]);
+  expect(rustFake.fileCalls[0]).toEqual(["src/Cargo.toml", "Cargo.toml"]);
+});
+
+test("ecosystems: one folder that is a project of two ecosystems is read once, specs in table order", async () => {
+  const tree = { ...NO_SERVERS, "Cargo.toml": "", ...bins("", "oxfmt") };
+  const fake = lookups(tree, ["rust-analyzer"]);
+
+  const specs = await detect(["src/lib.rs", "src/a.ts"], fake, ROOT);
+
+  expect(summary(specs)).toEqual(["oxfmt oxfmt --lsp @", "rust-analyzer rust-analyzer @"]);
+  expect(fake.fileCalls).toHaveLength(2);
+});
+
+test("rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check", async () => {
+  const tree = {
+    "rs/Cargo.toml": '[workspace]\nmembers = ["core"]\n',
+    "rs/core/Cargo.toml": "[package]\n",
+  };
+  const fake = lookups(tree, ["rust-analyzer"]);
+
+  const specs = await detect(["rs/core/src/lib.rs"], fake, ROOT);
+
+  expect(specs).toEqual([
+    {
+      name: "rust-analyzer",
+      command: { program: "rust-analyzer", args: [] },
+      project: "rs",
+      folders: RUST_BIN,
+      fileTypes: ["rs"],
+      formats: true,
+      settings: { "rust-analyzer": { checkOnSave: false } },
+      initializationOptions: { checkOnSave: false },
+      install: null,
+    },
+  ]);
+  expect(fake.programCalls).toEqual([["rust-analyzer", "rs", RUST_BIN]]);
+});
+
+test("rust-analyzer: found in ~/.cargo/bin counts; missing → rustup's component", async () => {
+  const tree = { "Cargo.toml": "[package]\n" };
+
+  const inHome = await detect(
+    ["src/lib.rs"],
+    lookups({ ...tree, ...home(".cargo/bin", "rust-analyzer") }),
+    ROOT,
+  );
+  const missing = await detect(["src/lib.rs"], lookups(tree), ROOT);
+  const noManifest = await detect(["src/lib.rs"], lookups({}, ["rust-analyzer"]), ROOT);
+
+  expect(installOf(inHome)).toEqual([null]);
+  expect(installOf(missing)).toEqual([
+    { kind: "rustup", component: "rust-analyzer", program: "rust-analyzer" },
+  ]);
+  expect(noManifest).toEqual([]);
+});
+
+test("gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install", async () => {
+  const tree = { "go/go.mod": "module calc\n" };
+
+  const onPath = await detect(["go/calc/calc.go"], lookups(tree, ["gopls"]), ROOT);
+  const inHome = await detect(
+    ["go/calc/calc.go"],
+    lookups({ ...tree, ...home("go/bin", "gopls") }),
+    ROOT,
+  );
+  const missing = await detect(["go/calc/calc.go"], lookups(tree), ROOT);
+  const noManifest = await detect(["go/calc/calc.go"], lookups({}, ["gopls"]), ROOT);
+
+  expect(onPath).toEqual([
+    {
+      name: "gopls",
+      command: { program: "gopls", args: [] },
+      project: "go",
+      folders: GO_BIN,
+      fileTypes: ["go"],
+      formats: true,
+      settings: null,
+      initializationOptions: null,
+      install: null,
+    },
+  ]);
+  expect(installOf(inHome)).toEqual([null]);
+  expect(installOf(missing)).toEqual([
+    { kind: "go", module: "golang.org/x/tools/gopls@latest", program: "gopls" },
+  ]);
+  expect(noManifest).toEqual([]);
+});
+
+test("ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec", async () => {
+  const tree = { "py/pyproject.toml": "[project]\n[tool.ruff.lint]\n" };
+
+  const specs = await detect(["py/api/stats.py"], lookups(tree, ["ruff"]), ROOT);
+
+  expect(specs).toEqual([
+    {
+      name: "ruff",
+      command: { program: "ruff", args: ["server"] },
+      project: "py",
+      folders: PYTHON_BIN,
+      fileTypes: PYTHON_TYPES,
+      formats: true,
+      settings: null,
+      initializationOptions: null,
+      install: null,
+    },
+  ]);
+});
+
+test("ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint", async () => {
+  const config = { "requirements.txt": "", "ruff.toml": "" };
+  const hidden = { "requirements.txt": "", ".ruff.toml": "" };
+
+  const inHome = await detect(
+    ["a.py"],
+    lookups({ ...config, ...home(".local/bin", "ruff") }),
+    ROOT,
+  );
+  const missing = await detect(["a.py"], lookups(hidden), ROOT);
+
+  expect(summary(inHome)).toEqual(["ruff ruff server @"]);
+  expect(installOf(inHome)).toEqual([null]);
+  expect(installOf(missing)).toEqual([
+    { kind: "python", package: "ruff", program: "ruff", folder: "", manager: null },
+  ]);
+});
+
+test("ruff, ty, basedpyright: with no config, only the project's venv copy counts", async () => {
+  const tree = { "py/pyproject.toml": "[project]\n" };
+  const programs = ["ruff", "ty", "basedpyright-langserver"];
+
+  const local = await detect(["py/a.py"], lookups({ ...tree, ...venv("py/", ...programs) }), ROOT);
+  const onPath = await detect(
+    ["py/a.py"],
+    lookups(tree, [...programs, "pyright-langserver"]),
+    ROOT,
+  );
+
+  expect(summary(local)).toEqual([
+    "ruff ruff server @py",
+    "ty ty server @py",
+    "basedpyright basedpyright-langserver --stdio @py",
+  ]);
+  expect(local.map(({ formats }) => formats)).toEqual([true, false, false]);
+  expect(onPath).toEqual([]);
+});
+
+test("ty, basedpyright, pyright: their config signs count, missing → their PyPI packages", async () => {
+  const tree = {
+    "pyproject.toml": "[tool.basedpyright]\n[tool.pyright]\n",
+    "ty.toml": "",
+  };
+
+  const specs = await detect(["a.pyi"], lookups(tree), ROOT);
+
+  expect(summary(specs)).toEqual([
+    "ty ty server @",
+    "basedpyright basedpyright-langserver --stdio @",
+    "pyright pyright-langserver --stdio @",
+  ]);
+  expect(installOf(specs).map((hint) => hint?.kind === "python" && hint.package)).toEqual([
+    "ty",
+    "basedpyright",
+    "pyright",
+  ]);
+});
+
+test("pyright: pyrightconfig.json counts on PATH; a venv copy alone does not", async () => {
+  const tree = { "setup.py": "" };
+
+  const configured = await detect(
+    ["a.py"],
+    lookups({ ...tree, "pyrightconfig.json": "{}" }, ["pyright-langserver"]),
+    ROOT,
+  );
+  const venvOnly = await detect(
+    ["a.py"],
+    lookups({ ...tree, ...venv("", "pyright-langserver") }),
+    ROOT,
+  );
+
+  expect(summary(configured)).toEqual(["pyright pyright-langserver --stdio @"]);
+  expect(configured[0]?.formats).toBe(false);
+  expect(venvOnly).toEqual([]);
+});
+
+function pythonManagerFor(tree: Tree): Promise<unknown> {
+  const project = { "py/pyproject.toml": "[tool.ruff]\n", ...tree };
+  return detect(["py/a.py"], lookups(project), ROOT).then((specs) => {
+    const install = specs[0]?.install;
+    return install?.kind === "python" ? install.manager : undefined;
+  });
+}
+
+test("python manager: each lock file, the nearest wins, none → null", async () => {
+  expect(await pythonManagerFor({ "py/uv.lock": "" })).toBe("uv");
+  expect(await pythonManagerFor({ "py/poetry.lock": "" })).toBe("poetry");
+  expect(await pythonManagerFor({ "pdm.lock": { kind: "TooLarge" } })).toBe("pdm");
+  expect(await pythonManagerFor({ "py/pdm.lock": "", "uv.lock": "" })).toBe("pdm");
+  expect(await pythonManagerFor({ "py/uv.lock": { kind: "Folder" }, "poetry.lock": "" })).toBe(
+    "poetry",
+  );
+  expect(await pythonManagerFor({ "py/pnpm-lock.yaml": "" })).toBeNull();
+});
+
+test("PHP: Phpactor first, else Intelephense, each with its own options and folders", async () => {
+  const tree = { "php/composer.json": "{}" };
+
+  const both = await detect(
+    ["php/src/Stats.php"],
+    lookups(tree, ["phpactor", "intelephense"]),
+    ROOT,
+  );
+  const intelephense = await detect(["php/src/Stats.php"], lookups(tree, ["intelephense"]), ROOT);
+  const phar = await detect(
+    ["php/src/Stats.php"],
+    lookups({ ...tree, ...home(".local/bin", "phpactor") }, ["intelephense"]),
+    ROOT,
+  );
+
+  expect(both).toEqual([
+    {
+      name: "Phpactor",
+      command: { program: "phpactor", args: ["language-server"] },
+      project: "php",
+      folders: PHP_BIN,
+      fileTypes: ["php"],
+      formats: false,
+      settings: null,
+      initializationOptions: { "language_server.enable_trust_check": false },
+      install: null,
+    },
+  ]);
+  expect(intelephense).toEqual([
+    {
+      name: "Intelephense",
+      command: { program: "intelephense", args: ["--stdio"] },
+      project: "php",
+      folders: PHP_BIN,
+      fileTypes: ["php"],
+      formats: false,
+      settings: null,
+      initializationOptions: null,
+      install: null,
+    },
+  ]);
+  expect(summary(phar)).toEqual(["Phpactor phpactor language-server @php"]);
+});
+
+test("PHP: Phpactor in vendor/bin counts; neither server → Phpactor's download hint", async () => {
+  const tree = { "composer.json": "{}" };
+
+  const vendor = await detect(["a.php"], lookups({ ...tree, "vendor/bin/phpactor": "" }), ROOT);
+  const neither = await detect(["a.php"], lookups(tree), ROOT);
+  const noManifest = await detect(["a.php"], lookups({}, ["phpactor"]), ROOT);
+
+  expect(installOf(vendor)).toEqual([null]);
+  expect(summary(neither)).toEqual(["Phpactor phpactor language-server @"]);
+  expect(installOf(neither)).toEqual([PHPACTOR_HINT]);
+  expect(noManifest).toEqual([]);
+});
+
+test("clangd: formats only with a .clang-format or _clang-format up to the root", async () => {
+  const tree = { "c/compile_commands.json": "[]" };
+  const path = ["c/src/main.c"];
+
+  const plain = await detect(path, lookups(tree, ["clangd"]), ROOT);
+  const styled = await detect(path, lookups({ ...tree, "c/.clang-format": "" }, ["clangd"]), ROOT);
+  const above = await detect(path, lookups({ ...tree, "_clang-format": "" }, ["clangd"]), ROOT);
+
+  expect(plain).toEqual([
+    {
+      name: "clangd",
+      command: { program: "clangd", args: [] },
+      project: "c",
+      folders: CLANG_BIN,
+      fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
+      formats: false,
+      settings: null,
+      initializationOptions: null,
+      install: null,
+    },
+  ]);
+  expect(styled[0]?.formats).toBe(true);
+  expect(above[0]?.formats).toBe(true);
+});
+
+test("clangd: build/compile_commands.json makes the folder holding build/ the project; missing → the system's package manager", async () => {
+  const tree = { "c/build/compile_commands.json": "[]" };
+
+  const specs = await detect(["c/src/main.cpp"], lookups(tree), ROOT);
+  const noManifest = await detect(["c/src/main.cpp"], lookups({}, ["clangd"]), ROOT);
+
+  expect(summary(specs)).toEqual(["clangd clangd @c"]);
+  expect(installOf(specs)).toEqual([{ kind: "system", program: "clangd" }]);
+  expect(noManifest).toEqual([]);
+});
+
+test("Biome: the project's copy counts and formats; a copy on PATH does not", async () => {
+  const tree = { "biome/package.json": "{}" };
+
+  const local = await detect(
+    ["biome/src/index.js"],
+    lookups({ ...tree, ...bins("biome/", "biome") }),
+    ROOT,
+  );
+  const onPath = await detect(["biome/src/index.js"], lookups(tree, ["biome"]), ROOT);
+
+  expect(local).toEqual([
+    {
+      name: "Biome",
+      command: { program: "biome", args: ["lsp-proxy"] },
+      project: "biome",
+      folders: NODE_BIN,
+      fileTypes: [
+        "js",
+        "jsx",
+        "mjs",
+        "cjs",
+        "ts",
+        "tsx",
+        "mts",
+        "cts",
+        "json",
+        "jsonc",
+        "css",
+        "graphql",
+      ],
+      formats: true,
+      settings: null,
+      initializationOptions: null,
+      install: null,
+    },
+  ]);
+  expect(onPath).toEqual([]);
 });

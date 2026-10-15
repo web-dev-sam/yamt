@@ -1,4 +1,4 @@
-import type { PackageManager } from "./spec";
+import type { PackageManager, PythonManager } from "./spec";
 
 export const LOCK_FILES = [
   "pnpm-lock.yaml",
@@ -35,3 +35,13 @@ export function packageManager(
 ): PackageManager | null {
   return declaredManager(declared) ?? (nearestLock === null ? null : LOCK_MANAGER[nearestLock]);
 }
+
+export const PYTHON_LOCK_FILES = ["uv.lock", "poetry.lock", "pdm.lock"] as const;
+
+export const PYTHON_LOCK_MANAGER: Readonly<
+  Record<(typeof PYTHON_LOCK_FILES)[number], PythonManager>
+> = {
+  "uv.lock": "uv",
+  "poetry.lock": "poetry",
+  "pdm.lock": "pdm",
+};

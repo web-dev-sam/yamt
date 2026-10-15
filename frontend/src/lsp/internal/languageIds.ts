@@ -23,9 +23,20 @@ const LANGUAGE_IDS: Readonly<Record<string, string>> = {
   toml: "toml",
   graphql: "graphql",
   py: "python",
+  pyi: "python",
   rs: "rust",
   go: "go",
+  php: "php",
+  c: "c",
+  h: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cxx: "cpp",
+  hh: "cpp",
+  hpp: "cpp",
+  hxx: "cpp",
   sh: "shellscript",
+  bash: "shellscript",
 };
 
 export function languageId(path: string): string {
