@@ -603,6 +603,18 @@ marks or the Result; keyboard access; a length cap. Pull done by rebase (`3e465c
 | 2   | 3.R-removal-tooltip (`briefs/3.R-removal-tooltip.md`, `-rework-1.md`): the tooltip on the bar, the owner's bar geometry in `theme.css`, `oxfmt` fixes, window colour (#1057), `app-session hover` (needs 1) | web-impl  | done    | `cc6e2d6` (`RemovalTooltip`, notes `.omp/run/notes/RemovalTooltip.md`): hoverTooltip answering only while the bar is `:hover`, text read from the bar, `removalText.ts` display rules; real app dark/light screenshots. Reviews → #1063 (plan #73 amended), #1064–#1067, #1069–#1071 → `f731f50` (`RemovalTooltipR1`), both re-checks pass; #1068 dropped. Browser tests not runnable here (host libs) |
 | 3   | final run (`briefs/3.R-removal-verify.md`): `just check`, `just mutants 3e465cb`, the real app on `language-tools-script-setup`, fixture whitespace case | verifier  | done    | `RemovalVerify` at `1b7ccd1`, gate **pass** (notes `.omp/run/notes/RemovalVerify.md`): Rust mutants 0 missed, TS survivors on changed lines dropped (#1072, #1073); real app a–f pass (hover, 1 px beside none, into tooltip, apply closes/undo, light, 4 px bar); fixture `→`/`↵`/`·` pass; browser tests not runnable here (#1074) |
 
+## Release 0.3.2 (session 19, owner request #1075)
+
+Contents: the `[Unreleased]` changelog section — the removal tooltip (plan §2 #73), wider removal bars, the owner's dark
+theme with the native window's matching background. Product code as checked by the tooltip's final run (`1b7ccd1`); the
+release commit changes version and docs only. Not pushed yet: `main` holds the owner's `3e465cb` and the tooltip commits.
+
+| row | slice                                                                                                                         | owner        | status  | evidence                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------ | ------- | ----------------------------------------------------------------------------------------------------- |
+| 1   | version 0.3.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.3.2] - 2026-10-15`, README file names (`.readmer/readme.json` + `readmer`) | orchestrator | done    | release commit; no product file changes; `readmer check` passes                                        |
+| 2   | final run before tagging (`briefs/release-0.3.2-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict, removal and language-server projects | verifier     | running |                                                                                                       |
+| 3   | release build and publishing (`docs/slices/handoff-release-0.3.2.md`)                                                         | human        | planned |                                                                                                       |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
