@@ -1,10 +1,9 @@
 {
-  "PresetsDetect2": {
+  "PresetsDetect3": {
     "owned": [
       "frontend/src/lsp/**",
-      "frontend/src/ui/serverText.ts",
-      "frontend/src/ui/serverText.test.ts",
-      "frontend/src/ui/ServerMenu.vue",
+      "frontend/src/ui/serverSetup.ts",
+      "frontend/src/ui/serverSetup.test.ts",
       "frontend/src/ui/**/*.test.ts"
     ]
   }
