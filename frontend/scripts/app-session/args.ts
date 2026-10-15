@@ -25,6 +25,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
   type          --name <n> <text> [--x11]
   scroll        --name <n> <accessible name or css> --to <bottom|top|px> [--role <role>] [--nth <i>]
+  hover         --name <n> <accessible name or css> [--role <role>] [--nth <i>]   pointer only, no click
   read          --name <n> <js expression>
   shot          --name <n> <file.png> [--display]
   focus-away    --name <n>
@@ -60,6 +61,7 @@ export type Command =
       readonly query: Query;
       readonly to: ScrollTo;
     }
+  | { readonly kind: "hover"; readonly name: string; readonly query: Query }
   | { readonly kind: "read"; readonly name: string; readonly expression: string }
   | {
       readonly kind: "shot";
@@ -82,6 +84,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
   press: { values: ["name"], flags: ["x11"] },
   type: { values: ["name"], flags: ["x11"] },
   scroll: { values: ["name", "to", "role", "nth"], flags: [] },
+  hover: { values: ["name", "role", "nth"], flags: [] },
   read: { values: ["name"], flags: [] },
   shot: { values: ["name"], flags: ["display"] },
   "focus-away": { values: ["name"], flags: [] },
@@ -219,6 +222,8 @@ function build(kind: CommandKind, parsed: Parsed): Command {
       return inputCommand(kind, parsed);
     case "scroll":
       return { kind, name: sessionName(parsed), query: query(parsed), to: scrollTo(parsed) };
+    case "hover":
+      return { kind, name: sessionName(parsed), query: query(parsed) };
     case "read":
       return {
         kind,

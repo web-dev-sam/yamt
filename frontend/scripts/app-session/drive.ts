@@ -94,7 +94,7 @@ export async function typeText(state: SessionState, command: Of<"type">): Promis
   return { typed: command.text };
 }
 
-async function scrollTarget(state: SessionState, query: Query): Promise<Candidate> {
+async function namedOrCss(state: SessionState, query: Query): Promise<Candidate> {
   const named = await candidates(state, NAMED_SELECTOR);
   if (named.some((candidate) => isNamed(candidate, query))) {
     return pickByName(named, query);
@@ -122,7 +122,7 @@ async function settledScrollTop(state: SessionState, candidate: Candidate): Prom
 }
 
 export async function scroll(state: SessionState, command: Of<"scroll">): Promise<Output> {
-  const chosen = await scrollTarget(state, command.query);
+  const chosen = await namedOrCss(state, command.query);
   const before = await reveal(state, chosen);
   const deltaY = Math.round(scrollDelta(command.to, before));
   if (deltaY !== 0) {
@@ -146,6 +146,16 @@ export async function scroll(state: SessionState, command: Of<"scroll">): Promis
 
 export async function read(state: SessionState, command: Of<"read">): Promise<Output> {
   return { value: await execute(state, `return (${command.expression});`, []) };
+}
+
+export async function hover(state: SessionState, command: Of<"hover">): Promise<Output> {
+  const chosen = await namedOrCss(state, command.query);
+  const point = viewportPoint(await reveal(state, chosen));
+  const move = { type: "pointerMove", duration: 0, origin: "viewport", ...point };
+  await perform(state, [
+    { type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [move] },
+  ]);
+  return { hovered: { role: roleOf(chosen), name: nameOf(chosen) }, viewport: point };
 }
 
 export async function shot(state: SessionState, command: Of<"shot">): Promise<Output> {

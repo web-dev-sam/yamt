@@ -13,6 +13,7 @@ import { paneDocs } from "./paneDocs";
 import type { Side } from "./side";
 import { showStatuses, sideStatusField } from "./sideStatus";
 import type { ChunkState } from "./status";
+import { removalAt, sideWordDecorations } from "./words";
 
 type Columns = readonly [line: number, start: number, len: number];
 type Point = readonly [line: number, column: number];
@@ -280,6 +281,57 @@ test("a bar equals another pane's bar of the same tone and differs from a bar of
 
   expect(leftConflict.eq(rightConflict)).toBe(true);
   expect(leftConflict.eq(leftModified)).toBe(false);
+});
+
+test("a bar differs from a bar of the same tone whose removed text is another", async () => {
+  const merge = open(await synthetic());
+  const conflict = chunk(merge, CONFLICT);
+  const local = conflict.words.local;
+  const retexted: Chunk = {
+    ...conflict,
+    words: {
+      ...conflict.words,
+      local: {
+        ...local,
+        removals: local.removals.map((removal) => ({ ...removal, text: "other" })),
+      },
+    },
+  };
+  function firstBar(chunkOf: Chunk): WidgetType {
+    const bars = sideWordDecorations(merge.left.doc, [chunkOf], "local");
+    for (const cursor = bars.iter(); cursor.value !== null; cursor.next()) {
+      const widget: unknown = cursor.value.spec.widget;
+      if (widget instanceof WidgetType) {
+        return widget;
+      }
+    }
+    throw new Error("no bar");
+  }
+
+  expect(firstBar(conflict).eq(firstBar(conflict))).toBe(true);
+  expect(firstBar(conflict).eq(firstBar(retexted))).toBe(false);
+});
+
+test("removalAt reads the text of the bar at a position, and nothing once its side is applied", async () => {
+  const start = open(await synthetic());
+  const applied = run(
+    start,
+    actionSteps(
+      target(start),
+      { kind: "apply", side: "local", chunks: [chunk(start, CONFLICT)] },
+      "side",
+    ),
+  );
+
+  expect([4, 5, 6, 21, 27].map((pos) => removalAt(start.left, pos))).toEqual([
+    null,
+    "removed",
+    null,
+    "removed",
+    "removed",
+  ]);
+  expect([5, 21, 27].map((pos) => removalAt(applied.left, pos))).toEqual([null, null, "removed"]);
+  expect(removalAt(undone(applied).left, 5)).toBe("removed");
 });
 
 test("a resolved block loses its word marks and bars on every side pane and undo brings them back", async () => {

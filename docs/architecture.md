@@ -609,7 +609,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
   bands, the word marks and the removal bars; the middle pane draws bands only, until both sides
   are handled (plan §2 #31, #33).
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
-  bar where the side removed text) from `chunk.words` (plan §2 #30, #31).
+  bar where the side removed text, carrying that text; `removalAt` reads it back) from `chunk.words`
+  (plan §2 #30, #31). `removalTooltip.ts` shows a bar's text on hover (`hoverTooltip`, only while the
+  bar itself is hovered, closed when the bar goes; tooltips in `document.body` on every pane), what it
+  shows decided by the pure `removalText.ts` (plan §2 #73).
 - `geometry.ts` (where each chunk sits in each pane, each run's wave top per pane — `waveRows` — and
   `STRIP_PANES`, the two panes each strip sits between), `gap.ts` (what a strip shows: the bands that
   cross it, the wave joins of runs both its panes fold — `wavePaints` —, each open change's icon row in

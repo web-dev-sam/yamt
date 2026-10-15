@@ -22,7 +22,7 @@ const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
 // `--color-window` in frontend/src/style.css, dark and light palettes.
-const BACKGROUND_DARK: Color = Color(0x26, 0x28, 0x2c, 0xff);
+const BACKGROUND_DARK: Color = Color(0x27, 0x25, 0x2e, 0xff);
 const BACKGROUND_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
 const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);

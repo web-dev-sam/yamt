@@ -54,6 +54,7 @@ path.chunk-band {
   position: relative;
   display: inline-block;
   width: 0;
+  padding-inline: 2px;
   height: 1lh;
   vertical-align: top;
 }
@@ -128,7 +129,7 @@ path.chunk-band {
   pointer-events: none;
 }
 
-.fold-wave-hover>.strip-wave-line {
+.fold-wave-hover > .strip-wave-line {
   stroke-width: var(--strip-wave-hover-stroke);
 }
 
@@ -279,4 +280,25 @@ path.chunk-band {
   font-size: inherit;
   color: var(--color-fg-muted);
   opacity: 1;
+}
+
+:root .cm-tooltip.cm-tooltip-hover:has(> .removal-tooltip) {
+  border: 1px solid var(--color-control-border);
+  border-radius: 4px;
+  background-color: var(--color-panel);
+}
+
+:root .removal-tooltip {
+  max-width: 640px;
+  max-height: 20lh;
+  margin: 0;
+  padding: 4px 8px;
+  overflow: auto;
+  color: var(--color-code);
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+
+:root .removal-tooltip-whitespace {
+  color: var(--color-fg-muted);
 }

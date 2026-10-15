@@ -1,5 +1,5 @@
-import type { Range, Text } from "@codemirror/state";
-import { Decoration, WidgetType, type DecorationSet } from "@codemirror/view";
+import type { EditorState, Range, Text } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 
 import type { Chunk } from "../../ipc";
 import type { Side } from "./side";
@@ -7,14 +7,16 @@ import { chunkTone, type Tone } from "./tone";
 
 class RemovalPoint extends WidgetType {
   readonly className: string;
+  readonly text: string;
 
-  constructor(tone: Tone) {
+  constructor(tone: Tone, text: string) {
     super();
-    this.className = `chunk-removal chunk-removal-${tone} px-0.5`;
+    this.className = `chunk-removal chunk-removal-${tone}`;
+    this.text = text;
   }
 
   override eq(other: RemovalPoint): boolean {
-    return other.className === this.className;
+    return other.className === this.className && other.text === this.text;
   }
 
   toDOM(): HTMLElement {
@@ -26,6 +28,25 @@ class RemovalPoint extends WidgetType {
   override ignoreEvent(): boolean {
     return false;
   }
+}
+
+export function removalAt(state: EditorState, pos: number): string | null {
+  for (const source of state.facet(EditorView.decorations)) {
+    if (typeof source === "function") {
+      continue;
+    }
+    for (
+      const cursor = source.iter(pos);
+      cursor.value !== null && cursor.from <= pos;
+      cursor.next()
+    ) {
+      const widget: unknown = cursor.value.spec.widget;
+      if (widget instanceof RemovalPoint) {
+        return widget.text;
+      }
+    }
+  }
+  return null;
 }
 
 export function sideWordDecorations(
@@ -41,8 +62,8 @@ export function sideWordDecorations(
       const from = doc.line(range.line + 1).from + range.start;
       decorations.push(mark.range(from, from + range.len));
     }
-    const bar = Decoration.widget({ widget: new RemovalPoint(tone) });
     for (const removal of chunk.words[side].removals) {
+      const bar = Decoration.widget({ widget: new RemovalPoint(tone, removal.text) });
       decorations.push(bar.range(doc.line(removal.at.line + 1).from + removal.at.column));
     }
   }

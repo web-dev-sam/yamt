@@ -158,6 +158,23 @@ test("scroll takes a target and --to top, bottom or a whole pixel offset", () =>
   expect(() => parseCommand(["scroll", "--name", "a", "x"])).toThrow(/--to <bottom\|top\|px>/);
 });
 
+test("hover takes one target like scroll, by name or css, with --role and --nth, and no --to", () => {
+  expect(parseCommand(["hover", "--name", "a", ".chunk-removal", "--nth", "2"])).toEqual({
+    kind: "hover",
+    name: "a",
+    query: { name: ".chunk-removal", role: null, nth: 2 },
+  });
+  expect(parseCommand(["hover", "--name", "a", "Save", "--role", "button"])).toEqual({
+    kind: "hover",
+    name: "a",
+    query: { name: "Save", role: "button", nth: null },
+  });
+  expect(() => parseCommand(["hover", "--name", "a"])).toThrow(/exactly one accessible name/);
+  expect(() => parseCommand(["hover", "--name", "a", "x", "--to", "top"])).toThrow(
+    /unknown option --to/,
+  );
+});
+
 test("colours takes a file and at least one colour, and needs no session", () => {
   expect(parseCommand(["colours", "/tmp/s.mkv", "26282c", "#191A1C"])).toEqual({
     kind: "colours",

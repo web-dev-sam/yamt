@@ -1,5 +1,5 @@
 import { parseCommand, type Command } from "./app-session/args";
-import { click, press, read, scroll, shot, typeText } from "./app-session/drive";
+import { click, hover, press, read, scroll, shot, typeText } from "./app-session/drive";
 import { startFixture } from "./app-session/fixture";
 import { focusAway, focusBack } from "./app-session/focus";
 import { sessionNamed, fromRoot } from "./app-session/session";
@@ -25,6 +25,8 @@ async function run(command: Command): Promise<unknown> {
       return typeText(sessionNamed(command.name), command);
     case "scroll":
       return scroll(sessionNamed(command.name), command);
+    case "hover":
+      return hover(sessionNamed(command.name), command);
     case "read":
       return read(sessionNamed(command.name), command);
     case "shot":
