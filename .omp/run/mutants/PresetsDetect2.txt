@@ -1,0 +1,4014 @@
+mutants: no Rust changes since 4da9380
+[32m12:25:42 (386646) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m12:25:42 (386646) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m12:25:42 (386646) INFO ProjectReader[39m Found 10 of 437 file(s) to be mutated.
+[32m12:25:43 (386646) INFO Instrumenter[39m Instrumented 10 source file(s) with 1229 mutant(s)
+[32m12:25:43 (386646) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m12:25:44 (386646) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m12:25:51 (386646) INFO DryRunExecutor[39m Initial test run succeeded. Ran 392 tests in 6 seconds (net 3184.3395360000054 ms, overhead 3340.6604639999946 ms).
+
+All tests
+  editor/internal
+    problems.test.ts
+      ✘ rule 2: positions are read on the version's own text and mapped through every edit made since (covered 0)
+      ✘ rule 2: a character past the line ends at the line's end, a line past the text at its end (covered 0)
+      ✘ rule 2: a problem whose text was deleted since its version is not shown (covered 0)
+      ✘ rule 2: answers for a version never taken or forgotten are dropped; a second answer for the same version replaces the first (covered 0)
+      ✘ rule 2: an answer that changes nothing shown sets no diagnostics, so an open problem tooltip stays (covered 0)
+      ✘ rule 2: a version stays answerable until every server that answered is past it (covered 0)
+      ✘ rule 2: with no answers at all only the newest 32 versions are kept (covered 0)
+      ✘ rule 2: two servers' problems are shown together, and [] clears only that server's (covered 0)
+      ✘ rule 4: counts are errors, warnings, and info with hints as other (covered 0)
+    serverDoc.test.ts
+      ✘ rule 1: an editable Result is opened under its path, says changed on each edit only, and closes once (covered 0)
+      ✘ rule 1: a read-only Result, or no servers, opens nothing (covered 0)
+      ✘ rule 2: take gives the Result's text with its own line breaks (covered 0)
+      ✘ rule 2: problems show in the middle pane only (covered 0)
+      ✘ rule 4: counts go out when they change, not for an edit that leaves them (covered 0)
+      ✘ rule 4: a closed Result tells no one about later counts (covered 0)
+      ✘ rule 5: a second format while one runs returns the same promise; the next call asks again (covered 0)
+  lsp
+    internal
+      added.test.ts
+        ✘ addedSpecs: the program's file name, served at the repository root, formatting allowed (covered 0)
+        ✘ addedSpecs: a repeated or taken name gets (2), (3) …; an empty command is skipped (covered 0)
+      detect.test.ts
+        ✓ project folders: the nearest package.json walking up, the file's own folder first (killed 89)
+        ✓ project folders: a file at the root belongs to the root project (killed 7)
+        ✓ project folders: files with no package.json above them are served by no preset; a Cargo.toml brings no node project (killed 1)
+        ✓ project folders: a folder named package.json is no project (killed 2)
+        ~ project folders: two files in one project check it once (covered 216)
+        ✓ oxlint and oxfmt: found in the project (or above it), formatter first, with their options (killed 9)
+        ✓ oxlint and oxfmt: a global install does not count (killed 2)
+        ✓ TypeScript 7 or later: the project's own tsc in language-server mode (killed 20)
+        ✓ TypeScript 5 with the project's own tsgo: the native preview; tsgo on PATH does not count (killed 7)
+        ✓ TypeScript 6: typescript-language-server from the project or PATH, else an install hint (killed 2)
+        ✓ TypeScript 5.9 without its server: install hint with the version, folder and manager (killed 11)
+        ~ TypeScript: the package counts up to the root, jsconfig.json counts as config (covered 219)
+        ~ TypeScript: the nearest typescript package decides the version (covered 219)
+        ✓ TypeScript: the whole leading number is the major version (killed 1)
+        ✓ TypeScript: not detected without a config, without the package, or with no version (killed 6)
+        ✓ eslint: config, package and its server found on PATH or in the project (killed 2)
+        ✓ eslint: without its server, an install hint for vscode-langservers-extracted (killed 8)
+        ✓ eslint: not detected without a config or without the package (killed 2)
+        ~ names are unique across projects; a tool in one project keeps its plain name (covered 225)
+        ~ package manager: the lock file nearest the project folder, up to the root (covered 266)
+        ✓ package manager: the project's field beats a lock file; a malformed package.json has none (killed 10)
+        ✓ a rejecting lookup means not found (killed 5)
+        ~ a short answer from projectFiles leaves the rest missing (covered 83)
+        ✓ ecosystems: a path joins only the ecosystems that serve its type (killed 20)
+        ~ ecosystems: one folder that is a project of two ecosystems is read once, specs in table order (covered 256)
+        ✓ rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check (killed 10)
+        ✓ rust-analyzer: found in ~/.cargo/bin counts; missing → rustup's component (killed 6)
+        ✓ gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install (killed 5)
+        ✓ ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec (killed 19)
+        ✓ ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint (killed 13)
+        ✓ ruff, ty, basedpyright: with no config, only the project's venv copy counts (killed 2)
+        ~ ty, basedpyright, pyright: their config signs count, missing → their PyPI packages (covered 226)
+        ~ pyright: pyrightconfig.json counts on PATH; a venv copy alone does not (covered 213)
+        ✓ python manager: each lock file, the nearest wins, none → null (killed 2)
+        ✓ PHP: Phpactor first, else Intelephense, each with its own options and folders (killed 3)
+        ✓ PHP: Phpactor in vendor/bin counts; neither server → Phpactor's download hint (killed 4)
+        ✓ clangd: formats only with a .clang-format or _clang-format up to the root (killed 10)
+        ✓ clangd: build/compile_commands.json makes the folder holding build/ the project; missing → the system's package manager (killed 4)
+        ~ Biome: the project's copy counts and formats; a copy on PATH does not (covered 211)
+      ecosystems.test.ts
+        ✓ node: package.json makes its folder a project, nested, at the root, or not at all (killed 1)
+        ~ python: pyproject.toml makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ python: setup.py makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ python: setup.cfg makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ python: requirements.txt makes its folder a project, nested, at the root, or not at all (covered 46)
+        ✓ rust: Cargo.toml makes its folder a project, nested, at the root, or not at all (killed 2)
+        ~ go: go.mod makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ go: go.work makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ php: composer.json makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ clang: compile_commands.json makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ clang: compile_flags.txt makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ clang: .clangd makes its folder a project, nested, at the root, or not at all (covered 46)
+        ~ rust: the nearest workspace Cargo.toml beats a member's own (covered 38)
+        ~ rust: a [workspace.*] table counts as a workspace, a mention in text does not (covered 53)
+        ~ rust: no workspace anywhere, the nearest Cargo.toml (covered 53)
+        ~ rust: a workspace Cargo.toml too large to read is a plain Cargo.toml (covered 53)
+        ~ go: go.work beats a nearer go.mod (covered 46)
+        ~ clang: build/compile_commands.json makes the folder holding build/ the project (covered 50)
+        ~ manifests are read along the folder chain, rule by rule (covered 22)
+        ✘ program folders per ecosystem (covered 0)
+      languageIds.test.ts
+        ~ language ids for the new presets' file types (covered 14)
+      packageManager.test.ts
+        ✓ the packageManager field names the manager; yarn 1 is classic yarn, yarn 2+ is berry (killed 16)
+        ✓ every lock file names its manager (killed 2)
+        ✓ a field beats a lock file; an unknown or versionless field falls back to the lock file (killed 1)
+        ~ no field and no lock file: no manager (covered 28)
+        ✘ every Python lock file names its manager (covered 0)
+      presets.test.ts
+        ✘ presets run formatters first, in the table's order, each in its ecosystem (covered 0)
+        ✘ each preset serves its file types (covered 0)
+        ~ settings and start options: oxlint on type, eslint on type, rust-analyzer without cargo check, Phpactor without its trust prompt (covered 6)
+        ✘ commands: Biome's proxy, the Python servers, Phpactor then Intelephense (covered 0)
+        ✘ install recipes per ecosystem (covered 0)
+        ✘ pyproject sections match the tool's own tables only (covered 0)
+        ✘ eslint's configs are the flat config and the legacy .eslintrc forms (covered 0)
+      spec.test.ts
+        ✓ the extension is the last dotted part of the file name, lower case (killed 4)
+        ~ a spec serves files with its extensions under its project folder only (covered 24)
+        ~ language ids come from the table; an unknown extension is its own id (covered 14)
+    index.test.ts
+      ✓ rule 1: a spec serves a path by its extension and its project folder (killed 30)
+      ✓ rule 1: serving(path) is true only while a running server serves the path (killed 5)
+      ✓ rule 2: a spec starts when the first document it serves opens (killed 3)
+      ~ an added server's start command looks in node_modules/.bin like a detected one (covered 86)
+      ~ rule 2: a document already open at setSpecs starts the spec (covered 86)
+      ✓ rule 2: startOnOpen false stays stopped until start(name) (killed 3)
+      ~ rule 2: a spec with install is notInstalled and never started (covered 85)
+      ✓ rule 2: a user stop survives setSpecs, even with startOnOpen, until start (killed 3)
+      ✓ haltAll stops every run without a user stop; Start on open starts them again (killed 1)
+      ✓ haltAll shows a crashed server as stopped and tells onChange listeners (killed 3)
+      ~ haltAll leaves startOnOpen as it was and starts nothing until a document opens (covered 100)
+      ~ a Start on open right after haltAll, while the old run still stops, starts a new run (covered 95)
+      ~ a server the user stopped stays stopped after haltAll and a Start on open (covered 108)
+      ✓ destroy waits for runs halted by haltAll (killed 5)
+      ~ rule 9: stop sends didClose, shutdown, exit, then host.stop, and waits for Exited (covered 96)
+      ~ rule 9: a shutdown without an answer waits 2 s, then exit and host.stop (covered 96)
+      ✓ rule 3: setSpecs keeps an unchanged spec's run and starts a newly installed one (killed 1)
+      ~ rule 3: a changed spec is stopped and started again; a removed one is stopped (covered 102)
+      ✓ rule 4: initialize carries the project, capabilities and options; then initialized and configuration (killed 1)
+      ~ rule 4: initialize without initializationOptions omits them; the root folder is named after the repository (covered 87)
+      ~ rule 4: no answer to initialize within 30 s fails timedOut and stops the run (covered 85)
+      ~ rule 4: an error reply to initialize fails initializeFailed (covered 86)
+      ~ rule 4: a malformed initialize result fails initializeFailed (covered 85)
+      ~ rule 4: start replies map to failed reasons (covered 86)
+      ~ rule 4: a repository path that is not text fails every start (covered 85)
+      ✓ rule 5: sync sends the full text 300 ms after the last change, with rising versions (killed 9)
+      ✓ rule 5: one take serves every server; close sends didClose and shows no more problems (killed 4)
+      ✓ rule 5: changes while no server has the document open are taken at the next open (killed 1)
+      ~ rule 6: pushed problems with and without a version land in one slot (covered 94)
+      ~ rule 6: severities map 1-4 to error, warning, info, hint; none means error (covered 86)
+      ~ rule 6: pulled problems: after open and every sync, previousResultId sent, unchanged keeps items (covered 93)
+      ~ rule 6: a pull answered for an older version is pulled again; one pull in flight per document (covered 93)
+      ~ rule 6: a late pull never replaces a newer push, nor a late push a newer pull (covered 94)
+      ~ rule 6: a sync of one document pulls every document on that server (covered 93)
+      ~ rule 6: workspace/diagnostic/refresh is answered null, then pulled again (covered 86)
+      ~ rule 6: a failed or malformed pull is logged and shows nothing (covered 87)
+      ~ rule 6: problems are cleared on stop, crash and removal (covered 101)
+      ~ rule 7: server requests are answered from the table, unknown ones -32601 and logged (covered 89)
+      ~ rule 7: log and show messages go to the log; progress and telemetry are dropped (covered 87)
+      ~ rule 11: a malformed message is logged and dropped (covered 90)
+      ✓ rule 8: the first formats spec whose server offers formatting formats; edits use UTF-16 positions (killed 3)
+      ~ rule 8: no edits, or edits that change nothing, are unchanged (covered 89)
+      ~ rule 8: a formatter still starting is waited for (covered 89)
+      ~ rule 8: 5 s in total, including the wait for a starting server, then timedOut (covered 85)
+      ~ rule 8: a formatting request without an answer times out at 5 s total and is cancelled (covered 89)
+      ✓ rule 8: noFormatter when no spec formats the document, the document is closed, or no host (killed 3)
+      ~ rule 8: a running server that does not offer formatting is skipped (covered 89)
+      ~ rule 8: a formats spec that is stopped, crashed or failed is notRunning (covered 88)
+      ~ rule 8: an error reply or overlapping edits are failed (covered 89)
+      ✓ rule 9: an exit yamt did not ask for is crashed{code}; pending requests fail; it stays crashed (killed 2)
+      ~ rule 9: restart of a running server stops it and starts a new run (covered 96)
+      ~ rule 9: a stop before the host replied stops the run once it starts (covered 92)
+      ~ rule 9: a stop before the host refused the start ends stopped (covered 92)
+      ~ rule 9: a stop before the repository context arrived starts nothing (covered 93)
+      ✓ destroy stops every server and resolves when all exited (killed 1)
+      ~ rule 10: the log keeps the last 2,000 lines across restarts (covered 94)
+      ✓ rule 10: log lines carry the clock's time; onChange fires and unsubscribes (killed 1)
+      ~ rule 2: no host makes every spec failed{noHost} (covered 84)
+      ~ rule 10: a failed initialize logs start, failure and exit as yamt lines (covered 83)
+      ~ rule 10: an initialize time-out is logged as cancelled, then as the failure (covered 83)
+      ~ rule 10: start failures are logged in words (covered 83)
+      ~ rule 9: an exit without a code is crashed{null} and logged (covered 90)
+      ~ rule 9: a crash during initialize is crashed, and messages before running are dropped (covered 85)
+      ✓ rule 2: start and stop act on the named spec only; an unknown name does nothing (killed 1)
+      ~ rule 2: start on a running server starts no second process (covered 93)
+      ✓ rule 3: a user stop of one name does not keep a new spec of another name stopped (killed 1)
+      ~ rule 3: restart clears a user stop, so a changed spec of that name starts (covered 111)
+      ~ rule 9: an initialize answer that arrives after stop does not make the server run (covered 92)
+      ~ rule 9: a stop before a failing context arrives ends stopped, not failed (covered 93)
+      ~ rule 4: the context is read once; a failing context fails the start with its message (covered 85)
+      ~ rule 4: a repository path that is not text names the reason (covered 85)
+      ~ rule 6/8: null or false providers mean no pulls and no formatting (covered 89)
+      ~ rule 7: answering a request other than refresh pulls nothing (covered 86)
+      ~ rule 9: a stop logs the pulls it leaves unanswered (covered 94)
+      ~ rule 9: a server that exits during shutdown is not stopped again (covered 97)
+      ~ rule 9: a stop after restart, during the old run's shutdown, keeps it stopped (covered 99)
+      ~ rule 3: a spec removed after restart, during the old run's shutdown, starts nothing (covered 104)
+      ~ destroy after restart, during the old run's shutdown, starts nothing (covered 98)
+      ~ rule 5: a document opened by a listener when its server starts running is opened once (covered 94)
+      ~ rule 8: formatting syncs a pending change once; the pending sync does not repeat it (covered 89)
+      ~ rule 8: malformed edits are failed with the reason (covered 89)
+      ~ rule 8: after a 2 s wait for a starting formatter, its request gets the 3 s left (covered 89)
+      ~ rule 6: a first pull answered unchanged shows no problems (covered 86)
+      ~ rule 6: a timed-out pull is logged as such and shows nothing (covered 87)
+      ~ rule 6: a malformed pull report is logged and shows nothing (covered 87)
+      ~ rule 6: a pull answered after its document closed shows nothing (covered 94)
+      ~ rule 6: pushed versions that are not positive integers are dropped (covered 87)
+      ✘ a document version is a positive safe integer (covered 0)
+      ✓ rule 1/5: a document a running server does not serve is never opened or closed on it (killed 1)
+      ~ rule 5: close sends didClose with the document's URI (covered 94)
+      ✓ rule 5: a change syncs when any one server has the document open (killed 1)
+      ✓ rule 5: a closed document is not opened on a server started later (killed 7)
+      ✓ onChange fires for setSpecs, for a state change and for a log line (killed 1)
+      ~ rule 4: a Windows repository root names the folder and makes a drive URI (covered 86)
+      ~ destroy waits for a stop already under way (covered 97)
+      ~ destroy waits for servers removed by setSpecs (covered 98)
+      ✓ destroy waits for a removed server still stopping after another removed one stopped (killed 3)
+      ~ rule 4: a host that throws while starting is spawnFailed (covered 85)
+      ~ rule 9: a host that fails to stop a run is logged; the run's exit still ends the stop (covered 97)
+      ~ rule 8: a document that throws when taken fails the format, never rejects (covered 89)
+      ~ rule 7: a log message without text is logged with its reason (covered 87)
+  ui
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ the unprocessed question carries WebStorm's title and buttons (covered 0)
+      ✘ the exit question says the listed files are not saved to disk (plan §2 #69) (covered 0)
+      ✘ the clash question names the key in the platform's words, its owner and the asking action (covered 0)
+      ~ the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67) (covered 13)
+    saving.test.ts
+      ✘ save: Written sends the file text, marks it saved as the file text, takes git's list and records the format outcome (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): git lists only it, as resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): another file is resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): it is resolved and another is not (covered 0)
+      ✘ save without unsaved work formats but sends nothing (covered 0)
+      ✘ save goes on whatever formatting answers, and an editor without an outcome records none (covered 0)
+      ✘ a save while a save of the same file runs is ignored; typing during the write keeps the dot (covered 0)
+      ✘ claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended (covered 0)
+      ✘ a finish that ends while a save of the same file runs leaves that save's claim in place (covered 0)
+      ✘ a save whose formatting still runs when another write of the same file starts writes nothing (covered 0)
+      ✘ finish writes the Result as shown and marks it saved as shown (covered 0)
+      ✘ afterWrite takes git's list and says whether the write landed; a disk change gives its notice and reloads the file (covered 0)
+      ✘ a save refused because the file changed on disk marks nothing saved and shows the disk view (covered 0)
+      ✘ a failed save keeps the dot, is reported in words, and the next save clears it (covered 0)
+    servers.test.ts
+      ✓ serverViews follow LanguageServers.onChange (killed 6)
+      ✓ the actions map onto start, stop and restart by name (killed 3)
+      ✓ a shown log follows new lines; other logs and other screens show none (killed 3)
+      ~ leaving a shown log for files by any writer empties shownLog (covered 54)
+      ~ leaving a shown log for settings by any writer empties shownLog (covered 54)
+      ✓ serving follows lsp's rule per path, whatever the other servers do (killed 7)
+      ~ a computed over serving turns true when the server starts (covered 86)
+    serverSetup.test.ts
+      ✓ start: the file list and the settings are in before detection starts (killed 89)
+      ✓ start: no specs means no question and no servers (killed 1)
+      ~ start: a stored Start answers without a question and starts the served servers (covered 344)
+      ✓ start: a stored Don't start answers without a question and starts nothing (killed 2)
+      ~ start: an answer stored for another repository does not count (covered 287)
+      ~ start: without an answer the question lists each found server with its folder, and the added ones (covered 312)
+      ~ start: Start in the question is stored and starts the servers (covered 344)
+      ~ start: Don't start in the question is stored and starts nothing (covered 315)
+      ~ start: Escape stores nothing, so the question comes back next run; the servers show stopped (covered 315)
+      ~ start: a Start whose write fails starts nothing (covered 315)
+      ~ start: another question already open stores nothing and leaves that question open (covered 312)
+      ~ start: as many added servers as found ones still bring the question (covered 312)
+      ~ start: servers added by hand alone are asked about too (covered 127)
+      ~ start: a repository whose path is not UTF-8 has no root, so nothing at all (covered 21)
+      ~ start: a failing host context is logged and asks nothing (covered 21)
+      ~ focus after a failed start look finds the servers, applies the stored answer and asks nothing (covered 344)
+      ~ focus after a failed start look never asks a repository without an answer (covered 315)
+      ~ fixture mode (no host): the files and settings load; no servers, no question (covered 21)
+      ~ focus: the file list and the settings are refreshed before detection runs again (covered 345)
+      ✓ focus: detection runs again without asking; running servers keep their run and a newly installed one starts (killed 6)
+      ~ focus: a repository still without an answer is never asked and keeps its servers stopped (covered 328)
+      ~ focus: an older detection that answers last is dropped (covered 322)
+      ~ focus: before the start set-up has finished, focus refreshes but does not detect (covered 314)
+      ✓ settings: answering Start applies at once; Don't start stops the running servers; Start again starts them (killed 4)
+      ~ settings: a Don't start whose write fails leaves the running servers running (covered 345)
+      ~ settings: a Start whose write fails leaves the servers stopped (covered 316)
+      ✓ settings: Don't start while Don't start is stored keeps a server started by hand (killed 3)
+      ✓ settings: a server the user stopped stays stopped through Don't start and Start (killed 1)
+      ✓ settings: an added server is stored, appears after the found ones and starts under Start; Remove drops it (killed 1)
+      ~ settings: Remove drops only the server at its index (covered 19)
+      ✘ the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped (covered 0)
+      ✘ the add form: a file type with a dot inside can never match a file, so it gives null (covered 0)
+    serverText.test.ts
+      ✓ rule 2/3: stopped reads Stopped with a stopped dot (killed 8)
+      ✓ rule 2/3: starting reads Starting… with a busy dot (killed 6)
+      ✓ rule 2/3: running reads Running with a running dot (killed 6)
+      ✓ rule 2/3: stopping reads Stopping… with a busy dot (killed 4)
+      ✓ rule 2/3: crashed reads Stopped: exited with code 3 with a problem dot (killed 8)
+      ✓ rule 2/3: crashed reads Stopped: exited with a problem dot (killed 2)
+      ✓ rule 2/3: failed reads Not found: looked in frontend/node_modu… with a problem dot (killed 8)
+      ✓ rule 2/3: failed reads Could not start: permission denied with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Could not start: bad reply with a problem dot (killed 1)
+      ✓ rule 2/3: failed reads Did not answer in time with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Runs only in the app with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Its folder is outside the repository with a problem dot (killed 3)
+      ✓ rule 2/3: notInstalled reads Not installed with a warning dot (killed 5)
+      ✓ rule 3: the actions that apply per state (killed 33)
+      ✓ rule 4: npm installs with `npm install -D p` here and `npm install -g p` for all projects (killed 17)
+      ✓ rule 4: pnpm installs with `pnpm add -D p` here and `pnpm add -g p` for all projects (killed 1)
+      ~ rule 4: yarn installs with `yarn add -D p` here and `yarn global add p` for all projects (covered 43)
+      ~ rule 4: yarnBerry installs with `yarn add -D p` here and `npm install -g p` for all projects (covered 43)
+      ~ rule 4: bun installs with `bun add --dev p` here and `bun add -g p` for all projects (covered 43)
+      ✓ rule 4: an unknown manager gets npm's commands and the note to use your own (killed 3)
+      ✓ rule 4: the TypeScript and eslint sentences, the PATH line and the come-back line (killed 13)
+      ✓ rule 4: the folder line names the project folder, or the repository root for "" (killed 8)
+      ✓ vue: the plugin goes into the project only, with no PATH line (killed 10)
+      ✓ python: uv installs with `uv add --dev ruff` here and `uv tool install ruff` for all projects (killed 18)
+      ~ python: poetry installs with `poetry add --group dev ruff` here and `pipx install ruff` for all projects (covered 38)
+      ~ python: pdm installs with `pdm add -d ruff` here and `pipx install ruff` for all projects (covered 38)
+      ✓ python: no lock file installs with pip in the project's virtual environment (killed 5)
+      ✓ rustup, go and download: one step each, with their own lines (killed 22)
+      ✓ system: no step, the package-manager line (killed 6)
+      ~ a project folder reads as the folder with a slash, the root as the repository root (covered 7)
+      ✓ a server reads as its name, marked when it is not installed (killed 6)
+      ✓ rule 2: the format note is shown for the four refusals and hidden otherwise (killed 18)
+      ✓ rule 2: the counts' title counts errors and warnings in words (killed 11)
+      ✓ rule 5: a log line's time is HH:MM:SS (killed 3)
+    store.test.ts
+      ✓ useAppStore throws before createAppStore, then returns the created store (killed 1)
+      ~ loading the list opens the first file the editor can show and logs file.loaded (covered 13)
+      ~ an empty list opens nothing (covered 13)
+      ~ a rejected list opens nothing, resolves, and shows an Unexpected list problem (covered 13)
+      ~ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (covered 13)
+      ~ re-clicking the shown file keeps the problem and lets a pending load win (covered 13)
+      ~ switching to an opened file wins over a load that resolves later and clears the problem (covered 13)
+      ~ a later open wins when the earlier load resolves last (covered 13)
+      ~ a stale failed open is logged but shows no problem (covered 13)
+      ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 13)
+      ~ a rejected load is an Unexpected problem and keeps the previous file (covered 13)
+      ~ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (covered 13)
+      ~ a finish of a file no longer shown does not switch files (covered 13)
+      ~ settings open and close; picking a file while they show closes them and shows it, the shown file too (covered 13)
+      ~ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 14)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 13)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 13)
+      ~ a file the user opens while a finish runs wins over the next file, though still loading (covered 13)
+      ~ a file the user opens while a take runs wins over the next file, though still loading (covered 13)
+      ~ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 13)
+      ~ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (covered 13)
+      ~ a rejected finish is an Unexpected problem (covered 13)
+      ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 13)
+      ~ closing asks only with unsaved work and answers with the choice (covered 13)
+      ~ everything is resolved only when every listed file is (covered 13)
+      ~ reset of A replaces only A in place with a new object and keeps B opened (covered 13)
+      ~ a failed reset keeps the current file and names the path (covered 13)
+      ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 13)
+      ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 13)
+      ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 13)
+      ~ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 13)
+      ~ a list of files the editor cannot show opens the first one's choice and loads nothing (covered 13)
+      ~ opening a file the editor cannot show describes it once and never loads it (covered 13)
+      ~ a failed describe is a failed open of that file and shows no choice (covered 13)
+      ~ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 13)
+      ~ a take keeps a problem about another file (covered 13)
+      ~ a failed take keeps the list and the choice and names the file (covered 13)
+      ~ reset of a taken choice forgets only its side at once and describes the file again (covered 13)
+      ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 13)
+      ~ choices count toward everything resolved (covered 13)
+      ~ a take on the shown file opens the next unresolved file, wrapping to the top (covered 13)
+      ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 13)
+      ~ a list refresh changes the marks only: same file shown, same views, another file's problem kept (covered 13)
+      ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 13)
+      ~ both side names are asked for once; a failure leaves none and logs a warning (covered 13)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: true) (covered 13)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 13)
+      ~ a change to a file that is not shown gives only its notice and its mark (covered 13)
+      ~ changes reported by the first list are start notices; the file then opens from the disk (covered 13)
+      ~ a newer change replaces the notice for its path; dismissNotice removes just one (covered 13)
+      ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 13)
+      ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 13)
+      ~ a change git could not stage is a warning notice, not a problem (covered 13)
+      ~ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 13)
+      ~ a take refused because the file changed on disk shows the change and the disk view (covered 13)
+      ~ a reset refused because the file changed on disk shows the change and the disk view (covered 13)
+      ~ finish, take and reset forward the disk version they are given (covered 13)
+      ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 13)
+      ~ settings start with the start theme and the default keys, before any file is read (covered 13)
+      ~ a load on focus applies a file changed by hand since the last load (covered 13)
+      ~ start-up loads the file list and the settings; focus loads both again (covered 13)
+      ~ a loaded file sets the theme and keys every opened file follows (covered 13)
+      ~ a failed load or change keeps the settings in use and shows a settings problem (covered 13)
+      ~ key problems in the file show one settings problem, which a clean read clears (covered 13)
+      ~ setTheme sends the settings in use and applies the reply (covered 13)
+      ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 13)
+      ~ a load whose only difference is the antialiasing is adopted (covered 13)
+      ~ a key another action holds asks; Move writes both changes in one call (covered 13)
+      ~ Cancel on the clash question writes nothing (covered 13)
+      ~ each key edit sends only the changed actions, as key texts (covered 13)
+      ~ an identical load keeps the settings object and does not show the same key problems again (covered 13)
+      ~ a key problem shown again replaces a settings failure the file no longer has (covered 13)
+      ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 13)
+      ~ a load that started before a change and answers after it does not put the old file back (covered 13)
+      ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 13)
+      ~ moveSettings sends the path with the settings in use and uses the file found there (covered 13)
+      ~ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (covered 13)
+      ~ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 13)
+      ~ a key press another handler already took does not toggle the list (covered 13)
+      ~ while a question waits the key does nothing; once answered it toggles again (covered 13)
+      ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 13)
+      ~ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 13)
+      ~ with two toggle-file-list keys, each one toggles the list (covered 13)
+      ~ toggleCollapsing flips collapsing and keeps the choice in the window's storage (covered 13)
+      ~ a save while a reset of the same file runs is ignored (covered 13)
+      ~ a save while a finish of the same file runs is ignored (covered 13)
+      ~ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 13)
+      ~ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 13)
+      ~ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 31)
+    useMergeController.test.ts
+      ✘ unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change (covered 0)
+      ✘ without data or hosts there is no editor: no snapshot, nothing unsaved (covered 0)
+      ✘ the editor is read-only as the view says, and is rebuilt when that changes (covered 0)
+      ✘ the editor is built with the preferences in use and follows a change without a rebuild (covered 0)
+      ✘ a preferences change before the file loaded reaches the editor built later (covered 0)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+      ✘ flipping collapsing before the file loaded reaches no editor and throws nothing (covered 0)
+      ✘ an editor built while collapsing is off is told so, and a file loaded later follows the current choice (covered 0)
+      ✘ flipping collapsing tells every live editor once, and a destroyed one never (covered 0)
+      ✘ a preferences change never resets collapsing (covered 0)
+      ✘ problems: the editor's counts when built, then each change it reports; null once it is gone (covered 0)
+      ✘ summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change (covered 0)
+      ✘ problems and format are null while no editor is built (covered 0)
+      ✘ format answers with the outcome of the editor in use, a rebuilt one after a rebuild (covered 0)
+      ~ the editor gets the language servers in use and is rebuilt when they change (covered 8)
+
+[Survived] EqualityOperator
+src/lsp/internal/detect.ts:69:44
+-     return [...projects].sort(([a], [b]) => (a < b ? -1 : 1));
++     return [...projects].sort(([a], [b]) => (a <= b ? -1 : 1));
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    names are unique across projects; a tool in one project keeps its plain name
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:74:5
+-       case "manifest":
+-         return [];
++       case "manifest":
+Tests ran:
+    ecosystems: a path joins only the ecosystems that serve its type
+    ecosystems: one folder that is a project of two ecosystems is read once, specs in table order
+    rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check
+  and 6 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:75:14
+-         return [];
++         return ["Stryker was here"];
+Tests ran:
+    ecosystems: a path joins only the ecosystems that serve its type
+    ecosystems: one folder that is a project of two ecosystems is read once, specs in table order
+    rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check
+  and 6 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:74:10
+-       case "manifest":
++       case "":
+Tests ran:
+    ecosystems: a path joins only the ecosystems that serve its type
+    ecosystems: one folder that is a project of two ecosystems is read once, specs in table order
+    rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check
+  and 12 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:113:22
+-         return { here: [], up: PYTHON_LOCK_FILES };
++         return { here: ["Stryker was here"], up: PYTHON_LOCK_FILES };
+Tests ran:
+    ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec
+    ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint
+    ruff, ty, basedpyright: with no config, only the project's venv copy counts
+  and 3 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:118:22
+-         return { here: [], up: [] };
++         return { here: ["Stryker was here"], up: [] };
+Tests ran:
+    ecosystems: a path joins only the ecosystems that serve its type
+    ecosystems: one folder that is a project of two ecosystems is read once, specs in table order
+    rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check
+  and 6 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:118:30
+-         return { here: [], up: [] };
++         return { here: [], up: ["Stryker was here"] };
+Tests ran:
+    ecosystems: a path joins only the ecosystems that serve its type
+    ecosystems: one folder that is a project of two ecosystems is read once, specs in table order
+    rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check
+  and 6 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:84:58
+-     return formats.kind === "withConfig" ? formats.files : [];
++     return formats.kind === "withConfig" ? formats.files : ["Stryker was here"];
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 55 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:91:22
+-         return { here: [], up: formatConfigs(preset.formats) };
++         return { here: ["Stryker was here"], up: formatConfigs(preset.formats) };
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 44 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:143:14
+-         return file?.kind === "Text" && sign.line.test(file.text);
++         return true && sign.line.test(file.text);
+Tests ran:
+    ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec
+    ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint
+    ruff, ty, basedpyright: with no config, only the project's venv copy counts
+  and 3 more tests!
+
+
+[Survived] OptionalChaining
+src/lsp/internal/detect.ts:143:14
+-         return file?.kind === "Text" && sign.line.test(file.text);
++         return file.kind === "Text" && sign.line.test(file.text);
+Tests ran:
+    ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec
+    ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint
+    ruff, ty, basedpyright: with no config, only the project's venv copy counts
+  and 3 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:172:40
+-     const major = /^\d+/.exec(version ?? "")?.[0];
++     const major = /^\d+/.exec(version ?? "Stryker was here!")?.[0];
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 11 more tests!
+
+
+[Survived] MethodExpression
+src/lsp/internal/detect.ts:124:8
+-       ...PRESETS.filter((preset) => ecosystems.has(preset.ecosystem)).map(lookedFor),
++       ...PRESETS.map(lookedFor),
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 57 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:173:7
+-     if (version === null || major === undefined || !hasConfig(project, look.configs)) {
++     if (false || major === undefined || !hasConfig(project, look.configs)) {
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 44 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:39:20
+-   const ROOT_LABEL = "repository root";
++   const ROOT_LABEL = "";
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:18:22
+-   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++   const VENV_FOLDERS = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:18:36
+-   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++   const VENV_FOLDERS = [".venv/bin", "", "venv/bin", "venv/Scripts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:18:53
+-   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "", "venv/Scripts"];
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:15:31
+-     return paths.map((path) => ({ path, holding: null }));
++     return paths.map((path) => ({}));
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:24:12
+-       rules: [manifests(PACKAGE_JSON)],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:25:25
+-       folders: { project: ["node_modules/.bin"], home: [] },
++       folders: { project: [], home: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:18:65
+-   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", ""];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:20:29
+-   export const PACKAGE_JSON = "package.json";
++   export const PACKAGE_JSON = "";
+Ran all tests for this mutant.
+
+[Survived] BlockStatement
+src/lsp/internal/ecosystems.ts:14:61
+-   function manifests(...paths: string[]): readonly Manifest[] {
+-     return paths.map((path) => ({ path, holding: null }));
+-   }
++   function manifests(...paths: string[]): readonly Manifest[] {}
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:27:11
+-     python: {
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
+-       folders: { project: VENV_FOLDERS, home: [".local/bin"] },
+-     },
++     python: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:25:54
+-       folders: { project: ["node_modules/.bin"], home: [] },
++       folders: { project: ["node_modules/.bin"], home: ["Stryker was here"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:25:26
+-       folders: { project: ["node_modules/.bin"], home: [] },
++       folders: { project: [""], home: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:28:53
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++       rules: [manifests("pyproject.toml", "setup.py", "", "requirements.txt")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:18:23
+-   const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++   const VENV_FOLDERS = ["", ".venv/Scripts", "venv/bin", "venv/Scripts"];
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:23:9
+-     node: {
+-       rules: [manifests(PACKAGE_JSON)],
+-       folders: { project: ["node_modules/.bin"], home: [] },
+-     },
++     node: {},
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/ecosystems.ts:15:20
+-     return paths.map((path) => ({ path, holding: null }));
++     return paths.map(() => undefined);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:25:14
+-       folders: { project: ["node_modules/.bin"], home: [] },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:28:12
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:29:46
+-       folders: { project: VENV_FOLDERS, home: [".local/bin"] },
++       folders: { project: VENV_FOLDERS, home: [""] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:29:14
+-       folders: { project: VENV_FOLDERS, home: [".local/bin"] },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:29:45
+-       folders: { project: VENV_FOLDERS, home: [".local/bin"] },
++       folders: { project: VENV_FOLDERS, home: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:28:23
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++       rules: [manifests("", "setup.py", "setup.cfg", "requirements.txt")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:32:22
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:28:41
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++       rules: [manifests("pyproject.toml", "", "setup.cfg", "requirements.txt")],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:32:12
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:32:86
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("")],
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/ecosystems.ts:32:45
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "Cargo.toml", holding: /^[ \t]\[workspace[\].]/m }], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/ecosystems.ts:32:45
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "Cargo.toml", holding: /^[^ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:33:25
+-       folders: { project: [], home: [".cargo/bin"] },
++       folders: { project: ["Stryker was here"], home: [".cargo/bin"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:28:66
+-       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++       rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:33:36
+-       folders: { project: [], home: [".cargo/bin"] },
++       folders: { project: [], home: [""] },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:33:35
+-       folders: { project: [], home: [".cargo/bin"] },
++       folders: { project: [], home: [] },
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/ecosystems.ts:32:45
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[^\].]/m }], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:33:14
+-       folders: { project: [], home: [".cargo/bin"] },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:37:14
+-       folders: { project: [], home: ["go/bin"] },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:35:7
+-     go: {
+-       rules: [manifests("go.work"), manifests("go.mod")],
+-       folders: { project: [], home: ["go/bin"] },
+-     },
++     go: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:37:25
+-       folders: { project: [], home: ["go/bin"] },
++       folders: { project: ["Stryker was here"], home: ["go/bin"] },
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/ecosystems.ts:32:45
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{ path: "Cargo.toml", holding: /[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:32:14
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[{}], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:39:8
+-     php: {
+-       rules: [manifests("composer.json")],
+-       folders: {
+-         project: ["vendor/bin"],
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
+-       },
+-     },
++     php: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:37:36
+-       folders: { project: [], home: ["go/bin"] },
++       folders: { project: [], home: [""] },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:32:13
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++       rules: [[], manifests("Cargo.toml")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:40:23
+-       rules: [manifests("composer.json")],
++       rules: [manifests("")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:41:14
+-       folders: {
+-         project: ["vendor/bin"],
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
+-       },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:36:12
+-       rules: [manifests("go.work"), manifests("go.mod")],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:37:35
+-       folders: { project: [], home: ["go/bin"] },
++       folders: { project: [], home: [] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:31:9
+-     rust: {
+-       rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
+-       folders: { project: [], home: [".cargo/bin"] },
+-     },
++     rust: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:42:16
+-         project: ["vendor/bin"],
++         project: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:36:45
+-       rules: [manifests("go.work"), manifests("go.mod")],
++       rules: [manifests("go.work"), manifests("")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:43:14
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++         home: ["", ".composer/vendor/bin", ".local/bin"],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:43:13
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++         home: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:43:45
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++         home: [".config/composer/vendor/bin", "", ".local/bin"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:36:23
+-       rules: [manifests("go.work"), manifests("go.mod")],
++       rules: [manifests(""), manifests("go.mod")],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:40:12
+-       rules: [manifests("composer.json")],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:50:9
+-           "build/compile_commands.json",
++           "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:47:12
+-       rules: [
+-         manifests(
+-           "compile_commands.json",
+-           "build/compile_commands.json",
+-           "compile_flags.txt",
+-           ".clangd",
+-         ),
+-       ],
++       rules: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:52:9
+-           ".clangd",
++           "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:55:14
+-       folders: { project: [], home: [] },
++       folders: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:55:25
+-       folders: { project: [], home: [] },
++       folders: { project: ["Stryker was here"], home: [] },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/ecosystems.ts:55:35
+-       folders: { project: [], home: [] },
++       folders: { project: [], home: ["Stryker was here"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:43:69
+-         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++         home: [".config/composer/vendor/bin", ".composer/vendor/bin", ""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/ecosystems.ts:46:10
+-     clang: {
+-       rules: [
+-         manifests(
+-           "compile_commands.json",
+-           "build/compile_commands.json",
+-           "compile_flags.txt",
+-           ".clangd",
+-         ),
+-       ],
+-       folders: { project: [], home: [] },
+-     },
++     clang: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:51:9
+-           "compile_flags.txt",
++           "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:49:9
+-           "compile_commands.json",
++           "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/ecosystems.ts:42:17
+-         project: ["vendor/bin"],
++         project: [""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/languageIds.ts:3:56
+-   const LANGUAGE_IDS: Readonly<Record<string, string>> = {
+-     js: "javascript",
+-     mjs: "javascript",
+-     cjs: "javascript",
+-     jsx: "javascriptreact",
+-     ts: "typescript",
+-     mts: "typescript",
+-     cts: "typescript",
+-     tsx: "typescriptreact",
+-     json: "json",
+-     jsonc: "jsonc",
+-     json5: "json5",
+-     css: "css",
+-     scss: "scss",
+-     less: "less",
+-     html: "html",
+-     vue: "vue",
+-     md: "markdown",
+-     yaml: "yaml",
+-     yml: "yaml",
+-     toml: "toml",
+-     graphql: "graphql",
+-     py: "python",
+-     pyi: "python",
+-     rs: "rust",
+-     go: "go",
+-     php: "php",
+-     c: "c",
+-     h: "c",
+-     cc: "cpp",
+-     cpp: "cpp",
+-     cxx: "cpp",
+-     hh: "cpp",
+-     hpp: "cpp",
+-     hxx: "cpp",
+-     sh: "shellscript",
+-     bash: "shellscript",
+-   };
++   const LANGUAGE_IDS: Readonly<Record<string, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:8:7
+-     ts: "typescript",
++     ts: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:5:8
+-     mjs: "javascript",
++     mjs: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:6:8
+-     cjs: "javascript",
++     cjs: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:10:8
+-     cts: "typescript",
++     cts: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:4:7
+-     js: "javascript",
++     js: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:11:8
+-     tsx: "typescriptreact",
++     tsx: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:12:9
+-     json: "json",
++     json: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:13:10
+-     jsonc: "jsonc",
++     jsonc: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:14:10
+-     json5: "json5",
++     json5: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:16:9
+-     scss: "scss",
++     scss: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:17:9
+-     less: "less",
++     less: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:9:8
+-     mts: "typescript",
++     mts: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:18:9
+-     html: "html",
++     html: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:7:8
+-     jsx: "javascriptreact",
++     jsx: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:20:7
+-     md: "markdown",
++     md: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:23:9
+-     toml: "toml",
++     toml: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:26:8
+-     pyi: "python",
++     pyi: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:24:12
+-     graphql: "graphql",
++     graphql: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:28:7
+-     go: "go",
++     go: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:30:6
+-     c: "c",
++     c: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:29:8
+-     php: "php",
++     php: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:15:8
+-     css: "css",
++     css: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:25:7
+-     py: "python",
++     py: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:31:6
+-     h: "c",
++     h: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:22:8
+-     yml: "yaml",
++     yml: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:27:7
+-     rs: "rust",
++     rs: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:35:7
+-     hh: "cpp",
++     hh: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:32:7
+-     cc: "cpp",
++     cc: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:37:8
+-     hxx: "cpp",
++     hxx: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:36:8
+-     hpp: "cpp",
++     hpp: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:19:8
+-     vue: "vue",
++     vue: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:21:9
+-     yaml: "yaml",
++     yaml: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:34:8
+-     cxx: "cpp",
++     cxx: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:39:9
+-     bash: "shellscript",
++     bash: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:33:8
+-     cpp: "cpp",
++     cpp: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/languageIds.ts:38:7
+-     sh: "shellscript",
++     sh: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/packageManager.ts:25:60
+-     const [, name, major] = DECLARED.exec(declared ?? "") ?? [];
++     const [, name, major] = DECLARED.exec(declared ?? "") ?? ["Stryker was here"];
+Tests ran:
+    TypeScript 5 with the project's own tsgo: the native preview; tsgo on PATH does not count
+    TypeScript 6: typescript-language-server from the project or PATH, else an install hint
+    eslint: config, package and its server found on PATH or in the project
+  and 8 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:25:53
+-     const [, name, major] = DECLARED.exec(declared ?? "") ?? [];
++     const [, name, major] = DECLARED.exec(declared ?? "Stryker was here!") ?? [];
+Tests ran:
+    TypeScript 5 with the project's own tsgo: the native preview; tsgo on PATH does not count
+    TypeScript 6: typescript-language-server from the project or PATH, else an install hint
+    eslint: config, package and its server found on PATH or in the project
+  and 7 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/packageManager.ts:29:10
+-     return name === "npm" || name === "pnpm" || name === "bun" ? name : null;
++     return true ? name : null;
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 34 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:14:21
+-     "pnpm-lock.yaml": "pnpm",
++     "pnpm-lock.yaml": "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/packageManager.ts:13:66
+-   const LOCK_MANAGER: Readonly<Record<LockFile, PackageManager>> = {
+-     "pnpm-lock.yaml": "pnpm",
+-     "yarn.lock": "yarn",
+-     "bun.lock": "bun",
+-     "bun.lockb": "bun",
+-     "package-lock.json": "npm",
+-   };
++   const LOCK_MANAGER: Readonly<Record<LockFile, PackageManager>> = {};
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/packageManager.ts:21:18
+-   const DECLARED = /^(npm|pnpm|yarn|bun)@(\d+)/;
++   const DECLARED = /^(npm|pnpm|yarn|bun)@(\d)/;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:16:15
+-     "bun.lock": "bun",
++     "bun.lock": "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:18:24
+-     "package-lock.json": "npm",
++     "package-lock.json": "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/packageManager.ts:43:5
+-   > = {
+-     "uv.lock": "uv",
+-     "poetry.lock": "poetry",
+-     "pdm.lock": "pdm",
+-   };
++   > = {};
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/packageManager.ts:21:18
+-   const DECLARED = /^(npm|pnpm|yarn|bun)@(\d+)/;
++   const DECLARED = /^(npm|pnpm|yarn|bun)@(\D+)/;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:15:16
+-     "yarn.lock": "yarn",
++     "yarn.lock": "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:17:16
+-     "bun.lockb": "bun",
++     "bun.lockb": "",
+Ran all tests for this mutant.
+
+[Survived] Regex
+src/lsp/internal/packageManager.ts:21:18
+-   const DECLARED = /^(npm|pnpm|yarn|bun)@(\d+)/;
++   const DECLARED = /(npm|pnpm|yarn|bun)@(\d+)/;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:45:18
+-     "poetry.lock": "poetry",
++     "poetry.lock": "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:44:14
+-     "uv.lock": "uv",
++     "uv.lock": "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/packageManager.ts:46:15
+-     "pdm.lock": "pdm",
++     "pdm.lock": "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:63:17
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:45
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "", "tsx", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:24
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:65
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", ""];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:31
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "", "cjs", "ts", "tsx", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:64:16
+-   const PYTHON = ["py", "pyi"];
++   const PYTHON = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:18
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:38
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "mjs", "", "ts", "tsx", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:64:17
+-   const PYTHON = ["py", "pyi"];
++   const PYTHON = ["", "pyi"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:58
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "", "cts"];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:64:23
+-   const PYTHON = ["py", "pyi"];
++   const PYTHON = ["py", ""];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:63:51
+-   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++   const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "", "mts", "cts"];
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:65:21
+-   const TS_LSP_ARGS = ["--lsp", "--stdio"];
++   const TS_LSP_ARGS = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:65:22
+-   const TS_LSP_ARGS = ["--lsp", "--stdio"];
++   const TS_LSP_ARGS = ["", "--stdio"];
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:66:15
+-   const STDIO = ["--stdio"];
++   const STDIO = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:65:31
+-   const TS_LSP_ARGS = ["--lsp", "--stdio"];
++   const TS_LSP_ARGS = ["--lsp", ""];
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:67:25
+-   const ALWAYS: Formats = { kind: "always" };
++   const ALWAYS: Formats = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:66:16
+-   const STDIO = ["--stdio"];
++   const STDIO = [""];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:67:33
+-   const ALWAYS: Formats = { kind: "always" };
++   const ALWAYS: Formats = { kind: "" };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:68:24
+-   const NEVER: Formats = { kind: "never" };
++   const NEVER: Formats = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:68:32
+-   const NEVER: Formats = { kind: "never" };
++   const NEVER: Formats = { kind: "" };
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:69:35
+-   const MANIFEST: readonly Sign[] = [{ kind: "manifest" }];
++   const MANIFEST: readonly Sign[] = [];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:76:22
+-       line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
++       line: new RegExp(``, "m"),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:69:36
+-   const MANIFEST: readonly Sign[] = [{ kind: "manifest" }];
++   const MANIFEST: readonly Sign[] = [{}];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:74:11
+-       kind: "section",
++       kind: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:69:44
+-   const MANIFEST: readonly Sign[] = [{ kind: "manifest" }];
++   const MANIFEST: readonly Sign[] = [{ kind: "" }];
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:93:13
+-         kind: "used",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:76:57
+-       line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
++       line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, ""),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:97:23
+-         recipe: { kind: "python", package: name },
++         recipe: { kind: "", package: name },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:92:11
+-       look: {
+-         kind: "used",
+-         signs,
+-         orProjectProgram,
+-         command,
+-         recipe: { kind: "python", package: name },
+-         orElse: [],
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] BlockStatement
+src/lsp/internal/presets.ts:72:47
+-   function pyprojectSection(tool: string): Sign {
+-     return {
+-       kind: "section",
+-       file: "pyproject.toml",
+-       line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
+-     };
+-   }
++   function pyprojectSection(tool: string): Sign {}
+Ran all tests for this mutant.
+
+[Survived] BlockStatement
+src/lsp/internal/presets.ts:88:94
+-   function pythonTool({ name, command, signs, orProjectProgram, formats }: PythonTool): Preset {
+-     return {
+-       name,
+-       ecosystem: "python",
+-       look: {
+-         kind: "used",
+-         signs,
+-         orProjectProgram,
+-         command,
+-         recipe: { kind: "python", package: name },
+-         orElse: [],
+-       },
+-       fileTypes: PYTHON,
+-       formats,
+-       ...NO_OPTIONS,
+-     };
+-   }
++   function pythonTool({ name, command, signs, orProjectProgram, formats }: PythonTool): Preset {}
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:97:15
+-         recipe: { kind: "python", package: name },
++         recipe: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:75:11
+-       file: "pyproject.toml",
++       file: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:98:15
+-         orElse: [],
++         orElse: ["Stryker was here"],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:73:10
+-     return {
+-       kind: "section",
+-       file: "pyproject.toml",
+-       line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
+-     };
++     return {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:89:10
+-     return {
+-       name,
+-       ecosystem: "python",
+-       look: {
+-         kind: "used",
+-         signs,
+-         orProjectProgram,
+-         command,
+-         recipe: { kind: "python", package: name },
+-         orElse: [],
+-       },
+-       fileTypes: PYTHON,
+-       formats,
+-       ...NO_OPTIONS,
+-     };
++     return {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:106:31
+-   const RUST_ANALYZER_OPTIONS = { checkOnSave: false };
++   const RUST_ANALYZER_OPTIONS = {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:113:3
+-     {
+-       name: "oxfmt",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
+-       fileTypes: [
+-         ...SCRIPTS,
+-         "json",
+-         "jsonc",
+-         "json5",
+-         "css",
+-         "scss",
+-         "less",
+-         "html",
+-         "vue",
+-         "md",
+-         "yaml",
+-         "yml",
+-         "toml",
+-         "graphql",
+-       ],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:109:3
+-     "https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar";
++     "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:91:16
+-       ecosystem: "python",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:112:43
+-   export const PRESETS: readonly Preset[] = [
+-     {
+-       name: "oxfmt",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
+-       fileTypes: [
+-         ...SCRIPTS,
+-         "json",
+-         "jsonc",
+-         "json5",
+-         "css",
+-         "scss",
+-         "less",
+-         "html",
+-         "vue",
+-         "md",
+-         "yaml",
+-         "yml",
+-         "toml",
+-         "graphql",
+-       ],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
+-     {
+-       name: "Biome",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
+-     {
+-       name: "oxlint",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
+-       fileTypes: [...SCRIPTS, "vue"],
+-       formats: NEVER,
+-       settings: null,
+-       initializationOptions: (workspaceUri) => [{ workspaceUri, options: { run: "onType" } }],
+-     },
+-     {
+-       name: "TypeScript",
+-       ecosystem: "node",
+-       look: {
+-         kind: "typescript",
+-         configs: ["tsconfig.json", "jsconfig.json"],
+-         package: "typescript",
+-         firstLspMajor: 7,
+-         compiler: { program: "tsc", args: TS_LSP_ARGS },
+-         nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
+-         server: {
+-           command: { program: "typescript-language-server", args: STDIO },
+-           package: "typescript-language-server",
+-         },
+-       },
+-       fileTypes: SCRIPTS,
+-       formats: NEVER,
+-       ...NO_OPTIONS,
+-     },
+-     {
+-       name: "eslint",
+-       ecosystem: "node",
+-       look: {
+-         kind: "eslint",
+-         configs: [
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+-         ],
+-         package: "eslint",
+-         server: {
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
+-           package: "vscode-langservers-extracted",
+-         },
+-       },
+-       fileTypes: [...SCRIPTS, "vue"],
+-       formats: NEVER,
+-       settings: { validate: "on", run: "onType" },
+-       initializationOptions: null,
+-     },
+-     {
+-       name: "rust-analyzer",
+-       ecosystem: "rust",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "rust-analyzer", args: [] },
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
+-         orElse: [],
+-       },
+-       fileTypes: ["rs"],
+-       formats: ALWAYS,
+-       settings: { "rust-analyzer": RUST_ANALYZER_OPTIONS },
+-       initializationOptions: () => RUST_ANALYZER_OPTIONS,
+-     },
+-     {
+-       name: "gopls",
+-       ecosystem: "go",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "gopls", args: [] },
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
+-         orElse: [],
+-       },
+-       fileTypes: ["go"],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
+-     pythonTool({
+-       name: "ruff",
+-       command: { program: "ruff", args: ["server"] },
+-       signs: [
+-         { kind: "file", name: "ruff.toml" },
+-         { kind: "file", name: ".ruff.toml" },
+-         pyprojectSection("ruff"),
+-       ],
+-       orProjectProgram: true,
+-       formats: ALWAYS,
+-     }),
+-     pythonTool({
+-       name: "ty",
+-       command: { program: "ty", args: ["server"] },
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
+-       orProjectProgram: true,
+-       formats: NEVER,
+-     }),
+-     pythonTool({
+-       name: "basedpyright",
+-       command: { program: "basedpyright-langserver", args: STDIO },
+-       signs: [pyprojectSection("basedpyright")],
+-       orProjectProgram: true,
+-       formats: NEVER,
+-     }),
+-     pythonTool({
+-       name: "pyright",
+-       command: { program: "pyright-langserver", args: STDIO },
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
+-       orProjectProgram: false,
+-       formats: NEVER,
+-     }),
+-     {
+-       name: "Phpactor",
+-       ecosystem: "php",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "phpactor", args: ["language-server"] },
+-         recipe: {
+-           kind: "download",
+-           command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
+-           needs: "PHP 8.2 or later",
+-         },
+-         orElse: [
+-           {
+-             name: "Intelephense",
+-             command: { program: "intelephense", args: STDIO },
+-             formats: NEVER,
+-             ...NO_OPTIONS,
+-           },
+-         ],
+-       },
+-       fileTypes: ["php"],
+-       formats: NEVER,
+-       settings: null,
+-       initializationOptions: () => ({ "language_server.enable_trust_check": false }),
+-     },
+-     {
+-       name: "clangd",
+-       ecosystem: "clang",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "clangd", args: [] },
+-         recipe: { kind: "system" },
+-         orElse: [],
+-       },
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
+-       ...NO_OPTIONS,
+-     },
+-   ];
++   export const PRESETS: readonly Preset[] = [];
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:106:46
+-   const RUST_ANALYZER_OPTIONS = { checkOnSave: false };
++   const RUST_ANALYZER_OPTIONS = { checkOnSave: true };
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:114:11
+-       name: "oxfmt",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:115:16
+-       ecosystem: "node",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:116:11
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:116:57
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "", args: ["--lsp"] } },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:116:46
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: {} },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:116:72
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "oxfmt", args: [] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:116:73
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "oxfmt", args: [""] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:116:19
+-       look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
++       look: { kind: "", command: { program: "oxfmt", args: ["--lsp"] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:119:7
+-         "json",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:122:7
+-         "css",
++         "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:117:16
+-       fileTypes: [
+-         ...SCRIPTS,
+-         "json",
+-         "jsonc",
+-         "json5",
+-         "css",
+-         "scss",
+-         "less",
+-         "html",
+-         "vue",
+-         "md",
+-         "yaml",
+-         "yml",
+-         "toml",
+-         "graphql",
+-       ],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:121:7
+-         "json5",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:123:7
+-         "scss",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:124:7
+-         "less",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:125:7
+-         "html",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:120:7
+-         "jsonc",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:129:7
+-         "yml",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:126:7
+-         "vue",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:127:7
+-         "md",
++         "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:136:3
+-     {
+-       name: "Biome",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:128:7
+-         "yaml",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:130:7
+-         "toml",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:131:7
+-         "graphql",
++         "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:137:11
+-       name: "Biome",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:138:16
+-       ecosystem: "node",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:139:11
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:139:72
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: { kind: "projectProgram", command: { program: "biome", args: [] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:139:19
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: { kind: "", command: { program: "biome", args: ["lsp-proxy"] } },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:139:46
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: { kind: "projectProgram", command: {} },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:139:73
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: { kind: "projectProgram", command: { program: "biome", args: [""] } },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:140:16
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:139:57
+-       look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++       look: { kind: "projectProgram", command: { program: "", args: ["lsp-proxy"] } },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:147:11
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:145:11
+-       name: "oxlint",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:144:3
+-     {
+-       name: "oxlint",
+-       ecosystem: "node",
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
+-       fileTypes: [...SCRIPTS, "vue"],
+-       formats: NEVER,
+-       settings: null,
+-       initializationOptions: (workspaceUri) => [{ workspaceUri, options: { run: "onType" } }],
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:140:53
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++       fileTypes: [...SCRIPTS, "json", "jsonc", "css", ""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:147:46
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: {} },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:140:37
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++       fileTypes: [...SCRIPTS, "json", "", "css", "graphql"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:140:46
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++       fileTypes: [...SCRIPTS, "json", "jsonc", "", "graphql"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:140:29
+-       fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++       fileTypes: [...SCRIPTS, "", "jsonc", "css", "graphql"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:146:16
+-       ecosystem: "node",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:147:73
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "oxlint", args: [] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:147:19
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: { kind: "", command: { program: "oxlint", args: ["--lsp"] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:147:74
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "oxlint", args: [""] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:147:57
+-       look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
++       look: { kind: "projectProgram", command: { program: "", args: ["--lsp"] } },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:148:29
+-       fileTypes: [...SCRIPTS, "vue"],
++       fileTypes: [...SCRIPTS, ""],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:148:16
+-       fileTypes: [...SCRIPTS, "vue"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:153:3
+-     {
+-       name: "TypeScript",
+-       ecosystem: "node",
+-       look: {
+-         kind: "typescript",
+-         configs: ["tsconfig.json", "jsconfig.json"],
+-         package: "typescript",
+-         firstLspMajor: 7,
+-         compiler: { program: "tsc", args: TS_LSP_ARGS },
+-         nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
+-         server: {
+-           command: { program: "typescript-language-server", args: STDIO },
+-           package: "typescript-language-server",
+-         },
+-       },
+-       fileTypes: SCRIPTS,
+-       formats: NEVER,
+-       ...NO_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/presets.ts:151:28
+-       initializationOptions: (workspaceUri) => [{ workspaceUri, options: { run: "onType" } }],
++       initializationOptions: () => undefined,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:157:13
+-         kind: "typescript",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:156:11
+-       look: {
+-         kind: "typescript",
+-         configs: ["tsconfig.json", "jsconfig.json"],
+-         package: "typescript",
+-         firstLspMajor: 7,
+-         compiler: { program: "tsc", args: TS_LSP_ARGS },
+-         nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
+-         server: {
+-           command: { program: "typescript-language-server", args: STDIO },
+-           package: "typescript-language-server",
+-         },
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:154:11
+-       name: "TypeScript",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:155:16
+-       ecosystem: "node",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:162:22
+-         nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
++         nativePreview: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:158:16
+-         configs: ["tsconfig.json", "jsconfig.json"],
++         configs: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:159:16
+-         package: "typescript",
++         package: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:161:17
+-         compiler: { program: "tsc", args: TS_LSP_ARGS },
++         compiler: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:158:34
+-         configs: ["tsconfig.json", "jsconfig.json"],
++         configs: ["tsconfig.json", ""],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:161:28
+-         compiler: { program: "tsc", args: TS_LSP_ARGS },
++         compiler: { program: "", args: TS_LSP_ARGS },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:164:18
+-           command: { program: "typescript-language-server", args: STDIO },
++           command: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:163:15
+-         server: {
+-           command: { program: "typescript-language-server", args: STDIO },
+-           package: "typescript-language-server",
+-         },
++         server: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:162:33
+-         nativePreview: { program: "tsgo", args: TS_LSP_ARGS },
++         nativePreview: { program: "", args: TS_LSP_ARGS },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:158:17
+-         configs: ["tsconfig.json", "jsconfig.json"],
++         configs: ["", "jsconfig.json"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:165:18
+-           package: "typescript-language-server",
++           package: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:177:16
+-         configs: [
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+-         ],
++         configs: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:164:29
+-           command: { program: "typescript-language-server", args: STDIO },
++           command: { program: "", args: STDIO },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:178:12
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...[].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:176:13
+-         kind: "eslint",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:175:11
+-       look: {
+-         kind: "eslint",
+-         configs: [
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+-         ],
+-         package: "eslint",
+-         server: {
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
+-           package: "vscode-langservers-extracted",
+-         },
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:172:3
+-     {
+-       name: "eslint",
+-       ecosystem: "node",
+-       look: {
+-         kind: "eslint",
+-         configs: [
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+-         ],
+-         package: "eslint",
+-         server: {
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
+-           package: "vscode-langservers-extracted",
+-         },
+-       },
+-       fileTypes: [...SCRIPTS, "vue"],
+-       formats: NEVER,
+-       settings: { validate: "on", run: "onType" },
+-       initializationOptions: null,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:174:16
+-       ecosystem: "node",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:173:11
+-       name: "eslint",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:26
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:33
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "cjs", "", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:39
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "cjs", "ts", "", "cts"].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:46
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "cjs", "ts", "mts", ""].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:66
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => ``),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:13
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:178:19
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:24
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", "", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:179:12
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...[].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:32
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", ".cjs", "", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:13
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["Stryker was here!", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:17
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", "", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:50
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", ".cjs", ".json", ".yaml", ""].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/presets.ts:178:57
+-           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
++           ...["js", "mjs", "cjs", "ts", "mts", "cts"].map(() => undefined),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:71
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => ``),
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/presets.ts:179:62
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map(() => undefined),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:183:18
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
++           command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:181:16
+-         package: "eslint",
++         package: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:187:16
+-       fileTypes: [...SCRIPTS, "vue"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:182:15
+-         server: {
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
+-           package: "vscode-langservers-extracted",
+-         },
++         server: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:183:29
+-           command: { program: "vscode-eslint-language-server", args: STDIO },
++           command: { program: "", args: STDIO },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:189:38
+-       settings: { validate: "on", run: "onType" },
++       settings: { validate: "on", run: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:179:41
+-           ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
++           ...["", ".js", ".cjs", ".json", "", ".yml"].map((ext) => `.eslintrc${ext}`),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:193:11
+-       name: "rust-analyzer",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:187:29
+-       fileTypes: [...SCRIPTS, "vue"],
++       fileTypes: [...SCRIPTS, ""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:192:3
+-     {
+-       name: "rust-analyzer",
+-       ecosystem: "rust",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "rust-analyzer", args: [] },
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
+-         orElse: [],
+-       },
+-       fileTypes: ["rs"],
+-       formats: ALWAYS,
+-       settings: { "rust-analyzer": RUST_ANALYZER_OPTIONS },
+-       initializationOptions: () => RUST_ANALYZER_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:184:18
+-           package: "vscode-langservers-extracted",
++           package: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:195:11
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "rust-analyzer", args: [] },
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
+-         orElse: [],
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:194:16
+-       ecosystem: "rust",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:196:13
+-         kind: "used",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:198:25
+-         orProjectProgram: false,
++         orProjectProgram: true,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:189:27
+-       settings: { validate: "on", run: "onType" },
++       settings: { validate: "", run: "onType" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:199:27
+-         command: { program: "rust-analyzer", args: [] },
++         command: { program: "", args: [] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:200:15
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
++         recipe: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:199:50
+-         command: { program: "rust-analyzer", args: [] },
++         command: { program: "rust-analyzer", args: ["Stryker was here"] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:189:15
+-       settings: { validate: "on", run: "onType" },
++       settings: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:203:16
+-       fileTypes: ["rs"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:208:3
+-     {
+-       name: "gopls",
+-       ecosystem: "go",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "gopls", args: [] },
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
+-         orElse: [],
+-       },
+-       fileTypes: ["go"],
+-       formats: ALWAYS,
+-       ...NO_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:201:15
+-         orElse: [],
++         orElse: ["Stryker was here"],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:199:16
+-         command: { program: "rust-analyzer", args: [] },
++         command: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:205:15
+-       settings: { "rust-analyzer": RUST_ANALYZER_OPTIONS },
++       settings: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:211:11
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "gopls", args: [] },
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
+-         orElse: [],
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:200:44
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
++         recipe: { kind: "rustup", component: "" },
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:214:25
+-         orProjectProgram: false,
++         orProjectProgram: true,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:203:17
+-       fileTypes: ["rs"],
++       fileTypes: [""],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:200:23
+-         recipe: { kind: "rustup", component: "rust-analyzer" },
++         recipe: { kind: "", component: "rust-analyzer" },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:215:42
+-         command: { program: "gopls", args: [] },
++         command: { program: "gopls", args: ["Stryker was here"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:215:27
+-         command: { program: "gopls", args: [] },
++         command: { program: "", args: [] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:215:16
+-         command: { program: "gopls", args: [] },
++         command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:210:16
+-       ecosystem: "go",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:216:15
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
++         recipe: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:216:37
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
++         recipe: { kind: "go", module: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:216:23
+-         recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
++         recipe: { kind: "", module: "golang.org/x/tools/gopls@latest" },
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/presets.ts:206:28
+-       initializationOptions: () => RUST_ANALYZER_OPTIONS,
++       initializationOptions: () => undefined,
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:217:15
+-         orElse: [],
++         orElse: ["Stryker was here"],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:219:16
+-       fileTypes: ["go"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:209:11
+-       name: "gopls",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:212:13
+-         kind: "used",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:219:17
+-       fileTypes: ["go"],
++       fileTypes: [""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:225:14
+-       command: { program: "ruff", args: ["server"] },
++       command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:224:11
+-       name: "ruff",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:225:25
+-       command: { program: "ruff", args: ["server"] },
++       command: { program: "", args: ["server"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:227:15
+-         { kind: "file", name: "ruff.toml" },
++         { kind: "", name: "ruff.toml" },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:225:39
+-       command: { program: "ruff", args: ["server"] },
++       command: { program: "ruff", args: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:225:40
+-       command: { program: "ruff", args: ["server"] },
++       command: { program: "ruff", args: [""] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:228:7
+-         { kind: "file", name: ".ruff.toml" },
++         {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:228:15
+-         { kind: "file", name: ".ruff.toml" },
++         { kind: "", name: ".ruff.toml" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:234:14
+-     pythonTool({
+-       name: "ty",
+-       command: { program: "ty", args: ["server"] },
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
+-       orProjectProgram: true,
+-       formats: NEVER,
+-     }),
++     pythonTool({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:229:24
+-         pyprojectSection("ruff"),
++         pyprojectSection(""),
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:231:23
+-       orProjectProgram: true,
++       orProjectProgram: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:228:29
+-         { kind: "file", name: ".ruff.toml" },
++         { kind: "file", name: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:227:29
+-         { kind: "file", name: "ruff.toml" },
++         { kind: "file", name: "" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:236:14
+-       command: { program: "ty", args: ["server"] },
++       command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:236:25
+-       command: { program: "ty", args: ["server"] },
++       command: { program: "", args: ["server"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:235:11
+-       name: "ty",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:236:38
+-       command: { program: "ty", args: ["server"] },
++       command: { program: "ty", args: [""] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:223:14
+-     pythonTool({
+-       name: "ruff",
+-       command: { program: "ruff", args: ["server"] },
+-       signs: [
+-         { kind: "file", name: "ruff.toml" },
+-         { kind: "file", name: ".ruff.toml" },
+-         pyprojectSection("ruff"),
+-       ],
+-       orProjectProgram: true,
+-       formats: ALWAYS,
+-     }),
++     pythonTool({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:227:7
+-         { kind: "file", name: "ruff.toml" },
++         {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:237:12
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++       signs: [],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:226:12
+-       signs: [
+-         { kind: "file", name: "ruff.toml" },
+-         { kind: "file", name: ".ruff.toml" },
+-         pyprojectSection("ruff"),
+-       ],
++       signs: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:237:21
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++       signs: [{ kind: "", name: "ty.toml" }, pyprojectSection("ty")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:237:65
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:237:35
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++       signs: [{ kind: "file", name: "" }, pyprojectSection("ty")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:237:13
+-       signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++       signs: [{}, pyprojectSection("ty")],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:236:37
+-       command: { program: "ty", args: ["server"] },
++       command: { program: "ty", args: [] },
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:238:23
+-       orProjectProgram: true,
++       orProjectProgram: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:242:11
+-       name: "basedpyright",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:243:14
+-       command: { program: "basedpyright-langserver", args: STDIO },
++       command: {},
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:244:12
+-       signs: [pyprojectSection("basedpyright")],
++       signs: [],
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:245:23
+-       orProjectProgram: true,
++       orProjectProgram: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:243:25
+-       command: { program: "basedpyright-langserver", args: STDIO },
++       command: { program: "", args: STDIO },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:241:14
+-     pythonTool({
+-       name: "basedpyright",
+-       command: { program: "basedpyright-langserver", args: STDIO },
+-       signs: [pyprojectSection("basedpyright")],
+-       orProjectProgram: true,
+-       formats: NEVER,
+-     }),
++     pythonTool({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:250:14
+-       command: { program: "pyright-langserver", args: STDIO },
++       command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:250:25
+-       command: { program: "pyright-langserver", args: STDIO },
++       command: { program: "", args: STDIO },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:251:13
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++       signs: [{}, pyprojectSection("pyright")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:248:14
+-     pythonTool({
+-       name: "pyright",
+-       command: { program: "pyright-langserver", args: STDIO },
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
+-       orProjectProgram: false,
+-       formats: NEVER,
+-     }),
++     pythonTool({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:249:11
+-       name: "pyright",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:251:21
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++       signs: [{ kind: "", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:251:12
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++       signs: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:244:30
+-       signs: [pyprojectSection("basedpyright")],
++       signs: [pyprojectSection("")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:251:76
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("")],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:256:11
+-       name: "Phpactor",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:251:35
+-       signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++       signs: [{ kind: "file", name: "" }, pyprojectSection("pyright")],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:255:3
+-     {
+-       name: "Phpactor",
+-       ecosystem: "php",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "phpactor", args: ["language-server"] },
+-         recipe: {
+-           kind: "download",
+-           command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
+-           needs: "PHP 8.2 or later",
+-         },
+-         orElse: [
+-           {
+-             name: "Intelephense",
+-             command: { program: "intelephense", args: STDIO },
+-             formats: NEVER,
+-             ...NO_OPTIONS,
+-           },
+-         ],
+-       },
+-       fileTypes: ["php"],
+-       formats: NEVER,
+-       settings: null,
+-       initializationOptions: () => ({ "language_server.enable_trust_check": false }),
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:258:11
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "phpactor", args: ["language-server"] },
+-         recipe: {
+-           kind: "download",
+-           command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
+-           needs: "PHP 8.2 or later",
+-         },
+-         orElse: [
+-           {
+-             name: "Intelephense",
+-             command: { program: "intelephense", args: STDIO },
+-             formats: NEVER,
+-             ...NO_OPTIONS,
+-           },
+-         ],
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:259:13
+-         kind: "used",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:262:46
+-         command: { program: "phpactor", args: ["language-server"] },
++         command: { program: "phpactor", args: [""] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:262:16
+-         command: { program: "phpactor", args: ["language-server"] },
++         command: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:262:27
+-         command: { program: "phpactor", args: ["language-server"] },
++         command: { program: "", args: ["language-server"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:257:16
+-       ecosystem: "php",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:265:18
+-           command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
++           command: ``,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:252:23
+-       orProjectProgram: false,
++       orProjectProgram: true,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:266:16
+-           needs: "PHP 8.2 or later",
++           needs: "",
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:261:25
+-         orProjectProgram: false,
++         orProjectProgram: true,
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:268:15
+-         orElse: [
+-           {
+-             name: "Intelephense",
+-             command: { program: "intelephense", args: STDIO },
+-             formats: NEVER,
+-             ...NO_OPTIONS,
+-           },
+-         ],
++         orElse: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:264:15
+-           kind: "download",
++           kind: "",
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:262:45
+-         command: { program: "phpactor", args: ["language-server"] },
++         command: { program: "phpactor", args: [] },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:263:15
+-         recipe: {
+-           kind: "download",
+-           command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
+-           needs: "PHP 8.2 or later",
+-         },
++         recipe: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:270:17
+-             name: "Intelephense",
++             name: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:271:20
+-             command: { program: "intelephense", args: STDIO },
++             command: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:269:9
+-           {
+-             name: "Intelephense",
+-             command: { program: "intelephense", args: STDIO },
+-             formats: NEVER,
+-             ...NO_OPTIONS,
+-           },
++           {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:271:31
+-             command: { program: "intelephense", args: STDIO },
++             command: { program: "", args: STDIO },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:282:3
+-     {
+-       name: "clangd",
+-       ecosystem: "clang",
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "clangd", args: [] },
+-         recipe: { kind: "system" },
+-         orElse: [],
+-       },
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
+-       ...NO_OPTIONS,
+-     },
++     {},
+Ran all tests for this mutant.
+
+[Survived] ArrowFunction
+src/lsp/internal/presets.ts:280:28
+-       initializationOptions: () => ({ "language_server.enable_trust_check": false }),
++       initializationOptions: () => undefined,
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:277:16
+-       fileTypes: ["php"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:277:17
+-       fileTypes: ["php"],
++       fileTypes: [""],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:283:11
+-       name: "clangd",
++       name: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:285:11
+-       look: {
+-         kind: "used",
+-         signs: MANIFEST,
+-         orProjectProgram: false,
+-         command: { program: "clangd", args: [] },
+-         recipe: { kind: "system" },
+-         orElse: [],
+-       },
++       look: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:289:16
+-         command: { program: "clangd", args: [] },
++         command: {},
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/lsp/internal/presets.ts:288:25
+-         orProjectProgram: false,
++         orProjectProgram: true,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:284:16
+-       ecosystem: "clang",
++       ecosystem: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:286:13
+-         kind: "used",
++         kind: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:289:27
+-         command: { program: "clangd", args: [] },
++         command: { program: "", args: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:290:23
+-         recipe: { kind: "system" },
++         recipe: { kind: "" },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:291:15
+-         orElse: [],
++         orElse: ["Stryker was here"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:33
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "cc", "", "cxx", "hh", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:289:43
+-         command: { program: "clangd", args: [] },
++         command: { program: "clangd", args: ["Stryker was here"] },
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:293:16
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:47
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "cc", "cpp", "cxx", "", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:17
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:40
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "cc", "cpp", "", "hh", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:27
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "", "cpp", "cxx", "hh", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:290:15
+-         recipe: { kind: "system" },
++         recipe: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:53
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:60
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", ""],
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/lsp/internal/presets.ts:294:14
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++       formats: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:294:22
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++       formats: { kind: "", files: [".clang-format", "_clang-format"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:294:44
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++       formats: { kind: "withConfig", files: ["", "_clang-format"] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:293:22
+-       fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++       fileTypes: ["c", "", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/presets.ts:294:43
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++       formats: { kind: "withConfig", files: [] },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/presets.ts:294:61
+-       formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++       formats: { kind: "withConfig", files: [".clang-format", ""] },
+Ran all tests for this mutant.
+
+[Survived] BlockStatement
+src/lsp/internal/project.ts:26:30
+-     if (file?.kind !== "Text") {
+-       return null;
+-     }
++     if (file?.kind !== "Text") {}
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 11 more tests!
+
+
+[Survived] BlockStatement
+src/lsp/internal/project.ts:32:11
+-     } catch {
+-       return null;
+-     }
++     } catch {}
+Tests ran:
+    TypeScript: not detected without a config, without the package, or with no version
+    package manager: the project's field beats a lock file; a malformed package.json has none
+
+
+[Survived] ObjectLiteral
+src/lsp/internal/project.ts:40:33
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({}));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] StringLiteral
+src/lsp/internal/project.ts:40:41
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({ kind: "", searched: [] }));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/project.ts:40:63
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({ kind: "NotFound", searched: ["Stryker was here"] }));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/project.ts:26:7
+-     if (file?.kind !== "Text") {
++     if (false) {
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 44 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/project.ts:49:10
+-     return answer.kind === "Found" && answer.place === "Project";
++     return true && answer.place === "Project";
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: a stored Start answers without a question and starts the served servers
+    start: a stored Don't start answers without a question and starts nothing
+  and 50 more tests!
+
+
+[Survived] BlockStatement
+src/lsp/index.ts:152:37
+-         void server.halt().then(() => {
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
+-         });
++         void server.halt().then(() => {});
+Tests ran:
+    focus: detection runs again without asking; running servers keep their run and a newly installed one starts
+    focus: a repository still without an answer is never asked and keeps its servers stopped
+    focus: an older detection that answers last is dropped
+  and 16 more tests!
+
+
+[Survived] MethodExpression
+src/lsp/index.ts:153:25
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
++           this.#retired = this.#retired;
+Tests ran:
+    focus: detection runs again without asking; running servers keep their run and a newly installed one starts
+    focus: a repository still without an answer is never asked and keeps its servers stopped
+    focus: an older detection that answers last is dropped
+  and 16 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/index.ts:153:59
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
++           this.#retired = this.#retired.filter((retired) => true);
+Tests ran:
+    focus: detection runs again without asking; running servers keep their run and a newly installed one starts
+    focus: a repository still without an answer is never asked and keeps its servers stopped
+    focus: an older detection that answers last is dropped
+  and 16 more tests!
+
+
+[Survived] BooleanLiteral
+src/lsp/index.ts:40:18
+-     #startOnOpen = false;
++     #startOnOpen = true;
+Tests ran:
+    start: the file list and the settings are in before detection starts
+    start: no specs means no question and no servers
+    start: a stored Start answers without a question and starts the served servers
+  and 224 more tests!
+
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:86:5
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:86:14
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:109:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:109:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:130:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:130:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:152:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:152:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:169:5
+-       default: {
+-         const _exhaustive: never = hint.reason;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:169:14
+-       default: {
+-         const _exhaustive: never = hint.reason;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:233:5
+-       default: {
+-         const _exhaustive: never = hint;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:233:14
+-       default: {
+-         const _exhaustive: never = hint;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:264:5
+-       default: {
+-         const _exhaustive: never = outcome;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:264:14
+-       default: {
+-         const _exhaustive: never = outcome;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:279:48
+-   export function logTitle(name: string): string {
+-     return `${name} log`;
+-   }
++   export function logTitle(name: string): string {}
+
+[NoCoverage] StringLiteral
+src/ui/serverText.ts:280:10
+-     return `${name} log`;
++     return ``;
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:284:51
+-     return new Date(at).toLocaleTimeString("en-GB", { hour12: false });
++     return new Date(at).toLocaleTimeString("en-GB", {});
+Tests ran:
+    rule 5: a log line's time is HH:MM:SS
+
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:27:70
+-   export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {
+-     start: "Start",
+-     stop: "Stop",
+-     restart: "Restart",
+-   };
++   export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:28:10
+-     start: "Start",
++     start: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:33:25
+-   export const SHOW_LOG = "Show log";
++   export const SHOW_LOG = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:39:23
+-   export const COPIED = "Copied";
++   export const COPIED = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:37:21
+-   export const COPY = "Copy";
++   export const COPY = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:43:30
+-   export const NOT_INSTALLED = "Not installed";
++   export const NOT_INSTALLED = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:29:9
+-     stop: "Stop",
++     stop: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:41:21
+-   export const BACK = "Back";
++   export const BACK = "";
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:45:30
+-   const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
++   const NPM: ManagerCommands = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:45:67
+-   const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
++   const NPM: ManagerCommands = { project: "npm install -D", global: "" };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:49:9
+-     pnpm: { project: "pnpm add -D", global: "pnpm add -g" },
++     pnpm: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:30:12
+-     restart: "Restart",
++     restart: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:49:43
+-     pnpm: { project: "pnpm add -D", global: "pnpm add -g" },
++     pnpm: { project: "pnpm add -D", global: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:50:43
+-     yarn: { project: "yarn add -D", global: "yarn global add" },
++     yarn: { project: "yarn add -D", global: "" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:50:20
+-     yarn: { project: "yarn add -D", global: "yarn global add" },
++     yarn: { project: "", global: "yarn global add" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:50:9
+-     yarn: { project: "yarn add -D", global: "yarn global add" },
++     yarn: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:51:25
+-     yarnBerry: { project: "yarn add -D", global: NPM.global },
++     yarnBerry: { project: "", global: NPM.global },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:35:26
+-   export const EMPTY_LOG = "Nothing logged yet.";
++   export const EMPTY_LOG = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:49:20
+-     pnpm: { project: "pnpm add -D", global: "pnpm add -g" },
++     pnpm: { project: "", global: "pnpm add -g" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:45:41
+-   const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
++   const NPM: ManagerCommands = { project: "", global: "npm install -g" };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:55:30
+-   const PIP: ManagerCommands = { project: "python -m pip install", global: "pipx install" };
++   const PIP: ManagerCommands = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:55:41
+-   const PIP: ManagerCommands = { project: "python -m pip install", global: "pipx install" };
++   const PIP: ManagerCommands = { project: "", global: "pipx install" };
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:52:44
+-     bun: { project: "bun add --dev", global: "bun add -g" },
++     bun: { project: "bun add --dev", global: "" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:47:77
+-   const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
+-     npm: NPM,
+-     pnpm: { project: "pnpm add -D", global: "pnpm add -g" },
+-     yarn: { project: "yarn add -D", global: "yarn global add" },
+-     yarnBerry: { project: "yarn add -D", global: NPM.global },
+-     bun: { project: "bun add --dev", global: "bun add -g" },
+-   };
++   const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:51:14
+-     yarnBerry: { project: "yarn add -D", global: NPM.global },
++     yarnBerry: {},
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:57:75
+-   const PYTHON_COMMANDS: Readonly<Record<PythonManager, ManagerCommands>> = {
+-     uv: { project: "uv add --dev", global: "uv tool install" },
+-     poetry: { project: "poetry add --group dev", global: PIP.global },
+-     pdm: { project: "pdm add -d", global: PIP.global },
+-   };
++   const PYTHON_COMMANDS: Readonly<Record<PythonManager, ManagerCommands>> = {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:52:8
+-     bun: { project: "bun add --dev", global: "bun add -g" },
++     bun: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:52:19
+-     bun: { project: "bun add --dev", global: "bun add -g" },
++     bun: { project: "", global: "bun add -g" },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:58:42
+-     uv: { project: "uv add --dev", global: "uv tool install" },
++     uv: { project: "uv add --dev", global: "" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:59:11
+-     poetry: { project: "poetry add --group dev", global: PIP.global },
++     poetry: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:55:74
+-   const PIP: ManagerCommands = { project: "python -m pip install", global: "pipx install" };
++   const PIP: ManagerCommands = { project: "python -m pip install", global: "" };
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:58:7
+-     uv: { project: "uv add --dev", global: "uv tool install" },
++     uv: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:60:19
+-     pdm: { project: "pdm add -d", global: PIP.global },
++     pdm: { project: "", global: PIP.global },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:59:22
+-     poetry: { project: "poetry add --group dev", global: PIP.global },
++     poetry: { project: "", global: PIP.global },
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:58:18
+-     uv: { project: "uv add --dev", global: "uv tool install" },
++     uv: { project: "", global: "uv tool install" },
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:60:8
+-     pdm: { project: "pdm add -d", global: PIP.global },
++     pdm: {},
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:63:32
+-   const SAME_WITH_YOUR_MANAGER = "Or the same with your package manager.";
++   const SAME_WITH_YOUR_MANAGER = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:178:22
+-   const ALL_PROJECTS = "Or for all projects:";
++   const ALL_PROJECTS = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:287:26
+-   export const YAMT_MARK = "yamt";
++   export const YAMT_MARK = "";
+Ran all tests for this mutant.
+
+Ran 4.81 tests per mutant on average.
+---------------------|------------------|----------|-----------|------------|----------|----------|
+                     | % Mutation score |          |           |            |          |          |
+File                 |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+---------------------|--------|---------|----------|-----------|------------|----------|----------|
+All files            |  62.08 |   62.90 |      763 |         0 |        450 |       16 |        0 |
+ lsp                 |  56.34 |   56.34 |      529 |         0 |        410 |        0 |        0 |
+  internal           |  49.69 |   49.69 |      401 |         0 |        406 |        0 |        0 |
+   detect.ts         |  93.24 |   93.24 |      207 |         0 |         15 |        0 |        0 |
+   ecosystems.ts     |  47.15 |   47.15 |       58 |         0 |         65 |        0 |        0 |
+   install.ts        | 100.00 |  100.00 |       29 |         0 |          0 |        0 |        0 |
+   languageIds.ts    |   5.13 |    5.13 |        2 |         0 |         37 |        0 |        0 |
+   packageManager.ts |  65.96 |   65.96 |       31 |         0 |         16 |        0 |        0 |
+   presets.ts        |   2.21 |    2.21 |        6 |         0 |        266 |        0 |        0 |
+   project.ts        |  86.00 |   86.00 |       43 |         0 |          7 |        0 |        0 |
+   spec.ts           | 100.00 |  100.00 |       25 |         0 |          0 |        0 |        0 |
+  index.ts           |  96.97 |   96.97 |      128 |         0 |          4 |        0 |        0 |
+ ui                  |  80.69 |   85.40 |      234 |         0 |         40 |       16 |        0 |
+  serverText.ts      |  80.69 |   85.40 |      234 |         0 |         40 |       16 |        0 |
+---------------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m12:26:21 (386646) INFO MutationTestExecutor[39m Done in 38 seconds.
