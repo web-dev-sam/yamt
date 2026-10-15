@@ -120,7 +120,7 @@ mutants base:
     # cargo-mutants copies and builds the tree in TMPDIR, and the tests make temp repos there: on disk (/tmp is RAM
     # here) and outside any git work tree (tests need a plain directory) (#574, #578).
     mkdir -p target/mutants /var/tmp/yamt-mutants
-    git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
+    git diff --no-color --no-ext-diff --no-renames --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
     if [ -s target/mutants/rust.diff ]; then
         status=0
         TMPDIR=/var/tmp/yamt-mutants {{ hermetic_git }} {{ capped_tests }} cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
@@ -128,7 +128,7 @@ mutants base:
     else
         echo "mutants: no Rust changes since {{ base }}"
     fi
-    web_files=$(git diff --name-only --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     if [ -n "$web_files" ]; then
         # --ignoreStatic: module-level mutants are not re-evaluated under the vitest runner, so they survive
         # whatever the tests assert (#732: 134 false survivors).

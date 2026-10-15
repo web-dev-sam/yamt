@@ -7,6 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Language servers for more languages. Besides oxlint, oxfmt, TypeScript and eslint, yamt now finds Biome,
+  rust-analyzer (Rust), gopls (Go), ruff, ty, basedpyright and pyright (Python), Phpactor or else Intelephense
+  (PHP) and clangd (C and C++) in the repository's projects, and `.vue` files get TypeScript's problems when
+  the project has `@vue/typescript-plugin`. The same once-per-repository question starts them. Phpactor shows
+  the project's own PHPStan, Psalm, PHP-CS-Fixer and phpcs problems when the project has the tool and its
+  config. Ctrl+S also formats with Biome, rustfmt, gofmt, ruff, clang-format (with a `.clang-format`) and
+  PHP-CS-Fixer or phpcbf.
+- A server the project uses but that is not installed shows "Not installed" with the command for that
+  language's own installer: the project's package manager, uv, Poetry or PDM, rustup, `go install`, or
+  Phpactor's download. A found server that stops while starting (rustup's `rust-analyzer` without the
+  component) shows the same steps.
+- Settings → Language servers → "From the list" fills in the command and file types of a known server, Deno
+  and bash-language-server included.
+
+### Changed
+
+- yamt also looks for a server's program in the project's `.venv` and `vendor/bin` folders, and after the
+  PATH in `~/go/bin`, `~/.cargo/bin`, `~/.local/bin` and Composer's global folder, so servers installed with
+  `go install`, pipx or `uv tool` are found when yamt is started from the desktop.
+- A server added by hand whose command is a known server's (for example `ruff server`) gets that server's
+  name, settings and formatting rule.
+
 ## [0.3.0] - 2026-10-14
 
 ### Added
