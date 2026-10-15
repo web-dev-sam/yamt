@@ -585,6 +585,24 @@ folders. Product code as checked by the presets' final runs (`a5babf6`); the rel
 | 2'  | Windows CI fix (`briefs/3.Y-folders-rework-3.md`; Gate B "Fix it, then release", #1053): CI run 38731561117 on `7d4f6cc` red on windows-2025 only, one lsp-host test found `lsp-echo.exe` on the test-time PATH (#1052) | rust-impl    | done   | `7d52482` (`PresetsFoldersR3`): the placed program is `yamt-echo-in-tools{EXE_SUFFIX}`; `Release031Gate` at `7d52482`: `just check` 0, `cargo test` (threads) 10/10. Windows itself only on GitHub: confirmed by step 1 of the handoff                                                                                                                                                                                                                         |
 | 3   | release build and publishing (`docs/slices/handoff-release-0.3.1.md`)                                                                                                                                                   | human        | done   | CI on `cd46a75` green on all four jobs (frontend, ubuntu-22.04, macos-14, windows-2025); v0.3.1 published 2026-10-15T12:42:36Z (GitHub API), https://github.com/web-dev-sam/yamt/releases/tag/v0.3.1: AppImage, `.deb`, `.app.tar.gz`, `.dmg`, `x64-setup.exe`                                                                                                                                                                                                 |
 
+## Removal tooltip — the removed code on hover (session 19, owner request #1055)
+
+Owner request (#1055, 2026-10-15): pull, push, check the commit that made the deletion marker bigger (`3e465cb`), and
+"Make that deletion marker show a tooltip on hover with the code that got deleted in a code block".
+
+Intent: resting the pointer on a removal bar in a side pane shows what that side removed from base, as code (the panes'
+font and syntax colours), selectable and copyable. Rules: `docs/plan.md` §2 #73. Acceptance: in the real app, hovering a
+bar shows its removed text; hovering the code next to it shows nothing; applying or ignoring that side closes it; the
+owner's bar size stays; `just check` green (it was red on `main` after `3e465cb`: #1056). Non-goals: tooltips on word
+marks or the Result; keyboard access; a length cap. Pull done by rebase (`3e465cb` on `2eae6e9`); push is the owner's
+(the push guard denies it to agents).
+
+| row | slice                                                                                                                                                                | owner     | status  | evidence |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
+| 1   | 3.R-removal-text (`briefs/3.R-removal-text.md`): `Removal<L> { at, text }` replaces `removed_at` in merge-core, bindings, fixtures, `ipc/domain.ts`                  | rust-impl | running |          |
+| 2   | 3.R-removal-tooltip (`briefs/3.R-removal-tooltip.md`): the tooltip on the bar, the owner's bar geometry in `theme.css`, `oxfmt` fixes, `app-session hover` (needs 1) | web-impl  | planned |          |
+| 3   | final run: `just check`, `just mutants 3e465cb`, the real app on `language-tools-script-setup`                                                                       | verifier  | planned |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
