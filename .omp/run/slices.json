@@ -1,32 +1,19 @@
 {
-  "RemovalText": {
+  "RemovalTooltip": {
     "owned": [
-      "crates/merge-core/**",
-      "crates/session/tests/**",
-      "crates/cli/tests/**",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/tauri.test.ts",
       "frontend/src/editor/internal/words.ts",
-      "frontend/src/editor/internal/apply.test.ts",
-      "frontend/src/editor/internal/chunkField.test.ts",
-      "frontend/src/editor/internal/decorations.test.ts",
-      "frontend/src/editor/internal/fileText.test.ts",
-      "frontend/src/editor/internal/foldRuns.test.ts",
-      "frontend/src/editor/internal/folds.test.ts",
-      "frontend/src/editor/internal/format.test.ts",
-      "frontend/src/editor/internal/gap.test.ts",
-      "frontend/src/editor/internal/pane.test.ts",
-      "frontend/src/editor/internal/savedPoint.test.ts",
-      "frontend/src/editor/internal/sides.test.ts",
-      "frontend/src/editor/internal/tone.test.ts",
       "frontend/src/editor/internal/words.test.ts",
-      "frontend/src/editor/problems.browser.test.ts",
-      "frontend/fixtures/golden/**",
-      "frontend/fixtures/showcase/**",
-      "frontend/src/ipc/words.ts",
-      "frontend/src/ipc/validate.ts"
+      "frontend/src/editor/internal/removal*.ts",
+      "frontend/src/editor/internal/paneViews.ts",
+      "frontend/src/editor/theme.css",
+      "frontend/src/style.css",
+      "src-tauri/src/window.rs",
+      "frontend/src/editor/removals.browser.test.ts",
+      "frontend/scripts/app-session.ts",
+      "frontend/scripts/app-session/args.ts",
+      "frontend/scripts/app-session/drive.ts",
+      "frontend/scripts/app-session/args.test.ts",
+      "frontend/src/editor/AGENTS.md"
     ]
   }
 }
