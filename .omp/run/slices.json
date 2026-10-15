@@ -1,5 +1,1 @@
-{
-  "PresetsUriTest": {
-    "owned": ["frontend/src/lsp/internal/uri.test.ts"]
-  }
-}
+{}

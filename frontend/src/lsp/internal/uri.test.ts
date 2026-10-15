@@ -57,6 +57,13 @@ test("absolutePath keeps a UNC root's two leading backslashes", () => {
   expect(absolutePath("\\\\server\\share\\repo", "web")).toBe("\\\\server\\share\\repo\\web");
 });
 
+test("only a leading /X: is a drive: a POSIX folder with a colon keeps its path", () => {
+  expect(absolutePath("/home/u/proj:v2", "src")).toBe("/home/u/proj:v2/src");
+  expect(absolutePath("/home/u/x:", "src")).toBe("/home/u/x:/src");
+  expect(absolutePath("/home/u", "x:/src")).toBe("/home/u/x:/src");
+  expect(fileUri("/home/u/proj:v2", "src/a.ts")).toBe("file:///home/u/proj%3Av2/src/a.ts");
+});
+
 test("a URI that does not decode is never the same", () => {
   expect(sameFile("file:///a%25.ts", "file:///a%E0.ts")).toBe(false);
 });
