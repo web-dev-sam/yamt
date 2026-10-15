@@ -1,1 +1,5 @@
-{}
+{
+  "PresetsFoldersR3": {
+    "owned": ["crates/lsp-host/tests/**"]
+  }
+}
