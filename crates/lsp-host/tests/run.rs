@@ -372,6 +372,18 @@ fn a_missing_project_folder_is_a_spawn_failure_and_a_missing_program_lists_the_s
     );
 }
 
+/// A copy written here can still be open for writing in another test's forked child when the start
+/// execs it, which fails with ETXTBSY (execve(2)); a link leaves no write handle in this process.
+#[cfg(unix)]
+fn place_echo(at: &Path) {
+    std::os::unix::fs::symlink(ECHO, at).unwrap();
+}
+
+#[cfg(windows)]
+fn place_echo(at: &Path) {
+    fs::copy(ECHO, at).unwrap();
+}
+
 #[test]
 fn a_bare_program_name_is_found_in_a_project_folder_and_not_without_it() {
     let repo = tempfile::tempdir().unwrap();
@@ -383,7 +395,7 @@ fn a_bare_program_name_is_found_in_a_project_folder_and_not_without_it() {
         .to_str()
         .unwrap()
         .to_owned();
-    fs::copy(ECHO, tools.join(&name)).unwrap();
+    place_echo(&tools.join(&name));
     let mut host = Host::new(repo.path());
     let command = |project: Vec<String>| ServerCommand {
         program: name.clone(),
