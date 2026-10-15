@@ -44,6 +44,10 @@ function failLine(reason: FailReason): string {
       return `Could not start: ${reason.message}`;
     case "timedOut":
       return "Did not answer in time";
+    case "exited":
+      return reason.code === null
+        ? "Stopped while starting: exited"
+        : `Stopped while starting: exited with code ${reason.code}`;
     case "noHost":
       return "Runs only in the app";
     case "outsideRepository":

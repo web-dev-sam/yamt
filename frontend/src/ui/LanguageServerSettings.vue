@@ -5,7 +5,7 @@ import type { RepositoryAnswer } from "../ipc";
 import type { PresetChoice, ServerSpec } from "../lsp";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import PresetPicker from "./PresetPicker.vue";
-import { parseAddedServer } from "./serverSetup";
+import { addedServerFields, parseAddedServer } from "./serverSetup";
 import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
 import { useAppStore } from "./store";
 
@@ -24,7 +24,7 @@ const answer = computed(() =>
     ? null
     : (settings.value.languageServers.repositories[serverRoot.value] ?? null),
 );
-const added = computed(() => settings.value.languageServers.added);
+const added = computed(() => settings.value.languageServers.added.map(addedServerFields));
 const newServer = computed(() => parseAddedServer(commandText.value, fileTypesText.value));
 
 function commandOf(spec: ServerSpec): string {
@@ -40,8 +40,9 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
 }
 
 function fill(choice: PresetChoice): void {
-  commandText.value = choice.command.join(" ");
-  fileTypesText.value = choice.fileTypes.join(", ");
+  const fields = addedServerFields(choice);
+  commandText.value = fields.command;
+  fileTypesText.value = fields.fileTypes;
 }
 
 async function add(): Promise<void> {
@@ -86,12 +87,12 @@ async function add(): Promise<void> {
           :key="index"
           class="flex items-center gap-3 rounded px-2 py-1 hover:bg-row-hover"
         >
-          <span class="min-w-0 flex-1 truncate font-mono">{{ server.command.join(" ") }}</span>
-          <span class="shrink-0 text-fg-muted">{{ server.fileTypes.join(", ") }}</span>
+          <span class="min-w-0 flex-1 truncate font-mono">{{ server.command }}</span>
+          <span class="shrink-0 text-fg-muted">{{ server.fileTypes }}</span>
           <button
             type="button"
             class="shrink-0 rounded border border-control-border px-2.5 py-0.5 hover:bg-hover"
-            :aria-label="`Remove ${server.command.join(' ')}`"
+            :aria-label="`Remove ${server.command}`"
             @click="removeServer(index)"
           >
             Remove

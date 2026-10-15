@@ -39,6 +39,8 @@ export type ServerSetup = {
   removeServer(index: number): Promise<void>;
 };
 
+type AddedServerFields = { readonly command: string; readonly fileTypes: string };
+
 const STORED_REPLIES: Readonly<Record<Reply, RepositoryAnswer | null>> = {
   yes: "start",
   no: "dontStart",
@@ -53,6 +55,13 @@ export function parseAddedServer(command: string, fileTypes: string): AddedServe
     .filter((type) => type !== "");
   const valid = words.length > 0 && types.length > 0 && !types.some((type) => type.includes("."));
   return valid ? { command: words, fileTypes: types } : null;
+}
+
+export function addedServerFields(server: {
+  readonly command: readonly string[];
+  readonly fileTypes: readonly string[];
+}): AddedServerFields {
+  return { command: server.command.join(" "), fileTypes: server.fileTypes.join(", ") };
 }
 
 async function look(setup: Setup, host: ServerHost): Promise<string | null> {

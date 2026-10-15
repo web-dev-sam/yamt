@@ -16,9 +16,9 @@ import {
   type ServerHost,
   type StartReply,
 } from "../ipc";
-import { LanguageServers, type ResultDocument, type ServerState } from "../lsp";
+import { LanguageServers, presetChoices, type ResultDocument, type ServerState } from "../lsp";
 import { createAsking } from "./asking";
-import { createServerSetup, parseAddedServer } from "./serverSetup";
+import { addedServerFields, createServerSetup, parseAddedServer } from "./serverSetup";
 import { startSettings } from "./settings";
 
 type Tree = Record<string, string>;
@@ -793,3 +793,21 @@ test("the add form: a file type with a dot inside can never match a file, so it 
   expect(parseAddedServer("tsserver", "d.ts")).toBeNull();
   expect(parseAddedServer("tsserver", "ts, .d.ts")).toBeNull();
 });
+
+test("the add form: a server's fields are its command joined by spaces, its file types by commas", () => {
+  expect(addedServerFields({ command: ["ruff", "server"], fileTypes: ["py", "pyi"] })).toEqual({
+    command: "ruff server",
+    fileTypes: "py, pyi",
+  });
+});
+
+test.each(presetChoices())(
+  "the add form: $name from the list parses back to its own command and file types",
+  (choice) => {
+    const fields = addedServerFields(choice);
+    expect(parseAddedServer(fields.command, fields.fileTypes)).toEqual({
+      command: choice.command,
+      fileTypes: choice.fileTypes,
+    });
+  },
+);

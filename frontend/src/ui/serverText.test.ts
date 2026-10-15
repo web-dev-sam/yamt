@@ -52,6 +52,16 @@ const ROWS: readonly Row[] = [
     dot: "problem",
   },
   {
+    state: { kind: "failed", reason: { kind: "exited", code: 1 } },
+    line: "Stopped while starting: exited with code 1",
+    dot: "problem",
+  },
+  {
+    state: { kind: "failed", reason: { kind: "exited", code: null } },
+    line: "Stopped while starting: exited",
+    dot: "problem",
+  },
+  {
     state: { kind: "failed", reason: { kind: "noHost" } },
     line: "Runs only in the app",
     dot: "problem",

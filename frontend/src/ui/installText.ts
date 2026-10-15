@@ -135,10 +135,9 @@ export function installText(hint: InstallHint): InstallText {
 
 function failedWhileStarting(state: ServerState): boolean {
   switch (state.kind) {
-    case "crashed":
-      return true;
     case "failed":
       return state.reason.kind !== "noHost" && state.reason.kind !== "outsideRepository";
+    case "crashed":
     case "stopped":
     case "starting":
     case "running":

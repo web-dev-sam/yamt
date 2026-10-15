@@ -198,9 +198,9 @@ test.each<ServerState>([
   { kind: "failed", reason: { kind: "spawnFailed", message: "denied" } },
   { kind: "failed", reason: { kind: "initializeFailed", message: "Unknown binary" } },
   { kind: "failed", reason: { kind: "timedOut" } },
-  { kind: "crashed", code: 1 },
-  { kind: "crashed", code: null },
-])("a failed start ($kind) with help leads into the install text", (state) => {
+  { kind: "failed", reason: { kind: "exited", code: 1 } },
+  { kind: "failed", reason: { kind: "exited", code: null } },
+])("a failed start ($reason.kind) with help leads into the install text", (state) => {
   expect(failureHelp(state, RUSTUP_HINT)).toEqual({
     lead: "If it is not installed:",
     install: installText(RUSTUP_HINT),
@@ -216,6 +216,8 @@ test.each<ServerState>([
   { kind: "running" },
   { kind: "stopping" },
   { kind: "notInstalled", hint: RUSTUP_HINT },
+  { kind: "crashed", code: 1 },
+  { kind: "crashed", code: null },
 ])("no install text under $kind, which installing would not fix", (state) => {
   expect(failureHelp(state, RUSTUP_HINT)).toBeNull();
 });

@@ -6,6 +6,7 @@ export type FailReason =
   | { readonly kind: "spawnFailed"; readonly message: string }
   | { readonly kind: "initializeFailed"; readonly message: string }
   | { readonly kind: "timedOut" }
+  | { readonly kind: "exited"; readonly code: number | null }
   | { readonly kind: "noHost" }
   | { readonly kind: "outsideRepository"; readonly project: string };
 
@@ -65,6 +66,10 @@ export function failText(reason: StartFailure): string {
       return `Initialize failed: ${reason.message}`;
     case "timedOut":
       return "Stopped: the server did not answer initialize";
+    case "exited":
+      return reason.code === null
+        ? "Stopped while starting: exited"
+        : `Stopped while starting: exited with code ${reason.code}`;
     case "outsideRepository":
       return `The project folder ${reason.project} is outside the repository`;
     default: {

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onClickOutside } from "@vueuse/core";
 import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
 
 import { keyLabel, type Key, type KeyAction } from "../ipc";
@@ -12,8 +11,9 @@ import {
   keymapMenu,
   type KeymapCommand,
 } from "./keyText";
-import { ARROW_STEPS, stepMenuItem } from "./menuKeys";
+import { ARROW_STEPS } from "./menuKeys";
 import { useAppStore } from "./store";
+import { useDropdownMenu } from "./useDropdownMenu";
 
 type Recording = {
   readonly action: KeyAction;
@@ -24,8 +24,16 @@ type Recording = {
 const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
 const list = useTemplateRef<HTMLDivElement>("list");
 const menu = useTemplateRef<HTMLUListElement[]>("menu");
-const menuFor = shallowRef<KeyAction | null>(null);
-const menuAbove = shallowRef(false);
+const {
+  openFor: menuFor,
+  above: menuAbove,
+  toggle: toggleMenu,
+  close: closeMenu,
+  menuKey,
+} = useDropdownMenu<KeyAction>({
+  menu: () => menu.value?.[0] ?? null,
+  opener: rowOf,
+});
 const recording = shallowRef<Recording | null>(null);
 
 const bindings = computed(() => settings.value.keys.bindings);
@@ -48,14 +56,6 @@ const menuEntries = computed(() =>
     : keymapMenu(menuFor.value, bindings.value[menuFor.value], navigator.platform),
 );
 
-onClickOutside(
-  () => menu.value?.[0] ?? null,
-  () => {
-    void closeMenuAfterClick();
-  },
-  { ignore: ["[data-keymap-row][aria-expanded=true]"] },
-);
-
 function rowOf(action: KeyAction): HTMLElement | null {
   return list.value?.querySelector<HTMLElement>(`[data-keymap-row="${action}"]`) ?? null;
 }
@@ -63,49 +63,6 @@ function rowOf(action: KeyAction): HTMLElement | null {
 async function focusRow(action: KeyAction): Promise<void> {
   await nextTick();
   rowOf(action)?.focus();
-}
-
-async function closeMenu(): Promise<void> {
-  const action = menuFor.value;
-  menuFor.value = null;
-  if (action !== null) {
-    await focusRow(action);
-  }
-}
-
-async function closeMenuAfterClick(): Promise<void> {
-  const focused = document.activeElement;
-  if (focused !== document.body && menu.value?.[0]?.contains(focused) !== true) {
-    menuFor.value = null;
-    return;
-  }
-  await closeMenu();
-}
-
-async function toggleMenu(action: KeyAction): Promise<void> {
-  if (menuFor.value === action) {
-    await closeMenu();
-    return;
-  }
-  menuFor.value = action;
-  menuAbove.value = false;
-  await nextTick();
-  const opened = menu.value?.[0];
-  if (opened === undefined) {
-    return;
-  }
-  menuAbove.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
-  await nextTick();
-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-}
-
-function visibleBottom(element: HTMLElement): number {
-  for (let box = element.parentElement; box !== null; box = box.parentElement) {
-    if (getComputedStyle(box).overflowY !== "visible") {
-      return box.getBoundingClientRect().bottom;
-    }
-  }
-  return window.innerHeight;
 }
 
 function stepRow(event: KeyboardEvent): void {
@@ -116,30 +73,6 @@ function stepRow(event: KeyboardEvent): void {
   }
   event.preventDefault();
   rows[rows.findIndex((row) => row === event.currentTarget) + step]?.focus();
-}
-
-function menuKey(event: KeyboardEvent): void {
-  const items = [...(menu.value?.[0]?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
-  const step = stepMenuItem(
-    { count: items.length, focused: items.findIndex((item) => item === event.target) },
-    event,
-  );
-  switch (step.kind) {
-    case "close":
-      event.preventDefault();
-      void closeMenu();
-      return;
-    case "focus":
-      event.preventDefault();
-      items[step.index]?.focus();
-      return;
-    case "ignore":
-      return;
-    default: {
-      const _exhaustive: never = step;
-      return _exhaustive;
-    }
-  }
 }
 
 async function run(action: KeyAction, command: KeymapCommand): Promise<void> {

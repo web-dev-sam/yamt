@@ -1808,7 +1808,7 @@ test("rule 9: an exit without a code is crashed{null} and logged", async () => {
   expect(logOf(languageServers, "oxlint").at(-1)).toBe("yamt: Exited without a code");
 });
 
-test("rule 9: a crash during initialize is crashed, and messages before running are dropped", async () => {
+test("rule 9: an exit during initialize is a failed start, not stopped again; messages before running are dropped", async () => {
   host.setup = (server) => {
     server.handlers = { initialize: () => NO_REPLY };
   };
@@ -1828,7 +1828,14 @@ test("rule 9: a crash during initialize is crashed, and messages before running 
   server.exit(2);
   await settle();
 
-  expect(stateOf(languageServers, "eslint")).toEqual({ kind: "crashed", code: 2 });
+  expect(stateOf(languageServers, "eslint")).toEqual({
+    kind: "failed",
+    reason: { kind: "exited", code: 2 },
+  });
+  const log = logOf(languageServers, "eslint");
+  expect(log).toContain("yamt: Exited with code 2");
+  expect(log.at(-1)).toBe("yamt: Stopped while starting: exited with code 2");
+  expect(host.stopped).toEqual([]);
   expect(doc.shown).toEqual([]);
 });
 

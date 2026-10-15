@@ -230,10 +230,16 @@ export class Server {
   }
 
   #exited(attempt: Attempt, code: number | null): void {
-    if (this.#run.attempt === attempt) {
-      this.running?.docs.closeAll();
-      this.#setRun({ kind: "idle", attempt: null, state: { kind: "crashed", code } });
+    const run = this.#run;
+    if (run.attempt !== attempt) {
+      return;
     }
+    if (run.kind === "starting") {
+      this.#fail({ kind: "exited", code }, null);
+      return;
+    }
+    this.running?.docs.closeAll();
+    this.#setRun({ kind: "idle", attempt: null, state: { kind: "crashed", code } });
   }
 
   #fail(reason: StartFailure, attempt: Attempt | null): void {
