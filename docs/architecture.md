@@ -796,7 +796,9 @@ Antialiasing (Subpixel/Greyscale, Linux only by `showsAntialiasing`, applied at 
 Keymap and the settings file field with Use/Default; keyboard to "Back" on open and back to its
 opener on "Back", plan §2 #56, #57), `ChoiceButtons.vue` (one pressed-choice button group: Theme and
 Antialiasing), `KeymapList.vue` (the actions' rows by group with their key
-labels, WebStorm's Keymap edit menu per row) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
+labels, WebStorm's Keymap edit menu per row), `PresetPicker.vue` (Settings → Language servers → "From the list":
+`presetChoices()` fills Command and File types through `addedServerFields`, plan §2 #72; its drop-down and the key
+list's row menus share `useDropdownMenu.ts`) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
 dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Already used by" line),
 `ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button in `TOOLBAR_BUTTONS`
 order, toggles through the store, teleported to the body and placed by `menuPosition.ts`; closes on
