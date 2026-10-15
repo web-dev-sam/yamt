@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Resting the pointer on a removal bar in the left or right pane shows the code that side removed, as a code block
+  in the panes' font and syntax colours. It can be scrolled, selected and copied; removed whitespace alone shows as
+  `·`, `→` and `↵`. It closes when the pointer leaves, or when that side's change is applied or ignored.
+
+### Changed
+
+- Removal bars are wider (4 px) with room on each side, and the dark theme has new colours; the native window's
+  dark background matches them.
+
 ## [0.3.1] - 2026-10-15
 
 ### Added
