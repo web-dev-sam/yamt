@@ -12,7 +12,8 @@ import {
   type ResultDocument,
   type ServerProblem,
 } from "../lsp";
-import { MergeController, type MergeHosts, type MergeOptions } from "./index";
+import { MergeController, type MergeOptions } from "./index";
+import { covers, found, mount, unmountAll } from "./paneHarness";
 
 const WIDTH = 1200;
 const HEIGHT = 700;
@@ -61,47 +62,11 @@ class ProbeServers extends LanguageServers {
   }
 }
 
-const roots: HTMLElement[] = [];
-
 function version(n: number): DocVersion {
   if (!isDocVersion(n)) {
     throw new RangeError(`not a document version: ${n}`);
   }
   return n;
-}
-
-function box(style: string): HTMLDivElement {
-  const node = document.createElement("div");
-  node.setAttribute("style", style);
-  return node;
-}
-
-function strip(): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("style", "display: block; width: 100%; height: 100%");
-  return svg;
-}
-
-function mount(): MergeHosts {
-  const wrapper = box(
-    "position: fixed; inset: 40px 0 auto 0; height: 400px; display: grid; grid-template-columns: 1fr 40px 1fr 40px 1fr; will-change: transform",
-  );
-  const pane = "min-width: 0; min-height: 0; height: 400px";
-  const hosts: MergeHosts = {
-    left: box(pane),
-    center: box(pane),
-    right: box(pane),
-    strips: [strip(), strip()],
-  };
-  const [leftStrip, rightStrip] = hosts.strips.map((svg) => {
-    const layer = box("min-height: 0; will-change: transform");
-    layer.append(svg);
-    return layer;
-  });
-  wrapper.append(hosts.left, leftStrip ?? "", hosts.center, rightStrip ?? "", hosts.right);
-  document.body.append(wrapper);
-  roots.push(wrapper);
-  return hosts;
 }
 
 function sideText(block: string): string {
@@ -162,24 +127,11 @@ function opened(servers: ProbeServers): ResultDocument {
   return servers.doc;
 }
 
-function found<T extends Element>(node: T | null, what: string): T {
-  if (node === null) {
-    throw new Error(`no ${what}`);
-  }
-  return node;
-}
-
-function covers(tooltip: HTMLElement, x: number, y: number): boolean {
-  return tooltip.contains(document.elementFromPoint(x, y));
-}
-
 beforeEach(async () => {
   await page.viewport(WIDTH, HEIGHT);
 });
 
-afterEach(() => {
-  roots.splice(0).forEach((root) => root.remove());
-});
+afterEach(unmountAll);
 
 test("a problem's tooltip inside will-change: transform wrappers shows its message on top of the panes", async () => {
   const hosts = mount();

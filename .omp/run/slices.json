@@ -1,18 +1,1 @@
-{
-  "RemovalTooltipR1": {
-    "owned": [
-      "frontend/src/editor/internal/words.ts",
-      "frontend/src/editor/internal/words.test.ts",
-      "frontend/src/editor/internal/removal*.ts",
-      "frontend/src/editor/internal/paneViews.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/removals.browser.test.ts",
-      "frontend/src/editor/problems.browser.test.ts",
-      "frontend/src/editor/*Harness*.ts",
-      "frontend/src/editor/*harness*.ts",
-      "frontend/src/editor/*support*.ts",
-      "frontend/src/editor/*Support*.ts",
-      "frontend/src/editor/AGENTS.md"
-    ]
-  }
-}
+{}

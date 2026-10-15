@@ -260,11 +260,15 @@ path.chunk-band {
   border-bottom-color: var(--problem-tone);
 }
 
-:root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint) {
-  max-width: 480px;
+:root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint),
+:root .cm-tooltip.cm-tooltip-hover:has(> .removal-tooltip) {
   border: 1px solid var(--color-control-border);
   border-radius: 4px;
   background-color: var(--color-panel);
+}
+
+:root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint) {
+  max-width: 480px;
   color: var(--color-fg);
   font-family: var(--font-sans);
   font-size: 13px;
@@ -282,21 +286,17 @@ path.chunk-band {
   opacity: 1;
 }
 
-:root .cm-tooltip.cm-tooltip-hover:has(> .removal-tooltip) {
-  border: 1px solid var(--color-control-border);
-  border-radius: 4px;
-  background-color: var(--color-panel);
-}
-
 :root .removal-tooltip {
   max-width: 640px;
   max-height: 20lh;
   margin: 0;
   padding: 4px 8px;
   overflow: auto;
-  color: var(--color-code);
-  font-variant-ligatures: none;
   white-space: pre;
+}
+
+:root .removal-tooltip::after {
+  content: "\200b";
 }
 
 :root .removal-tooltip-whitespace {

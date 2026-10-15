@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
-import { MergeController, type MergeHosts, type MergeOptions } from "./index";
+import { MergeController, type MergeOptions } from "./index";
+import { covers, found, mount, unmountAll } from "./paneHarness";
 
 type RawRemoval = { readonly at: { line: number; column: number }; readonly text: string };
 
@@ -19,7 +20,7 @@ const REMOVALS: readonly RawRemoval[] = [
 ];
 const BAR_PX = 4;
 const BAR_LEFT_PX = -1;
-const HALF_CHARACTER_PX = 4;
+const BESIDE_PX = 1;
 const HOVER_REST_MS = 600;
 const OPEN_WAIT_MS = 3000;
 const OPTIONS: MergeOptions = {
@@ -28,42 +29,6 @@ const OPTIONS: MergeOptions = {
   collapsed: false,
   servers: null,
 };
-
-const roots: HTMLElement[] = [];
-
-function box(style: string): HTMLDivElement {
-  const node = document.createElement("div");
-  node.setAttribute("style", style);
-  return node;
-}
-
-function strip(): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("style", "display: block; width: 100%; height: 100%");
-  return svg;
-}
-
-function mount(): MergeHosts {
-  const wrapper = box(
-    "position: fixed; inset: 40px 0 auto 0; height: 400px; display: grid; grid-template-columns: 1fr 40px 1fr 40px 1fr; will-change: transform",
-  );
-  const pane = "min-width: 0; min-height: 0; height: 400px";
-  const hosts: MergeHosts = {
-    left: box(pane),
-    center: box(pane),
-    right: box(pane),
-    strips: [strip(), strip()],
-  };
-  const [leftStrip, rightStrip] = hosts.strips.map((svg) => {
-    const layer = box("min-height: 0; will-change: transform");
-    layer.append(svg);
-    return layer;
-  });
-  wrapper.append(hosts.left, leftStrip ?? "", hosts.center, rightStrip ?? "", hosts.right);
-  document.body.append(wrapper);
-  roots.push(wrapper);
-  return hosts;
-}
 
 async function data(removals: readonly RawRemoval[]): Promise<FileMergeData> {
   const base = ["const a = 1;", LONG, "call(a, b, c);", "const z = 0;", ""].join("\n");
@@ -98,23 +63,12 @@ async function data(removals: readonly RawRemoval[]): Promise<FileMergeData> {
   });
 }
 
-function found<T extends Element>(node: T | null | undefined, what: string): T {
-  if (node === null || node === undefined) {
-    throw new Error(`no ${what}`);
-  }
-  return node;
-}
-
 function shownTooltip(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".removal-tooltip");
 }
 
 async function openedTooltip(): Promise<HTMLElement> {
   return vi.waitFor(() => found(shownTooltip(), "tooltip yet"), { timeout: OPEN_WAIT_MS });
-}
-
-function covers(tooltip: HTMLElement, x: number, y: number): boolean {
-  return tooltip.contains(document.elementFromPoint(x, y));
 }
 
 // Nothing signals a hover that opened no tooltip, so the pointer rests twice CodeMirror's hover
@@ -137,9 +91,7 @@ beforeEach(async () => {
   await page.viewport(WIDTH, HEIGHT);
 });
 
-afterEach(() => {
-  roots.splice(0).forEach((root) => root.remove());
-});
+afterEach(unmountAll);
 
 test("a bar keeps the owner's geometry: a 4 px box, the bar 4 px wide from 1 px left of it", async () => {
   const hosts = mount();
@@ -160,10 +112,10 @@ test("hovering a bar shows its removed text above the panes; beside it none; app
   const [lineStartBar, midLineBar] = hosts.left.querySelectorAll<HTMLElement>(".chunk-removal");
   const midLine = found(midLineBar, "mid-line bar");
 
-  await hoverBeside(midLine, HALF_CHARACTER_PX);
+  await hoverBeside(midLine, BESIDE_PX);
   await rest();
   const besideRight = shownTooltip();
-  await hoverBeside(midLine, -HALF_CHARACTER_PX);
+  await hoverBeside(midLine, -BESIDE_PX);
   await rest();
   const besideLeft = shownTooltip();
 
@@ -200,6 +152,25 @@ test("a whitespace-only removal shows its whitespace as marks", async () => {
 
   expect(tooltip.textContent).toBe("→↵");
   expect(tooltip.classList.contains("removal-tooltip-whitespace")).toBe(true);
+
+  controller.destroy();
+});
+
+test("a kept final line break draws its empty line, in the pane's code colour and ligatures", async () => {
+  const hosts = mount();
+  const removals = [{ at: { line: 1, column: 0 }, text: `${LONG}\n\n` }];
+  const controller = new MergeController(await data(removals), hosts, OPTIONS);
+
+  await userEvent.hover(found(hosts.left.querySelector<HTMLElement>(".chunk-removal"), "bar"));
+  const tooltip = await openedTooltip();
+  const shown = getComputedStyle(tooltip);
+  const pane = getComputedStyle(found(hosts.left.querySelector(".cm-content"), "content"));
+  const padding = parseFloat(shown.paddingTop) + parseFloat(shown.paddingBottom);
+
+  expect(tooltip.textContent).toBe(`${LONG}\n`);
+  expect((tooltip.clientHeight - padding) / parseFloat(shown.lineHeight)).toBe(2);
+  expect(shown.color).toBe(pane.color);
+  expect(shown.fontVariantLigatures).toBe(pane.fontVariantLigatures);
 
   controller.destroy();
 });

@@ -25,11 +25,11 @@ test("whole lines removed after a bar at a line end lose their first line break,
   expect(shownRemoval("\n\nb();\n", "lineEnd").text).toBe("\nb();\n");
 });
 
-test("a bar on an empty line drops one joining line break, and keeps a blank line inside", () => {
+test("a bar on an empty line drops one joining line break, the trailing one first, and keeps a blank line inside", () => {
   expect(shownRemoval("a(1);\n\nb(1);", "emptyLine").text).toBe("a(1);\n\nb(1);");
   expect(shownRemoval("\na(1);", "emptyLine").text).toBe("a(1);");
   expect(shownRemoval("a(1);\n", "emptyLine").text).toBe("a(1);");
-  expect(shownRemoval("\na(1);\n", "emptyLine").text).toBe("a(1);\n");
+  expect(shownRemoval("\na(1);\n", "emptyLine").text).toBe("\na(1);");
 });
 
 test("text removed inside a line, or across lines without a join, is shown as it is", () => {

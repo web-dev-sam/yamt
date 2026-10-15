@@ -19,12 +19,12 @@ export function barPlace(line: Pick<Line, "from" | "to">, pos: number): BarPlace
 }
 
 function withoutJoin(text: string, place: BarPlace): string {
-  const endsLine = place === "lineEnd" || place === "emptyLine";
-  if (endsLine && text.startsWith("\n")) {
-    return text.slice(1);
-  }
   const startsLine = place === "lineStart" || place === "emptyLine";
-  return startsLine && text.endsWith("\n") ? text.slice(0, -1) : text;
+  if (startsLine && text.endsWith("\n")) {
+    return text.slice(0, -1);
+  }
+  const endsLine = place === "lineEnd" || place === "emptyLine";
+  return endsLine && text.startsWith("\n") ? text.slice(1) : text;
 }
 
 export function shownRemoval(text: string, place: BarPlace): ShownRemoval {

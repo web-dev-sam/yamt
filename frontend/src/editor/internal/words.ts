@@ -5,13 +5,15 @@ import type { Chunk } from "../../ipc";
 import type { Side } from "./side";
 import { chunkTone, type Tone } from "./tone";
 
+export const REMOVAL_BAR_CLASS = "chunk-removal";
+
 class RemovalPoint extends WidgetType {
   readonly className: string;
   readonly text: string;
 
   constructor(tone: Tone, text: string) {
     super();
-    this.className = `chunk-removal chunk-removal-${tone}`;
+    this.className = `${REMOVAL_BAR_CLASS} ${REMOVAL_BAR_CLASS}-${tone}`;
     this.text = text;
   }
 

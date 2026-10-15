@@ -5,7 +5,7 @@ import { highlightCode } from "@lezer/highlight";
 
 import { paletteHighlight } from "./pane";
 import { barPlace, shownRemoval, type ShownRemoval } from "./removalText";
-import { removalAt } from "./words";
+import { REMOVAL_BAR_CLASS, removalAt } from "./words";
 
 function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
   const block = document.createElement("pre");
@@ -14,6 +14,10 @@ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
   block.style.fontFamily = pane.fontFamily;
   block.style.fontSize = pane.fontSize;
   block.style.lineHeight = pane.lineHeight;
+  block.style.fontVariantLigatures = pane.fontVariantLigatures;
+  if (shown.kind === "code") {
+    block.style.color = pane.color;
+  }
   block.style.setProperty("tab-size", String(view.state.tabSize));
   const grammar = view.state.facet(language);
   if (shown.kind === "whitespace" || grammar === null) {
@@ -42,7 +46,7 @@ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
 function hoveredRemoval(view: EditorView): Tooltip | null {
   // CodeMirror asks with the bar's position also when the pointer rests on a character next to it
   // (@codemirror/view HoverPlugin.startHover: posAtCoords within one character width).
-  const bar = view.contentDOM.querySelector(".chunk-removal:hover");
+  const bar = view.contentDOM.querySelector(`.${REMOVAL_BAR_CLASS}:hover`);
   if (bar === null) {
     return null;
   }
