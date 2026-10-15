@@ -1,18 +1,29 @@
-import { joined, PACKAGE_JSON } from "./ecosystems";
+import { joined, PACKAGE_JSON, type Ecosystem } from "./ecosystems";
 import {
   LOCK_FILES,
   packageManager,
   PYTHON_LOCK_FILES,
   PYTHON_LOCK_MANAGER,
 } from "./packageManager";
-import type { Recipe } from "./presets";
-import { jsonField, nearest, type Project } from "./project";
+import { jsonField, nearest, type Place, type Wanted } from "./project";
 import type { InstallHint } from "./spec";
+import type { Recipe } from "./tool";
 
 export type NodeHint = Extract<InstallHint, { kind: "node" }>;
 
+const NOTHING_READ: Wanted = { here: [], up: [] };
+
+export const HINT_FILES: Readonly<Record<Ecosystem, Wanted>> = {
+  node: { here: [PACKAGE_JSON], up: LOCK_FILES },
+  python: { here: [], up: PYTHON_LOCK_FILES },
+  rust: NOTHING_READ,
+  go: NOTHING_READ,
+  php: NOTHING_READ,
+  clang: NOTHING_READ,
+};
+
 export function nodeHint(
-  project: Project,
+  project: Place,
   { package: name, program }: Pick<NodeHint, "package" | "program">,
   reason: NodeHint["reason"],
 ): NodeHint {
@@ -24,7 +35,7 @@ export function nodeHint(
   return { kind: "node", package: name, program, folder: project.folder, manager, reason };
 }
 
-export function recipeHint(project: Project, recipe: Recipe, program: string): InstallHint {
+export function recipeHint(project: Place, recipe: Recipe, program: string): InstallHint {
   switch (recipe.kind) {
     case "python": {
       const lock = nearest(project, PYTHON_LOCK_FILES);

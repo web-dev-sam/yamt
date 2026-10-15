@@ -1,64 +1,14 @@
-import type { Ecosystem } from "./ecosystems";
+import { tomlTable, type Ecosystem } from "./ecosystems";
+import { PHPACTOR_INTEGRATIONS } from "./integrations";
+import type { Command, Formats, FromProject, Look, Sign, Tool } from "./tool";
 
-type Command = { readonly program: string; readonly args: readonly string[] };
+type Served = Tool & { readonly fileTypes: readonly string[] };
 
-type Installable = { readonly command: Command; readonly package: string };
+export type DetectedPreset = Served & { readonly ecosystem: Ecosystem; readonly look: Look };
 
-export type Formats =
-  | { readonly kind: "always" }
-  | { readonly kind: "never" }
-  | { readonly kind: "withConfig"; readonly files: readonly string[] };
+type ListOnlyPreset = Served & { readonly ecosystem: null; readonly command: Command };
 
-export type Tool = {
-  readonly name: string;
-  readonly formats: Formats;
-  readonly settings: unknown;
-  readonly initializationOptions: ((workspaceUri: string) => unknown) | null;
-};
-
-export type Recipe =
-  | { readonly kind: "python"; readonly package: string }
-  | { readonly kind: "rustup"; readonly component: string }
-  | { readonly kind: "go"; readonly module: string }
-  | { readonly kind: "download"; readonly command: string; readonly needs: string | null }
-  | { readonly kind: "system" };
-
-export type Sign =
-  | { readonly kind: "manifest" }
-  | { readonly kind: "file"; readonly name: string }
-  | { readonly kind: "section"; readonly file: string; readonly line: RegExp };
-
-export type Look =
-  | { readonly kind: "projectProgram"; readonly command: Command }
-  | {
-      readonly kind: "used";
-      readonly signs: readonly Sign[];
-      readonly orProjectProgram: boolean;
-      readonly command: Command;
-      readonly recipe: Recipe;
-      readonly orElse: readonly (Tool & { readonly command: Command })[];
-    }
-  | {
-      readonly kind: "typescript";
-      readonly configs: readonly string[];
-      readonly package: string;
-      readonly firstLspMajor: number;
-      readonly compiler: Command;
-      readonly nativePreview: Command;
-      readonly server: Installable;
-    }
-  | {
-      readonly kind: "eslint";
-      readonly configs: readonly string[];
-      readonly package: string;
-      readonly server: Installable;
-    };
-
-export type Preset = Tool & {
-  readonly ecosystem: Ecosystem;
-  readonly look: Look;
-  readonly fileTypes: readonly string[];
-};
+export type Preset = DetectedPreset | ListOnlyPreset;
 
 const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 const PYTHON = ["py", "pyi"];
@@ -67,25 +17,25 @@ const STDIO = ["--stdio"];
 const ALWAYS: Formats = { kind: "always" };
 const NEVER: Formats = { kind: "never" };
 const MANIFEST: readonly Sign[] = [{ kind: "manifest" }];
-const NO_OPTIONS = { settings: null, initializationOptions: null } as const;
+const NOTHING: FromProject = { kind: "nothing" };
+const NO_OPTIONS = { settings: null, initializationOptions: null, fromProject: NOTHING } as const;
 
 function pyprojectSection(tool: string): Sign {
-  return {
-    kind: "section",
-    file: "pyproject.toml",
-    line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
-  };
+  return { kind: "section", file: "pyproject.toml", line: tomlTable(`tool.${tool}`) };
 }
 
 type PythonTool = {
   readonly name: string;
+  readonly package: string;
   readonly command: Command;
   readonly signs: readonly Sign[];
   readonly orProjectProgram: boolean;
   readonly formats: Formats;
+  readonly fromProject: FromProject;
 };
 
-function pythonTool({ name, command, signs, orProjectProgram, formats }: PythonTool): Preset {
+function pythonTool(tool: PythonTool): DetectedPreset {
+  const { name, command, signs, orProjectProgram, formats, fromProject } = tool;
   return {
     name,
     ecosystem: "python",
@@ -94,12 +44,14 @@ function pythonTool({ name, command, signs, orProjectProgram, formats }: PythonT
       signs,
       orProjectProgram,
       command,
-      recipe: { kind: "python", package: name },
+      recipe: { kind: "python", package: tool.package },
       orElse: [],
     },
     fileTypes: PYTHON,
     formats,
-    ...NO_OPTIONS,
+    settings: null,
+    initializationOptions: null,
+    fromProject,
   };
 }
 
@@ -107,6 +59,8 @@ const RUST_ANALYZER_OPTIONS = { checkOnSave: false };
 
 const PHPACTOR_RELEASE =
   "https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar";
+
+const DENO_OPTIONS = { enable: true, lint: true };
 
 /** Detection order is spec order: the formatter first, since the first formatting spec formats. */
 export const PRESETS: readonly Preset[] = [
@@ -149,6 +103,7 @@ export const PRESETS: readonly Preset[] = [
     formats: NEVER,
     settings: null,
     initializationOptions: (workspaceUri) => [{ workspaceUri, options: { run: "onType" } }],
+    fromProject: NOTHING,
   },
   {
     name: "TypeScript",
@@ -188,6 +143,7 @@ export const PRESETS: readonly Preset[] = [
     formats: NEVER,
     settings: { validate: "on", run: "onType" },
     initializationOptions: null,
+    fromProject: NOTHING,
   },
   {
     name: "rust-analyzer",
@@ -204,6 +160,7 @@ export const PRESETS: readonly Preset[] = [
     formats: ALWAYS,
     settings: { "rust-analyzer": RUST_ANALYZER_OPTIONS },
     initializationOptions: () => RUST_ANALYZER_OPTIONS,
+    fromProject: NOTHING,
   },
   {
     name: "gopls",
@@ -222,6 +179,7 @@ export const PRESETS: readonly Preset[] = [
   },
   pythonTool({
     name: "ruff",
+    package: "ruff",
     command: { program: "ruff", args: ["server"] },
     signs: [
       { kind: "file", name: "ruff.toml" },
@@ -230,27 +188,34 @@ export const PRESETS: readonly Preset[] = [
     ],
     orProjectProgram: true,
     formats: ALWAYS,
+    fromProject: NOTHING,
   }),
   pythonTool({
     name: "ty",
+    package: "ty",
     command: { program: "ty", args: ["server"] },
     signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
     orProjectProgram: true,
     formats: NEVER,
+    fromProject: NOTHING,
   }),
   pythonTool({
     name: "basedpyright",
+    package: "basedpyright",
     command: { program: "basedpyright-langserver", args: STDIO },
     signs: [pyprojectSection("basedpyright")],
     orProjectProgram: true,
     formats: NEVER,
+    fromProject: NOTHING,
   }),
   pythonTool({
     name: "pyright",
+    package: "pyright",
     command: { program: "pyright-langserver", args: STDIO },
     signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
     orProjectProgram: false,
     formats: NEVER,
+    fromProject: { kind: "venvPython" },
   }),
   {
     name: "Phpactor",
@@ -262,7 +227,7 @@ export const PRESETS: readonly Preset[] = [
       command: { program: "phpactor", args: ["language-server"] },
       recipe: {
         kind: "download",
-        command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
+        command: `curl --create-dirs -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
         needs: "PHP 8.2 or later",
       },
       orElse: [
@@ -275,9 +240,10 @@ export const PRESETS: readonly Preset[] = [
       ],
     },
     fileTypes: ["php"],
-    formats: NEVER,
+    formats: { kind: "withIntegration" },
     settings: null,
     initializationOptions: () => ({ "language_server.enable_trust_check": false }),
+    fromProject: { kind: "integrations", integrations: PHPACTOR_INTEGRATIONS },
   },
   {
     name: "clangd",
@@ -294,4 +260,26 @@ export const PRESETS: readonly Preset[] = [
     formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
     ...NO_OPTIONS,
   },
+  {
+    name: "Deno",
+    ecosystem: null,
+    command: { program: "deno", args: ["lsp"] },
+    fileTypes: ["js", "jsx", "ts", "tsx", "mjs", "mts"],
+    formats: ALWAYS,
+    settings: { deno: DENO_OPTIONS },
+    initializationOptions: () => DENO_OPTIONS,
+    fromProject: NOTHING,
+  },
+  {
+    name: "bash-language-server",
+    ecosystem: null,
+    command: { program: "bash-language-server", args: ["start"] },
+    fileTypes: ["sh", "bash"],
+    formats: ALWAYS,
+    ...NO_OPTIONS,
+  },
 ];
+
+export const DETECTED_PRESETS: readonly DetectedPreset[] = PRESETS.flatMap((preset) =>
+  preset.ecosystem === null ? [] : [preset],
+);

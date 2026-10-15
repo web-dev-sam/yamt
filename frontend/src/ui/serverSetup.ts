@@ -55,31 +55,31 @@ export function parseAddedServer(command: string, fileTypes: string): AddedServe
   return valid ? { command: words, fileTypes: types } : null;
 }
 
-async function look(setup: Setup, host: ServerHost): Promise<boolean> {
+async function look(setup: Setup, host: ServerHost): Promise<string | null> {
   setup.latestLook += 1;
   const ticket = setup.latestLook;
   const paths = setup.files.value.map((file) => file.path);
   try {
     const { root } = await host.context();
     if (root === null) {
-      return false;
+      return null;
     }
     const found = await detect(paths, host, root);
     if (ticket !== setup.latestLook) {
-      return false;
+      return null;
     }
     setup.root.value = root;
     setup.found.value = found;
-    return true;
+    return root;
   } catch (error) {
     log.warn("servers.detect_failed", { ...unexpected(error) });
-    return false;
+    return null;
   }
 }
 
-function addedOf(setup: Setup): readonly ServerSpec[] {
+function addedOf(setup: Setup, root: string): readonly ServerSpec[] {
   const taken = setup.found.value.map((spec) => spec.name);
-  return addedSpecs(setup.settings.value.languageServers.added, taken);
+  return addedSpecs(setup.settings.value.languageServers.added, taken, root);
 }
 
 function storedAnswer(setup: Setup): RepositoryAnswer | null {
@@ -87,27 +87,28 @@ function storedAnswer(setup: Setup): RepositoryAnswer | null {
   return root === null ? null : (setup.settings.value.languageServers.repositories[root] ?? null);
 }
 
-function apply(setup: Setup, answer: RepositoryAnswer | null): void {
-  const specs = [...setup.found.value, ...addedOf(setup)];
+function apply(setup: Setup, root: string, answer: RepositoryAnswer | null): void {
+  const specs = [...setup.found.value, ...addedOf(setup, root)];
   setup.servers.setSpecs(specs, { startOnOpen: answer === "start" });
 }
 
 async function setUp(setup: Setup, host: ServerHost): Promise<void> {
-  if (!(await look(setup, host)) || setup.found.value.length + addedOf(setup).length === 0) {
+  const root = await look(setup, host);
+  if (root === null || setup.found.value.length + addedOf(setup, root).length === 0) {
     return;
   }
   if (storedAnswer(setup) === null) {
     const reply = await setup.asking.ask({
       kind: "servers",
       found: setup.found.value,
-      added: addedOf(setup),
+      added: addedOf(setup, root),
     });
     const given = STORED_REPLIES[reply];
     if (given !== null) {
       await setup.setServerAnswer(given);
     }
   }
-  apply(setup, storedAnswer(setup));
+  apply(setup, root, storedAnswer(setup));
 }
 
 async function startUp(setup: Setup): Promise<void> {
@@ -120,28 +121,34 @@ async function startUp(setup: Setup): Promise<void> {
 
 async function refocus(setup: Setup): Promise<void> {
   await Promise.all([setup.refreshFiles(), setup.loadSettings()]);
-  if (setup.host !== null && setup.started && (await look(setup, setup.host))) {
-    apply(setup, storedAnswer(setup));
+  if (setup.host === null || !setup.started) {
+    return;
+  }
+  const root = await look(setup, setup.host);
+  if (root !== null) {
+    apply(setup, root, storedAnswer(setup));
   }
 }
 
 async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
   const before = storedAnswer(setup);
   await setup.setServerAnswer(given);
-  if (setup.root.value === null) {
+  const root = setup.root.value;
+  if (root === null) {
     return;
   }
   const now = storedAnswer(setup);
   if (before !== "dontStart" && now === "dontStart") {
     setup.servers.haltAll();
   }
-  apply(setup, now);
+  apply(setup, root, now);
 }
 
 async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise<void> {
   await setup.setAddedServers(added);
-  if (setup.root.value !== null) {
-    apply(setup, storedAnswer(setup));
+  const root = setup.root.value;
+  if (root !== null) {
+    apply(setup, root, storedAnswer(setup));
   }
 }
 

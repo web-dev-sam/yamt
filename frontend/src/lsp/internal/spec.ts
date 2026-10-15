@@ -1,11 +1,10 @@
 import type { ProgramFolders } from "../../ipc";
-import { ECOSYSTEMS } from "./ecosystems";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "yarnBerry" | "bun";
 
 export type PythonManager = "uv" | "poetry" | "pdm";
 
-export const PROGRAM_FOLDERS: ProgramFolders = ECOSYSTEMS.node.folders;
+export type SpecNote = { readonly kind: "vueNeedsTypeScript6"; readonly version: string };
 
 export type InstallHint =
   | {
@@ -46,6 +45,8 @@ export type ServerSpec = {
   readonly settings: unknown;
   readonly initializationOptions: unknown;
   readonly install: InstallHint | null;
+  readonly help: InstallHint | null;
+  readonly notes: readonly SpecNote[];
 };
 
 export function extensionOf(path: string): string {

@@ -1,7 +1,16 @@
 import { expect, test } from "vitest";
 
 import type { ProjectFile } from "../../ipc";
-import { ECOSYSTEMS, manifestPaths, projectOf, type Ecosystem, type Files } from "./ecosystems";
+import {
+  ECOSYSTEMS,
+  EVERY_ECOSYSTEM_FOLDERS,
+  fileHolds,
+  manifestPaths,
+  projectOf,
+  tomlTable,
+  type Ecosystem,
+  type Files,
+} from "./ecosystems";
 
 function files(tree: Readonly<Record<string, string | ProjectFile>>): Files {
   return new Map(
@@ -109,4 +118,57 @@ test("program folders per ecosystem", () => {
     },
     clang: { project: [], home: [] },
   });
+});
+
+test("added servers look in every ecosystem's folders, de-duplicated, in table order", () => {
+  expect(EVERY_ECOSYSTEM_FOLDERS).toEqual({
+    project: [
+      "node_modules/.bin",
+      ".venv/bin",
+      ".venv/Scripts",
+      "venv/bin",
+      "venv/Scripts",
+      "vendor/bin",
+    ],
+    home: [
+      ".local/bin",
+      ".cargo/bin",
+      "go/bin",
+      ".config/composer/vendor/bin",
+      ".composer/vendor/bin",
+    ],
+  });
+});
+
+test("a TOML table header: plain, indented or dotted counts; a commented line or a longer name does not", () => {
+  const ruff = tomlTable("tool.ruff");
+
+  expect(
+    ["[tool.ruff]", "  [tool.ruff]", "\t[tool.ruff.lint]", "x = 1\n[tool.ruff]"].map((text) =>
+      ruff.test(text),
+    ),
+  ).toEqual([true, true, true, true]);
+  expect(
+    ["# [tool.ruff]", "[tool.ruffle]", "[toolxruff]", "x = '[tool.ruff]'"].map((text) =>
+      ruff.test(text),
+    ),
+  ).toEqual([false, false, false, false]);
+});
+
+test("rust: an indented [workspace] header counts", () => {
+  const tree = files({
+    "Cargo.toml": '  [workspace]\nmembers = ["core"]\n',
+    "core/Cargo.toml": "",
+  });
+
+  expect(projectOf("rust", "core/src", tree)).toBe("");
+});
+
+test("a pattern holds only in a readable text file", () => {
+  const pattern = /^\[workspace\]/m;
+
+  expect(fileHolds({ kind: "Text", text: "[workspace]" }, pattern)).toBe(true);
+  expect(fileHolds({ kind: "Text", text: "[package]" }, pattern)).toBe(false);
+  expect(fileHolds({ kind: "TooLarge" }, pattern)).toBe(false);
+  expect(fileHolds(undefined, pattern)).toBe(false);
 });

@@ -184,6 +184,8 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
       settings: null,
       initializationOptions: null,
       install: null,
+      help: null,
+      notes: [],
     },
     {
       name: "oxlint",
@@ -195,6 +197,8 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
       settings: null,
       initializationOptions: [{ workspaceUri: "file:///repo/web", options: { run: "onType" } }],
       install: null,
+      help: null,
+      notes: [],
     },
   ]);
 });
@@ -221,6 +225,8 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
       settings: null,
       initializationOptions: null,
       install: null,
+      help: null,
+      notes: [],
     },
   ]);
 });
@@ -362,6 +368,15 @@ test("eslint: config, package and its server found on PATH or in the project", a
       settings: { validate: "on", run: "onType" },
       initializationOptions: null,
       install: null,
+      help: {
+        kind: "node",
+        package: "vscode-langservers-extracted",
+        program: "vscode-eslint-language-server",
+        folder: "",
+        manager: null,
+        reason: { kind: "eslint" },
+      },
+      notes: [],
     },
   ]);
   expect(local).toEqual(onPath);
@@ -491,7 +506,7 @@ const PHPACTOR_HINT: InstallHint = {
   kind: "download",
   program: "phpactor",
   command:
-    "curl -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
+    "curl --create-dirs -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
   needs: "PHP 8.2 or later",
 };
 
@@ -557,6 +572,8 @@ test("rust-analyzer: the workspace's manifest counts, found on PATH, without car
       settings: { "rust-analyzer": { checkOnSave: false } },
       initializationOptions: { checkOnSave: false },
       install: null,
+      help: { kind: "rustup", component: "rust-analyzer", program: "rust-analyzer" },
+      notes: [],
     },
   ]);
   expect(fake.programCalls).toEqual([["rust-analyzer", "rs", RUST_BIN]]);
@@ -603,6 +620,8 @@ test("gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install
       settings: null,
       initializationOptions: null,
       install: null,
+      help: { kind: "go", module: "golang.org/x/tools/gopls@latest", program: "gopls" },
+      notes: [],
     },
   ]);
   expect(installOf(inHome)).toEqual([null]);
@@ -628,6 +647,8 @@ test("ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec", a
       settings: null,
       initializationOptions: null,
       install: null,
+      help: { kind: "python", package: "ruff", program: "ruff", folder: "py", manager: null },
+      notes: [],
     },
   ]);
 });
@@ -754,6 +775,8 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
       settings: null,
       initializationOptions: { "language_server.enable_trust_check": false },
       install: null,
+      help: PHPACTOR_HINT,
+      notes: [],
     },
   ]);
   expect(intelephense).toEqual([
@@ -767,6 +790,8 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
       settings: null,
       initializationOptions: null,
       install: null,
+      help: null,
+      notes: [],
     },
   ]);
   expect(summary(phar)).toEqual(["Phpactor phpactor language-server @php"]);
@@ -804,6 +829,8 @@ test("clangd: formats only with a .clang-format or _clang-format up to the root"
       settings: null,
       initializationOptions: null,
       install: null,
+      help: { kind: "system", program: "clangd" },
+      notes: [],
     },
   ]);
   expect(styled[0]?.formats).toBe(true);
@@ -855,7 +882,344 @@ test("Biome: the project's copy counts and formats; a copy on PATH does not", as
       settings: null,
       initializationOptions: null,
       install: null,
+      help: null,
+      notes: [],
     },
   ]);
   expect(onPath).toEqual([]);
+});
+
+const SCRIPT_TYPES = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+const VUE_PACKAGE = { "web/node_modules/vue/package.json": '{"version":"3.5.0"}' };
+const VUE_PLUGIN = { "node_modules/@vue/typescript-plugin/package.json": "{}" };
+const TS_SERVER_HINT: InstallHint = {
+  kind: "node",
+  package: "typescript-language-server",
+  program: "typescript-language-server",
+  folder: "web",
+  manager: "pnpm",
+  reason: { kind: "typescript", version: "5.9.3" },
+};
+
+function vueProject(version: string): Tree {
+  return { "web/package.json": "{}", "web/pnpm-lock.yaml": "", ...typescriptAt("web/", version) };
+}
+
+test("Vue with the plugin up the chain: the TypeScript server also serves vue and loads the plugin from the project folder", async () => {
+  const tree = { ...vueProject("5.9.3"), ...VUE_PACKAGE, ...VUE_PLUGIN };
+
+  const specs = await detect(
+    ["web/src/App.vue"],
+    lookups(tree, ["typescript-language-server"]),
+    ROOT,
+  );
+
+  expect(specs).toEqual([
+    {
+      name: "TypeScript",
+      command: { program: "typescript-language-server", args: ["--stdio"] },
+      project: "web",
+      folders: NODE_BIN,
+      fileTypes: [...SCRIPT_TYPES, "vue"],
+      formats: false,
+      settings: null,
+      initializationOptions: {
+        plugins: [{ name: "@vue/typescript-plugin", location: "/repo/web", languages: ["vue"] }],
+      },
+      install: null,
+      help: TS_SERVER_HINT,
+      notes: [],
+    },
+  ]);
+});
+
+test("Vue: the plugin's location is the project folder in the root's own separators", async () => {
+  const tree = { ...vueProject("6.0.0"), ...VUE_PACKAGE, ...VUE_PLUGIN };
+
+  const windows = await detect(
+    ["web/src/App.vue"],
+    lookups(tree, ["typescript-language-server"]),
+    "C:\\repo",
+  );
+  const atRoot = await detect(
+    ["src/App.vue"],
+    lookups(
+      {
+        "package.json": "{}",
+        ...typescriptAt("", "6.0.0"),
+        "node_modules/vue/package.json": "{}",
+        ...VUE_PLUGIN,
+      },
+      ["typescript-language-server"],
+    ),
+    ROOT,
+  );
+
+  expect(windows[0]?.initializationOptions).toEqual({
+    plugins: [{ name: "@vue/typescript-plugin", location: "C:\\repo\\web", languages: ["vue"] }],
+  });
+  expect(atRoot[0]?.initializationOptions).toEqual({
+    plugins: [{ name: "@vue/typescript-plugin", location: "/repo", languages: ["vue"] }],
+  });
+});
+
+test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spec with the plugin's hint", async () => {
+  const tree = { ...vueProject("5.9.3"), ...VUE_PACKAGE };
+
+  const specs = await detect(
+    ["web/src/App.vue"],
+    lookups(tree, ["typescript-language-server"]),
+    ROOT,
+  );
+
+  expect(specs).toEqual([
+    expect.objectContaining({
+      name: "TypeScript",
+      fileTypes: SCRIPT_TYPES,
+      initializationOptions: null,
+      install: null,
+      notes: [],
+    }),
+    {
+      name: "Vue",
+      command: { program: "typescript-language-server", args: ["--stdio"] },
+      project: "web",
+      folders: NODE_BIN,
+      fileTypes: ["vue"],
+      formats: false,
+      settings: null,
+      initializationOptions: null,
+      install: {
+        kind: "node",
+        package: "@vue/typescript-plugin",
+        program: "@vue/typescript-plugin",
+        folder: "web",
+        manager: "pnpm",
+        reason: { kind: "vue" },
+      },
+      help: null,
+      notes: [],
+    },
+  ]);
+});
+
+test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the project's version", async () => {
+  const seven = { ...vueProject("7.0.0"), ...VUE_PACKAGE, ...VUE_PLUGIN };
+  const preview = { ...vueProject("5.9.3"), ...VUE_PACKAGE, ...bins("web/", "tsgo") };
+
+  const tsc = await detect(["web/src/App.vue"], lookups(seven), ROOT);
+  const tsgo = await detect(["web/src/App.vue"], lookups(preview), ROOT);
+
+  expect(tsc).toEqual([
+    expect.objectContaining({
+      command: { program: "tsc", args: ["--lsp", "--stdio"] },
+      fileTypes: SCRIPT_TYPES,
+      initializationOptions: null,
+      notes: [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }],
+    }),
+  ]);
+  expect(tsgo).toEqual([
+    expect.objectContaining({
+      command: { program: "tsgo", args: ["--lsp", "--stdio"] },
+      notes: [{ kind: "vueNeedsTypeScript6", version: "5.9.3" }],
+    }),
+  ]);
+});
+
+test("Vue: without the vue package nothing changes, plugin or not", async () => {
+  const plain = vueProject("5.9.3");
+  const pluginOnly = { ...plain, ...VUE_PLUGIN };
+  const seven = { ...vueProject("7.0.0"), ...VUE_PLUGIN };
+  const server = ["typescript-language-server"];
+
+  for (const tree of [plain, pluginOnly]) {
+    expect(await detect(["web/a.ts"], lookups(tree, server), ROOT)).toEqual([
+      expect.objectContaining({ fileTypes: SCRIPT_TYPES, initializationOptions: null, notes: [] }),
+    ]);
+  }
+  expect((await detect(["web/a.ts"], lookups(seven), ROOT))[0]?.notes).toEqual([]);
+});
+
+test("help: a found server carries the hint it would have had missing; a missing one only its install", async () => {
+  const tree = vueProject("5.9.3");
+
+  const [found] = await detect(["web/a.ts"], lookups(tree, ["typescript-language-server"]), ROOT);
+  const [missing] = await detect(["web/a.ts"], lookups(tree), ROOT);
+  const [orElse] = await detect(
+    ["a.php"],
+    lookups({ "composer.json": "{}" }, ["intelephense"]),
+    ROOT,
+  );
+  const [projectProgram] = await detect(
+    ["web/a.ts"],
+    lookups({ ...tree, ...bins("web/", "oxlint") }),
+    ROOT,
+  );
+
+  expect([found?.install, found?.help]).toEqual([null, TS_SERVER_HINT]);
+  expect([missing?.install, missing?.help]).toEqual([TS_SERVER_HINT, null]);
+  expect(orElse?.help).toBeNull();
+  expect(projectProgram?.help).toBeNull();
+});
+
+const PHP_PROJECT = { "php/composer.json": "{}" };
+
+async function phpactorIn(tree: Tree, servers = ["phpactor"]): Promise<ServerSpec | undefined> {
+  return (
+    await detect(["php/src/Stats.php"], lookups({ ...PHP_PROJECT, ...tree }, servers), ROOT)
+  )[0];
+}
+
+test.each<[string, string, string[], boolean]>([
+  [
+    "language_server_phpstan.enabled",
+    "vendor/bin/phpstan",
+    ["phpstan.neon", "phpstan.neon.dist", "phpstan.dist.neon"],
+    false,
+  ],
+  ["language_server_psalm.enabled", "vendor/bin/psalm", ["psalm.xml", "psalm.xml.dist"], false],
+  [
+    "language_server_php_cs_fixer.enabled",
+    "vendor/bin/php-cs-fixer",
+    [".php-cs-fixer.php", ".php-cs-fixer.dist.php"],
+    true,
+  ],
+  [
+    "php_code_sniffer.enabled",
+    "vendor/bin/phpcs",
+    [".phpcs.xml", "phpcs.xml", ".phpcs.xml.dist", "phpcs.xml.dist"],
+    true,
+  ],
+])(
+  "Phpactor: %s is on only with %s and one of %j in the project; formats: %s",
+  async (key, bin, configs, formats) => {
+    for (const config of configs) {
+      const spec = await phpactorIn({ [`php/${bin}`]: "", [`php/${config}`]: "" });
+      expect(spec?.initializationOptions).toEqual({
+        "language_server.enable_trust_check": false,
+        [key]: true,
+      });
+      expect(spec?.formats).toBe(formats);
+    }
+    const programOnly = await phpactorIn({ [`php/${bin}`]: "" });
+    const configOnly = await phpactorIn({ [`php/${configs[0] ?? ""}`]: "" });
+    const programAbove = await phpactorIn({ [bin]: "", [`php/${configs[0] ?? ""}`]: "" });
+    const configAbove = await phpactorIn({ [`php/${bin}`]: "", [configs[0] ?? ""]: "" });
+    for (const off of [programOnly, configOnly, programAbove, configAbove]) {
+      expect([off?.initializationOptions, off?.formats]).toEqual([
+        { "language_server.enable_trust_check": false },
+        false,
+      ]);
+    }
+  },
+);
+
+test("Phpactor: every integration at once; Intelephense never gets them", async () => {
+  const all = {
+    "php/vendor/bin/phpstan": "",
+    "php/phpstan.neon": "",
+    "php/vendor/bin/psalm": "",
+    "php/psalm.xml": "",
+    "php/vendor/bin/phpcs": "",
+    "php/phpcs.xml.dist": "",
+  };
+
+  const phpactor = await phpactorIn(all);
+  const intelephense = await phpactorIn(all, ["intelephense"]);
+
+  expect(phpactor?.initializationOptions).toEqual({
+    "language_server.enable_trust_check": false,
+    "language_server_phpstan.enabled": true,
+    "language_server_psalm.enabled": true,
+    "php_code_sniffer.enabled": true,
+  });
+  expect(phpactor?.formats).toBe(true);
+  expect([intelephense?.name, intelephense?.initializationOptions, intelephense?.formats]).toEqual([
+    "Intelephense",
+    null,
+    false,
+  ]);
+});
+
+test("pyright: the project venv's Python becomes pythonPath, from .venv or venv; none without one", async () => {
+  const tree = { "py/pyproject.toml": "[tool.pyright]\n" };
+  const server = ["pyright-langserver"];
+
+  const [dotVenv] = await detect(
+    ["py/a.py"],
+    lookups({ ...tree, "py/.venv/bin/python": "" }, server),
+    ROOT,
+  );
+  const [venv] = await detect(
+    ["py/a.py"],
+    lookups({ ...tree, "py/venv/Scripts/python": "" }, server),
+    ROOT,
+  );
+  const [onPath] = await detect(["py/a.py"], lookups(tree, [...server, "python"]), ROOT);
+  const [ruff] = await detect(
+    ["py/a.py"],
+    lookups({ "py/pyproject.toml": "[tool.ruff]\n", "py/.venv/bin/python": "" }, ["ruff"]),
+    ROOT,
+  );
+
+  expect(dotVenv?.settings).toEqual({ python: { pythonPath: "/repo/py/.venv/bin/python" } });
+  expect(venv?.settings).toEqual({ python: { pythonPath: "/repo/py/venv/Scripts/python" } });
+  expect(onPath?.settings).toBeNull();
+  expect(ruff?.settings).toBeNull();
+});
+
+test("reads: a node-only project reads its configs, packages and lock files, nothing of other ecosystems", async () => {
+  const fake = lookups({ "web/package.json": "{}" });
+
+  await detect(["web/a.ts"], fake, ROOT);
+
+  const up = [
+    "node_modules/typescript/package.json",
+    "node_modules/vue/package.json",
+    "node_modules/@vue/typescript-plugin/package.json",
+    "node_modules/eslint/package.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "package-lock.json",
+  ];
+  expect(fake.fileCalls[1]).toEqual([
+    ...[
+      "tsconfig.json",
+      "jsconfig.json",
+      ...["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `eslint.config.${ext}`),
+      ...["", ".js", ".cjs", ".json", ".yaml", ".yml"].map((ext) => `.eslintrc${ext}`),
+      "package.json",
+    ].map((name) => `web/${name}`),
+    ...up.map((name) => `web/${name}`),
+    ...up,
+  ]);
+});
+
+test("reads: a rust-only project reads nothing beyond its manifests; a php project reads its tools", async () => {
+  const rust = lookups({ "Cargo.toml": "" }, ["rust-analyzer"]);
+  const php = lookups({ "composer.json": "" }, ["phpactor"]);
+
+  await detect(["src/lib.rs"], rust, ROOT);
+  await detect(["a.php"], php, ROOT);
+
+  expect(rust.fileCalls).toEqual([["src/Cargo.toml", "Cargo.toml"], []]);
+  expect(php.fileCalls[1]).toEqual([
+    "vendor/bin/phpstan",
+    "phpstan.neon",
+    "phpstan.neon.dist",
+    "phpstan.dist.neon",
+    "vendor/bin/psalm",
+    "psalm.xml",
+    "psalm.xml.dist",
+    "vendor/bin/php-cs-fixer",
+    ".php-cs-fixer.php",
+    ".php-cs-fixer.dist.php",
+    "vendor/bin/phpcs",
+    ".phpcs.xml",
+    "phpcs.xml",
+    ".phpcs.xml.dist",
+    "phpcs.xml.dist",
+  ]);
 });

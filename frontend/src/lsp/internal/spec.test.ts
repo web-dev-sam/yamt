@@ -13,6 +13,8 @@ const SPEC: ServerSpec = {
   settings: null,
   initializationOptions: null,
   install: null,
+  help: null,
+  notes: [],
 };
 
 test("the extension is the last dotted part of the file name, lower case", () => {

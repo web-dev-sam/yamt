@@ -1,5 +1,13 @@
 import type { ProgramFound, ProjectFile, ServerHost } from "../../ipc";
-import { ECOSYSTEMS, foldersUp, joined, present, type Ecosystem, type Files } from "./ecosystems";
+import {
+  ECOSYSTEMS,
+  foldersUp,
+  joined,
+  PACKAGE_JSON,
+  present,
+  type Ecosystem,
+  type Files,
+} from "./ecosystems";
 import { sectionOf } from "./json";
 
 export type ProjectLookups = Pick<ServerHost, "findProgram" | "projectFiles">;
@@ -10,6 +18,10 @@ export type Project = {
   readonly files: Files;
   readonly lookups: ProjectLookups;
 };
+
+export type Place = Pick<Project, "folder" | "files">;
+
+export type Wanted = { readonly here: readonly string[]; readonly up: readonly string[] };
 
 export async function readFiles(lookups: ProjectLookups, paths: readonly string[]): Promise<Files> {
   const unique = [...new Set(paths)];
@@ -44,21 +56,32 @@ export async function foundAnywhere(project: Project, program: string): Promise<
   return (await findProgram(project, program)).kind === "Found";
 }
 
-export async function inProject(project: Project, program: string): Promise<boolean> {
+export async function projectProgram(project: Project, program: string): Promise<string | null> {
   const answer = await findProgram(project, program);
-  return answer.kind === "Found" && answer.place === "Project";
+  return answer.kind === "Found" && answer.place === "Project" ? answer.path : null;
 }
 
-export function nearest<Name extends string>(
-  project: Project,
-  names: readonly Name[],
-): Name | null {
+export async function inProject(project: Project, program: string): Promise<boolean> {
+  return (await projectProgram(project, program)) !== null;
+}
+
+export function nearest<Name extends string>(project: Place, names: readonly Name[]): Name | null {
   const held = foldersUp(project.folder).flatMap((at) =>
     names.filter((name) => present(project.files.get(joined(at, name)))),
   );
   return held[0] ?? null;
 }
 
-export function hasConfig(project: Project, configs: readonly string[]): boolean {
+export function hasConfig(project: Place, configs: readonly string[]): boolean {
   return configs.some((config) => present(project.files.get(joined(project.folder, config))));
+}
+
+export function modulePackage(name: string): string {
+  return `node_modules/${name}/${PACKAGE_JSON}`;
+}
+
+export function nearestPackage(project: Place, name: string): ProjectFile | undefined {
+  return foldersUp(project.folder)
+    .map((at) => project.files.get(joined(at, modulePackage(name))))
+    .find(present);
 }

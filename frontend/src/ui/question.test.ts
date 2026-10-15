@@ -99,6 +99,8 @@ function spec(name: string, project: string, installed = true): ServerSpec {
           manager: "pnpm",
           reason: { kind: "typescript", version: "5.9.3" },
         },
+    help: null,
+    notes: [],
   };
 }
 

@@ -63,6 +63,8 @@ function spec(name: string, project: string): ServerSpec {
     settings: null,
     initializationOptions: null,
     install: null,
+    help: null,
+    notes: [],
   };
 }
 

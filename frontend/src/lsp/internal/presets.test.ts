@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 
-import { PRESETS, type Look } from "./presets";
+import { DETECTED_PRESETS, PRESETS, type DetectedPreset } from "./presets";
+import type { Look } from "./tool";
 
-function preset(name: string): (typeof PRESETS)[number] {
-  const found = PRESETS.find((candidate) => candidate.name === name);
+function preset(name: string): DetectedPreset {
+  const found = DETECTED_PRESETS.find((candidate) => candidate.name === name);
   if (found === undefined) {
     throw new Error(`no preset ${name}`);
   }
@@ -35,6 +36,21 @@ test("presets run formatters first, in the table's order, each in its ecosystem"
     "pyright:python",
     "Phpactor:php",
     "clangd:clang",
+    "Deno:null",
+    "bash-language-server:null",
+  ]);
+  expect(DETECTED_PRESETS.map(({ name }) => name)).toEqual(
+    PRESETS.slice(0, -2).map(({ name }) => name),
+  );
+  expect(PRESETS.slice(-2)).toEqual([
+    expect.objectContaining({
+      command: { program: "deno", args: ["lsp"] },
+      fileTypes: ["js", "jsx", "ts", "tsx", "mjs", "mts"],
+    }),
+    expect.objectContaining({
+      command: { program: "bash-language-server", args: ["start"] },
+      fileTypes: ["sh", "bash"],
+    }),
   ]);
   expect(PRESETS.map(({ name, formats }) => [name, formats.kind])).toEqual([
     ["oxfmt", "always"],
@@ -48,8 +64,10 @@ test("presets run formatters first, in the table's order, each in its ecosystem"
     ["ty", "never"],
     ["basedpyright", "never"],
     ["pyright", "never"],
-    ["Phpactor", "never"],
+    ["Phpactor", "withIntegration"],
     ["clangd", "withConfig"],
+    ["Deno", "always"],
+    ["bash-language-server", "always"],
   ]);
   expect(preset("clangd").formats).toEqual({
     kind: "withConfig",
@@ -91,10 +109,24 @@ test("settings and start options: oxlint on type, eslint on type, rust-analyzer 
     "oxlint",
     "rust-analyzer",
     "Phpactor",
+    "Deno",
   ]);
   expect(PRESETS.filter((p) => p.settings !== null).map(({ name }) => name)).toEqual([
     "eslint",
     "rust-analyzer",
+    "Deno",
+  ]);
+  const deno = PRESETS.find(({ name }) => name === "Deno");
+  expect(deno?.initializationOptions?.("file:///repo")).toEqual({ enable: true, lint: true });
+  expect(deno?.settings).toEqual({ deno: { enable: true, lint: true } });
+  expect(
+    PRESETS.filter((p) => p.fromProject.kind !== "nothing").map((p) => [
+      p.name,
+      p.fromProject.kind,
+    ]),
+  ).toEqual([
+    ["pyright", "venvPython"],
+    ["Phpactor", "integrations"],
   ]);
 });
 
@@ -127,6 +159,7 @@ test("commands: Biome's proxy, the Python servers, Phpactor then Intelephense", 
       formats: { kind: "never" },
       settings: null,
       initializationOptions: null,
+      fromProject: { kind: "nothing" },
     },
   ]);
 });
@@ -146,7 +179,7 @@ test("install recipes per ecosystem", () => {
   expect(usedLook("Phpactor").recipe).toEqual({
     kind: "download",
     command:
-      "curl -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
+      "curl --create-dirs -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
     needs: "PHP 8.2 or later",
   });
   expect(usedLook("clangd").recipe).toEqual({ kind: "system" });

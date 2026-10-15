@@ -276,6 +276,8 @@ test("a server reads as its name, marked when it is not installed", () => {
     initializationOptions: null,
     formats: false,
     install: null,
+    help: null,
+    notes: [],
   };
 
   expect(serverLabel(installed)).toBe("TypeScript");

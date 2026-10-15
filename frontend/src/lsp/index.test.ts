@@ -14,6 +14,9 @@ import {
   LanguageServers,
   addedSpecs,
   isDocVersion,
+  presetChoices,
+  type PresetChoice,
+  type SpecNote,
   type DocVersion,
   type FailReason,
   type FormatRefusal,
@@ -274,6 +277,8 @@ function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
     settings: null,
     initializationOptions: null,
     install: null,
+    help: null,
+    notes: [],
     ...overrides,
   };
 }
@@ -394,8 +399,10 @@ test("rule 2: a spec starts when the first document it serves opens", async () =
   });
 });
 
-test("an added server's start command looks in node_modules/.bin like a detected one", async () => {
-  const languageServers = servers([...addedSpecs([{ command: ["pylsp"], fileTypes: ["ts"] }], [])]);
+test("an added server's start command looks in every ecosystem's folders", async () => {
+  const languageServers = servers([
+    ...addedSpecs([{ command: ["pylsp"], fileTypes: ["ts"] }], [], "/repo"),
+  ]);
   languageServers.open(new FakeDoc("a.ts", "x"));
   await settle();
 
@@ -403,7 +410,23 @@ test("an added server's start command looks in node_modules/.bin like a detected
     program: "pylsp",
     args: [],
     project: "",
-    folders: { project: ["node_modules/.bin"], home: [] },
+    folders: {
+      project: [
+        "node_modules/.bin",
+        ".venv/bin",
+        ".venv/Scripts",
+        "venv/bin",
+        "venv/Scripts",
+        "vendor/bin",
+      ],
+      home: [
+        ".local/bin",
+        ".cargo/bin",
+        "go/bin",
+        ".config/composer/vendor/bin",
+        ".composer/vendor/bin",
+      ],
+    },
   });
 });
 
@@ -657,6 +680,62 @@ test("rule 3: a changed spec is stopped and started again; a removed one is stop
   expect(
     doc.shown.filter((shown) => shown.server === "oxlint").map((s) => s.problems.length),
   ).toEqual([1, 0]);
+});
+
+test("rule 3: once Vue's plugin is installed, the next detection drops Vue and restarts TypeScript serving .vue", async () => {
+  const vueHint: InstallHint = {
+    ...INSTALL_HINT,
+    package: "@vue/typescript-plugin",
+    reason: { kind: "vue" },
+  };
+  const typescript = spec("TypeScript");
+  const languageServers = servers([
+    typescript,
+    spec("Vue", { fileTypes: ["vue"], install: vueHint }),
+  ]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  languageServers.open(new FakeDoc("App.vue", "x"));
+  await settle();
+  const before = host.only("TypeScript");
+
+  const plugins = {
+    plugins: [{ name: "@vue/typescript-plugin", location: "/repo", languages: ["vue"] }],
+  };
+  languageServers.setSpecs(
+    [spec("TypeScript", { fileTypes: ["ts", "vue"], initializationOptions: plugins })],
+    { startOnOpen: true },
+  );
+  await settle();
+
+  expect(host.stopped).toEqual([before.run]);
+  expect(host.only("TypeScript")).not.toBe(before);
+  expect(languageServers.views().map((view) => [view.name, view.state.kind])).toEqual([
+    ["TypeScript", "running"],
+  ]);
+  expect(languageServers.serving("App.vue")).toBe(true);
+});
+
+test("a spec's notes are part of it: a TypeScript 7 spec gaining the Vue note is a changed spec", async () => {
+  const note: SpecNote = { kind: "vueNeedsTypeScript6", version: "7.0.0" };
+  const languageServers = servers([spec("TypeScript")]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+  const before = host.only("TypeScript");
+
+  languageServers.setSpecs([spec("TypeScript", { notes: [note] })], { startOnOpen: true });
+  await settle();
+
+  expect(host.stopped).toEqual([before.run]);
+});
+
+test("presetChoices is the public preset list for Settings", () => {
+  const first: PresetChoice | undefined = presetChoices()[0];
+
+  expect(first).toEqual({
+    name: "oxfmt",
+    command: ["oxfmt", "--lsp"],
+    fileTypes: expect.arrayContaining(["ts", "vue"]),
+  });
 });
 
 test("rule 4: initialize carries the project, capabilities and options; then initialized and configuration", async () => {
