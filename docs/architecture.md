@@ -740,8 +740,9 @@ export class LanguageServers {
   views(): readonly ServerView[]; log(name): readonly LogLine[]; // last 2,000 lines
   onChange(listener): () => void; serving(path): boolean; open(doc: ResultDocument): OpenDocument; destroy(): Promise<void>;
 }
-export function detect(paths, lookups, root): Promise<readonly ServerSpec[]>; // lookups: the host's findProgram/projectFiles; oxlint, oxfmt, TypeScript, eslint per project; install hints
-export function addedSpecs(added, taken): readonly ServerSpec[];
+export function detect(paths, lookups, root): Promise<readonly ServerSpec[]>; // lookups: the host's findProgram/projectFiles; every preset per project of its ecosystem; install hints
+export function addedSpecs(added, taken, root): readonly ServerSpec[]; // a hand-added server matching a preset's command gets its rules
+export function presetChoices(): readonly PresetChoice[]; // Settings' "From the list": each preset's server command and file types
 ```
 
 - **One server** (`internal/server.ts`): its run is one sum type (`run.ts`: idle, launching, starting, running,
@@ -756,11 +757,21 @@ export function addedSpecs(added, taken): readonly ServerSpec[];
 - **Formatting** (`formatting.ts`): the first running spec that may format and offers it; 5 s in total; the edits are
   applied to the text sent (`edits.ts`) and handed back as `{ sent, result }` — the editor turns them into its own line
   diff (`editor/internal/format.ts`).
-- **Detection** (`presets.ts`, `detect.ts`, `packageManager.ts`, `added.ts`): pure over the host's `findProgram` and
-  `projectFiles`; a tool whose server is missing gets an `InstallHint` (package, program, project folder, the
-  project's package manager from `packageManager` or the nearest lock file).
+- **Detection** (plan §2 #72; pure over the host's `findProgram` and `projectFiles`): `ecosystems.ts` is the one table of
+  ecosystems (node, python, rust, go, php, clang) — each one's project rule (the nearest manifest; a Cargo workspace, a
+  `go.work`, `build/compile_commands.json`) and its `ProgramFolders` (`node_modules/.bin`; `.venv`/`venv`; `vendor/bin`;
+  home `go/bin`, `.cargo/bin`, `.local/bin`, Composer's) — and the only folder walking; a path joins only the
+  ecosystems with a preset serving its file type. `presets.ts` is the one tool table (formatters first; Deno and
+  bash-language-server list-only) in the vocabulary of `tool.ts`; `candidates.ts` names every file detection reads;
+  `project.ts` answers per project (files, program lookups, nearest file); `install.ts` builds the `InstallHint` sum
+  (node with its package manager, python with uv/Poetry/PDM from the lock file, rustup, go, download, system);
+  `integrations.ts` turns Phpactor's PHPStan, Psalm, PHP-CS-Fixer and phpcs on from the project's own tool and config;
+  `vue.ts` adds `@vue/typescript-plugin` to a TypeScript 5/6 server, or a "Vue" spec to install it, or a note for
+  TypeScript 7; `choices.ts` lists each preset's server for Settings; `added.ts` matches hand-added servers to presets
+  and looks for their programs in every ecosystem's folders. A found preset server carries `help`, its install hint,
+  for when it exits while starting.
 - **Rust side**: `yamt-lsp-host` (§3.5) starts the programs, frames `Content-Length` messages and stops them; it never
-  parses a message and never learns a server's name.
+  parses a message and never learns a server's or an ecosystem's name: the window passes the folders to search.
 
 ### 5.4 `ui/` — Vue 3
 
