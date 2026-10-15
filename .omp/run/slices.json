@@ -7,5 +7,8 @@
       "frontend/src/ui/ServerMenu.vue",
       "frontend/src/ui/**/*.test.ts"
     ]
+  },
+  "PresetsSmokeRepoR1": {
+    "owned": ["scripts/lsp-repo.sh", "scripts/lsp-servers.sh", ".vscode/tasks.json"]
   }
 }

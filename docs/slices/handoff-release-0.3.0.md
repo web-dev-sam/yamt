@@ -34,9 +34,13 @@ The owner runs this. Publishing to GitHub is the owner's action (the safety hook
    ~/Downloads/yamt_0.3.0_amd64.AppImage
    ```
 
-   Expect 7 files. For the language servers, run the VS Code task "lsp: new conflict project", then
-   `cd /tmp/yamt-lsp-project && ~/Downloads/yamt_0.3.0_amd64.AppImage`. Expect oxfmt, oxlint, TypeScript and ruff
-   running, problems underlined in `web/src/math.ts` and `api/stats.py`, and Ctrl+S formatting each.
+   Expect 7 files. For the language servers: `rm -rf /tmp/yamt-lsp-project && scripts/lsp-repo.sh --servers
+   /tmp/yamt-lsp-project` (the smoke repository has grown a project per language since 0.3.0; 0.3.0 detects only the
+   `web/` tools), then `cd /tmp/yamt-lsp-project && PATH="$(~/Projects/yamt/scripts/lsp-servers.sh --path):$PATH"
+   ~/Downloads/yamt_0.3.0_amd64.AppImage`. Expect oxfmt, oxlint and TypeScript running, problems underlined in
+   `web/src/math.ts`, and Ctrl+S formatting it. For ruff, add `py/.venv/bin/ruff server` with file types `py, pyi` in
+   Settings → Language servers (0.3.0 has no ruff preset): problems in `py/api/stats.py`, Ctrl+S formats it. If an older
+   run added `.venv/bin/ruff server` there, remove it.
 
 5. **Publish** the draft.
 
