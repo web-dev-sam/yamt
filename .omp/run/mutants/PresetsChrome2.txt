@@ -1,0 +1,685 @@
+mutants: no Rust changes since 0e38d26
+[32m13:04:05 (515641) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m13:04:05 (515641) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m13:04:05 (515641) INFO ProjectReader[39m Found 4 of 446 file(s) to be mutated.
+[32m13:04:05 (515641) INFO Instrumenter[39m Instrumented 4 source file(s) with 512 mutant(s)
+[32m13:04:05 (515641) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m13:04:06 (515641) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m13:04:12 (515641) INFO DryRunExecutor[39m Initial test run succeeded. Ran 332 tests in 5 seconds (net 3149.394182999994 ms, overhead 2822.605817000006 ms).
+
+All tests
+  editor/internal
+    problems.test.ts
+      ✘ rule 2: positions are read on the version's own text and mapped through every edit made since (covered 0)
+      ✘ rule 2: a character past the line ends at the line's end, a line past the text at its end (covered 0)
+      ✘ rule 2: a problem whose text was deleted since its version is not shown (covered 0)
+      ✘ rule 2: answers for a version never taken or forgotten are dropped; a second answer for the same version replaces the first (covered 0)
+      ✘ rule 2: an answer that changes nothing shown sets no diagnostics, so an open problem tooltip stays (covered 0)
+      ✘ rule 2: a version stays answerable until every server that answered is past it (covered 0)
+      ✘ rule 2: with no answers at all only the newest 32 versions are kept (covered 0)
+      ✘ rule 2: two servers' problems are shown together, and [] clears only that server's (covered 0)
+      ✘ rule 4: counts are errors, warnings, and info with hints as other (covered 0)
+    serverDoc.test.ts
+      ✘ rule 1: an editable Result is opened under its path, says changed on each edit only, and closes once (covered 0)
+      ✘ rule 1: a read-only Result, or no servers, opens nothing (covered 0)
+      ✘ rule 2: take gives the Result's text with its own line breaks (covered 0)
+      ✘ rule 2: problems show in the middle pane only (covered 0)
+      ✘ rule 4: counts go out when they change, not for an edit that leaves them (covered 0)
+      ✘ rule 4: a closed Result tells no one about later counts (covered 0)
+      ✘ rule 5: a second format while one runs returns the same promise; the next call asks again (covered 0)
+  lsp/index.test.ts
+    ✓ rule 1: a spec serves a path by its extension and its project folder (killed 40)
+    ✓ rule 1: serving(path) is true only while a running server serves the path (killed 18)
+    ~ rule 2: a spec starts when the first document it serves opens (covered 74)
+    ~ an added server's start command looks in every ecosystem's folders (covered 71)
+    ~ rule 2: a document already open at setSpecs starts the spec (covered 71)
+    ✓ rule 2: startOnOpen false stays stopped until start(name) (killed 4)
+    ✓ rule 2: a spec with install is notInstalled and never started (killed 2)
+    ✓ rule 2: a user stop survives setSpecs, even with startOnOpen, until start (killed 3)
+    ✓ haltAll stops every run without a user stop; Start on open starts them again (killed 5)
+    ✓ haltAll shows a crashed server as stopped and tells onChange listeners (killed 7)
+    ~ haltAll leaves startOnOpen as it was and starts nothing until a document opens (covered 85)
+    ~ a Start on open right after haltAll, while the old run still stops, starts a new run (covered 80)
+    ~ a server the user stopped stays stopped after haltAll and a Start on open (covered 93)
+    ✓ destroy waits for runs halted by haltAll (killed 5)
+    ~ rule 9: stop sends didClose, shutdown, exit, then host.stop, and waits for Exited (covered 81)
+    ~ rule 9: a shutdown without an answer waits 2 s, then exit and host.stop (covered 81)
+    ✓ rule 3: setSpecs keeps an unchanged spec's run and starts a newly installed one (killed 3)
+    ✓ rule 3: a changed spec is stopped and started again; a removed one is stopped (killed 1)
+    ~ rule 3: once Vue's plugin is installed, the next detection drops Vue and restarts TypeScript serving .vue (covered 98)
+    ~ a spec's notes are part of it: a TypeScript 7 spec gaining the Vue note is a changed spec (covered 84)
+    ✘ presetChoices is the public preset list for Settings (covered 0)
+    ✓ rule 4: initialize carries the project, capabilities and options; then initialized and configuration (killed 3)
+    ~ rule 4: initialize without initializationOptions omits them; the root folder is named after the repository (covered 72)
+    ~ rule 4: no answer to initialize within 30 s fails timedOut and stops the run (covered 79)
+    ✓ rule 4: an error reply to initialize fails initializeFailed (killed 4)
+    ~ rule 4: a malformed initialize result fails initializeFailed (covered 78)
+    ✓ rule 4: start replies map to failed reasons (killed 17)
+    ~ rule 4: a repository path that is not text fails every start (covered 78)
+    ✓ rule 5: sync sends the full text 300 ms after the last change, with rising versions (killed 9)
+    ✓ rule 5: one take serves every server; close sends didClose and shows no more problems (killed 4)
+    ✓ rule 5: changes while no server has the document open are taken at the next open (killed 1)
+    ~ rule 6: pushed problems with and without a version land in one slot (covered 79)
+    ~ rule 6: severities map 1-4 to error, warning, info, hint; none means error (covered 71)
+    ~ rule 6: pulled problems: after open and every sync, previousResultId sent, unchanged keeps items (covered 78)
+    ~ rule 6: a pull answered for an older version is pulled again; one pull in flight per document (covered 78)
+    ~ rule 6: a late pull never replaces a newer push, nor a late push a newer pull (covered 79)
+    ~ rule 6: a sync of one document pulls every document on that server (covered 78)
+    ~ rule 6: workspace/diagnostic/refresh is answered null, then pulled again (covered 71)
+    ~ rule 6: a failed or malformed pull is logged and shows nothing (covered 72)
+    ~ rule 6: problems are cleared on stop, crash and removal (covered 86)
+    ~ rule 7: server requests are answered from the table, unknown ones -32601 and logged (covered 72)
+    ~ rule 7: log and show messages go to the log; progress and telemetry are dropped (covered 72)
+    ~ rule 11: a malformed message is logged and dropped (covered 75)
+    ✓ rule 8: the first formats spec whose server offers formatting formats; edits use UTF-16 positions (killed 3)
+    ~ rule 8: no edits, or edits that change nothing, are unchanged (covered 74)
+    ~ rule 8: a formatter still starting is waited for (covered 74)
+    ~ rule 8: 5 s in total, including the wait for a starting server, then timedOut (covered 72)
+    ~ rule 8: a formatting request without an answer times out at 5 s total and is cancelled (covered 74)
+    ✓ rule 8: noFormatter when no spec formats the document, the document is closed, or no host (killed 3)
+    ~ rule 8: a running server that does not offer formatting is skipped (covered 74)
+    ~ rule 8: a formats spec that is stopped, crashed or failed is notRunning (covered 73)
+    ~ rule 8: an error reply or overlapping edits are failed (covered 74)
+    ✓ rule 9: an exit yamt did not ask for is crashed{code}; pending requests fail; it stays crashed (killed 2)
+    ~ rule 9: restart of a running server stops it and starts a new run (covered 81)
+    ~ rule 9: a stop before the host replied stops the run once it starts (covered 79)
+    ~ rule 9: a stop before the host refused the start ends stopped (covered 79)
+    ~ rule 9: a stop before the repository context arrived starts nothing (covered 80)
+    ✓ destroy stops every server and resolves when all exited (killed 1)
+    ~ rule 10: the log keeps the last 2,000 lines across restarts (covered 79)
+    ✓ rule 10: log lines carry the clock's time; onChange fires and unsubscribes (killed 1)
+    ✓ rule 2: no host makes every spec failed{noHost} (killed 6)
+    ~ rule 10: a failed initialize logs start, failure and exit as yamt lines (covered 76)
+    ✓ rule 10: an initialize time-out is logged as cancelled, then as the failure (killed 3)
+    ✓ rule 10: start failures are logged in words (killed 6)
+    ~ rule 9: an exit without a code is crashed{null} and logged (covered 75)
+    ~ rule 9: a crash during initialize is crashed, and messages before running are dropped (covered 72)
+    ✓ rule 2: start and stop act on the named spec only; an unknown name does nothing (killed 4)
+    ~ rule 2: start on a running server starts no second process (covered 78)
+    ✓ rule 3: a user stop of one name does not keep a new spec of another name stopped (killed 1)
+    ~ rule 3: restart clears a user stop, so a changed spec of that name starts (covered 96)
+    ~ rule 9: an initialize answer that arrives after stop does not make the server run (covered 79)
+    ~ rule 9: a stop before a failing context arrives ends stopped, not failed (covered 80)
+    ~ rule 4: the context is read once; a failing context fails the start with its message (covered 78)
+    ~ rule 4: a repository path that is not text names the reason (covered 78)
+    ~ rule 6/8: null or false providers mean no pulls and no formatting (covered 74)
+    ~ rule 7: answering a request other than refresh pulls nothing (covered 71)
+    ~ rule 9: a stop logs the pulls it leaves unanswered (covered 79)
+    ~ rule 9: a server that exits during shutdown is not stopped again (covered 82)
+    ~ rule 9: a stop after restart, during the old run's shutdown, keeps it stopped (covered 84)
+    ~ rule 3: a spec removed after restart, during the old run's shutdown, starts nothing (covered 89)
+    ~ destroy after restart, during the old run's shutdown, starts nothing (covered 83)
+    ✓ rule 5: a document opened by a listener when its server starts running is opened once (killed 1)
+    ~ rule 8: formatting syncs a pending change once; the pending sync does not repeat it (covered 74)
+    ~ rule 8: malformed edits are failed with the reason (covered 74)
+    ~ rule 8: after a 2 s wait for a starting formatter, its request gets the 3 s left (covered 74)
+    ~ rule 6: a first pull answered unchanged shows no problems (covered 71)
+    ~ rule 6: a timed-out pull is logged as such and shows nothing (covered 72)
+    ~ rule 6: a malformed pull report is logged and shows nothing (covered 72)
+    ~ rule 6: a pull answered after its document closed shows nothing (covered 79)
+    ~ rule 6: pushed versions that are not positive integers are dropped (covered 72)
+    ✘ a document version is a positive safe integer (covered 0)
+    ✓ rule 1/5: a document a running server does not serve is never opened or closed on it (killed 1)
+    ~ rule 5: close sends didClose with the document's URI (covered 79)
+    ✓ rule 5: a change syncs when any one server has the document open (killed 1)
+    ✓ rule 5: a closed document is not opened on a server started later (killed 6)
+    ✓ onChange fires for setSpecs, for a state change and for a log line (killed 2)
+    ~ rule 4: a Windows repository root names the folder and makes a drive URI (covered 71)
+    ~ destroy waits for a stop already under way (covered 82)
+    ~ destroy waits for servers removed by setSpecs (covered 83)
+    ✓ destroy waits for a removed server still stopping after another removed one stopped (killed 3)
+    ~ rule 4: a host that throws while starting is spawnFailed (covered 83)
+    ~ rule 9: a host that fails to stop a run is logged; the run's exit still ends the stop (covered 82)
+    ~ rule 8: a document that throws when taken fails the format, never rejects (covered 74)
+    ~ rule 7: a log message without text is logged with its reason (covered 72)
+  ui
+    installText.test.ts
+      ✓ rule 4: npm installs with `npm install -D p` here and `npm install -g p` for all projects (killed 17)
+      ✓ rule 4: pnpm installs with `pnpm add -D p` here and `pnpm add -g p` for all projects (killed 1)
+      ~ rule 4: yarn installs with `yarn add -D p` here and `yarn global add p` for all projects (covered 43)
+      ~ rule 4: yarnBerry installs with `yarn add -D p` here and `npm install -g p` for all projects (covered 43)
+      ~ rule 4: bun installs with `bun add --dev p` here and `bun add -g p` for all projects (covered 43)
+      ✓ rule 4: an unknown manager gets npm's commands and the note to use your own (killed 3)
+      ✓ rule 4: the TypeScript and eslint sentences, the PATH line and the come-back line (killed 13)
+      ✓ rule 4: the folder line names the project folder, or the repository root for "" (killed 1)
+      ✓ vue: the plugin goes into the project only, with no PATH line (killed 10)
+      ✓ python: uv installs with `uv add --dev ruff` here and `uv tool install ruff` for all projects (killed 17)
+      ~ python: poetry installs with `poetry add --group dev ruff` here and `pipx install ruff` for all projects (covered 37)
+      ~ python: pdm installs with `pdm add -d ruff` here and `pipx install ruff` for all projects (covered 37)
+      ✓ python: no lock file installs with pip in the project's virtual environment (killed 5)
+      ✓ rustup, go and download: one step each, with their own lines (killed 22)
+      ✓ system: no step, the package-manager line (killed 6)
+      ✓ a failed start (failed) with help leads into the install text (killed 13)
+      ✓ a failed start (crashed) with help leads into the install text (killed 2)
+      ✓ no install text under failed, which installing would not fix (killed 7)
+      ✓ no install text under stopped, which installing would not fix (killed 3)
+      ✓ no install text under starting, which installing would not fix (killed 1)
+      ✓ no install text under running, which installing would not fix (killed 1)
+      ✓ no install text under stopping, which installing would not fix (killed 1)
+      ✓ no install text under notInstalled, which installing would not fix (killed 1)
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ the unprocessed question carries WebStorm's title and buttons (covered 0)
+      ✘ the exit question says the listed files are not saved to disk (plan §2 #69) (covered 0)
+      ✘ the clash question names the key in the platform's words, its owner and the asking action (covered 0)
+      ~ the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67) (covered 13)
+    saving.test.ts
+      ✘ save: Written sends the file text, marks it saved as the file text, takes git's list and records the format outcome (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): git lists only it, as resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): another file is resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): it is resolved and another is not (covered 0)
+      ✘ save without unsaved work formats but sends nothing (covered 0)
+      ✘ save goes on whatever formatting answers, and an editor without an outcome records none (covered 0)
+      ✘ a save while a save of the same file runs is ignored; typing during the write keeps the dot (covered 0)
+      ✘ claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended (covered 0)
+      ✘ a finish that ends while a save of the same file runs leaves that save's claim in place (covered 0)
+      ✘ a save whose formatting still runs when another write of the same file starts writes nothing (covered 0)
+      ✘ finish writes the Result as shown and marks it saved as shown (covered 0)
+      ✘ afterWrite takes git's list and says whether the write landed; a disk change gives its notice and reloads the file (covered 0)
+      ✘ a save refused because the file changed on disk marks nothing saved and shows the disk view (covered 0)
+      ✘ a failed save keeps the dot, is reported in words, and the next save clears it (covered 0)
+    servers.test.ts
+      ~ serverViews follow LanguageServers.onChange (covered 50)
+      ~ the actions map onto start, stop and restart by name (covered 21)
+      ~ a shown log follows new lines; other logs and other screens show none (covered 63)
+      ~ leaving a shown log for files by any writer empties shownLog (covered 63)
+      ~ leaving a shown log for settings by any writer empties shownLog (covered 63)
+      ~ serving follows lsp's rule per path, whatever the other servers do (covered 71)
+      ~ a computed over serving turns true when the server starts (covered 71)
+    serverSetup.test.ts
+      ✓ start: the file list and the settings are in before detection starts (killed 2)
+      ~ start: no specs means no question and no servers (covered 21)
+      ~ start: a stored Start answers without a question and starts the served servers (covered 73)
+      ~ start: a stored Don't start answers without a question and starts nothing (covered 58)
+      ~ start: an answer stored for another repository does not count (covered 19)
+      ~ start: without an answer the question lists each found server with its folder, and the added ones (covered 55)
+      ~ start: Start in the question is stored and starts the servers (covered 73)
+      ~ start: Don't start in the question is stored and starts nothing (covered 58)
+      ~ start: Escape stores nothing, so the question comes back next run; the servers show stopped (covered 58)
+      ~ start: a Start whose write fails starts nothing (covered 58)
+      ~ start: another question already open stores nothing and leaves that question open (covered 55)
+      ~ start: as many added servers as found ones still bring the question (covered 55)
+      ~ start: servers added by hand alone are asked about too (covered 53)
+      ~ start: a repository whose path is not UTF-8 has no root, so nothing at all (covered 21)
+      ~ start: a failing host context is logged and asks nothing (covered 21)
+      ~ focus after a failed start look finds the servers, applies the stored answer and asks nothing (covered 73)
+      ~ focus after a failed start look never asks a repository without an answer (covered 58)
+      ~ fixture mode (no host): the files and settings load; no servers, no question (covered 21)
+      ~ focus: the file list and the settings are refreshed before detection runs again (covered 74)
+      ✓ focus: detection runs again without asking; running servers keep their run and a newly installed one starts (killed 2)
+      ~ focus: a repository still without an answer is never asked and keeps its servers stopped (covered 71)
+      ~ focus: an older detection that answers last is dropped (covered 65)
+      ~ focus: before the start set-up has finished, focus refreshes but does not detect (covered 57)
+      ~ settings: answering Start applies at once; Don't start stops the running servers; Start again starts them (covered 85)
+      ~ settings: a Don't start whose write fails leaves the running servers running (covered 74)
+      ~ settings: a Start whose write fails leaves the servers stopped (covered 59)
+      ~ settings: Don't start while Don't start is stored keeps a server started by hand (covered 73)
+      ~ settings: a server the user stopped stays stopped through Don't start and Start (covered 92)
+      ~ settings: an added server is stored, appears after the found ones and starts under Start; Remove drops it (covered 86)
+      ~ settings: Remove drops only the server at its index (covered 19)
+      ✘ the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped (covered 0)
+      ✘ the add form: a file type with a dot inside can never match a file, so it gives null (covered 0)
+    serverText.test.ts
+      ✓ rule 2/3: stopped reads Stopped with a stopped dot (killed 8)
+      ✓ rule 2/3: starting reads Starting… with a busy dot (killed 6)
+      ✓ rule 2/3: running reads Running with a running dot (killed 6)
+      ✓ rule 2/3: stopping reads Stopping… with a busy dot (killed 4)
+      ✓ rule 2/3: crashed reads Stopped: exited with code 3 with a problem dot (killed 8)
+      ✓ rule 2/3: crashed reads Stopped: exited with a problem dot (killed 2)
+      ✓ rule 2/3: failed reads Not found: looked in frontend/node_modu… with a problem dot (killed 8)
+      ✓ rule 2/3: failed reads Could not start: permission denied with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Could not start: bad reply with a problem dot (killed 1)
+      ✓ rule 2/3: failed reads Did not answer in time with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Runs only in the app with a problem dot (killed 3)
+      ✓ rule 2/3: failed reads Its folder is outside the repository with a problem dot (killed 3)
+      ✓ rule 2/3: notInstalled reads Not installed with a warning dot (killed 5)
+      ✓ rule 3: the actions that apply per state (killed 33)
+      ✓ the TypeScript 7 Vue note names the project's TypeScript version (killed 2)
+      ✓ a project folder reads as the folder with a slash, the root as the repository root (killed 7)
+      ✓ a server reads as its name, marked when it is not installed (killed 6)
+      ✓ rule 2: the format note is shown for the four refusals and hidden otherwise (killed 18)
+      ✓ rule 2: the counts' title counts errors and warnings in words (killed 11)
+      ✓ rule 5: a log line's time is HH:MM:SS (killed 3)
+    store.test.ts
+      ~ useAppStore throws before createAppStore, then returns the created store (covered 26)
+      ~ loading the list opens the first file the editor can show and logs file.loaded (covered 13)
+      ~ an empty list opens nothing (covered 13)
+      ~ a rejected list opens nothing, resolves, and shows an Unexpected list problem (covered 13)
+      ~ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (covered 13)
+      ~ re-clicking the shown file keeps the problem and lets a pending load win (covered 13)
+      ~ switching to an opened file wins over a load that resolves later and clears the problem (covered 13)
+      ~ a later open wins when the earlier load resolves last (covered 13)
+      ~ a stale failed open is logged but shows no problem (covered 13)
+      ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 13)
+      ~ a rejected load is an Unexpected problem and keeps the previous file (covered 13)
+      ~ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (covered 13)
+      ~ a finish of a file no longer shown does not switch files (covered 13)
+      ~ settings open and close; picking a file while they show closes them and shows it, the shown file too (covered 13)
+      ~ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 14)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 13)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 13)
+      ~ a file the user opens while a finish runs wins over the next file, though still loading (covered 13)
+      ~ a file the user opens while a take runs wins over the next file, though still loading (covered 13)
+      ~ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 13)
+      ~ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (covered 13)
+      ~ a rejected finish is an Unexpected problem (covered 13)
+      ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 13)
+      ~ closing asks only with unsaved work and answers with the choice (covered 13)
+      ~ everything is resolved only when every listed file is (covered 13)
+      ~ reset of A replaces only A in place with a new object and keeps B opened (covered 13)
+      ~ a failed reset keeps the current file and names the path (covered 13)
+      ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 13)
+      ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 13)
+      ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 13)
+      ~ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 13)
+      ~ a list of files the editor cannot show opens the first one's choice and loads nothing (covered 13)
+      ~ opening a file the editor cannot show describes it once and never loads it (covered 13)
+      ~ a failed describe is a failed open of that file and shows no choice (covered 13)
+      ~ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 13)
+      ~ a take keeps a problem about another file (covered 13)
+      ~ a failed take keeps the list and the choice and names the file (covered 13)
+      ~ reset of a taken choice forgets only its side at once and describes the file again (covered 13)
+      ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 13)
+      ~ choices count toward everything resolved (covered 13)
+      ~ a take on the shown file opens the next unresolved file, wrapping to the top (covered 13)
+      ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 13)
+      ~ a list refresh changes the marks only: same file shown, same views, another file's problem kept (covered 13)
+      ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 13)
+      ~ both side names are asked for once; a failure leaves none and logs a warning (covered 13)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: true) (covered 13)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 13)
+      ~ a change to a file that is not shown gives only its notice and its mark (covered 13)
+      ~ changes reported by the first list are start notices; the file then opens from the disk (covered 13)
+      ~ a newer change replaces the notice for its path; dismissNotice removes just one (covered 13)
+      ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 13)
+      ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 13)
+      ~ a change git could not stage is a warning notice, not a problem (covered 13)
+      ~ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 13)
+      ~ a take refused because the file changed on disk shows the change and the disk view (covered 13)
+      ~ a reset refused because the file changed on disk shows the change and the disk view (covered 13)
+      ~ finish, take and reset forward the disk version they are given (covered 13)
+      ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 13)
+      ~ settings start with the start theme and the default keys, before any file is read (covered 13)
+      ~ a load on focus applies a file changed by hand since the last load (covered 13)
+      ~ start-up loads the file list and the settings; focus loads both again (covered 13)
+      ~ a loaded file sets the theme and keys every opened file follows (covered 13)
+      ~ a failed load or change keeps the settings in use and shows a settings problem (covered 13)
+      ~ key problems in the file show one settings problem, which a clean read clears (covered 13)
+      ~ setTheme sends the settings in use and applies the reply (covered 13)
+      ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 13)
+      ~ a load whose only difference is the antialiasing is adopted (covered 13)
+      ~ a key another action holds asks; Move writes both changes in one call (covered 13)
+      ~ Cancel on the clash question writes nothing (covered 13)
+      ~ each key edit sends only the changed actions, as key texts (covered 13)
+      ~ an identical load keeps the settings object and does not show the same key problems again (covered 13)
+      ~ a key problem shown again replaces a settings failure the file no longer has (covered 13)
+      ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 13)
+      ~ a load that started before a change and answers after it does not put the old file back (covered 13)
+      ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 13)
+      ~ moveSettings sends the path with the settings in use and uses the file found there (covered 13)
+      ~ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (covered 13)
+      ~ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 13)
+      ~ a key press another handler already took does not toggle the list (covered 13)
+      ~ while a question waits the key does nothing; once answered it toggles again (covered 13)
+      ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 13)
+      ~ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 13)
+      ~ with two toggle-file-list keys, each one toggles the list (covered 13)
+      ~ toggleCollapsing flips collapsing and keeps the choice in the window's storage (covered 13)
+      ~ a save while a reset of the same file runs is ignored (covered 13)
+      ~ a save while a finish of the same file runs is ignored (covered 13)
+      ~ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 13)
+      ~ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 13)
+      ~ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 31)
+    useMergeController.test.ts
+      ✘ unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change (covered 0)
+      ✘ without data or hosts there is no editor: no snapshot, nothing unsaved (covered 0)
+      ✘ the editor is read-only as the view says, and is rebuilt when that changes (covered 0)
+      ✘ the editor is built with the preferences in use and follows a change without a rebuild (covered 0)
+      ✘ a preferences change before the file loaded reaches the editor built later (covered 0)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+      ✘ flipping collapsing before the file loaded reaches no editor and throws nothing (covered 0)
+      ✘ an editor built while collapsing is off is told so, and a file loaded later follows the current choice (covered 0)
+      ✘ flipping collapsing tells every live editor once, and a destroyed one never (covered 0)
+      ✘ a preferences change never resets collapsing (covered 0)
+      ✘ problems: the editor's counts when built, then each change it reports; null once it is gone (covered 0)
+      ✘ summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change (covered 0)
+      ✘ problems and format are null while no editor is built (covered 0)
+      ✘ format answers with the outcome of the editor in use, a rebuilt one after a rebuild (covered 0)
+      ~ the editor gets the language servers in use and is rebuilt when they change (covered 8)
+
+[NoCoverage] ConditionalExpression
+src/lsp/internal/state.ts:51:5
+-       default: {
+-         const _exhaustive: never = reply;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/lsp/internal/state.ts:51:14
+-       default: {
+-         const _exhaustive: never = reply;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/lsp/internal/state.ts:70:5
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/lsp/internal/state.ts:70:14
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[Survived] BlockStatement
+src/lsp/index.ts:161:37
+-         void server.halt().then(() => {
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
+-         });
++         void server.halt().then(() => {});
+Tests ran:
+    rule 2: a user stop survives setSpecs, even with startOnOpen, until start
+    haltAll stops every run without a user stop; Start on open starts them again
+    haltAll shows a crashed server as stopped and tells onChange listeners
+  and 18 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/index.ts:162:59
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
++           this.#retired = this.#retired.filter((retired) => true);
+Tests ran:
+    rule 2: a user stop survives setSpecs, even with startOnOpen, until start
+    haltAll stops every run without a user stop; Start on open starts them again
+    haltAll shows a crashed server as stopped and tells onChange listeners
+  and 18 more tests!
+
+
+[Survived] MethodExpression
+src/lsp/index.ts:162:25
+-           this.#retired = this.#retired.filter((retired) => retired !== server);
++           this.#retired = this.#retired;
+Tests ran:
+    rule 2: a user stop survives setSpecs, even with startOnOpen, until start
+    haltAll stops every run without a user stop; Start on open starts them again
+    haltAll shows a crashed server as stopped and tells onChange listeners
+  and 18 more tests!
+
+
+[Survived] BooleanLiteral
+src/lsp/index.ts:47:18
+-     #startOnOpen = false;
++     #startOnOpen = true;
+Tests ran:
+    rule 1: a spec serves a path by its extension and its project folder
+    rule 1: serving(path) is true only while a running server serves the path
+    rule 2: a spec starts when the first document it serves opens
+  and 226 more tests!
+
+
+[NoCoverage] ConditionalExpression
+src/ui/installText.ts:56:5
+-       default: {
+-         const _exhaustive: never = hint.reason;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/installText.ts:56:14
+-       default: {
+-         const _exhaustive: never = hint.reason;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/installText.ts:120:5
+-       default: {
+-         const _exhaustive: never = hint;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/installText.ts:120:14
+-       default: {
+-         const _exhaustive: never = hint;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/installText.ts:148:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/installText.ts:148:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[Survived] StringLiteral
+src/ui/installText.ts:138:10
+-       case "crashed":
++       case "":
+Tests ran:
+    a failed start (failed) with help leads into the install text
+    a failed start (crashed) with help leads into the install text
+    no install text under failed, which installing would not fix
+  and 5 more tests!
+
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:51:5
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:51:14
+-       default: {
+-         const _exhaustive: never = reason;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:74:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:74:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:95:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:95:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:117:5
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:117:14
+-       default: {
+-         const _exhaustive: never = state;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] ConditionalExpression
+src/ui/serverText.ts:143:5
+-       default: {
+-         const _exhaustive: never = outcome;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:143:14
+-       default: {
+-         const _exhaustive: never = outcome;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[NoCoverage] BlockStatement
+src/ui/serverText.ts:158:48
+-   export function logTitle(name: string): string {
+-     return `${name} log`;
+-   }
++   export function logTitle(name: string): string {}
+
+[NoCoverage] StringLiteral
+src/ui/serverText.ts:159:10
+-     return `${name} log`;
++     return ``;
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:163:51
+-     return new Date(at).toLocaleTimeString("en-GB", { hour12: false });
++     return new Date(at).toLocaleTimeString("en-GB", {});
+Tests ran:
+    rule 5: a log line's time is HH:MM:SS
+
+
+[Survived] StringLiteral
+src/ui/serverText.ts:11:12
+-     restart: "Restart",
++     restart: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:22:21
+-   export const BACK = "Back";
++   export const BACK = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:14:25
+-   export const SHOW_LOG = "Show log";
++   export const SHOW_LOG = "";
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/serverText.ts:8:70
+-   export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {
+-     start: "Start",
+-     stop: "Stop",
+-     restart: "Restart",
+-   };
++   export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:26:30
+-   export const FROM_THE_LIST = "From the list";
++   export const FROM_THE_LIST = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:16:26
+-   export const EMPTY_LOG = "Nothing logged yet.";
++   export const EMPTY_LOG = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:20:23
+-   export const COPIED = "Copied";
++   export const COPIED = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:10:9
+-     stop: "Stop",
++     stop: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:166:26
+-   export const YAMT_MARK = "yamt";
++   export const YAMT_MARK = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:24:30
+-   export const NOT_INSTALLED = "Not installed";
++   export const NOT_INSTALLED = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:18:21
+-   export const COPY = "Copy";
++   export const COPY = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:28:35
+-   export const FROM_THE_LIST_HINT = `"${FROM_THE_LIST}" fills both fields with a known server.`;
++   export const FROM_THE_LIST_HINT = ``;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/serverText.ts:9:10
+-     start: "Start",
++     start: "",
+Ran all tests for this mutant.
+
+Ran 3.75 tests per mutant on average.
+-----------------|------------------|----------|-----------|------------|----------|----------|
+                 | % Mutation score |          |           |            |          |          |
+File             |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+All files        |  91.44 |   95.84 |      438 |         0 |         19 |       22 |        0 |
+ lsp             |  95.60 |   97.75 |      174 |         0 |          4 |        4 |        0 |
+  internal       |  92.00 |  100.00 |       46 |         0 |          0 |        4 |        0 |
+   state.ts      |  92.00 |  100.00 |       46 |         0 |          0 |        4 |        0 |
+  index.ts       |  96.97 |   96.97 |      128 |         0 |          4 |        0 |        0 |
+ ui              |  88.89 |   94.62 |      264 |         0 |         15 |       18 |        0 |
+  installText.ts |  94.66 |   99.20 |      124 |         0 |          1 |        6 |        0 |
+  serverText.ts  |  84.34 |   90.91 |      140 |         0 |         14 |       12 |        0 |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m13:04:22 (515641) INFO MutationTestExecutor[39m Done in 17 seconds.
