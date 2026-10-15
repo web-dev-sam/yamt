@@ -389,12 +389,7 @@ fn a_bare_program_name_is_found_in_a_project_folder_and_not_without_it() {
     let repo = tempfile::tempdir().unwrap();
     let tools = repo.path().join("tools");
     fs::create_dir_all(&tools).unwrap();
-    let name = Path::new(ECHO)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
+    let name = format!("yamt-echo-in-tools{}", std::env::consts::EXE_SUFFIX);
     place_echo(&tools.join(&name));
     let mut host = Host::new(repo.path());
     let command = |project: Vec<String>| ServerCommand {
