@@ -2,14 +2,14 @@ mod marks;
 
 use marks::{marked_lines, one_sided, only_chunk};
 use yamt_merge_core::{
-    ChunkId, ChunkKind, InlinePoint, InlineRange, LocalLine, Options, RemoteLine, SideWordChanges,
-    WordChanges, compute_chunks, word_changes,
+    ChunkId, ChunkKind, InlinePoint, InlineRange, LocalLine, Options, RemoteLine, Removal,
+    SideWordChanges, WordChanges, compute_chunks, word_changes,
 };
 
 fn nothing<L>() -> SideWordChanges<L> {
     SideWordChanges {
         changed: Vec::new(),
-        removed_at: Vec::new(),
+        removals: Vec::new(),
     }
 }
 
@@ -27,9 +27,12 @@ fn a_changed_word_and_a_removed_word_carry_absolute_lines_and_utf16_columns() {
                     start: 4,
                     len: 3,
                 }],
-                removed_at: vec![InlinePoint {
-                    line: LocalLine(1),
-                    column: 9,
+                removals: vec![Removal {
+                    at: InlinePoint {
+                        line: LocalLine(1),
+                        column: 9,
+                    },
+                    text: " y".to_owned(),
                 }],
             },
             remote: nothing(),
@@ -76,7 +79,28 @@ fn a_new_blank_line_is_not_marked_but_a_new_indented_line_is() {
 
 #[test]
 fn removed_lines_at_the_chunk_start_point_at_the_first_side_line() {
-    assert_eq!(one_sided("gone();\nx(1);\n", "x(2);\n"), ["|x([2]);"]);
+    assert_eq!(
+        one_sided("gone();\nx(1);\n", "x(2);\n"),
+        ["⟨gone();↵⟩x([2]);"]
+    );
+}
+
+#[test]
+fn removed_crlf_lines_carry_no_carriage_return() {
+    assert_eq!(
+        one_sided("gone();\r\nx(1);\r\nend();\r\n", "x(2);\r\n"),
+        ["⟨gone();↵⟩x([2]);⟨↵end();⟩"]
+    );
+}
+
+#[test]
+fn trailing_removed_tokens_join_removed_lines_at_the_chunk_end() {
+    assert_eq!(one_sided("return x;\n}\n", "return x\n"), ["return x⟨;↵}⟩"]);
+}
+
+#[test]
+fn removed_lines_around_a_kept_blank_line_join_into_one_removal() {
+    assert_eq!(one_sided("a(1);\n\nb(1);\n", "\n"), ["⟨a(1);↵↵b(1);⟩"]);
 }
 
 #[test]
@@ -94,7 +118,7 @@ fn both_same_gives_both_sides_the_same_marks() {
     assert_eq!(chunk.kind, ChunkKind::BothSame);
     let local = marked_lines(side, 0, 2, &words.local, |line| line.0);
     let remote = marked_lines(side, 0, 2, &words.remote, |line| line.0);
-    assert_eq!(local, ["[lead]", "fn [b](x|)"]);
+    assert_eq!(local, ["[lead]", "fn [b](x⟨, y⟩)"]);
     assert_eq!(local, remote);
 }
 

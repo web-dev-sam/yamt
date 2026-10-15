@@ -45,16 +45,19 @@
               "len": 21
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 86,
-              "column": 93
+              "at": {
+                "line": 86,
+                "column": 93
+              },
+              "text": "\n\t\t\t\tvueCompilerOptions.target >= 3.3 ? `ExtractPublicPropTypes` : `ExtractPropTypes`\n\t\t\t}<typeof ${names.propsOption}>`,"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -97,20 +100,26 @@
               "len": 1
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 106,
-              "column": 0
+              "at": {
+                "line": 106,
+                "column": 0
+              },
+              "text": "\t\t: vueCompilerOptions.target >= 3\n"
             },
             {
-              "line": 108,
-              "column": 67
+              "at": {
+                "line": 108,
+                "column": 67
+              },
+              "text": "\n\t\t: `globalThis.JSX.IntrinsicAttributes`;"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -148,11 +157,11 @@
               "len": 17
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -245,14 +254,20 @@
               "len": 2
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 362,
-              "column": 0
+              "at": {
+                "line": 362,
+                "column": 0
+              },
+              "text": "\tif (options.vueCompilerOptions.target >= 3.3) {\n"
             },
             {
-              "line": 373,
-              "column": 65
+              "at": {
+                "line": 373,
+                "column": 65
+              },
+              "text": "\n\t\t}"
             }
           ]
         },
@@ -394,10 +409,13 @@
               "len": 3
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 398,
-              "column": 0
+              "at": {
+                "line": 398,
+                "column": 0
+              },
+              "text": "\t\tif (emitted) {\n"
             }
           ]
         }

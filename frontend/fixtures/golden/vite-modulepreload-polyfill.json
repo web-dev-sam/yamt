@@ -55,10 +55,13 @@
               "len": 22
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 2,
-              "column": 7
+              "at": {
+                "line": 2,
+                "column": 7
+              },
+              "text": "type "
             }
           ]
         },
@@ -70,7 +73,7 @@
               "len": 50
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -107,11 +110,11 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -169,18 +172,27 @@
               "len": 8
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 29,
-              "column": 0
+              "at": {
+                "line": 29,
+                "column": 0
+              },
+              "text": "      handler(id) {\n"
             },
             {
-              "line": 29,
-              "column": 16
+              "at": {
+                "line": 29,
+                "column": 16
+              },
+              "text": "("
             },
             {
-              "line": 31,
-              "column": 46
+              "at": {
+                "line": 31,
+                "column": 46
+              },
+              "text": "\n        }"
             }
           ]
         },
@@ -212,18 +224,27 @@
               "len": 8
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 14,
-              "column": 0
+              "at": {
+                "line": 14,
+                "column": 0
+              },
+              "text": "      handler(id) {\n"
             },
             {
-              "line": 14,
-              "column": 16
+              "at": {
+                "line": 14,
+                "column": 16
+              },
+              "text": "("
             },
             {
-              "line": 16,
-              "column": 46
+              "at": {
+                "line": 16,
+                "column": 46
+              },
+              "text": "\n        }"
             }
           ]
         }
@@ -333,18 +354,27 @@
               "len": 8
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 35,
-              "column": 0
+              "at": {
+                "line": 35,
+                "column": 0
+              },
+              "text": "      handler(id) {\n"
             },
             {
-              "line": 35,
-              "column": 16
+              "at": {
+                "line": 35,
+                "column": 16
+              },
+              "text": "("
             },
             {
-              "line": 47,
-              "column": 64
+              "at": {
+                "line": 47,
+                "column": 64
+              },
+              "text": "\n        }"
             }
           ]
         },
@@ -426,18 +456,27 @@
               "len": 8
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 20,
-              "column": 0
+              "at": {
+                "line": 20,
+                "column": 0
+              },
+              "text": "      handler(id) {\n"
             },
             {
-              "line": 20,
-              "column": 16
+              "at": {
+                "line": 20,
+                "column": 16
+              },
+              "text": "("
             },
             {
-              "line": 32,
-              "column": 64
+              "at": {
+                "line": 32,
+                "column": 64
+              },
+              "text": "\n        }"
             }
           ]
         }

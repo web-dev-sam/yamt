@@ -34,11 +34,11 @@
         "chunk": 0,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -70,11 +70,11 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -106,11 +106,11 @@
         "chunk": 2,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -148,11 +148,11 @@
               "len": 46
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -184,7 +184,7 @@
         "chunk": 4,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -234,78 +234,132 @@
               "len": 2
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 186,
-              "column": 9
+              "at": {
+                "line": 186,
+                "column": 9
+              },
+              "text": "defineComponent, "
             },
             {
-              "line": 191,
-              "column": 0
+              "at": {
+                "line": 191,
+                "column": 0
+              },
+              "text": "export default defineComponent({\n  name: 'App',\n  components: { AppLink },\n  setup() {\n    "
             },
             {
-              "line": 192,
-              "column": 0
+              "at": {
+                "line": 192,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 193,
-              "column": 0
+              "at": {
+                "line": 193,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 195,
-              "column": 0
+              "at": {
+                "line": 195,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 196,
-              "column": 0
+              "at": {
+                "line": 196,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 197,
-              "column": 0
+              "at": {
+                "line": 197,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 199,
-              "column": 0
+              "at": {
+                "line": 199,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 202,
-              "column": 0
+              "at": {
+                "line": 202,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 204,
-              "column": 0
+              "at": {
+                "line": 204,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 206,
-              "column": 0
+              "at": {
+                "line": 206,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 207,
-              "column": 0
+              "at": {
+                "line": 207,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 209,
-              "column": 0
+              "at": {
+                "line": 209,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 211,
-              "column": 0
+              "at": {
+                "line": 211,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 213,
-              "column": 0
+              "at": {
+                "line": 213,
+                "column": 0
+              },
+              "text": "    "
             },
             {
-              "line": 215,
-              "column": 0
+              "at": {
+                "line": 215,
+                "column": 0
+              },
+              "text": "    return {\n      currentLocation,\n      nextUserLink,\n      state,\n      flushWaiter,\n      setupWaiter,\n      viewName,\n"
             },
             {
-              "line": 217,
-              "column": 0
+              "at": {
+                "line": 217,
+                "column": 0
+              },
+              "text": "      },\n    "
             },
             {
-              "line": 218,
-              "column": 0
+              "at": {
+                "line": 218,
+                "column": 0
+              },
+              "text": "  },\n})\n"
             }
           ]
         }

@@ -64,8 +64,8 @@ async function opened(
       middle: range(change.middle),
       words: {
         chunk: id,
-        local: { changed: [], removed_at: [] },
-        remote: { changed: [], removed_at: [] },
+        local: { changed: [], removals: [] },
+        remote: { changed: [], removals: [] },
       },
       waiting: change.waiting ?? (change.kind === "Conflict" ? MARKERS : SIDE_LINES),
     })),

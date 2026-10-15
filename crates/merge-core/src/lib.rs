@@ -16,4 +16,4 @@ pub use chunk::{Chunk, ChunkId, ChunkKind};
 pub use compute::{DEFAULT_GAP, Options, compute_chunks};
 pub use line::{BaseLine, InlinePoint, InlineRange, LineRange, LocalLine, RemoteLine};
 pub use line_map::{LineMap, line_map};
-pub use word::{SideWordChanges, WordChanges, word_changes};
+pub use word::{Removal, SideWordChanges, WordChanges, word_changes};

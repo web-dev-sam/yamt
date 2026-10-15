@@ -232,6 +232,14 @@ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Te
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
+/**  Base text one side removed, and the place in that side where it would sit. */
+export type Removal<L> = {
+	/**  The zero-width place (the same places `removed_at` held). */
+	at: InlinePoint<L>,
+	/**  The removed base text, every line break written `\n`; never empty. */
+	text: string,
+};
+
 export type RepositoryAnswer = "start" | "dontStart";
 
 export type RunId = number;
@@ -276,8 +284,8 @@ export type SideWordChanges<L> = {
 	 *  never across a line break.
 	 */
 	changed: InlineRange<L>[],
-	/**  Places where base text this side removed would sit: sorted, at most one per place. */
-	removed_at: InlinePoint<L>[],
+	/**  Base text this side removed with nothing new in its place: sorted by place, at most one per place. */
+	removals: Removal<L>[],
 };
 
 export type StartReply = { kind: "Started"; run: RunId } | { kind: "NotFound"; program: string; searched: string[] } | { kind: "SpawnFailed"; program: string; message: string } | { kind: "OutsideRepository"; project: string };

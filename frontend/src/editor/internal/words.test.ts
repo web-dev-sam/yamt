@@ -41,7 +41,7 @@ function block(line: number): { start: number; len: number } {
 function words(ranges: readonly Columns[], points: readonly Point[]): object {
   return {
     changed: ranges.map(([line, start, len]) => ({ line, start, len })),
-    removed_at: points.map(([line, column]) => ({ line, column })),
+    removals: points.map(([line, column]) => ({ at: { line, column }, text: "removed" })),
   };
 }
 

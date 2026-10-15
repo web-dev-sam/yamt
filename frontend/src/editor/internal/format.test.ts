@@ -72,8 +72,8 @@ function chunkRecord(middleLen: number): unknown {
     middle: { start: BLOCK.start, len: middleLen },
     words: {
       chunk: 0,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
+      local: { changed: [], removals: [] },
+      remote: { changed: [], removals: [] },
     },
     waiting: {
       kind: "Markers",

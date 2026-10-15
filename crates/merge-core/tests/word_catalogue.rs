@@ -31,7 +31,7 @@ fn c3_argument_added() {
 
 #[test]
 fn c4_argument_removed() {
-    assert_eq!(one_line("foo(a, b, c)", "foo(a, c)"), "foo(a, |c)");
+    assert_eq!(one_line("foo(a, b, c)", "foo(a, c)"), "foo(a, ⟨b, ⟩c)");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn c15_import_removed() {
             "import { ref, computed, watch } from 'vue';",
             "import { ref, watch } from 'vue';"
         ),
-        "import { ref, |watch } from 'vue';"
+        "import { ref, ⟨computed, ⟩watch } from 'vue';"
     );
 }
 
@@ -182,7 +182,7 @@ fn c20_trailing_comma_added() {
 
 #[test]
 fn c21_semicolon_removed() {
-    assert_eq!(one_line("return x;", "return x"), "return x|");
+    assert_eq!(one_line("return x;", "return x"), "return x⟨;⟩");
 }
 
 #[test]
@@ -221,12 +221,12 @@ fn c26_dedented_and_changed() {
 
 #[test]
 fn c27_indentation_removed() {
-    assert_eq!(one_line("\tfoo();", "foo();"), "|foo();");
+    assert_eq!(one_line("\tfoo();", "foo();"), "⟨\t⟩foo();");
 }
 
 #[test]
 fn c28_inner_spaces_removed() {
-    assert_eq!(one_line("foo( a )", "foo(a)"), "foo(|a|)");
+    assert_eq!(one_line("foo( a )", "foo(a)"), "foo(⟨ ⟩a⟨ ⟩)");
 }
 
 #[test]

@@ -78,9 +78,14 @@ const INLINE_POINT = v.object({
   column: v.number(),
 } satisfies SchemaOf<Generated.InlinePoint<number>>);
 
+const REMOVAL = v.object({
+  at: INLINE_POINT,
+  text: v.string(),
+} satisfies SchemaOf<Generated.Removal<number>>);
+
 const SIDE_WORD_CHANGES = v.object({
   changed: v.array(INLINE_RANGE),
-  removed_at: v.array(INLINE_POINT),
+  removals: v.array(REMOVAL),
 } satisfies SchemaOf<Generated.SideWordChanges<number>>);
 
 const WORD_CHANGES = v.object({

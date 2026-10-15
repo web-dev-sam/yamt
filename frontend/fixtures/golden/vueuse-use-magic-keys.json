@@ -40,11 +40,11 @@
               "len": 16
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -82,11 +82,11 @@
               "len": 16
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -124,11 +124,11 @@
               "len": 3
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -160,11 +160,11 @@
         "chunk": 3,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -196,11 +196,11 @@
         "chunk": 4,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -248,11 +248,11 @@
               "len": 3
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -284,7 +284,7 @@
         "chunk": 6,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -304,7 +304,7 @@
               "len": 5
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -342,11 +342,11 @@
               "len": 7
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -419,14 +419,20 @@
               "len": 2
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 128,
-              "column": 0
+              "at": {
+                "line": 128,
+                "column": 0
+              },
+              "text": "  if (target) {\n"
             },
             {
-              "line": 135,
-              "column": 17
+              "at": {
+                "line": 135,
+                "column": 17
+              },
+              "text": "\n  }"
             }
           ]
         },
@@ -448,7 +454,7 @@
               "len": 55
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {

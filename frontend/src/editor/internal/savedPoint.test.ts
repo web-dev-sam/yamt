@@ -99,8 +99,8 @@ function chunkRecord(id: number, kind: Chunk["kind"], line: number): unknown {
     middle: range,
     words: {
       chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
+      local: { changed: [], removals: [] },
+      remote: { changed: [], removals: [] },
     },
     waiting:
       kind === "Conflict"

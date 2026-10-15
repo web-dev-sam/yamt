@@ -53,8 +53,8 @@ function numbered(from: number, to: number): string[] {
 function noWords(id: number) {
   return {
     chunk: id,
-    local: { changed: [], removed_at: [] },
-    remote: { changed: [], removed_at: [] },
+    local: { changed: [], removals: [] },
+    remote: { changed: [], removals: [] },
   };
 }
 

@@ -24,7 +24,9 @@
       "frontend/src/editor/internal/words.test.ts",
       "frontend/src/editor/problems.browser.test.ts",
       "frontend/fixtures/golden/**",
-      "frontend/fixtures/showcase/**"
+      "frontend/fixtures/showcase/**",
+      "frontend/src/ipc/words.ts",
+      "frontend/src/ipc/validate.ts"
     ]
   }
 }

@@ -1,0 +1,7 @@
+export function isNonNegativeInteger(n: number): boolean {
+  return Number.isSafeInteger(n) && n >= 0;
+}
+
+export function invalid(field: string, value: number): Error {
+  return new Error(`${field} must be a non-negative safe integer, got ${value}`);
+}

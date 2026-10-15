@@ -40,11 +40,11 @@
               "len": 7
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -76,7 +76,7 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -91,7 +91,7 @@
               "len": 18
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -129,11 +129,11 @@
               "len": 3
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -165,14 +165,17 @@
         "chunk": 3,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 13,
-              "column": 7
+              "at": {
+                "line": 13,
+                "column": 7
+              },
+              "text": "b, "
             }
           ]
         }
@@ -212,11 +215,11 @@
               "len": 8
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -248,7 +251,7 @@
         "chunk": 5,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -258,7 +261,7 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -296,11 +299,11 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -332,7 +335,7 @@
         "chunk": 7,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -342,7 +345,7 @@
               "len": 6
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -385,11 +388,11 @@
               "len": 15
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -421,7 +424,7 @@
         "chunk": 9,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -436,7 +439,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -474,11 +477,11 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -510,7 +513,7 @@
         "chunk": 11,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -520,7 +523,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -558,11 +561,11 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -594,7 +597,7 @@
         "chunk": 13,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -604,7 +607,7 @@
               "len": 7
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -636,16 +639,19 @@
         "chunk": 14,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 46,
-              "column": 14
+              "at": {
+                "line": 46,
+                "column": 14
+              },
+              "text": "computed, "
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -677,7 +683,7 @@
         "chunk": 15,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -687,7 +693,7 @@
               "len": 17
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -725,11 +731,11 @@
               "len": 5
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -761,7 +767,7 @@
         "chunk": 17,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -771,7 +777,7 @@
               "len": 11
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -809,11 +815,11 @@
               "len": 21
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -845,7 +851,7 @@
         "chunk": 19,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -855,7 +861,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -887,16 +893,19 @@
         "chunk": 20,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 64,
-              "column": 8
+              "at": {
+                "line": 64,
+                "column": 8
+              },
+              "text": ";"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -928,7 +937,7 @@
         "chunk": 21,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -938,7 +947,7 @@
               "len": 15
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -976,11 +985,11 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1012,7 +1021,7 @@
         "chunk": 23,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1022,7 +1031,7 @@
               "len": 2
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1060,11 +1069,11 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1096,7 +1105,7 @@
         "chunk": 25,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1111,7 +1120,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1143,16 +1152,19 @@
         "chunk": 26,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 82,
-              "column": 0
+              "at": {
+                "line": 82,
+                "column": 0
+              },
+              "text": "\t"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1184,18 +1196,24 @@
         "chunk": 27,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 85,
-              "column": 4
+              "at": {
+                "line": 85,
+                "column": 4
+              },
+              "text": " "
             },
             {
-              "line": 85,
-              "column": 5
+              "at": {
+                "line": 85,
+                "column": 5
+              },
+              "text": " "
             }
           ]
         }
@@ -1235,11 +1253,11 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1271,7 +1289,7 @@
         "chunk": 29,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1281,7 +1299,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1319,11 +1337,11 @@
               "len": 7
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1355,7 +1373,7 @@
         "chunk": 31,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1365,7 +1383,7 @@
               "len": 13
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1403,11 +1421,11 @@
               "len": 40
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1439,7 +1457,7 @@
         "chunk": 33,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1449,7 +1467,7 @@
               "len": 43
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1487,11 +1505,11 @@
               "len": 38
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1523,7 +1541,7 @@
         "chunk": 35,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1548,7 +1566,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1580,24 +1598,33 @@
         "chunk": 36,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 113,
-              "column": 0
+              "at": {
+                "line": 113,
+                "column": 0
+              },
+              "text": "if (ok) {\n\t"
             },
             {
-              "line": 114,
-              "column": 0
+              "at": {
+                "line": 114,
+                "column": 0
+              },
+              "text": "\t"
             },
             {
-              "line": 114,
-              "column": 4
+              "at": {
+                "line": 114,
+                "column": 4
+              },
+              "text": "\n}"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1629,7 +1656,7 @@
         "chunk": 37,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1649,7 +1676,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1692,16 +1719,19 @@
               "len": 1
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 122,
-              "column": 0
+              "at": {
+                "line": 122,
+                "column": 0
+              },
+              "text": "b();\n"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1733,7 +1763,7 @@
         "chunk": 39,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1743,10 +1773,13 @@
               "len": 3
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 131,
-              "column": 6
+              "at": {
+                "line": 131,
+                "column": 6
+              },
+              "text": " b)"
             }
           ]
         }
@@ -1786,16 +1819,19 @@
               "len": 3
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 128,
-              "column": 9
+              "at": {
+                "line": 128,
+                "column": 9
+              },
+              "text": "\n\tb)"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1827,7 +1863,7 @@
         "chunk": 41,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1837,10 +1873,13 @@
               "len": 4
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 139,
-              "column": 0
+              "at": {
+                "line": 139,
+                "column": 0
+              },
+              "text": "a();\n"
             }
           ]
         }
@@ -1890,11 +1929,11 @@
               "len": 10
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -1926,7 +1965,7 @@
         "chunk": 43,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1941,10 +1980,13 @@
               "len": 1
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 150,
-              "column": 0
+              "at": {
+                "line": 150,
+                "column": 0
+              },
+              "text": "\t"
             }
           ]
         }
@@ -1984,16 +2026,19 @@
               "len": 1
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 145,
-              "column": 5
+              "at": {
+                "line": 145,
+                "column": 5
+              },
+              "text": "\n"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2025,7 +2070,7 @@
         "chunk": 45,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2045,7 +2090,7 @@
               "len": 7
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2083,11 +2128,11 @@
               "len": 10
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2119,7 +2164,7 @@
         "chunk": 47,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2129,7 +2174,7 @@
               "len": 6
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2167,11 +2212,11 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2209,7 +2254,7 @@
               "len": 6
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2219,7 +2264,7 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2256,10 +2301,13 @@
         "chunk": 50,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 165,
-              "column": 14
+              "at": {
+                "line": 165,
+                "column": 14
+              },
+              "text": "computed, "
             }
           ]
         },
@@ -2271,7 +2319,7 @@
               "len": 11
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2314,7 +2362,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2324,7 +2372,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2382,7 +2430,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2402,7 +2450,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2445,7 +2493,7 @@
               "len": 24
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2455,7 +2503,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2503,7 +2551,7 @@
               "len": 18
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -2513,7 +2561,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2550,18 +2598,27 @@
         "chunk": 55,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 184,
-              "column": 0
+              "at": {
+                "line": 184,
+                "column": 0
+              },
+              "text": "if (ok) {\n\t"
             },
             {
-              "line": 185,
-              "column": 0
+              "at": {
+                "line": 185,
+                "column": 0
+              },
+              "text": "\t"
             },
             {
-              "line": 185,
-              "column": 5
+              "at": {
+                "line": 185,
+                "column": 5
+              },
+              "text": "\n}"
             }
           ]
         },
@@ -2588,7 +2645,7 @@
               "len": 1
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -2686,14 +2743,20 @@
               "len": 2
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 188,
-              "column": 0
+              "at": {
+                "line": 188,
+                "column": 0
+              },
+              "text": "\tif (options.vueCompilerOptions.target >= 3.3) {\n"
             },
             {
-              "line": 199,
-              "column": 65
+              "at": {
+                "line": 199,
+                "column": 65
+              },
+              "text": "\n\t\t}"
             }
           ]
         },
@@ -2835,10 +2898,13 @@
               "len": 3
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 231,
-              "column": 0
+              "at": {
+                "line": 231,
+                "column": 0
+              },
+              "text": "\t\tif (emitted) {\n"
             }
           ]
         }

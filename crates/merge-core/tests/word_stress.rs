@@ -41,12 +41,12 @@ enum Edit {
 }
 
 /// What the marks of one side line may be, known from the edit that made it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Truth {
     Untouched,
     Reindented { width: usize },
     OneWord { start: usize, end: usize },
-    WordDeleted { column: usize },
+    WordDeleted { column: usize, word: String },
     Unconstrained,
 }
 
@@ -108,16 +108,16 @@ impl Side {
         self.push(&line.text(), Truth::OneWord { start, end });
     }
 
-    /// The point is pinned at the start of the word that moved into the deleted one's place, or
-    /// at the end of the line's words when the last one was deleted.
+    /// The removal is pinned at the start of the word that moved into the deleted one's place, or
+    /// at the end of the line's words when the last one was deleted, and holds the deleted word.
     fn push_word_deleted(&mut self, mut line: Line, position: usize) {
-        line.words.remove(position);
+        let word = line.words.remove(position);
         let column = if position < line.words.len() {
             line.word_columns(position).0
         } else {
             line.word_columns(position - 1).1
         };
-        self.push(&line.text(), Truth::WordDeleted { column });
+        self.push(&line.text(), Truth::WordDeleted { column, word });
     }
 
     fn push_split(&mut self, line: &Line, position: usize) {
@@ -203,38 +203,36 @@ fn check_promises<'a, L: Copy + 'a>(
     index: fn(L) -> u32,
 ) -> Result<(), TestCaseError> {
     let mut ranges: Vec<Vec<(usize, usize)>> = vec![Vec::new(); side.truths.len()];
-    let mut points: Vec<Vec<usize>> = vec![Vec::new(); side.truths.len()];
+    let mut removals: Vec<Vec<(usize, &str)>> = vec![Vec::new(); side.truths.len()];
     for change in changes {
         for range in &change.changed {
             let (start, end) = (range.start as usize, (range.start + range.len) as usize);
             ranges[index(range.line) as usize].push((start, end));
         }
-        for point in &change.removed_at {
-            points[index(point.line) as usize].push(point.column as usize);
+        for removal in &change.removals {
+            let at = (removal.at.column as usize, removal.text.as_str());
+            removals[index(removal.at.line) as usize].push(at);
         }
     }
     for (line, truth) in side.truths.iter().enumerate() {
         let on_line = &ranges[line];
         let message = format!("line {line} {truth:?} ranges {on_line:?}\n{}", side.text);
-        match *truth {
+        match truth {
             Truth::Untouched => prop_assert!(on_line.is_empty(), "{}", message),
             Truth::Reindented { width } => {
-                prop_assert!(on_line.iter().all(|&(_, end)| end <= width), "{}", message);
+                prop_assert!(on_line.iter().all(|&(_, end)| end <= *width), "{}", message);
             }
             Truth::OneWord { start, end } => prop_assert!(
                 on_line
                     .iter()
-                    .all(|&(from, to)| from + 1 >= start && to <= end + 1),
+                    .all(|&(from, to)| from + 1 >= *start && to <= end + 1),
                 "{}",
                 message
             ),
-            Truth::WordDeleted { column } => {
-                prop_assert!(
-                    points[line].contains(&column),
-                    "{} points {:?}",
-                    message,
-                    points[line]
-                );
+            Truth::WordDeleted { column, word } => {
+                let holds_word = |&(at, text): &(usize, &str)| at == *column && text.contains(word);
+                let held = &removals[line];
+                prop_assert!(held.iter().any(holds_word), "{message} removals {held:?}");
             }
             Truth::Unconstrained => {}
         }
@@ -252,7 +250,7 @@ proptest! {
         let words = word_changes(&base, &local.text, &base, &chunks);
         check_promises(&local, words.iter().map(|change| &change.local), |line| line.0)?;
         for change in &words {
-            prop_assert!(change.remote.changed.is_empty() && change.remote.removed_at.is_empty());
+            prop_assert!(change.remote.changed.is_empty() && change.remote.removals.is_empty());
         }
     }
 

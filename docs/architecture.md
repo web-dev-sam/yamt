@@ -202,10 +202,12 @@ one per chunk in order; each side is compared with base on its own, line by line
    `MAX_GAP_COMBINATIONS` cells, above it the gap's side lines are new);
 3. inside each pair — a token diff (word runs, whitespace runs, single other characters).
 
-Output per side, `SideWordChanges<L> { changed: Vec<InlineRange<L>>, removed_at: Vec<InlinePoint<L>> }`:
+Output per side, `SideWordChanges<L> { changed: Vec<InlineRange<L>>, removals: Vec<Removal<L>> }`:
 `changed` = side text not in base (an unpaired side line whole; ranges on one line separated only by
-whitespace joined), `removed_at` = zero-width places where base text the side removed would sit
-(inside a pair, or one per run of unpaired base lines with nothing new in their place).
+whitespace joined), `removals` = `Removal<L> { at: InlinePoint<L>, text: String }`, the zero-width
+places where base text the side removed would sit (inside a pair, or one per run of unpaired base
+lines with nothing new in their place) with that base text, line breaks as `\n`, never empty;
+removals meeting at one place join in base order (plan §2 #73).
 `InlineRange<L> { line, start, len }` and `InlinePoint<L> { line, column }` stay on one line, columns
 in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions). A side whose chunk
 text or base text is empty gets nothing (the block tint says it all). Pure.
@@ -415,7 +417,8 @@ export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDelete
 export type FileEntry = { path: string; status: "Unresolved" | "Resolved"; unsupported: UnsupportedReason | null };
 export type InlineRange<L> = { line: L; start: number; len: number };   // UTF-16 columns, one line
 export type InlinePoint<L> = { line: L; column: number };               // zero-width, UTF-16 column
-export type SideWordChanges<L> = { changed: InlineRange<L>[]; removed_at: InlinePoint<L>[] };
+export type Removal<L> = { at: InlinePoint<L>; text: string };          // removed base text, `\n` breaks (plan §2 #73)
+export type SideWordChanges<L> = { changed: InlineRange<L>[]; removals: Removal<L>[] };
 export type WordChanges = { chunk: ChunkId; local: SideWordChanges<LocalLine>; remote: SideWordChanges<RemoteLine> };
 export type MergeChunk = { chunk: Chunk; middle: LineRange<MiddleLine>; words: WordChanges }; // plan §2 #53
 export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };

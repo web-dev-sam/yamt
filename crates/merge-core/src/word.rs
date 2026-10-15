@@ -12,14 +12,23 @@ use crate::line::{
 use crate::line_pairs::{LinePosition, line_pairs};
 use crate::token::{Token, TokenKind, line_tokens};
 
+/// Base text one side removed, and the place in that side where it would sit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct Removal<L> {
+    /// The zero-width place (the same places `removed_at` held).
+    pub at: InlinePoint<L>,
+    /// The removed base text, every line break written `\n`; never empty.
+    pub text: String,
+}
+
 /// One side of a chunk compared with base, line by line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct SideWordChanges<L> {
     /// Side text that is not in base: sorted by line then start, disjoint, never empty,
     /// never across a line break.
     pub changed: Vec<InlineRange<L>>,
-    /// Places where base text this side removed would sit: sorted, at most one per place.
-    pub removed_at: Vec<InlinePoint<L>>,
+    /// Base text this side removed with nothing new in its place: sorted by place, at most one per place.
+    pub removals: Vec<Removal<L>>,
 }
 
 /// Where one chunk's sides differ from base.
@@ -61,12 +70,13 @@ fn side_word_changes<L: Copy + PartialEq>(
     line_of: fn(u32) -> L,
 ) -> SideWordChanges<L> {
     let mut marker = SideMarker {
+        base,
         side: lines_in(all_side_lines, &side_range),
         first_line: side_range.start,
         line_of,
         changes: SideWordChanges {
             changed: Vec::new(),
-            removed_at: Vec::new(),
+            removals: Vec::new(),
         },
     };
     if base.is_empty() || marker.side.is_empty() {
@@ -75,7 +85,7 @@ fn side_word_changes<L: Copy + PartialEq>(
     let mut after_previous = LinePosition { base: 0, side: 0 };
     for pair in line_pairs(base, marker.side) {
         marker.mark_gap(after_previous, pair);
-        marker.mark_pair(line_text(base, pair.base), pair.side);
+        marker.mark_pair(pair.base, pair.side);
         after_previous = LinePosition {
             base: pair.base + 1,
             side: pair.side + 1,
@@ -86,18 +96,18 @@ fn side_word_changes<L: Copy + PartialEq>(
         side: marker.side_len(),
     };
     marker.mark_gap(after_previous, chunk_end);
-    marker.changes.removed_at.dedup();
     marker.changes
 }
 
 struct SideMarker<'a, L> {
+    base: &'a [&'a str],
     side: &'a [&'a str],
     first_line: u32,
     line_of: fn(u32) -> L,
     changes: SideWordChanges<L>,
 }
 
-impl<L: Copy> SideMarker<'_, L> {
+impl<L: Copy + PartialEq> SideMarker<'_, L> {
     /// Marks the unpaired lines between two pairs (or a chunk edge): new side lines in full, and
     /// removed base lines as one point when no side line replaces them.
     fn mark_gap(&mut self, from: LinePosition, until: LinePosition) {
@@ -110,14 +120,22 @@ impl<L: Copy> SideMarker<'_, L> {
         if from.side < until.side || from.base == until.base {
             return;
         }
+        let removed = lines_in(self.base, &(from.base..until.base));
         if until.side < self.side_len() {
-            self.mark_point(until.side, 0);
+            let text = removed
+                .iter()
+                .flat_map(|line| [without_line_break(line), "\n"]);
+            self.mark_point(until.side, 0, text.collect());
         } else if let Some(previous) = from.side.checked_sub(1) {
-            self.mark_point(previous, self.width(previous));
+            let text = removed
+                .iter()
+                .flat_map(|line| ["\n", without_line_break(line)]);
+            self.mark_point(previous, self.width(previous), text.collect());
         }
     }
 
-    fn mark_pair(&mut self, base_text: &str, side_line: u32) {
+    fn mark_pair(&mut self, base_line: u32, side_line: u32) {
+        let base_text = line_text(self.base, base_line);
         let side_text = line_text(self.side, side_line);
         if base_text == side_text {
             return;
@@ -129,7 +147,9 @@ impl<L: Copy> SideMarker<'_, L> {
             let column = side_tokens
                 .get(hunk.after.start as usize)
                 .map_or_else(|| self.width(side_line), |token| token.column);
-            self.mark_point(side_line, column);
+            let removed = base_tokens.get(hunk.before.start as usize..hunk.before.end as usize);
+            let text = removed.unwrap_or_default().iter().map(|token| token.text);
+            self.mark_point(side_line, column, text.collect());
         }
         let added: Vec<bool> = (0..)
             .zip(&side_tokens)
@@ -145,9 +165,15 @@ impl<L: Copy> SideMarker<'_, L> {
         self.changes.changed.push(InlineRange { line, start, len });
     }
 
-    fn mark_point(&mut self, side_line: u32, column: u32) {
+    /// Two removals at one place become one, their texts joined in the order they were marked,
+    /// which is base order.
+    fn mark_point(&mut self, side_line: u32, column: u32, text: String) {
         let line = (self.line_of)(self.first_line + side_line);
-        self.changes.removed_at.push(InlinePoint { line, column });
+        let at = InlinePoint { line, column };
+        match self.changes.removals.last_mut() {
+            Some(last) if last.at == at => last.text.push_str(&text),
+            Some(_) | None => self.changes.removals.push(Removal { at, text }),
+        }
     }
 
     fn width(&self, side_line: u32) -> u32 {

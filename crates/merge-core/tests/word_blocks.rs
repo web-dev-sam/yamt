@@ -39,7 +39,7 @@ fn m1_wrapped_in_a_condition() {
 fn m2_unwrapped_from_a_condition() {
     assert_eq!(
         one_sided("if (ok) {\n\ta();\n\tb();\n}\n", "a();\nb();\n"),
-        ["|a();", "|b();|"]
+        ["⟨if (ok) {↵\t⟩a();", "⟨\t⟩b();⟨↵}⟩"]
     );
 }
 
@@ -55,7 +55,7 @@ fn m3_line_inserted_between_changed_lines() {
 fn m4_line_removed_between_changed_lines() {
     assert_eq!(
         one_sided("a(1);\nb();\nc(1);\n", "a(2);\nc(2);\n"),
-        ["a([2]);", "|c([2]);"]
+        ["a([2]);", "⟨b();↵⟩c([2]);"]
     );
 }
 
@@ -63,20 +63,23 @@ fn m4_line_removed_between_changed_lines() {
 fn m5_line_split() {
     assert_eq!(
         one_sided("foo(a, b)\n", "foo(a,\n\tb)\n"),
-        ["foo(a,|", "[\tb)]"]
+        ["foo(a,⟨ b)⟩", "[\tb)]"]
     );
 }
 
 #[test]
 fn m6_lines_joined() {
-    assert_eq!(one_sided("foo(a,\n\tb)\n", "foo(a, b)\n"), ["foo(a,[ b)]|"]);
+    assert_eq!(
+        one_sided("foo(a,\n\tb)\n", "foo(a, b)\n"),
+        ["foo(a,[ b)]⟨↵\tb)⟩"]
+    );
 }
 
 #[test]
 fn m7_lines_swapped() {
     assert_eq!(
         one_sided("a();\nb();\n", "b();\na();\n"),
-        ["|b();", "[a();]"]
+        ["⟨a();↵⟩b();", "[a();]"]
     );
 }
 
@@ -95,13 +98,13 @@ fn m8_block_rewritten_without_shared_words() {
 fn m9_nest_dedented_pairs_each_closer_with_its_own() {
     assert_eq!(
         one_sided("\t\tx();\n\t\t}\n\t}\n", "\tx();\n\t}\n}\n"),
-        ["[\t]x();", "[\t]}", "|}"]
+        ["[\t]x();", "[\t]}", "⟨\t⟩}"]
     );
 }
 
 #[test]
 fn m10_blank_line_removed_after_a_change() {
-    assert_eq!(one_sided("a(1);\n\n", "a(2);\n"), ["a([2]);|"]);
+    assert_eq!(one_sided("a(1);\n\n", "a(2);\n"), ["a([2]);⟨↵⟩"]);
 }
 
 #[test]
@@ -119,7 +122,7 @@ fn m11_same_rename_on_every_line() {
 fn m12_crlf_and_emoji_keep_utf16_columns_and_breaks_outside() {
     assert_eq!(
         one_sided("😀 é old\r\nx;\r\n", "😀 é new\r\nx\r\nadded\r\n"),
-        ["😀 é [new]", "x|", "[added]"]
+        ["😀 é [new]", "x⟨;⟩", "[added]"]
     );
 }
 
@@ -132,7 +135,11 @@ fn m13_conflict_marks_each_side_as_its_own_case() {
     let (local, remote) = conflict(base, local, remote);
     assert_eq!(
         local,
-        ["import { ref, computed } from 'vue';", "|a(1);", "|b(1);|"]
+        [
+            "import { ref, computed } from 'vue';",
+            "⟨if (ok) {↵\t⟩a(1);",
+            "⟨\t⟩b(1);⟨↵}⟩"
+        ]
     );
     assert_eq!(
         remote,
@@ -178,7 +185,7 @@ fn m14_local_dedent_marks_only_indentation_and_the_two_removed_lines() {
     assert_eq!(
         language_tools_chunk_3().0,
         [
-            "|[\t]let emitted = false;",
+            "⟨\tif (options.vueCompilerOptions.target >= 3.3) {↵⟩[\t]let emitted = false;",
             "[\t]for (const macro of Object.keys(options.vueCompilerOptions.macros)) {",
             "[\t\t]if (!options.setupBindings.has(macro)) {",
             "[\t\t\t]if (!emitted) {",
@@ -189,7 +196,7 @@ fn m14_local_dedent_marks_only_indentation_and_the_two_removed_lines() {
             "[\t\t]}",
             "[\t]}",
             "[\t]if (emitted) {",
-            "[\t\t]yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;|",
+            "[\t\t]yield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;⟨↵\t\t}⟩",
         ]
     );
 }
@@ -227,7 +234,7 @@ const M14_REMOTE: [&str; 34] = [
     "[\t\t\tfor (const { canonical, alias } of toImport) {]",
     "[\t\t\t\tyield alias === canonical ? `${canonical}, ` : `${canonical} as ${alias}, `;]",
     "[\t\t\t]}",
-    "|\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;",
+    "⟨\t\tif (emitted) {↵⟩\t\t\tyield `} from '${options.vueCompilerOptions.lib}'${endOfLine}`;",
     "\t\t}",
 ];
 

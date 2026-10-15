@@ -5,7 +5,8 @@ use yamt_merge_core::{
 pub const HEAD: &str = "head();\n";
 pub const TAIL: &str = "tail();\n";
 
-/// The chunk's side lines in the brief's notation: `[…]` one changed range, `|` one point.
+/// The chunk's side lines in the brief's notation: `[…]` one changed range, `⟨…⟩` one removal
+/// holding its text, each `\n` of it shown as `↵`.
 pub fn marked_lines<L: Copy>(
     text: &str,
     first: u32,
@@ -22,18 +23,18 @@ pub fn marked_lines<L: Copy>(
                 .filter(|range| index(range.line) == line)
                 .map(|range| (range.start as usize, (range.start + range.len) as usize))
                 .collect();
-            let points: Vec<usize> = changes
-                .removed_at
+            let removals: Vec<(usize, &str)> = changes
+                .removals
                 .iter()
-                .filter(|point| index(point.line) == line)
-                .map(|point| point.column as usize)
+                .filter(|removal| index(removal.at.line) == line)
+                .map(|removal| (removal.at.column as usize, removal.text.as_str()))
                 .collect();
-            marked_line(lines[line as usize], &ranges, &points)
+            marked_line(lines[line as usize], &ranges, &removals)
         })
         .collect()
 }
 
-fn marked_line(line: &str, ranges: &[(usize, usize)], points: &[usize]) -> String {
+fn marked_line(line: &str, ranges: &[(usize, usize)], removals: &[(usize, &str)]) -> String {
     let content = line
         .strip_suffix("\r\n")
         .or_else(|| line.strip_suffix('\n'))
@@ -44,8 +45,10 @@ fn marked_line(line: &str, ranges: &[(usize, usize)], points: &[usize]) -> Strin
         for _ in ranges.iter().filter(|range| range.1 == column) {
             marked.push(']');
         }
-        for _ in points.iter().filter(|point| **point == column) {
-            marked.push('|');
+        for (_, text) in removals.iter().filter(|removal| removal.0 == column) {
+            marked.push('⟨');
+            marked.push_str(&text.replace('\n', "↵"));
+            marked.push('⟩');
         }
         for _ in ranges.iter().filter(|range| range.0 == column) {
             marked.push('[');
@@ -73,7 +76,7 @@ pub fn one_sided(base: &str, side: &str) -> Vec<String> {
     let side = format!("{HEAD}{side}{TAIL}");
     let (chunk, words) = only_chunk(&base, &side, &base);
     assert_eq!(chunk.kind, ChunkKind::LocalOnly);
-    assert!(words.remote.changed.is_empty() && words.remote.removed_at.is_empty());
+    assert!(words.remote.changed.is_empty() && words.remote.removals.is_empty());
     let local = marked_lines(
         &side,
         chunk.local.start.0,
@@ -83,7 +86,7 @@ pub fn one_sided(base: &str, side: &str) -> Vec<String> {
     );
     let (chunk, words) = only_chunk(&base, &base, &side);
     assert_eq!(chunk.kind, ChunkKind::RemoteOnly);
-    assert!(words.local.changed.is_empty() && words.local.removed_at.is_empty());
+    assert!(words.local.changed.is_empty() && words.local.removals.is_empty());
     let remote = marked_lines(
         &side,
         chunk.remote.start.0,

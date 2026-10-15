@@ -45,7 +45,7 @@
               "len": 47
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -75,10 +75,13 @@
               "len": 8
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 3,
-              "column": 37
+              "at": {
+                "line": 3,
+                "column": 37
+              },
+              "text": "-vitest"
             }
           ]
         }
@@ -117,11 +120,11 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -153,7 +156,7 @@
         "chunk": 2,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -168,7 +171,7 @@
               "len": 25
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -200,11 +203,11 @@
         "chunk": 3,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -867,7 +870,7 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -1562,7 +1565,7 @@
               "len": 4
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {

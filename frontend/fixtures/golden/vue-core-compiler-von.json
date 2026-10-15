@@ -34,7 +34,7 @@
         "chunk": 0,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -44,7 +44,7 @@
               "len": 16
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -87,11 +87,11 @@
               "len": 8
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -128,7 +128,7 @@
         "chunk": 2,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -143,10 +143,13 @@
               "len": 9
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 83,
-              "column": 46
+              "at": {
+                "line": 83,
+                "column": 46
+              },
+              "text": ".content"
             }
           ]
         }

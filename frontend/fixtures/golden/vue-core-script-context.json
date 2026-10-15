@@ -34,11 +34,11 @@
         "chunk": 0,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -70,36 +70,54 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 21,
-              "column": 16
+              "at": {
+                "line": 21,
+                "column": 16
+              },
+              "text": " = this.descriptor.source"
             },
             {
-              "line": 22,
-              "column": 18
+              "at": {
+                "line": 22,
+                "column": 18
+              },
+              "text": " = this.descriptor.filename"
             },
             {
-              "line": 23,
-              "column": 16
+              "at": {
+                "line": 23,
+                "column": 16
+              },
+              "text": " = new MagicString(this.source)"
             },
             {
-              "line": 24,
-              "column": 33
+              "at": {
+                "line": 24,
+                "column": 33
+              },
+              "text": " ="
             },
             {
-              "line": 25,
-              "column": 0
+              "at": {
+                "line": 25,
+                "column": 0
+              },
+              "text": "    this.descriptor.scriptSetup?.loc.start.offset\n"
             },
             {
-              "line": 25,
-              "column": 31
+              "at": {
+                "line": 25,
+                "column": 31
+              },
+              "text": " = this.descriptor.scriptSetup?.loc.end.offset"
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -167,14 +185,20 @@
               "len": 34
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 96,
-              "column": 0
+              "at": {
+                "line": 96,
+                "column": 0
+              },
+              "text": "      scriptLang === 'js' ||\n      scriptLang === 'jsx' ||\n      scriptSetupLang === 'js' ||\n      scriptSetupLang === 'jsx'\n"
             },
             {
-              "line": 96,
-              "column": 49
+              "at": {
+                "line": 96,
+                "column": 49
+              },
+              "text": "\n      scriptLang === 'ts' ||\n      scriptLang === 'tsx' ||\n      scriptSetupLang === 'ts' ||\n      scriptSetupLang === 'tsx'"
             }
           ]
         },
@@ -191,14 +215,20 @@
               "len": 34
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 91,
-              "column": 0
+              "at": {
+                "line": 91,
+                "column": 0
+              },
+              "text": "      scriptLang === 'js' ||\n      scriptLang === 'jsx' ||\n      scriptSetupLang === 'js' ||\n      scriptSetupLang === 'jsx'\n"
             },
             {
-              "line": 91,
-              "column": 49
+              "at": {
+                "line": 91,
+                "column": 49
+              },
+              "text": "\n      scriptLang === 'ts' ||\n      scriptLang === 'tsx' ||\n      scriptSetupLang === 'ts' ||\n      scriptSetupLang === 'tsx'"
             }
           ]
         }
@@ -237,16 +267,19 @@
         "chunk": 3,
         "local": {
           "changed": [],
-          "removed_at": [
+          "removals": [
             {
-              "line": 99,
-              "column": 21
+              "at": {
+                "line": 99,
+                "column": 21
+              },
+              "text": "this."
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {

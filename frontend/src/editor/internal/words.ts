@@ -42,8 +42,8 @@ export function sideWordDecorations(
       decorations.push(mark.range(from, from + range.len));
     }
     const bar = Decoration.widget({ widget: new RemovalPoint(tone) });
-    for (const point of chunk.words[side].removedAt) {
-      decorations.push(bar.range(doc.line(point.line + 1).from + point.column));
+    for (const removal of chunk.words[side].removals) {
+      decorations.push(bar.range(doc.line(removal.at.line + 1).from + removal.at.column));
     }
   }
   return Decoration.set(decorations, true);

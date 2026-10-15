@@ -65,16 +65,19 @@
               "len": 13
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 8,
-              "column": 0
+              "at": {
+                "line": 8,
+                "column": 0
+              },
+              "text": "import { Repl, useStore, SFCOptions, useVueImportMap "
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -106,11 +109,11 @@
         "chunk": 1,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -213,20 +216,26 @@
               "len": 4
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 32,
-              "column": 46
+              "at": {
+                "line": 32,
+                "column": 46
+              },
+              "text": ","
             },
             {
-              "line": 37,
-              "column": 51
+              "at": {
+                "line": 37,
+                "column": 51
+              },
+              "text": ","
             }
           ]
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -258,11 +267,11 @@
         "chunk": 3,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -294,11 +303,11 @@
         "chunk": 4,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -330,11 +339,11 @@
         "chunk": 5,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -377,7 +386,7 @@
               "len": 32
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -387,7 +396,7 @@
               "len": 55
             }
           ],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {

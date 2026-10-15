@@ -34,7 +34,7 @@
         "chunk": 0,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -54,10 +54,13 @@
               "len": 30
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 6,
-              "column": 0
+              "at": {
+                "line": 6,
+                "column": 0
+              },
+              "text": "import { persistQueryClient "
             }
           ]
         }
@@ -97,11 +100,11 @@
               "len": 46
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -133,11 +136,11 @@
         "chunk": 2,
         "local": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [],
-          "removed_at": []
+          "removals": []
         }
       },
       "waiting": {
@@ -200,7 +203,7 @@
               "len": 9
             }
           ],
-          "removed_at": []
+          "removals": []
         },
         "remote": {
           "changed": [
@@ -255,14 +258,20 @@
               "len": 13
             }
           ],
-          "removed_at": [
+          "removals": [
             {
-              "line": 46,
-              "column": 0
+              "at": {
+                "line": 46,
+                "column": 0
+              },
+              "text": "\n      return () => {\n        unsubscribe()\n"
             },
             {
-              "line": 47,
-              "column": 0
+              "at": {
+                "line": 47,
+                "column": 0
+              },
+              "text": "    }\n"
             }
           ]
         }

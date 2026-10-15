@@ -50,13 +50,19 @@ const CHUNK = {
 const MIDDLE_RANGE = { start: 0, len: 0 };
 
 const WORDS = {
-  local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [{ line: 0, column: 1 }] },
-  remote: { changed: [{ line: 0, start: 1, len: 1 }], removed_at: [] },
+  local: {
+    changed: [{ line: 0, start: 0, len: 1 }],
+    removals: [{ at: { line: 0, column: 1 }, text: "b, " }],
+  },
+  remote: { changed: [{ line: 0, start: 1, len: 1 }], removals: [] },
 };
 
 const DOMAIN_WORDS = {
-  local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [{ line: 0, column: 1 }] },
-  remote: { changed: [{ line: 0, start: 1, len: 1 }], removedAt: [] },
+  local: {
+    changed: [{ line: 0, start: 0, len: 1 }],
+    removals: [{ at: { line: 0, column: 1 }, text: "b, " }],
+  },
+  remote: { changed: [{ line: 0, start: 1, len: 1 }], removals: [] },
 };
 
 const WAITING = {
@@ -217,9 +223,9 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
   const words = data.chunks[8]?.words;
   expect(words?.local.changed).toHaveLength(8);
   expect(words?.local.changed[0]).toEqual({ line: 128, start: 0, len: 2 });
-  expect(words?.local.removedAt).toEqual([
-    { line: 128, column: 0 },
-    { line: 135, column: 17 },
+  expect(words?.local.removals).toEqual([
+    { at: { line: 128, column: 0 }, text: "  if (target) {\n" },
+    { at: { line: 135, column: 17 }, text: "\n  }" },
   ]);
   expect(data.local.split("\n")[135]).toBe("  }, { passive })");
   expect(words?.remote).toEqual({
@@ -228,7 +234,7 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
       { line: 151, start: 0, len: 54 },
       { line: 152, start: 0, len: 55 },
     ],
-    removedAt: [],
+    removals: [],
   });
 });
 
@@ -317,14 +323,28 @@ test.each([
   [
     "a string word column",
     record("x.ts", {
-      words: { local: { changed: [{ line: 0, start: "1", len: 1 }], removed_at: [] } },
+      words: { local: { changed: [{ line: 0, start: "1", len: 1 }], removals: [] } },
     }),
     "chunks.0.words.local.changed.0.start",
   ],
   [
     "a string point column",
-    record("x.ts", { words: { remote: { changed: [], removed_at: [{ line: 0, column: "1" }] } } }),
-    "chunks.0.words.remote.removed_at.0.column",
+    record("x.ts", {
+      words: { remote: { changed: [], removals: [{ at: { line: 0, column: "1" }, text: "x" }] } },
+    }),
+    "chunks.0.words.remote.removals.0.at.column",
+  ],
+  [
+    "a removal without a place",
+    record("x.ts", { words: { remote: { changed: [], removals: [{ text: "x" }] } } }),
+    'Invalid key: Expected "at"',
+  ],
+  [
+    "a number removal text",
+    record("x.ts", {
+      words: { local: { changed: [], removals: [{ at: { line: 0, column: 0 }, text: 1 }] } },
+    }),
+    "chunks.0.words.local.removals.0.text",
   ],
   [
     "the old flat word shape",
@@ -440,14 +460,14 @@ test.each([
   [
     "a negative word line",
     record("x.ts", {
-      words: { local: { changed: [{ line: -1, start: 0, len: 1 }], removed_at: [] } },
+      words: { local: { changed: [{ line: -1, start: 0, len: 1 }], removals: [] } },
     }),
     "chunks[0].words.local.changed[0].line must be a non-negative safe integer, got -1",
   ],
   [
     "a non-integer remote word line",
     record("x.ts", {
-      words: { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removed_at: [] } },
+      words: { remote: { changed: [{ line: 0.5, start: 0, len: 1 }], removals: [] } },
     }),
     "chunks[0].words.remote.changed[0].line must be a non-negative safe integer, got 0.5",
   ],
@@ -460,7 +480,7 @@ test.each([
             { line: 0, start: 1, len: 1 },
             { line: 0, start: -1, len: 1 },
           ],
-          removed_at: [],
+          removals: [],
         },
       },
     }),
@@ -469,23 +489,23 @@ test.each([
   [
     "an empty word range",
     record("x.ts", {
-      words: { local: { changed: [{ line: 0, start: 0, len: 0 }], removed_at: [] } },
+      words: { local: { changed: [{ line: 0, start: 0, len: 0 }], removals: [] } },
     }),
     "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0",
   ],
   [
     "a fractional word length",
     record("x.ts", {
-      words: { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removed_at: [] } },
+      words: { local: { changed: [{ line: 0, start: 0, len: 0.5 }], removals: [] } },
     }),
     "chunks[0].words.local.changed[0].len must be a positive safe integer, got 0.5",
   ],
   [
     "a negative point line",
     record("x.ts", {
-      words: { remote: { changed: [], removed_at: [{ line: -1, column: 0 }] } },
+      words: { remote: { changed: [], removals: [{ at: { line: -1, column: 0 }, text: "x" }] } },
     }),
-    "chunks[0].words.remote.removed_at[0].line must be a non-negative safe integer, got -1",
+    "chunks[0].words.remote.removals[0].at.line must be a non-negative safe integer, got -1",
   ],
   [
     "a negative point column",
@@ -493,28 +513,45 @@ test.each([
       words: {
         local: {
           changed: [],
-          removed_at: [
-            { line: 0, column: 0 },
-            { line: 0, column: -1 },
+          removals: [
+            { at: { line: 0, column: 0 }, text: "x" },
+            { at: { line: 0, column: -1 }, text: "x" },
           ],
         },
       },
     }),
-    "chunks[0].words.local.removed_at[1].column must be a non-negative safe integer, got -1",
+    "chunks[0].words.local.removals[1].at.column must be a non-negative safe integer, got -1",
   ],
   [
     "a fractional point column",
     record("x.ts", {
-      words: { local: { changed: [], removed_at: [{ line: 0, column: 0.5 }] } },
+      words: { local: { changed: [], removals: [{ at: { line: 0, column: 0.5 }, text: "x" }] } },
     }),
-    "chunks[0].words.local.removed_at[0].column must be a non-negative safe integer, got 0.5",
+    "chunks[0].words.local.removals[0].at.column must be a non-negative safe integer, got 0.5",
   ],
   [
     "an unsafe point column",
     record("x.ts", {
-      words: { remote: { changed: [], removed_at: [{ line: 0, column: 2 ** 53 }] } },
+      words: {
+        remote: { changed: [], removals: [{ at: { line: 0, column: 2 ** 53 }, text: "x" }] },
+      },
     }),
-    `chunks[0].words.remote.removed_at[0].column must be a non-negative safe integer, got ${2 ** 53}`,
+    `chunks[0].words.remote.removals[0].at.column must be a non-negative safe integer, got ${2 ** 53}`,
+  ],
+  [
+    "an empty removal text",
+    record("x.ts", {
+      words: {
+        local: {
+          changed: [],
+          removals: [
+            { at: { line: 0, column: 0 }, text: "x" },
+            { at: { line: 0, column: 3 }, text: "" },
+          ],
+        },
+      },
+    }),
+    "chunks[0].words.local.removals[1].text must not be empty",
   ],
 ])("a record with %s is rejected naming its words", (_case, json, message) => {
   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(

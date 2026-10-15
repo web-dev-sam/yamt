@@ -64,8 +64,8 @@ const DTO: Generated.FileMergeData = {
       middle: LINE,
       words: {
         chunk: 0,
-        local: { changed: [{ line: 0, start: 0, len: 1 }], removed_at: [] },
-        remote: { changed: [], removed_at: [{ line: 0, column: 1 }] },
+        local: { changed: [{ line: 0, start: 0, len: 1 }], removals: [] },
+        remote: { changed: [], removals: [{ at: { line: 0, column: 1 }, text: ";" }] },
       },
       waiting: MARKERS,
     },
@@ -147,8 +147,8 @@ test("loadFile turns the app's data into domain data: the middle range, not base
           local: LINE,
           remote: LINE,
           words: {
-            local: { changed: [{ line: 0, start: 0, len: 1 }], removedAt: [] },
-            remote: { changed: [], removedAt: [{ line: 0, column: 1 }] },
+            local: { changed: [{ line: 0, start: 0, len: 1 }], removals: [] },
+            remote: { changed: [], removals: [{ at: { line: 0, column: 1 }, text: ";" }] },
           },
           waiting: MARKERS,
         },

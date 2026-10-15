@@ -1,4 +1,6 @@
 import type * as Generated from "./bindings";
+import { invalid, isNonNegativeInteger } from "./validate";
+import { toSideWords, type SideWords } from "./words";
 
 type MiddleLine = number & { readonly __brand: "MiddleLine" };
 export type DiskVersion = number & { readonly __brand: "DiskVersion" };
@@ -6,12 +8,6 @@ type LocalLine = number & { readonly __brand: "LocalLine" };
 type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
 type LineRange<L> = { readonly start: L; readonly len: number };
-type InlineRange<L> = { readonly line: L; readonly start: number; readonly len: number };
-type InlinePoint<L> = { readonly line: L; readonly column: number };
-type SideWords<L> = {
-  readonly changed: readonly InlineRange<L>[];
-  readonly removedAt: readonly InlinePoint<L>[];
-};
 type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideWords<RemoteLine> };
 
 export type Chunk = {
@@ -108,10 +104,6 @@ export type SourceResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: SourceFailure };
 
-function isNonNegativeInteger(n: number): boolean {
-  return Number.isSafeInteger(n) && n >= 0;
-}
-
 function isMiddleLine(n: number): n is MiddleLine {
   return isNonNegativeInteger(n);
 }
@@ -134,70 +126,6 @@ function isChunkId(n: number): n is ChunkId {
 
 function isRunId(n: number): n is RunId {
   return isNonNegativeInteger(n);
-}
-
-function invalid(field: string, value: number): Error {
-  return new Error(`${field} must be a non-negative safe integer, got ${value}`);
-}
-
-function toInlineRange<L extends number>({
-  range,
-  isLine,
-  field,
-}: {
-  range: Generated.InlineRange<number>;
-  isLine: (n: number) => n is L;
-  field: string;
-}): InlineRange<L> {
-  const { line, start, len } = range;
-  if (!isLine(line)) {
-    throw invalid(`${field}.line`, line);
-  }
-  if (!isNonNegativeInteger(start)) {
-    throw invalid(`${field}.start`, start);
-  }
-  if (!Number.isSafeInteger(len) || len <= 0) {
-    throw new Error(`${field}.len must be a positive safe integer, got ${len}`);
-  }
-  return { line, start, len };
-}
-
-function toInlinePoint<L extends number>({
-  point,
-  isLine,
-  field,
-}: {
-  point: Generated.InlinePoint<number>;
-  isLine: (n: number) => n is L;
-  field: string;
-}): InlinePoint<L> {
-  const { line, column } = point;
-  if (!isLine(line)) {
-    throw invalid(`${field}.line`, line);
-  }
-  if (!isNonNegativeInteger(column)) {
-    throw invalid(`${field}.column`, column);
-  }
-  return { line, column };
-}
-
-function toSideWords<L extends number>({
-  side,
-  isLine,
-  field,
-}: {
-  side: Generated.SideWordChanges<number>;
-  isLine: (n: number) => n is L;
-  field: string;
-}): SideWords<L> {
-  return {
-    changed: side.changed.map((range, index) =>
-      toInlineRange({ range, isLine, field: `${field}.changed[${index}]` }),
-    ),
-    removedAt: side.removed_at.map((point, index) =>
-      toInlinePoint({ point, isLine, field: `${field}.removed_at[${index}]` }),
-    ),
-  };
 }
 
 function toWords({

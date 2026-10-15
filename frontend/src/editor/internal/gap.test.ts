@@ -59,7 +59,7 @@ async function conflictBand(
 }
 
 function noWords(chunk: number): Record<string, unknown> {
-  return { chunk, local: { changed: [], removed_at: [] }, remote: { changed: [], removed_at: [] } };
+  return { chunk, local: { changed: [], removals: [] }, remote: { changed: [], removals: [] } };
 }
 
 async function oneLineDeletedOnEachSide(): Promise<readonly Chunk[]> {

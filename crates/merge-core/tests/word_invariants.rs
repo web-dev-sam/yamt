@@ -99,13 +99,13 @@ fn content(line: &str) -> &str {
 #[derive(Debug, PartialEq)]
 struct PlainSide {
     ranges: Vec<(u32, u32, u32)>,
-    points: Vec<(u32, u32)>,
+    removals: Vec<(u32, u32, String)>,
 }
 
 fn nothing() -> PlainSide {
     PlainSide {
         ranges: Vec::new(),
-        points: Vec::new(),
+        removals: Vec::new(),
     }
 }
 
@@ -116,10 +116,16 @@ fn plain<L: Copy>(side: &SideWordChanges<L>, index: fn(L) -> u32) -> PlainSide {
             .iter()
             .map(|range| (index(range.line), range.start, range.len))
             .collect(),
-        points: side
-            .removed_at
+        removals: side
+            .removals
             .iter()
-            .map(|point| (index(point.line), point.column))
+            .map(|removal| {
+                (
+                    index(removal.at.line),
+                    removal.at.column,
+                    removal.text.clone(),
+                )
+            })
             .collect(),
     }
 }
@@ -151,18 +157,55 @@ fn check_side(side: &PlainSide, text: &str, chunk_lines: (u32, u32)) -> Result<(
             "{side:?}"
         );
     }
-    for &(line, column) in &side.points {
-        prop_assert!(in_chunk(line), "{side:?} {chunk_lines:?}");
+    for (line, column, _) in &side.removals {
+        prop_assert!(in_chunk(*line), "{side:?} {chunk_lines:?}");
         prop_assert!(
-            is_char_boundary(lines[line as usize], column),
+            is_char_boundary(lines[*line as usize], *column),
             "{side:?} {text:?}"
         );
     }
     prop_assert!(
-        side.points.windows(2).all(|pair| pair[0] < pair[1]),
+        side.removals
+            .windows(2)
+            .all(|pair| (pair[0].0, pair[0].1) < (pair[1].0, pair[1].1)),
         "{side:?}"
     );
     Ok(())
+}
+
+fn without_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// Each text is non-empty and, whitespace aside, a contiguous part of the chunk's base text; its
+/// `k` line breaks cut it into `k + 1` parts, of which the first `k` or the last `k` are `k`
+/// consecutive whole base lines.
+fn check_texts(side: &PlainSide, base_lines: &[&str]) -> Result<(), TestCaseError> {
+    let base_contents: Vec<&str> = base_lines.iter().map(|line| content(line)).collect();
+    let base_text = without_whitespace(&base_lines.concat());
+    for (_, _, text) in &side.removals {
+        prop_assert!(!text.is_empty(), "{side:?}");
+        prop_assert!(
+            base_text.contains(&without_whitespace(text)),
+            "{text:?} {base_lines:?}"
+        );
+        let parts: Vec<&str> = text.split('\n').collect();
+        let breaks = parts.len() - 1;
+        if breaks > 0 {
+            let is_whole_lines =
+                |lines: &[&str]| base_contents.windows(breaks).any(|window| window == lines);
+            prop_assert!(
+                is_whole_lines(&parts[..breaks]) || is_whole_lines(&parts[1..]),
+                "{text:?} {base_lines:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn chunk_lines(text: &str, first: u32, len: u32) -> Vec<&str> {
+    let lines = text.split_inclusive('\n').skip(first as usize);
+    lines.take(len as usize).collect()
 }
 
 fn without_ranges(text: &str, first: u32, len: u32, ranges: &[(u32, u32, u32)]) -> Option<String> {
@@ -235,10 +278,21 @@ proptest! {
                 return Err(TestCaseError::fail("a range splits a character"));
             };
             if chunk.base.is_empty() {
-                prop_assert!(change.local.changed.is_empty() && change.local.removed_at.is_empty());
+                prop_assert!(change.local.changed.is_empty() && change.local.removals.is_empty());
             } else {
                 prop_assert!(is_subsequence(&local_rest, &base_rest), "{local_rest:?} {base_rest:?}");
             }
+        }
+    }
+
+    #[test]
+    fn every_removal_text_is_base_text_of_its_chunk(triple in triple()) {
+        let Triple { base, local, remote } = &triple;
+        let chunks = compute_chunks(base, local, remote, &Options::default());
+        for (chunk, change) in chunks.iter().zip(word_changes(base, local, remote, &chunks)) {
+            let base_lines = chunk_lines(base, chunk.base.start.0, chunk.base.len);
+            check_texts(&plain(&change.local, |line| line.0), &base_lines)?;
+            check_texts(&plain(&change.remote, |line| line.0), &base_lines)?;
         }
     }
 

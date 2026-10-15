@@ -66,8 +66,8 @@ async function synthetic(
         middle,
         words: {
           chunk: id,
-          local: { changed: [], removed_at: [] },
-          remote: { changed: [], removed_at: [] },
+          local: { changed: [], removals: [] },
+          remote: { changed: [], removals: [] },
         },
         waiting: chunk.kind === "Conflict" ? MARKERS : { kind: "SideLines" },
       };
@@ -731,8 +731,8 @@ async function diskSeeded({ middle, base, at, side, eol }: Seeded): Promise<File
         middle: range(at),
         words: {
           chunk: 0,
-          local: { changed: [], removed_at: [] },
-          remote: { changed: [], removed_at: [] },
+          local: { changed: [], removals: [] },
+          remote: { changed: [], removals: [] },
         },
         waiting: MARKERS,
       },
@@ -824,8 +824,8 @@ function addedConflict(
     middle: range(ranges.middle),
     words: {
       chunk: id,
-      local: { changed: [], removed_at: [] },
-      remote: { changed: [], removed_at: [] },
+      local: { changed: [], removals: [] },
+      remote: { changed: [], removals: [] },
     },
     waiting: MARKERS,
   };

@@ -27,8 +27,8 @@ async function chunkWith(
         middle: { start: 0, len: lens.middle },
         words: {
           chunk: 0,
-          local: { changed: [], removed_at: [] },
-          remote: { changed: [], removed_at: [] },
+          local: { changed: [], removals: [] },
+          remote: { changed: [], removals: [] },
         },
         waiting:
           kind === "Conflict"

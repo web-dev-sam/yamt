@@ -131,8 +131,8 @@ async function data(): Promise<FileMergeData> {
           middle: { start: 2, len: 4 },
           words: {
             chunk: 0,
-            local: { changed: [], removed_at: [] },
-            remote: { changed: [], removed_at: [] },
+            local: { changed: [], removals: [] },
+            remote: { changed: [], removals: [] },
           },
           waiting: {
             kind: "Markers",
