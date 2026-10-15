@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0468c44ea2a6a0416542b0f9987697b728769688f7314f0de617dbdce589d24c # shrinks to run = DeletedRun { base: [Line { indent: "", words: ["l0a", "l0b", "l0c"] }, Line { indent: "", words: ["l1a", "l1b", "l1c"] }, Line { indent: "", words: ["l2a", "l2b", "l2c"] }, Line { indent: "", words: ["l3a", "l3b", "l3c"] }, Line { indent: "", words: ["l4a", "l4b", "l4c"] }, Line { indent: "", words: ["l5a", "l5b", "l5c"] }], start: 1, len: 2, neighbours: Before }

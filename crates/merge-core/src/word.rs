@@ -15,7 +15,7 @@ use crate::token::{Token, TokenKind, line_tokens};
 /// Base text one side removed, and the place in that side where it would sit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct Removal<L> {
-    /// The zero-width place (the same places `removed_at` held).
+    /// The zero-width place in the side where the removed text would sit.
     pub at: InlinePoint<L>,
     /// The removed base text, every line break written `\n`; never empty.
     pub text: String,

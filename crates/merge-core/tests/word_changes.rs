@@ -104,6 +104,38 @@ fn removed_lines_around_a_kept_blank_line_join_into_one_removal() {
 }
 
 #[test]
+fn two_removed_lines_before_and_after_one_pair_keep_every_line() {
+    assert_eq!(
+        one_sided("a();\nb();\nx(1);\nc();\nd();\n", "x(2);\n"),
+        ["⟨a();↵b();↵⟩x([2]);⟨↵c();↵d();⟩"]
+    );
+}
+
+#[test]
+fn two_removed_lines_between_pairs_keep_every_line() {
+    assert_eq!(
+        one_sided("a(1);\nb();\nc();\nd(1);\n", "a(2);\nd(2);\n"),
+        ["a([2]);", "⟨b();↵c();↵⟩d([2]);"]
+    );
+}
+
+#[test]
+fn two_removed_lines_join_a_pair_s_removed_leading_tokens() {
+    assert_eq!(
+        one_sided("a();\nb();\nlet x = f(1);\n", "x = f(2);\n"),
+        ["⟨a();↵b();↵let ⟩x = f([2]);"]
+    );
+}
+
+#[test]
+fn two_removed_lines_join_a_pair_s_removed_trailing_tokens() {
+    assert_eq!(
+        one_sided("x(1);\nc();\nd();\n", "x(2)\n"),
+        ["x([2])⟨;↵c();↵d();⟩"]
+    );
+}
+
+#[test]
 fn a_pure_deletion_has_no_point() {
     let base = "a\nb\nc\n";
     let (chunk, words) = only_chunk(base, "a\nc\n", base);

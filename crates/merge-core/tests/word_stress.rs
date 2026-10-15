@@ -9,6 +9,104 @@ const MIN_LINES: usize = 3;
 const MAX_LINES: usize = 30;
 const MAX_EDITS: usize = 10;
 const CASES: u32 = 512;
+const MAX_DELETED: usize = 4;
+
+/// Which neighbours of a deleted run have one word replaced, so that they pair with base.
+#[derive(Clone, Copy, Debug)]
+enum Neighbours {
+    Before,
+    After,
+    Both,
+}
+
+/// Base lines, with `len` lines from `start` deleted and the run's `neighbours` edited.
+#[derive(Debug)]
+struct DeletedRun {
+    base: Vec<Line>,
+    start: usize,
+    len: usize,
+    neighbours: Neighbours,
+}
+
+impl DeletedRun {
+    fn side_text(&self) -> String {
+        let mut text = String::new();
+        for (index, line) in self.base.iter().enumerate() {
+            if (self.start..self.start + self.len).contains(&index) {
+                continue;
+            }
+            let is_before = index + 1 == self.start;
+            let is_after = index == self.start + self.len;
+            let edited = match self.neighbours {
+                Neighbours::Before => is_before,
+                Neighbours::After => is_after,
+                Neighbours::Both => is_before || is_after,
+            };
+            if edited {
+                text += &with_new_word(line).text();
+            } else {
+                text += &line.text();
+            }
+        }
+        text
+    }
+
+    /// The one removal: every deleted line in order, each followed by its line break at the start
+    /// of the line after the run, or each preceded by one at the end of the line before it.
+    fn removal(&self) -> (u32, usize, String) {
+        let deleted = &self.base[self.start..self.start + self.len];
+        let contents: Vec<String> = deleted
+            .iter()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+        let side_line = u32::try_from(self.start).unwrap_or(u32::MAX);
+        match self.neighbours {
+            Neighbours::After | Neighbours::Both => {
+                let text = contents
+                    .iter()
+                    .flat_map(|line| [line.as_str(), "\n"])
+                    .collect();
+                (side_line, 0, text)
+            }
+            Neighbours::Before => {
+                let width = with_new_word(&self.base[self.start - 1])
+                    .text()
+                    .trim_end()
+                    .len();
+                let text = contents
+                    .iter()
+                    .flat_map(|line| ["\n", line.as_str()])
+                    .collect();
+                (side_line - 1, width, text)
+            }
+        }
+    }
+}
+
+fn with_new_word(line: &Line) -> Line {
+    let mut line = line.clone();
+    line.words[1] = String::from("new");
+    line
+}
+
+fn deleted_run() -> impl Strategy<Value = DeletedRun> {
+    (
+        vec(any::<Index>(), MAX_DELETED + 2..=MAX_LINES),
+        1..=MAX_DELETED,
+        any::<Index>(),
+        prop_oneof![
+            Just(Neighbours::Before),
+            Just(Neighbours::After),
+            Just(Neighbours::Both)
+        ],
+    )
+        .prop_map(|(indents, len, start, neighbours)| DeletedRun {
+            start: 1 + start.index(indents.len() - len - 1),
+            base: base_lines(&indents),
+            len,
+            neighbours,
+        })
+}
 
 #[derive(Clone, Debug)]
 struct Line {
@@ -261,5 +359,21 @@ proptest! {
         let words = word_changes(&base, &local.text, &remote.text, &chunks);
         check_promises(&local, words.iter().map(|change| &change.local), |line| line.0)?;
         check_promises(&remote, words.iter().map(|change| &change.remote), |line| line.0)?;
+    }
+
+    #[test]
+    fn a_deleted_run_is_removed_whole_and_in_order(run in deleted_run()) {
+        let base: String = run.base.iter().map(Line::text).collect();
+        let side = run.side_text();
+        let chunks = compute_chunks(&base, &side, &base, &Options::default());
+        prop_assert_eq!(chunks.len(), 1);
+        let words = word_changes(&base, &side, &base, &chunks);
+        let removals: Vec<(u32, usize, String)> = words[0]
+            .local
+            .removals
+            .iter()
+            .map(|removal| (removal.at.line.0, removal.at.column as usize, removal.text.clone()))
+            .collect();
+        prop_assert_eq!(removals, vec![run.removal()], "{}", side);
     }
 }
