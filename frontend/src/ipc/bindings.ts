@@ -28,7 +28,7 @@ export const commands = {
 	startServer: (command: ServerCommand, events: Channel<HostEvent>) => __TAURI_INVOKE<StartReply>("start_server", { command, events }),
 	sendToServer: (run: RunId, message: string) => __TAURI_INVOKE<void>("send_to_server", { run, message }),
 	stopServer: (run: RunId) => __TAURI_INVOKE<void>("stop_server", { run }),
-	findProgram: (program: string, project: string) => __TAURI_INVOKE<ProgramFound>("find_program", { program, project }),
+	findProgram: (program: string, project: string, folders: ProgramFolders) => __TAURI_INVOKE<ProgramFound>("find_program", { program, project, folders }),
 	projectFiles: (paths: string[]) => __TAURI_INVOKE<ProjectFile[]>("project_files", { paths }),
 };
 
@@ -210,9 +210,21 @@ export type MiddleLine = number;
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
+/**
+ *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
+ *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute or
+ *  holds `..` or `.` is skipped.
+ */
+export type ProgramFolders = {
+	/**  Tried in the project folder, then each parent up to the repository root; within one folder in list order. */
+	project: string[],
+	/**  Tried after every PATH entry, relative to the user's home folder. */
+	home: string[],
+};
+
 export type ProgramFound = { kind: "Found"; path: string; place: ProgramPlace } | { kind: "NotFound"; searched: string[] };
 
-export type ProgramPlace = "Project" | "Path";
+export type ProgramPlace = "Project" | "Path" | "Home";
 
 /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
 export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
@@ -229,6 +241,7 @@ export type ServerCommand = {
 	program: string,
 	args: string[],
 	project: string,
+	folders: ProgramFolders,
 };
 
 /**  `root`: the repository's folder, `None` when its path is not UTF-8. */

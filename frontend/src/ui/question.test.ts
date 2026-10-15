@@ -84,6 +84,7 @@ function spec(name: string, project: string, installed = true): ServerSpec {
     name,
     command: { program: name, args: [] },
     project,
+    folders: { project: ["node_modules/.bin"], home: [] },
     fileTypes: ["ts"],
     formats: false,
     settings: null,

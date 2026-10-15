@@ -4,6 +4,7 @@ import {
   commands,
   type HostEvent,
   type LogValue,
+  type ProgramFolders as ProgramFoldersDto,
   type SettingsRead as SettingsReadDto,
 } from "./bindings";
 import type { ChunkSource, SettingsSource } from "./ChunkSource";
@@ -13,6 +14,7 @@ import {
   toSettingsRead,
   toSides,
   toStartReply,
+  type ProgramFolders,
   type SettingsRead,
   type SourceFailure,
   type SourceResult,
@@ -107,16 +109,24 @@ export function createTauriServerHost(): ServerHost {
     async start(command, onEvent) {
       const events = new Channel<HostEvent>(onEvent);
       return toStartReply(
-        await commands.startServer({ ...command, args: [...command.args] }, events),
+        await commands.startServer(
+          { ...command, args: [...command.args], folders: foldersDto(command.folders) },
+          events,
+        ),
       );
     },
     send(run, message) {
       void commands.sendToServer(run, message);
     },
     stop: (run) => commands.stopServer(run),
-    findProgram: (program, project) => commands.findProgram(program, project),
+    findProgram: (program, project, folders) =>
+      commands.findProgram(program, project, foldersDto(folders)),
     projectFiles: (paths) => commands.projectFiles([...paths]),
   };
+}
+
+function foldersDto(folders: ProgramFolders): ProgramFoldersDto {
+  return { project: [...folders.project], home: [...folders.home] };
 }
 
 // JSON.stringify writes NaN and ±Infinity as `null` (ECMA-262 SerializeJSONProperty); the app's

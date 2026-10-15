@@ -1,4 +1,8 @@
+import type { ProgramFolders } from "../../ipc";
+
 export type PackageManager = "npm" | "pnpm" | "yarn" | "yarnBerry" | "bun";
+
+export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
 
 export type InstallHint = {
   readonly package: string;
@@ -14,6 +18,7 @@ export type ServerSpec = {
   readonly name: string;
   readonly command: { readonly program: string; readonly args: readonly string[] };
   readonly project: string;
+  readonly folders: ProgramFolders;
   readonly fileTypes: readonly string[];
   readonly formats: boolean;
   readonly settings: unknown;

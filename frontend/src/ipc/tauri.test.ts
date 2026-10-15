@@ -436,7 +436,8 @@ test("the server host starts a run with a channel whose messages reach onEvent, 
     },
   );
   const heard: Generated.HostEvent[] = [];
-  const command = { program: "oxlint", args: ["--lsp"], project: "frontend" };
+  const folders = { project: ["node_modules/.bin"], home: ["go/bin"] };
+  const command = { program: "oxlint", args: ["--lsp"], project: "frontend", folders };
 
   const reply = await createTauriServerHost().start(command, (event) => heard.push(event));
   channels[0]?.onmessage({ kind: "Message", text: "{}" });
@@ -459,7 +460,7 @@ test("the server host passes a refused start through and rejects a run id that i
   commands.startServer.mockResolvedValueOnce(notFound);
   commands.startServer.mockResolvedValueOnce({ kind: "Started", run: -1 });
   const host = createTauriServerHost();
-  const command = { program: "oxlint", args: [], project: "" };
+  const command = { program: "oxlint", args: [], project: "", folders: { project: [], home: [] } };
 
   expect(await host.start(command, () => undefined)).toEqual(notFound);
   await expect(host.start(command, () => undefined)).rejects.toThrow("run");
@@ -476,7 +477,11 @@ test("the server host maps send, stop, context, findProgram and projectFiles ont
   commands.projectFiles.mockResolvedValue(files);
   commands.startServer.mockResolvedValue({ kind: "Started", run: 3 });
   const host = createTauriServerHost();
-  const reply = await host.start({ program: "a", args: [], project: "" }, () => undefined);
+  const noFolders = { project: [], home: [] };
+  const reply = await host.start(
+    { program: "a", args: [], project: "", folders: noFolders },
+    () => undefined,
+  );
   if (reply.kind !== "Started") {
     throw new Error("not started");
   }
@@ -487,8 +492,9 @@ test("the server host maps send, stop, context, findProgram and projectFiles ont
   expect(commands.sendToServer).toHaveBeenCalledWith(3, '{"id":1}');
   expect(commands.stopServer).toHaveBeenCalledWith(3);
   expect(await host.context()).toEqual(context);
-  expect(await host.findProgram("oxlint", "frontend")).toEqual(found);
-  expect(commands.findProgram).toHaveBeenCalledWith("oxlint", "frontend");
+  const folders = { project: ["node_modules/.bin"], home: [".local/bin"] };
+  expect(await host.findProgram("oxlint", "frontend", folders)).toEqual(found);
+  expect(commands.findProgram).toHaveBeenCalledWith("oxlint", "frontend", folders);
   expect(await host.projectFiles(["a", "package.json"])).toEqual(files);
   expect(commands.projectFiles).toHaveBeenCalledWith(["a", "package.json"]);
 });

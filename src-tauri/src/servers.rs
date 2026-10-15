@@ -7,7 +7,8 @@ use tauri::ipc::Channel;
 use tauri::webview::PageLoadEvent;
 use tauri::{Runtime, State};
 use yamt_lsp_host::{
-    Host, HostEvent, ProgramFound, ProjectFile, RunId, ServerCommand, ServerContext, StartReply,
+    Host, HostEvent, ProgramFolders, ProgramFound, ProjectFile, RunId, ServerCommand,
+    ServerContext, StartReply,
 };
 
 pub(crate) type HostState = Mutex<Host>;
@@ -77,13 +78,17 @@ pub(crate) fn stop_server(host: State<'_, HostState>, run: RunId) {
 
 #[tauri::command]
 #[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
 pub(crate) fn find_program(
     host: State<'_, HostState>,
     program: &str,
     project: &str,
+    folders: ProgramFolders,
 ) -> ProgramFound {
-    lock(&host).find_program(program, project)
+    lock(&host).find_program(program, project, &folders)
 }
 
 #[tauri::command]
@@ -137,7 +142,11 @@ mod tests {
 
         let found = window.invoke(
             "find_program",
-            json!({ "program": "tool", "project": "frontend" }),
+            json!({
+                "program": "tool",
+                "project": "frontend",
+                "folders": { "project": ["node_modules/.bin"], "home": [] },
+            }),
         );
         let files = window.invoke(
             "project_files",
@@ -176,6 +185,7 @@ mod run_tests {
             program: "sh".to_owned(),
             args: vec!["-c".to_owned(), "echo $$ >&2; exec cat".to_owned()],
             project: String::new(),
+            folders: ProgramFolders::default(),
         };
         let reply = start_server(window.app.state(), command, events);
         let StartReply::Started { run } = reply else {

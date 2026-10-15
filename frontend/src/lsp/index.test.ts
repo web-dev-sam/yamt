@@ -12,6 +12,7 @@ import type {
 } from "../ipc";
 import {
   LanguageServers,
+  addedSpecs,
   isDocVersion,
   type DocVersion,
   type FailReason,
@@ -267,6 +268,7 @@ function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
     name,
     command: { program: name, args: ["--lsp"] },
     project: "",
+    folders: { project: ["node_modules/.bin"], home: [] },
     fileTypes: ["ts"],
     formats: false,
     settings: null,
@@ -383,7 +385,25 @@ test("rule 2: a spec starts when the first document it serves opens", async () =
 
   expect(stateOf(languageServers, "oxlint")).toEqual({ kind: "running" });
   expect(host.servers).toHaveLength(1);
-  expect(host.only("oxlint").command).toEqual({ program: "oxlint", args: ["--lsp"], project: "" });
+  expect(host.only("oxlint").command).toEqual({
+    program: "oxlint",
+    args: ["--lsp"],
+    project: "",
+    folders: { project: ["node_modules/.bin"], home: [] },
+  });
+});
+
+test("an added server's start command looks in node_modules/.bin like a detected one", async () => {
+  const languageServers = servers([...addedSpecs([{ command: ["pylsp"], fileTypes: ["ts"] }], [])]);
+  languageServers.open(new FakeDoc("a.ts", "x"));
+  await settle();
+
+  expect(host.only("pylsp").command).toEqual({
+    program: "pylsp",
+    args: [],
+    project: "",
+    folders: { project: ["node_modules/.bin"], home: [] },
+  });
 });
 
 test("rule 2: a document already open at setSpecs starts the spec", async () => {

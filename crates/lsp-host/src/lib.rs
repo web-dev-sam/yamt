@@ -14,7 +14,7 @@ use std::sync::mpsc::Sender;
 use serde::{Deserialize, Serialize};
 
 pub use crate::files::ProjectFile;
-pub use crate::program::{ProgramFound, ProgramPlace};
+pub use crate::program::{ProgramFolders, ProgramFound, ProgramPlace};
 pub use crate::run::HostEvent;
 use crate::run::Running;
 
@@ -29,6 +29,7 @@ pub struct ServerCommand {
     pub program: String,
     pub args: Vec<String>,
     pub project: String,
+    pub folders: ProgramFolders,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
@@ -91,7 +92,8 @@ impl Host {
                 project: command.project.clone(),
             };
         };
-        let program = match program::find(&self.root, &project, &command.program) {
+        let program = match program::find(&self.root, &project, &command.program, &command.folders)
+        {
             Ok(found) => found.path,
             Err(searched) => {
                 return StartReply::NotFound {
@@ -145,13 +147,18 @@ impl Host {
 
     /// `NotFound` with nothing searched for a project outside the repository.
     #[must_use]
-    pub fn find_program(&self, program: &str, project: &str) -> ProgramFound {
+    pub fn find_program(
+        &self,
+        program: &str,
+        project: &str,
+        folders: &ProgramFolders,
+    ) -> ProgramFound {
         let Some(project) = files::in_repository(&self.root, project) else {
             return ProgramFound::NotFound {
                 searched: Vec::new(),
             };
         };
-        match program::find(&self.root, &project, program) {
+        match program::find(&self.root, &project, program, folders) {
             Ok(found) => ProgramFound::Found {
                 path: found.path.display().to_string(),
                 place: found.place,

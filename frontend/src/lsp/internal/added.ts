@@ -1,5 +1,5 @@
 import type { AddedServer } from "../../ipc";
-import type { ServerSpec } from "./spec";
+import { PROGRAM_FOLDERS, type ServerSpec } from "./spec";
 
 const FIRST_REPEAT = 2;
 
@@ -24,6 +24,7 @@ export function addedSpecs(
         name,
         command,
         project: "",
+        folders: PROGRAM_FOLDERS,
         fileTypes,
         formats: true,
         settings: null,

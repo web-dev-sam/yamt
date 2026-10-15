@@ -57,6 +57,7 @@ function spec(name: string, project: string): ServerSpec {
     name,
     command: { program: name, args: ["--lsp"] },
     project,
+    folders: { project: ["node_modules/.bin"], home: [] },
     fileTypes: ["ts"],
     formats: false,
     settings: null,

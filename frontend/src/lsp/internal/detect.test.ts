@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { ProgramFound, ProjectFile } from "../../ipc";
+import type { ProgramFolders, ProgramFound, ProjectFile } from "../../ipc";
 import { detect, type ProjectLookups } from "./detect";
 import type { ServerSpec } from "./spec";
 
@@ -8,10 +8,11 @@ type Tree = Readonly<Record<string, string | ProjectFile>>;
 
 type Fake = ProjectLookups & {
   readonly fileCalls: (readonly string[])[];
-  readonly programCalls: [string, string][];
+  readonly programCalls: [string, string, ProgramFolders][];
 };
 
 const ROOT = "/repo";
+const NODE_BIN: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
 const NO_SERVERS = { "package.json": "{}" };
 
 function parentOf(path: string): string {
@@ -32,7 +33,7 @@ function fileOf(tree: Tree, path: string): ProjectFile {
 
 function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
   const fileCalls: (readonly string[])[] = [];
-  const programCalls: [string, string][] = [];
+  const programCalls: [string, string, ProgramFolders][] = [];
   return {
     fileCalls,
     programCalls,
@@ -40,8 +41,8 @@ function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
       fileCalls.push(paths);
       return paths.map((path) => fileOf(tree, path));
     },
-    async findProgram(program, project): Promise<ProgramFound> {
-      programCalls.push([program, project]);
+    async findProgram(program, project, folders): Promise<ProgramFound> {
+      programCalls.push([program, project, folders]);
       for (let at = project; ; at = parentOf(at)) {
         const bin = `${at === "" ? "" : `${at}/`}node_modules/.bin/${program}`;
         if (tree[bin] !== undefined) {
@@ -139,8 +140,11 @@ test("project folders: two files in one project check it once", async () => {
   expect(summary(specs)).toEqual(["oxlint oxlint --lsp @frontend"]);
   expect(fake.fileCalls).toHaveLength(2);
   expect(fake.programCalls.filter(([program]) => program === "oxlint")).toEqual([
-    ["oxlint", "frontend"],
+    ["oxlint", "frontend", NODE_BIN],
   ]);
+  expect(fake.programCalls.map(([, , folders]) => folders)).toEqual(
+    fake.programCalls.map(() => NODE_BIN),
+  );
 });
 
 test("oxlint and oxfmt: found in the project (or above it), formatter first, with their options", async () => {
@@ -153,6 +157,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
       name: "oxfmt",
       command: { program: "oxfmt", args: ["--lsp"] },
       project: "web",
+      folders: NODE_BIN,
       fileTypes: expect.arrayContaining(["ts", "vue", "json", "md", "toml"]),
       formats: true,
       settings: null,
@@ -163,6 +168,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
       name: "oxlint",
       command: { program: "oxlint", args: ["--lsp"] },
       project: "web",
+      folders: NODE_BIN,
       fileTypes: expect.arrayContaining(["ts", "vue"]),
       formats: false,
       settings: null,
@@ -188,6 +194,7 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
       name: "TypeScript",
       command: { program: "tsc", args: ["--lsp", "--stdio"] },
       project: "",
+      folders: NODE_BIN,
       fileTypes: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
       formats: false,
       settings: null,
@@ -236,6 +243,7 @@ test("TypeScript 5.9 without its server: install hint with the version, folder a
       name: "TypeScript",
       command: { program: "typescript-language-server", args: ["--stdio"] },
       project: "frontend",
+      folders: NODE_BIN,
       install: {
         package: "typescript-language-server",
         program: "typescript-language-server",
@@ -326,6 +334,7 @@ test("eslint: config, package and its server found on PATH or in the project", a
       name: "eslint",
       command: { program: "vscode-eslint-language-server", args: ["--stdio"] },
       project: "",
+      folders: NODE_BIN,
       fileTypes: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "vue"],
       formats: false,
       settings: { validate: "on", run: "onType" },

@@ -56,7 +56,7 @@ servers_context()                 -> ServerContext { root: Option<String>, proce
 start_server(command: ServerCommand, events: Channel<HostEvent>) -> StartReply   Started{run} | NotFound{program, searched} | SpawnFailed | OutsideRepository; events Message{text} | Log{line} | Exited{code}, Exited once and last
 send_to_server(run: RunId, message) -> ()   queues one JSON-RPC body; framing is Rust's; never blocks
 stop_server(run: RunId)           -> ()   signals; killed after 2 s; Exited follows on the channel
-find_program(program, project)    -> ProgramFound   Found{path, place: Project | Path} | NotFound{searched}: node_modules/.bin up to the root, then PATH
+find_program(program, project, folders) -> ProgramFound   Found{path, place: Project | Path | Home} | NotFound{searched}: folders.project up to the root, then PATH, then folders.home
 project_files(paths: Vec<String>) -> Vec<ProjectFile>   Missing | Folder | Text{text} (≤ 64 KiB) | TooLarge | NotText; repo-relative, outside the repository = Missing
 ```
 

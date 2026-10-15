@@ -26,7 +26,12 @@ function runId(n: number): RunId {
 
 const RUN = runId(7);
 
-const COMMAND: ServerCommand = { program: "x", args: [], project: "" };
+const COMMAND: ServerCommand = {
+  program: "x",
+  args: [],
+  project: "",
+  folders: { project: [], home: [] },
+};
 
 class FakeHost implements ServerHost {
   readonly sent: [RunId, string][] = [];

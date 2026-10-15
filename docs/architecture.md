@@ -361,11 +361,13 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   is `languageServers { repositories, added: [{ command, fileTypes }] }`.
 - Language-server commands (`servers.rs`, crate `yamt-lsp-host`, plan §2 #70; Rust never parses a server message):
   `servers_context() -> ServerContext { root, process_id }`, `start_server(command: ServerCommand { program, args,
-  project }, events: Channel<HostEvent>) -> StartReply` (`Started{run}` | `NotFound{program, searched}` |
+  project, folders }, events: Channel<HostEvent>) -> StartReply` (`Started{run}` | `NotFound{program, searched}` |
   `SpawnFailed` | `OutsideRepository`; events `Message{text}` | `Log{line}` | `Exited{code}`, `Exited` once and last),
   `send_to_server(run, message)`, `stop_server(run)` (signals; the child is killed 2 s later if it has not exited),
-  `find_program(program, project) -> ProgramFound` (the project's `node_modules/.bin`, its parents up to the root,
-  then PATH; `searched` in order), `project_files(paths) -> Vec<ProjectFile>` (repo-relative, text up to 64 KiB). A
+  `find_program(program, project, folders: ProgramFolders { project, home }) -> ProgramFound` (each `folders.project`
+  entry in the project and its parents up to the root, then PATH, then each `folders.home` entry in the home folder,
+  place `Project` | `Path` | `Home`; the window chooses the folders, plan §2 #72; `searched` in order),
+  `project_files(paths) -> Vec<ProjectFile>` (repo-relative, text up to 64 KiB). A
   page load stops the previous page's runs (`on_page_load` in `with_session`); `stop_all` after `run_return` leaves no
   child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,

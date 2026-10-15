@@ -3,7 +3,7 @@ import { projectUri, type ProjectAt } from "./handshake";
 import { sectionOf } from "./json";
 import { LOCK_FILES, packageManager } from "./packageManager";
 import { PRESETS, type Look, type Preset } from "./presets";
-import type { InstallHint, PackageManager, ServerSpec } from "./spec";
+import { PROGRAM_FOLDERS, type InstallHint, type PackageManager, type ServerSpec } from "./spec";
 
 export type ProjectLookups = Pick<ServerHost, "findProgram" | "projectFiles">;
 
@@ -68,7 +68,7 @@ async function readFiles(lookups: ProjectLookups, paths: readonly string[]): Pro
 
 function findProgram(project: Project, program: string): Promise<ProgramFound> {
   return project.lookups
-    .findProgram(program, project.folder)
+    .findProgram(program, project.folder, PROGRAM_FOLDERS)
     .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
 }
 
@@ -179,6 +179,7 @@ function specOf(preset: Preset, detected: Detected, at: ProjectAt): ServerSpec {
     name: preset.name,
     command: detected.command,
     project: at.folder,
+    folders: PROGRAM_FOLDERS,
     fileTypes: preset.fileTypes,
     formats: preset.formats,
     settings: preset.settings,

@@ -7,6 +7,7 @@ const SPEC: ServerSpec = {
   name: "oxlint",
   command: { program: "oxlint", args: [] },
   project: "frontend",
+  folders: { project: ["node_modules/.bin"], home: [] },
   fileTypes: ["ts", "vue"],
   formats: false,
   settings: null,

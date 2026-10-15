@@ -1,5 +1,6 @@
 import type {
   HostEvent,
+  ProgramFolders,
   ProgramFound,
   ProjectFile,
   RunId,
@@ -15,6 +16,6 @@ export interface ServerHost {
   send(run: RunId, message: string): void;
   /** Signals the run (the host kills it 2 s later); its `Exited` event always follows. */
   stop(run: RunId): Promise<void>;
-  findProgram(program: string, project: string): Promise<ProgramFound>;
+  findProgram(program: string, project: string, folders: ProgramFolders): Promise<ProgramFound>;
   projectFiles(paths: readonly string[]): Promise<readonly ProjectFile[]>;
 }

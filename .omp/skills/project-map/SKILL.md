@@ -37,7 +37,7 @@ crates/settings     (yamt-settings) the per-user settings file (plan §2 #57, #6
                     places (default file, settings-location, `~/`), file (kept entries, temp file + rename, symlink target). Key strings are opaque here. NO tauri, NO yamt-* crate
 crates/lsp-host     (yamt-lsp-host) starts language servers and frames their messages; Rust never parses one (plan §2 #70): lib (`Host`: start, send, stop,
                     stop_every at a page load, stop_all at close), run (threads per run: supervisor, stdin writer, stdout frame reader, stderr line reader; `Exited` once and last),
-                    frame (`Content-Length`, 64 MiB message and 8 KiB header/log-line caps), program (lookup: the project's node_modules/.bin up to the root, then PATH;
+                    frame (`Content-Length`, 64 MiB message and 8 KiB header/log-line caps), program (lookup: the window's ProgramFolders — project entries up to the root, then PATH, then home entries;
                     Windows PATHEXT, CREATE_NO_WINDOW), files (`project_files`, repo-relative, 64 KiB); bin lsp-echo (test server). NO yamt-*, NO tauri, NO serde_json, NO async
 src-tauri           (yamt-app) lib.rs (`run`, `export_bindings`: one tauri-specta builder for both bins) + graphics (NVIDIA guard, the one `unsafe`, plan §2 #43),
                     args, outcome (start-up decision, exit status), window (close fallback when the page is gone; `stored_at_start` read once: native background + `data-theme` script, Linux font rendering before the webview; `show_theme`; `stop_all` after `run_return`),

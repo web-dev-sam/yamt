@@ -1,23 +1,36 @@
 use std::env;
-use std::ffi::OsStr;
 #[cfg(windows)]
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-const BIN_FOLDER: [&str; 2] = ["node_modules", ".bin"];
+use crate::files;
+
 #[cfg(unix)]
 const EXECUTE_BITS: u32 = 0o111;
 /// Windows' own value when `PATHEXT` is not set (`cmd.exe` documentation, "PATHEXT").
 #[cfg(windows)]
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
+/// Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
+/// names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute or
+/// holds `..` or `.` is skipped.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, specta::Type)]
+pub struct ProgramFolders {
+    /// Tried in the project folder, then each parent up to the repository root; within one folder in list order.
+    pub project: Vec<String>,
+    /// Tried after every PATH entry, relative to the user's home folder.
+    pub home: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, specta::Type)]
 pub enum ProgramPlace {
     Project,
     Path,
+    Home,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
@@ -35,15 +48,31 @@ pub(crate) struct Found {
 
 /// The program a server command names, seen from `project` (a folder inside `root`); `Err` lists
 /// every folder searched, in order.
-pub(crate) fn find(root: &Path, project: &Path, program: &str) -> Result<Found, Vec<PathBuf>> {
-    find_with_path(root, project, program, env::var_os("PATH").as_deref())
-}
-
-fn find_with_path(
+pub(crate) fn find(
     root: &Path,
     project: &Path,
     program: &str,
-    path_variable: Option<&OsStr>,
+    folders: &ProgramFolders,
+) -> Result<Found, Vec<PathBuf>> {
+    let environment = Environment {
+        path_variable: env::var_os("PATH"),
+        home: env::home_dir(),
+    };
+    find_with(root, project, program, folders, &environment)
+}
+
+/// What the lookup reads from the user's environment; tests give their own.
+struct Environment {
+    path_variable: Option<OsString>,
+    home: Option<PathBuf>,
+}
+
+fn find_with(
+    root: &Path,
+    project: &Path,
+    program: &str,
+    folders: &ProgramFolders,
+    environment: &Environment,
 ) -> Result<Found, Vec<PathBuf>> {
     if program.contains('/') || program.contains(std::path::MAIN_SEPARATOR) {
         let candidate = project.join(program);
@@ -57,7 +86,7 @@ fn find_with_path(
         };
     }
     let mut searched = Vec::new();
-    for (folder, place) in folders(root, project, path_variable) {
+    for (folder, place) in search_order(root, project, folders, environment) {
         if let Some(path) = runnable(&folder.join(program)) {
             return Ok(Found { path, place });
         }
@@ -66,26 +95,50 @@ fn find_with_path(
     Err(searched)
 }
 
-/// `node_modules/.bin` in `project` and each parent up to `root`, then each `PATH` entry.
-fn folders(
+/// The project entries in `project` and each parent up to `root`, then each `PATH` entry, then
+/// the home entries in the home folder.
+fn search_order(
     root: &Path,
     project: &Path,
-    path_variable: Option<&OsStr>,
+    folders: &ProgramFolders,
+    environment: &Environment,
 ) -> Vec<(PathBuf, ProgramPlace)> {
-    let mut folders = Vec::new();
+    let project_entries = relative_folders(&folders.project);
+    let mut order = Vec::new();
     for folder in project.ancestors() {
-        folders.push((
-            folder.join(BIN_FOLDER.iter().collect::<PathBuf>()),
-            ProgramPlace::Project,
-        ));
+        for entry in &project_entries {
+            order.push((folder.join(entry), ProgramPlace::Project));
+        }
         if folder == root {
             break;
         }
     }
-    for folder in path_variable.map(env::split_paths).into_iter().flatten() {
-        folders.push((folder, ProgramPlace::Path));
+    let path_folders = environment.path_variable.iter().flat_map(env::split_paths);
+    for folder in path_folders {
+        order.push((folder, ProgramPlace::Path));
     }
-    folders
+    if let Some(home) = &environment.home {
+        for entry in relative_folders(&folders.home) {
+            order.push((home.join(entry), ProgramPlace::Home));
+        }
+    }
+    order
+}
+
+fn relative_folders(entries: &[String]) -> Vec<PathBuf> {
+    entries
+        .iter()
+        .filter_map(|entry| relative_folder(entry))
+        .collect()
+}
+
+/// `entry`'s `/`-separated plain names as a relative path; `None` when one is not a plain name.
+fn relative_folder(entry: &str) -> Option<PathBuf> {
+    let mut folder = PathBuf::new();
+    for segment in entry.split('/') {
+        folder.push(files::plain_name(segment)?);
+    }
+    Some(folder)
 }
 
 #[cfg(unix)]
@@ -128,8 +181,6 @@ fn windows_candidates(candidate: &Path, pathext: &OsStr) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-
     use tempfile::TempDir;
 
     use super::*;
@@ -159,14 +210,45 @@ mod tests {
             self.dir.path().join(name)
         }
 
-        fn path_variable(&self, names: &[&str]) -> OsString {
-            let folders = names.iter().map(|name| self.path_folder(name));
-            env::join_paths(folders).unwrap()
+        fn home(&self) -> PathBuf {
+            self.dir.path().join("home")
+        }
+
+        fn environment(&self, path_names: &[&str], home: Option<PathBuf>) -> Environment {
+            let folders = path_names.iter().map(|name| self.path_folder(name));
+            Environment {
+                path_variable: Some(env::join_paths(folders).unwrap()),
+                home,
+            }
         }
 
         fn find(&self, program: &str, path_names: &[&str]) -> Result<Found, Vec<PathBuf>> {
-            let path_variable = self.path_variable(path_names);
-            find_with_path(&self.root(), &self.project(), program, Some(&path_variable))
+            let folders = program_folders(&["node_modules/.bin"], &["go/bin"]);
+            self.find_in(program, &folders, path_names)
+        }
+
+        fn find_in(
+            &self,
+            program: &str,
+            folders: &ProgramFolders,
+            path_names: &[&str],
+        ) -> Result<Found, Vec<PathBuf>> {
+            let environment = self.environment(path_names, Some(self.home()));
+            find_with(
+                &self.root(),
+                &self.project(),
+                program,
+                folders,
+                &environment,
+            )
+        }
+    }
+
+    fn program_folders(project: &[&str], home: &[&str]) -> ProgramFolders {
+        let texts = |entries: &[&str]| entries.iter().map(|entry| (*entry).to_owned()).collect();
+        ProgramFolders {
+            project: texts(project),
+            home: texts(home),
         }
     }
 
@@ -234,17 +316,99 @@ mod tests {
     }
 
     #[test]
-    fn not_found_lists_every_folder_searched_in_order_and_stops_at_the_root() {
+    fn not_found_lists_every_folder_searched_in_order() {
         let tree = Tree::new();
-        put_program(&bin(tree.dir.path()), "tool");
+        let folders = program_folders(&["a", "b/bin"], &["go/bin", ".local/bin"]);
         let searched = vec![
-            bin(&tree.project()),
-            bin(&tree.root().join("frontend")),
-            bin(&tree.root()),
+            tree.project().join("a"),
+            tree.project().join("b").join("bin"),
+            tree.root().join("frontend").join("a"),
+            tree.root().join("frontend").join("b").join("bin"),
+            tree.root().join("a"),
+            tree.root().join("b").join("bin"),
             tree.path_folder("p1"),
             tree.path_folder("p2"),
+            tree.home().join("go").join("bin"),
+            tree.home().join(".local").join("bin"),
         ];
-        assert_eq!(tree.find("tool", &["p1", "p2"]), Err(searched));
+        assert_eq!(tree.find_in("tool", &folders, &["p1", "p2"]), Err(searched));
+    }
+
+    #[test]
+    fn nothing_above_the_root_is_searched() {
+        let tree = Tree::new();
+        put_program(&bin(tree.dir.path()), "tool");
+        let Err(searched) = tree.find("tool", &[]) else {
+            panic!("found above the root");
+        };
+        assert!(!searched.contains(&bin(tree.dir.path())));
+    }
+
+    #[test]
+    fn two_project_entries_in_one_folder_are_tried_in_list_order() {
+        let tree = Tree::new();
+        let folders = program_folders(&[".venv/bin", "vendor/bin"], &[]);
+        let in_vendor = put_program(&tree.project().join("vendor").join("bin"), "tool");
+        put_program(&tree.root().join(".venv").join("bin"), "tool");
+        assert_eq!(
+            tree.find_in("tool", &folders, &[]),
+            Ok(found(in_vendor.clone(), ProgramPlace::Project))
+        );
+        let in_venv = put_program(&tree.project().join(".venv").join("bin"), "tool");
+        assert_eq!(
+            tree.find_in("tool", &folders, &[]),
+            Ok(found(in_venv, ProgramPlace::Project))
+        );
+    }
+
+    #[test]
+    fn a_home_entry_is_found_after_path_with_place_home() {
+        let tree = Tree::new();
+        let in_home = put_program(&tree.home().join("go").join("bin"), "tool");
+        assert_eq!(
+            tree.find("tool", &["p1"]),
+            Ok(found(in_home, ProgramPlace::Home))
+        );
+    }
+
+    #[test]
+    fn path_beats_home() {
+        let tree = Tree::new();
+        put_program(&tree.home().join("go").join("bin"), "tool");
+        let on_path = put_program(&tree.path_folder("p1"), "tool");
+        assert_eq!(
+            tree.find("tool", &["p1"]),
+            Ok(found(on_path, ProgramPlace::Path))
+        );
+    }
+
+    #[test]
+    fn empty_absolute_and_dotted_entries_are_never_searched() {
+        let tree = Tree::new();
+        let bad = ["", "/abs", "a/../b", "./x", "a//b"];
+        let folders = program_folders(&bad, &bad);
+        for folder in [tree.project().join("b"), tree.project().join("x")] {
+            put_program(&folder, "tool");
+        }
+        put_program(&tree.home().join("b"), "tool");
+        let searched = vec![tree.path_folder("p1")];
+        assert_eq!(tree.find_in("tool", &folders, &["p1"]), Err(searched));
+    }
+
+    #[test]
+    fn without_a_home_folder_home_entries_are_skipped() {
+        let tree = Tree::new();
+        put_program(&tree.home().join("go").join("bin"), "tool");
+        let folders = program_folders(&[], &["go/bin"]);
+        let environment = tree.environment(&["p1"], None);
+        let found = find_with(
+            &tree.root(),
+            &tree.project(),
+            "tool",
+            &folders,
+            &environment,
+        );
+        assert_eq!(found, Err(vec![tree.path_folder("p1")]));
     }
 
     #[test]

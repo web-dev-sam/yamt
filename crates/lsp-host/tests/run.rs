@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
-use yamt_lsp_host::{Host, HostEvent, RunId, ServerCommand, StartReply};
+use yamt_lsp_host::{Host, HostEvent, ProgramFolders, RunId, ServerCommand, StartReply};
 
 const ECHO: &str = env!("CARGO_BIN_EXE_lsp-echo");
 const WAIT: Duration = Duration::from_secs(10);
@@ -32,6 +32,7 @@ fn echo_command(args: &[&str], project: &str) -> ServerCommand {
         program: ECHO.to_owned(),
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         project: project.to_owned(),
+        folders: ProgramFolders::default(),
     }
 }
 
@@ -358,6 +359,7 @@ fn a_missing_project_folder_is_a_spawn_failure_and_a_missing_program_lists_the_s
         program: "sub/not-there".to_owned(),
         args: Vec::new(),
         project: String::new(),
+        folders: ProgramFolders::default(),
     };
     let searched = vec![repo.path().join("sub").display().to_string()];
     assert_eq!(

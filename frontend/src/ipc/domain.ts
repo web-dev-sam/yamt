@@ -62,8 +62,10 @@ export type AddedServer = Generated.AddedServer;
 
 export type RunId = number & { readonly __brand: "RunId" };
 
-export type ServerCommand = Omit<Generated.ServerCommand, "args"> & {
+export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
+export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
   readonly args: readonly string[];
+  readonly folders: ProgramFolders;
 };
 
 export type HostEvent = Generated.HostEvent;

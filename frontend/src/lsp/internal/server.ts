@@ -150,7 +150,8 @@ export class Server {
     const attempt = this.#createAttempt(host, context);
     this.#setRun({ kind: "starting", attempt });
     const { program, args } = this.spec.command;
-    const reply = await attempt.start({ program, args, project: this.spec.project });
+    const { project, folders } = this.spec;
+    const reply = await attempt.start({ program, args, project, folders });
     if (this.#run.attempt !== attempt) {
       return;
     }

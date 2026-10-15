@@ -154,6 +154,7 @@ test("a server reads as its name, marked when it is not installed", () => {
   const installed: ServerSpec = {
     name: "TypeScript",
     project: "frontend",
+    folders: { project: ["node_modules/.bin"], home: [] },
     command: { program: "typescript-language-server", args: ["--stdio"] },
     fileTypes: ["ts"],
     settings: null,

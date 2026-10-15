@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use yamt_lsp_host::{Host, ProgramFound, ProjectFile};
+use yamt_lsp_host::{Host, ProgramFolders, ProgramFound, ProjectFile};
 
 const TEXT_LIMIT: usize = 64 * 1024;
 
@@ -70,7 +70,7 @@ fn find_program_searches_nothing_for_a_project_outside_the_repository() {
     let repo = tempfile::tempdir().unwrap();
     let host = Host::new(repo.path());
     assert_eq!(
-        host.find_program("tool", "../elsewhere"),
+        host.find_program("tool", "../elsewhere", &ProgramFolders::default()),
         ProgramFound::NotFound {
             searched: Vec::new()
         }

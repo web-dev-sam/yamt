@@ -18,6 +18,7 @@ export type {
   KeysChange,
   LanguageServerSettings,
   NotText,
+  ProgramFolders,
   ProgramFound,
   ProjectFile,
   RepositoryAnswer,

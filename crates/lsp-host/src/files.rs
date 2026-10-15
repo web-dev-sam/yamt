@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -21,11 +22,7 @@ pub enum ProjectFile {
 pub(crate) fn in_repository(root: &Path, relative: &str) -> Option<PathBuf> {
     let mut path = root.to_owned();
     for segment in relative.split('/').filter(|segment| !segment.is_empty()) {
-        let mut components = Path::new(segment).components();
-        let (Some(Component::Normal(name)), None) = (components.next(), components.next()) else {
-            return None;
-        };
-        path.push(name);
+        path.push(plain_name(segment)?);
     }
     if let (Ok(real), Ok(real_root)) = (fs::canonicalize(&path), fs::canonicalize(root))
         && !real.starts_with(real_root)
@@ -33,6 +30,15 @@ pub(crate) fn in_repository(root: &Path, relative: &str) -> Option<PathBuf> {
         return None;
     }
     Some(path)
+}
+
+/// `segment` itself when it is one plain file name: not empty, `.`, `..`, a root or a drive.
+pub(crate) fn plain_name(segment: &str) -> Option<&OsStr> {
+    let mut components = Path::new(segment).components();
+    let (Some(Component::Normal(name)), None) = (components.next(), components.next()) else {
+        return None;
+    };
+    Some(name)
 }
 
 pub(crate) fn project_file(root: &Path, relative: &str) -> ProjectFile {
