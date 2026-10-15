@@ -7,8 +7,5 @@
       "frontend/src/ui/ServerMenu.vue",
       "frontend/src/ui/**/*.test.ts"
     ]
-  },
-  "PresetsFoldersR1": {
-    "owned": ["crates/lsp-host/**"]
   }
 }

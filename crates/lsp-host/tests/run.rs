@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -369,4 +370,38 @@ fn a_missing_project_folder_is_a_spawn_failure_and_a_missing_program_lists_the_s
             searched
         }
     );
+}
+
+#[test]
+fn a_bare_program_name_is_found_in_a_project_folder_and_not_without_it() {
+    let repo = tempfile::tempdir().unwrap();
+    let tools = repo.path().join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let name = Path::new(ECHO)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    fs::copy(ECHO, tools.join(&name)).unwrap();
+    let mut host = Host::new(repo.path());
+    let command = |project: Vec<String>| ServerCommand {
+        program: name.clone(),
+        args: Vec::new(),
+        project: String::new(),
+        folders: ProgramFolders {
+            project,
+            home: Vec::new(),
+        },
+    };
+    let (sender, _events) = mpsc::channel();
+    let reply = host.start(&command(vec!["tools".to_owned()]), sender.clone());
+    assert!(matches!(reply, StartReply::Started { .. }), "{reply:?}");
+    host.stop_all();
+    let reply = host.start(&command(Vec::new()), sender);
+    let StartReply::NotFound { searched, .. } = reply else {
+        panic!("{reply:?}");
+    };
+    let in_repo = |folder: &String| Path::new(folder).starts_with(repo.path());
+    assert!(!searched.iter().any(in_repo), "{searched:?}");
 }

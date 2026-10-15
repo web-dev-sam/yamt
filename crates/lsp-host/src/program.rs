@@ -16,8 +16,8 @@ const EXECUTE_BITS: u32 = 0o111;
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
 /// Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
-/// names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute or
-/// holds `..` or `.` is skipped.
+/// names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
+/// holds `..` or `.`, or has an empty name (`go/bin/`, `a//b`) is skipped.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, specta::Type)]
 pub struct ProgramFolders {
     /// Tried in the project folder, then each parent up to the repository root; within one folder in list order.
