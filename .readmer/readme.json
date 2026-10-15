@@ -85,9 +85,16 @@
     {
       "title": "Language servers",
       "body": [
-        "yamt runs the language servers your project already has, so the result pane shows their problems as you type: an underline, with the message on hover. It finds oxlint, oxfmt, TypeScript and eslint in the repository's projects and asks once per repository whether to start them; settings can change the answer. Left of the gear, each server shows its state; click one to start, stop or restart it or to read its log. A server that needs a separate package (typescript-language-server for TypeScript 5 and 6, vscode-langservers-extracted for eslint) shows \"Not installed\" with the install command for your package manager; yamt starts it when you come back to the window. With a formatter running (oxfmt, or an added server that formats), Ctrl+S formats the result before saving and leaves changes that still wait as they are. yamt ships no language server.",
+        "yamt runs the language servers your project already has, so the result pane shows their problems as you type: an underline, with the message on hover. It finds these in the repository's projects and asks once per repository whether to start them; settings can change the answer:",
         "",
-        "Other servers are added in settings under **Language servers → Added by you**: a command and the file types it serves. For Python with ruff, for example: command `ruff server`, file types `py, pyi`. yamt looks for the command in `node_modules/.bin` at the repository root, then on the PATH of the terminal it was started from; a command with a `/`, such as `.venv/bin/ruff server`, is read from the repository root. An added server is offered in every repository and runs where the repository's answer is Start; press **Start** under \"This repository\" if it is not."
+        "- JavaScript and TypeScript: oxlint, oxfmt, Biome, TypeScript, eslint; `.vue` files through TypeScript when the project has `@vue/typescript-plugin`",
+        "- Rust: rust-analyzer · Go: gopls · C and C++: clangd, with a compile database",
+        "- Python: ruff, ty, basedpyright, pyright",
+        "- PHP: Phpactor, with the project's own PHPStan, Psalm, PHP-CS-Fixer and phpcs; else Intelephense",
+        "",
+        "Left of the gear, each server shows its state; click one to start, stop or restart it or to read its log. A server the project uses but that is not installed shows \"Not installed\" with the install command for that language's installer (your package manager, uv, Poetry or PDM, rustup, `go install`); yamt starts it when you come back to the window. With a formatter running (oxfmt, Biome, rustfmt, gofmt, ruff, clang-format with a `.clang-format`, PHP-CS-Fixer or phpcbf, or an added server that formats), Ctrl+S formats the result before saving and leaves changes that still wait as they are. yamt ships no language server.",
+        "",
+        "Other servers are added in settings under **Language servers → Added by you**: pick one **From the list** (Deno and bash-language-server are there too) or type a command and the file types it serves. yamt looks for a program in the project's `node_modules/.bin`, `.venv/bin` and `vendor/bin` up to the repository root, then on the PATH of the terminal it was started from, then in `~/go/bin`, `~/.cargo/bin`, `~/.local/bin` and Composer's global folder; a command with a `/` is read from the repository root. An added server is offered in every repository and runs where the repository's answer is Start; press **Start** under \"This repository\" if it is not."
       ]
     },
     {
