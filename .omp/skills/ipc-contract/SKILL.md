@@ -13,8 +13,8 @@ from them and committed.
 
 1. Edit the Rust type/command.
 2. `just bindings` (runs `cargo run -p yamt-app --features bindings --bin export-bindings`).
-3. Update `ipc/domain.ts` (`toDomain`) if a DTO shape changed.
-4. Commit Rust + `bindings.ts` + `domain.ts` together.
+3. Update `ipc/domain.ts` (`toDomain`) if a DTO shape changed — `ipc/words.ts` (`toSideWords`) for `SideWordChanges`.
+4. Commit Rust + `bindings.ts` + `domain.ts` (and `words.ts`) together.
 
 - [IPC1] `bindings.ts` is never hand-edited. Detector: hook `generated.ts`; `just bindings-check`
   diffs a fresh export against the committed file.

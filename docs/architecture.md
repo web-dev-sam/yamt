@@ -432,7 +432,8 @@ export const commands: { listFiles(): Promise<FileList>; loadFile(path: string):
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
 unbranded. `ipc/domain.ts` owns the domain types (`MiddleLine = number & { readonly __brand:
 "MiddleLine" }`, `LocalLine`, `RemoteLine`, `ChunkId`, `DiskVersion`, and `Chunk`/`FileMergeData` built on them)
-and one `toDomain(dto: Generated.FileMergeData): FileMergeData` mapping. Both `ChunkSource`
+and one `toDomain(dto: Generated.FileMergeData): FileMergeData` mapping; word marks and removals convert in
+`ipc/words.ts` (`toSideWords`, with the line guard `domain.ts` passes in, plan §2 #73). Both `ChunkSource`
 implementations return domain types; nothing outside `ipc/` sees a generated DTO. `DocPos`
 (a CodeMirror offset) is a fourth brand created only inside `editor/`. Mixing any two is a
 type error, which is the point: base-vs-local-vs-doc confusion is the merge tool's native bug.

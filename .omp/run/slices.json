@@ -15,5 +15,10 @@
       "frontend/scripts/app-session/args.test.ts",
       "frontend/src/editor/AGENTS.md"
     ]
+  },
+  "RemovalTextR1": {
+    "owned": [
+      "crates/merge-core/**"
+    ]
   }
 }
