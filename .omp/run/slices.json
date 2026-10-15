@@ -1,5 +1,10 @@
 {
   "PresetsChrome2": {
-    "owned": ["frontend/src/ui/**"]
+    "owned": [
+      "frontend/src/ui/**",
+      "frontend/src/lsp/index.ts",
+      "frontend/src/lsp/internal/state.ts",
+      "frontend/src/lsp/**/*.test.ts"
+    ]
   }
 }
