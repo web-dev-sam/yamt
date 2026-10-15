@@ -2,7 +2,6 @@ import type { ServerHost } from "../ipc";
 import { DocEntry, type ResultDocument } from "./internal/documents";
 import { format, type FormatReply, type FormattingOptions } from "./internal/formatting";
 import { hostContext, type HostContext } from "./internal/handshake";
-import { sameValue } from "./internal/json";
 import { LogBook, type LogLine } from "./internal/log";
 import { Server, type ServerEnv } from "./internal/server";
 import type { ServerSpec } from "./internal/spec";
@@ -68,9 +67,11 @@ export class LanguageServers {
   setSpecs(specs: readonly ServerSpec[], options: { readonly startOnOpen: boolean }): void {
     this.#startOnOpen = options.startOnOpen;
     const old = this.#servers;
-    this.#servers = specs.map(
-      (spec) => old.find((server) => sameValue(server.spec, spec)) ?? this.#create(spec, old),
-    );
+    this.#servers = specs.map((spec) => {
+      const kept = old.find((server) => server.runsAs(spec));
+      kept?.takeDisplay(spec);
+      return kept ?? this.#create(spec, old);
+    });
     this.#retire(old.filter((candidate) => !this.#servers.includes(candidate)));
     this.#servers.forEach((server) => this.#startIfServing(server));
     this.#changed();

@@ -240,7 +240,7 @@ export const PRESETS: readonly Preset[] = [
       ],
     },
     fileTypes: ["php"],
-    formats: { kind: "withIntegration" },
+    formats: NEVER,
     settings: null,
     initializationOptions: () => ({ "language_server.enable_trust_check": false }),
     fromProject: { kind: "integrations", integrations: PHPACTOR_INTEGRATIONS },

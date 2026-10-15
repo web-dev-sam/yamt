@@ -1,18 +1,16 @@
 import { nodeHint } from "./install";
 import { modulePackage, nearestPackage, type Place } from "./project";
-import type { ServerSpec } from "./spec";
+import type { ServerSpec, TypeScriptProgram } from "./spec";
+import { absolutePath } from "./uri";
 
-export type TypeScriptRun = { readonly version: string; readonly runsPlugins: boolean };
+export type TypeScriptRun =
+  | { readonly kind: "noPlugins"; readonly program: TypeScriptProgram; readonly version: string }
+  | { readonly kind: "plugins" };
 
 const VUE = "vue";
 const PLUGIN = "@vue/typescript-plugin";
 
 export const VUE_FILES: readonly string[] = [modulePackage(VUE), modulePackage(PLUGIN)];
-
-function absoluteFolder(root: string, folder: string): string {
-  const separator = root.includes("\\") ? "\\" : "/";
-  return folder === "" ? root : [root, ...folder.split("/")].join(separator);
-}
 
 export function withVue(
   project: Place,
@@ -23,11 +21,12 @@ export function withVue(
   if (nearestPackage(project, VUE) === undefined) {
     return [typescript];
   }
-  if (!run.runsPlugins) {
-    return [{ ...typescript, notes: [{ kind: "vueNeedsTypeScript6", version: run.version }] }];
+  if (run.kind === "noPlugins") {
+    const { program, version } = run;
+    return [{ ...typescript, notes: [{ kind: "vueNeedsTypeScript6", program, version }] }];
   }
   if (nearestPackage(project, PLUGIN) !== undefined) {
-    const location = absoluteFolder(root, project.folder);
+    const location = absolutePath(root, project.folder);
     return [
       {
         ...typescript,

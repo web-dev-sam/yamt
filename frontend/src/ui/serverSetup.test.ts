@@ -563,6 +563,53 @@ test("focus: an older detection that answers last is dropped", async () => {
   expect(setup.foundServers.value).toEqual([]);
 });
 
+test("focus: a look that finds no root applies nothing; the running servers keep their run", async () => {
+  const host = new FakeHost(PROJECT);
+  const { setup, servers } = setUpWith({ host, answer: "start" });
+  await setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(FOUND_RUNNING);
+  });
+  const setSpecs = vi.spyOn(servers, "setSpecs");
+  host.root = null;
+
+  await setup.refocus();
+
+  expect(setSpecs).not.toHaveBeenCalled();
+  expect(states(servers)).toEqual(FOUND_RUNNING);
+  expect(host.stopped).toEqual([]);
+});
+
+test("focus: a detection that rejects is logged and applies nothing", async () => {
+  const warn = vi.spyOn(log, "warn").mockReturnValue();
+  const host = new FakeHost(PROJECT);
+  const { setup, servers } = setUpWith({ host, answer: "start" });
+  await setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(FOUND_RUNNING);
+  });
+  const setSpecs = vi.spyOn(servers, "setSpecs");
+  const unreadable = new Proxy<readonly ProjectFile[]>([], {
+    get(_, key) {
+      if (key === "then") {
+        return undefined;
+      }
+      throw new Error("unreadable answer");
+    },
+  });
+  vi.spyOn(host, "projectFiles").mockResolvedValue(unreadable);
+
+  await setup.refocus();
+
+  expect(warn).toHaveBeenCalledWith("servers.detect_failed", {
+    kind: "Unexpected",
+    message: "unreadable answer",
+  });
+  expect(setSpecs).not.toHaveBeenCalled();
+  expect(states(servers)).toEqual(FOUND_RUNNING);
+  warn.mockRestore();
+});
+
 test("focus: before the start set-up has finished, focus refreshes but does not detect", async () => {
   const host = new FakeHost(PROJECT);
   const { setup, servers, asking, done, events } = await asked({ host });

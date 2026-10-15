@@ -1003,7 +1003,7 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
   ]);
 });
 
-test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the project's version", async () => {
+test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the program that runs and the project's version", async () => {
   const seven = { ...vueProject("7.0.0"), ...VUE_PACKAGE, ...VUE_PLUGIN };
   const preview = { ...vueProject("5.9.3"), ...VUE_PACKAGE, ...bins("web/", "tsgo") };
 
@@ -1015,13 +1015,13 @@ test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carri
       command: { program: "tsc", args: ["--lsp", "--stdio"] },
       fileTypes: SCRIPT_TYPES,
       initializationOptions: null,
-      notes: [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }],
+      notes: [{ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" }],
     }),
   ]);
   expect(tsgo).toEqual([
     expect.objectContaining({
       command: { program: "tsgo", args: ["--lsp", "--stdio"] },
-      notes: [{ kind: "vueNeedsTypeScript6", version: "5.9.3" }],
+      notes: [{ kind: "vueNeedsTypeScript6", program: "tsgo", version: "5.9.3" }],
     }),
   ]);
 });
@@ -1038,6 +1038,21 @@ test("Vue: without the vue package nothing changes, plugin or not", async () => 
     ]);
   }
   expect((await detect(["web/a.ts"], lookups(seven), ROOT))[0]?.notes).toEqual([]);
+});
+
+test("Vue: oxlint and eslint in a project with vue and no TypeScript config are their no-vue specs, with no Vue spec or note", async () => {
+  const plain = { "web/package.json": "{}", ...bins("web/", "oxlint"), ...eslintAt("web/") };
+  const server = ["vscode-eslint-language-server"];
+
+  const withVue = await detect(["web/a.ts"], lookups({ ...plain, ...VUE_PACKAGE }, server), ROOT);
+  const without = await detect(["web/a.ts"], lookups(plain, server), ROOT);
+
+  expect(summary(withVue)).toEqual([
+    "oxlint oxlint --lsp @web",
+    "eslint vscode-eslint-language-server --stdio @web",
+  ]);
+  expect(withVue).toEqual(without);
+  expect(withVue.flatMap(({ notes }) => notes)).toEqual([]);
 });
 
 test("help: a found server carries the hint it would have had missing; a missing one only its install", async () => {
@@ -1194,6 +1209,21 @@ test("reads: a node-only project reads its configs, packages and lock files, not
     ].map((name) => `web/${name}`),
     ...up.map((name) => `web/${name}`),
     ...up,
+  ]);
+});
+
+test("reads: a python-only project reads its tools' configs and the lock files, nothing of other ecosystems", async () => {
+  const fake = lookups({ "py/pyproject.toml": "[tool.ruff]\n" }, ["ruff"]);
+
+  await detect(["py/a.py"], fake, ROOT);
+
+  const locks = ["uv.lock", "poetry.lock", "pdm.lock"];
+  expect(fake.fileCalls[1]).toEqual([
+    ...["ruff.toml", ".ruff.toml", "pyproject.toml", "ty.toml", "pyrightconfig.json"].map(
+      (name) => `py/${name}`,
+    ),
+    ...locks.map((name) => `py/${name}`),
+    ...locks,
   ]);
 });
 

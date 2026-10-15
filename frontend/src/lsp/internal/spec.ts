@@ -4,7 +4,13 @@ export type PackageManager = "npm" | "pnpm" | "yarn" | "yarnBerry" | "bun";
 
 export type PythonManager = "uv" | "poetry" | "pdm";
 
-export type SpecNote = { readonly kind: "vueNeedsTypeScript6"; readonly version: string };
+export type TypeScriptProgram = "tsc" | "tsgo";
+
+export type SpecNote = {
+  readonly kind: "vueNeedsTypeScript6";
+  readonly program: TypeScriptProgram;
+  readonly version: string;
+};
 
 export type InstallHint =
   | {

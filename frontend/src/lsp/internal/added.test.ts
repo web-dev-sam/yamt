@@ -97,7 +97,7 @@ test("addedSpecs: `intelephense.cmd --stdio` in a folder matches Intelephense an
   );
 });
 
-test("addedSpecs: a preset's start options are built for the repository root; a non-never formats rule formats", () => {
+test("addedSpecs: a preset's start options are built for the repository root; a tool that may format (its rule or a formatting integration) formats", () => {
   const specs = addedSpecs(
     [
       { command: ["oxlint", "--lsp"], fileTypes: ["ts"] },

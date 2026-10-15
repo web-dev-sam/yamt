@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { fileUri, sameFile } from "./uri";
+import { absolutePath, fileUri, sameFile } from "./uri";
 
 test("a POSIX root and a repo-relative path make a file URI", () => {
   expect(fileUri("/home/me/repo", "src/a.ts")).toBe("file:///home/me/repo/src/a.ts");
@@ -33,6 +33,28 @@ test("a verbatim Windows root loses its \\\\?\\ prefix", () => {
 
 test("a UNC root keeps its server as the URI authority", () => {
   expect(fileUri("\\\\server\\share\\repo", "a.ts")).toBe("file://server/share/repo/a.ts");
+});
+
+test("absolutePath joins a POSIX root, with or without a trailing slash, and a folder with /", () => {
+  expect(absolutePath("/home/me/repo", "web/app")).toBe("/home/me/repo/web/app");
+  expect(absolutePath("/home/me/repo/", "web")).toBe("/home/me/repo/web");
+  expect(absolutePath("/home/me/repo/", "")).toBe("/home/me/repo");
+});
+
+test("absolutePath keeps a Windows root's backslashes and drops a trailing one", () => {
+  expect(absolutePath("C:\\Users\\me\\repo", "web/app")).toBe("C:\\Users\\me\\repo\\web\\app");
+  expect(absolutePath("C:\\repo\\", "web")).toBe("C:\\repo\\web");
+  expect(absolutePath("C:\\repo\\", "")).toBe("C:\\repo");
+});
+
+test("absolutePath drops a verbatim Windows root's \\\\?\\ prefix, as fileUri does", () => {
+  expect(absolutePath("\\\\?\\D:\\repo", "web")).toBe("D:\\repo\\web");
+  expect(absolutePath("\\\\?\\D:\\repo\\", "")).toBe("D:\\repo");
+  expect(fileUri("\\\\?\\D:\\repo\\", "web")).toBe("file:///D:/repo/web");
+});
+
+test("absolutePath keeps a UNC root's two leading backslashes", () => {
+  expect(absolutePath("\\\\server\\share\\repo", "web")).toBe("\\\\server\\share\\repo\\web");
 });
 
 test("a URI that does not decode is never the same", () => {

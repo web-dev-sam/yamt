@@ -642,7 +642,7 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint"]);
 
   const help = { kind: "system", program: "tsserver" } as const;
-  const notes = [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }] as const;
+  const notes = [{ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" }] as const;
   languageServers.setSpecs(
     [spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver", { help, notes })],
     { startOnOpen: true },
@@ -718,17 +718,33 @@ test("rule 3: once Vue's plugin is installed, the next detection drops Vue and r
   expect(languageServers.serving("App.vue")).toBe(true);
 });
 
-test("a spec's notes are part of it: a TypeScript 7 spec gaining the Vue note is a changed spec", async () => {
-  const note: SpecNote = { kind: "vueNeedsTypeScript6", version: "7.0.0" };
+test("rule 3: a help-only or notes-only change keeps the run and shows the new words; a command change restarts", async () => {
+  const help: InstallHint = { kind: "system", program: "tsc" };
+  const note: SpecNote = { kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.0" };
   const languageServers = servers([spec("TypeScript")]);
   languageServers.open(new FakeDoc("a.ts", "x"));
   await settle();
   const before = host.only("TypeScript");
 
-  languageServers.setSpecs([spec("TypeScript", { notes: [note] })], { startOnOpen: true });
+  languageServers.setSpecs([spec("TypeScript", { help })], { startOnOpen: true });
+  await settle();
+  languageServers.setSpecs([spec("TypeScript", { help, notes: [note] })], { startOnOpen: true });
+  await settle();
+
+  expect(host.stopped).toEqual([]);
+  expect(host.only("TypeScript")).toBe(before);
+  expect(languageServers.views()).toEqual([
+    { name: "TypeScript", project: "", state: { kind: "running" }, help, notes: [note] },
+  ]);
+
+  const command = { program: "tsgo", args: ["--lsp", "--stdio"] };
+  languageServers.setSpecs([spec("TypeScript", { help, notes: [note], command })], {
+    startOnOpen: true,
+  });
   await settle();
 
   expect(host.stopped).toEqual([before.run]);
+  expect(host.servers.map((server) => server.command.program)).toEqual(["TypeScript", "tsgo"]);
 });
 
 test("presetChoices is the public preset list for Settings", () => {

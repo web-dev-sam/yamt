@@ -9,7 +9,7 @@ import {
   type Ecosystem,
 } from "./ecosystems";
 import { projectUri, type ProjectAt } from "./handshake";
-import { nodeHint, recipeHint, type NodeHint } from "./install";
+import { nodeHint, serverHint, type NodeHint } from "./install";
 import { integrationsOn } from "./integrations";
 import { isObject } from "./json";
 import { DETECTED_PRESETS, type DetectedPreset } from "./presets";
@@ -26,7 +26,7 @@ import {
   type ProjectLookups,
 } from "./project";
 import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
-import type { Command, Look, Sign, Tool } from "./tool";
+import type { Command, Formats, Look, Sign, Tool } from "./tool";
 import { withVue, type TypeScriptRun } from "./vue";
 
 type Detected = {
@@ -85,11 +85,9 @@ function signHolds(project: Project, sign: Sign): boolean {
 async function serverOf(
   project: Project,
   tool: Tool,
-  server: Extract<Look, { kind: "typescript" | "eslint" }>["server"],
-  reason: NodeHint["reason"],
+  command: Command,
+  hint: InstallHint,
 ): Promise<Detected> {
-  const { command } = server;
-  const hint = nodeHint(project, { package: server.package, program: command.program }, reason);
   return (await foundAnywhere(project, command.program))
     ? installed(tool, command, hint)
     : { tool, command, install: hint, help: null, typescript: null };
@@ -105,15 +103,19 @@ async function typescript(
   if (version === null || major === undefined || !hasConfig(project, look.configs)) {
     return null;
   }
-  const noPlugins = { version, runsPlugins: false };
   if (Number(major) >= look.firstLspMajor) {
-    return { ...installed(preset, look.compiler, null), typescript: noPlugins };
+    const run = { kind: "noPlugins", program: "tsc", version } satisfies TypeScriptRun;
+    return { ...installed(preset, look.compiler, null), typescript: run };
   }
   if (await inProject(project, look.nativePreview.program)) {
-    return { ...installed(preset, look.nativePreview, null), typescript: noPlugins };
+    const run = { kind: "noPlugins", program: "tsgo", version } satisfies TypeScriptRun;
+    return { ...installed(preset, look.nativePreview, null), typescript: run };
   }
-  const server = await serverOf(project, preset, look.server, { kind: "typescript", version });
-  return { ...server, typescript: { version, runsPlugins: true } };
+  const { command, package: name } = look.server;
+  const reason: NodeHint["reason"] = { kind: "typescript", version };
+  const hint = nodeHint(project, { package: name, program: command.program }, reason);
+  const server = await serverOf(project, preset, command, hint);
+  return { ...server, typescript: { kind: "plugins" } };
 }
 
 async function used(
@@ -122,7 +124,7 @@ async function used(
   look: Extract<Look, { kind: "used" }>,
 ): Promise<Detected | null> {
   const { command } = look;
-  const hint = recipeHint(project, look.recipe, command.program);
+  const hint = serverHint(project, look);
   if (look.signs.some((sign) => signHolds(project, sign))) {
     if (await foundAnywhere(project, command.program)) {
       return installed(preset, command, hint);
@@ -153,13 +155,13 @@ async function lookIn(project: Project, preset: DetectedPreset): Promise<Detecte
     case "eslint": {
       const configured = hasConfig(project, look.configs);
       return configured && nearestPackage(project, look.package) !== undefined
-        ? serverOf(project, preset, look.server, { kind: "eslint" })
+        ? serverOf(project, preset, look.server.command, serverHint(project, look))
         : null;
     }
   }
 }
 
-function formatsIn(project: Project, { formats, fromProject }: Tool): boolean {
+function formatsIn(project: Project, formats: Formats): boolean {
   switch (formats.kind) {
     case "always":
       return true;
@@ -167,11 +169,6 @@ function formatsIn(project: Project, { formats, fromProject }: Tool): boolean {
       return false;
     case "withConfig":
       return nearest(project, formats.files) !== null;
-    case "withIntegration":
-      return (
-        fromProject.kind === "integrations" &&
-        integrationsOn(project, fromProject.integrations).some((on) => on.formats)
-      );
   }
 }
 
@@ -182,8 +179,10 @@ async function fromProject(project: Project, tool: Tool, spec: ServerSpec): Prom
       return spec;
     case "integrations": {
       const own = isObject(spec.initializationOptions) ? spec.initializationOptions : {};
-      const on = integrationsOn(project, from.integrations).map(({ key }) => [key, true]);
-      return { ...spec, initializationOptions: { ...own, ...Object.fromEntries(on) } };
+      const on = integrationsOn(project, from.integrations);
+      const keys = Object.fromEntries(on.map(({ key }) => [key, true]));
+      const formats = spec.formats || on.some((integration) => integration.formats);
+      return { ...spec, formats, initializationOptions: { ...own, ...keys } };
     }
     case "venvPython": {
       const pythonPath = await projectProgram(project, PYTHON);
@@ -206,7 +205,7 @@ async function specsOf(
     project: project.folder,
     folders: ECOSYSTEMS[preset.ecosystem].folders,
     fileTypes: preset.fileTypes,
-    formats: formatsIn(project, tool),
+    formats: formatsIn(project, tool.formats),
     settings: tool.settings,
     initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
     install: detected.install,

@@ -7,7 +7,7 @@ import {
 } from "./packageManager";
 import { jsonField, nearest, type Place, type Wanted } from "./project";
 import type { InstallHint } from "./spec";
-import type { Recipe } from "./tool";
+import type { Look, Recipe } from "./tool";
 
 export type NodeHint = Extract<InstallHint, { kind: "node" }>;
 
@@ -35,7 +35,7 @@ export function nodeHint(
   return { kind: "node", package: name, program, folder: project.folder, manager, reason };
 }
 
-export function recipeHint(project: Place, recipe: Recipe, program: string): InstallHint {
+function recipeHint(project: Place, recipe: Recipe, program: string): InstallHint {
   switch (recipe.kind) {
     case "python": {
       const lock = nearest(project, PYTHON_LOCK_FILES);
@@ -50,5 +50,19 @@ export function recipeHint(project: Place, recipe: Recipe, program: string): Ins
       return { kind: "download", program, command: recipe.command, needs: recipe.needs };
     case "system":
       return { kind: "system", program };
+  }
+}
+
+export function serverHint(
+  place: Place,
+  look: Extract<Look, { kind: "used" | "eslint" }>,
+): InstallHint {
+  switch (look.kind) {
+    case "used":
+      return recipeHint(place, look.recipe, look.command.program);
+    case "eslint": {
+      const { command, package: name } = look.server;
+      return nodeHint(place, { package: name, program: command.program }, { kind: "eslint" });
+    }
   }
 }

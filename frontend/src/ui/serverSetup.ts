@@ -82,9 +82,8 @@ function addedOf(setup: Setup, root: string): readonly ServerSpec[] {
   return addedSpecs(setup.settings.value.languageServers.added, taken, root);
 }
 
-function storedAnswer(setup: Setup): RepositoryAnswer | null {
-  const root = setup.root.value;
-  return root === null ? null : (setup.settings.value.languageServers.repositories[root] ?? null);
+function storedAnswer(setup: Setup, root: string): RepositoryAnswer | null {
+  return setup.settings.value.languageServers.repositories[root] ?? null;
 }
 
 function apply(setup: Setup, root: string, answer: RepositoryAnswer | null): void {
@@ -97,7 +96,7 @@ async function setUp(setup: Setup, host: ServerHost): Promise<void> {
   if (root === null || setup.found.value.length + addedOf(setup, root).length === 0) {
     return;
   }
-  if (storedAnswer(setup) === null) {
+  if (storedAnswer(setup, root) === null) {
     const reply = await setup.asking.ask({
       kind: "servers",
       found: setup.found.value,
@@ -108,7 +107,7 @@ async function setUp(setup: Setup, host: ServerHost): Promise<void> {
       await setup.setServerAnswer(given);
     }
   }
-  apply(setup, root, storedAnswer(setup));
+  apply(setup, root, storedAnswer(setup, root));
 }
 
 async function startUp(setup: Setup): Promise<void> {
@@ -126,18 +125,18 @@ async function refocus(setup: Setup): Promise<void> {
   }
   const root = await look(setup, setup.host);
   if (root !== null) {
-    apply(setup, root, storedAnswer(setup));
+    apply(setup, root, storedAnswer(setup, root));
   }
 }
 
 async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
-  const before = storedAnswer(setup);
-  await setup.setServerAnswer(given);
   const root = setup.root.value;
+  const before = root === null ? null : storedAnswer(setup, root);
+  await setup.setServerAnswer(given);
   if (root === null) {
     return;
   }
-  const now = storedAnswer(setup);
+  const now = storedAnswer(setup, root);
   if (before !== "dontStart" && now === "dontStart") {
     setup.servers.haltAll();
   }
@@ -148,7 +147,7 @@ async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise
   await setup.setAddedServers(added);
   const root = setup.root.value;
   if (root !== null) {
-    apply(setup, root, storedAnswer(setup));
+    apply(setup, root, storedAnswer(setup, root));
   }
 }
 

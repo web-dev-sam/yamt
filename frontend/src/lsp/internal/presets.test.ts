@@ -64,7 +64,7 @@ test("presets run formatters first, in the table's order, each in its ecosystem"
     ["ty", "never"],
     ["basedpyright", "never"],
     ["pyright", "never"],
-    ["Phpactor", "withIntegration"],
+    ["Phpactor", "never"],
     ["clangd", "withConfig"],
     ["Deno", "always"],
     ["bash-language-server", "always"],

@@ -84,8 +84,14 @@ test("rule 3: the actions that apply per state", () => {
 });
 
 test("the TypeScript 7 Vue note names the project's TypeScript version", () => {
-  expect(noteLine({ kind: "vueNeedsTypeScript6", version: "7.0.2" })).toBe(
+  expect(noteLine({ kind: "vueNeedsTypeScript6", program: "tsc", version: "7.0.2" })).toBe(
     "Vue files get no type problems: TypeScript 7.0.2 runs no plugins, and Vue needs TypeScript 6.",
+  );
+});
+
+test("the tsgo Vue note names the native preview, not the typescript package's version", () => {
+  expect(noteLine({ kind: "vueNeedsTypeScript6", program: "tsgo", version: "5.9.3" })).toBe(
+    "Vue files get no type problems: TypeScript's native preview (tsgo) runs no plugins, and Vue needs TypeScript 6.",
   );
 });
 

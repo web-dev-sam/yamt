@@ -122,7 +122,12 @@ export function serverActions(state: ServerState): readonly ServerAction[] {
 }
 
 export function noteLine(note: SpecNote): string {
-  return `Vue files get no type problems: TypeScript ${note.version} runs no plugins, and Vue needs TypeScript 6.`;
+  switch (note.program) {
+    case "tsc":
+      return `Vue files get no type problems: TypeScript ${note.version} runs no plugins, and Vue needs TypeScript 6.`;
+    case "tsgo":
+      return "Vue files get no type problems: TypeScript's native preview (tsgo) runs no plugins, and Vue needs TypeScript 6.";
+  }
 }
 
 export function formatNote(outcome: FormatOutcome | undefined): string | null {

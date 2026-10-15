@@ -5,8 +5,7 @@ type Installable = { readonly command: Command; readonly package: string };
 export type Formats =
   | { readonly kind: "always" }
   | { readonly kind: "never" }
-  | { readonly kind: "withConfig"; readonly files: readonly string[] }
-  | { readonly kind: "withIntegration" };
+  | { readonly kind: "withConfig"; readonly files: readonly string[] };
 
 export type Integration = {
   readonly key: string;
@@ -27,6 +26,11 @@ export type Tool = {
   readonly initializationOptions: ((workspaceUri: string) => unknown) | null;
   readonly fromProject: FromProject;
 };
+
+export function mayFormat({ formats, fromProject }: Tool): boolean {
+  const integrations = fromProject.kind === "integrations" ? fromProject.integrations : [];
+  return formats.kind !== "never" || integrations.some((integration) => integration.formats);
+}
 
 export type Recipe =
   | { readonly kind: "python"; readonly package: string }

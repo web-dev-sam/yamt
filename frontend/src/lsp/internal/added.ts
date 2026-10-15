@@ -4,6 +4,7 @@ import { EVERY_ECOSYSTEM_FOLDERS } from "./ecosystems";
 import { projectUri } from "./handshake";
 import { sameValue } from "./json";
 import type { ServerSpec } from "./spec";
+import { mayFormat } from "./tool";
 
 const FIRST_REPEAT = 2;
 const WINDOWS_RUNNABLE = /\.(exe|cmd|bat)$/i;
@@ -25,7 +26,7 @@ function presetPart(
   const { tool, help } = preset;
   const workspaceUri = projectUri({ folder: "", root });
   return {
-    formats: tool.formats.kind !== "never",
+    formats: mayFormat(tool),
     settings: tool.settings,
     initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
     help,

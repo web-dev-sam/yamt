@@ -1,4 +1,4 @@
-import { nodeHint, recipeHint } from "./install";
+import { serverHint } from "./install";
 import { PRESETS, type Preset } from "./presets";
 import type { Place } from "./project";
 import type { InstallHint } from "./spec";
@@ -28,21 +28,17 @@ function serversOf(preset: Preset): readonly PresetServer[] {
   switch (look.kind) {
     case "projectProgram":
       return [{ tool: preset, command: look.command, fileTypes, help: null }];
-    case "used": {
-      const help = recipeHint(AT_ROOT, look.recipe, look.command.program);
+    case "used":
       return [
-        { tool: preset, command: look.command, fileTypes, help },
+        { tool: preset, command: look.command, fileTypes, help: serverHint(AT_ROOT, look) },
         ...look.orElse.map((tool) => ({ tool, command: tool.command, fileTypes, help: null })),
       ];
-    }
     case "typescript":
       return [{ tool: preset, command: look.server.command, fileTypes, help: null }];
-    case "eslint": {
-      const { command } = look.server;
-      const server = { package: look.server.package, program: command.program };
-      const help = nodeHint(AT_ROOT, server, { kind: "eslint" });
-      return [{ tool: preset, command, fileTypes, help }];
-    }
+    case "eslint":
+      return [
+        { tool: preset, command: look.server.command, fileTypes, help: serverHint(AT_ROOT, look) },
+      ];
   }
 }
 

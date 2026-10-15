@@ -9,6 +9,7 @@ import {
   type HostContext,
   type ReadyContext,
 } from "./handshake";
+import { sameValue } from "./json";
 import type { LogLine } from "./log";
 import { stateOf, STOPPED, type Halting, type Run, type Running } from "./run";
 import { ServerDocs } from "./serverDocs";
@@ -26,18 +27,32 @@ export type ServerEnv = {
   readonly changed: () => void;
 };
 
+const DISPLAY_ONLY: Pick<ServerSpec, "help" | "notes"> = { help: null, notes: [] };
+
 export class Server {
-  readonly spec: ServerSpec;
   userStopped: boolean;
   readonly #env: ServerEnv;
+  #spec: ServerSpec;
   #run: Run;
   #settled: (() => void)[] = [];
 
   constructor(spec: ServerSpec, env: ServerEnv, userStopped: boolean) {
-    this.spec = spec;
+    this.#spec = spec;
     this.userStopped = userStopped;
     this.#env = env;
     this.#run = { kind: "idle", attempt: null, state: stateAtRest(spec, env.host !== null) };
+  }
+
+  get spec(): ServerSpec {
+    return this.#spec;
+  }
+
+  runsAs(spec: ServerSpec): boolean {
+    return sameValue({ ...this.#spec, ...DISPLAY_ONLY }, { ...spec, ...DISPLAY_ONLY });
+  }
+
+  takeDisplay({ help, notes }: ServerSpec): void {
+    this.#spec = { ...this.#spec, help, notes };
   }
 
   get state(): ServerState {
