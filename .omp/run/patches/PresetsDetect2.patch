@@ -1,0 +1,2331 @@
+commit d6e97e0e06a5177c9b8053cb3d745857968be666
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 12:25:33 +0200
+
+    feat(lsp): detect servers for Rust, Go, Python, PHP, C/C++ and Biome; install hints per ecosystem (row 4, #72)
+
+diff --git a/frontend/src/lsp/AGENTS.md b/frontend/src/lsp/AGENTS.md
+index 84aaaf5..4ac06c4 100644
+--- a/frontend/src/lsp/AGENTS.md
++++ b/frontend/src/lsp/AGENTS.md
+@@ -2,6 +2,6 @@ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own langu
+ 
+ A server's run is one sum type, `Run` in `internal/run.ts` (idle, launching, starting, running, halting), held by `internal/server.ts` (the lifecycle); its `state` and `running` (the documents, the capabilities, the attempt) are derived from it. `internal/attempt.ts` is one process run: it starts and stops the process and routes its messages.
+ 
+-Which specs exist (plan §2 #70 "Detection", "Not installed"): `internal/detect.ts` `detect(paths, lookups, root)` is a pure function over the host's two generic lookups (`findProgram`, `projectFiles`; Rust never learns a server's name). A path's project is the nearest folder with a `package.json` up to the repository root; each project is read in one `projectFiles` batch and run through the one preset table `internal/presets.ts` (oxfmt, oxlint, TypeScript, eslint: what to look for, command, file types, formats, settings); a missing server gets an `InstallHint` whose manager comes from `internal/packageManager.ts` (the `packageManager` field, else the nearest lock file). "The project has this program" has one test, `findProgram` answering `place: "Project"` (oxfmt, oxlint, the native preview's `tsgo`), so detected and can start agree; a project's workspace URI is `handshake.ts` `projectUri`, the one the handshake sends. A rejecting lookup means "not found"; nothing throws. `internal/added.ts` `addedSpecs` turns the settings file's added servers into specs served at the repository root; an entry whose program has no file name is skipped. Where a program is looked for (plan §2 #72) is the window's: `internal/spec.ts` `PROGRAM_FOLDERS` (`node_modules/.bin` in the project and each parent up to the root, no home folders; the host tries PATH between the two) goes with every detection `findProgram` call and on every spec, detected or added, as `ServerSpec.folders`; the start command sends `spec.folders`.
++Which specs exist (plan §2 #70 "Detection", "Not installed", #72): `internal/detect.ts` `detect(paths, lookups, root)` is a pure function over the host's two generic lookups (`findProgram`, `projectFiles`; Rust never learns a server's name or an ecosystem). `internal/ecosystems.ts` is the one table of ecosystems (node, python, rust, go, php, clang): each one's project rule (manifests tried in order, nearest folder up to the repository root; rust prefers the nearest `Cargo.toml` with a `[workspace]` table, go `go.work` over `go.mod`, clang's `build/compile_commands.json` makes the folder holding `build/` the project) and its `ProgramFolders` (project folders such as `node_modules/.bin`, `.venv/bin`, `vendor/bin`; home folders such as `go/bin`, `.cargo/bin`, `.local/bin`); the folder walking lives there once. A path joins an ecosystem only when some preset of that ecosystem serves its file type. Each project folder is read in one `projectFiles` batch and run through the one preset table `internal/presets.ts` (formatters first: oxfmt, Biome, oxlint, TypeScript, eslint, rust-analyzer, gopls, ruff, ty, basedpyright, pyright, Phpactor else Intelephense, clangd: what counts as used, command, file types, formats rule, settings, start options, install recipe). A `used` look counts a config file, a `pyproject.toml` section or the ecosystem's manifest wherever `findProgram` finds the server (`Project`, `Path`, `Home`), else its spec carries an `InstallHint` (`internal/install.ts`: node's manager from `internal/packageManager.ts` — the `packageManager` field, else the nearest lock file; python's from the nearest `uv.lock`/`poetry.lock`/`pdm.lock`); a program-only sign (oxfmt, Biome, oxlint; ruff, ty, basedpyright without their config) counts only `place: "Project"`, so detected and can start agree. `internal/project.ts` holds what one (ecosystem, folder) project reads: its files, its program lookups with the ecosystem's folders, the nearest of a set of files. A project's workspace URI is `handshake.ts` `projectUri`, the one the handshake sends. A rejecting lookup means "not found"; nothing throws. `internal/added.ts` `addedSpecs` turns the settings file's added servers into specs served at the repository root; an entry whose program has no file name is skipped. Every detected spec carries its ecosystem's folders as `ServerSpec.folders`; added specs carry `internal/spec.ts` `PROGRAM_FOLDERS` (node's); the start command sends `spec.folders`.
+ 
+ Reading path of one message from a server: `ServerHost` event → `internal/attempt.ts` `#onEvent` → `connection.ts` `receive` (parse) → a response settles its request; a request goes to `answers.ts` (pure table) and back through `send`; a notification goes to `attempt.ts` `#notified` → `problems.ts` `pushProblems` → `DocProblems` → `ResultDocument.showProblems`. Outward: `index.ts` `open` → `documents.ts` (`DocEntry`: version, 300 ms sync) → `serverDocs.ts` (`didOpen`/`didChange`/`didClose`) → `connection.ts` → `ServerHost.send`; pulls go from `problems.ts` `DocProblems.pull`, the formatting request from `formatting.ts`.
+diff --git a/frontend/src/lsp/index.test.ts b/frontend/src/lsp/index.test.ts
+index 9a92dc9..b60d80d 100644
+--- a/frontend/src/lsp/index.test.ts
++++ b/frontend/src/lsp/index.test.ts
+@@ -281,6 +281,7 @@ function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
+ const MANAGER: PackageManager = "pnpm";
+ 
+ const INSTALL_HINT: InstallHint = {
++  kind: "node",
+   package: "typescript-language-server",
+   program: "typescript-language-server",
+   folder: "frontend",
+diff --git a/frontend/src/lsp/index.ts b/frontend/src/lsp/index.ts
+index 46eda9a..b33d474 100644
+--- a/frontend/src/lsp/index.ts
++++ b/frontend/src/lsp/index.ts
+@@ -17,7 +17,7 @@ export type { ResultDocument } from "./internal/documents";
+ export type { FormatRefusal, FormatReply, FormattingOptions } from "./internal/formatting";
+ export type { LogLine } from "./internal/log";
+ export type { LinePosition, ProblemSeverity, ServerProblem } from "./internal/problems";
+-export type { InstallHint, PackageManager, ServerSpec } from "./internal/spec";
++export type { InstallHint, PackageManager, PythonManager, ServerSpec } from "./internal/spec";
+ export type { FailReason, ServerState, ServerView } from "./internal/state";
+ export type { Timers } from "./internal/timers";
+ 
+diff --git a/frontend/src/lsp/internal/detect.test.ts b/frontend/src/lsp/internal/detect.test.ts
+index 6b7fa87..84e26a4 100644
+--- a/frontend/src/lsp/internal/detect.test.ts
++++ b/frontend/src/lsp/internal/detect.test.ts
+@@ -1,8 +1,9 @@
+ import { expect, test } from "vitest";
+ 
+ import type { ProgramFolders, ProgramFound, ProjectFile } from "../../ipc";
+-import { detect, type ProjectLookups } from "./detect";
+-import type { ServerSpec } from "./spec";
++import { detect } from "./detect";
++import type { ProjectLookups } from "./project";
++import type { InstallHint, ServerSpec } from "./spec";
+ 
+ type Tree = Readonly<Record<string, string | ProjectFile>>;
+ 
+@@ -31,6 +32,27 @@ function fileOf(tree: Tree, path: string): ProjectFile {
+   return folder ? { kind: "Folder" } : { kind: "Missing" };
+ }
+ 
++function joinedPath(folder: string, name: string): string {
++  return folder === "" ? name : `${folder}/${name}`;
++}
++
++function inProjectFolders(
++  tree: Tree,
++  [program, project, folders]: [string, string, ProgramFolders],
++): string | null {
++  for (let at = project; ; at = parentOf(at)) {
++    const hit = folders.project
++      .map((folder) => joinedPath(at, `${folder}/${program}`))
++      .find((path) => tree[path] !== undefined);
++    if (hit !== undefined) {
++      return hit;
++    }
++    if (at === "") {
++      return null;
++    }
++  }
++}
++
+ function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
+   const fileCalls: (readonly string[])[] = [];
+   const programCalls: [string, string, ProgramFolders][] = [];
+@@ -43,18 +65,17 @@ function lookups(tree: Tree, onPath: readonly string[] = []): Fake {
+     },
+     async findProgram(program, project, folders): Promise<ProgramFound> {
+       programCalls.push([program, project, folders]);
+-      for (let at = project; ; at = parentOf(at)) {
+-        const bin = `${at === "" ? "" : `${at}/`}node_modules/.bin/${program}`;
+-        if (tree[bin] !== undefined) {
+-          return { kind: "Found", path: `${ROOT}/${bin}`, place: "Project" };
+-        }
+-        if (at === "") {
+-          break;
+-        }
++      const local = inProjectFolders(tree, [program, project, folders]);
++      if (local !== null) {
++        return { kind: "Found", path: `${ROOT}/${local}`, place: "Project" };
+       }
+-      return onPath.includes(program)
+-        ? { kind: "Found", path: `/usr/bin/${program}`, place: "Path" }
+-        : { kind: "NotFound", searched: ["/usr/bin"] };
++      if (onPath.includes(program)) {
++        return { kind: "Found", path: `/usr/bin/${program}`, place: "Path" };
++      }
++      const home = folders.home.find((folder) => tree[`~/${folder}/${program}`] !== undefined);
++      return home === undefined
++        ? { kind: "NotFound", searched: ["/usr/bin"] }
++        : { kind: "Found", path: `/home/u/${home}/${program}`, place: "Home" };
+     },
+   };
+ }
+@@ -118,10 +139,10 @@ test("project folders: a file at the root belongs to the root project", async ()
+   ]);
+ });
+ 
+-test("project folders: files with no package.json above them are served by no preset", async () => {
+-  const fake = lookups({ "crates/session/Cargo.toml": "", ...bins("", "oxlint") });
++test("project folders: files with no package.json above them are served by no preset; a Cargo.toml brings no node project", async () => {
++  const fake = lookups({ "crates/session/Cargo.toml": "[workspace]", ...bins("", "oxlint") });
+ 
+-  expect(await detect(["crates/session/src/lib.rs"], fake, ROOT)).toEqual([]);
++  expect(await detect(["crates/session/src/lib.ts"], fake, ROOT)).toEqual([]);
+   expect(fake.fileCalls).toHaveLength(1);
+   expect(fake.programCalls).toEqual([]);
+ });
+@@ -245,6 +266,7 @@ test("TypeScript 5.9 without its server: install hint with the version, folder a
+       project: "frontend",
+       folders: NODE_BIN,
+       install: {
++        kind: "node",
+         package: "typescript-language-server",
+         program: "typescript-language-server",
+         folder: "frontend",
+@@ -352,6 +374,7 @@ test("eslint: without its server, an install hint for vscode-langservers-extract
+ 
+   expect(specs.map(({ install }) => install)).toEqual([
+     {
++      kind: "node",
+       package: "vscode-langservers-extracted",
+       program: "vscode-eslint-language-server",
+       folder: "",
+@@ -394,7 +417,10 @@ test("names are unique across projects; a tool in one project keeps its plain na
+ 
+ function managerFor(tree: Tree): Promise<unknown> {
+   const withHint = { ...tree, ...typescriptAt("app/", "5.9.3") };
+-  return detect(["app/a.ts"], lookups(withHint), ROOT).then((specs) => specs[0]?.install?.manager);
++  return detect(["app/a.ts"], lookups(withHint), ROOT).then((specs) => {
++    const install = specs[0]?.install;
++    return install?.kind === "node" ? install.manager : undefined;
++  });
+ }
+ 
+ test("package manager: the lock file nearest the project folder, up to the root", async () => {
+@@ -437,9 +463,9 @@ test("a rejecting lookup means not found", async () => {
+   expect(summary(await detect(["a.ts"], noPrograms, ROOT))).toEqual([
+     "eslint vscode-eslint-language-server --stdio @",
+   ]);
+-  expect((await detect(["a.ts"], noPrograms, ROOT))[0]?.install?.reason).toEqual({
+-    kind: "eslint",
+-  });
++  expect((await detect(["a.ts"], noPrograms, ROOT))[0]?.install).toEqual(
++    expect.objectContaining({ kind: "node", reason: { kind: "eslint" } }),
++  );
+ });
+ 
+ test("a short answer from projectFiles leaves the rest missing", async () => {
+@@ -448,3 +474,388 @@ test("a short answer from projectFiles leaves the rest missing", async () => {
+ 
+   expect(await detect(["a.ts"], short, ROOT)).toEqual([]);
+ });
++
++const RUST_BIN: ProgramFolders = { project: [], home: [".cargo/bin"] };
++const GO_BIN: ProgramFolders = { project: [], home: ["go/bin"] };
++const PYTHON_BIN: ProgramFolders = {
++  project: [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"],
++  home: [".local/bin"],
++};
++const PHP_BIN: ProgramFolders = {
++  project: ["vendor/bin"],
++  home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++};
++const CLANG_BIN: ProgramFolders = { project: [], home: [] };
++const PYTHON_TYPES = ["py", "pyi"];
++const PHPACTOR_HINT: InstallHint = {
++  kind: "download",
++  program: "phpactor",
++  command:
++    "curl -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
++  needs: "PHP 8.2 or later",
++};
++
++function venv(folder: string, ...programs: string[]): Tree {
++  return Object.fromEntries(programs.map((program) => [`${folder}.venv/bin/${program}`, ""]));
++}
++
++function home(folder: string, program: string): Tree {
++  return { [`~/${folder}/${program}`]: "" };
++}
++
++function installOf(specs: readonly ServerSpec[]): (InstallHint | null)[] {
++  return specs.map(({ install }) => install);
++}
++
++test("ecosystems: a path joins only the ecosystems that serve its type", async () => {
++  const tree = {
++    ...NO_SERVERS,
++    "Cargo.toml": "[workspace]\n",
++    "pyproject.toml": "[tool.ruff]\n",
++    ...bins("", "oxlint"),
++  };
++  const servers = ["rust-analyzer", "ruff"];
++  const typescriptFake = lookups(tree, servers);
++  const rustFake = lookups(tree, servers);
++
++  const typescriptOnly = await detect(["src/a.ts"], typescriptFake, ROOT);
++  const rustOnly = await detect(["src/lib.rs"], rustFake, ROOT);
++
++  expect(summary(typescriptOnly)).toEqual(["oxlint oxlint --lsp @"]);
++  expect(typescriptFake.programCalls.map(([program]) => program)).not.toContain("rust-analyzer");
++  expect(summary(rustOnly)).toEqual(["rust-analyzer rust-analyzer @"]);
++  expect(rustFake.fileCalls[0]).toEqual(["src/Cargo.toml", "Cargo.toml"]);
++});
++
++test("ecosystems: one folder that is a project of two ecosystems is read once, specs in table order", async () => {
++  const tree = { ...NO_SERVERS, "Cargo.toml": "", ...bins("", "oxfmt") };
++  const fake = lookups(tree, ["rust-analyzer"]);
++
++  const specs = await detect(["src/lib.rs", "src/a.ts"], fake, ROOT);
++
++  expect(summary(specs)).toEqual(["oxfmt oxfmt --lsp @", "rust-analyzer rust-analyzer @"]);
++  expect(fake.fileCalls).toHaveLength(2);
++});
++
++test("rust-analyzer: the workspace's manifest counts, found on PATH, without cargo check", async () => {
++  const tree = {
++    "rs/Cargo.toml": '[workspace]\nmembers = ["core"]\n',
++    "rs/core/Cargo.toml": "[package]\n",
++  };
++  const fake = lookups(tree, ["rust-analyzer"]);
++
++  const specs = await detect(["rs/core/src/lib.rs"], fake, ROOT);
++
++  expect(specs).toEqual([
++    {
++      name: "rust-analyzer",
++      command: { program: "rust-analyzer", args: [] },
++      project: "rs",
++      folders: RUST_BIN,
++      fileTypes: ["rs"],
++      formats: true,
++      settings: { "rust-analyzer": { checkOnSave: false } },
++      initializationOptions: { checkOnSave: false },
++      install: null,
++    },
++  ]);
++  expect(fake.programCalls).toEqual([["rust-analyzer", "rs", RUST_BIN]]);
++});
++
++test("rust-analyzer: found in ~/.cargo/bin counts; missing → rustup's component", async () => {
++  const tree = { "Cargo.toml": "[package]\n" };
++
++  const inHome = await detect(
++    ["src/lib.rs"],
++    lookups({ ...tree, ...home(".cargo/bin", "rust-analyzer") }),
++    ROOT,
++  );
++  const missing = await detect(["src/lib.rs"], lookups(tree), ROOT);
++  const noManifest = await detect(["src/lib.rs"], lookups({}, ["rust-analyzer"]), ROOT);
++
++  expect(installOf(inHome)).toEqual([null]);
++  expect(installOf(missing)).toEqual([
++    { kind: "rustup", component: "rust-analyzer", program: "rust-analyzer" },
++  ]);
++  expect(noManifest).toEqual([]);
++});
++
++test("gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install", async () => {
++  const tree = { "go/go.mod": "module calc\n" };
++
++  const onPath = await detect(["go/calc/calc.go"], lookups(tree, ["gopls"]), ROOT);
++  const inHome = await detect(
++    ["go/calc/calc.go"],
++    lookups({ ...tree, ...home("go/bin", "gopls") }),
++    ROOT,
++  );
++  const missing = await detect(["go/calc/calc.go"], lookups(tree), ROOT);
++  const noManifest = await detect(["go/calc/calc.go"], lookups({}, ["gopls"]), ROOT);
++
++  expect(onPath).toEqual([
++    {
++      name: "gopls",
++      command: { program: "gopls", args: [] },
++      project: "go",
++      folders: GO_BIN,
++      fileTypes: ["go"],
++      formats: true,
++      settings: null,
++      initializationOptions: null,
++      install: null,
++    },
++  ]);
++  expect(installOf(inHome)).toEqual([null]);
++  expect(installOf(missing)).toEqual([
++    { kind: "go", module: "golang.org/x/tools/gopls@latest", program: "gopls" },
++  ]);
++  expect(noManifest).toEqual([]);
++});
++
++test("ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec", async () => {
++  const tree = { "py/pyproject.toml": "[project]\n[tool.ruff.lint]\n" };
++
++  const specs = await detect(["py/api/stats.py"], lookups(tree, ["ruff"]), ROOT);
++
++  expect(specs).toEqual([
++    {
++      name: "ruff",
++      command: { program: "ruff", args: ["server"] },
++      project: "py",
++      folders: PYTHON_BIN,
++      fileTypes: PYTHON_TYPES,
++      formats: true,
++      settings: null,
++      initializationOptions: null,
++      install: null,
++    },
++  ]);
++});
++
++test("ruff: ruff.toml or .ruff.toml with ruff in ~/.local/bin counts; missing → pip's hint", async () => {
++  const config = { "requirements.txt": "", "ruff.toml": "" };
++  const hidden = { "requirements.txt": "", ".ruff.toml": "" };
++
++  const inHome = await detect(
++    ["a.py"],
++    lookups({ ...config, ...home(".local/bin", "ruff") }),
++    ROOT,
++  );
++  const missing = await detect(["a.py"], lookups(hidden), ROOT);
++
++  expect(summary(inHome)).toEqual(["ruff ruff server @"]);
++  expect(installOf(inHome)).toEqual([null]);
++  expect(installOf(missing)).toEqual([
++    { kind: "python", package: "ruff", program: "ruff", folder: "", manager: null },
++  ]);
++});
++
++test("ruff, ty, basedpyright: with no config, only the project's venv copy counts", async () => {
++  const tree = { "py/pyproject.toml": "[project]\n" };
++  const programs = ["ruff", "ty", "basedpyright-langserver"];
++
++  const local = await detect(["py/a.py"], lookups({ ...tree, ...venv("py/", ...programs) }), ROOT);
++  const onPath = await detect(
++    ["py/a.py"],
++    lookups(tree, [...programs, "pyright-langserver"]),
++    ROOT,
++  );
++
++  expect(summary(local)).toEqual([
++    "ruff ruff server @py",
++    "ty ty server @py",
++    "basedpyright basedpyright-langserver --stdio @py",
++  ]);
++  expect(local.map(({ formats }) => formats)).toEqual([true, false, false]);
++  expect(onPath).toEqual([]);
++});
++
++test("ty, basedpyright, pyright: their config signs count, missing → their PyPI packages", async () => {
++  const tree = {
++    "pyproject.toml": "[tool.basedpyright]\n[tool.pyright]\n",
++    "ty.toml": "",
++  };
++
++  const specs = await detect(["a.pyi"], lookups(tree), ROOT);
++
++  expect(summary(specs)).toEqual([
++    "ty ty server @",
++    "basedpyright basedpyright-langserver --stdio @",
++    "pyright pyright-langserver --stdio @",
++  ]);
++  expect(installOf(specs).map((hint) => hint?.kind === "python" && hint.package)).toEqual([
++    "ty",
++    "basedpyright",
++    "pyright",
++  ]);
++});
++
++test("pyright: pyrightconfig.json counts on PATH; a venv copy alone does not", async () => {
++  const tree = { "setup.py": "" };
++
++  const configured = await detect(
++    ["a.py"],
++    lookups({ ...tree, "pyrightconfig.json": "{}" }, ["pyright-langserver"]),
++    ROOT,
++  );
++  const venvOnly = await detect(
++    ["a.py"],
++    lookups({ ...tree, ...venv("", "pyright-langserver") }),
++    ROOT,
++  );
++
++  expect(summary(configured)).toEqual(["pyright pyright-langserver --stdio @"]);
++  expect(configured[0]?.formats).toBe(false);
++  expect(venvOnly).toEqual([]);
++});
++
++function pythonManagerFor(tree: Tree): Promise<unknown> {
++  const project = { "py/pyproject.toml": "[tool.ruff]\n", ...tree };
++  return detect(["py/a.py"], lookups(project), ROOT).then((specs) => {
++    const install = specs[0]?.install;
++    return install?.kind === "python" ? install.manager : undefined;
++  });
++}
++
++test("python manager: each lock file, the nearest wins, none → null", async () => {
++  expect(await pythonManagerFor({ "py/uv.lock": "" })).toBe("uv");
++  expect(await pythonManagerFor({ "py/poetry.lock": "" })).toBe("poetry");
++  expect(await pythonManagerFor({ "pdm.lock": { kind: "TooLarge" } })).toBe("pdm");
++  expect(await pythonManagerFor({ "py/pdm.lock": "", "uv.lock": "" })).toBe("pdm");
++  expect(await pythonManagerFor({ "py/uv.lock": { kind: "Folder" }, "poetry.lock": "" })).toBe(
++    "poetry",
++  );
++  expect(await pythonManagerFor({ "py/pnpm-lock.yaml": "" })).toBeNull();
++});
++
++test("PHP: Phpactor first, else Intelephense, each with its own options and folders", async () => {
++  const tree = { "php/composer.json": "{}" };
++
++  const both = await detect(
++    ["php/src/Stats.php"],
++    lookups(tree, ["phpactor", "intelephense"]),
++    ROOT,
++  );
++  const intelephense = await detect(["php/src/Stats.php"], lookups(tree, ["intelephense"]), ROOT);
++  const phar = await detect(
++    ["php/src/Stats.php"],
++    lookups({ ...tree, ...home(".local/bin", "phpactor") }, ["intelephense"]),
++    ROOT,
++  );
++
++  expect(both).toEqual([
++    {
++      name: "Phpactor",
++      command: { program: "phpactor", args: ["language-server"] },
++      project: "php",
++      folders: PHP_BIN,
++      fileTypes: ["php"],
++      formats: false,
++      settings: null,
++      initializationOptions: { "language_server.enable_trust_check": false },
++      install: null,
++    },
++  ]);
++  expect(intelephense).toEqual([
++    {
++      name: "Intelephense",
++      command: { program: "intelephense", args: ["--stdio"] },
++      project: "php",
++      folders: PHP_BIN,
++      fileTypes: ["php"],
++      formats: false,
++      settings: null,
++      initializationOptions: null,
++      install: null,
++    },
++  ]);
++  expect(summary(phar)).toEqual(["Phpactor phpactor language-server @php"]);
++});
++
++test("PHP: Phpactor in vendor/bin counts; neither server → Phpactor's download hint", async () => {
++  const tree = { "composer.json": "{}" };
++
++  const vendor = await detect(["a.php"], lookups({ ...tree, "vendor/bin/phpactor": "" }), ROOT);
++  const neither = await detect(["a.php"], lookups(tree), ROOT);
++  const noManifest = await detect(["a.php"], lookups({}, ["phpactor"]), ROOT);
++
++  expect(installOf(vendor)).toEqual([null]);
++  expect(summary(neither)).toEqual(["Phpactor phpactor language-server @"]);
++  expect(installOf(neither)).toEqual([PHPACTOR_HINT]);
++  expect(noManifest).toEqual([]);
++});
++
++test("clangd: formats only with a .clang-format or _clang-format up to the root", async () => {
++  const tree = { "c/compile_commands.json": "[]" };
++  const path = ["c/src/main.c"];
++
++  const plain = await detect(path, lookups(tree, ["clangd"]), ROOT);
++  const styled = await detect(path, lookups({ ...tree, "c/.clang-format": "" }, ["clangd"]), ROOT);
++  const above = await detect(path, lookups({ ...tree, "_clang-format": "" }, ["clangd"]), ROOT);
++
++  expect(plain).toEqual([
++    {
++      name: "clangd",
++      command: { program: "clangd", args: [] },
++      project: "c",
++      folders: CLANG_BIN,
++      fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++      formats: false,
++      settings: null,
++      initializationOptions: null,
++      install: null,
++    },
++  ]);
++  expect(styled[0]?.formats).toBe(true);
++  expect(above[0]?.formats).toBe(true);
++});
++
++test("clangd: build/compile_commands.json makes the folder holding build/ the project; missing → the system's package manager", async () => {
++  const tree = { "c/build/compile_commands.json": "[]" };
++
++  const specs = await detect(["c/src/main.cpp"], lookups(tree), ROOT);
++  const noManifest = await detect(["c/src/main.cpp"], lookups({}, ["clangd"]), ROOT);
++
++  expect(summary(specs)).toEqual(["clangd clangd @c"]);
++  expect(installOf(specs)).toEqual([{ kind: "system", program: "clangd" }]);
++  expect(noManifest).toEqual([]);
++});
++
++test("Biome: the project's copy counts and formats; a copy on PATH does not", async () => {
++  const tree = { "biome/package.json": "{}" };
++
++  const local = await detect(
++    ["biome/src/index.js"],
++    lookups({ ...tree, ...bins("biome/", "biome") }),
++    ROOT,
++  );
++  const onPath = await detect(["biome/src/index.js"], lookups(tree, ["biome"]), ROOT);
++
++  expect(local).toEqual([
++    {
++      name: "Biome",
++      command: { program: "biome", args: ["lsp-proxy"] },
++      project: "biome",
++      folders: NODE_BIN,
++      fileTypes: [
++        "js",
++        "jsx",
++        "mjs",
++        "cjs",
++        "ts",
++        "tsx",
++        "mts",
++        "cts",
++        "json",
++        "jsonc",
++        "css",
++        "graphql",
++      ],
++      formats: true,
++      settings: null,
++      initializationOptions: null,
++      install: null,
++    },
++  ]);
++  expect(onPath).toEqual([]);
++});
+diff --git a/frontend/src/lsp/internal/detect.ts b/frontend/src/lsp/internal/detect.ts
+index 66cecf6..e983e8d 100644
+--- a/frontend/src/lsp/internal/detect.ts
++++ b/frontend/src/lsp/internal/detect.ts
+@@ -1,146 +1,171 @@
+-import type { ProgramFound, ProjectFile, ServerHost } from "../../ipc";
++import type { ProjectFile } from "../../ipc";
++import {
++  ECOSYSTEMS,
++  foldersUp,
++  joined,
++  manifestPaths,
++  PACKAGE_JSON,
++  parentOf,
++  present,
++  projectOf,
++  type Ecosystem,
++} from "./ecosystems";
+ import { projectUri, type ProjectAt } from "./handshake";
+-import { sectionOf } from "./json";
+-import { LOCK_FILES, packageManager } from "./packageManager";
+-import { PRESETS, type Look, type Preset } from "./presets";
+-import { PROGRAM_FOLDERS, type InstallHint, type PackageManager, type ServerSpec } from "./spec";
++import { nodeHint, recipeHint, type NodeHint } from "./install";
++import { LOCK_FILES, PYTHON_LOCK_FILES } from "./packageManager";
++import { PRESETS, type Formats, type Look, type Preset, type Sign, type Tool } from "./presets";
++import {
++  foundAnywhere,
++  hasConfig,
++  inProject,
++  jsonField,
++  nearest,
++  readFiles,
++  type Project,
++  type ProjectLookups,
++} from "./project";
++import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
+ 
+-export type ProjectLookups = Pick<ServerHost, "findProgram" | "projectFiles">;
++type Command = ServerSpec["command"];
+ 
+-type Files = ReadonlyMap<string, ProjectFile>;
+-
+-type Project = {
+-  readonly folder: string;
+-  readonly files: Files;
+-  readonly lookups: ProjectLookups;
+-  readonly manager: PackageManager | null;
++type Detected = {
++  readonly tool: Tool;
++  readonly command: Command;
++  readonly install: InstallHint | null;
+ };
+ 
+-type Detected = { readonly command: ServerSpec["command"]; readonly install: InstallHint | null };
++type Wanted = { readonly here: readonly string[]; readonly up: readonly string[] };
+ 
+-type ServerLook = Extract<Look, { kind: "typescript" | "eslint" }>;
+-
+-const PACKAGE_JSON = "package.json";
+ const ROOT_LABEL = "repository root";
+ 
+-function joined(folder: string, name: string): string {
+-  return folder === "" ? name : `${folder}/${name}`;
++function modulePackage(name: string): string {
++  return `node_modules/${name}/${PACKAGE_JSON}`;
+ }
+ 
+-function parentOf(path: string): string {
+-  return path.slice(0, Math.max(path.lastIndexOf("/"), 0));
++function servingEcosystems(path: string): readonly Ecosystem[] {
++  const extension = extensionOf(path);
++  const serving = PRESETS.filter((preset) => preset.fileTypes.includes(extension));
++  return [...new Set(serving.map((preset) => preset.ecosystem))];
+ }
+ 
+-function foldersUp(folder: string): readonly string[] {
+-  return folder === "" ? [""] : [folder, ...foldersUp(parentOf(folder))];
+-}
+-
+-function modulePackage(folder: string, name: string): string {
+-  return joined(folder, `node_modules/${name}/${PACKAGE_JSON}`);
+-}
+-
+-function present(file: ProjectFile | undefined): file is ProjectFile {
+-  return file !== undefined && file.kind !== "Missing" && file.kind !== "Folder";
+-}
+-
+-function jsonField(file: ProjectFile | undefined, field: string): string | null {
+-  if (file?.kind !== "Text") {
+-    return null;
+-  }
+-  try {
+-    const value = sectionOf(JSON.parse(file.text), field);
+-    return typeof value === "string" ? value : null;
+-  } catch {
+-    return null;
+-  }
+-}
+-
+-async function readFiles(lookups: ProjectLookups, paths: readonly string[]): Promise<Files> {
+-  const unique = [...new Set(paths)];
+-  const answers = await lookups.projectFiles(unique).catch((): readonly ProjectFile[] => []);
+-  return new Map(
+-    unique.map((path, index): [string, ProjectFile] => [
+-      path,
+-      answers[index] ?? { kind: "Missing" },
+-    ]),
+-  );
+-}
+-
+-function findProgram(project: Project, program: string): Promise<ProgramFound> {
+-  return project.lookups
+-    .findProgram(program, project.folder, PROGRAM_FOLDERS)
+-    .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
+-}
+-
+-async function inProject(project: Project, program: string): Promise<boolean> {
+-  const found = await findProgram(project, program);
+-  return found.kind === "Found" && found.place === "Project";
+-}
+-
+-async function projectFolders(
++async function projectsOf(
+   lookups: ProjectLookups,
+   paths: readonly string[],
+-): Promise<readonly string[]> {
+-  const chains = paths.map((path) => foldersUp(parentOf(path)));
+-  const manifests = chains.flat().map((folder) => joined(folder, PACKAGE_JSON));
+-  const files = await readFiles(lookups, manifests);
+-  const projects = chains.flatMap(
+-    (chain) => chain.find((folder) => present(files.get(joined(folder, PACKAGE_JSON)))) ?? [],
++): Promise<readonly (readonly [string, ReadonlySet<Ecosystem>])[]> {
++  const joins = paths.flatMap((path) =>
++    servingEcosystems(path).map((ecosystem) => ({ ecosystem, folder: parentOf(path) })),
+   );
+-  return [...new Set(projects)].sort();
++  const files = await readFiles(
++    lookups,
++    joins.flatMap(({ ecosystem, folder }) => manifestPaths(ecosystem, folder)),
++  );
++  const projects = new Map<string, Set<Ecosystem>>();
++  for (const { ecosystem, folder } of joins) {
++    const project = projectOf(ecosystem, folder, files);
++    if (project !== null) {
++      projects.set(project, (projects.get(project) ?? new Set()).add(ecosystem));
++    }
++  }
++  return [...projects].sort(([a], [b]) => (a < b ? -1 : 1));
+ }
+ 
+-function lookedFor(look: Look): { configs: readonly string[]; packages: readonly string[] } {
+-  switch (look.kind) {
+-    case "projectProgram":
+-      return { configs: [], packages: [] };
+-    case "typescript":
+-      return { configs: look.configs, packages: [look.package] };
+-    case "eslint":
+-      return { configs: look.configs, packages: [look.package] };
++function signFile(sign: Sign): readonly string[] {
++  switch (sign.kind) {
++    case "manifest":
++      return [];
++    case "file":
++      return [sign.name];
++    case "section":
++      return [sign.file];
+   }
+ }
+ 
+-function candidates(folder: string): readonly string[] {
+-  const wanted = PRESETS.map((preset) => lookedFor(preset.look));
+-  return [
+-    joined(folder, PACKAGE_JSON),
+-    ...wanted.flatMap(({ configs }) => configs.map((config) => joined(folder, config))),
+-    ...foldersUp(folder).flatMap((at) => [
+-      ...wanted.flatMap(({ packages }) => packages.map((name) => modulePackage(at, name))),
+-      ...LOCK_FILES.map((lock) => joined(at, lock)),
+-    ]),
++function formatConfigs(formats: Formats): readonly string[] {
++  return formats.kind === "withConfig" ? formats.files : [];
++}
++
++function lookedFor(preset: Preset): Wanted {
++  const { look } = preset;
++  switch (look.kind) {
++    case "projectProgram":
++      return { here: [], up: formatConfigs(preset.formats) };
++    case "used": {
++      const tools = [preset, ...look.orElse];
++      return {
++        here: look.signs.flatMap(signFile),
++        up: tools.flatMap((tool) => formatConfigs(tool.formats)),
++      };
++    }
++    case "typescript":
++    case "eslint":
++      return {
++        here: look.configs,
++        up: [...formatConfigs(preset.formats), modulePackage(look.package)],
++      };
++  }
++}
++
++function ecosystemFiles(ecosystem: Ecosystem): Wanted {
++  switch (ecosystem) {
++    case "node":
++      return { here: [PACKAGE_JSON], up: LOCK_FILES };
++    case "python":
++      return { here: [], up: PYTHON_LOCK_FILES };
++    case "rust":
++    case "go":
++    case "php":
++    case "clang":
++      return { here: [], up: [] };
++  }
++}
++
++function candidates(folder: string, ecosystems: ReadonlySet<Ecosystem>): readonly string[] {
++  const wanted = [
++    ...PRESETS.filter((preset) => ecosystems.has(preset.ecosystem)).map(lookedFor),
++    ...[...ecosystems].map(ecosystemFiles),
+   ];
++  return [
++    ...wanted.flatMap(({ here }) => here.map((name) => joined(folder, name))),
++    ...foldersUp(folder).flatMap((at) =>
++      wanted.flatMap(({ up }) => up.map((name) => joined(at, name))),
++    ),
++  ];
++}
++
++function signHolds(project: Project, sign: Sign): boolean {
++  switch (sign.kind) {
++    case "manifest":
++      return true;
++    case "file":
++      return hasConfig(project, [sign.name]);
++    case "section": {
++      const file = project.files.get(joined(project.folder, sign.file));
++      return file?.kind === "Text" && sign.line.test(file.text);
++    }
++  }
+ }
+ 
+ function nearestPackage(project: Project, name: string): ProjectFile | undefined {
+   return foldersUp(project.folder)
+-    .map((at) => project.files.get(modulePackage(at, name)))
++    .map((at) => project.files.get(joined(at, modulePackage(name))))
+     .find(present);
+ }
+ 
+-function hasConfig(project: Project, configs: readonly string[]): boolean {
+-  return configs.some((config) => present(project.files.get(joined(project.folder, config))));
+-}
+-
+ async function serverOf(
+   project: Project,
+-  server: ServerLook["server"],
+-  reason: InstallHint["reason"],
++  tool: Tool,
++  server: Extract<Look, { kind: "typescript" | "eslint" }>["server"],
++  reason: NodeHint["reason"],
+ ): Promise<Detected> {
+-  const found = await findProgram(project, server.command.program);
+-  const install = {
+-    package: server.package,
+-    program: server.command.program,
+-    folder: project.folder,
+-    manager: project.manager,
+-    reason,
+-  };
+-  return { command: server.command, install: found.kind === "Found" ? null : install };
++  const { command } = server;
++  const install = nodeHint(project, { package: server.package, program: command.program }, reason);
++  const installed = await foundAnywhere(project, command.program);
++  return { tool, command, install: installed ? null : install };
+ }
+ 
+ async function typescript(
+   project: Project,
++  preset: Preset,
+   look: Extract<Look, { kind: "typescript" }>,
+ ): Promise<Detected | null> {
+   const version = jsonField(nearestPackage(project, look.package), "version");
+@@ -149,58 +174,91 @@ async function typescript(
+     return null;
+   }
+   if (Number(major) >= look.firstLspMajor) {
+-    return { command: look.compiler, install: null };
++    return { tool: preset, command: look.compiler, install: null };
+   }
+   if (await inProject(project, look.nativePreview.program)) {
+-    return { command: look.nativePreview, install: null };
++    return { tool: preset, command: look.nativePreview, install: null };
+   }
+-  return serverOf(project, look.server, { kind: "typescript", version });
++  return serverOf(project, preset, look.server, { kind: "typescript", version });
+ }
+ 
+-async function lookIn(project: Project, look: Look): Promise<Detected | null> {
++async function used(
++  project: Project,
++  preset: Preset,
++  look: Extract<Look, { kind: "used" }>,
++): Promise<Detected | null> {
++  const { command } = look;
++  if (look.signs.some((sign) => signHolds(project, sign))) {
++    for (const choice of [{ ...preset, command }, ...look.orElse]) {
++      if (await foundAnywhere(project, choice.command.program)) {
++        return { tool: choice, command: choice.command, install: null };
++      }
++    }
++    return { tool: preset, command, install: recipeHint(project, look.recipe, command.program) };
++  }
++  return look.orProjectProgram && (await inProject(project, command.program))
++    ? { tool: preset, command, install: null }
++    : null;
++}
++
++async function lookIn(project: Project, preset: Preset): Promise<Detected | null> {
++  const { look } = preset;
+   switch (look.kind) {
+     case "projectProgram":
+       return (await inProject(project, look.command.program))
+-        ? { command: look.command, install: null }
++        ? { tool: preset, command: look.command, install: null }
+         : null;
++    case "used":
++      return used(project, preset, look);
+     case "typescript":
+-      return typescript(project, look);
++      return typescript(project, preset, look);
+     case "eslint": {
+-      const used = hasConfig(project, look.configs);
+-      return used && nearestPackage(project, look.package) !== undefined
+-        ? serverOf(project, look.server, { kind: "eslint" })
++      const configured = hasConfig(project, look.configs);
++      return configured && nearestPackage(project, look.package) !== undefined
++        ? serverOf(project, preset, look.server, { kind: "eslint" })
+         : null;
+     }
+   }
+ }
+ 
+-function specOf(preset: Preset, detected: Detected, at: ProjectAt): ServerSpec {
++function formatsIn(project: Project, formats: Formats): boolean {
++  switch (formats.kind) {
++    case "always":
++      return true;
++    case "never":
++      return false;
++    case "withConfig":
++      return nearest(project, formats.files) !== null;
++  }
++}
++
++function specOf(project: Project, preset: Preset, detected: Detected, root: string): ServerSpec {
++  const { tool } = detected;
++  const workspaceUri = projectUri({ folder: project.folder, root });
+   return {
+-    name: preset.name,
++    name: tool.name,
+     command: detected.command,
+-    project: at.folder,
+-    folders: PROGRAM_FOLDERS,
++    project: project.folder,
++    folders: ECOSYSTEMS[preset.ecosystem].folders,
+     fileTypes: preset.fileTypes,
+-    formats: preset.formats,
+-    settings: preset.settings,
+-    initializationOptions: preset.initializationOptions?.(projectUri(at)) ?? null,
++    formats: formatsIn(project, tool.formats),
++    settings: tool.settings,
++    initializationOptions: tool.initializationOptions?.(workspaceUri) ?? null,
+     install: detected.install,
+   };
+ }
+ 
+-async function detectIn(lookups: ProjectLookups, at: ProjectAt): Promise<readonly ServerSpec[]> {
+-  const { folder } = at;
+-  const files = await readFiles(lookups, candidates(folder));
+-  const nearestLock = foldersUp(folder)
+-    .flatMap((up) => LOCK_FILES.filter((lock) => present(files.get(joined(up, lock)))))
+-    .at(0);
+-  const declared = jsonField(files.get(joined(folder, PACKAGE_JSON)), "packageManager");
+-  const manager = packageManager(declared, nearestLock ?? null);
+-  const project = { folder, files, lookups, manager };
++async function detectIn(
++  lookups: ProjectLookups,
++  { folder, root }: ProjectAt,
++  ecosystems: ReadonlySet<Ecosystem>,
++): Promise<readonly ServerSpec[]> {
++  const files = await readFiles(lookups, candidates(folder, ecosystems));
+   const found = await Promise.all(
+-    PRESETS.map(async (preset) => {
+-      const detected = await lookIn(project, preset.look);
+-      return detected === null ? [] : [specOf(preset, detected, at)];
++    PRESETS.filter((preset) => ecosystems.has(preset.ecosystem)).map(async (preset) => {
++      const project = { ecosystem: preset.ecosystem, folder, files, lookups };
++      const detected = await lookIn(project, preset);
++      return detected === null ? [] : [specOf(project, preset, detected, root)];
+     }),
+   );
+   return found.flat();
+@@ -211,9 +269,11 @@ export async function detect(
+   lookups: ProjectLookups,
+   root: string,
+ ): Promise<readonly ServerSpec[]> {
+-  const folders = await projectFolders(lookups, paths);
++  const projects = await projectsOf(lookups, paths);
+   const found = (
+-    await Promise.all(folders.map((folder) => detectIn(lookups, { folder, root })))
++    await Promise.all(
++      projects.map(([folder, ecosystems]) => detectIn(lookups, { folder, root }, ecosystems)),
++    )
+   ).flat();
+   return found.map((spec) => {
+     const shared = found.filter((other) => other.name === spec.name).length > 1;
+diff --git a/frontend/src/lsp/internal/ecosystems.test.ts b/frontend/src/lsp/internal/ecosystems.test.ts
+new file mode 100644
+index 0000000..3ecc474
+--- /dev/null
++++ b/frontend/src/lsp/internal/ecosystems.test.ts
+@@ -0,0 +1,112 @@
++import { expect, test } from "vitest";
++
++import type { ProjectFile } from "../../ipc";
++import { ECOSYSTEMS, manifestPaths, projectOf, type Ecosystem, type Files } from "./ecosystems";
++
++function files(tree: Readonly<Record<string, string | ProjectFile>>): Files {
++  return new Map(
++    Object.entries(tree).map(([path, entry]): [string, ProjectFile] => [
++      path,
++      typeof entry === "string" ? { kind: "Text", text: entry } : entry,
++    ]),
++  );
++}
++
++test.each<[Ecosystem, string]>([
++  ["node", "package.json"],
++  ["python", "pyproject.toml"],
++  ["python", "setup.py"],
++  ["python", "setup.cfg"],
++  ["python", "requirements.txt"],
++  ["rust", "Cargo.toml"],
++  ["go", "go.mod"],
++  ["go", "go.work"],
++  ["php", "composer.json"],
++  ["clang", "compile_commands.json"],
++  ["clang", "compile_flags.txt"],
++  ["clang", ".clangd"],
++])("%s: %s makes its folder a project, nested, at the root, or not at all", (ecosystem, name) => {
++  expect(projectOf(ecosystem, "a/b/src", files({ [`a/b/${name}`]: "" }))).toBe("a/b");
++  expect(projectOf(ecosystem, "a/b/src", files({ [name]: "" }))).toBe("");
++  expect(projectOf(ecosystem, "", files({ [name]: "" }))).toBe("");
++  expect(projectOf(ecosystem, "a/b/src", files({ [`x/${name}`]: "" }))).toBeNull();
++  expect(projectOf(ecosystem, "a/b/src", files({ [`a/${name}`]: { kind: "Folder" } }))).toBeNull();
++});
++
++test("rust: the nearest workspace Cargo.toml beats a member's own", () => {
++  const tree = files({
++    "rs/Cargo.toml": '[workspace]\nmembers = ["core"]\n',
++    "rs/core/Cargo.toml": '[package]\nname = "core"\n',
++  });
++
++  expect(projectOf("rust", "rs/core/src", tree)).toBe("rs");
++});
++
++test("rust: a [workspace.*] table counts as a workspace, a mention in text does not", () => {
++  const dotted = files({
++    "Cargo.toml": "[package]\n[workspace.dependencies]\n",
++    "core/Cargo.toml": "",
++  });
++  const mention = files({
++    "Cargo.toml": '[package]\ndescription = "no [workspace] here"\n',
++    "core/Cargo.toml": "",
++  });
++
++  expect(projectOf("rust", "core/src", dotted)).toBe("");
++  expect(projectOf("rust", "core/src", mention)).toBe("core");
++});
++
++test("rust: no workspace anywhere, the nearest Cargo.toml", () => {
++  const tree = files({ "Cargo.toml": "[package]\n", "tools/x/Cargo.toml": "[package]\n" });
++
++  expect(projectOf("rust", "tools/x/src", tree)).toBe("tools/x");
++});
++
++test("rust: a workspace Cargo.toml too large to read is a plain Cargo.toml", () => {
++  const tree = files({ "Cargo.toml": { kind: "TooLarge" }, "core/Cargo.toml": "" });
++
++  expect(projectOf("rust", "core/src", tree)).toBe("core");
++  expect(projectOf("rust", "src", tree)).toBe("");
++});
++
++test("go: go.work beats a nearer go.mod", () => {
++  const tree = files({ "go.work": "go 1.22\n", "svc/go.mod": "module svc\n" });
++
++  expect(projectOf("go", "svc/calc", tree)).toBe("");
++  expect(projectOf("go", "svc/calc", files({ "svc/go.mod": "" }))).toBe("svc");
++});
++
++test("clang: build/compile_commands.json makes the folder holding build/ the project", () => {
++  const tree = files({ "c/build/compile_commands.json": "[]" });
++
++  expect(projectOf("clang", "c/src", tree)).toBe("c");
++  expect(manifestPaths("clang", "c")).toContain("c/build/compile_commands.json");
++});
++
++test("manifests are read along the folder chain, rule by rule", () => {
++  expect(manifestPaths("node", "a/b")).toEqual([
++    "a/b/package.json",
++    "a/package.json",
++    "package.json",
++  ]);
++  expect(manifestPaths("go", "a")).toEqual(["a/go.work", "go.work", "a/go.mod", "go.mod"]);
++});
++
++test("program folders per ecosystem", () => {
++  expect(
++    Object.fromEntries(Object.entries(ECOSYSTEMS).map(([name, facts]) => [name, facts.folders])),
++  ).toEqual({
++    node: { project: ["node_modules/.bin"], home: [] },
++    python: {
++      project: [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"],
++      home: [".local/bin"],
++    },
++    rust: { project: [], home: [".cargo/bin"] },
++    go: { project: [], home: ["go/bin"] },
++    php: {
++      project: ["vendor/bin"],
++      home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++    },
++    clang: { project: [], home: [] },
++  });
++});
+diff --git a/frontend/src/lsp/internal/ecosystems.ts b/frontend/src/lsp/internal/ecosystems.ts
+new file mode 100644
+index 0000000..cbcac4c
+--- /dev/null
++++ b/frontend/src/lsp/internal/ecosystems.ts
+@@ -0,0 +1,99 @@
++import type { ProgramFolders, ProjectFile } from "../../ipc";
++
++export type Ecosystem = "node" | "python" | "rust" | "go" | "php" | "clang";
++
++export type Files = ReadonlyMap<string, ProjectFile>;
++
++type Manifest = { readonly path: string; readonly holding: RegExp | null };
++
++type EcosystemFacts = {
++  readonly rules: readonly (readonly Manifest[])[];
++  readonly folders: ProgramFolders;
++};
++
++function manifests(...paths: string[]): readonly Manifest[] {
++  return paths.map((path) => ({ path, holding: null }));
++}
++
++const VENV_FOLDERS = [".venv/bin", ".venv/Scripts", "venv/bin", "venv/Scripts"];
++
++export const PACKAGE_JSON = "package.json";
++
++export const ECOSYSTEMS: Readonly<Record<Ecosystem, EcosystemFacts>> = {
++  node: {
++    rules: [manifests(PACKAGE_JSON)],
++    folders: { project: ["node_modules/.bin"], home: [] },
++  },
++  python: {
++    rules: [manifests("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")],
++    folders: { project: VENV_FOLDERS, home: [".local/bin"] },
++  },
++  rust: {
++    rules: [[{ path: "Cargo.toml", holding: /^[ \t]*\[workspace[\].]/m }], manifests("Cargo.toml")],
++    folders: { project: [], home: [".cargo/bin"] },
++  },
++  go: {
++    rules: [manifests("go.work"), manifests("go.mod")],
++    folders: { project: [], home: ["go/bin"] },
++  },
++  php: {
++    rules: [manifests("composer.json")],
++    folders: {
++      project: ["vendor/bin"],
++      home: [".config/composer/vendor/bin", ".composer/vendor/bin", ".local/bin"],
++    },
++  },
++  clang: {
++    rules: [
++      manifests(
++        "compile_commands.json",
++        "build/compile_commands.json",
++        "compile_flags.txt",
++        ".clangd",
++      ),
++    ],
++    folders: { project: [], home: [] },
++  },
++};
++
++export function joined(folder: string, name: string): string {
++  return folder === "" ? name : `${folder}/${name}`;
++}
++
++export function parentOf(path: string): string {
++  return path.slice(0, Math.max(path.lastIndexOf("/"), 0));
++}
++
++export function foldersUp(folder: string): readonly string[] {
++  return folder === "" ? [""] : [folder, ...foldersUp(parentOf(folder))];
++}
++
++export function present(file: ProjectFile | undefined): file is ProjectFile {
++  return file !== undefined && file.kind !== "Missing" && file.kind !== "Folder";
++}
++
++export function manifestPaths(ecosystem: Ecosystem, folder: string): readonly string[] {
++  return ECOSYSTEMS[ecosystem].rules.flatMap((rule) =>
++    foldersUp(folder).flatMap((at) => rule.map((manifest) => joined(at, manifest.path))),
++  );
++}
++
++function holds(files: Files, folder: string, manifest: Manifest): boolean {
++  const file = files.get(joined(folder, manifest.path));
++  if (manifest.holding === null) {
++    return present(file);
++  }
++  return file?.kind === "Text" && manifest.holding.test(file.text);
++}
++
++export function projectOf(ecosystem: Ecosystem, folder: string, files: Files): string | null {
++  for (const rule of ECOSYSTEMS[ecosystem].rules) {
++    const found = foldersUp(folder).find((at) =>
++      rule.some((manifest) => holds(files, at, manifest)),
++    );
++    if (found !== undefined) {
++      return found;
++    }
++  }
++  return null;
++}
+diff --git a/frontend/src/lsp/internal/install.ts b/frontend/src/lsp/internal/install.ts
+new file mode 100644
+index 0000000..3d646ba
+--- /dev/null
++++ b/frontend/src/lsp/internal/install.ts
+@@ -0,0 +1,43 @@
++import { joined, PACKAGE_JSON } from "./ecosystems";
++import {
++  LOCK_FILES,
++  packageManager,
++  PYTHON_LOCK_FILES,
++  PYTHON_LOCK_MANAGER,
++} from "./packageManager";
++import type { Recipe } from "./presets";
++import { jsonField, nearest, type Project } from "./project";
++import type { InstallHint } from "./spec";
++
++export type NodeHint = Extract<InstallHint, { kind: "node" }>;
++
++export function nodeHint(
++  project: Project,
++  { package: name, program }: Pick<NodeHint, "package" | "program">,
++  reason: NodeHint["reason"],
++): NodeHint {
++  const manifest = project.files.get(joined(project.folder, PACKAGE_JSON));
++  const manager = packageManager(
++    jsonField(manifest, "packageManager"),
++    nearest(project, LOCK_FILES),
++  );
++  return { kind: "node", package: name, program, folder: project.folder, manager, reason };
++}
++
++export function recipeHint(project: Project, recipe: Recipe, program: string): InstallHint {
++  switch (recipe.kind) {
++    case "python": {
++      const lock = nearest(project, PYTHON_LOCK_FILES);
++      const manager = lock === null ? null : PYTHON_LOCK_MANAGER[lock];
++      return { kind: "python", package: recipe.package, program, folder: project.folder, manager };
++    }
++    case "rustup":
++      return { kind: "rustup", component: recipe.component, program };
++    case "go":
++      return { kind: "go", module: recipe.module, program };
++    case "download":
++      return { kind: "download", program, command: recipe.command, needs: recipe.needs };
++    case "system":
++      return { kind: "system", program };
++  }
++}
+diff --git a/frontend/src/lsp/internal/languageIds.test.ts b/frontend/src/lsp/internal/languageIds.test.ts
+new file mode 100644
+index 0000000..966243f
+--- /dev/null
++++ b/frontend/src/lsp/internal/languageIds.test.ts
+@@ -0,0 +1,35 @@
++import { expect, test } from "vitest";
++
++import { languageId } from "./languageIds";
++
++test("language ids for the new presets' file types", () => {
++  const ids = Object.fromEntries(
++    [
++      "a.php",
++      "a.pyi",
++      "a.c",
++      "a.h",
++      "a.cc",
++      "a.cpp",
++      "a.cxx",
++      "a.hh",
++      "a.hpp",
++      "a.hxx",
++      "a.bash",
++    ].map((path) => [path.slice(2), languageId(path)]),
++  );
++
++  expect(ids).toEqual({
++    php: "php",
++    pyi: "python",
++    c: "c",
++    h: "c",
++    cc: "cpp",
++    cpp: "cpp",
++    cxx: "cpp",
++    hh: "cpp",
++    hpp: "cpp",
++    hxx: "cpp",
++    bash: "shellscript",
++  });
++});
+diff --git a/frontend/src/lsp/internal/languageIds.ts b/frontend/src/lsp/internal/languageIds.ts
+index b245f08..aee5534 100644
+--- a/frontend/src/lsp/internal/languageIds.ts
++++ b/frontend/src/lsp/internal/languageIds.ts
+@@ -23,9 +23,20 @@ const LANGUAGE_IDS: Readonly<Record<string, string>> = {
+   toml: "toml",
+   graphql: "graphql",
+   py: "python",
++  pyi: "python",
+   rs: "rust",
+   go: "go",
++  php: "php",
++  c: "c",
++  h: "c",
++  cc: "cpp",
++  cpp: "cpp",
++  cxx: "cpp",
++  hh: "cpp",
++  hpp: "cpp",
++  hxx: "cpp",
+   sh: "shellscript",
++  bash: "shellscript",
+ };
+ 
+ export function languageId(path: string): string {
+diff --git a/frontend/src/lsp/internal/packageManager.test.ts b/frontend/src/lsp/internal/packageManager.test.ts
+index f8e42dc..adf7899 100644
+--- a/frontend/src/lsp/internal/packageManager.test.ts
++++ b/frontend/src/lsp/internal/packageManager.test.ts
+@@ -1,6 +1,11 @@
+ import { expect, test } from "vitest";
+ 
+-import { LOCK_FILES, packageManager } from "./packageManager";
++import {
++  LOCK_FILES,
++  packageManager,
++  PYTHON_LOCK_FILES,
++  PYTHON_LOCK_MANAGER,
++} from "./packageManager";
+ 
+ test("the packageManager field names the manager; yarn 1 is classic yarn, yarn 2+ is berry", () => {
+   expect(packageManager("pnpm@12.0.0", null)).toBe("pnpm");
+@@ -33,3 +38,11 @@ test("a field beats a lock file; an unknown or versionless field falls back to t
+ test("no field and no lock file: no manager", () => {
+   expect(packageManager(null, null)).toBeNull();
+ });
++
++test("every Python lock file names its manager", () => {
++  expect(PYTHON_LOCK_FILES.map((lock) => [lock, PYTHON_LOCK_MANAGER[lock]])).toEqual([
++    ["uv.lock", "uv"],
++    ["poetry.lock", "poetry"],
++    ["pdm.lock", "pdm"],
++  ]);
++});
+diff --git a/frontend/src/lsp/internal/packageManager.ts b/frontend/src/lsp/internal/packageManager.ts
+index 8437190..fa9abe8 100644
+--- a/frontend/src/lsp/internal/packageManager.ts
++++ b/frontend/src/lsp/internal/packageManager.ts
+@@ -1,4 +1,4 @@
+-import type { PackageManager } from "./spec";
++import type { PackageManager, PythonManager } from "./spec";
+ 
+ export const LOCK_FILES = [
+   "pnpm-lock.yaml",
+@@ -35,3 +35,13 @@ export function packageManager(
+ ): PackageManager | null {
+   return declaredManager(declared) ?? (nearestLock === null ? null : LOCK_MANAGER[nearestLock]);
+ }
++
++export const PYTHON_LOCK_FILES = ["uv.lock", "poetry.lock", "pdm.lock"] as const;
++
++export const PYTHON_LOCK_MANAGER: Readonly<
++  Record<(typeof PYTHON_LOCK_FILES)[number], PythonManager>
++> = {
++  "uv.lock": "uv",
++  "poetry.lock": "poetry",
++  "pdm.lock": "pdm",
++};
+diff --git a/frontend/src/lsp/internal/presets.test.ts b/frontend/src/lsp/internal/presets.test.ts
+index b8e635f..4c9a702 100644
+--- a/frontend/src/lsp/internal/presets.test.ts
++++ b/frontend/src/lsp/internal/presets.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { PRESETS } from "./presets";
++import { PRESETS, type Look } from "./presets";
+ 
+ function preset(name: string): (typeof PRESETS)[number] {
+   const found = PRESETS.find((candidate) => candidate.name === name);
+@@ -10,31 +10,158 @@ function preset(name: string): (typeof PRESETS)[number] {
+   return found;
+ }
+ 
+-test("presets run formatter first: oxfmt, oxlint, TypeScript, eslint", () => {
+-  expect(PRESETS.map(({ name }) => name)).toEqual(["oxfmt", "oxlint", "TypeScript", "eslint"]);
+-  expect(PRESETS.map(({ formats }) => formats)).toEqual([true, false, false, false]);
++function usedLook(name: string): Extract<Look, { kind: "used" }> {
++  const { look } = preset(name);
++  if (look.kind !== "used") {
++    throw new Error(`${name} is not a used look`);
++  }
++  return look;
++}
++
++const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++
++test("presets run formatters first, in the table's order, each in its ecosystem", () => {
++  expect(PRESETS.map(({ name, ecosystem }) => `${name}:${ecosystem}`)).toEqual([
++    "oxfmt:node",
++    "Biome:node",
++    "oxlint:node",
++    "TypeScript:node",
++    "eslint:node",
++    "rust-analyzer:rust",
++    "gopls:go",
++    "ruff:python",
++    "ty:python",
++    "basedpyright:python",
++    "pyright:python",
++    "Phpactor:php",
++    "clangd:clang",
++  ]);
++  expect(PRESETS.map(({ name, formats }) => [name, formats.kind])).toEqual([
++    ["oxfmt", "always"],
++    ["Biome", "always"],
++    ["oxlint", "never"],
++    ["TypeScript", "never"],
++    ["eslint", "never"],
++    ["rust-analyzer", "always"],
++    ["gopls", "always"],
++    ["ruff", "always"],
++    ["ty", "never"],
++    ["basedpyright", "never"],
++    ["pyright", "never"],
++    ["Phpactor", "never"],
++    ["clangd", "withConfig"],
++  ]);
++  expect(preset("clangd").formats).toEqual({
++    kind: "withConfig",
++    files: [".clang-format", "_clang-format"],
++  });
+ });
+ 
+ test("each preset serves its file types", () => {
+-  const scripts = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+   expect(preset("oxfmt").fileTypes).toEqual([
+-    ...scripts,
++    ...SCRIPTS,
+     ..."json jsonc json5 css scss less html vue md yaml yml toml graphql".split(" "),
+   ]);
+-  expect(preset("oxlint").fileTypes).toEqual([...scripts, "vue"]);
+-  expect(preset("TypeScript").fileTypes).toEqual(scripts);
+-  expect(preset("eslint").fileTypes).toEqual([...scripts, "vue"]);
++  expect(preset("Biome").fileTypes).toEqual([...SCRIPTS, "json", "jsonc", "css", "graphql"]);
++  expect(preset("oxlint").fileTypes).toEqual([...SCRIPTS, "vue"]);
++  expect(preset("TypeScript").fileTypes).toEqual(SCRIPTS);
++  expect(preset("eslint").fileTypes).toEqual([...SCRIPTS, "vue"]);
++  expect(preset("rust-analyzer").fileTypes).toEqual(["rs"]);
++  expect(preset("gopls").fileTypes).toEqual(["go"]);
++  for (const name of ["ruff", "ty", "basedpyright", "pyright"]) {
++    expect(preset(name).fileTypes).toEqual(["py", "pyi"]);
++  }
++  expect(preset("Phpactor").fileTypes).toEqual(["php"]);
++  expect(preset("clangd").fileTypes).toEqual(["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"]);
+ });
+ 
+-test("oxlint runs on type in its project's workspace; eslint validates on type", () => {
++test("settings and start options: oxlint on type, eslint on type, rust-analyzer without cargo check, Phpactor without its trust prompt", () => {
+   expect(preset("oxlint").initializationOptions?.("file:///repo/frontend")).toEqual([
+     { workspaceUri: "file:///repo/frontend", options: { run: "onType" } },
+   ]);
+   expect(preset("eslint").settings).toEqual({ validate: "on", run: "onType" });
++  expect(preset("rust-analyzer").settings).toEqual({ "rust-analyzer": { checkOnSave: false } });
++  expect(preset("rust-analyzer").initializationOptions?.("file:///repo/rs")).toEqual({
++    checkOnSave: false,
++  });
++  expect(preset("Phpactor").initializationOptions?.("file:///repo/php")).toEqual({
++    "language_server.enable_trust_check": false,
++  });
+   expect(PRESETS.filter((p) => p.initializationOptions !== null).map(({ name }) => name)).toEqual([
+     "oxlint",
++    "rust-analyzer",
++    "Phpactor",
+   ]);
+-  expect(PRESETS.filter((p) => p.settings !== null).map(({ name }) => name)).toEqual(["eslint"]);
++  expect(PRESETS.filter((p) => p.settings !== null).map(({ name }) => name)).toEqual([
++    "eslint",
++    "rust-analyzer",
++  ]);
++});
++
++test("commands: Biome's proxy, the Python servers, Phpactor then Intelephense", () => {
++  expect(preset("Biome").look).toEqual({
++    kind: "projectProgram",
++    command: { program: "biome", args: ["lsp-proxy"] },
++  });
++  expect(
++    ["rust-analyzer", "gopls", "ruff", "ty", "basedpyright", "pyright", "Phpactor", "clangd"].map(
++      (name) => {
++        const { command } = usedLook(name);
++        return [command.program, ...command.args].join(" ");
++      },
++    ),
++  ).toEqual([
++    "rust-analyzer",
++    "gopls",
++    "ruff server",
++    "ty server",
++    "basedpyright-langserver --stdio",
++    "pyright-langserver --stdio",
++    "phpactor language-server",
++    "clangd",
++  ]);
++  expect(usedLook("Phpactor").orElse).toEqual([
++    {
++      name: "Intelephense",
++      command: { program: "intelephense", args: ["--stdio"] },
++      formats: { kind: "never" },
++      settings: null,
++      initializationOptions: null,
++    },
++  ]);
++});
++
++test("install recipes per ecosystem", () => {
++  expect(usedLook("rust-analyzer").recipe).toEqual({ kind: "rustup", component: "rust-analyzer" });
++  expect(usedLook("gopls").recipe).toEqual({
++    kind: "go",
++    module: "golang.org/x/tools/gopls@latest",
++  });
++  expect(["ruff", "ty", "basedpyright", "pyright"].map((name) => usedLook(name).recipe)).toEqual([
++    { kind: "python", package: "ruff" },
++    { kind: "python", package: "ty" },
++    { kind: "python", package: "basedpyright" },
++    { kind: "python", package: "pyright" },
++  ]);
++  expect(usedLook("Phpactor").recipe).toEqual({
++    kind: "download",
++    command:
++      "curl -Lo ~/.local/bin/phpactor https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar && chmod a+x ~/.local/bin/phpactor",
++    needs: "PHP 8.2 or later",
++  });
++  expect(usedLook("clangd").recipe).toEqual({ kind: "system" });
++});
++
++test("pyproject sections match the tool's own tables only", () => {
++  const ruff = usedLook("ruff").signs.find((sign) => sign.kind === "section");
++  const line = ruff?.kind === "section" ? ruff.line : /$^/;
++
++  expect(
++    ["[tool.ruff]", "[tool.ruff.lint]", "  [tool.ruff]"].map((text) => line.test(text)),
++  ).toEqual([true, true, true]);
++  expect(["[tool.ruffle]", "# [tool.ruff]", "[tool.black]"].map((text) => line.test(text))).toEqual(
++    [false, false, false],
++  );
+ });
+ 
+ test("eslint's configs are the flat config and the legacy .eslintrc forms", () => {
+diff --git a/frontend/src/lsp/internal/presets.ts b/frontend/src/lsp/internal/presets.ts
+index 5a233c6..8a4e626 100644
+--- a/frontend/src/lsp/internal/presets.ts
++++ b/frontend/src/lsp/internal/presets.ts
+@@ -1,9 +1,43 @@
++import type { Ecosystem } from "./ecosystems";
++
+ type Command = { readonly program: string; readonly args: readonly string[] };
+ 
+ type Installable = { readonly command: Command; readonly package: string };
+ 
++export type Formats =
++  | { readonly kind: "always" }
++  | { readonly kind: "never" }
++  | { readonly kind: "withConfig"; readonly files: readonly string[] };
++
++export type Tool = {
++  readonly name: string;
++  readonly formats: Formats;
++  readonly settings: unknown;
++  readonly initializationOptions: ((workspaceUri: string) => unknown) | null;
++};
++
++export type Recipe =
++  | { readonly kind: "python"; readonly package: string }
++  | { readonly kind: "rustup"; readonly component: string }
++  | { readonly kind: "go"; readonly module: string }
++  | { readonly kind: "download"; readonly command: string; readonly needs: string | null }
++  | { readonly kind: "system" };
++
++export type Sign =
++  | { readonly kind: "manifest" }
++  | { readonly kind: "file"; readonly name: string }
++  | { readonly kind: "section"; readonly file: string; readonly line: RegExp };
++
+ export type Look =
+   | { readonly kind: "projectProgram"; readonly command: Command }
++  | {
++      readonly kind: "used";
++      readonly signs: readonly Sign[];
++      readonly orProjectProgram: boolean;
++      readonly command: Command;
++      readonly recipe: Recipe;
++      readonly orElse: readonly (Tool & { readonly command: Command })[];
++    }
+   | {
+       readonly kind: "typescript";
+       readonly configs: readonly string[];
+@@ -20,23 +54,65 @@ export type Look =
+       readonly server: Installable;
+     };
+ 
+-export type Preset = {
+-  readonly name: string;
++export type Preset = Tool & {
++  readonly ecosystem: Ecosystem;
+   readonly look: Look;
+   readonly fileTypes: readonly string[];
+-  readonly formats: boolean;
+-  readonly settings: unknown;
+-  readonly initializationOptions: ((workspaceUri: string) => unknown) | null;
+ };
+ 
+ const SCRIPTS = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
++const PYTHON = ["py", "pyi"];
+ const TS_LSP_ARGS = ["--lsp", "--stdio"];
+ const STDIO = ["--stdio"];
++const ALWAYS: Formats = { kind: "always" };
++const NEVER: Formats = { kind: "never" };
++const MANIFEST: readonly Sign[] = [{ kind: "manifest" }];
++const NO_OPTIONS = { settings: null, initializationOptions: null } as const;
++
++function pyprojectSection(tool: string): Sign {
++  return {
++    kind: "section",
++    file: "pyproject.toml",
++    line: new RegExp(`^[ \\t]*\\[tool\\.${tool}[\\].]`, "m"),
++  };
++}
++
++type PythonTool = {
++  readonly name: string;
++  readonly command: Command;
++  readonly signs: readonly Sign[];
++  readonly orProjectProgram: boolean;
++  readonly formats: Formats;
++};
++
++function pythonTool({ name, command, signs, orProjectProgram, formats }: PythonTool): Preset {
++  return {
++    name,
++    ecosystem: "python",
++    look: {
++      kind: "used",
++      signs,
++      orProjectProgram,
++      command,
++      recipe: { kind: "python", package: name },
++      orElse: [],
++    },
++    fileTypes: PYTHON,
++    formats,
++    ...NO_OPTIONS,
++  };
++}
++
++const RUST_ANALYZER_OPTIONS = { checkOnSave: false };
++
++const PHPACTOR_RELEASE =
++  "https://github.com/phpactor/phpactor/releases/latest/download/phpactor.phar";
+ 
+ /** Detection order is spec order: the formatter first, since the first formatting spec formats. */
+ export const PRESETS: readonly Preset[] = [
+   {
+     name: "oxfmt",
++    ecosystem: "node",
+     look: { kind: "projectProgram", command: { program: "oxfmt", args: ["--lsp"] } },
+     fileTypes: [
+       ...SCRIPTS,
+@@ -54,20 +130,29 @@ export const PRESETS: readonly Preset[] = [
+       "toml",
+       "graphql",
+     ],
+-    formats: true,
+-    settings: null,
+-    initializationOptions: null,
++    formats: ALWAYS,
++    ...NO_OPTIONS,
++  },
++  {
++    name: "Biome",
++    ecosystem: "node",
++    look: { kind: "projectProgram", command: { program: "biome", args: ["lsp-proxy"] } },
++    fileTypes: [...SCRIPTS, "json", "jsonc", "css", "graphql"],
++    formats: ALWAYS,
++    ...NO_OPTIONS,
+   },
+   {
+     name: "oxlint",
++    ecosystem: "node",
+     look: { kind: "projectProgram", command: { program: "oxlint", args: ["--lsp"] } },
+     fileTypes: [...SCRIPTS, "vue"],
+-    formats: false,
++    formats: NEVER,
+     settings: null,
+     initializationOptions: (workspaceUri) => [{ workspaceUri, options: { run: "onType" } }],
+   },
+   {
+     name: "TypeScript",
++    ecosystem: "node",
+     look: {
+       kind: "typescript",
+       configs: ["tsconfig.json", "jsconfig.json"],
+@@ -81,12 +166,12 @@ export const PRESETS: readonly Preset[] = [
+       },
+     },
+     fileTypes: SCRIPTS,
+-    formats: false,
+-    settings: null,
+-    initializationOptions: null,
++    formats: NEVER,
++    ...NO_OPTIONS,
+   },
+   {
+     name: "eslint",
++    ecosystem: "node",
+     look: {
+       kind: "eslint",
+       configs: [
+@@ -100,8 +185,113 @@ export const PRESETS: readonly Preset[] = [
+       },
+     },
+     fileTypes: [...SCRIPTS, "vue"],
+-    formats: false,
++    formats: NEVER,
+     settings: { validate: "on", run: "onType" },
+     initializationOptions: null,
+   },
++  {
++    name: "rust-analyzer",
++    ecosystem: "rust",
++    look: {
++      kind: "used",
++      signs: MANIFEST,
++      orProjectProgram: false,
++      command: { program: "rust-analyzer", args: [] },
++      recipe: { kind: "rustup", component: "rust-analyzer" },
++      orElse: [],
++    },
++    fileTypes: ["rs"],
++    formats: ALWAYS,
++    settings: { "rust-analyzer": RUST_ANALYZER_OPTIONS },
++    initializationOptions: () => RUST_ANALYZER_OPTIONS,
++  },
++  {
++    name: "gopls",
++    ecosystem: "go",
++    look: {
++      kind: "used",
++      signs: MANIFEST,
++      orProjectProgram: false,
++      command: { program: "gopls", args: [] },
++      recipe: { kind: "go", module: "golang.org/x/tools/gopls@latest" },
++      orElse: [],
++    },
++    fileTypes: ["go"],
++    formats: ALWAYS,
++    ...NO_OPTIONS,
++  },
++  pythonTool({
++    name: "ruff",
++    command: { program: "ruff", args: ["server"] },
++    signs: [
++      { kind: "file", name: "ruff.toml" },
++      { kind: "file", name: ".ruff.toml" },
++      pyprojectSection("ruff"),
++    ],
++    orProjectProgram: true,
++    formats: ALWAYS,
++  }),
++  pythonTool({
++    name: "ty",
++    command: { program: "ty", args: ["server"] },
++    signs: [{ kind: "file", name: "ty.toml" }, pyprojectSection("ty")],
++    orProjectProgram: true,
++    formats: NEVER,
++  }),
++  pythonTool({
++    name: "basedpyright",
++    command: { program: "basedpyright-langserver", args: STDIO },
++    signs: [pyprojectSection("basedpyright")],
++    orProjectProgram: true,
++    formats: NEVER,
++  }),
++  pythonTool({
++    name: "pyright",
++    command: { program: "pyright-langserver", args: STDIO },
++    signs: [{ kind: "file", name: "pyrightconfig.json" }, pyprojectSection("pyright")],
++    orProjectProgram: false,
++    formats: NEVER,
++  }),
++  {
++    name: "Phpactor",
++    ecosystem: "php",
++    look: {
++      kind: "used",
++      signs: MANIFEST,
++      orProjectProgram: false,
++      command: { program: "phpactor", args: ["language-server"] },
++      recipe: {
++        kind: "download",
++        command: `curl -Lo ~/.local/bin/phpactor ${PHPACTOR_RELEASE} && chmod a+x ~/.local/bin/phpactor`,
++        needs: "PHP 8.2 or later",
++      },
++      orElse: [
++        {
++          name: "Intelephense",
++          command: { program: "intelephense", args: STDIO },
++          formats: NEVER,
++          ...NO_OPTIONS,
++        },
++      ],
++    },
++    fileTypes: ["php"],
++    formats: NEVER,
++    settings: null,
++    initializationOptions: () => ({ "language_server.enable_trust_check": false }),
++  },
++  {
++    name: "clangd",
++    ecosystem: "clang",
++    look: {
++      kind: "used",
++      signs: MANIFEST,
++      orProjectProgram: false,
++      command: { program: "clangd", args: [] },
++      recipe: { kind: "system" },
++      orElse: [],
++    },
++    fileTypes: ["c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx"],
++    formats: { kind: "withConfig", files: [".clang-format", "_clang-format"] },
++    ...NO_OPTIONS,
++  },
+ ];
+diff --git a/frontend/src/lsp/internal/project.ts b/frontend/src/lsp/internal/project.ts
+new file mode 100644
+index 0000000..6f9b935
+--- /dev/null
++++ b/frontend/src/lsp/internal/project.ts
+@@ -0,0 +1,64 @@
++import type { ProgramFound, ProjectFile, ServerHost } from "../../ipc";
++import { ECOSYSTEMS, foldersUp, joined, present, type Ecosystem, type Files } from "./ecosystems";
++import { sectionOf } from "./json";
++
++export type ProjectLookups = Pick<ServerHost, "findProgram" | "projectFiles">;
++
++export type Project = {
++  readonly ecosystem: Ecosystem;
++  readonly folder: string;
++  readonly files: Files;
++  readonly lookups: ProjectLookups;
++};
++
++export async function readFiles(lookups: ProjectLookups, paths: readonly string[]): Promise<Files> {
++  const unique = [...new Set(paths)];
++  const answers = await lookups.projectFiles(unique).catch((): readonly ProjectFile[] => []);
++  return new Map(
++    unique.map((path, index): [string, ProjectFile] => [
++      path,
++      answers[index] ?? { kind: "Missing" },
++    ]),
++  );
++}
++
++export function jsonField(file: ProjectFile | undefined, field: string): string | null {
++  if (file?.kind !== "Text") {
++    return null;
++  }
++  try {
++    const value = sectionOf(JSON.parse(file.text), field);
++    return typeof value === "string" ? value : null;
++  } catch {
++    return null;
++  }
++}
++
++function findProgram(project: Project, program: string): Promise<ProgramFound> {
++  return project.lookups
++    .findProgram(program, project.folder, ECOSYSTEMS[project.ecosystem].folders)
++    .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++}
++
++export async function foundAnywhere(project: Project, program: string): Promise<boolean> {
++  return (await findProgram(project, program)).kind === "Found";
++}
++
++export async function inProject(project: Project, program: string): Promise<boolean> {
++  const answer = await findProgram(project, program);
++  return answer.kind === "Found" && answer.place === "Project";
++}
++
++export function nearest<Name extends string>(
++  project: Project,
++  names: readonly Name[],
++): Name | null {
++  const held = foldersUp(project.folder).flatMap((at) =>
++    names.filter((name) => present(project.files.get(joined(at, name)))),
++  );
++  return held[0] ?? null;
++}
++
++export function hasConfig(project: Project, configs: readonly string[]): boolean {
++  return configs.some((config) => present(project.files.get(joined(project.folder, config))));
++}
+diff --git a/frontend/src/lsp/internal/spec.ts b/frontend/src/lsp/internal/spec.ts
+index 14956b4..019b91c 100644
+--- a/frontend/src/lsp/internal/spec.ts
++++ b/frontend/src/lsp/internal/spec.ts
+@@ -1,18 +1,40 @@
+ import type { ProgramFolders } from "../../ipc";
++import { ECOSYSTEMS } from "./ecosystems";
+ 
+ export type PackageManager = "npm" | "pnpm" | "yarn" | "yarnBerry" | "bun";
+ 
+-export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
++export type PythonManager = "uv" | "poetry" | "pdm";
+ 
+-export type InstallHint = {
+-  readonly package: string;
+-  readonly program: string;
+-  readonly folder: string;
+-  readonly manager: PackageManager | null;
+-  readonly reason:
+-    | { readonly kind: "typescript"; readonly version: string }
+-    | { readonly kind: "eslint" };
+-};
++export const PROGRAM_FOLDERS: ProgramFolders = ECOSYSTEMS.node.folders;
++
++export type InstallHint =
++  | {
++      readonly kind: "node";
++      readonly package: string;
++      readonly program: string;
++      readonly folder: string;
++      readonly manager: PackageManager | null;
++      readonly reason:
++        | { readonly kind: "typescript"; readonly version: string }
++        | { readonly kind: "eslint" }
++        | { readonly kind: "vue" };
++    }
++  | {
++      readonly kind: "python";
++      readonly package: string;
++      readonly program: string;
++      readonly folder: string;
++      readonly manager: PythonManager | null;
++    }
++  | { readonly kind: "rustup"; readonly component: string; readonly program: string }
++  | { readonly kind: "go"; readonly module: string; readonly program: string }
++  | {
++      readonly kind: "download";
++      readonly program: string;
++      readonly command: string;
++      readonly needs: string | null;
++    }
++  | { readonly kind: "system"; readonly program: string };
+ 
+ export type ServerSpec = {
+   readonly name: string;
+diff --git a/frontend/src/ui/ServerMenu.vue b/frontend/src/ui/ServerMenu.vue
+index 8ce32da..beb755f 100644
+--- a/frontend/src/ui/ServerMenu.vue
++++ b/frontend/src/ui/ServerMenu.vue
+@@ -151,7 +151,7 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
+         <p class="wrap-break-word text-fg-muted">{{ line }}</p>
+       </div>
+       <div v-if="hint !== null" class="flex flex-col gap-2 px-2 pt-1 pb-2">
+-        <p class="wrap-break-word">{{ hint.reason }}</p>
++        <p v-if="hint.reason !== null" class="wrap-break-word">{{ hint.reason }}</p>
+         <div v-for="step in hint.steps" :key="step.label">
+           <p>{{ step.label }}</p>
+           <div class="mt-1 flex items-center gap-1">
+@@ -170,8 +170,8 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
+             </button>
+           </div>
+         </div>
+-        <p v-if="hint.managerNote !== null">{{ hint.managerNote }}</p>
+-        <p class="wrap-break-word">{{ hint.otherWay }}</p>
++        <p v-for="note in hint.notes" :key="note" class="wrap-break-word">{{ note }}</p>
++        <p v-if="hint.otherWay !== null" class="wrap-break-word">{{ hint.otherWay }}</p>
+         <p class="text-fg-muted">{{ hint.comeBack }}</p>
+       </div>
+       <button
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index f35380e..f8754bd 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -92,6 +92,7 @@ function spec(name: string, project: string, installed = true): ServerSpec {
+     install: installed
+       ? null
+       : {
++          kind: "node",
+           package: "typescript-language-server",
+           program: "typescript-language-server",
+           folder: project,
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index 3bf4786..641c1ab 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import type { InstallHint, PackageManager, ServerSpec, ServerState } from "../lsp";
++import type { InstallHint, PackageManager, PythonManager, ServerSpec, ServerState } from "../lsp";
+ import {
+   dotKind,
+   formatNote,
+@@ -15,7 +15,12 @@ import {
+ 
+ type Row = { readonly state: ServerState; readonly line: string; readonly dot: string };
+ 
+-const TS_HINT: InstallHint = {
++type NodeHint = Extract<InstallHint, { kind: "node" }>;
++
++type PythonHint = Extract<InstallHint, { kind: "python" }>;
++
++const TS_HINT: NodeHint = {
++  kind: "node",
+   package: "typescript-language-server",
+   program: "typescript-language-server",
+   folder: "frontend",
+@@ -23,7 +28,8 @@ const TS_HINT: InstallHint = {
+   reason: { kind: "typescript", version: "5.9.3" },
+ };
+ 
+-const ESLINT_HINT: InstallHint = {
++const ESLINT_HINT: NodeHint = {
++  kind: "node",
+   package: "vscode-langservers-extracted",
+   program: "vscode-eslint-language-server",
+   folder: "",
+@@ -31,6 +37,25 @@ const ESLINT_HINT: InstallHint = {
+   reason: { kind: "eslint" },
+ };
+ 
++const VUE_HINT: NodeHint = {
++  kind: "node",
++  package: "@vue/typescript-plugin",
++  program: "@vue/typescript-plugin",
++  folder: "web",
++  manager: "pnpm",
++  reason: { kind: "vue" },
++};
++
++const RUFF_HINT: PythonHint = {
++  kind: "python",
++  package: "ruff",
++  program: "ruff",
++  folder: "py",
++  manager: "uv",
++};
++
++const COME_BACK = "yamt finds it when you come back to this window.";
++
+ const ROWS: readonly Row[] = [
+   { state: { kind: "stopped" }, line: "Stopped", dot: "stopped" },
+   { state: { kind: "starting" }, line: "Starting…", dot: "busy" },
+@@ -107,7 +132,7 @@ test.each<[PackageManager, string, string]>([
+   const text = installText({ ...TS_HINT, package: "p", manager });
+ 
+   expect(text.steps.map((step) => step.command)).toEqual([project, global]);
+-  expect(text.managerNote).toBeNull();
++  expect(text.notes).toEqual([]);
+ });
+ 
+ test("rule 4: an unknown manager gets npm's commands and the note to use your own", () => {
+@@ -117,7 +142,7 @@ test("rule 4: an unknown manager gets npm's commands and the note to use your ow
+     "npm install -D typescript-language-server",
+     "npm install -g typescript-language-server",
+   ]);
+-  expect(text.managerNote).toBe("Or the same with your package manager.");
++  expect(text.notes).toEqual(["Or the same with your package manager."]);
+ });
+ 
+ test("rule 4: the TypeScript and eslint sentences, the PATH line and the come-back line", () => {
+@@ -133,7 +158,7 @@ test("rule 4: the TypeScript and eslint sentences, the PATH line and the come-ba
+   expect(eslint.otherWay).toBe(
+     "Or install it any other way that puts vscode-eslint-language-server on your PATH.",
+   );
+-  expect(eslint.comeBack).toBe("yamt finds it when you come back to this window.");
++  expect(eslint.comeBack).toBe(COME_BACK);
+ });
+ 
+ test('rule 4: the folder line names the project folder, or the repository root for ""', () => {
+@@ -141,7 +166,97 @@ test('rule 4: the folder line names the project folder, or the repository root f
+     "In frontend/:",
+     "Or for all projects:",
+   ]);
+-  expect(installText(ESLINT_HINT).steps[0].label).toBe("In the repository root:");
++  expect(installText(ESLINT_HINT).steps.map((step) => step.label)).toEqual([
++    "In the repository root:",
++    "Or for all projects:",
++  ]);
++});
++
++test("vue: the plugin goes into the project only, with no PATH line", () => {
++  expect(installText(VUE_HINT)).toEqual({
++    reason:
++      "This project uses Vue; its .vue files need the package @vue/typescript-plugin in this project.",
++    steps: [{ label: "In web/:", command: "pnpm add -D @vue/typescript-plugin" }],
++    notes: [],
++    otherWay: null,
++    comeBack: COME_BACK,
++  });
++  expect(installText({ ...VUE_HINT, manager: null }).notes).toEqual([
++    "Or the same with your package manager.",
++  ]);
++});
++
++test.each<[PythonManager, string, string]>([
++  ["uv", "uv add --dev ruff", "uv tool install ruff"],
++  ["poetry", "poetry add --group dev ruff", "pipx install ruff"],
++  ["pdm", "pdm add -d ruff", "pipx install ruff"],
++])("python: %s installs with `%s` here and `%s` for all projects", (manager, project, global) => {
++  expect(installText({ ...RUFF_HINT, manager })).toEqual({
++    reason: null,
++    steps: [
++      { label: "In py/:", command: project },
++      { label: "Or for all projects:", command: global },
++    ],
++    notes: [],
++    otherWay: "Or install it any other way that puts ruff on your PATH.",
++    comeBack: COME_BACK,
++  });
++});
++
++test("python: no lock file installs with pip in the project's virtual environment", () => {
++  expect(installText({ ...RUFF_HINT, folder: "", manager: null })).toEqual({
++    reason: null,
++    steps: [
++      {
++        label: "In the repository root, in the project's virtual environment:",
++        command: "python -m pip install ruff",
++      },
++      { label: "Or for all projects:", command: "pipx install ruff" },
++    ],
++    notes: ["Or the same with your package manager."],
++    otherWay: "Or install it any other way that puts ruff on your PATH.",
++    comeBack: COME_BACK,
++  });
++});
++
++test("rustup, go and download: one step each, with their own lines", () => {
++  expect(
++    installText({ kind: "rustup", component: "rust-analyzer", program: "rust-analyzer" }),
++  ).toEqual({
++    reason: null,
++    steps: [{ label: "For all projects:", command: "rustup component add rust-analyzer" }],
++    notes: [],
++    otherWay: "Or install it any other way that puts rust-analyzer on your PATH.",
++    comeBack: COME_BACK,
++  });
++  expect(
++    installText({ kind: "go", module: "golang.org/x/tools/gopls@latest", program: "gopls" }),
++  ).toEqual({
++    reason: null,
++    steps: [{ label: "For all projects:", command: "go install golang.org/x/tools/gopls@latest" }],
++    notes: ["It goes to Go's bin folder (usually ~/go/bin), where yamt looks too."],
++    otherWay: "Or install it any other way that puts gopls on your PATH.",
++    comeBack: COME_BACK,
++  });
++  const download = { kind: "download", program: "phpactor", command: "curl x" } as const;
++  expect(installText({ ...download, needs: "PHP 8.2 or later" })).toEqual({
++    reason: null,
++    steps: [{ label: "For all projects:", command: "curl x" }],
++    notes: ["Needs PHP 8.2 or later."],
++    otherWay: "Or install it any other way that puts phpactor on your PATH.",
++    comeBack: COME_BACK,
++  });
++  expect(installText({ ...download, needs: null }).notes).toEqual([]);
++});
++
++test("system: no step, the package-manager line", () => {
++  expect(installText({ kind: "system", program: "clangd" })).toEqual({
++    reason: null,
++    steps: [],
++    notes: ["Install clangd with your system's package manager."],
++    otherWay: "Or install it any other way that puts clangd on your PATH.",
++    comeBack: COME_BACK,
++  });
+ });
+ 
+ test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index e157fa2..a0e1237 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -1,4 +1,11 @@
+-import type { FailReason, InstallHint, PackageManager, ServerSpec, ServerState } from "../lsp";
++import type {
++  FailReason,
++  InstallHint,
++  PackageManager,
++  PythonManager,
++  ServerSpec,
++  ServerState,
++} from "../lsp";
+ import type { FormatOutcome, ProblemCounts } from "./useMergeController";
+ 
+ export type DotKind = "running" | "busy" | "stopped" | "problem" | "warning";
+@@ -8,10 +15,10 @@ export type ServerAction = "start" | "stop" | "restart";
+ type InstallStep = { readonly label: string; readonly command: string };
+ 
+ export type InstallText = {
+-  readonly reason: string;
+-  readonly steps: readonly [InstallStep, InstallStep];
+-  readonly managerNote: string | null;
+-  readonly otherWay: string;
++  readonly reason: string | null;
++  readonly steps: readonly InstallStep[];
++  readonly notes: readonly string[];
++  readonly otherWay: string | null;
+   readonly comeBack: string;
+ };
+ 
+@@ -45,6 +52,16 @@ const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
+   bun: { project: "bun add --dev", global: "bun add -g" },
+ };
+ 
++const PIP: ManagerCommands = { project: "python -m pip install", global: "pipx install" };
++
++const PYTHON_COMMANDS: Readonly<Record<PythonManager, ManagerCommands>> = {
++  uv: { project: "uv add --dev", global: "uv tool install" },
++  poetry: { project: "poetry add --group dev", global: PIP.global },
++  pdm: { project: "pdm add -d", global: PIP.global },
++};
++
++const SAME_WITH_YOUR_MANAGER = "Or the same with your package manager.";
++
+ export function projectLabel(folder: string): string {
+   return folder === "" ? "the repository root" : `${folder}/`;
+ }
+@@ -139,12 +156,16 @@ export function serverActions(state: ServerState): readonly ServerAction[] {
+   }
+ }
+ 
+-function reasonSentence(hint: InstallHint): string {
++type NodeHint = Extract<InstallHint, { kind: "node" }>;
++
++function reasonSentence(hint: NodeHint): string {
+   switch (hint.reason.kind) {
+     case "typescript":
+       return `This project uses TypeScript ${hint.reason.version}, which needs the separate package ${hint.package}.`;
+     case "eslint":
+       return `eslint's language server is the separate package ${hint.package}.`;
++    case "vue":
++      return `This project uses Vue; its .vue files need the package ${hint.package} in this project.`;
+     default: {
+       const _exhaustive: never = hint.reason;
+       return _exhaustive;
+@@ -152,16 +173,75 @@ function reasonSentence(hint: InstallHint): string {
+   }
+ }
+ 
+-export function installText(hint: InstallHint): InstallText {
++type HintParts = Pick<InstallText, "reason" | "steps" | "notes">;
++
++const ALL_PROJECTS = "Or for all projects:";
++
++function nodeParts(hint: NodeHint): HintParts {
+   const commands = MANAGER_COMMANDS[hint.manager ?? "npm"];
++  const here = {
++    label: `In ${projectLabel(hint.folder)}:`,
++    command: `${commands.project} ${hint.package}`,
++  };
++  const everywhere = { label: ALL_PROJECTS, command: `${commands.global} ${hint.package}` };
+   return {
+     reason: reasonSentence(hint),
++    steps: hint.reason.kind === "vue" ? [here] : [here, everywhere],
++    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : [],
++  };
++}
++
++function pythonParts(hint: Extract<InstallHint, { kind: "python" }>): HintParts {
++  const folder = projectLabel(hint.folder);
++  const commands = hint.manager === null ? PIP : PYTHON_COMMANDS[hint.manager];
++  const here =
++    hint.manager === null ? `In ${folder}, in the project's virtual environment:` : `In ${folder}:`;
++  return {
++    reason: null,
+     steps: [
+-      { label: `In ${projectLabel(hint.folder)}:`, command: `${commands.project} ${hint.package}` },
+-      { label: "Or for all projects:", command: `${commands.global} ${hint.package}` },
++      { label: here, command: `${commands.project} ${hint.package}` },
++      { label: ALL_PROJECTS, command: `${commands.global} ${hint.package}` },
+     ],
+-    managerNote: hint.manager === null ? "Or the same with your package manager." : null,
+-    otherWay: `Or install it any other way that puts ${hint.program} on your PATH.`,
++    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : [],
++  };
++}
++
++function oneStep(command: string, notes: readonly string[]): HintParts {
++  return { reason: null, steps: [{ label: "For all projects:", command }], notes };
++}
++
++function hintParts(hint: InstallHint): HintParts {
++  switch (hint.kind) {
++    case "node":
++      return nodeParts(hint);
++    case "python":
++      return pythonParts(hint);
++    case "rustup":
++      return oneStep(`rustup component add ${hint.component}`, []);
++    case "go":
++      return oneStep(`go install ${hint.module}`, [
++        "It goes to Go's bin folder (usually ~/go/bin), where yamt looks too.",
++      ]);
++    case "download":
++      return oneStep(hint.command, hint.needs === null ? [] : [`Needs ${hint.needs}.`]);
++    case "system":
++      return {
++        reason: null,
++        steps: [],
++        notes: [`Install ${hint.program} with your system's package manager.`],
++      };
++    default: {
++      const _exhaustive: never = hint;
++      return _exhaustive;
++    }
++  }
++}
++
++export function installText(hint: InstallHint): InstallText {
++  const vue = hint.kind === "node" && hint.reason.kind === "vue";
++  return {
++    ...hintParts(hint),
++    otherWay: vue ? null : `Or install it any other way that puts ${hint.program} on your PATH.`,
+     comeBack: "yamt finds it when you come back to this window.",
+   };
+ }
