@@ -74,32 +74,46 @@ install_rust_analyzer() {
     mv "$rust_analyzer_home/rust-analyzer.part" "$rust_analyzer_home/rust-analyzer"
 }
 
-# $1: URL, $2: file. Downloads once.
+# $1: URL, $2: file. Downloads once; returns non-zero when the download fails.
 download() {
     [ -e "$2" ] && return
     mkdir -p "$(dirname "$2")"
-    curl -fsSL "$1" -o "$2.part" || die "could not download $1"
+    curl -fsSL "$1" -o "$2.part" || return 1
     mv "$2.part" "$2"
+}
+
+# $1: the step that failed. PHP is best effort: without it the other servers are still installed.
+leave_php_out() {
+    php_runs=false
+    echo "lsp-servers: PHP could not run ($1); Phpactor, PHPStan and phpcs are left out"
 }
 
 # Sets php_runs to true when the static PHP build runs here.
 install_php() {
     local archive="php-$php_version-cli-linux-x86_64.tar.gz"
+    local url="https://dl.static-php.dev/static-php-cli/common/$archive"
     if [ ! -x "$php_home/php" ]; then
-        download "https://dl.static-php.dev/static-php-cli/common/$archive" "$php_home/$archive"
-        tar -xzf "$php_home/$archive" -C "$php_home" php || die "$php_home/$archive holds no php"
+        download "$url" "$php_home/$archive" || { leave_php_out "could not download $url"; return; }
+        if ! tar -xzf "$php_home/$archive" -C "$php_home" php; then
+            rm -f "$php_home/$archive"
+            leave_php_out "$php_home/$archive holds no php"
+            return
+        fi
     fi
     if "$php_home/php" -r 'exit(0);' >/dev/null 2>&1; then
         php_runs=true
     else
-        echo "lsp-servers: PHP could not run ($php_home/php); Phpactor, PHPStan and phpcs are left out"
+        leave_php_out "$php_home/php does not start"
     fi
 }
 
 install_php_programs() {
-    download "https://github.com/phpactor/phpactor/releases/download/$phpactor_version/phpactor.phar" \
-        "$phpactor_home/phpactor.phar"
-    download "https://getcomposer.org/download/$composer_version/composer.phar" "$composer_home/composer.phar"
+    local phpactor_url="https://github.com/phpactor/phpactor/releases/download/$phpactor_version/phpactor.phar"
+    local composer_url="https://getcomposer.org/download/$composer_version/composer.phar"
+    download "$phpactor_url" "$phpactor_home/phpactor.phar" ||
+        { leave_php_out "could not download $phpactor_url"; return; }
+    download "$composer_url" "$composer_home/composer.phar" ||
+        { leave_php_out "could not download $composer_url"; return; }
     chmod +x "$phpactor_home/phpactor.phar" "$composer_home/composer.phar"
     if [ ! -x "$php_tools_home/vendor/bin/phpstan" ] || [ ! -x "$php_tools_home/vendor/bin/phpcs" ]; then
         mkdir -p "$php_tools_home"
@@ -166,7 +180,6 @@ install_servers() {
 
 # $1: the virtual environment's folder. Makes it with ruff, ty and basedpyright.
 install_python_tools() {
-    command -v uv >/dev/null || die "uv is needed to make $1"
     uv venv --quiet "$1" || die "could not make a Python virtual environment in $1"
     uv pip install --quiet --python "$1/bin/python" "ruff==$ruff_version" "ty==$ty_version" \
         "basedpyright==$basedpyright_version" || die "could not install ruff, ty and basedpyright into $1"

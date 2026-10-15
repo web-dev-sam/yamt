@@ -2,11 +2,12 @@
 # Usage: scripts/lsp-repo.sh [--servers] <dir>
 # Builds a git repo in <dir> left mid-merge (local merging remote) for the real-app check of yamt's language servers
 # (docs/plan.md §2 #70, #72): one project per ecosystem, each with one conflicted file (web/ has three). Outside the
-# conflicts each file holds one problem per server that serves it and, where a formatter runs, one badly formatted
-# line; every seed is reported while typing, without saving.
+# conflicts each file but web/src/greet.ts holds one problem per server that serves it and, where a formatter runs, one
+# badly formatted line; every seed is reported while typing, without saving. greet.ts is conflicted and has no seeds.
 # - web/: package.json, .oxlintrc.json, .oxfmtrc.json, tsconfig.json, pnpm-lock.yaml. src/math.ts: a `debugger;`
 #   (oxlint), a string given to a number (TypeScript), a badly formatted line (oxfmt); src/greet.ts; src/App.vue
-#   (`<script setup lang="ts">`): a string given to a number (TypeScript through @vue/typescript-plugin).
+#   (`<script setup lang="ts">`): a `debugger;` (oxlint), a string given to a number (TypeScript through
+#   @vue/typescript-plugin), a badly formatted line (oxfmt).
 # - biome/: package.json, biome.json. src/index.js: a `debugger;` (Biome's noDebugger), a badly formatted line.
 # - py/: pyproject.toml with [tool.ruff.lint], [tool.ty], [tool.basedpyright]. api/stats.py: an unused import (ruff),
 #   a string given to an int (ty and basedpyright), a badly formatted line (ruff).
@@ -20,11 +21,13 @@
 # After the merge, web/node_modules gets links into this checkout's frontend/node_modules: oxlint, oxfmt, typescript
 # (5.9) and vue, with their .bin entries. The package.json files are copies: yamt reads nothing whose real path is
 # outside the repository (crates/lsp-host/src/files.rs), and detection reads versions there.
-# Without --servers no server is installed: TypeScript and Vue show "not installed" with their hints, and biome/,
-# py/.venv and php/vendor are missing. With it, scripts/lsp-servers.sh installs the pinned servers once into the
-# user's cache (the network is needed the first time) and prints the PATH line to launch yamt with; this script then
-# links @vue/typescript-plugin into web/node_modules and Biome into biome/node_modules/.bin, makes py/.venv (uv) with
-# ruff, ty and basedpyright, and, when PHP runs, copies PHPStan and phpcs into php/vendor.
+# Without --servers nothing is installed: biome/node_modules, py/.venv, php/vendor and web's @vue/typescript-plugin
+# are missing. A server whose program is in none of those folders and not on PATH then shows "not installed" with its
+# hint, or is not detected when the program is its only sign. With --servers, scripts/lsp-servers.sh installs the
+# pinned servers once into the user's cache (the network is needed the first time) and prints the PATH line to launch
+# yamt with; this script then links @vue/typescript-plugin into web/node_modules and Biome into
+# biome/node_modules/.bin, makes py/.venv (uv) with ruff, ty and basedpyright, and, when PHP runs, copies PHPStan and
+# phpcs into php/vendor.
 # Prints the conflicted paths. Uses no user or system git config (risk RK19).
 set -euo pipefail
 # shellcheck source=scripts/git-sandbox.sh
@@ -46,6 +49,9 @@ for tool in oxlint oxfmt tsc; do
     [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
 done
 [ -e "$modules/vue/package.json" ] || die "missing $modules/vue; run pnpm -C frontend install"
+if $with_servers; then
+    command -v uv >/dev/null || die "uv is needed to make py/.venv; see https://docs.astral.sh/uv/"
+fi
 require_empty_dir "$dir"
 isolate_git_config
 
@@ -240,10 +246,14 @@ EOF
 const label = "$1";
 
 const count: number = "three";
+
+debugger;
+
+const   totals={a:1,b:2}
 </script>
 
 <template>
-  <p>{{ label }} {{ count }}</p>
+  <p>{{ label }} {{ count }} {{ totals.a }}</p>
 </template>
 EOF
 }

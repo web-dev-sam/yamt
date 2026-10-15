@@ -73,7 +73,7 @@
     },
     {
       "label": "lsp: new conflict project",
-      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: one project per language (web/ with TypeScript, Vue, oxlint and oxfmt; biome/; py/ with ruff, ty and basedpyright; rs/ for rust-analyzer; go/ for gopls; php/ for Phpactor or Intelephense; c/ for clangd), each with a conflicted file and, outside the conflicts, one problem per server and a badly formatted line. Installs the pinned servers once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh) and prints the PATH line yamt runs with. Your settings file is not touched.",
+      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: one project per language (web/ with TypeScript, Vue, oxlint and oxfmt; biome/; py/ with ruff, ty and basedpyright; rs/ for rust-analyzer; go/ for gopls; php/ for Phpactor or Intelephense; c/ for clangd), each with a conflicted file and, outside the conflicts, one problem per server and a badly formatted line; web/src/greet.ts is the one conflicted file with no seeds. Installs the pinned servers once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh) and prints the PATH line yamt runs with. Your settings file is not touched.",
       "type": "shell",
       "command": "rm -rf /tmp/yamt-lsp-project && scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project",
       "problemMatcher": [],
