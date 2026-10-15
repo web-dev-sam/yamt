@@ -22,8 +22,8 @@ export type ArrowRow = ArrowShape & {
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-export const ACTION_WIDTH_PX = 16;
-const ICON_PX = 14;
+export const ACTION_WIDTH_PX = 19;
+const ICON_PX = 17;
 const HALF = 0.5;
 const APPLY_ICON: Readonly<Record<Side, Readonly<Record<ApplyMode, string>>>> = {
   local: { replace: chevronsRightIcon, append: cornerRightDownIcon },

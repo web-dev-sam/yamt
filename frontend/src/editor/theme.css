@@ -63,8 +63,8 @@ path.chunk-band {
   z-index: -1;
   inset-block: 1px;
   left: -1px;
-  width: 2px;
-  border-radius: 1px;
+  width: 4px;
+  border-radius: 2px;
   content: "";
 }
 
@@ -128,7 +128,7 @@ path.chunk-band {
   pointer-events: none;
 }
 
-.fold-wave-hover > .strip-wave-line {
+.fold-wave-hover>.strip-wave-line {
   stroke-width: var(--strip-wave-hover-stroke);
 }
 

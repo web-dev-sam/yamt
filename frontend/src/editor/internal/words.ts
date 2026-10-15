@@ -10,7 +10,7 @@ class RemovalPoint extends WidgetType {
 
   constructor(tone: Tone) {
     super();
-    this.className = `chunk-removal chunk-removal-${tone}`;
+    this.className = `chunk-removal chunk-removal-${tone} px-0.5`;
   }
 
   override eq(other: RemovalPoint): boolean {
