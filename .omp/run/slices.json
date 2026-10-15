@@ -1,10 +1,12 @@
 {
-  "PresetsChrome2": {
+  "PresetsDetect3R1": {
     "owned": [
-      "frontend/src/ui/**",
-      "frontend/src/lsp/index.ts",
-      "frontend/src/lsp/internal/state.ts",
-      "frontend/src/lsp/**/*.test.ts"
+      "frontend/src/lsp/**",
+      "frontend/src/ui/serverSetup.ts",
+      "frontend/src/ui/serverSetup.test.ts",
+      "frontend/src/ui/serverText.ts",
+      "frontend/src/ui/serverText.test.ts",
+      "frontend/src/ui/**/*.test.ts"
     ]
   }
 }
