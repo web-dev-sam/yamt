@@ -73,7 +73,7 @@
     },
     {
       "label": "lsp: new conflict project",
-      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: 2 conflicted .ts files in web/ (oxlint and TypeScript underline problems, oxfmt formats) and a conflicted api/stats.py (ruff underlines problems and formats). math.ts and stats.py each have problems and a badly formatted line outside the conflicts. Installs typescript-language-server and ruff once into ~/.cache/yamt (needs the network the first time), and adds ruff (.venv/bin/ruff server, for py and pyi) to your yamt settings' servers added by hand unless it is there.",
+      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: one project per language (web/ with TypeScript, Vue, oxlint and oxfmt; biome/; py/ with ruff, ty and basedpyright; rs/ for rust-analyzer; go/ for gopls; php/ for Phpactor or Intelephense; c/ for clangd), each with a conflicted file and, outside the conflicts, one problem per server and a badly formatted line. Installs the pinned servers once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh) and prints the PATH line yamt runs with. Your settings file is not touched.",
       "type": "shell",
       "command": "rm -rf /tmp/yamt-lsp-project && scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project",
       "problemMatcher": [],
@@ -84,9 +84,9 @@
     },
     {
       "label": "lsp: open in yamt",
-      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-lsp-project (made first if missing). The first time, yamt asks whether to start the project's language servers; the answer is kept for that folder (Settings → Language servers changes it). Ctrl+S formats with oxfmt (.ts) or ruff (.py), then saves. Running it again closes the open yamt window and rebuilds.",
+      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-lsp-project (made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so the installed servers are found. The first time, yamt asks whether to start the project's language servers; the answer is kept for that folder (Settings → Language servers changes it). Ctrl+S formats with the project's formatter, then saves. Running it again closes the open yamt window and rebuilds.",
       "type": "shell",
-      "command": "test -d /tmp/yamt-lsp-project/.git || scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project; just app --repo /tmp/yamt-lsp-project; echo \"yamt exit status: $?\"",
+      "command": "test -d /tmp/yamt-lsp-project/.git || scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-lsp-project; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "reveal": "always" },
       "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
