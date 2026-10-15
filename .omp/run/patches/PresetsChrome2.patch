@@ -1,0 +1,1192 @@
+commit 0cadec3fa966333771fbe94f37a2b7496f3b229e
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 13:02:34 +0200
+
+    feat(ui): Settings preset list, install steps under a failed start, TypeScript 7 Vue note, Poetry note (row 6, #72; #1015)
+
+diff --git a/frontend/src/lsp/index.test.ts b/frontend/src/lsp/index.test.ts
+index 797c65d..03083bc 100644
+--- a/frontend/src/lsp/index.test.ts
++++ b/frontend/src/lsp/index.test.ts
+@@ -641,16 +641,19 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
+   await settle();
+   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint"]);
+ 
+-  languageServers.setSpecs([spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver")], {
+-    startOnOpen: true,
+-  });
++  const help = { kind: "system", program: "tsserver" } as const;
++  const notes = [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }] as const;
++  languageServers.setSpecs(
++    [spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver", { help, notes })],
++    { startOnOpen: true },
++  );
+   await settle();
+ 
+   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint", "tsserver"]);
+   expect(host.stopped).toEqual([]);
+   expect(languageServers.views()).toEqual([
+-    { name: "oxlint", project: "", state: { kind: "running" } },
+-    { name: "tsserver", project: "", state: { kind: "running" } },
++    { name: "oxlint", project: "", state: { kind: "running" }, help: null, notes: [] },
++    { name: "tsserver", project: "", state: { kind: "running" }, help, notes },
+   ]);
+ });
+ 
+diff --git a/frontend/src/lsp/index.ts b/frontend/src/lsp/index.ts
+index 6d87776..1b7373c 100644
+--- a/frontend/src/lsp/index.ts
++++ b/frontend/src/lsp/index.ts
+@@ -100,6 +100,8 @@ export class LanguageServers {
+       name: spec.name,
+       project: spec.project,
+       state,
++      help: spec.help,
++      notes: spec.notes,
+     }));
+   }
+ 
+diff --git a/frontend/src/lsp/internal/state.ts b/frontend/src/lsp/internal/state.ts
+index 358965a..3ed890a 100644
+--- a/frontend/src/lsp/internal/state.ts
++++ b/frontend/src/lsp/internal/state.ts
+@@ -1,5 +1,5 @@
+ import type { StartReply } from "../../ipc";
+-import type { InstallHint, ServerSpec } from "./spec";
++import type { InstallHint, ServerSpec, SpecNote } from "./spec";
+ 
+ export type FailReason =
+   | { readonly kind: "notFound"; readonly program: string; readonly searched: readonly string[] }
+@@ -22,6 +22,8 @@ export type ServerView = {
+   readonly name: string;
+   readonly project: string;
+   readonly state: ServerState;
++  readonly help: InstallHint | null;
++  readonly notes: readonly SpecNote[];
+ };
+ 
+ export type RestState = Extract<
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 44dd850..3d87c3b 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -1,7 +1,7 @@
+ Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()`; the single editor seam is `useMergeController`. Section order enforced by `scripts/check-sfc-order.ts`.
+ 
+-Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`.
++Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+-Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`; the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
++Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
+diff --git a/frontend/src/ui/LanguageServerSettings.vue b/frontend/src/ui/LanguageServerSettings.vue
+index d2f009c..aec325a 100644
+--- a/frontend/src/ui/LanguageServerSettings.vue
++++ b/frontend/src/ui/LanguageServerSettings.vue
+@@ -2,10 +2,11 @@
+ import { computed, shallowRef } from "vue";
+ 
+ import type { RepositoryAnswer } from "../ipc";
+-import type { ServerSpec } from "../lsp";
++import type { PresetChoice, ServerSpec } from "../lsp";
+ import ChoiceButtons from "./ChoiceButtons.vue";
++import PresetPicker from "./PresetPicker.vue";
+ import { parseAddedServer } from "./serverSetup";
+-import { NOT_INSTALLED, projectLabel } from "./serverText";
++import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
+ import { useAppStore } from "./store";
+ 
+ const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: string }[] = [
+@@ -38,6 +39,11 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
+   }
+ }
+ 
++function fill(choice: PresetChoice): void {
++  commandText.value = choice.command.join(" ");
++  fileTypesText.value = choice.fileTypes.join(", ");
++}
++
+ async function add(): Promise<void> {
+   if (newServer.value === null) {
+     return;
+@@ -93,6 +99,7 @@ async function add(): Promise<void> {
+         </li>
+       </ul>
+       <form class="flex items-end gap-2" @submit.prevent="add">
++        <PresetPicker @pick="fill" />
+         <label class="flex min-w-0 flex-2 flex-col gap-1">
+           Command
+           <input
+@@ -123,6 +130,7 @@ async function add(): Promise<void> {
+       </form>
+       <p class="mt-1 text-fg-muted">
+         The command is split on spaces. File types are extensions, separated by commas or spaces.
++        {{ FROM_THE_LIST_HINT }}
+       </p>
+     </section>
+   </div>
+diff --git a/frontend/src/ui/PresetPicker.vue b/frontend/src/ui/PresetPicker.vue
+new file mode 100644
+index 0000000..0557ec4
+--- /dev/null
++++ b/frontend/src/ui/PresetPicker.vue
+@@ -0,0 +1,134 @@
++<script setup lang="ts">
++import { onClickOutside } from "@vueuse/core";
++import { nextTick, shallowRef, useTemplateRef } from "vue";
++
++import { presetChoices, type PresetChoice } from "../lsp";
++import { stepMenuItem } from "./menuKeys";
++import { FROM_THE_LIST } from "./serverText";
++
++const emit = defineEmits<{ pick: [choice: PresetChoice] }>();
++
++const CHOICES = presetChoices();
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const menu = useTemplateRef<HTMLUListElement>("menu");
++const open = shallowRef(false);
++const above = shallowRef(false);
++
++onClickOutside(
++  menu,
++  () => {
++    void closeAfterClick();
++  },
++  { ignore: [opener] },
++);
++
++async function close(): Promise<void> {
++  open.value = false;
++  await nextTick();
++  opener.value?.focus();
++}
++
++async function closeAfterClick(): Promise<void> {
++  const focused = document.activeElement;
++  if (focused !== document.body && menu.value?.contains(focused) !== true) {
++    open.value = false;
++    return;
++  }
++  await close();
++}
++
++async function toggle(): Promise<void> {
++  if (open.value) {
++    await close();
++    return;
++  }
++  open.value = true;
++  above.value = false;
++  await nextTick();
++  const opened = menu.value;
++  if (opened === null) {
++    return;
++  }
++  above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
++  await nextTick();
++  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++}
++
++function visibleBottom(element: HTMLElement): number {
++  for (let box = element.parentElement; box !== null; box = box.parentElement) {
++    if (getComputedStyle(box).overflowY !== "visible") {
++      return box.getBoundingClientRect().bottom;
++    }
++  }
++  return window.innerHeight;
++}
++
++function menuKey(event: KeyboardEvent): void {
++  const items = [...(menu.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  const step = stepMenuItem(
++    { count: items.length, focused: items.findIndex((item) => item === event.target) },
++    event,
++  );
++  switch (step.kind) {
++    case "close":
++      event.preventDefault();
++      void close();
++      return;
++    case "focus":
++      event.preventDefault();
++      items[step.index]?.focus();
++      return;
++    case "ignore":
++      return;
++    default: {
++      const _exhaustive: never = step;
++      return _exhaustive;
++    }
++  }
++}
++
++async function pick(choice: PresetChoice): Promise<void> {
++  await close();
++  emit("pick", choice);
++}
++</script>
++
++<template>
++  <div class="relative">
++    <button
++      ref="opener"
++      type="button"
++      aria-haspopup="menu"
++      :aria-expanded="open"
++      class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-expanded:bg-row-selected"
++      @click="toggle"
++    >
++      {{ FROM_THE_LIST }}
++    </button>
++    <ul
++      v-if="open"
++      ref="menu"
++      role="menu"
++      :aria-label="FROM_THE_LIST"
++      class="absolute left-0 z-10 min-w-72 rounded border border-control-border bg-panel py-1"
++      :class="above ? 'bottom-full' : 'top-full'"
++      @keydown="menuKey"
++    >
++      <li v-for="choice in CHOICES" :key="choice.name" role="none">
++        <button
++          type="button"
++          role="menuitem"
++          :aria-label="choice.name"
++          class="flex w-full gap-6 px-3 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected"
++          @click="pick(choice)"
++        >
++          <span class="flex-1 whitespace-nowrap">{{ choice.name }}</span>
++          <span class="font-mono whitespace-nowrap text-fg-muted">{{
++            choice.command.join(" ")
++          }}</span>
++        </button>
++      </li>
++    </ul>
++  </div>
++</template>
+diff --git a/frontend/src/ui/ServerMenu.vue b/frontend/src/ui/ServerMenu.vue
+index beb755f..dfde7f6 100644
+--- a/frontend/src/ui/ServerMenu.vue
++++ b/frontend/src/ui/ServerMenu.vue
+@@ -2,13 +2,14 @@
+ import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from "@vueuse/core";
+ import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ 
++import { failureHelp, installText } from "./installText";
+ import { stepMenuItem } from "./menuKeys";
+ import { menuPosition, type Point } from "./menuPosition";
+ import {
+   ACTION_LABELS,
+   COPIED,
+   COPY,
+-  installText,
++  noteLine,
+   serverActions,
+   SHOW_LOG,
+   stateLine,
+@@ -31,9 +32,15 @@ useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
+ const view = computed(() => serverViews.value.find((each) => each.name === props.name) ?? null);
+ const line = computed(() => (view.value === null ? "" : stateLine(view.value.state)));
+ const actions = computed(() => (view.value === null ? [] : serverActions(view.value.state)));
+-const hint = computed(() =>
+-  view.value?.state.kind === "notInstalled" ? installText(view.value.state.hint) : null,
++const failure = computed(() =>
++  view.value === null ? null : failureHelp(view.value.state, view.value.help),
+ );
++const hint = computed(() =>
++  view.value?.state.kind === "notInstalled"
++    ? installText(view.value.state.hint)
++    : (failure.value?.install ?? null),
++);
++const notes = computed(() => view.value?.notes.map(noteLine) ?? []);
+ const placement = computed(() => {
+   const { x, y } = menuPosition({
+     pointer: props.at,
+@@ -149,8 +156,10 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
+       <div class="px-2 py-1">
+         <p class="font-semibold">{{ name }}</p>
+         <p class="wrap-break-word text-fg-muted">{{ line }}</p>
++        <p v-for="note in notes" :key="note" class="wrap-break-word text-fg-muted">{{ note }}</p>
+       </div>
+       <div v-if="hint !== null" class="flex flex-col gap-2 px-2 pt-1 pb-2">
++        <p v-if="failure !== null">{{ failure.lead }}</p>
+         <p v-if="hint.reason !== null" class="wrap-break-word">{{ hint.reason }}</p>
+         <div v-for="step in hint.steps" :key="step.label">
+           <p>{{ step.label }}</p>
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/installText.test.ts
+similarity index 50%
+copy from frontend/src/ui/serverText.test.ts
+copy to frontend/src/ui/installText.test.ts
+index e75b0df..bdf9ce6 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/installText.test.ts
+@@ -1,19 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+-import type { InstallHint, PackageManager, PythonManager, ServerSpec, ServerState } from "../lsp";
+-import {
+-  dotKind,
+-  formatNote,
+-  installText,
+-  logTime,
+-  problemsTitle,
+-  projectLabel,
+-  serverActions,
+-  serverLabel,
+-  stateLine,
+-} from "./serverText";
+-
+-type Row = { readonly state: ServerState; readonly line: string; readonly dot: string };
++import type { InstallHint, PackageManager, PythonManager, ServerState } from "../lsp";
++import { failureHelp, installText } from "./installText";
+ 
+ type NodeHint = Extract<InstallHint, { kind: "node" }>;
+ 
+@@ -56,72 +44,6 @@ const RUFF_HINT: PythonHint = {
+ 
+ const COME_BACK = "yamt finds it when you come back to this window.";
+ 
+-const ROWS: readonly Row[] = [
+-  { state: { kind: "stopped" }, line: "Stopped", dot: "stopped" },
+-  { state: { kind: "starting" }, line: "Starting…", dot: "busy" },
+-  { state: { kind: "running" }, line: "Running", dot: "running" },
+-  { state: { kind: "stopping" }, line: "Stopping…", dot: "busy" },
+-  { state: { kind: "crashed", code: 3 }, line: "Stopped: exited with code 3", dot: "problem" },
+-  { state: { kind: "crashed", code: null }, line: "Stopped: exited", dot: "problem" },
+-  {
+-    state: {
+-      kind: "failed",
+-      reason: {
+-        kind: "notFound",
+-        program: "oxlint",
+-        searched: ["frontend/node_modules/.bin", "/usr/bin"],
+-      },
+-    },
+-    line: "Not found: looked in frontend/node_modules/.bin, /usr/bin",
+-    dot: "problem",
+-  },
+-  {
+-    state: { kind: "failed", reason: { kind: "spawnFailed", message: "permission denied" } },
+-    line: "Could not start: permission denied",
+-    dot: "problem",
+-  },
+-  {
+-    state: { kind: "failed", reason: { kind: "initializeFailed", message: "bad reply" } },
+-    line: "Could not start: bad reply",
+-    dot: "problem",
+-  },
+-  {
+-    state: { kind: "failed", reason: { kind: "timedOut" } },
+-    line: "Did not answer in time",
+-    dot: "problem",
+-  },
+-  {
+-    state: { kind: "failed", reason: { kind: "noHost" } },
+-    line: "Runs only in the app",
+-    dot: "problem",
+-  },
+-  {
+-    state: { kind: "failed", reason: { kind: "outsideRepository", project: "../x" } },
+-    line: "Its folder is outside the repository",
+-    dot: "problem",
+-  },
+-  { state: { kind: "notInstalled", hint: TS_HINT }, line: "Not installed", dot: "warning" },
+-];
+-
+-test.each(ROWS)("rule 2/3: $state.kind reads $line with a $dot dot", ({ state, line, dot }) => {
+-  expect(stateLine(state)).toBe(line);
+-  expect(dotKind(state)).toBe(dot);
+-});
+-
+-test("rule 3: the actions that apply per state", () => {
+-  expect(serverActions({ kind: "stopped" })).toEqual(["start"]);
+-  expect(serverActions({ kind: "starting" })).toEqual(["stop"]);
+-  expect(serverActions({ kind: "running" })).toEqual(["stop", "restart"]);
+-  expect(serverActions({ kind: "stopping" })).toEqual([]);
+-  expect(serverActions({ kind: "crashed", code: 1 })).toEqual(["start", "restart"]);
+-  expect(serverActions({ kind: "failed", reason: { kind: "timedOut" } })).toEqual([
+-    "start",
+-    "restart",
+-  ]);
+-  expect(serverActions({ kind: "failed", reason: { kind: "noHost" } })).toEqual([]);
+-  expect(serverActions({ kind: "notInstalled", hint: TS_HINT })).toEqual([]);
+-});
+-
+ test.each<[PackageManager, string, string]>([
+   ["npm", "npm install -D p", "npm install -g p"],
+   ["pnpm", "pnpm add -D p", "pnpm add -g p"],
+@@ -186,22 +108,28 @@ test("vue: the plugin goes into the project only, with no PATH line", () => {
+   ]);
+ });
+ 
+-test.each<[PythonManager, string, string]>([
+-  ["uv", "uv add --dev ruff", "uv tool install ruff"],
+-  ["poetry", "poetry add --group dev ruff", "pipx install ruff"],
+-  ["pdm", "pdm add -d ruff", "pipx install ruff"],
+-])("python: %s installs with `%s` here and `%s` for all projects", (manager, project, global) => {
+-  expect(installText({ ...RUFF_HINT, manager })).toEqual({
+-    reason: null,
+-    steps: [
+-      { label: "In py/:", command: project },
+-      { label: "Or for all projects:", command: global },
+-    ],
+-    notes: [],
+-    otherWay: "Or install it any other way that puts ruff on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-});
++const POETRY_VENV =
++  "yamt looks in the project's .venv, which Poetry uses only with virtualenvs.in-project set to true.";
++
++test.each<[PythonManager, string, string, readonly string[]]>([
++  ["uv", "uv add --dev ruff", "uv tool install ruff", []],
++  ["poetry", "poetry add --group dev ruff", "pipx install ruff", [POETRY_VENV]],
++  ["pdm", "pdm add -d ruff", "pipx install ruff", []],
++])(
++  "python: %s installs with `%s` here and `%s` for all projects",
++  (manager, project, global, notes) => {
++    expect(installText({ ...RUFF_HINT, manager })).toEqual({
++      reason: null,
++      steps: [
++        { label: "In py/:", command: project },
++        { label: "Or for all projects:", command: global },
++      ],
++      notes,
++      otherWay: "Or install it any other way that puts ruff on your PATH.",
++      comeBack: COME_BACK,
++    });
++  },
++);
+ 
+ test("python: no lock file installs with pip in the project's virtual environment", () => {
+   expect(installText({ ...RUFF_HINT, folder: "", manager: null })).toEqual({
+@@ -259,56 +187,35 @@ test("system: no step, the package-manager line", () => {
+   });
+ });
+ 
+-test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+-  expect(projectLabel("frontend")).toBe("frontend/");
+-  expect(projectLabel("packages/web")).toBe("packages/web/");
+-  expect(projectLabel("")).toBe("the repository root");
++const RUSTUP_HINT: InstallHint = {
++  kind: "rustup",
++  component: "rust-analyzer",
++  program: "rust-analyzer",
++};
++
++test.each<ServerState>([
++  { kind: "failed", reason: { kind: "notFound", program: "rust-analyzer", searched: ["/bin"] } },
++  { kind: "failed", reason: { kind: "spawnFailed", message: "denied" } },
++  { kind: "failed", reason: { kind: "initializeFailed", message: "Unknown binary" } },
++  { kind: "failed", reason: { kind: "timedOut" } },
++  { kind: "crashed", code: 1 },
++  { kind: "crashed", code: null },
++])("a failed start ($kind) with help leads into the install text", (state) => {
++  expect(failureHelp(state, RUSTUP_HINT)).toEqual({
++    lead: "If it is not installed:",
++    install: installText(RUSTUP_HINT),
++  });
++  expect(failureHelp(state, null)).toBeNull();
+ });
+ 
+-test("a server reads as its name, marked when it is not installed", () => {
+-  const installed: ServerSpec = {
+-    name: "TypeScript",
+-    project: "frontend",
+-    folders: { project: ["node_modules/.bin"], home: [] },
+-    command: { program: "typescript-language-server", args: ["--stdio"] },
+-    fileTypes: ["ts"],
+-    settings: null,
+-    initializationOptions: null,
+-    formats: false,
+-    install: null,
+-    help: null,
+-    notes: [],
+-  };
+-
+-  expect(serverLabel(installed)).toBe("TypeScript");
+-  expect(serverLabel({ ...installed, install: TS_HINT })).toBe("TypeScript (not installed)");
+-});
+-
+-test("rule 2: the format note is shown for the four refusals and hidden otherwise", () => {
+-  expect(formatNote({ kind: "notRunning", server: "oxfmt", state: { kind: "stopped" } })).toBe(
+-    "Not formatted: oxfmt is not running",
+-  );
+-  expect(formatNote({ kind: "failed", server: "oxfmt", message: "boom" })).toBe(
+-    "Not formatted: oxfmt failed: boom",
+-  );
+-  expect(formatNote({ kind: "timedOut", server: "oxfmt" })).toBe(
+-    "Not formatted: oxfmt did not answer in time",
+-  );
+-  expect(formatNote({ kind: "changedMeanwhile", server: "oxfmt" })).toBe(
+-    "Not formatted: the Result changed while oxfmt was formatting",
+-  );
+-  expect(formatNote({ kind: "formatted", server: "oxfmt" })).toBeNull();
+-  expect(formatNote({ kind: "unchanged", server: "oxfmt" })).toBeNull();
+-  expect(formatNote({ kind: "noFormatter" })).toBeNull();
+-  expect(formatNote(undefined)).toBeNull();
+-});
+-
+-test("rule 2: the counts' title counts errors and warnings in words", () => {
+-  expect(problemsTitle({ errors: 1, warnings: 0, other: 4 })).toBe("1 error, 0 warnings");
+-  expect(problemsTitle({ errors: 2, warnings: 1, other: 0 })).toBe("2 errors, 1 warning");
+-});
+-
+-test("rule 5: a log line's time is HH:MM:SS", () => {
+-  expect(logTime(new Date(2026, 9, 14, 9, 5, 7).getTime())).toBe("09:05:07");
+-  expect(logTime(new Date(2026, 9, 14, 23, 59, 0).getTime())).toBe("23:59:00");
++test.each<ServerState>([
++  { kind: "failed", reason: { kind: "noHost" } },
++  { kind: "failed", reason: { kind: "outsideRepository", project: "../x" } },
++  { kind: "stopped" },
++  { kind: "starting" },
++  { kind: "running" },
++  { kind: "stopping" },
++  { kind: "notInstalled", hint: RUSTUP_HINT },
++])("no install text under $kind, which installing would not fix", (state) => {
++  expect(failureHelp(state, RUSTUP_HINT)).toBeNull();
+ });
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/installText.ts
+similarity index 52%
+copy from frontend/src/ui/serverText.ts
+copy to frontend/src/ui/installText.ts
+index a0e1237..27c8513 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/installText.ts
+@@ -1,16 +1,5 @@
+-import type {
+-  FailReason,
+-  InstallHint,
+-  PackageManager,
+-  PythonManager,
+-  ServerSpec,
+-  ServerState,
+-} from "../lsp";
+-import type { FormatOutcome, ProblemCounts } from "./useMergeController";
+-
+-export type DotKind = "running" | "busy" | "stopped" | "problem" | "warning";
+-
+-export type ServerAction = "start" | "stop" | "restart";
++import type { InstallHint, PackageManager, PythonManager, ServerState } from "../lsp";
++import { projectLabel } from "./serverText";
+ 
+ type InstallStep = { readonly label: string; readonly command: string };
+ 
+@@ -22,26 +11,10 @@ export type InstallText = {
+   readonly comeBack: string;
+ };
+ 
++export type FailureHelp = { readonly lead: string; readonly install: InstallText };
++
+ type ManagerCommands = { readonly project: string; readonly global: string };
+ 
+-export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {
+-  start: "Start",
+-  stop: "Stop",
+-  restart: "Restart",
+-};
+-
+-export const SHOW_LOG = "Show log";
+-
+-export const EMPTY_LOG = "Nothing logged yet.";
+-
+-export const COPY = "Copy";
+-
+-export const COPIED = "Copied";
+-
+-export const BACK = "Back";
+-
+-export const NOT_INSTALLED = "Not installed";
+-
+ const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
+ 
+ const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
+@@ -62,99 +35,13 @@ const PYTHON_COMMANDS: Readonly<Record<PythonManager, ManagerCommands>> = {
+ 
+ const SAME_WITH_YOUR_MANAGER = "Or the same with your package manager.";
+ 
+-export function projectLabel(folder: string): string {
+-  return folder === "" ? "the repository root" : `${folder}/`;
+-}
+-
+-export function serverLabel(spec: ServerSpec): string {
+-  return spec.install === null ? spec.name : `${spec.name} (${NOT_INSTALLED.toLowerCase()})`;
+-}
+-
+-function failLine(reason: FailReason): string {
+-  switch (reason.kind) {
+-    case "notFound":
+-      return `Not found: looked in ${reason.searched.join(", ")}`;
+-    case "spawnFailed":
+-    case "initializeFailed":
+-      return `Could not start: ${reason.message}`;
+-    case "timedOut":
+-      return "Did not answer in time";
+-    case "noHost":
+-      return "Runs only in the app";
+-    case "outsideRepository":
+-      return "Its folder is outside the repository";
+-    default: {
+-      const _exhaustive: never = reason;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-export function stateLine(state: ServerState): string {
+-  switch (state.kind) {
+-    case "stopped":
+-      return "Stopped";
+-    case "starting":
+-      return "Starting…";
+-    case "running":
+-      return "Running";
+-    case "stopping":
+-      return "Stopping…";
+-    case "crashed":
+-      return state.code === null ? "Stopped: exited" : `Stopped: exited with code ${state.code}`;
+-    case "failed":
+-      return failLine(state.reason);
+-    case "notInstalled":
+-      return NOT_INSTALLED;
+-    default: {
+-      const _exhaustive: never = state;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-export function dotKind(state: ServerState): DotKind {
+-  switch (state.kind) {
+-    case "running":
+-      return "running";
+-    case "starting":
+-    case "stopping":
+-      return "busy";
+-    case "stopped":
+-      return "stopped";
+-    case "crashed":
+-    case "failed":
+-      return "problem";
+-    case "notInstalled":
+-      return "warning";
+-    default: {
+-      const _exhaustive: never = state;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-export function serverActions(state: ServerState): readonly ServerAction[] {
+-  switch (state.kind) {
+-    case "stopped":
+-      return ["start"];
+-    case "starting":
+-      return ["stop"];
+-    case "running":
+-      return ["stop", "restart"];
+-    case "crashed":
+-      return ["start", "restart"];
+-    case "failed":
+-      return state.reason.kind === "noHost" ? [] : ["start", "restart"];
+-    case "stopping":
+-    case "notInstalled":
+-      return [];
+-    default: {
+-      const _exhaustive: never = state;
+-      return _exhaustive;
+-    }
+-  }
+-}
++const PYTHON_NOTES: Readonly<Record<PythonManager, readonly string[]>> = {
++  uv: [],
++  poetry: [
++    "yamt looks in the project's .venv, which Poetry uses only with virtualenvs.in-project set to true.",
++  ],
++  pdm: [],
++};
+ 
+ type NodeHint = Extract<InstallHint, { kind: "node" }>;
+ 
+@@ -202,7 +89,7 @@ function pythonParts(hint: Extract<InstallHint, { kind: "python" }>): HintParts
+       { label: here, command: `${commands.project} ${hint.package}` },
+       { label: ALL_PROJECTS, command: `${commands.global} ${hint.package}` },
+     ],
+-    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : [],
++    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : PYTHON_NOTES[hint.manager],
+   };
+ }
+ 
+@@ -246,42 +133,27 @@ export function installText(hint: InstallHint): InstallText {
+   };
+ }
+ 
+-export function formatNote(outcome: FormatOutcome | undefined): string | null {
+-  switch (outcome?.kind) {
+-    case "notRunning":
+-      return `Not formatted: ${outcome.server} is not running`;
++function failedWhileStarting(state: ServerState): boolean {
++  switch (state.kind) {
++    case "crashed":
++      return true;
+     case "failed":
+-      return `Not formatted: ${outcome.server} failed: ${outcome.message}`;
+-    case "timedOut":
+-      return `Not formatted: ${outcome.server} did not answer in time`;
+-    case "changedMeanwhile":
+-      return `Not formatted: the Result changed while ${outcome.server} was formatting`;
+-    case "formatted":
+-    case "unchanged":
+-    case "noFormatter":
+-    case undefined:
+-      return null;
++      return state.reason.kind !== "noHost" && state.reason.kind !== "outsideRepository";
++    case "stopped":
++    case "starting":
++    case "running":
++    case "stopping":
++    case "notInstalled":
++      return false;
+     default: {
+-      const _exhaustive: never = outcome;
++      const _exhaustive: never = state;
+       return _exhaustive;
+     }
+   }
+ }
+ 
+-function counted(count: number, one: string, many: string): string {
+-  return `${count} ${count === 1 ? one : many}`;
++export function failureHelp(state: ServerState, help: InstallHint | null): FailureHelp | null {
++  return help !== null && failedWhileStarting(state)
++    ? { lead: "If it is not installed:", install: installText(help) }
++    : null;
+ }
+-
+-export function problemsTitle({ errors, warnings }: ProblemCounts): string {
+-  return `${counted(errors, "error", "errors")}, ${counted(warnings, "warning", "warnings")}`;
+-}
+-
+-export function logTitle(name: string): string {
+-  return `${name} log`;
+-}
+-
+-export function logTime(at: number): string {
+-  return new Date(at).toLocaleTimeString("en-GB", { hour12: false });
+-}
+-
+-export const YAMT_MARK = "yamt";
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index e75b0df..252b5ed 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -1,11 +1,11 @@
+ import { expect, test } from "vitest";
+ 
+-import type { InstallHint, PackageManager, PythonManager, ServerSpec, ServerState } from "../lsp";
++import type { InstallHint, ServerSpec, ServerState } from "../lsp";
+ import {
+   dotKind,
+   formatNote,
+-  installText,
+   logTime,
++  noteLine,
+   problemsTitle,
+   projectLabel,
+   serverActions,
+@@ -15,46 +15,7 @@ import {
+ 
+ type Row = { readonly state: ServerState; readonly line: string; readonly dot: string };
+ 
+-type NodeHint = Extract<InstallHint, { kind: "node" }>;
+-
+-type PythonHint = Extract<InstallHint, { kind: "python" }>;
+-
+-const TS_HINT: NodeHint = {
+-  kind: "node",
+-  package: "typescript-language-server",
+-  program: "typescript-language-server",
+-  folder: "frontend",
+-  manager: "pnpm",
+-  reason: { kind: "typescript", version: "5.9.3" },
+-};
+-
+-const ESLINT_HINT: NodeHint = {
+-  kind: "node",
+-  package: "vscode-langservers-extracted",
+-  program: "vscode-eslint-language-server",
+-  folder: "",
+-  manager: "npm",
+-  reason: { kind: "eslint" },
+-};
+-
+-const VUE_HINT: NodeHint = {
+-  kind: "node",
+-  package: "@vue/typescript-plugin",
+-  program: "@vue/typescript-plugin",
+-  folder: "web",
+-  manager: "pnpm",
+-  reason: { kind: "vue" },
+-};
+-
+-const RUFF_HINT: PythonHint = {
+-  kind: "python",
+-  package: "ruff",
+-  program: "ruff",
+-  folder: "py",
+-  manager: "uv",
+-};
+-
+-const COME_BACK = "yamt finds it when you come back to this window.";
++const CLANGD_HINT: InstallHint = { kind: "system", program: "clangd" };
+ 
+ const ROWS: readonly Row[] = [
+   { state: { kind: "stopped" }, line: "Stopped", dot: "stopped" },
+@@ -100,7 +61,7 @@ const ROWS: readonly Row[] = [
+     line: "Its folder is outside the repository",
+     dot: "problem",
+   },
+-  { state: { kind: "notInstalled", hint: TS_HINT }, line: "Not installed", dot: "warning" },
++  { state: { kind: "notInstalled", hint: CLANGD_HINT }, line: "Not installed", dot: "warning" },
+ ];
+ 
+ test.each(ROWS)("rule 2/3: $state.kind reads $line with a $dot dot", ({ state, line, dot }) => {
+@@ -119,144 +80,13 @@ test("rule 3: the actions that apply per state", () => {
+     "restart",
+   ]);
+   expect(serverActions({ kind: "failed", reason: { kind: "noHost" } })).toEqual([]);
+-  expect(serverActions({ kind: "notInstalled", hint: TS_HINT })).toEqual([]);
++  expect(serverActions({ kind: "notInstalled", hint: CLANGD_HINT })).toEqual([]);
+ });
+ 
+-test.each<[PackageManager, string, string]>([
+-  ["npm", "npm install -D p", "npm install -g p"],
+-  ["pnpm", "pnpm add -D p", "pnpm add -g p"],
+-  ["yarn", "yarn add -D p", "yarn global add p"],
+-  ["yarnBerry", "yarn add -D p", "npm install -g p"],
+-  ["bun", "bun add --dev p", "bun add -g p"],
+-])("rule 4: %s installs with `%s` here and `%s` for all projects", (manager, project, global) => {
+-  const text = installText({ ...TS_HINT, package: "p", manager });
+-
+-  expect(text.steps.map((step) => step.command)).toEqual([project, global]);
+-  expect(text.notes).toEqual([]);
+-});
+-
+-test("rule 4: an unknown manager gets npm's commands and the note to use your own", () => {
+-  const text = installText({ ...TS_HINT, manager: null });
+-
+-  expect(text.steps.map((step) => step.command)).toEqual([
+-    "npm install -D typescript-language-server",
+-    "npm install -g typescript-language-server",
+-  ]);
+-  expect(text.notes).toEqual(["Or the same with your package manager."]);
+-});
+-
+-test("rule 4: the TypeScript and eslint sentences, the PATH line and the come-back line", () => {
+-  const typescript = installText(TS_HINT);
+-  const eslint = installText(ESLINT_HINT);
+-
+-  expect(typescript.reason).toBe(
+-    "This project uses TypeScript 5.9.3, which needs the separate package typescript-language-server.",
++test("the TypeScript 7 Vue note names the project's TypeScript version", () => {
++  expect(noteLine({ kind: "vueNeedsTypeScript6", version: "7.0.2" })).toBe(
++    "Vue files get no type problems: TypeScript 7.0.2 runs no plugins, and Vue needs TypeScript 6.",
+   );
+-  expect(eslint.reason).toBe(
+-    "eslint's language server is the separate package vscode-langservers-extracted.",
+-  );
+-  expect(eslint.otherWay).toBe(
+-    "Or install it any other way that puts vscode-eslint-language-server on your PATH.",
+-  );
+-  expect(eslint.comeBack).toBe(COME_BACK);
+-});
+-
+-test('rule 4: the folder line names the project folder, or the repository root for ""', () => {
+-  expect(installText(TS_HINT).steps.map((step) => step.label)).toEqual([
+-    "In frontend/:",
+-    "Or for all projects:",
+-  ]);
+-  expect(installText(ESLINT_HINT).steps.map((step) => step.label)).toEqual([
+-    "In the repository root:",
+-    "Or for all projects:",
+-  ]);
+-});
+-
+-test("vue: the plugin goes into the project only, with no PATH line", () => {
+-  expect(installText(VUE_HINT)).toEqual({
+-    reason:
+-      "This project uses Vue; its .vue files need the package @vue/typescript-plugin in this project.",
+-    steps: [{ label: "In web/:", command: "pnpm add -D @vue/typescript-plugin" }],
+-    notes: [],
+-    otherWay: null,
+-    comeBack: COME_BACK,
+-  });
+-  expect(installText({ ...VUE_HINT, manager: null }).notes).toEqual([
+-    "Or the same with your package manager.",
+-  ]);
+-});
+-
+-test.each<[PythonManager, string, string]>([
+-  ["uv", "uv add --dev ruff", "uv tool install ruff"],
+-  ["poetry", "poetry add --group dev ruff", "pipx install ruff"],
+-  ["pdm", "pdm add -d ruff", "pipx install ruff"],
+-])("python: %s installs with `%s` here and `%s` for all projects", (manager, project, global) => {
+-  expect(installText({ ...RUFF_HINT, manager })).toEqual({
+-    reason: null,
+-    steps: [
+-      { label: "In py/:", command: project },
+-      { label: "Or for all projects:", command: global },
+-    ],
+-    notes: [],
+-    otherWay: "Or install it any other way that puts ruff on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-});
+-
+-test("python: no lock file installs with pip in the project's virtual environment", () => {
+-  expect(installText({ ...RUFF_HINT, folder: "", manager: null })).toEqual({
+-    reason: null,
+-    steps: [
+-      {
+-        label: "In the repository root, in the project's virtual environment:",
+-        command: "python -m pip install ruff",
+-      },
+-      { label: "Or for all projects:", command: "pipx install ruff" },
+-    ],
+-    notes: ["Or the same with your package manager."],
+-    otherWay: "Or install it any other way that puts ruff on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-});
+-
+-test("rustup, go and download: one step each, with their own lines", () => {
+-  expect(
+-    installText({ kind: "rustup", component: "rust-analyzer", program: "rust-analyzer" }),
+-  ).toEqual({
+-    reason: null,
+-    steps: [{ label: "For all projects:", command: "rustup component add rust-analyzer" }],
+-    notes: [],
+-    otherWay: "Or install it any other way that puts rust-analyzer on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-  expect(
+-    installText({ kind: "go", module: "golang.org/x/tools/gopls@latest", program: "gopls" }),
+-  ).toEqual({
+-    reason: null,
+-    steps: [{ label: "For all projects:", command: "go install golang.org/x/tools/gopls@latest" }],
+-    notes: ["It goes to Go's bin folder (usually ~/go/bin), where yamt looks too."],
+-    otherWay: "Or install it any other way that puts gopls on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-  const download = { kind: "download", program: "phpactor", command: "curl x" } as const;
+-  expect(installText({ ...download, needs: "PHP 8.2 or later" })).toEqual({
+-    reason: null,
+-    steps: [{ label: "For all projects:", command: "curl x" }],
+-    notes: ["Needs PHP 8.2 or later."],
+-    otherWay: "Or install it any other way that puts phpactor on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+-  expect(installText({ ...download, needs: null }).notes).toEqual([]);
+-});
+-
+-test("system: no step, the package-manager line", () => {
+-  expect(installText({ kind: "system", program: "clangd" })).toEqual({
+-    reason: null,
+-    steps: [],
+-    notes: ["Install clangd with your system's package manager."],
+-    otherWay: "Or install it any other way that puts clangd on your PATH.",
+-    comeBack: COME_BACK,
+-  });
+ });
+ 
+ test("a project folder reads as the folder with a slash, the root as the repository root", () => {
+@@ -281,7 +111,7 @@ test("a server reads as its name, marked when it is not installed", () => {
+   };
+ 
+   expect(serverLabel(installed)).toBe("TypeScript");
+-  expect(serverLabel({ ...installed, install: TS_HINT })).toBe("TypeScript (not installed)");
++  expect(serverLabel({ ...installed, install: CLANGD_HINT })).toBe("TypeScript (not installed)");
+ });
+ 
+ test("rule 2: the format note is shown for the four refusals and hidden otherwise", () => {
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index a0e1237..55bdf98 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -1,29 +1,10 @@
+-import type {
+-  FailReason,
+-  InstallHint,
+-  PackageManager,
+-  PythonManager,
+-  ServerSpec,
+-  ServerState,
+-} from "../lsp";
++import type { FailReason, ServerSpec, ServerState, SpecNote } from "../lsp";
+ import type { FormatOutcome, ProblemCounts } from "./useMergeController";
+ 
+ export type DotKind = "running" | "busy" | "stopped" | "problem" | "warning";
+ 
+ export type ServerAction = "start" | "stop" | "restart";
+ 
+-type InstallStep = { readonly label: string; readonly command: string };
+-
+-export type InstallText = {
+-  readonly reason: string | null;
+-  readonly steps: readonly InstallStep[];
+-  readonly notes: readonly string[];
+-  readonly otherWay: string | null;
+-  readonly comeBack: string;
+-};
+-
+-type ManagerCommands = { readonly project: string; readonly global: string };
+-
+ export const ACTION_LABELS: Readonly<Record<ServerAction, string>> = {
+   start: "Start",
+   stop: "Stop",
+@@ -42,25 +23,9 @@ export const BACK = "Back";
+ 
+ export const NOT_INSTALLED = "Not installed";
+ 
+-const NPM: ManagerCommands = { project: "npm install -D", global: "npm install -g" };
++export const FROM_THE_LIST = "From the list";
+ 
+-const MANAGER_COMMANDS: Readonly<Record<PackageManager, ManagerCommands>> = {
+-  npm: NPM,
+-  pnpm: { project: "pnpm add -D", global: "pnpm add -g" },
+-  yarn: { project: "yarn add -D", global: "yarn global add" },
+-  yarnBerry: { project: "yarn add -D", global: NPM.global },
+-  bun: { project: "bun add --dev", global: "bun add -g" },
+-};
+-
+-const PIP: ManagerCommands = { project: "python -m pip install", global: "pipx install" };
+-
+-const PYTHON_COMMANDS: Readonly<Record<PythonManager, ManagerCommands>> = {
+-  uv: { project: "uv add --dev", global: "uv tool install" },
+-  poetry: { project: "poetry add --group dev", global: PIP.global },
+-  pdm: { project: "pdm add -d", global: PIP.global },
+-};
+-
+-const SAME_WITH_YOUR_MANAGER = "Or the same with your package manager.";
++export const FROM_THE_LIST_HINT = `"${FROM_THE_LIST}" fills both fields with a known server.`;
+ 
+ export function projectLabel(folder: string): string {
+   return folder === "" ? "the repository root" : `${folder}/`;
+@@ -156,94 +121,8 @@ export function serverActions(state: ServerState): readonly ServerAction[] {
+   }
+ }
+ 
+-type NodeHint = Extract<InstallHint, { kind: "node" }>;
+-
+-function reasonSentence(hint: NodeHint): string {
+-  switch (hint.reason.kind) {
+-    case "typescript":
+-      return `This project uses TypeScript ${hint.reason.version}, which needs the separate package ${hint.package}.`;
+-    case "eslint":
+-      return `eslint's language server is the separate package ${hint.package}.`;
+-    case "vue":
+-      return `This project uses Vue; its .vue files need the package ${hint.package} in this project.`;
+-    default: {
+-      const _exhaustive: never = hint.reason;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-type HintParts = Pick<InstallText, "reason" | "steps" | "notes">;
+-
+-const ALL_PROJECTS = "Or for all projects:";
+-
+-function nodeParts(hint: NodeHint): HintParts {
+-  const commands = MANAGER_COMMANDS[hint.manager ?? "npm"];
+-  const here = {
+-    label: `In ${projectLabel(hint.folder)}:`,
+-    command: `${commands.project} ${hint.package}`,
+-  };
+-  const everywhere = { label: ALL_PROJECTS, command: `${commands.global} ${hint.package}` };
+-  return {
+-    reason: reasonSentence(hint),
+-    steps: hint.reason.kind === "vue" ? [here] : [here, everywhere],
+-    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : [],
+-  };
+-}
+-
+-function pythonParts(hint: Extract<InstallHint, { kind: "python" }>): HintParts {
+-  const folder = projectLabel(hint.folder);
+-  const commands = hint.manager === null ? PIP : PYTHON_COMMANDS[hint.manager];
+-  const here =
+-    hint.manager === null ? `In ${folder}, in the project's virtual environment:` : `In ${folder}:`;
+-  return {
+-    reason: null,
+-    steps: [
+-      { label: here, command: `${commands.project} ${hint.package}` },
+-      { label: ALL_PROJECTS, command: `${commands.global} ${hint.package}` },
+-    ],
+-    notes: hint.manager === null ? [SAME_WITH_YOUR_MANAGER] : [],
+-  };
+-}
+-
+-function oneStep(command: string, notes: readonly string[]): HintParts {
+-  return { reason: null, steps: [{ label: "For all projects:", command }], notes };
+-}
+-
+-function hintParts(hint: InstallHint): HintParts {
+-  switch (hint.kind) {
+-    case "node":
+-      return nodeParts(hint);
+-    case "python":
+-      return pythonParts(hint);
+-    case "rustup":
+-      return oneStep(`rustup component add ${hint.component}`, []);
+-    case "go":
+-      return oneStep(`go install ${hint.module}`, [
+-        "It goes to Go's bin folder (usually ~/go/bin), where yamt looks too.",
+-      ]);
+-    case "download":
+-      return oneStep(hint.command, hint.needs === null ? [] : [`Needs ${hint.needs}.`]);
+-    case "system":
+-      return {
+-        reason: null,
+-        steps: [],
+-        notes: [`Install ${hint.program} with your system's package manager.`],
+-      };
+-    default: {
+-      const _exhaustive: never = hint;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-export function installText(hint: InstallHint): InstallText {
+-  const vue = hint.kind === "node" && hint.reason.kind === "vue";
+-  return {
+-    ...hintParts(hint),
+-    otherWay: vue ? null : `Or install it any other way that puts ${hint.program} on your PATH.`,
+-    comeBack: "yamt finds it when you come back to this window.",
+-  };
++export function noteLine(note: SpecNote): string {
++  return `Vue files get no type problems: TypeScript ${note.version} runs no plugins, and Vue needs TypeScript 6.`;
+ }
+ 
+ export function formatNote(outcome: FormatOutcome | undefined): string | null {
+diff --git a/frontend/src/ui/servers.test.ts b/frontend/src/ui/servers.test.ts
+index daf22f4..6c21919 100644
+--- a/frontend/src/ui/servers.test.ts
++++ b/frontend/src/ui/servers.test.ts
+@@ -85,7 +85,13 @@ test("serverViews follow LanguageServers.onChange", () => {
+   servers.setSpecs([spec("oxlint", "")], { startOnOpen: false });
+ 
+   expect(slice.serverViews.value).toEqual([
+-    { name: "oxlint", project: "", state: { kind: "failed", reason: { kind: "noHost" } } },
++    {
++      name: "oxlint",
++      project: "",
++      state: { kind: "failed", reason: { kind: "noHost" } },
++      help: null,
++      notes: [],
++    },
+   ]);
+ });
+ 
