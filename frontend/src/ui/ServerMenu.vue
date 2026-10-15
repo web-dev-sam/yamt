@@ -2,13 +2,14 @@
 import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from "@vueuse/core";
 import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 
+import { failureHelp, installText } from "./installText";
 import { stepMenuItem } from "./menuKeys";
 import { menuPosition, type Point } from "./menuPosition";
 import {
   ACTION_LABELS,
   COPIED,
   COPY,
-  installText,
+  noteLine,
   serverActions,
   SHOW_LOG,
   stateLine,
@@ -31,9 +32,15 @@ useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
 const view = computed(() => serverViews.value.find((each) => each.name === props.name) ?? null);
 const line = computed(() => (view.value === null ? "" : stateLine(view.value.state)));
 const actions = computed(() => (view.value === null ? [] : serverActions(view.value.state)));
-const hint = computed(() =>
-  view.value?.state.kind === "notInstalled" ? installText(view.value.state.hint) : null,
+const failure = computed(() =>
+  view.value === null ? null : failureHelp(view.value.state, view.value.help),
 );
+const hint = computed(() =>
+  view.value?.state.kind === "notInstalled"
+    ? installText(view.value.state.hint)
+    : (failure.value?.install ?? null),
+);
+const notes = computed(() => view.value?.notes.map(noteLine) ?? []);
 const placement = computed(() => {
   const { x, y } = menuPosition({
     pointer: props.at,
@@ -149,8 +156,10 @@ async function copy(command: string, event: MouseEvent): Promise<void> {
       <div class="px-2 py-1">
         <p class="font-semibold">{{ name }}</p>
         <p class="wrap-break-word text-fg-muted">{{ line }}</p>
+        <p v-for="note in notes" :key="note" class="wrap-break-word text-fg-muted">{{ note }}</p>
       </div>
       <div v-if="hint !== null" class="flex flex-col gap-2 px-2 pt-1 pb-2">
+        <p v-if="failure !== null">{{ failure.lead }}</p>
         <p v-if="hint.reason !== null" class="wrap-break-word">{{ hint.reason }}</p>
         <div v-for="step in hint.steps" :key="step.label">
           <p>{{ step.label }}</p>

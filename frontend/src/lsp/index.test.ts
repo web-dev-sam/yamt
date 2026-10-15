@@ -641,16 +641,19 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
   await settle();
   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint"]);
 
-  languageServers.setSpecs([spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver")], {
-    startOnOpen: true,
-  });
+  const help = { kind: "system", program: "tsserver" } as const;
+  const notes = [{ kind: "vueNeedsTypeScript6", version: "7.0.0" }] as const;
+  languageServers.setSpecs(
+    [spec("oxlint", { settings: { a: [1, { b: 2 }] } }), spec("tsserver", { help, notes })],
+    { startOnOpen: true },
+  );
   await settle();
 
   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint", "tsserver"]);
   expect(host.stopped).toEqual([]);
   expect(languageServers.views()).toEqual([
-    { name: "oxlint", project: "", state: { kind: "running" } },
-    { name: "tsserver", project: "", state: { kind: "running" } },
+    { name: "oxlint", project: "", state: { kind: "running" }, help: null, notes: [] },
+    { name: "tsserver", project: "", state: { kind: "running" }, help, notes },
   ]);
 });
 

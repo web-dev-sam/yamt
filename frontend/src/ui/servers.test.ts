@@ -85,7 +85,13 @@ test("serverViews follow LanguageServers.onChange", () => {
   servers.setSpecs([spec("oxlint", "")], { startOnOpen: false });
 
   expect(slice.serverViews.value).toEqual([
-    { name: "oxlint", project: "", state: { kind: "failed", reason: { kind: "noHost" } } },
+    {
+      name: "oxlint",
+      project: "",
+      state: { kind: "failed", reason: { kind: "noHost" } },
+      help: null,
+      notes: [],
+    },
   ]);
 });
 

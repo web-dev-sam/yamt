@@ -100,6 +100,8 @@ export class LanguageServers {
       name: spec.name,
       project: spec.project,
       state,
+      help: spec.help,
+      notes: spec.notes,
     }));
   }
 

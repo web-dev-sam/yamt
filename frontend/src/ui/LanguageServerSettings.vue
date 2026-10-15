@@ -2,10 +2,11 @@
 import { computed, shallowRef } from "vue";
 
 import type { RepositoryAnswer } from "../ipc";
-import type { ServerSpec } from "../lsp";
+import type { PresetChoice, ServerSpec } from "../lsp";
 import ChoiceButtons from "./ChoiceButtons.vue";
+import PresetPicker from "./PresetPicker.vue";
 import { parseAddedServer } from "./serverSetup";
-import { NOT_INSTALLED, projectLabel } from "./serverText";
+import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
 import { useAppStore } from "./store";
 
 const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: string }[] = [
@@ -36,6 +37,11 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
   if (value !== "notAsked") {
     await answerServers(value);
   }
+}
+
+function fill(choice: PresetChoice): void {
+  commandText.value = choice.command.join(" ");
+  fileTypesText.value = choice.fileTypes.join(", ");
 }
 
 async function add(): Promise<void> {
@@ -93,6 +99,7 @@ async function add(): Promise<void> {
         </li>
       </ul>
       <form class="flex items-end gap-2" @submit.prevent="add">
+        <PresetPicker @pick="fill" />
         <label class="flex min-w-0 flex-2 flex-col gap-1">
           Command
           <input
@@ -123,6 +130,7 @@ async function add(): Promise<void> {
       </form>
       <p class="mt-1 text-fg-muted">
         The command is split on spaces. File types are extensions, separated by commas or spaces.
+        {{ FROM_THE_LIST_HINT }}
       </p>
     </section>
   </div>

@@ -1,5 +1,5 @@
 import type { StartReply } from "../../ipc";
-import type { InstallHint, ServerSpec } from "./spec";
+import type { InstallHint, ServerSpec, SpecNote } from "./spec";
 
 export type FailReason =
   | { readonly kind: "notFound"; readonly program: string; readonly searched: readonly string[] }
@@ -22,6 +22,8 @@ export type ServerView = {
   readonly name: string;
   readonly project: string;
   readonly state: ServerState;
+  readonly help: InstallHint | null;
+  readonly notes: readonly SpecNote[];
 };
 
 export type RestState = Extract<
