@@ -537,6 +537,34 @@ fixtures between rounds and updates architecture and the project map before row 
 | 3   | final run before tagging (`briefs/release-0.3.0-verify.md`): `just check`, licences current, `.deb` bundle, `--version`, the release binary on the conflict and language-server projects                                                                                                                      | verifier     | done   | `Release030Verify` at `a4faa91`, gate **pass** (notes `.omp/run/notes/Release030Verify.md`): `just check` 0 (442 Rust + 1 skipped, 1215 web, 10 goldens); licences unchanged; `yamt_0.3.0_amd64.deb` 4.94 MiB, only `usr/bin/yamt`; `yamt 0.3.0`; release binary: 7 files + Mark resolved; four servers, problems in `.ts` and `.py`, hover, Ctrl+S formats both and keeps markers; no leftovers. #987 (no dpkg), #988 (servers start when a file they serve opens, by design) dropped |
 | 4   | release build and publishing (`docs/slices/handoff-release-0.3.0.md`)                                                                                                                                                                                                                                         | human        | open   | CI at `2dd7675` (run 38632852557) green: frontend, ubuntu-22.04, macos-14, windows-2025; tag not made (`fetch.prunetags`, #807). Left for the owner: push `main` + tag, check the draft, paste the `[0.3.0]` section, smoke one download, publish                                                                                                                                                                                                                                      |
 
+## Language server presets — more languages (session 17)
+
+Owner request (#993, 2026-10-15): "add language server presets for different languages like:
+ts/vue/rust/go/python(ruff,...)/php(phpcs,...)/...(popular options)".
+
+Intent: yamt recognizes the usual tools of more languages the way it recognizes oxlint, oxfmt, TypeScript and eslint
+today (plan §2 #67, #70, #71): found in the repository, listed in the once-per-repository question, shown in the status
+area, problems underlined in the Result, the formatter run by Ctrl/Cmd+S; a tool the project uses whose server is missing
+shows "not installed" with that language's own install commands. Languages: the four JS/TS tools plus Vue, Rust, Go,
+Python (ruff and a type checker), PHP, and a few other popular ones picked by the design (one widely used server, a
+stdio language server giving problems without editor-specific glue, a cheap signal in the repository).
+
+Acceptance (proposed): per language, in the real app on a conflict repository using that language's tools: the question
+lists the detected servers; after Start, a seeded problem in a conflicted file is underlined with its message on hover;
+the language's formatter formats on Ctrl/Cmd+S as one undo step; a tool not installed shows "not installed" with that
+language's install commands and starts after installing and returning to the window; a server found only on PATH counts
+only when the project shows it uses that language; no server process outlives yamt; the four existing tools behave as
+before. Non-goals: completion, hover info, go-to-definition; installing anything; yamt shipping a server; the login
+shell's PATH; a config file inside the repository.
+
+Owner answers (2026-10-15): PHP gets Phpactor and Intelephense, phpcs stays out — it has no language server (#994);
+Settings → Language servers offers the known presets to pick from when adding a server, filling in the command and
+file types (#995).
+
+| row | slice                                                                                                                                                                               | owner    | status  | evidence |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: preset list per language, projects beyond `package.json`, programs in virtualenvs/vendor, install hints per ecosystem, Vue, phpcs, slicing (`briefs/3.Y-presets-design.md`) | designer | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
