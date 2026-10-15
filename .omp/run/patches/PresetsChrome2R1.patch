@@ -1,0 +1,664 @@
+commit 4a8097e7cfa7b335ddec09d54ba37cc2ff1697f5
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 13:19:05 +0200
+
+    fix(ui): exit while starting is a failed start with install steps, crash after running is not; one drop-down composable; one inverse of parseAddedServer (#1033-#1039)
+
+diff --git a/frontend/src/lsp/index.test.ts b/frontend/src/lsp/index.test.ts
+index f3e14b8..00613dd 100644
+--- a/frontend/src/lsp/index.test.ts
++++ b/frontend/src/lsp/index.test.ts
+@@ -1808,7 +1808,7 @@ test("rule 9: an exit without a code is crashed{null} and logged", async () => {
+   expect(logOf(languageServers, "oxlint").at(-1)).toBe("yamt: Exited without a code");
+ });
+ 
+-test("rule 9: a crash during initialize is crashed, and messages before running are dropped", async () => {
++test("rule 9: an exit during initialize is a failed start, not stopped again; messages before running are dropped", async () => {
+   host.setup = (server) => {
+     server.handlers = { initialize: () => NO_REPLY };
+   };
+@@ -1828,7 +1828,14 @@ test("rule 9: a crash during initialize is crashed, and messages before running
+   server.exit(2);
+   await settle();
+ 
+-  expect(stateOf(languageServers, "eslint")).toEqual({ kind: "crashed", code: 2 });
++  expect(stateOf(languageServers, "eslint")).toEqual({
++    kind: "failed",
++    reason: { kind: "exited", code: 2 },
++  });
++  const log = logOf(languageServers, "eslint");
++  expect(log).toContain("yamt: Exited with code 2");
++  expect(log.at(-1)).toBe("yamt: Stopped while starting: exited with code 2");
++  expect(host.stopped).toEqual([]);
+   expect(doc.shown).toEqual([]);
+ });
+ 
+diff --git a/frontend/src/lsp/internal/server.ts b/frontend/src/lsp/internal/server.ts
+index d3f8411..bd27450 100644
+--- a/frontend/src/lsp/internal/server.ts
++++ b/frontend/src/lsp/internal/server.ts
+@@ -230,10 +230,16 @@ export class Server {
+   }
+ 
+   #exited(attempt: Attempt, code: number | null): void {
+-    if (this.#run.attempt === attempt) {
+-      this.running?.docs.closeAll();
+-      this.#setRun({ kind: "idle", attempt: null, state: { kind: "crashed", code } });
++    const run = this.#run;
++    if (run.attempt !== attempt) {
++      return;
+     }
++    if (run.kind === "starting") {
++      this.#fail({ kind: "exited", code }, null);
++      return;
++    }
++    this.running?.docs.closeAll();
++    this.#setRun({ kind: "idle", attempt: null, state: { kind: "crashed", code } });
+   }
+ 
+   #fail(reason: StartFailure, attempt: Attempt | null): void {
+diff --git a/frontend/src/lsp/internal/state.ts b/frontend/src/lsp/internal/state.ts
+index 3ed890a..8f0a90b 100644
+--- a/frontend/src/lsp/internal/state.ts
++++ b/frontend/src/lsp/internal/state.ts
+@@ -6,6 +6,7 @@ export type FailReason =
+   | { readonly kind: "spawnFailed"; readonly message: string }
+   | { readonly kind: "initializeFailed"; readonly message: string }
+   | { readonly kind: "timedOut" }
++  | { readonly kind: "exited"; readonly code: number | null }
+   | { readonly kind: "noHost" }
+   | { readonly kind: "outsideRepository"; readonly project: string };
+ 
+@@ -65,6 +66,10 @@ export function failText(reason: StartFailure): string {
+       return `Initialize failed: ${reason.message}`;
+     case "timedOut":
+       return "Stopped: the server did not answer initialize";
++    case "exited":
++      return reason.code === null
++        ? "Stopped while starting: exited"
++        : `Stopped while starting: exited with code ${reason.code}`;
+     case "outsideRepository":
+       return `The project folder ${reason.project} is outside the repository`;
+     default: {
+diff --git a/frontend/src/ui/KeymapList.vue b/frontend/src/ui/KeymapList.vue
+index 9916b4f..eae0b94 100644
+--- a/frontend/src/ui/KeymapList.vue
++++ b/frontend/src/ui/KeymapList.vue
+@@ -1,5 +1,4 @@
+ <script setup lang="ts">
+-import { onClickOutside } from "@vueuse/core";
+ import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
+ 
+ import { keyLabel, type Key, type KeyAction } from "../ipc";
+@@ -12,8 +11,9 @@ import {
+   keymapMenu,
+   type KeymapCommand,
+ } from "./keyText";
+-import { ARROW_STEPS, stepMenuItem } from "./menuKeys";
++import { ARROW_STEPS } from "./menuKeys";
+ import { useAppStore } from "./store";
++import { useDropdownMenu } from "./useDropdownMenu";
+ 
+ type Recording = {
+   readonly action: KeyAction;
+@@ -24,8 +24,16 @@ type Recording = {
+ const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
+ const list = useTemplateRef<HTMLDivElement>("list");
+ const menu = useTemplateRef<HTMLUListElement[]>("menu");
+-const menuFor = shallowRef<KeyAction | null>(null);
+-const menuAbove = shallowRef(false);
++const {
++  openFor: menuFor,
++  above: menuAbove,
++  toggle: toggleMenu,
++  close: closeMenu,
++  menuKey,
++} = useDropdownMenu<KeyAction>({
++  menu: () => menu.value?.[0] ?? null,
++  opener: rowOf,
++});
+ const recording = shallowRef<Recording | null>(null);
+ 
+ const bindings = computed(() => settings.value.keys.bindings);
+@@ -48,14 +56,6 @@ const menuEntries = computed(() =>
+     : keymapMenu(menuFor.value, bindings.value[menuFor.value], navigator.platform),
+ );
+ 
+-onClickOutside(
+-  () => menu.value?.[0] ?? null,
+-  () => {
+-    void closeMenuAfterClick();
+-  },
+-  { ignore: ["[data-keymap-row][aria-expanded=true]"] },
+-);
+-
+ function rowOf(action: KeyAction): HTMLElement | null {
+   return list.value?.querySelector<HTMLElement>(`[data-keymap-row="${action}"]`) ?? null;
+ }
+@@ -65,49 +65,6 @@ async function focusRow(action: KeyAction): Promise<void> {
+   rowOf(action)?.focus();
+ }
+ 
+-async function closeMenu(): Promise<void> {
+-  const action = menuFor.value;
+-  menuFor.value = null;
+-  if (action !== null) {
+-    await focusRow(action);
+-  }
+-}
+-
+-async function closeMenuAfterClick(): Promise<void> {
+-  const focused = document.activeElement;
+-  if (focused !== document.body && menu.value?.[0]?.contains(focused) !== true) {
+-    menuFor.value = null;
+-    return;
+-  }
+-  await closeMenu();
+-}
+-
+-async function toggleMenu(action: KeyAction): Promise<void> {
+-  if (menuFor.value === action) {
+-    await closeMenu();
+-    return;
+-  }
+-  menuFor.value = action;
+-  menuAbove.value = false;
+-  await nextTick();
+-  const opened = menu.value?.[0];
+-  if (opened === undefined) {
+-    return;
+-  }
+-  menuAbove.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+-  await nextTick();
+-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+-}
+-
+-function visibleBottom(element: HTMLElement): number {
+-  for (let box = element.parentElement; box !== null; box = box.parentElement) {
+-    if (getComputedStyle(box).overflowY !== "visible") {
+-      return box.getBoundingClientRect().bottom;
+-    }
+-  }
+-  return window.innerHeight;
+-}
+-
+ function stepRow(event: KeyboardEvent): void {
+   const step = ARROW_STEPS[event.key];
+   const rows = [...(list.value?.querySelectorAll<HTMLElement>("[data-keymap-row]") ?? [])];
+@@ -118,30 +75,6 @@ function stepRow(event: KeyboardEvent): void {
+   rows[rows.findIndex((row) => row === event.currentTarget) + step]?.focus();
+ }
+ 
+-function menuKey(event: KeyboardEvent): void {
+-  const items = [...(menu.value?.[0]?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+-  const step = stepMenuItem(
+-    { count: items.length, focused: items.findIndex((item) => item === event.target) },
+-    event,
+-  );
+-  switch (step.kind) {
+-    case "close":
+-      event.preventDefault();
+-      void closeMenu();
+-      return;
+-    case "focus":
+-      event.preventDefault();
+-      items[step.index]?.focus();
+-      return;
+-    case "ignore":
+-      return;
+-    default: {
+-      const _exhaustive: never = step;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+ async function run(action: KeyAction, command: KeymapCommand): Promise<void> {
+   await closeMenu();
+   switch (command.kind) {
+diff --git a/frontend/src/ui/LanguageServerSettings.vue b/frontend/src/ui/LanguageServerSettings.vue
+index aec325a..f2e7f0c 100644
+--- a/frontend/src/ui/LanguageServerSettings.vue
++++ b/frontend/src/ui/LanguageServerSettings.vue
+@@ -5,7 +5,7 @@ import type { RepositoryAnswer } from "../ipc";
+ import type { PresetChoice, ServerSpec } from "../lsp";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import PresetPicker from "./PresetPicker.vue";
+-import { parseAddedServer } from "./serverSetup";
++import { addedServerFields, parseAddedServer } from "./serverSetup";
+ import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
+ import { useAppStore } from "./store";
+ 
+@@ -24,7 +24,7 @@ const answer = computed(() =>
+     ? null
+     : (settings.value.languageServers.repositories[serverRoot.value] ?? null),
+ );
+-const added = computed(() => settings.value.languageServers.added);
++const added = computed(() => settings.value.languageServers.added.map(addedServerFields));
+ const newServer = computed(() => parseAddedServer(commandText.value, fileTypesText.value));
+ 
+ function commandOf(spec: ServerSpec): string {
+@@ -40,8 +40,9 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
+ }
+ 
+ function fill(choice: PresetChoice): void {
+-  commandText.value = choice.command.join(" ");
+-  fileTypesText.value = choice.fileTypes.join(", ");
++  const fields = addedServerFields(choice);
++  commandText.value = fields.command;
++  fileTypesText.value = fields.fileTypes;
+ }
+ 
+ async function add(): Promise<void> {
+@@ -86,12 +87,12 @@ async function add(): Promise<void> {
+           :key="index"
+           class="flex items-center gap-3 rounded px-2 py-1 hover:bg-row-hover"
+         >
+-          <span class="min-w-0 flex-1 truncate font-mono">{{ server.command.join(" ") }}</span>
+-          <span class="shrink-0 text-fg-muted">{{ server.fileTypes.join(", ") }}</span>
++          <span class="min-w-0 flex-1 truncate font-mono">{{ server.command }}</span>
++          <span class="shrink-0 text-fg-muted">{{ server.fileTypes }}</span>
+           <button
+             type="button"
+             class="shrink-0 rounded border border-control-border px-2.5 py-0.5 hover:bg-hover"
+-            :aria-label="`Remove ${server.command.join(' ')}`"
++            :aria-label="`Remove ${server.command}`"
+             @click="removeServer(index)"
+           >
+             Remove
+diff --git a/frontend/src/ui/PresetPicker.vue b/frontend/src/ui/PresetPicker.vue
+index 0557ec4..2c674f9 100644
+--- a/frontend/src/ui/PresetPicker.vue
++++ b/frontend/src/ui/PresetPicker.vue
+@@ -1,10 +1,10 @@
+ <script setup lang="ts">
+-import { onClickOutside } from "@vueuse/core";
+-import { nextTick, shallowRef, useTemplateRef } from "vue";
++import { useTemplateRef } from "vue";
+ 
+ import { presetChoices, type PresetChoice } from "../lsp";
+-import { stepMenuItem } from "./menuKeys";
++import { addedServerFields } from "./serverSetup";
+ import { FROM_THE_LIST } from "./serverText";
++import { useDropdownMenu } from "./useDropdownMenu";
+ 
+ const emit = defineEmits<{ pick: [choice: PresetChoice] }>();
+ 
+@@ -12,81 +12,10 @@ const CHOICES = presetChoices();
+ 
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const menu = useTemplateRef<HTMLUListElement>("menu");
+-const open = shallowRef(false);
+-const above = shallowRef(false);
+-
+-onClickOutside(
+-  menu,
+-  () => {
+-    void closeAfterClick();
+-  },
+-  { ignore: [opener] },
+-);
+-
+-async function close(): Promise<void> {
+-  open.value = false;
+-  await nextTick();
+-  opener.value?.focus();
+-}
+-
+-async function closeAfterClick(): Promise<void> {
+-  const focused = document.activeElement;
+-  if (focused !== document.body && menu.value?.contains(focused) !== true) {
+-    open.value = false;
+-    return;
+-  }
+-  await close();
+-}
+-
+-async function toggle(): Promise<void> {
+-  if (open.value) {
+-    await close();
+-    return;
+-  }
+-  open.value = true;
+-  above.value = false;
+-  await nextTick();
+-  const opened = menu.value;
+-  if (opened === null) {
+-    return;
+-  }
+-  above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+-  await nextTick();
+-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+-}
+-
+-function visibleBottom(element: HTMLElement): number {
+-  for (let box = element.parentElement; box !== null; box = box.parentElement) {
+-    if (getComputedStyle(box).overflowY !== "visible") {
+-      return box.getBoundingClientRect().bottom;
+-    }
+-  }
+-  return window.innerHeight;
+-}
+-
+-function menuKey(event: KeyboardEvent): void {
+-  const items = [...(menu.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+-  const step = stepMenuItem(
+-    { count: items.length, focused: items.findIndex((item) => item === event.target) },
+-    event,
+-  );
+-  switch (step.kind) {
+-    case "close":
+-      event.preventDefault();
+-      void close();
+-      return;
+-    case "focus":
+-      event.preventDefault();
+-      items[step.index]?.focus();
+-      return;
+-    case "ignore":
+-      return;
+-    default: {
+-      const _exhaustive: never = step;
+-      return _exhaustive;
+-    }
+-  }
+-}
++const { openFor, above, toggle, close, menuKey } = useDropdownMenu<"presets">({
++  menu: () => menu.value,
++  opener: () => opener.value,
++});
+ 
+ async function pick(choice: PresetChoice): Promise<void> {
+   await close();
+@@ -100,14 +29,14 @@ async function pick(choice: PresetChoice): Promise<void> {
+       ref="opener"
+       type="button"
+       aria-haspopup="menu"
+-      :aria-expanded="open"
++      :aria-expanded="openFor !== null"
+       class="rounded border border-control-border px-3.5 py-1 hover:bg-hover aria-expanded:bg-row-selected"
+-      @click="toggle"
++      @click="toggle('presets')"
+     >
+       {{ FROM_THE_LIST }}
+     </button>
+     <ul
+-      v-if="open"
++      v-if="openFor !== null"
+       ref="menu"
+       role="menu"
+       :aria-label="FROM_THE_LIST"
+@@ -125,7 +54,7 @@ async function pick(choice: PresetChoice): Promise<void> {
+         >
+           <span class="flex-1 whitespace-nowrap">{{ choice.name }}</span>
+           <span class="font-mono whitespace-nowrap text-fg-muted">{{
+-            choice.command.join(" ")
++            addedServerFields(choice).command
+           }}</span>
+         </button>
+       </li>
+diff --git a/frontend/src/ui/installText.test.ts b/frontend/src/ui/installText.test.ts
+index bdf9ce6..865e925 100644
+--- a/frontend/src/ui/installText.test.ts
++++ b/frontend/src/ui/installText.test.ts
+@@ -198,9 +198,9 @@ test.each<ServerState>([
+   { kind: "failed", reason: { kind: "spawnFailed", message: "denied" } },
+   { kind: "failed", reason: { kind: "initializeFailed", message: "Unknown binary" } },
+   { kind: "failed", reason: { kind: "timedOut" } },
+-  { kind: "crashed", code: 1 },
+-  { kind: "crashed", code: null },
+-])("a failed start ($kind) with help leads into the install text", (state) => {
++  { kind: "failed", reason: { kind: "exited", code: 1 } },
++  { kind: "failed", reason: { kind: "exited", code: null } },
++])("a failed start ($reason.kind) with help leads into the install text", (state) => {
+   expect(failureHelp(state, RUSTUP_HINT)).toEqual({
+     lead: "If it is not installed:",
+     install: installText(RUSTUP_HINT),
+@@ -216,6 +216,8 @@ test.each<ServerState>([
+   { kind: "running" },
+   { kind: "stopping" },
+   { kind: "notInstalled", hint: RUSTUP_HINT },
++  { kind: "crashed", code: 1 },
++  { kind: "crashed", code: null },
+ ])("no install text under $kind, which installing would not fix", (state) => {
+   expect(failureHelp(state, RUSTUP_HINT)).toBeNull();
+ });
+diff --git a/frontend/src/ui/installText.ts b/frontend/src/ui/installText.ts
+index 27c8513..54957bf 100644
+--- a/frontend/src/ui/installText.ts
++++ b/frontend/src/ui/installText.ts
+@@ -135,10 +135,9 @@ export function installText(hint: InstallHint): InstallText {
+ 
+ function failedWhileStarting(state: ServerState): boolean {
+   switch (state.kind) {
+-    case "crashed":
+-      return true;
+     case "failed":
+       return state.reason.kind !== "noHost" && state.reason.kind !== "outsideRepository";
++    case "crashed":
+     case "stopped":
+     case "starting":
+     case "running":
+diff --git a/frontend/src/ui/serverSetup.test.ts b/frontend/src/ui/serverSetup.test.ts
+index 4096e16..18185cc 100644
+--- a/frontend/src/ui/serverSetup.test.ts
++++ b/frontend/src/ui/serverSetup.test.ts
+@@ -16,9 +16,9 @@ import {
+   type ServerHost,
+   type StartReply,
+ } from "../ipc";
+-import { LanguageServers, type ResultDocument, type ServerState } from "../lsp";
++import { LanguageServers, presetChoices, type ResultDocument, type ServerState } from "../lsp";
+ import { createAsking } from "./asking";
+-import { createServerSetup, parseAddedServer } from "./serverSetup";
++import { addedServerFields, createServerSetup, parseAddedServer } from "./serverSetup";
+ import { startSettings } from "./settings";
+ 
+ type Tree = Record<string, string>;
+@@ -793,3 +793,21 @@ test("the add form: a file type with a dot inside can never match a file, so it
+   expect(parseAddedServer("tsserver", "d.ts")).toBeNull();
+   expect(parseAddedServer("tsserver", "ts, .d.ts")).toBeNull();
+ });
++
++test("the add form: a server's fields are its command joined by spaces, its file types by commas", () => {
++  expect(addedServerFields({ command: ["ruff", "server"], fileTypes: ["py", "pyi"] })).toEqual({
++    command: "ruff server",
++    fileTypes: "py, pyi",
++  });
++});
++
++test.each(presetChoices())(
++  "the add form: $name from the list parses back to its own command and file types",
++  (choice) => {
++    const fields = addedServerFields(choice);
++    expect(parseAddedServer(fields.command, fields.fileTypes)).toEqual({
++      command: choice.command,
++      fileTypes: choice.fileTypes,
++    });
++  },
++);
+diff --git a/frontend/src/ui/serverSetup.ts b/frontend/src/ui/serverSetup.ts
+index 0285a6a..67496ae 100644
+--- a/frontend/src/ui/serverSetup.ts
++++ b/frontend/src/ui/serverSetup.ts
+@@ -39,6 +39,8 @@ export type ServerSetup = {
+   removeServer(index: number): Promise<void>;
+ };
+ 
++type AddedServerFields = { readonly command: string; readonly fileTypes: string };
++
+ const STORED_REPLIES: Readonly<Record<Reply, RepositoryAnswer | null>> = {
+   yes: "start",
+   no: "dontStart",
+@@ -55,6 +57,13 @@ export function parseAddedServer(command: string, fileTypes: string): AddedServe
+   return valid ? { command: words, fileTypes: types } : null;
+ }
+ 
++export function addedServerFields(server: {
++  readonly command: readonly string[];
++  readonly fileTypes: readonly string[];
++}): AddedServerFields {
++  return { command: server.command.join(" "), fileTypes: server.fileTypes.join(", ") };
++}
++
+ async function look(setup: Setup, host: ServerHost): Promise<string | null> {
+   setup.latestLook += 1;
+   const ticket = setup.latestLook;
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index fd6d4c8..ba14aeb 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -51,6 +51,16 @@ const ROWS: readonly Row[] = [
+     line: "Did not answer in time",
+     dot: "problem",
+   },
++  {
++    state: { kind: "failed", reason: { kind: "exited", code: 1 } },
++    line: "Stopped while starting: exited with code 1",
++    dot: "problem",
++  },
++  {
++    state: { kind: "failed", reason: { kind: "exited", code: null } },
++    line: "Stopped while starting: exited",
++    dot: "problem",
++  },
+   {
+     state: { kind: "failed", reason: { kind: "noHost" } },
+     line: "Runs only in the app",
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index e88a329..c8730f1 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -44,6 +44,10 @@ function failLine(reason: FailReason): string {
+       return `Could not start: ${reason.message}`;
+     case "timedOut":
+       return "Did not answer in time";
++    case "exited":
++      return reason.code === null
++        ? "Stopped while starting: exited"
++        : `Stopped while starting: exited with code ${reason.code}`;
+     case "noHost":
+       return "Runs only in the app";
+     case "outsideRepository":
+diff --git a/frontend/src/ui/useDropdownMenu.ts b/frontend/src/ui/useDropdownMenu.ts
+new file mode 100644
+index 0000000..7cdaad0
+--- /dev/null
++++ b/frontend/src/ui/useDropdownMenu.ts
+@@ -0,0 +1,116 @@
++import { onClickOutside } from "@vueuse/core";
++import { nextTick, shallowRef, type ShallowRef } from "vue";
++
++import { stepMenuItem } from "./menuKeys";
++
++type DropdownParts<T> = {
++  readonly menu: () => HTMLElement | null;
++  readonly opener: (which: T) => HTMLElement | null;
++};
++
++type Dropdown<T> = DropdownParts<T> & {
++  readonly openFor: ShallowRef<T | null>;
++  readonly above: ShallowRef<boolean>;
++};
++
++export type DropdownMenu<T> = {
++  readonly openFor: Readonly<ShallowRef<T | null>>;
++  readonly above: Readonly<ShallowRef<boolean>>;
++  readonly toggle: (which: T) => Promise<void>;
++  readonly close: () => Promise<void>;
++  readonly menuKey: (event: KeyboardEvent) => void;
++};
++
++function visibleBottom(element: HTMLElement): number {
++  for (let box = element.parentElement; box !== null; box = box.parentElement) {
++    if (getComputedStyle(box).overflowY !== "visible") {
++      return box.getBoundingClientRect().bottom;
++    }
++  }
++  return window.innerHeight;
++}
++
++async function close<T>({ openFor, opener }: Dropdown<T>): Promise<void> {
++  const which = openFor.value;
++  openFor.value = null;
++  if (which !== null) {
++    await nextTick();
++    opener(which)?.focus();
++  }
++}
++
++async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
++  const focused = document.activeElement;
++  if (focused !== document.body && dropdown.menu()?.contains(focused) !== true) {
++    dropdown.openFor.value = null;
++    return;
++  }
++  await close(dropdown);
++}
++
++async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
++  if (dropdown.openFor.value === which) {
++    await close(dropdown);
++    return;
++  }
++  dropdown.openFor.value = which;
++  dropdown.above.value = false;
++  await nextTick();
++  const opened = dropdown.menu();
++  if (opened === null) {
++    return;
++  }
++  dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
++  await nextTick();
++  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++}
++
++function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
++  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  const step = stepMenuItem(
++    { count: items.length, focused: items.findIndex((item) => item === event.target) },
++    event,
++  );
++  switch (step.kind) {
++    case "close":
++      event.preventDefault();
++      void close(dropdown);
++      return;
++    case "focus":
++      event.preventDefault();
++      items[step.index]?.focus();
++      return;
++    case "ignore":
++      return;
++    default: {
++      const _exhaustive: never = step;
++      return _exhaustive;
++    }
++  }
++}
++
++export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
++  const dropdown: Dropdown<T> = { ...parts, openFor: shallowRef(null), above: shallowRef(false) };
++  onClickOutside(
++    parts.menu,
++    () => {
++      void closeAfterClick(dropdown);
++    },
++    {
++      ignore: () => {
++        const which = dropdown.openFor.value;
++        const opener = which === null ? null : parts.opener(which);
++        return opener === null ? [] : [opener];
++      },
++    },
++  );
++  return {
++    openFor: dropdown.openFor,
++    above: dropdown.above,
++    toggle: (which) => toggle(dropdown, which),
++    close: () => close(dropdown),
++    menuKey: (event) => {
++      menuKey(dropdown, event);
++    },
++  };
++}
