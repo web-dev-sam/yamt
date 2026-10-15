@@ -1,0 +1,86 @@
+commit 9f3571a4858d318f5f6df4d53af7360f2dd2cb9a
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 12:15:44 +0200
+
+    test(lsp-host): start looks a bare name up through command.folders; doc names empty-name entries (#1006, #1007)
+
+diff --git a/crates/lsp-host/src/program.rs b/crates/lsp-host/src/program.rs
+index 576fec0..bf219ea 100644
+--- a/crates/lsp-host/src/program.rs
++++ b/crates/lsp-host/src/program.rs
+@@ -16,8 +16,8 @@ const EXECUTE_BITS: u32 = 0o111;
+ const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+ 
+ /// Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
+-/// names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute or
+-/// holds `..` or `.` is skipped.
++/// names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
++/// holds `..` or `.`, or has an empty name (`go/bin/`, `a//b`) is skipped.
+ #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, specta::Type)]
+ pub struct ProgramFolders {
+     /// Tried in the project folder, then each parent up to the repository root; within one folder in list order.
+diff --git a/crates/lsp-host/tests/run.rs b/crates/lsp-host/tests/run.rs
+index a07f2a8..f21ae2f 100644
+--- a/crates/lsp-host/tests/run.rs
++++ b/crates/lsp-host/tests/run.rs
+@@ -1,6 +1,7 @@
+ #![cfg(test)]
+ 
+ use std::fs;
++use std::path::Path;
+ use std::process::Command;
+ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+ use std::thread;
+@@ -370,3 +371,37 @@ fn a_missing_project_folder_is_a_spawn_failure_and_a_missing_program_lists_the_s
+         }
+     );
+ }
++
++#[test]
++fn a_bare_program_name_is_found_in_a_project_folder_and_not_without_it() {
++    let repo = tempfile::tempdir().unwrap();
++    let tools = repo.path().join("tools");
++    fs::create_dir_all(&tools).unwrap();
++    let name = Path::new(ECHO)
++        .file_name()
++        .unwrap()
++        .to_str()
++        .unwrap()
++        .to_owned();
++    fs::copy(ECHO, tools.join(&name)).unwrap();
++    let mut host = Host::new(repo.path());
++    let command = |project: Vec<String>| ServerCommand {
++        program: name.clone(),
++        args: Vec::new(),
++        project: String::new(),
++        folders: ProgramFolders {
++            project,
++            home: Vec::new(),
++        },
++    };
++    let (sender, _events) = mpsc::channel();
++    let reply = host.start(&command(vec!["tools".to_owned()]), sender.clone());
++    assert!(matches!(reply, StartReply::Started { .. }), "{reply:?}");
++    host.stop_all();
++    let reply = host.start(&command(Vec::new()), sender);
++    let StartReply::NotFound { searched, .. } = reply else {
++        panic!("{reply:?}");
++    };
++    let in_repo = |folder: &String| Path::new(folder).starts_with(repo.path());
++    assert!(!searched.iter().any(in_repo), "{searched:?}");
++}
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index a246839..0bd4ef6 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -212,8 +212,8 @@ export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "
+ 
+ /**
+  *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
+- *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute or
+- *  holds `..` or `.` is skipped.
++ *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
++ *  holds `..` or `.`, or has an empty name (`go/bin/`, `a//b`) is skipped.
+  */
+ export type ProgramFolders = {
+ 	/**  Tried in the project folder, then each parent up to the repository root; within one folder in list order. */
