@@ -35,6 +35,7 @@ product owner joining the conversation now. Detector: hook `plain-language.ts` (
   it costs), readable without any other message.
 - [OR-h4] Lead with the decision needed, then at most three lines of why. Details on request.
 - [OR-h5] Reread each question as the human: not answerable without opening a file → rewrite.
+- [OR-h6] A release: `CHANGELOG.md` gets its full section as before; the reply also gives notes to paste into the release, in the owner's compact form (example: finding #989): Added/Changed/Fixed, one short line per feature, its parts as sub-bullets, no explanations, written in no file.
 
 ✗ "Approve P2 hook regression tests in `just check`? Both hook bugs were untested."
 ✓ "Should the safety checks that stop agents editing the wrong files get automated tests?
@@ -97,12 +98,11 @@ confirmation (VF7). `gate: fail` → fix round for the owning slice (§5), never
 
 ## 7. Milestone end and retro
 
-Run the demo recipe (`docs/plan.md` §5) with the human; write `docs/walkthroughs/M<n>.md`: what was built, and the
-few non-obvious Rust constructs with why each (Rust-beginner reader). ── **Gate C**: milestone acceptance by the
-owner. A check the product will show later waits for it: a board row in that milestone naming the question it
-settles; no side tooling (#106–#107). ── Then, before the next milestone's first spawn (owner, #108), spawn `curator`
-with `findings.jsonl` since the last retro + human corrections. ── **Gate D**: each change in plain language; the
-human approves; the curator applies, appends the changelog, bumps the verified commit. ──
+Run the demo recipe (`docs/plan.md` §5) with the human; write `docs/walkthroughs/M<n>.md`: what was built, and the few non-obvious
+Rust constructs with why each (Rust-beginner reader). ── **Gate C**: milestone acceptance by the owner. A check the product will
+show later waits for it: a board row in that milestone naming the question it settles; no side tooling (#106–#107). ── Then, before
+the next milestone's first spawn (owner, #108), spawn `curator` with `findings.jsonl` since the last retro + human corrections. ──
+**Gate D**: each change in plain language; the human approves; the curator applies, appends the changelog, bumps the verified commit. ──
 
 ## Rules about yourself
 
