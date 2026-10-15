@@ -1,0 +1,1138 @@
+Found 16 mutants to test
+ok       Unmutated baseline in 44s build + 6s test
+ INFO Auto-set test timeout to 31s
+16 mutants tested in 67s: 9 caught, 7 unviable
+[32m12:06:21 (280403) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m12:06:21 (280403) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m12:06:22 (280403) INFO ProjectReader[39m Found 8 of 432 file(s) to be mutated.
+[32m12:06:22 (280403) INFO Instrumenter[39m Instrumented 8 source file(s) with 655 mutant(s)
+[32m12:06:22 (280403) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m12:06:23 (280403) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m12:06:36 (280403) INFO DryRunExecutor[39m Initial test run succeeded. Ran 817 tests in 12 seconds (net 4179.614739000003 ms, overhead 8145.385260999997 ms).
+
+All tests
+  editor/internal
+    apply.test.ts
+      ~ apply local: the change gets the left text, resolves, and loses colour and arrow (covered 81)
+      ~ apply remote inserts the right lines at an empty middle range (covered 81)
+      ~ a conflict applied from both sides holds local then remote text (covered 81)
+      ~ ignore keeps the text and resolves a change or a half-applied conflict (covered 81)
+      ~ applying after an edit inside the change replaces the current range (covered 81)
+      ~ undo after apply restores text and status; redo re-applies (covered 81)
+      ~ undo after ignore brings the change back; redo ignores it again (covered 81)
+      ~ undo and redo after an arrow or × show that change, not the old cursor at line 1 (covered 81)
+      ~ redo of an insert-only apply puts the cursor on the first inserted line (covered 81)
+      ~ typing right after an arrow click is an undo step of its own (covered 81)
+      ~ bulk apply moves a cursor outside the visible lines to the first one; undo returns there (covered 81)
+      ~ bulk apply from the left resolves every LocalOnly change; one undo restores all (covered 81)
+      ~ a BothSame change resolves from either arrow and from either bulk apply (covered 54)
+      ~ bulk apply from the right inserts every RemoteOnly change in place (covered 81)
+      ~ bulk apply over touching spans whose last deletes an unterminated final line equals clicking each (covered 54)
+      ~ deleting all of a change's lines in the middle pane ignores it (covered 81)
+      ~ resultText of a CRLF file keeps CRLF after an apply (covered 54)
+      ~ a conflict applied from both sides after its separator line is deleted pushes the next change (covered 54)
+      ~ a change on an unterminated last line keeps the file without a final line break (covered 54)
+      ~ a side applied where a line break at the change's edge was deleted lands on lines of its own (covered 54)
+      ~ a side applied after the line break above a waiting conflict was deleted starts on its own line (covered 54)
+      ~ a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it (covered 81)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (Lf) (covered 54)
+      ~ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (CrLf) (covered 54)
+      ~ a chunk spans its middle range, not where its base range would put it (covered 54)
+      ~ a middle that is not text on disk is an empty document (covered 54)
+      ~ an add/add file reopened from the disk: a one-sided apply stays a conflict until the other side is settled (covered 54)
+      ~ Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step (covered 81)
+      ~ Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step (covered 81)
+      ~ Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied (covered 81)
+      ~ Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is (covered 81)
+      ~ Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome (covered 81)
+      ~ a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step (covered 54)
+      ~ Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it (covered 54)
+      ~ a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each (covered 54)
+      ~ a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each (covered 54)
+      ~ an apply drag over a change and a touching zero-line conflict equals clicking each (covered 54)
+    chunkField.test.ts
+      ~ a real fixture's chunks start at line starts; an empty middle range is a point (covered 81)
+      ~ a chunk ending on the last line ends at the document end (covered 54)
+      ~ typing at the end of an unterminated last line stays inside its chunk (covered 54)
+      ~ typing at an empty chunk's point in the middle of a line lands after it (covered 54)
+      ~ an edit before a chunk shifts it (covered 54)
+      ~ typing inside a chunk, including at its first line's start, grows it (covered 54)
+      ~ typing at the start of the line after a chunk stays outside it (covered 54)
+      ~ text typed at an empty chunk's point lands after it (covered 54)
+      ~ deleting all of a chunk's lines collapses it; undo restores the range (covered 54)
+      ~ one undo restores a merged history event; redo re-applies it (covered 54)
+    decorations.test.ts
+      ~ vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone (covered 81)
+      ~ a side pane drops a block once its own side is handled, even in an open conflict (covered 81)
+      ~ center colours follow their text when a line is typed above them (covered 81)
+      ~ an empty range at the end of an unterminated last line is drawn below that line (covered 54)
+      ~ a marker on another chunk's band line keeps its own tone class (covered 54)
+      ~ a line break pasted at the end of a band line stops at the marker that follows it (covered 54)
+      ~ random edits keep center ranges sorted, disjoint, inside the document, and drawable (covered 81)
+      ~ a RemoteOnly deletion: center band and right marker are deleted, left is bare (covered 54)
+      ~ a focused 8-line change is outlined on every line, with its first and last lines marked (covered 81)
+      ~ a focused zero-line change outlines the line carrying its bar, on the band's own edge (covered 54)
+      ~ a side alone draws no outline on any change (covered 81)
+    drag.test.ts
+      ~ dragging down covers the pressed icon and every open icon whose row the pointer reached (covered 81)
+      ~ dragging up covers every open icon whose row the pointer reached, down to the pressed one (covered 81)
+      ~ a pointer between icons covers nothing beyond the last icon it passed (covered 81)
+      ~ closed sides are skipped: a handled change and changes of the other side are never covered (covered 81)
+    fileText.test.ts
+      ~ a conflict with both sides waiting is git's markers around both sides' lines, every line ending in the file's own break (Lf) (covered 54)
+      ~ a conflict with both sides waiting is git's markers around both sides' lines, every line ending in the file's own break (CrLf) (covered 54)
+      ~ a waiting one-sided change is written as its side's lines, and typing inside it is not (covered 54)
+      ~ decided changes are written as shown, typing included (covered 54)
+      ~ a half-decided conflict keeps its markers: the decided section holds the Result's lines, the waiting side its own (covered 54)
+      ~ a change at the end of a file without a final line break keeps the file without one (covered 54)
+      ~ an insertion-point conflict writes its block between the lines, also at a file end without a line break (covered 54)
+      ~ a conflict with an empty side writes that section empty (covered 54)
+      ~ a region yamt could not place is written as shown, typing included (covered 54)
+      ~ a line break deleted at a waiting change's edge is written back, so no marker shares a line (covered 54)
+      ~ a side applied after the line break above a waiting conflict was deleted is written as one block with no blank line (covered 54)
+      ~ the shown text is left out of the file for a waiting one-sided change and a conflict whose sides both wait, nothing else (covered 54)
+    find.test.ts
+      ✘ an empty field shows nothing and a text without matches shows No results (covered 0)
+      ✘ a selection off a match counts every case-insensitive match (covered 0)
+      ✘ a selection on a match shows its place; next from the last wraps to the first (covered 0)
+      ✘ the count is recomputed after a document, selection or query change and only then (covered 0)
+      ✘ the space above the first line stays from show to hide, across edits; the last effect wins (covered 0)
+      ✘ the Close button's title names the first Close find key, or none (covered 0)
+    foldRuns.test.ts
+      ~ each run keeps 4, then 8, then 16 lines next to each change (covered 54)
+      ~ nothing is kept at the file's top or bottom (covered 54)
+      ~ a file without changes has one run with one level hiding each whole pane (covered 15)
+      ~ a run of 9 lines hides nothing, a run of 10 hides its 2 middle lines once (covered 54)
+      ~ an empty document hides nothing in its pane (covered 54)
+      ~ a run long only in the middle still makes its levels, null in the sides (covered 54)
+      ~ a level that differs from the one outside it in one pane only is kept (covered 54)
+      ~ a hidden range runs from its first line's start to its last line's end (covered 54)
+      ✘ a pane shows the first level that hides anything in it (covered 0)
+    folds.test.ts
+      ~ the middle starts with every run's levels: 4, 8 and 16 lines kept next to each change (covered 54)
+      ~ a line inserted above moves every range below it by one line (covered 54)
+      ~ typing at a hidden range's first or last character shows that line only (covered 54)
+      ~ deleting a level down to one line shows it, and undo does not hide it again (covered 54)
+      ~ deciding a change and bulk apply keep every hidden range's lines and every count (covered 54)
+      ~ each click shows the outermost hidden level; three clicks empty the run (covered 54)
+      ~ a step that keeps more levels than are hidden hides nothing again (covered 54)
+      ~ a click is not an undo step (covered 54)
+      ~ a find match shows every level holding it, through the innermost one (covered 54)
+      ~ a match ending exactly at a range's end shows it (covered 54)
+      ~ a cursor at a range's first or last position shows nothing (covered 54)
+      ~ a selection with both ends exactly on a range's edges shows it (covered 54)
+      ~ a side's reveal reads its own ranges and shows what the middle shows for the same line (covered 54)
+      ~ the sides are told the counts only when they differ, and mirror them (covered 54)
+      ~ a side cursor inside lines that get hidden moves to the wave line's start when counts grow, not when they shrink (covered 54)
+      ~ each pane's wave starts are where that pane draws its waves (covered 54)
+      ~ Delete at a wave's start or Backspace at its end deletes nothing and shows the next step (covered 54)
+      ~ delete-line or a line cut on a wave line deletes nothing and shows the next step (covered 54)
+      ~ a delete of only the line break before a wave still joins the lines (covered 54)
+      ~ a selection deleted across a wave and a delete beside one still delete (covered 54)
+      ~ off shows every hidden line in all three panes: no wave, and the sides get zero counts (covered 54)
+      ~ on after clicks hides every run as at a fresh open, whether it was on or off before (covered 54)
+      ~ lines typed above or inside a run while off move or grow its ranges, which hide when on (covered 54)
+      ~ a level shrunk below 2 lines while off stays shown when on (covered 54)
+      ~ a file opened while off has its runs but hides nothing, and on hides every step (covered 54)
+      ~ a toggle is not an undo step: undo after it undoes the earlier edit and leaves the folds (covered 54)
+      ~ Undo selection after a toggle moved the cursor does not put it back inside the hidden lines (covered 54)
+      ~ after a toggle, clicks show 4, 8, then all, and Delete at a wave shows the next step (covered 54)
+      ~ on moves a middle cursor inside hidden lines to the wave line's start and drops a selection with an end inside, without showing the run (covered 54)
+    foldView.test.ts
+      ✘ each run replaces its outermost hidden lines with one wave line (covered 0)
+      ✘ a pane without a range at the outer level shows the next level that has one (covered 0)
+      ✘ a run with no level left has no wave (covered 0)
+    format.test.ts
+      ~ rule 5: formatting lines 3 and 400 around an open block is one undo step that keeps the block's statuses and arrows (Lf) (covered 54)
+      ~ rule 5: formatting lines 3 and 400 around an open block is one undo step that keeps the block's statuses and arrows (CrLf) (covered 54)
+      ~ rule 5: reindenting lines 198–204 formats 198 and 204 only; the open block, the lines next to it, its arrows and the problems stay (Lf) (covered 54)
+      ~ rule 5: reindenting lines 198–204 formats 198 and 204 only; the open block, the lines next to it, its arrows and the problems stay (CrLf) (covered 54)
+      ~ rule 5: (A) a line split before the block, its … is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 54)
+      ~ rule 5: (B) two lines joined before a one-line … is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 54)
+      ~ rule 5: (B2) two lines joined before a two-line… is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 54)
+      ~ rule 5: (C) a blank line added after the block'… is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 54)
+      ~ rule 5: a formatter reformatting the lines inside an open block leaves them as they were (Lf) (covered 54)
+      ~ rule 5: a formatter reformatting the lines inside an open block leaves them as they were (CrLf) (covered 54)
+      ~ rule 5: a half-decided conflict (applied pending) and the lines next to it are not formatted (covered 54)
+      ~ rule 5: a half-decided conflict (ignored pending) and the lines next to it are not formatted (covered 54)
+      ~ rule 5: a half-decided conflict (pending applied) and the lines next to it are not formatted (covered 54)
+      ~ rule 5: a decided change (applied applied) is formatted like any other line (covered 54)
+      ~ rule 5: a decided change (ignored ignored) is formatted like any other line (covered 54)
+      ~ rule 5: a decided change (ignored applied) is formatted like any other line (covered 54)
+      ~ rule 5: an answer that only touches an open change or the lines next to it is unchanged and dispatches nothing (covered 54)
+      ~ rule 5: random answers around an open block never change it or the lines next to it (covered 54)
+      ~ rule 5: random answers away from an open block are applied exactly (covered 54)
+      ~ rule 5: a formatter's LF answer to a CRLF Result is split on every line break, and the Result stays CRLF (covered 54)
+      ~ rule 5: a CRLF Result keeps CRLF line breaks in every formatted line (covered 54)
+      ~ rule 5: a Result typed in since it was sent is changedMeanwhile and nothing is applied (covered 54)
+      ~ rule 5: a closed Result is changedMeanwhile and nothing is applied (covered 54)
+      ~ rule 5: a result equal line by line is unchanged; the client's unchanged and refusals pass through (covered 54)
+      ✘ rule 5: the options follow the Result's indent unit: a tab with the pane's tab size, or n spaces (covered 0)
+      ~ rule 5: the formatter is asked with the options of the Result pane as built (covered 54)
+      ✘ rule 5: any formatted result is applied exactly, insertions and deletions at the ends included (Lf) (covered 0)
+      ✘ rule 5: any formatted result is applied exactly, insertions and deletions at the ends included (CrLf) (covered 0)
+      ✘ rule 5: a result differing mostly in whitespace, lines split and joined, is applied exactly (Lf) (covered 0)
+      ✘ rule 5: a result differing mostly in whitespace, lines split and joined, is applied exactly (CrLf) (covered 0)
+    gap.test.ts
+      ✘ a shape is drawn while any part of it touches the strip, edges included (covered 0)
+      ✘ a shape wholly above or below the strip is left out (covered 0)
+      ~ each strip joins its own pane pair, each edge moved by its own pane's shift (covered 81)
+      ~ a band is kept while one edge is still in the strip and the other has left it (covered 81)
+      ~ a band 1 px above or below the strip on both edges is dropped (covered 81)
+      ~ a chunk whose local side is applied leaves the local strip and stays on the remote one (covered 81)
+      ~ a chunk whose local side is ignored leaves the local strip and stays on the remote one (covered 81)
+      ~ each strip paints a chunk in its own side's tone (covered 54)
+      ~ a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided (covered 81)
+      ~ on macOS the hint says ⌘+click (covered 81)
+      ~ a change that is not a conflict never has the hint, even when both sides changed it (covered 81)
+      ~ an icon row built while the other side waited is rebuilt once that side is ignored (covered 81)
+      ✘ a strip joins a run only where both of its panes show a wave (covered 0)
+      ✘ an empty side gets no joins on its strip while the other strip keeps them (covered 0)
+      ✘ a join runs between the waves' centres, each pane moved by its own shift (covered 0)
+      ✘ a join is kept while either wave line touches the strip and dropped once both have left it (covered 0)
+    geometry.test.ts
+      ✘ each strip sits between its side's pane and the middle, the local pane on its left (covered 0)
+      ✘ lines in the middle span from the first line's top to the next line's top (covered 0)
+      ✘ an empty range at a line start is a point at that line's top (covered 0)
+      ✘ a range to the end of an unterminated last line ends at that line's bottom (covered 0)
+      ✘ an empty range at the end of an unterminated last line is a point at its bottom (covered 0)
+      ✘ a range to the end of a newline-terminated document ends at the empty last line's top (covered 0)
+      ✘ an empty document has one point at the top (covered 0)
+      ~ chunk rows go stale on a status change, an edit, a fold step, a toggle or new measurements, not on a cursor move (covered 81)
+      ✘ each pane's wave top is the block top at the start its own pane shows, null where it shows none (covered 0)
+      ✘ a pane with fewer runs than the middle shows no wave for the missing runs (covered 0)
+    historyKey.test.ts
+      ✘ Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing (covered 0)
+      ✘ macOS: Cmd+Z undoes, Cmd+Shift+Z and Cmd+Y redo, Ctrl+Z does nothing (covered 0)
+      ✘ Alt, a key someone already handled and a text field never undo here (covered 0)
+      ✘ a non-Latin layout undoes and redoes by the physical key (covered 0)
+      ✘ a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript (covered 0)
+      ✘ a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes (covered 0)
+      ✘ a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing (covered 0)
+      ✘ a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing (covered 0)
+      ✘ a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only (covered 0)
+    keys.test.ts
+      ✘ Shift with a letter alone is the upper-case letter, as CodeMirror matches it (covered 0)
+      ✘ Shift with Mod, Alt or a named key keeps the Shift- prefix (covered 0)
+      ✘ named keys and plain characters pass through (covered 0)
+      ✘ a macOS Ctrl key is not bound on Linux and is Ctrl- on macOS (covered 0)
+    language.test.ts
+      ✘ App.vue is coloured as Vue (covered 0)
+      ✘ src/components/Provider.tsx is coloured as TSX (covered 0)
+      ✘ use-magic-keys.ts is coloured as TypeScript (covered 0)
+      ✘ vite.config.mts is coloured as TypeScript (covered 0)
+      ✘ public/index.php is coloured as PHP (covered 0)
+      ✘ src/docker/Dockerfile is coloured as Dockerfile (covered 0)
+      ✘ a file name no language claims stays plain (covered 0)
+    modClick.test.ts
+      ✘ Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not (covered 0)
+      ✘ without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens (covered 0)
+      ✘ Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't (covered 0)
+      ✘ only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key (covered 0)
+    navigation.test.ts
+      ✘ Down and Up pass over a change already decided on that side and stop at it on the other (covered 0)
+      ✘ Down on the lowest waiting change and Up on the top-most stay put (covered 0)
+      ✘ after deciding the lowest waiting change the pick is the top-most still waiting, not the one above (covered 0)
+      ✘ with nothing left on that side there is no pick, even while the other side waits (covered 0)
+      ✘ Left/Right from a conflict half lands on its other half while it waits, else the remembered change, else alone (covered 0)
+      ✘ a change made the same way on both sides crosses to its other half (covered 0)
+      ✘ from a local-only change, Right uses the right side's remembered change (covered 0)
+      ✘ from the screen, Down takes a change straddling the top and skips one ending exactly at it (covered 0)
+      ✘ from the screen, Up takes a change straddling the bottom and skips one starting exactly at it (covered 0)
+      ~ from the screen, a zero-line change exactly at the edge counts (covered 81)
+      ✘ a side alone with waiting changes only above the area stays put; with none waiting it falls back (covered 0)
+      ~ a click hits a band by its px span and a zero-line change near its bar, never a decided side (covered 81)
+      ✘ the keyboard moves to the other side only when the decision emptied the focused side, never to the hidden side (covered 0)
+      ✘ a decision on the other side never moves the keyboard off a side that was already empty (covered 0)
+      ✘ after a decision that moved the focused side's mark on, the view reveals its new change (covered 0)
+      ✘ after a decision on another change the mark stays and the view does not move (covered 0)
+      ✘ after a decision that left the focused side alone the view does not move (covered 0)
+      ✘ a handover wins over revealing on the emptied side (covered 0)
+    pane.test.ts
+      ✘ a Vue file draws template tags in the tag colour and its script setup as TypeScript (covered 0)
+      ✘ a TSX file draws JSX tags in the tag colour (covered 0)
+      ✘ a character literal is drawn in the string colour (covered 0)
+      ~ recolouring the center pane adds no undo step and keeps the chunks (covered 81)
+      ~ a selection across a word mark is the innermost mark, drawn over block and word tints (covered 71)
+      ✘ Tab adds the file's four-space unit to each of three selected lines and Shift+Tab removes it (covered 0)
+      ✘ Tab adds a tab to each selected line of a tab-indented file (covered 0)
+      ✘ Shift+Tab on lines with less than one unit removes what is there (covered 0)
+      ✘ one undo takes back a whole Tab on three lines (covered 0)
+      ✘ the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults (covered 0)
+      ✘ Indent on Mod-i runs before the default keymap's selectParentSyntax (covered 0)
+      ✘ Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection (covered 0)
+      ✘ Indent without keys: Tab indents nothing in the middle (covered 0)
+      ✘ CodeMirror's dark flag follows the theme (covered 0)
+      ✘ the browser's own undo and redo are refused in the middle; other input passes through (covered 0)
+      ✘ a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key (covered 0)
+      ✘ new preferences turn the middle light, move its Undo and rebind its find keys (covered 0)
+      ✘ new preferences turn a side light, rebind its Apply and its find keys (covered 0)
+    problems.test.ts
+      ✘ rule 2: positions are read on the version's own text and mapped through every edit made since (covered 0)
+      ✘ rule 2: a character past the line ends at the line's end, a line past the text at its end (covered 0)
+      ✘ rule 2: a problem whose text was deleted since its version is not shown (covered 0)
+      ✘ rule 2: answers for a version never taken or forgotten are dropped; a second answer for the same version replaces the first (covered 0)
+      ✘ rule 2: an answer that changes nothing shown sets no diagnostics, so an open problem tooltip stays (covered 0)
+      ✘ rule 2: a version stays answerable until every server that answered is past it (covered 0)
+      ✘ rule 2: with no answers at all only the newest 32 versions are kept (covered 0)
+      ✘ rule 2: two servers' problems are shown together, and [] clears only that server's (covered 0)
+      ✘ rule 4: counts are errors, warnings, and info with hints as other (covered 0)
+    savedPoint.test.ts
+      ~ typing outside a change lights the dot; undoing it back clears it (covered 54)
+      ~ ignoring a one-sided change lights the dot though the text stays the same (covered 54)
+      ~ applying a change and undoing it leaves nothing unsaved (covered 54)
+      ~ a save clears the dot, then undo past the save lights it again (covered 54)
+      ~ typing during the write keeps the dot: the saved point is the snapshot that was sent (covered 54)
+      ~ typing inside a one-sided change whose sides all wait keeps the dot after a save, since the file does not get it (covered 54)
+      ~ typing inside a conflict whose sides all wait keeps the dot after a save, since the file does not get it (covered 54)
+      ~ typing inside a one-sided change whose sides all wait is on disk after a write of the Result as shown, so the dot clears (covered 54)
+      ~ typing inside a conflict whose sides all wait is on disk after a write of the Result as shown, so the dot clears (covered 54)
+      ~ typing in the decided section of a half-decided conflict is written, so a save clears the dot (covered 54)
+      ~ a listener taken away hears nothing more (covered 54)
+    serverDoc.test.ts
+      ✘ rule 1: an editable Result is opened under its path, says changed on each edit only, and closes once (covered 0)
+      ✘ rule 1: a read-only Result, or no servers, opens nothing (covered 0)
+      ✘ rule 2: take gives the Result's text with its own line breaks (covered 0)
+      ✘ rule 2: problems show in the middle pane only (covered 0)
+      ✘ rule 4: counts go out when they change, not for an edit that leaves them (covered 0)
+      ✘ rule 4: a closed Result tells no one about later counts (covered 0)
+      ✘ rule 5: a second format while one runs returns the same promise; the next call asks again (covered 0)
+    sideKeys.test.ts
+      ✘ a focused side applies with Enter and Space, ignores with Backspace (macOS Delete), Delete and x, and moves with the arrows (covered 0)
+      ✘ Apply rebound to a: a applies and Enter is bound to nothing (covered 0)
+      ✘ a side action without keys binds nothing, and a macOS-only key is not bound on Linux (covered 0)
+      ✘ a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it (covered 0)
+    sideMark.test.ts
+      ✘ deciding the marked change moves the mark to the next change waiting below on that side (covered 0)
+      ✘ a push that reopens changes, as undo does, leaves the mark where it is (covered 0)
+      ✘ a remembered change decided while its side is alone moves by the same rule and stays alone (covered 0)
+      ✘ the last change decided on that side leaves the side alone with nothing remembered (covered 0)
+      ✘ setMark wins over a status push in the same transaction (covered 0)
+    sides.test.ts
+      ~ × on a conflict's left side keeps the middle and the right side; « then replaces the middle (covered 81)
+      ~ » then « on a conflict appends; the right arrow offers that only while the left side is applied (covered 81)
+      ~ applying a side of a conflict whose other side deleted the block resolves it whole (covered 54)
+      ~ × and apply on a block that is not a conflict resolve the whole block (covered 81)
+      ~ deleting a whole open or half-applied conflict in the middle pane ignores every side (covered 81)
+      ~ a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step (covered 54)
+      ~ touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves (covered 54)
+    tone.test.ts
+      ~ a side that adds lines where the middle has none is inserted, whatever base held (covered 54)
+      ~ a side that removes middle lines is deleted (covered 54)
+      ~ a side that replaces middle lines is modified (covered 54)
+      ~ BothSame takes its tone from the side's own range on each side (covered 54)
+      ~ a conflict is conflict on both sides, even where one side is empty (covered 54)
+      ~ the center takes its tone from remote for RemoteOnly and from local otherwise (covered 54)
+    words.test.ts
+      ~ side panes mark exactly the changed words, in a CRLF file and after an emoji (covered 81)
+      ~ side panes draw one bar per removal point in a CRLF file: line start, mid-line, line end (covered 81)
+      ~ a bar equals another pane's bar of the same tone and differs from a bar of another tone (covered 81)
+      ~ a resolved block loses its word marks and bars on every side pane and undo brings them back (covered 81)
+      ~ applying one side of a conflict drops that side's tint, word marks and bars; the other keeps them (covered 81)
+      ~ the middle pane tints its blocks without word marks or bars: open, half-applied, applied, undone (covered 81)
+      ~ vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes (covered 81)
+  ipc
+    fixture.test.ts
+      ✓ the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes (killed 24)
+      ✓ each committed fixture loads with its JSON's chunk count, its stages middle and version 0 (killed 1)
+      ✓ each committed fixture's conflicts wait as markers and its other changes as side lines (killed 1)
+      ✓ a conflict of vueuse-use-magic-keys.ts arrives intact, with its words (killed 8)
+      ~ in-memory records are listed sorted by path and keep every field (covered 81)
+      ~ a chunk waiting as {"kind":"SideLines"} arrives as it is (covered 81)
+      ~ a chunk waiting as {"kind":"AsShown"} arrives as it is (covered 81)
+      ~ a chunk waiting as {"kind":"Markers","open":"<<<<<<< ours","between":["||||||| base","b","======="],"close":">>>>>>> theirs"} arrives as it is (covered 81)
+      ~ a middle from the disk, or not text on disk, and its disk version arrive as they are (covered 81)
+      ~ a record deleted on the local side keeps that side (covered 81)
+      ~ a record deleted on the remote side keeps that side (covered 81)
+      ✘ a record with an unknown chunk kind is rejected naming the file (covered 0)
+      ✘ a record with an unknown eol is rejected naming the file (covered 0)
+      ✘ a record with an unknown deleted side is rejected naming the file (covered 0)
+      ✘ a record with missing deleted is rejected naming the file (covered 0)
+      ✘ a record with missing chunks is rejected naming the file (covered 0)
+      ✘ a record with missing middle is rejected naming the file (covered 0)
+      ✘ a record with missing disk_version is rejected naming the file (covered 0)
+      ✘ a record with a missing middle range is rejected naming the file (covered 0)
+      ✘ a record with an unknown middle kind is rejected naming the file (covered 0)
+      ✘ a record with an unknown not-text reason is rejected naming the file (covered 0)
+      ✘ a record with a string word column is rejected naming the file (covered 0)
+      ✘ a record with a string point column is rejected naming the file (covered 0)
+      ✘ a record with the old flat word shape is rejected naming the file (covered 0)
+      ✘ a record with a string line is rejected naming the file (covered 0)
+      ✘ a record with a string middle line is rejected naming the file (covered 0)
+      ✘ a record with a waiting of unknown kind is rejected naming the file (covered 0)
+      ✘ a record with markers without their close line is rejected naming the file (covered 0)
+      ✘ a record with markers whose between is one string is rejected naming the file (covered 0)
+      ✘ a record with a missing waiting is rejected naming the file (covered 0)
+      ✓ a record with a negative middle line is rejected naming the file and field (killed 5)
+      ✓ a record with a negative middle len is rejected naming the file and field (killed 3)
+      ✓ a record with a negative local line is rejected naming the file and field (killed 1)
+      ✓ a record with a negative remote line is rejected naming the file and field (killed 1)
+      ~ a record with a non-integer local line is rejected naming the file and field (covered 34)
+      ~ a record with an unsafe remote line is rejected naming the file and field (covered 37)
+      ~ a record with a non-integer len is rejected naming the file and field (covered 30)
+      ~ a record with a negative len is rejected naming the file and field (covered 37)
+      ✓ a record with a negative chunk id is rejected naming the file and field (killed 3)
+      ~ a record with a non-integer chunk id is rejected naming the file and field (covered 16)
+      ✓ a record with disk version -1 is rejected (killed 3)
+      ~ a record with disk version 0.5 is rejected (covered 84)
+      ~ a record with disk version 9007199254740992 is rejected (covered 84)
+      ✓ a record with words of another chunk is rejected naming its words (killed 4)
+      ✓ a record with a negative word line is rejected naming its words (killed 5)
+      ✓ a record with a non-integer remote word line is rejected naming its words (killed 1)
+      ✓ a record with a negative word column is rejected naming its words (killed 3)
+      ✓ a record with an empty word range is rejected naming its words (killed 6)
+      ~ a record with a fractional word length is rejected naming its words (covered 60)
+      ✓ a record with a negative point line is rejected naming its words (killed 4)
+      ✓ a record with a negative point column is rejected naming its words (killed 3)
+      ~ a record with a fractional point column is rejected naming its words (covered 59)
+      ~ a record with an unsafe point column is rejected naming its words (covered 79)
+      ~ an unknown path is an UnknownPath failure naming it, and changes nothing (covered 81)
+      ~ finish marks the file resolved and logs its text once; reset returns it unresolved (covered 81)
+      ~ save writes the file, logs its text, length and lines, and leaves it unresolved (covered 81)
+      ~ takeSide marks the file resolved and logs the side; reset returns it unresolved (covered 81)
+      ~ describeFile counts "" as 0 lines, like the app (covered 81)
+      ~ describeFile counts "one" as 1 lines, like the app (covered 81)
+      ~ describeFile counts "one\n" as 1 lines, like the app (covered 81)
+      ~ describeFile counts "one\ntwo" as 2 lines, like the app (covered 81)
+      ~ describeFile counts "one\r\ntwo\r\n" as 2 lines, like the app (covered 81)
+      ~ describeFile counts "one\n\n" as 2 lines, like the app (covered 81)
+      ~ loadFixture reads a committed or an in-memory record and rejects an unknown path (covered 81)
+    tauri.test.ts
+      ✓ listFiles returns the app's entries and disk changes, and its failure unchanged (killed 21)
+      ✓ a string error from listFiles rejects the call with that message (killed 5)
+      ✓ loadFile turns the app's data into domain data: the middle range, not base (killed 24)
+      ✓ loadFile rejects data whose chunk has a negative middle line, naming the field (killed 5)
+      ✓ each command's error arrives as the failure, unchanged (killed 4)
+      ~ finishFile and resetFile send their arguments with the disk version and return the reply (covered 98)
+      ✓ saveFile sends its three arguments and returns the reply or the app's error (killed 1)
+      ✓ describeFile and takeSide send their arguments and return the app's answer (killed 4)
+      ~ a rejected command rejects the call (covered 5)
+      ~ a string error from Tauri's IPC layer rejects the call with that message (covered 105)
+      ~ a string error from describeFile or takeSide rejects the call with that message (covered 106)
+      ✓ a null error from Tauri's IPC layer rejects the call (killed 1)
+      ~ a 404 error from Tauri's IPC layer rejects the call (covered 105)
+      ✓ the forward stringifies non-finite numbers and keeps every other value (killed 11)
+      ✓ the five settings commands send their arguments and return the read with its default path (killed 13)
+      ~ a settings failure comes back as the app's error (covered 21)
+      ✓ setServerAnswer and setAddedServers send their arguments and return the read (killed 3)
+      ~ setServerAnswer and setAddedServers return the app's error (covered 23)
+      ✓ the server host starts a run with a channel whose messages reach onEvent, branding the run (killed 15)
+      ✓ the server host passes a refused start through and rejects a run id that is not one (killed 8)
+      ✓ the server host maps send, stop, context, findProgram and projectFiles onto the commands (killed 6)
+  lsp
+    internal
+      added.test.ts
+        ✓ addedSpecs: the program's file name, served at the repository root, formatting allowed (killed 1)
+        ✓ addedSpecs: a repeated or taken name gets (2), (3) …; an empty command is skipped (killed 7)
+      detect.test.ts
+        ✓ project folders: the nearest package.json walking up, the file's own folder first (killed 83)
+        ✓ project folders: a file at the root belongs to the root project (killed 1)
+        ✓ project folders: files with no package.json above them are served by no preset (killed 1)
+        ✓ project folders: a folder named package.json is no project (killed 2)
+        ~ project folders: two files in one project check it once (covered 163)
+        ✓ oxlint and oxfmt: found in the project (or above it), formatter first, with their options (killed 2)
+        ✓ oxlint and oxfmt: a global install does not count (killed 2)
+        ✓ TypeScript 7 or later: the project's own tsc in language-server mode (killed 35)
+        ✓ TypeScript 5 with the project's own tsgo: the native preview; tsgo on PATH does not count (killed 7)
+        ✓ TypeScript 6: typescript-language-server from the project or PATH, else an install hint (killed 3)
+        ✓ TypeScript 5.9 without its server: install hint with the version, folder and manager (killed 4)
+        ~ TypeScript: the package counts up to the root, jsconfig.json counts as config (covered 165)
+        ~ TypeScript: the nearest typescript package decides the version (covered 165)
+        ✓ TypeScript: the whole leading number is the major version (killed 1)
+        ✓ TypeScript: not detected without a config, without the package, or with no version (killed 6)
+        ✓ eslint: config, package and its server found on PATH or in the project (killed 3)
+        ✓ eslint: without its server, an install hint for vscode-langservers-extracted (killed 7)
+        ✓ eslint: not detected without a config or without the package (killed 2)
+        ~ names are unique across projects; a tool in one project keeps its plain name (covered 165)
+        ~ package manager: the lock file nearest the project folder, up to the root (covered 174)
+        ✓ package manager: the project's field beats a lock file; a malformed package.json has none (killed 1)
+        ✓ a rejecting lookup means not found (killed 5)
+        ~ a short answer from projectFiles leaves the rest missing (covered 46)
+      spec.test.ts
+        ✓ the extension is the last dotted part of the file name, lower case (killed 4)
+        ~ a spec serves files with its extensions under its project folder only (covered 24)
+        ~ language ids come from the table; an unknown extension is its own id (covered 12)
+    index.test.ts
+      ✓ rule 1: a spec serves a path by its extension and its project folder (killed 56)
+      ✓ rule 1: serving(path) is true only while a running server serves the path (killed 14)
+      ✓ rule 2: a spec starts when the first document it serves opens (killed 5)
+      ✓ an added server's start command looks in node_modules/.bin like a detected one (killed 11)
+      ~ rule 2: a document already open at setSpecs starts the spec (covered 129)
+      ~ rule 2: startOnOpen false stays stopped until start(name) (covered 129)
+      ✓ rule 2: a spec with install is notInstalled and never started (killed 4)
+      ✓ rule 2: a user stop survives setSpecs, even with startOnOpen, until start (killed 4)
+      ✓ haltAll stops every run without a user stop; Start on open starts them again (killed 1)
+      ✓ haltAll shows a crashed server as stopped and tells onChange listeners (killed 9)
+      ~ haltAll leaves startOnOpen as it was and starts nothing until a document opens (covered 153)
+      ~ a Start on open right after haltAll, while the old run still stops, starts a new run (covered 145)
+      ~ a server the user stopped stays stopped after haltAll and a Start on open (covered 156)
+      ✓ destroy waits for runs halted by haltAll (killed 1)
+      ✓ rule 9: stop sends didClose, shutdown, exit, then host.stop, and waits for Exited (killed 2)
+      ~ rule 9: a shutdown without an answer waits 2 s, then exit and host.stop (covered 155)
+      ~ rule 3: setSpecs keeps an unchanged spec's run and starts a newly installed one (covered 132)
+      ✓ rule 3: a changed spec is stopped and started again; a removed one is stopped (killed 6)
+      ✓ rule 4: initialize carries the project, capabilities and options; then initialized and configuration (killed 10)
+      ✓ rule 4: initialize without initializationOptions omits them; the root folder is named after the repository (killed 3)
+      ✓ rule 4: no answer to initialize within 30 s fails timedOut and stops the run (killed 15)
+      ✓ rule 4: an error reply to initialize fails initializeFailed (killed 5)
+      ✓ rule 4: a malformed initialize result fails initializeFailed (killed 4)
+      ✓ rule 4: start replies map to failed reasons (killed 3)
+      ✓ rule 4: a repository path that is not text fails every start (killed 4)
+      ~ rule 5: sync sends the full text 300 ms after the last change, with rising versions (covered 129)
+      ~ rule 5: one take serves every server; close sends didClose and shows no more problems (covered 134)
+      ~ rule 5: changes while no server has the document open are taken at the next open (covered 129)
+      ✓ rule 6: pushed problems with and without a version land in one slot (killed 1)
+      ~ rule 6: severities map 1-4 to error, warning, info, hint; none means error (covered 134)
+      ~ rule 6: pulled problems: after open and every sync, previousResultId sent, unchanged keeps items (covered 129)
+      ~ rule 6: a pull answered for an older version is pulled again; one pull in flight per document (covered 129)
+      ✓ rule 6: a late pull never replaces a newer push, nor a late push a newer pull (killed 1)
+      ~ rule 6: a sync of one document pulls every document on that server (covered 129)
+      ~ rule 6: workspace/diagnostic/refresh is answered null, then pulled again (covered 134)
+      ~ rule 6: a failed or malformed pull is logged and shows nothing (covered 130)
+      ~ rule 6: problems are cleared on stop, crash and removal (covered 166)
+      ✓ rule 7: server requests are answered from the table, unknown ones -32601 and logged (killed 2)
+      ~ rule 7: log and show messages go to the log; progress and telemetry are dropped (covered 129)
+      ~ rule 11: a malformed message is logged and dropped (covered 134)
+      ✓ rule 8: the first formats spec whose server offers formatting formats; edits use UTF-16 positions (killed 4)
+      ~ rule 8: no edits, or edits that change nothing, are unchanged (covered 135)
+      ✓ rule 8: a formatter still starting is waited for (killed 10)
+      ~ rule 8: 5 s in total, including the wait for a starting server, then timedOut (covered 112)
+      ~ rule 8: a formatting request without an answer times out at 5 s total and is cancelled (covered 135)
+      ~ rule 8: noFormatter when no spec formats the document, the document is closed, or no host (covered 135)
+      ~ rule 8: a running server that does not offer formatting is skipped (covered 135)
+      ~ rule 8: a formats spec that is stopped, crashed or failed is notRunning (covered 145)
+      ~ rule 8: an error reply or overlapping edits are failed (covered 135)
+      ✓ rule 9: an exit yamt did not ask for is crashed{code}; pending requests fail; it stays crashed (killed 2)
+      ✓ rule 9: restart of a running server stops it and starts a new run (killed 7)
+      ✓ rule 9: a stop before the host replied stops the run once it starts (killed 6)
+      ~ rule 9: a stop before the host refused the start ends stopped (covered 123)
+      ✓ rule 9: a stop before the repository context arrived starts nothing (killed 6)
+      ~ destroy stops every server and resolves when all exited (covered 153)
+      ~ rule 10: the log keeps the last 2,000 lines across restarts (covered 160)
+      ~ rule 10: log lines carry the clock's time; onChange fires and unsubscribes (covered 129)
+      ✓ rule 2: no host makes every spec failed{noHost} (killed 4)
+      ✓ rule 10: a failed initialize logs start, failure and exit as yamt lines (killed 1)
+      ~ rule 10: an initialize time-out is logged as cancelled, then as the failure (covered 135)
+      ~ rule 10: start failures are logged in words (covered 115)
+      ~ rule 9: an exit without a code is crashed{null} and logged (covered 139)
+      ✓ rule 9: a crash during initialize is crashed, and messages before running are dropped (killed 5)
+      ~ rule 2: start and stop act on the named spec only; an unknown name does nothing (covered 129)
+      ✓ rule 2: start on a running server starts no second process (killed 1)
+      ~ rule 3: a user stop of one name does not keep a new spec of another name stopped (covered 155)
+      ✓ rule 3: restart clears a user stop, so a changed spec of that name starts (killed 1)
+      ~ rule 9: an initialize answer that arrives after stop does not make the server run (covered 137)
+      ~ rule 9: a stop before a failing context arrives ends stopped, not failed (covered 92)
+      ~ rule 4: the context is read once; a failing context fails the start with its message (covered 98)
+      ~ rule 4: a repository path that is not text names the reason (covered 98)
+      ~ rule 6/8: null or false providers mean no pulls and no formatting (covered 135)
+      ~ rule 7: answering a request other than refresh pulls nothing (covered 129)
+      ~ rule 9: a stop logs the pulls it leaves unanswered (covered 155)
+      ~ rule 9: a server that exits during shutdown is not stopped again (covered 155)
+      ✓ rule 9: a stop after restart, during the old run's shutdown, keeps it stopped (killed 1)
+      ~ rule 3: a spec removed after restart, during the old run's shutdown, starts nothing (covered 161)
+      ~ destroy after restart, during the old run's shutdown, starts nothing (covered 161)
+      ✓ rule 5: a document opened by a listener when its server starts running is opened once (killed 1)
+      ~ rule 8: formatting syncs a pending change once; the pending sync does not repeat it (covered 135)
+      ~ rule 8: malformed edits are failed with the reason (covered 135)
+      ~ rule 8: after a 2 s wait for a starting formatter, its request gets the 3 s left (covered 136)
+      ~ rule 6: a first pull answered unchanged shows no problems (covered 129)
+      ~ rule 6: a timed-out pull is logged as such and shows nothing (covered 129)
+      ~ rule 6: a malformed pull report is logged and shows nothing (covered 130)
+      ~ rule 6: a pull answered after its document closed shows nothing (covered 129)
+      ~ rule 6: pushed versions that are not positive integers are dropped (covered 135)
+      ✘ a document version is a positive safe integer (covered 0)
+      ~ rule 1/5: a document a running server does not serve is never opened or closed on it (covered 129)
+      ~ rule 5: close sends didClose with the document's URI (covered 129)
+      ~ rule 5: a change syncs when any one server has the document open (covered 129)
+      ~ rule 5: a closed document is not opened on a server started later (covered 129)
+      ~ onChange fires for setSpecs, for a state change and for a log line (covered 155)
+      ~ rule 4: a Windows repository root names the folder and makes a drive URI (covered 129)
+      ~ destroy waits for a stop already under way (covered 158)
+      ~ destroy waits for servers removed by setSpecs (covered 156)
+      ~ destroy waits for a removed server still stopping after another removed one stopped (covered 156)
+      ~ rule 4: a host that throws while starting is spawnFailed (covered 115)
+      ~ rule 9: a host that fails to stop a run is logged; the run's exit still ends the stop (covered 155)
+      ~ rule 8: a document that throws when taken fails the format, never rejects (covered 135)
+      ~ rule 7: a log message without text is logged with its reason (covered 129)
+  ui
+    choiceText.test.ts
+      ✘ {"kind":"Missing"} reads "Deleted in this branch." (covered 0)
+      ✘ {"kind":"Text","lines":120} reads "A text file, 120 lines." (covered 0)
+      ✘ {"kind":"Text","lines":1} reads "A text file, 1 line." (covered 0)
+      ✘ {"kind":"Text","lines":0} reads "A text file, 0 lines." (covered 0)
+      ✘ {"kind":"Binary","bytes":12697} reads "A binary file, 12.4 KB." (covered 0)
+      ✘ {"kind":"NonUtf8","bytes":3174} reads "Not UTF-8 text, 3.1 KB." (covered 0)
+      ✘ {"kind":"TooLarge","bytes":9646899} reads "A text file too large to show, 9.2 MB." (covered 0)
+      ✘ {"kind":"Link","target":"../shared/config.json"} reads "A symbolic link to ../shared/config.json." (covered 0)
+      ✘ {"kind":"Commit","id":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"} reads "Submodule at commit 1a2b3c4." (covered 0)
+      ✘ 0 bytes are 0 B (covered 0)
+      ✘ 1023 bytes are 1023 B (covered 0)
+      ✘ 1024 bytes are 1 KB (covered 0)
+      ✘ 1536 bytes are 1.5 KB (covered 0)
+      ✘ 1048524 bytes are 1023.9 KB (covered 0)
+      ✘ 1048575 bytes are 1 MB (covered 0)
+      ✘ 1048576 bytes are 1 MB (covered 0)
+      ✘ 1572864 bytes are 1.5 MB (covered 0)
+      ✘ 2147483648 bytes are 2048 MB (covered 0)
+      ✘ only a submodule side has a tooltip, its full commit id (covered 0)
+      ✘ both sides present: Take left and Take right (covered 0)
+      ✘ deleted on the local side: Delete there, Keep on the other (covered 0)
+      ✘ deleted on the remote side: Delete there, Keep on the other (covered 0)
+      ✘ after a choice the Result column names the side taken, or the deletion (covered 0)
+      ✘ a file the disk resolved says so in the Result column, whatever its sides (covered 0)
+      ✘ before a choice the Result column says what there is to choose (covered 0)
+      ✘ a middle that is Deleted on disk reads "Deleted on disk — staged as deleted." (covered 0)
+      ✘ a middle that is Binary on disk reads "Not shown: the file on disk is binary — staged as it is." (covered 0)
+      ✘ a middle that is NonUtf8 on disk reads "Not shown: the file on disk is not UTF-8 — staged as it is." (covered 0)
+      ✘ a middle that is TooLarge on disk reads "Not shown: the file on disk is too large — staged as it is." (covered 0)
+      ✘ a middle that is Link on disk reads "A link on disk now — staged as it is." (covered 0)
+      ✘ a middle that is Directory on disk reads "A folder on disk now — staged as deleted." (covered 0)
+    collapsing.test.ts
+      ✘ a missing key collapses and writes nothing until a toggle (covered 0)
+      ✘ a stored "false" does not collapse (covered 0)
+      ✘ a stored value that is true collapses (covered 0)
+      ✘ a stored value that is empty collapses (covered 0)
+      ✘ a stored value that is another word collapses (covered 0)
+      ✘ a stored value that is JSON collapses (covered 0)
+      ✘ a stored value that is upper case collapses (covered 0)
+      ✘ toggling writes "false", then "true", and a second start reads the choice (covered 0)
+      ✘ a storage that throws collapses, still toggles in memory and logs warnings (covered 0)
+    fileListMode.test.ts
+      ✘ starts as the list, toggles to the tree and back, storing the plain name (covered 0)
+      ✘ a second start over the same storage keeps the tree (covered 0)
+      ✘ a stored value that is upper case starts the list (covered 0)
+      ✘ a stored value that is empty starts the list (covered 0)
+      ✘ a stored value that is JSON starts the list (covered 0)
+      ✘ a stored value that is quoted starts the list (covered 0)
+      ✘ a stored value that is the list starts the list (covered 0)
+      ✘ a storage that throws starts the list, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    keyField.test.ts
+      ✘ Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded (covered 0)
+      ✘ plain Enter confirms the shown key, and is recorded when no key is shown (covered 0)
+      ✘ plain Escape cancels; with Shift or Ctrl it is recorded (covered 0)
+      ✘ a key with its modifiers replaces the shown one; a modifier alone changes nothing (covered 0)
+    keymapEdit.test.ts
+      ✘ adding a key the action already has does nothing (covered 0)
+      ✘ adding a free key sends the action's whole list (covered 0)
+      ✘ adding a key another action holds asks, and Move takes it from the owner in the same changes (covered 0)
+      ✘ an owner left with exactly its defaults is sent back to them as null (covered 0)
+      ✘ changing a key replaces it in place (covered 0)
+      ✘ changing to a key another action holds asks first (covered 0)
+      ✘ changing to a key the action already has drops the old one; to itself or from a missing key does nothing (covered 0)
+      ✘ changing back to the defaults sends null (covered 0)
+      ✘ removing a key sends the rest; removing a key the action lacks does nothing (covered 0)
+      ✘ removing the one added key goes back to the defaults as null (covered 0)
+      ✘ remove all sends an empty list, unless there is nothing left to remove (covered 0)
+      ✘ reset sends null (covered 0)
+      ✘ a list is the defaults when it holds exactly the default keys, in any order (covered 0)
+      ✘ a key's owners are every other action holding it, never the action itself (covered 0)
+    keyText.test.ts
+      ✘ the keymap groups list every action once, in the settings order (covered 0)
+      ✘ each action says where it acts, matching its group (covered 0)
+      ✘ giving Ctrl/⌘B to another action clashes with Toggle file list (covered 0)
+      ✘ Save is named, acts anywhere in the shown file, and Ctrl/⌘S clashes with it (plan §2 #65) (covered 0)
+      ✘ the edit menu changes and removes each key by its label; default keys offer no reset (covered 0)
+      ✘ Remove All shows past two keys, and Reset Shortcuts follows it without a separator (covered 0)
+      ✘ an action left without keys offers Add and Reset with one separator between (covered 0)
+      ✘ the + menu sets Enter, Escape, Tab and Shift+Tab, labelled for the platform (covered 0)
+      ✘ the conflict line names every action already using the key (covered 0)
+    problemText.test.ts
+      ✘ a failed open names the file and what failed (covered 0)
+      ✘ a failed finish names the file and what failed (covered 0)
+      ✘ a failed save names the file and what failed (covered 0)
+      ✘ a failed take names the file and what failed (covered 0)
+      ✘ a failed reset names the file and what failed (covered 0)
+      ✘ a failed list says the list could not be read, with the cause (covered 0)
+      ✘ Git carries git's own message (covered 0)
+      ✘ UnknownPath names the path (covered 0)
+      ✘ WriteFailed names the path and the system's message (covered 0)
+      ✘ NotAFile says nothing was written because the path is not a regular file (covered 0)
+      ✘ a failed save says the file could not be saved, with the write's own cause (covered 0)
+      ✘ ReadFailed names the path and the system's message (covered 0)
+      ✘ Unsupported Binary says why the file cannot be shown (covered 0)
+      ✘ Unsupported NonUtf8 says why the file cannot be shown (covered 0)
+      ✘ Unsupported TooLarge says why the file cannot be shown (covered 0)
+      ✘ Unsupported LocalDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported RemoteDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported Symlink says why the file cannot be shown (covered 0)
+      ✘ Unsupported Submodule says why the file cannot be shown (covered 0)
+      ✘ a broken settings file names its line and column and what to do (covered 0)
+      ✘ a broken settings entry without a position names the error only (covered 0)
+      ✘ the other settings failures say the settings file could not be used and why (covered 0)
+      ✘ key problems name the action, the key and what yamt does instead (covered 0)
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ the unprocessed question carries WebStorm's title and buttons (covered 0)
+      ✘ the exit question says the listed files are not saved to disk (plan §2 #69) (covered 0)
+      ✘ the clash question names the key in the platform's words, its owner and the asking action (covered 0)
+      ✘ the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67) (covered 0)
+    saving.test.ts
+      ✘ save: Written sends the file text, marks it saved as the file text, takes git's list and records the format outcome (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): git lists only it, as resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): another file is resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): it is resolved and another is not (covered 0)
+      ✘ save without unsaved work formats but sends nothing (covered 0)
+      ✘ save goes on whatever formatting answers, and an editor without an outcome records none (covered 0)
+      ✘ a save while a save of the same file runs is ignored; typing during the write keeps the dot (covered 0)
+      ✘ claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended (covered 0)
+      ✘ a finish that ends while a save of the same file runs leaves that save's claim in place (covered 0)
+      ✘ a save whose formatting still runs when another write of the same file starts writes nothing (covered 0)
+      ✘ finish writes the Result as shown and marks it saved as shown (covered 0)
+      ✘ afterWrite takes git's list and says whether the write landed; a disk change gives its notice and reloads the file (covered 0)
+      ✘ a save refused because the file changed on disk marks nothing saved and shows the disk view (covered 0)
+      ✘ a failed save keeps the dot, is reported in words, and the next save clears it (covered 0)
+    servers.test.ts
+      ~ serverViews follow LanguageServers.onChange (covered 8)
+      ✘ the actions map onto start, stop and restart by name (covered 0)
+      ~ a shown log follows new lines; other logs and other screens show none (covered 101)
+      ~ leaving a shown log for files by any writer empties shownLog (covered 101)
+      ~ leaving a shown log for settings by any writer empties shownLog (covered 101)
+      ~ serving follows lsp's rule per path, whatever the other servers do (covered 125)
+      ~ a computed over serving turns true when the server starts (covered 125)
+    serverSetup.test.ts
+      ✓ start: the file list and the settings are in before detection starts (killed 33)
+      ~ start: no specs means no question and no servers (covered 47)
+      ~ start: a stored Start answers without a question and starts the served servers (covered 309)
+      ~ start: a stored Don't start answers without a question and starts nothing (covered 187)
+      ~ start: an answer stored for another repository does not count (covered 179)
+      ~ start: without an answer the question lists each found server with its folder, and the added ones (covered 201)
+      ~ start: Start in the question is stored and starts the servers (covered 309)
+      ~ start: Don't start in the question is stored and starts nothing (covered 187)
+      ~ start: Escape stores nothing, so the question comes back next run; the servers show stopped (covered 187)
+      ~ start: a Start whose write fails starts nothing (covered 187)
+      ~ start: another question already open stores nothing and leaves that question open (covered 186)
+      ~ start: as many added servers as found ones still bring the question (covered 201)
+      ~ start: servers added by hand alone are asked about too (covered 69)
+      ✘ start: a repository whose path is not UTF-8 has no root, so nothing at all (covered 0)
+      ✘ start: a failing host context is logged and asks nothing (covered 0)
+      ~ focus after a failed start look finds the servers, applies the stored answer and asks nothing (covered 309)
+      ~ focus after a failed start look never asks a repository without an answer (covered 187)
+      ✘ fixture mode (no host): the files and settings load; no servers, no question (covered 0)
+      ~ focus: the file list and the settings are refreshed before detection runs again (covered 309)
+      ~ focus: detection runs again without asking; running servers keep their run and a newly installed one starts (covered 312)
+      ~ focus: a repository still without an answer is never asked and keeps its servers stopped (covered 190)
+      ~ focus: an older detection that answers last is dropped (covered 189)
+      ~ focus: before the start set-up has finished, focus refreshes but does not detect (covered 186)
+      ✓ settings: answering Start applies at once; Don't start stops the running servers; Start again starts them (killed 1)
+      ~ settings: a Don't start whose write fails leaves the running servers running (covered 309)
+      ~ settings: a Start whose write fails leaves the servers stopped (covered 187)
+      ~ settings: Don't start while Don't start is stored keeps a server started by hand (covered 309)
+      ✓ settings: a server the user stopped stays stopped through Don't start and Start (killed 1)
+      ✓ settings: an added server is stored, appears after the found ones and starts under Start; Remove drops it (killed 2)
+      ✘ settings: Remove drops only the server at its index (covered 0)
+      ✘ the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped (covered 0)
+      ✘ the add form: a file type with a dot inside can never match a file, so it gives null (covered 0)
+    settings.test.ts
+      ✘ antialiasing is shown on Linux platforms only (covered 0)
+      ✘ before any read the servers entry is empty, and the first load sends it so (covered 0)
+      ✘ a loaded servers entry is in use and survives a theme change, sent back in current (covered 0)
+      ✘ setServerAnswer and setAddedServers send the settings in use and adopt the reply (covered 0)
+      ✘ a failed server answer is reported as a settings problem and keeps the settings (covered 0)
+      ✘ a load whose only difference is an answer is adopted (covered 0)
+      ✘ a load whose only difference is another answer is adopted (covered 0)
+      ✘ a load whose only difference is one more answer is adopted (covered 0)
+      ✘ a load whose only difference is an answer for another root is adopted (covered 0)
+      ✘ a load whose only difference is one server fewer is adopted (covered 0)
+      ✘ a load whose only difference is one server more is adopted (covered 0)
+      ✘ a load whose only difference is a shorter command is adopted (covered 0)
+      ✘ a load whose only difference is a command word is adopted (covered 0)
+      ✘ a load whose only difference is a longer command is adopted (covered 0)
+      ✘ a load whose only difference is fewer file types is adopted (covered 0)
+      ✘ a load whose only difference is a file type is adopted (covered 0)
+      ✘ a load whose only difference is the action a key belongs to is adopted (covered 0)
+      ✘ a load of the same servers entry keeps the settings in use (covered 0)
+    store.test.ts
+      ~ useAppStore throws before createAppStore, then returns the created store (covered 10)
+      ~ loading the list opens the first file the editor can show and logs file.loaded (covered 81)
+      ✘ an empty list opens nothing (covered 0)
+      ✘ a rejected list opens nothing, resolves, and shows an Unexpected list problem (covered 0)
+      ~ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (covered 81)
+      ~ re-clicking the shown file keeps the problem and lets a pending load win (covered 81)
+      ~ switching to an opened file wins over a load that resolves later and clears the problem (covered 81)
+      ~ a later open wins when the earlier load resolves last (covered 81)
+      ~ a stale failed open is logged but shows no problem (covered 81)
+      ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 81)
+      ~ a rejected load is an Unexpected problem and keeps the previous file (covered 81)
+      ~ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (covered 81)
+      ~ a finish of a file no longer shown does not switch files (covered 81)
+      ~ settings open and close; picking a file while they show closes them and shows it, the shown file too (covered 81)
+      ✘ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 0)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 81)
+      ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 81)
+      ~ a file the user opens while a finish runs wins over the next file, though still loading (covered 81)
+      ~ a file the user opens while a take runs wins over the next file, though still loading (covered 81)
+      ~ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 81)
+      ~ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (covered 81)
+      ~ a rejected finish is an Unexpected problem (covered 81)
+      ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 81)
+      ~ closing asks only with unsaved work and answers with the choice (covered 81)
+      ~ everything is resolved only when every listed file is (covered 81)
+      ~ reset of A replaces only A in place with a new object and keeps B opened (covered 81)
+      ~ a failed reset keeps the current file and names the path (covered 81)
+      ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 81)
+      ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 81)
+      ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 81)
+      ~ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 81)
+      ✘ a list of files the editor cannot show opens the first one's choice and loads nothing (covered 0)
+      ~ opening a file the editor cannot show describes it once and never loads it (covered 81)
+      ~ a failed describe is a failed open of that file and shows no choice (covered 81)
+      ✘ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 0)
+      ✘ a take keeps a problem about another file (covered 0)
+      ✘ a failed take keeps the list and the choice and names the file (covered 0)
+      ✘ reset of a taken choice forgets only its side at once and describes the file again (covered 0)
+      ✘ a failed describe after a reset is a failed open; opening the file again describes it (covered 0)
+      ✘ choices count toward everything resolved (covered 0)
+      ~ a take on the shown file opens the next unresolved file, wrapping to the top (covered 81)
+      ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 81)
+      ~ a list refresh changes the marks only: same file shown, same views, another file's problem kept (covered 81)
+      ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 81)
+      ✘ both side names are asked for once; a failure leaves none and logs a warning (covered 0)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: true) (covered 81)
+      ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 81)
+      ~ a change to a file that is not shown gives only its notice and its mark (covered 81)
+      ~ changes reported by the first list are start notices; the file then opens from the disk (covered 81)
+      ~ a newer change replaces the notice for its path; dismissNotice removes just one (covered 81)
+      ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 81)
+      ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 81)
+      ~ a change git could not stage is a warning notice, not a problem (covered 81)
+      ~ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 81)
+      ~ a take refused because the file changed on disk shows the change and the disk view (covered 81)
+      ~ a reset refused because the file changed on disk shows the change and the disk view (covered 81)
+      ~ finish, take and reset forward the disk version they are given (covered 81)
+      ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 81)
+      ✘ settings start with the start theme and the default keys, before any file is read (covered 0)
+      ✘ a load on focus applies a file changed by hand since the last load (covered 0)
+      ✘ start-up loads the file list and the settings; focus loads both again (covered 0)
+      ✘ a loaded file sets the theme and keys every opened file follows (covered 0)
+      ✘ a failed load or change keeps the settings in use and shows a settings problem (covered 0)
+      ✘ key problems in the file show one settings problem, which a clean read clears (covered 0)
+      ✘ setTheme sends the settings in use and applies the reply (covered 0)
+      ✘ setAntialiasing sends the settings in use with the new value and applies the reply (covered 0)
+      ✘ a load whose only difference is the antialiasing is adopted (covered 0)
+      ✘ a key another action holds asks; Move writes both changes in one call (covered 0)
+      ✘ Cancel on the clash question writes nothing (covered 0)
+      ✘ each key edit sends only the changed actions, as key texts (covered 0)
+      ✘ an identical load keeps the settings object and does not show the same key problems again (covered 0)
+      ✘ a key problem shown again replaces a settings failure the file no longer has (covered 0)
+      ✘ a move to a file with the same broken keys names the new path in the Keys problem (covered 0)
+      ✘ a load that started before a change and answers after it does not put the old file back (covered 0)
+      ✘ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 0)
+      ✘ moveSettings sends the path with the settings in use and uses the file found there (covered 0)
+      ✘ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (covered 0)
+      ✘ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 0)
+      ✘ a key press another handler already took does not toggle the list (covered 0)
+      ✘ while a question waits the key does nothing; once answered it toggles again (covered 0)
+      ✘ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 0)
+      ✘ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 0)
+      ✘ with two toggle-file-list keys, each one toggles the list (covered 0)
+      ✘ toggleCollapsing flips collapsing and keeps the choice in the window's storage (covered 0)
+      ~ a save while a reset of the same file runs is ignored (covered 81)
+      ~ a save while a finish of the same file runs is ignored (covered 81)
+      ~ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 81)
+      ~ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 81)
+      ~ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 81)
+    toolbarButtons.test.ts
+      ✘ Undo and Redo start hidden; toggling shows or hides a button and stores the hidden ones in toolbar order (covered 0)
+      ✘ a second start over the same storage keeps the choice, also once every button shows (covered 0)
+      ✘ stored ids yamt does not know are dropped and duplicates collapse (covered 0)
+      ✘ the toolbar order puts the collapse toggle after Next change and before the apply-all buttons (covered 0)
+      ✘ a hidden list stored before the collapse toggle existed shows it; hiding it stores it in toolbar order (covered 0)
+      ✘ a stored value that is not JSON hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a JSON object hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a number hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a string hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is null hides Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is an array holding a non-string hides Undo and Redo, as at first (covered 0)
+      ✘ a missing key hides Undo and Redo and writes nothing until a toggle (covered 0)
+      ✘ a storage that throws hides Undo and Redo, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    useMergeController.test.ts
+      ~ unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change (covered 81)
+      ~ without data or hosts there is no editor: no snapshot, nothing unsaved (covered 81)
+      ~ the editor is read-only as the view says, and is rebuilt when that changes (covered 81)
+      ~ the editor is built with the preferences in use and follows a change without a rebuild (covered 81)
+      ~ a preferences change before the file loaded reaches the editor built later (covered 81)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+      ✘ flipping collapsing before the file loaded reaches no editor and throws nothing (covered 0)
+      ~ an editor built while collapsing is off is told so, and a file loaded later follows the current choice (covered 81)
+      ~ flipping collapsing tells every live editor once, and a destroyed one never (covered 81)
+      ~ a preferences change never resets collapsing (covered 81)
+      ~ problems: the editor's counts when built, then each change it reports; null once it is gone (covered 81)
+      ~ summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change (covered 81)
+      ✘ problems and format are null while no editor is built (covered 0)
+      ~ format answers with the outcome of the editor in use, a rebuilt one after a rebuild (covered 81)
+      ~ the editor gets the language servers in use and is rebuilt when they change (covered 81)
+    views.test.ts
+      ✘ deleted on side null with a {"kind":"Stages","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"Disk","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"DiskNotText","found":"Binary"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"Stages","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side local with a {"kind":"Disk","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"DiskNotText","found":"Deleted"} middle is editable: false (covered 0)
+    windowStorage.test.ts
+      ✘ a missing key gives the fallback and writes nothing (covered 0)
+      ✘ a stored value is read through the caller's read (covered 0)
+      ✘ a change is written through the caller's write before the assignment returns (covered 0)
+      ✘ a storage that throws gives the fallback and logs under the caller's event name (covered 0)
+
+[Survived] StringLiteral
+src/ipc/domain.ts:280:62
+-     return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
++     return { ...sides, diskVersion: toDiskVersion(diskVersion, "") };
+Tests ran:
+    describeFile and takeSide send their arguments and return the app's answer
+
+
+[NoCoverage] BlockStatement
+src/ipc/index.ts:67:80
+-   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
+-     return IN_APP ? guardWindowClose(mayClose) : Promise.resolve();
+-   }
++   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {}
+
+[Survived] StringLiteral
+src/ipc/index.ts:63:54
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "";
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:63:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = true;
+Ran all tests for this mutant.
+
+[Survived] EqualityOperator
+src/ipc/index.ts:63:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE !== "tauri";
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:63:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = false;
+Ran all tests for this mutant.
+
+[NoCoverage] BlockStatement
+src/ipc/tauri.ts:99:17
+-       sideNames() {
+-         return commands.sideNames();
+-       },
++       sideNames() {},
+
+[NoCoverage] StringLiteral
+src/lsp/internal/added.ts:12:51
+-       const base = program.split(/[/\\]/).at(-1) ?? "";
++       const base = program.split(/[/\\]/).at(-1) ?? "Stryker was here!";
+
+[Survived] BlockStatement
+src/lsp/internal/detect.ts:47:30
+-     if (file?.kind !== "Text") {
+-       return null;
+-     }
++     if (file?.kind !== "Text") {}
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 8 more tests!
+
+
+[Survived] BlockStatement
+src/lsp/internal/detect.ts:53:11
+-     } catch {
+-       return null;
+-     }
++     } catch {}
+Tests ran:
+    TypeScript: not detected without a config, without the package, or with no version
+    package manager: the project's field beats a lock file; a malformed package.json has none
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:72:41
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({ kind: "", searched: [] }));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] ObjectLiteral
+src/lsp/internal/detect.ts:72:33
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({}));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:72:63
+-       .catch((): ProgramFound => ({ kind: "NotFound", searched: [] }));
++       .catch((): ProgramFound => ({ kind: "NotFound", searched: ["Stryker was here"] }));
+Tests ran:
+    a rejecting lookup means not found
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:147:40
+-     const major = /^\d+/.exec(version ?? "")?.[0];
++     const major = /^\d+/.exec(version ?? "Stryker was here!")?.[0];
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:43:10
+-     return file !== undefined && file.kind !== "Missing" && file.kind !== "Folder";
++     return true && file.kind !== "Missing" && file.kind !== "Folder";
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: files with no package.json above them are served by no preset
+  and 46 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:47:7
+-     if (file?.kind !== "Text") {
++     if (false) {
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:77:10
+-     return found.kind === "Found" && found.place === "Project";
++     return true && found.place === "Project";
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:96:39
+-         return { configs: [], packages: [] };
++         return { configs: [], packages: ["Stryker was here"] };
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] ArrayDeclaration
+src/lsp/internal/detect.ts:96:25
+-         return { configs: [], packages: [] };
++         return { configs: ["Stryker was here"], packages: [] };
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:97:5
+-       case "typescript":
+-         return { configs: look.configs, packages: [look.package] };
++       case "typescript":
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+src/lsp/internal/detect.ts:148:7
+-     if (version === null || major === undefined || !hasConfig(project, look.configs)) {
++     if (false || major === undefined || !hasConfig(project, look.configs)) {
+Tests ran:
+    project folders: the nearest package.json walking up, the file's own folder first
+    project folders: a file at the root belongs to the root project
+    project folders: two files in one project check it once
+  and 41 more tests!
+
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:23:22
+-   const PACKAGE_JSON = "package.json";
++   const PACKAGE_JSON = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/detect.ts:24:20
+-   const ROOT_LABEL = "repository root";
++   const ROOT_LABEL = "";
+Ran all tests for this mutant.
+
+[NoCoverage] ConditionalExpression
+src/lsp/internal/server.ts:95:7
+-         default: {
+-           const _exhaustive: never = run;
+-           return _exhaustive;
+-         }
++         default:
+
+[NoCoverage] BlockStatement
+src/lsp/internal/server.ts:95:16
+-         default: {
+-           const _exhaustive: never = run;
+-           return _exhaustive;
+-         }
++         default: {}
+
+[Survived] ObjectLiteral
+src/lsp/internal/spec.ts:5:48
+-   export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
++   export const PROGRAM_FOLDERS: ProgramFolders = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/lsp/internal/spec.ts:5:60
+-   export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
++   export const PROGRAM_FOLDERS: ProgramFolders = { project: [""], home: [] };
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/spec.ts:5:88
+-   export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
++   export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: ["Stryker was here"] };
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/lsp/internal/spec.ts:5:59
+-   export const PROGRAM_FOLDERS: ProgramFolders = { project: ["node_modules/.bin"], home: [] };
++   export const PROGRAM_FOLDERS: ProgramFolders = { project: [], home: [] };
+Ran all tests for this mutant.
+
+Ran 6.42 tests per mutant on average.
+-------------|------------------|----------|-----------|------------|----------|----------|
+             | % Mutation score |          |           |            |          |          |
+File         |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-------------|--------|---------|----------|-----------|------------|----------|----------|
+All files    |  95.57 |   96.30 |      621 |         4 |         24 |        5 |        1 |
+ ipc         |  96.57 |   97.52 |      197 |         0 |          5 |        2 |        0 |
+  domain.ts  |  99.19 |   99.19 |      122 |         0 |          1 |        0 |        0 |
+  index.ts   |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
+  tauri.ts   |  98.68 |  100.00 |       75 |         0 |          0 |        1 |        0 |
+ lsp         |  95.11 |   95.75 |      424 |         4 |         19 |        3 |        1 |
+  internal   |  95.11 |   95.75 |      424 |         4 |         19 |        3 |        1 |
+   added.ts  |  95.65 |  100.00 |       21 |         1 |          0 |        1 |        0 |
+   detect.ts |  92.54 |   92.54 |      183 |         3 |         15 |        0 |        0 |
+   server.ts |  98.98 |  100.00 |      195 |         0 |          0 |        2 |        1 |
+   spec.ts   |  86.21 |   86.21 |       25 |         0 |          4 |        0 |        0 |
+-------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m12:06:55 (280403) INFO MutationTestExecutor[39m Done in 33 seconds.

@@ -1,0 +1,892 @@
+commit 3e4fb3f0ef6eceb9087f71b1e6aa9d14dcf22b07
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-15 12:02:33 +0200
+
+    chore(dev): lsp smoke repo grows a project per language; pinned servers into the cache (row 3, #72)
+
+diff --git a/.omp/run/notes/PresetsSmokeRepo.md b/.omp/run/notes/PresetsSmokeRepo.md
+new file mode 100644
+index 0000000..d6d435a
+--- /dev/null
++++ b/.omp/run/notes/PresetsSmokeRepo.md
+@@ -0,0 +1,146 @@
++The smoke repository is rebuilt: one project per language, each with its conflicted file and its seeds, and a new `scripts/lsp-servers.sh` that installs the pinned servers into the cache. One thing will fail when you run it: `just map-check` (PM6), because the project map does not name `scripts/lsp-servers.sh` yet. The map is outside my files, so the exact lines are under deviations below.
++
++```
++summary
++  scripts/lsp-repo.sh now builds web/ (2 .ts conflicts plus a conflicted src/App.vue), biome/, py/, rs/ (two-crate Cargo
++  workspace), go/, php/ and c/: 9 conflicts. Each file has one seeded problem per server and one badly formatted line
++  outside its conflict. --servers no longer writes the settings file (add_ruff_to_settings and the jq need are gone).
++  New scripts/lsp-servers.sh (sourced, or run alone; `--path` prints the servers folder) installs pinned versions once
++  into ~/.cache/yamt/<tool>-<version>:
++    typescript-language-server 6.0.2, intelephense 1.18.5, pyright 1.1.414, @biomejs/biome 2.5.15,
++    @vue/typescript-plugin 3.3.13, gopls v0.23.0, rust-analyzer 2026-10-12 (release binary), static PHP 8.4.23,
++    phpactor 2026.10.07.0, composer 2.10.3, phpstan 2.3.1, phpcs 4.0.4; in py/.venv via uv: ruff 0.17.0, ty 0.0.88,
++    basedpyright 1.40.2.
++  PATH line: PATH=/home/wds/.cache/yamt/servers-path:$PATH   (PHP runs here, so Phpactor is installed)
++
++files_changed
++  scripts/lsp-repo.sh
++  scripts/lsp-servers.sh (new)
++  .vscode/tasks.json
++
++tests_added
++  none: the brief's acceptance is command evidence; these are shell scripts with no test harness.
++
++smoke_evidence
++  How I ran it: the worktree has no frontend/node_modules. I ran the worktree scripts through
++  /tmp/yamt-presets-run/{scripts -> worktree scripts, frontend/node_modules -> /home/wds/Projects/yamt/frontend/node_modules}
++  and removed that folder afterwards.
++
++  1. lsp-repo.sh /tmp/yamt-test-presets-a → exit 0
++       lsp-repo: /tmp/yamt-test-presets-a is mid-merge; conflicted files:
++       biome/src/index.js
++       c/src/main.c
++       go/calc/calc.go
++       php/src/Stats.php
++       py/api/stats.py
++       rs/core/src/lib.rs
++       web/src/App.vue
++       web/src/greet.ts
++       web/src/math.ts
++     git -C /tmp/yamt-test-presets-a ls-files -u | cut -f2 | sort -u → the same 9 paths.
++     lsp-repo.sh --servers /tmp/yamt-test-presets-b → exit 0
++       lsp-servers: typescript-language-server 6.0.2, intelephense 1.18.5, pyright 1.1.414, biome 2.5.15, @vue/typescript-plugin 3.3.13, gopls v0.23.0, rust-analyzer 2026-10-12, php 8.4.23 (runs: true), phpactor 2026.10.07.0, composer 2.10.3, phpstan 2.3.1, phpcs 4.0.4; in project venvs: ruff 0.17.0, ty 0.0.88, basedpyright 1.40.2
++       lsp-servers: launch yamt with PATH=/home/wds/.cache/yamt/servers-path:$PATH
++       lsp-repo: /tmp/yamt-test-presets-b is mid-merge; conflicted files:
++       (the same 9 paths); ls-files -u | cut -f2 | sort -u → the same 9 paths.
++
++  2. Version answers (servers-path, or the project's bin folder in presets-b):
++       typescript-language-server: 6.0.2
++       pyright: pyright 1.1.414   (pyright-langserver has no version flag: "Connection input stream is not set")
++       rust-analyzer: rust-analyzer 0.3.3081-standalone
++       php: PHP 8.4.23 (cli) (built: Jul  7 2026 05:22:53) (NTS gcc 14.2.0)
++       phpactor: Phpactor 2026.10.07.0
++       composer: Composer version 2.10.3 2026-08-27 13:34:23
++       gopls version: golang.org/x/tools/gopls v0.23.0
++       intelephense: no version flag (`--version` crashes with a parse error); package.json says 1.18.5
++       py/.venv/bin: ruff 0.17.0 / ty 0.0.88 / basedpyright 1.40.2
++       biome/node_modules/.bin/biome: Version: 2.5.15
++       web/node_modules: @vue/typescript-plugin 3.3.13, vue 3.5.43 (package.json)
++       php/vendor/bin: PHPStan - PHP Static Analysis Tool 2.3.1 / PHP_CodeSniffer version 4.0.4 (stable)
++
++  3. Seeds. Run on a third --servers repo (/tmp/yamt-test-presets-c) after `git checkout --ours` on the conflicted
++     files, because the tools cannot parse marker files:
++       tsc --noEmit -p web: web/src/math.ts(14,14): error TS2322: Type 'string' is not assignable to type 'number'.
++       oxlint: src/math.ts:8:3: error eslint(no-debugger): `debugger` statement is not allowed
++       oxfmt --check: src/math.ts
++       ruff check: api/stats.py:1:8: F401 [*] `os` imported but unused
++       ruff format --diff: -totals={"a":1,"b":2} / +totals = {"a": 1, "b": 2}
++       ty check: api/stats.py:11:14: error[invalid-assignment] Object of type `Literal["three"]` is not assignable to `int`
++       basedpyright: py/api/stats.py:11:14 - error: Type "Literal['three']" is not assignable to declared type "int"
++       biome lint: src/index.js:4:3 lint/suspicious/noDebugger … × This is an unexpected use of the debugger statement.
++       biome format: - export·const···spaced={a:1,b:2} / + export·const·spaced·=·{·a:·1,·b:·2·};
++       gofmt -l: calc/calc.go
++       go vet: vet: calc/calc.go:9:17: cannot use "three" (untyped string constant) as int value in variable declaration
++       rustfmt --check: -pub fn spaced()->i32{1} / +pub fn spaced() -> i32 { / +    1 / +}
++       rust-analyzer diagnostics rs (its own diagnostics, no cargo check): … rs/core/src/lib.rs: Error RustcHardError("E0061") from LineCol { line: 7, col: 9 } …: expected 2 arguments, found 1
++       clang-format --dry-run: c/src/main.c:7:4: warning: code should be clang-formatted [-Wclang-format-violations]
++       clangd --check=c/src/main.c: Compile command from CDB is: [/tmp/yamt-test-presets-c/c] /usr/bin/cc -std=c17 -c …
++                                    E[…] [-Wint-conversion] Line 10: incompatible pointer to integer conversion initializing 'int' with an expression of type 'char[6]'
++                                    All checks completed, 1 errors
++       phpstan analyse: php/src/Stats.php:16:Function undefined_helper not found. [identifier=function.notFound]
++                        (--error-format=json stdout starts with `{"totals":…`, no warning before it)
++       phpcs (PSR12): php/src/Stats.php:19:16: error - Expected 0 spaces after opening parenthesis; 1 found (and 7 more on line 19)
++     What the final real-app check must see where there is no command line:
++       - Vue (@vue/typescript-plugin): in web/src/App.vue, `const count: number = "three";` (line 4) underlined as a type error.
++       - PHP: because PHP runs here, Phpactor is the PHP server, not Intelephense ("first found"). Expect PHPStan's
++         "Function undefined_helper not found" on Stats.php line 16 and phpcs's PSR12 errors on line 19 through
++         Phpactor. Intelephense's "undefined function" on line 16 shows only when Phpactor is absent.
++
++  4. uvx --from shellcheck-py shellcheck -x scripts/lsp-repo.sh scripts/lsp-servers.sh (ShellCheck 0.11.0) → exit 0,
++     no output. shellcheck is not installed here; uvx ran it without putting anything in ~/.local/bin.
++     bash -n on both → exit 0. .vscode/tasks.json parses as JSON.
++
++  5. sha256sum plus `ls -la --time-style=full-iso` of ~/go/bin, ~/.cargo/bin and ~/.local/bin, saved before and after:
++       settings.json 03de9d5f1fab92d3c38cceb09c1b37d3370e8fbc47f969adc78ab7c9db9ffe22, the same before and after.
++       ~/go/bin (gopls dated 2026-06-26), ~/.cargo/bin and ~/.local/bin entries: identical.
++       The only diff line is the `..` entry of ~/.cargo/bin, i.e. ~/.cargo itself: its timestamp became 11:59:30. That
++       is the time of my evidence `cargo check` in rs/ (cargo's package cache in ~/.cargo), not the scripts. No
++       ~/.cargo/bin entry changed.
++
++deviations_from_brief
++  - Project map needs updating (not my file). `.omp/skills/project-map/SKILL.md` line 54 is out of date, and PM6
++    needs lsp-servers.sh named. Replace line 54 with:
++      scripts/lsp-repo.sh     `[--servers] <dir>`: language-server smoke repository, one project per ecosystem left mid-merge (web/ with oxlint, oxfmt, TypeScript 5.9 and vue linked from frontend/node_modules, 3 conflicts incl. App.vue; biome/, py/, rs/ (Cargo workspace), go/, php/, c/ with 1 conflict each; one problem per server and one badly formatted line outside the conflicts); with the flag, the pinned servers from lsp-servers.sh, plus the Vue plugin, Biome, py/.venv (uv: ruff, ty, basedpyright) and php/vendor (PHPStan, phpcs); VS Code tasks "lsp: new conflict project" / "lsp: open in yamt"
++      scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh
++    The git-sandbox.sh entry ("sourced by conflict-repo.sh and golden-repo.sh") could also add lsp-repo.sh and
++    lsp-servers.sh, which already source it.
++  - Without --servers the network-free repository has no @vue/typescript-plugin, biome/node_modules, py/.venv or
++    php/vendor (the same as ruff and typescript-language-server before). So that variant shows "Vue (not installed)",
++    and Biome is not detected at all. web/package.json lists the plugin only with --servers, as it did for
++    typescript-language-server.
++  - typescript-language-server now lives only in servers-path, as a program found on PATH. It is no longer linked
++    into web/node_modules/.bin or listed in web/package.json.
++  - web/tsconfig.json include is now ["src", "src/**/*.vue"] (was ["src"]), the usual Vue layout. `tsc --noEmit -p web`
++    still reports only the math.ts seed.
++  - PHP is 8.4.23, the newest 8.4 static build, not 8.5.8: I picked 8.4 as the lower-risk choice for Phpactor's
++    dependencies. That is my judgement, not checked.
++  - PHPStan and phpcs are installed once with composer into ~/.cache/yamt/php-tools-…, then copied (`cp -a`) into
++    php/vendor, not linked. A link would put their real path outside the repository, which files.rs treats as Missing.
++    Composer's home and cache are inside ~/.cache/yamt.
++  - PHPStan's turbo-ext folder is removed from the cached install. The static PHP cannot load extensions ("Dynamic
++    loading not supported"), and PHPStan printed a startup warning on stdout ahead of its JSON. After removing the
++    folder, phpstan's JSON output starts clean.
++  - lsp-servers.sh has a `--path` flag (prints the servers folder). The "lsp: open in yamt" task uses it to prepend to
++    PATH, so XDG_CACHE_HOME is respected without VS Code substituting `${…}` itself.
++  - lsp-repo.sh writes files from here-documents (`write <path> <<EOF`) instead of printf format strings. That keeps
++    the seeds readable and avoids shellcheck SC2059 (a variable used as a printf format).
++  - Added `# shellcheck source=…` lines above the `source` calls; scripts/third-party-licenses.sh already uses
++    shellcheck directives.
++  - The script requires `uname -sm` = "Linux x86_64": the pinned rust-analyzer and PHP builds are x86_64 Linux only.
++
++open_risks
++  - scripts/lsp-servers.sh `install_gopls`: `go install` uses the default Go caches (~/go/pkg/mod, ~/.cache/go-build).
++    These are not on the off-limits list and ~/go/bin is untouched, but they are user folders.
++  - scripts/lsp-servers.sh `install_python_tools`: uv uses ~/.cache/uv. basedpyright's wheel pulls a Node runtime
++    wheel, so the first --servers run downloads it.
++  - scripts/lsp-repo.sh, App.vue and the web/ links: whether the TypeScript server actually loads
++    @vue/typescript-plugin from the per-entry links (real path in the cache) is untested here. That belongs to the
++    real-app check and the detect-3 build's plugin wiring.
++  - scripts/lsp-repo.sh, the php/ project: with PHP present, the PHP server is Phpactor. Intelephense's
++    undefined-function underline is visible only if servers-path lacks phpactor, e.g. after deleting
++    ~/.cache/yamt/servers-path/phpactor.
++  - scripts/lsp-repo.sh, the rs/ project: rust-analyzer creates rs/target and rs/Cargo.lock when it loads.
++    rs/.gitignore covers target/, but Cargo.lock appears as an untracked file.
++
++Checks for Main: just map-check (after the project-map update), just check.
++```
+\ No newline at end of file
+diff --git a/.omp/skills/project-map/SKILL.md b/.omp/skills/project-map/SKILL.md
+index 40fcda7..d25ec72 100644
+--- a/.omp/skills/project-map/SKILL.md
++++ b/.omp/skills/project-map/SKILL.md
+@@ -51,8 +51,9 @@ scripts/arch-check.sh    PM1: cargo tree edges, std::fs/process grep in merge-co
+ scripts/map-check.sh     PM6 (`just map-check`): every source file is named in this map
+ scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
+ scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
+-scripts/lsp-repo.sh     `[--servers] <dir>`: language-server smoke repository (a `web/` project with oxlint, oxfmt and TypeScript 5.9 linked from frontend/node_modules, 2 .ts conflicts; a root Python part, 1 .py conflict; one problem per server outside the conflicts; with the flag, typescript-language-server and ruff installed once into the user's cache, and ruff added by hand to the yamt settings file in use); VS Code tasks "lsp: new conflict project" / "lsp: open in yamt"
+-scripts/git-sandbox.sh   sourced by conflict-repo.sh and golden-repo.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
++scripts/lsp-repo.sh     `[--servers] <dir>`: language-server smoke repository, one project per ecosystem left mid-merge (web/ with oxlint, oxfmt, TypeScript 5.9 and vue linked from frontend/node_modules, 3 conflicts incl. App.vue; biome/, py/, rs/ (Cargo workspace), go/, php/, c/ with 1 conflict each; one problem per server and one badly formatted line outside the conflicts); with the flag, the pinned servers from lsp-servers.sh, plus the Vue plugin, Biome, py/.venv (uv: ruff, ty, basedpyright) and php/vendor (PHPStan, phpcs); VS Code tasks "lsp: new conflict project" / "lsp: open in yamt"
++scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh
++scripts/git-sandbox.sh   sourced by conflict-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
+ scripts/third-party-licenses.sh  `just third-party-licenses`: THIRD_PARTY_LICENSES.txt from `cargo metadata` + `pnpm licenses list --prod` + licence files on disk (jq);
+                     `ubuntu-versions` appends the AppImage's library versions and the GNU GPL/LGPL texts (Linux job); both release jobs regenerate and `git diff --exit-code` it
+ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
+diff --git a/.vscode/tasks.json b/.vscode/tasks.json
+index 9310120..1db001f 100644
+--- a/.vscode/tasks.json
++++ b/.vscode/tasks.json
+@@ -73,7 +73,7 @@
+     },
+     {
+       "label": "lsp: new conflict project",
+-      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: 2 conflicted .ts files in web/ (oxlint and TypeScript underline problems, oxfmt formats) and a conflicted api/stats.py (ruff underlines problems and formats). math.ts and stats.py each have problems and a badly formatted line outside the conflicts. Installs typescript-language-server and ruff once into ~/.cache/yamt (needs the network the first time), and adds ruff (.venv/bin/ruff server, for py and pyi) to your yamt settings' servers added by hand unless it is there.",
++      "detail": "Replace /tmp/yamt-lsp-project with a fresh repo in the middle of a merge: one project per language (web/ with TypeScript, Vue, oxlint and oxfmt; biome/; py/ with ruff, ty and basedpyright; rs/ for rust-analyzer; go/ for gopls; php/ for Phpactor or Intelephense; c/ for clangd), each with a conflicted file and, outside the conflicts, one problem per server and a badly formatted line. Installs the pinned servers once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh) and prints the PATH line yamt runs with. Your settings file is not touched.",
+       "type": "shell",
+       "command": "rm -rf /tmp/yamt-lsp-project && scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project",
+       "problemMatcher": [],
+@@ -84,9 +84,9 @@
+     },
+     {
+       "label": "lsp: open in yamt",
+-      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-lsp-project (made first if missing). The first time, yamt asks whether to start the project's language servers; the answer is kept for that folder (Settings → Language servers changes it). Ctrl+S formats with oxfmt (.ts) or ruff (.py), then saves. Running it again closes the open yamt window and rebuilds.",
++      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-lsp-project (made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so the installed servers are found. The first time, yamt asks whether to start the project's language servers; the answer is kept for that folder (Settings → Language servers changes it). Ctrl+S formats with the project's formatter, then saves. Running it again closes the open yamt window and rebuilds.",
+       "type": "shell",
+-      "command": "test -d /tmp/yamt-lsp-project/.git || scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project; just app --repo /tmp/yamt-lsp-project; echo \"yamt exit status: $?\"",
++      "command": "test -d /tmp/yamt-lsp-project/.git || scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-lsp-project; echo \"yamt exit status: $?\"",
+       "problemMatcher": [],
+       "presentation": { "panel": "dedicated", "reveal": "always" },
+       "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+diff --git a/scripts/lsp-repo.sh b/scripts/lsp-repo.sh
+index bd63ca4..dda7575 100755
+--- a/scripts/lsp-repo.sh
++++ b/scripts/lsp-repo.sh
+@@ -1,22 +1,36 @@
+ #!/usr/bin/env bash
+ # Usage: scripts/lsp-repo.sh [--servers] <dir>
+-# Builds a git repo in <dir> left mid-merge (local merging remote) for the language-server smoke test, with three
+-# conflicted files. The project folder web/ has package.json, .oxlintrc.json, .oxfmtrc.json, tsconfig.json and
+-# pnpm-lock.yaml, and two conflicted .ts files; outside the conflicts, math.ts has one problem for each server: a
+-# `debugger;` (oxlint), a string given to a number (TypeScript) and a badly formatted line (oxfmt formats it on
+-# Save). The Python part sits at the root: pyproject.toml (ruff checks its F rules) and api/stats.py, conflicted;
+-# outside the conflict, an unused import (ruff's lint) and a badly formatted line (ruff formats it on Save).
+-# After the merge, web/node_modules gets links into this checkout's frontend/node_modules: oxlint, oxfmt and
+-# typescript (5.9) with their .bin entries. typescript's package.json is a copy: yamt's project_files reads
+-# nothing whose real path is outside the repository (crates/lsp-host/src/files.rs), and detection reads the
+-# version there. Without --servers there is no typescript-language-server and no .venv/bin/ruff: TypeScript shows
+-# "Not installed" with its install hint, and ruff cannot start. With it, typescript-language-server and ruff
+-# (pinned below) are installed once into the user's cache (npm, python3 -m venv; the network is needed the first
+-# time) and linked into web/node_modules/.bin and .venv/bin. yamt finds ruff only as a server added by hand, so
+-# --servers also adds `.venv/bin/ruff server` for py/pyi to the yamt settings file in use (jq), unless it is
+-# there. Prints the conflicted paths. Uses no user or system git config (risk RK19).
++# Builds a git repo in <dir> left mid-merge (local merging remote) for the real-app check of yamt's language servers
++# (docs/plan.md §2 #70, #72): one project per ecosystem, each with one conflicted file (web/ has three). Outside the
++# conflicts each file holds one problem per server that serves it and, where a formatter runs, one badly formatted
++# line; every seed is reported while typing, without saving.
++# - web/: package.json, .oxlintrc.json, .oxfmtrc.json, tsconfig.json, pnpm-lock.yaml. src/math.ts: a `debugger;`
++#   (oxlint), a string given to a number (TypeScript), a badly formatted line (oxfmt); src/greet.ts; src/App.vue
++#   (`<script setup lang="ts">`): a string given to a number (TypeScript through @vue/typescript-plugin).
++# - biome/: package.json, biome.json. src/index.js: a `debugger;` (Biome's noDebugger), a badly formatted line.
++# - py/: pyproject.toml with [tool.ruff.lint], [tool.ty], [tool.basedpyright]. api/stats.py: an unused import (ruff),
++#   a string given to an int (ty and basedpyright), a badly formatted line (ruff).
++# - rs/: a Cargo workspace of core and app. core/src/lib.rs: a call with one argument too few (rust-analyzer's own
++#   diagnostic; it runs without `cargo check`), a badly formatted line (rustfmt).
++# - go/: go.mod, package calc. calc/calc.go: a string given to an int (gopls), a badly formatted line (gofmt).
++# - php/: composer.json, phpstan.neon, phpcs.xml (PSR12). src/Stats.php: an undefined function (Intelephense, and
++#   PHPStan through Phpactor), a badly formatted line (phpcs through Phpactor).
++# - c/: compile_commands.json (absolute paths of <dir>), .clang-format. src/main.c: `int count = "three";` (clangd),
++#   a badly formatted line (clang-format through clangd).
++# After the merge, web/node_modules gets links into this checkout's frontend/node_modules: oxlint, oxfmt, typescript
++# (5.9) and vue, with their .bin entries. The package.json files are copies: yamt reads nothing whose real path is
++# outside the repository (crates/lsp-host/src/files.rs), and detection reads versions there.
++# Without --servers no server is installed: TypeScript and Vue show "not installed" with their hints, and biome/,
++# py/.venv and php/vendor are missing. With it, scripts/lsp-servers.sh installs the pinned servers once into the
++# user's cache (the network is needed the first time) and prints the PATH line to launch yamt with; this script then
++# links @vue/typescript-plugin into web/node_modules and Biome into biome/node_modules/.bin, makes py/.venv (uv) with
++# ruff, ty and basedpyright, and, when PHP runs, copies PHPStan and phpcs into php/vendor.
++# Prints the conflicted paths. Uses no user or system git config (risk RK19).
+ set -euo pipefail
++# shellcheck source=scripts/git-sandbox.sh
+ source "$(dirname "$0")/git-sandbox.sh"
++# shellcheck source=scripts/lsp-servers.sh
++source "$(dirname "$0")/lsp-servers.sh"
+ 
+ with_servers=false
+ if [ "${1:-}" = "--servers" ]; then
+@@ -26,101 +40,340 @@ fi
+ [ $# -eq 1 ] || die "usage: $0 [--servers] <dir>"
+ dir=$1
+ modules="$(cd "$(dirname "$0")/.." && pwd)/frontend/node_modules"
+-expected_conflicts=3
+-tsls_version=6.0.2
+-tsls_home="${XDG_CACHE_HOME:-$HOME/.cache}/yamt/typescript-language-server-$tsls_version"
+-tsls_program="$tsls_home/node_modules/.bin/typescript-language-server"
+-ruff_version=0.17.0
+-ruff_home="${XDG_CACHE_HOME:-$HOME/.cache}/yamt/ruff-$ruff_version"
+-ruff_program="$ruff_home/bin/ruff"
+-# ruff as yamt's settings list it: a command with a slash is taken from the repository root.
+-ruff_server='{"command":[".venv/bin/ruff","server"],"fileTypes":["py","pyi"]}'
++expected_conflicts=9
+ 
+ for tool in oxlint oxfmt tsc; do
+     [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
+ done
++[ -e "$modules/vue/package.json" ] || die "missing $modules/vue; run pnpm -C frontend install"
+ require_empty_dir "$dir"
+ isolate_git_config
+ 
+-# Installs typescript-language-server $tsls_version into $tsls_home unless it is there already.
+-install_typescript_server() {
+-    [ -x "$tsls_program" ] && return
+-    command -v npm >/dev/null || die "npm is needed to install typescript-language-server"
+-    mkdir -p "$tsls_home"
+-    npm install --prefix "$tsls_home" --no-save --no-audit --no-fund --loglevel=error \
+-        "typescript-language-server@$tsls_version" >/dev/null ||
+-        die "could not install typescript-language-server $tsls_version into $tsls_home"
+-    [ -x "$tsls_program" ] || die "npm finished but $tsls_program is missing"
+-}
+-
+-# Installs ruff $ruff_version into $ruff_home (a Python virtual environment) unless it is there already.
+-install_ruff() {
+-    [ -x "$ruff_program" ] && return
+-    command -v python3 >/dev/null || die "python3 is needed to install ruff"
+-    python3 -m venv "$ruff_home" || die "could not make a Python virtual environment in $ruff_home"
+-    "$ruff_home/bin/python" -m pip install --quiet --disable-pip-version-check "ruff==$ruff_version" ||
+-        die "could not install ruff $ruff_version into $ruff_home"
+-    [ -x "$ruff_program" ] || die "pip finished but $ruff_program is missing"
+-}
+-
+-# Adds $ruff_server to the servers added by hand in the yamt settings file in use, unless it is there: the
+-# default file, or the one settings-location names (crates/settings/src/places.rs; the Linux config folder).
+-add_ruff_to_settings() {
+-    local folder="${XDG_CONFIG_HOME:-$HOME/.config}/yamt" file updated
+-    file="$folder/settings.json"
+-    if [ -f "$folder/settings-location" ]; then
+-        file=$(head -n 1 "$folder/settings-location")
+-        [[ "$file" = /* ]] || die "$folder/settings-location does not name an absolute path"
+-    fi
+-    if [ ! -e "$file" ]; then
+-        mkdir -p "$(dirname "$file")"
+-        printf '{}\n' >"$file"
+-    fi
+-    updated=$(jq --argjson server "$ruff_server" '
+-        .languageServers.repositories //= {}
+-        | .languageServers.added //= []
+-        | if any(.languageServers.added[]; . == $server) then . else .languageServers.added += [$server] end
+-    ' "$file") || die "could not read $file as JSON"
+-    if [ "$updated" != "$(jq . "$file")" ]; then
+-        printf '%s\n' "$updated" >"$file"
+-        echo "lsp-repo: added ruff (.venv/bin/ruff server, py/pyi) to the servers added by hand in $file"
+-    fi
+-}
+-
+ if $with_servers; then
+-    command -v jq >/dev/null || die "jq is needed to add ruff to yamt's settings"
+-    install_typescript_server
+-    install_ruff
++    install_servers
+ fi
+ 
+-# $1: path in the repo, $2: printf format giving the content.
++# $1: path in the repo; the content comes on standard input.
+ write() {
+     mkdir -p "$(dirname "$dir/$1")"
+-    printf "$2" >"$dir/$1"
++    cat >"$dir/$1"
+     repo_git add -- "$1"
+ }
+ 
+-# $1: side (base, local or remote). The two .ts files and the .py file, each with a change on that side in the
+-# middle.
++# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
++link_package() {
++    mkdir -p "$2"
++    for entry in "$1"/*; do
++        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
++    done
++    rm "$2/package.json"
++    cp "$1/package.json" "$2/package.json"
++}
++
++write_web_project() {
++    local plugin_dependency=""
++    if $with_servers; then
++        plugin_dependency=",
++    \"@vue/typescript-plugin\": \"$vue_plugin_version\""
++    fi
++    write web/package.json <<EOF
++{
++  "name": "lsp-smoke",
++  "private": true,
++  "dependencies": {
++    "vue": "*"
++  },
++  "devDependencies": {
++    "oxfmt": "*",
++    "oxlint": "*",
++    "typescript": "5.9.3"$plugin_dependency
++  }
++}
++EOF
++    printf "lockfileVersion: '9.0'\n" | write web/pnpm-lock.yaml
++    write web/.oxlintrc.json <<'EOF'
++{
++  "rules": { "no-debugger": "error" }
++}
++EOF
++    write web/.oxfmtrc.json <<'EOF'
++{
++  "printWidth": 100
++}
++EOF
++    write web/tsconfig.json <<'EOF'
++{
++  "compilerOptions": { "strict": true, "noEmit": true },
++  "include": ["src", "src/**/*.vue"]
++}
++EOF
++}
++
++write_other_projects() {
++    write biome/package.json <<EOF
++{
++  "name": "biome-smoke",
++  "private": true,
++  "devDependencies": {
++    "@biomejs/biome": "$biome_version"
++  }
++}
++EOF
++    write biome/biome.json <<'EOF'
++{
++  "formatter": { "indentStyle": "space" },
++  "linter": { "rules": { "recommended": true } }
++}
++EOF
++    write py/pyproject.toml <<'EOF'
++[project]
++name = "lsp-smoke"
++version = "0.1.0"
++requires-python = ">=3.9"
++
++[tool.ruff.lint]
++select = ["F"]
++
++[tool.ty]
++
++[tool.basedpyright]
++typeCheckingMode = "standard"
++EOF
++    write rs/Cargo.toml <<'EOF'
++[workspace]
++members = ["core", "app"]
++resolver = "2"
++EOF
++    write rs/core/Cargo.toml <<'EOF'
++[package]
++name = "smoke-core"
++version = "0.1.0"
++edition = "2021"
++EOF
++    write rs/app/Cargo.toml <<'EOF'
++[package]
++name = "smoke-app"
++version = "0.1.0"
++edition = "2021"
++
++[dependencies]
++smoke-core = { path = "../core" }
++EOF
++    write rs/app/src/main.rs <<'EOF'
++fn main() {
++    println!("{}", smoke_core::add(1, 2));
++}
++EOF
++    write go/go.mod <<'EOF'
++module example.com/smoke
++
++go 1.22
++EOF
++    write php/composer.json <<EOF
++{
++    "name": "yamt/lsp-smoke",
++    "require": {
++        "php": ">=8.2"
++    },
++    "require-dev": {
++        "phpstan/phpstan": "$phpstan_version",
++        "squizlabs/php_codesniffer": "$phpcs_version"
++    }
++}
++EOF
++    write php/phpstan.neon <<'EOF'
++parameters:
++    level: 5
++    paths:
++        - src
++EOF
++    write php/phpcs.xml <<'EOF'
++<?xml version="1.0"?>
++<ruleset name="smoke">
++    <rule ref="PSR12"/>
++    <file>src</file>
++</ruleset>
++EOF
++    write c/.clang-format <<'EOF'
++BasedOnStyle: LLVM
++EOF
++    write c/compile_commands.json <<EOF
++[
++  {
++    "directory": "$root/c",
++    "file": "$root/c/src/main.c",
++    "arguments": ["cc", "-std=c17", "-c", "src/main.c"]
++  }
++]
++EOF
++}
++
++# $1: side (base, local or remote). The web/ sources, each with a change on that side in the middle.
++put_web_sources() {
++    write web/src/math.ts <<EOF
++export function add(a: number, b: number): number {
++  return a + b;
++}
++
++export const LIMIT = "$1";
++
++export function twice(n: number): number {
++  debugger;
++  return add(n, n);
++}
++
++export const   spaced={a:1,b:2}
++
++export const count: number = "three";
++EOF
++    write web/src/greet.ts <<EOF
++import { LIMIT } from "./math";
++
++export function greet(name: string): string {
++  return \`hello \${name} ($1)\`;
++}
++
++export const shown = greet(LIMIT);
++EOF
++    write web/src/App.vue <<EOF
++<script setup lang="ts">
++const label = "$1";
++
++const count: number = "three";
++</script>
++
++<template>
++  <p>{{ label }} {{ count }}</p>
++</template>
++EOF
++}
++
++# $1: side (base, local or remote). One source per other project, each with a change on that side in the middle.
++put_other_sources() {
++    write biome/src/index.js <<EOF
++export const LIMIT = "$1";
++
++export function twice(n) {
++  debugger;
++  return n * 2;
++}
++
++export const   spaced={a:1,b:2}
++EOF
++    write py/api/stats.py <<EOF
++import os
++
++
++def mean(values: list[float]) -> float:
++    return sum(values) / len(values)
++
++
++LIMIT = "$1"
++
++
++count: int = "three"
++
++totals={"a":1,"b":2}
++EOF
++    write rs/core/src/lib.rs <<EOF
++pub const LIMIT: &str = "$1";
++
++pub fn add(a: i32, b: i32) -> i32 {
++    a + b
++}
++
++pub fn twice(n: i32) -> i32 {
++    add(n)
++}
++
++pub fn spaced()->i32{1}
++EOF
++    write go/calc/calc.go <<EOF
++package calc
++
++const Limit = "$1"
++
++func Add(a int, b int) int {
++	return a + b
++}
++
++var count int = "three"
++
++var   spaced = map[string]int{"a":1,"b":2}
++EOF
++    write php/src/Stats.php <<EOF
++<?php
++
++declare(strict_types=1);
++
++namespace Smoke;
++
++const LIMIT = "$1";
++
++function mean(array \$values): float
++{
++    return array_sum(\$values) / count(\$values);
++}
++
++function shown(): string
++{
++    return undefined_helper(LIMIT);
++}
++
++function spaced( \$a,\$b ) { return \$a+\$b; }
++EOF
++    write c/src/main.c <<EOF
++#include <stdio.h>
++
++static const char *limit = "$1";
++
++int add(int a, int b) { return a + b; }
++
++int   spaced(int a,int b){return a+b;}
++
++int main(void) {
++  int count = "three";
++  printf("%s %d\n", limit, count + add(1, 2) + spaced(1, 2));
++  return 0;
++}
++EOF
++}
++
++# $1: side (base, local or remote).
+ put_sources() {
+-    write web/src/math.ts "export function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport const LIMIT = \"$1\";\n\nexport function twice(n: number): number {\n  debugger;\n  return add(n, n);\n}\n\nexport const   spaced={a:1,b:2}\n\nexport const count: number = \"three\";\n"
+-    write web/src/greet.ts "import { LIMIT } from \"./math\";\n\nexport function greet(name: string): string {\n  return \`hello \${name} ($1)\`;\n}\n\nexport const shown = greet(LIMIT);\n"
+-    write api/stats.py "import os\n\n\ndef mean(values: list[float]) -> float:\n    return sum(values) / len(values)\n\n\nLIMIT = \"$1\"\n\n\ntotals={\"a\":1,\"b\":2}\n"
++    put_web_sources "$1"
++    put_other_sources "$1"
++}
++
++link_web_modules() {
++    mkdir -p "$dir/web/node_modules/.bin"
++    for package in oxlint oxfmt; do
++        ln -s "$modules/$package" "$dir/web/node_modules/$package"
++    done
++    link_package "$modules/typescript" "$dir/web/node_modules/typescript"
++    link_package "$modules/vue" "$dir/web/node_modules/vue"
++    for tool in oxlint oxfmt tsc; do
++        ln -s "$modules/.bin/$tool" "$dir/web/node_modules/.bin/$tool"
++    done
++}
++
++put_project_programs() {
++    link_package "$vue_plugin_home/node_modules/@vue/typescript-plugin" \
++        "$dir/web/node_modules/@vue/typescript-plugin"
++    mkdir -p "$dir/biome/node_modules/.bin"
++    ln -s "$biome_home/node_modules/.bin/biome" "$dir/biome/node_modules/.bin/biome"
++    install_python_tools "$dir/py/.venv"
++    if $php_runs; then
++        cp -a "$php_tools_home/vendor" "$dir/php/vendor"
++    fi
+ }
+ 
+ mkdir -p "$dir"
++root=$(cd "$dir" && pwd)
+ git -c init.defaultBranch=main init -q "$dir"
+ 
+-tsls_dependency=""
+-if $with_servers; then
+-    tsls_dependency=",\n    \"typescript-language-server\": \"$tsls_version\""
+-fi
+-write web/package.json "{\n  \"name\": \"lsp-smoke\",\n  \"private\": true,\n  \"devDependencies\": {\n    \"oxfmt\": \"*\",\n    \"oxlint\": \"*\",\n    \"typescript\": \"5.9.3\"$tsls_dependency\n  }\n}\n"
+-write web/pnpm-lock.yaml "lockfileVersion: '9.0'\n"
+-write web/.oxlintrc.json '{\n  "rules": { "no-debugger": "error" }\n}\n'
+-write web/.oxfmtrc.json '{\n  "printWidth": 100\n}\n'
+-write web/tsconfig.json '{\n  "compilerOptions": { "strict": true, "noEmit": true },\n  "include": ["src"]\n}\n'
+-write pyproject.toml '[project]\nname = "lsp-smoke"\nversion = "0.1.0"\nrequires-python = ">=3.9"\n\n[tool.ruff.lint]\nselect = ["F"]\n'
++write_web_project
++write_other_projects
+ put_sources base
+ repo_git commit -q -m base
+ 
+@@ -140,26 +393,15 @@ conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
+ count=$(grep -c . <<<"$conflicted" || true)
+ [ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
+ 
+-mkdir -p "$dir/web/node_modules/.bin" "$dir/web/node_modules/typescript"
+-for package in oxlint oxfmt; do
+-    ln -s "$modules/$package" "$dir/web/node_modules/$package"
+-done
+-for entry in "$modules"/typescript/*; do
+-    ln -s "$(readlink -f "$entry")" "$dir/web/node_modules/typescript/$(basename "$entry")"
+-done
+-rm "$dir/web/node_modules/typescript/package.json"
+-cp "$modules/typescript/package.json" "$dir/web/node_modules/typescript/package.json"
+-for tool in oxlint oxfmt tsc; do
+-    ln -s "$modules/.bin/$tool" "$dir/web/node_modules/.bin/$tool"
+-done
++link_web_modules
+ if $with_servers; then
+-    ln -s "$tsls_program" "$dir/web/node_modules/.bin/typescript-language-server"
+-    mkdir -p "$dir/.venv/bin"
+-    ln -s "$ruff_program" "$dir/.venv/bin/ruff"
+-    add_ruff_to_settings
++    put_project_programs
+ fi
+ printf 'node_modules/\n' >"$dir/web/.gitignore"
+-printf '.venv/\n' >"$dir/.gitignore"
++printf 'node_modules/\n' >"$dir/biome/.gitignore"
++printf '.venv/\n' >"$dir/py/.gitignore"
++printf 'target/\n' >"$dir/rs/.gitignore"
++printf 'vendor/\n' >"$dir/php/.gitignore"
+ 
+ echo "lsp-repo: $dir is mid-merge; conflicted files:"
+ echo "$conflicted"
+diff --git a/scripts/lsp-servers.sh b/scripts/lsp-servers.sh
+new file mode 100755
+index 0000000..9a31edb
+--- /dev/null
++++ b/scripts/lsp-servers.sh
+@@ -0,0 +1,182 @@
++#!/usr/bin/env bash
++# Usage: scripts/lsp-servers.sh [--path]
++# Installs the pinned language servers below for yamt's real-app check, each once into
++# ${XDG_CACHE_HOME:-~/.cache}/yamt/<tool>-<version> (the network is needed the first time), and fills
++# <cache>/yamt/servers-path with links to the programs a developer would have on PATH: typescript-language-server,
++# intelephense, pyright (and pyright-langserver), gopls, rust-analyzer and, when a static PHP build runs here, php,
++# phpactor and composer. Then prints the PATH line to launch yamt with. --path prints only that folder.
++# Also installs, for scripts/lsp-repo.sh to link or copy into its projects: Biome, @vue/typescript-plugin, and with
++# PHP, PHPStan and phpcs (composer.phar, with its home and cache inside <cache>/yamt). install_python_tools makes a
++# project's .venv with ruff, ty and basedpyright (uv). yamt itself installs nothing (docs/plan.md §2 #70); nothing
++# here writes ~/go/bin, ~/.cargo/bin, ~/.local/bin, a toolchain or a settings file.
++# rust-analyzer is the release binary, not rustup's proxy (`rustup component add` changes the toolchain).
++# PHP: static-php-cli's prebuilt CLI (https://dl.static-php.dev/static-php-cli/common/); Phpactor needs PHP 8.2
++# (https://phpactor.readthedocs.io/en/master/usage/standalone.html). Sourced by scripts/lsp-repo.sh for its versions
++# and folders; it calls install_servers with --servers.
++set -euo pipefail
++# shellcheck source=scripts/git-sandbox.sh
++source "$(dirname "${BASH_SOURCE[0]}")/git-sandbox.sh"
++
++tsls_version=6.0.2
++intelephense_version=1.18.5
++pyright_version=1.1.414
++biome_version=2.5.15
++vue_plugin_version=3.3.13
++gopls_version=v0.23.0
++rust_analyzer_version=2026-10-12
++php_version=8.4.23
++phpactor_version=2026.10.07.0
++composer_version=2.10.3
++phpstan_version=2.3.1
++phpcs_version=4.0.4
++ruff_version=0.17.0
++ty_version=0.0.88
++basedpyright_version=1.40.2
++
++cache="${XDG_CACHE_HOME:-$HOME/.cache}/yamt"
++servers_path="$cache/servers-path"
++tsls_home="$cache/typescript-language-server-$tsls_version"
++intelephense_home="$cache/intelephense-$intelephense_version"
++pyright_home="$cache/pyright-$pyright_version"
++biome_home="$cache/biome-$biome_version"
++vue_plugin_home="$cache/vue-typescript-plugin-$vue_plugin_version"
++gopls_home="$cache/gopls-$gopls_version"
++rust_analyzer_home="$cache/rust-analyzer-$rust_analyzer_version"
++php_home="$cache/php-$php_version"
++phpactor_home="$cache/phpactor-$phpactor_version"
++composer_home="$cache/composer-$composer_version"
++php_tools_home="$cache/php-tools-phpstan-$phpstan_version-phpcs-$phpcs_version"
++php_runs=false
++
++# $1: the folder to install into, $2: the npm package, $3: its version.
++install_npm() {
++    [ -e "$1/node_modules/$2/package.json" ] && return
++    command -v npm >/dev/null || die "npm is needed to install $2"
++    mkdir -p "$1"
++    npm install --prefix "$1" --no-save --no-audit --no-fund --loglevel=error "$2@$3" >/dev/null ||
++        die "could not install $2 $3 into $1"
++}
++
++install_gopls() {
++    [ -x "$gopls_home/bin/gopls" ] && return
++    command -v go >/dev/null || die "go is needed to install gopls"
++    GOBIN="$gopls_home/bin" go install "golang.org/x/tools/gopls@$gopls_version" ||
++        die "could not install gopls $gopls_version into $gopls_home"
++}
++
++install_rust_analyzer() {
++    local url="https://github.com/rust-lang/rust-analyzer/releases/download/$rust_analyzer_version/rust-analyzer-x86_64-unknown-linux-gnu.gz"
++    [ -x "$rust_analyzer_home/rust-analyzer" ] && return
++    mkdir -p "$rust_analyzer_home"
++    curl -fsSL "$url" | gunzip >"$rust_analyzer_home/rust-analyzer.part" ||
++        die "could not download rust-analyzer $rust_analyzer_version from $url"
++    chmod +x "$rust_analyzer_home/rust-analyzer.part"
++    mv "$rust_analyzer_home/rust-analyzer.part" "$rust_analyzer_home/rust-analyzer"
++}
++
++# $1: URL, $2: file. Downloads once.
++download() {
++    [ -e "$2" ] && return
++    mkdir -p "$(dirname "$2")"
++    curl -fsSL "$1" -o "$2.part" || die "could not download $1"
++    mv "$2.part" "$2"
++}
++
++# Sets php_runs to true when the static PHP build runs here.
++install_php() {
++    local archive="php-$php_version-cli-linux-x86_64.tar.gz"
++    if [ ! -x "$php_home/php" ]; then
++        download "https://dl.static-php.dev/static-php-cli/common/$archive" "$php_home/$archive"
++        tar -xzf "$php_home/$archive" -C "$php_home" php || die "$php_home/$archive holds no php"
++    fi
++    if "$php_home/php" -r 'exit(0);' >/dev/null 2>&1; then
++        php_runs=true
++    else
++        echo "lsp-servers: PHP could not run ($php_home/php); Phpactor, PHPStan and phpcs are left out"
++    fi
++}
++
++install_php_programs() {
++    download "https://github.com/phpactor/phpactor/releases/download/$phpactor_version/phpactor.phar" \
++        "$phpactor_home/phpactor.phar"
++    download "https://getcomposer.org/download/$composer_version/composer.phar" "$composer_home/composer.phar"
++    chmod +x "$phpactor_home/phpactor.phar" "$composer_home/composer.phar"
++    if [ ! -x "$php_tools_home/vendor/bin/phpstan" ] || [ ! -x "$php_tools_home/vendor/bin/phpcs" ]; then
++        mkdir -p "$php_tools_home"
++        cat >"$php_tools_home/composer.json" <<EOF
++{
++    "require-dev": {
++        "phpstan/phpstan": "$phpstan_version",
++        "squizlabs/php_codesniffer": "$phpcs_version"
++    }
++}
++EOF
++        COMPOSER_HOME="$composer_home/home" COMPOSER_CACHE_DIR="$composer_home/cache" \
++            "$php_home/php" "$composer_home/composer.phar" install --quiet --no-interaction \
++            --working-dir="$php_tools_home" || die "could not install PHPStan and phpcs into $php_tools_home"
++    fi
++    # A static PHP cannot load extensions ("Dynamic loading not supported"), and PHPStan's TurboExtensionSelector
++    # restarts with turbo-ext/<platform>/phpstan_turbo-*.so whenever that file exists: the failed load prints a
++    # startup warning on stdout, ahead of the JSON Phpactor reads.
++    rm -rf "$php_tools_home/vendor/phpstan/phpstan/turbo-ext"
++}
++
++# $1: link name in servers-path, $2: the program.
++put_on_path() {
++    ln -s "$2" "$servers_path/$1"
++}
++
++fill_servers_path() {
++    rm -rf "$servers_path"
++    mkdir -p "$servers_path"
++    put_on_path typescript-language-server "$tsls_home/node_modules/.bin/typescript-language-server"
++    put_on_path intelephense "$intelephense_home/node_modules/.bin/intelephense"
++    put_on_path pyright "$pyright_home/node_modules/.bin/pyright"
++    put_on_path pyright-langserver "$pyright_home/node_modules/.bin/pyright-langserver"
++    put_on_path gopls "$gopls_home/bin/gopls"
++    put_on_path rust-analyzer "$rust_analyzer_home/rust-analyzer"
++    if $php_runs; then
++        put_on_path php "$php_home/php"
++        put_on_path phpactor "$phpactor_home/phpactor.phar"
++        put_on_path composer "$composer_home/composer.phar"
++    fi
++}
++
++install_servers() {
++    [ "$(uname -sm)" = "Linux x86_64" ] || die "the pinned rust-analyzer and PHP builds are for Linux x86_64"
++    install_npm "$tsls_home" typescript-language-server "$tsls_version"
++    install_npm "$intelephense_home" intelephense "$intelephense_version"
++    install_npm "$pyright_home" pyright "$pyright_version"
++    install_npm "$biome_home" @biomejs/biome "$biome_version"
++    install_npm "$vue_plugin_home" @vue/typescript-plugin "$vue_plugin_version"
++    install_gopls
++    install_rust_analyzer
++    install_php
++    if $php_runs; then
++        install_php_programs
++    fi
++    fill_servers_path
++    echo "lsp-servers: typescript-language-server $tsls_version, intelephense $intelephense_version," \
++        "pyright $pyright_version, biome $biome_version, @vue/typescript-plugin $vue_plugin_version," \
++        "gopls $gopls_version, rust-analyzer $rust_analyzer_version, php $php_version (runs: $php_runs)," \
++        "phpactor $phpactor_version, composer $composer_version, phpstan $phpstan_version, phpcs $phpcs_version;" \
++        "in project venvs: ruff $ruff_version, ty $ty_version, basedpyright $basedpyright_version"
++    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
++}
++
++# $1: the virtual environment's folder. Makes it with ruff, ty and basedpyright.
++install_python_tools() {
++    command -v uv >/dev/null || die "uv is needed to make $1"
++    uv venv --quiet "$1" || die "could not make a Python virtual environment in $1"
++    uv pip install --quiet --python "$1/bin/python" "ruff==$ruff_version" "ty==$ty_version" \
++        "basedpyright==$basedpyright_version" || die "could not install ruff, ty and basedpyright into $1"
++}
++
++if [ "${BASH_SOURCE[0]}" = "$0" ]; then
++    if [ "${1:-}" = "--path" ]; then
++        echo "$servers_path"
++    else
++        [ $# -eq 0 ] || die "usage: $0 [--path]"
++        install_servers
++    fi
++fi
