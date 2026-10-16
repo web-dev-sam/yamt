@@ -597,11 +597,11 @@ owner's bar size stays; `just check` green (it was red on `main` after `3e465cb`
 marks or the Result; keyboard access; a length cap. Pull done by rebase (`3e465cb` on `2eae6e9`); push is the owner's
 (the push guard denies it to agents).
 
-| row | slice                                                                                                                                                                                       | owner     | status  | evidence                                                                                                                                                                                                                                                                             |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | 3.R-removal-text (`briefs/3.R-removal-text.md`, `-rework-1.md`): `Removal<L> { at, text }` replaces `removed_at` in merge-core, bindings, fixtures, `ipc/domain.ts` | rust-impl | done    | `1288ab4` (`RemovalText`): texts pinned on every catalogue point, `ipc/words.ts`+`validate.ts` split. Reviews: boundary pass (#1058 promoted, #1059 docs, #1060 dropped), correctness fail #1061 → `fd9e45f` (`RemovalTextR1`: multi-line removals pinned, doc), both re-checks pass. Rust mutants 0 missed; TS mutants after row 2 (main red) |
-| 2   | 3.R-removal-tooltip (`briefs/3.R-removal-tooltip.md`, `-rework-1.md`): the tooltip on the bar, the owner's bar geometry in `theme.css`, `oxfmt` fixes, window colour (#1057), `app-session hover` (needs 1) | web-impl  | done    | `cc6e2d6` (`RemovalTooltip`, notes `.omp/run/notes/RemovalTooltip.md`): hoverTooltip answering only while the bar is `:hover`, text read from the bar, `removalText.ts` display rules; real app dark/light screenshots. Reviews → #1063 (plan #73 amended), #1064–#1067, #1069–#1071 → `f731f50` (`RemovalTooltipR1`), both re-checks pass; #1068 dropped. Browser tests not runnable here (host libs) |
-| 3   | final run (`briefs/3.R-removal-verify.md`): `just check`, `just mutants 3e465cb`, the real app on `language-tools-script-setup`, fixture whitespace case | verifier  | done    | `RemovalVerify` at `1b7ccd1`, gate **pass** (notes `.omp/run/notes/RemovalVerify.md`): Rust mutants 0 missed, TS survivors on changed lines dropped (#1072, #1073); real app a–f pass (hover, 1 px beside none, into tooltip, apply closes/undo, light, 4 px bar); fixture `→`/`↵`/`·` pass; browser tests not runnable here (#1074) |
+| row | slice                                                                                                                                                                                                       | owner     | status | evidence                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | 3.R-removal-text (`briefs/3.R-removal-text.md`, `-rework-1.md`): `Removal<L> { at, text }` replaces `removed_at` in merge-core, bindings, fixtures, `ipc/domain.ts`                                         | rust-impl | done   | `1288ab4` (`RemovalText`): texts pinned on every catalogue point, `ipc/words.ts`+`validate.ts` split. Reviews: boundary pass (#1058 promoted, #1059 docs, #1060 dropped), correctness fail #1061 → `fd9e45f` (`RemovalTextR1`: multi-line removals pinned, doc), both re-checks pass. Rust mutants 0 missed; TS mutants after row 2 (main red)                                                         |
+| 2   | 3.R-removal-tooltip (`briefs/3.R-removal-tooltip.md`, `-rework-1.md`): the tooltip on the bar, the owner's bar geometry in `theme.css`, `oxfmt` fixes, window colour (#1057), `app-session hover` (needs 1) | web-impl  | done   | `cc6e2d6` (`RemovalTooltip`, notes `.omp/run/notes/RemovalTooltip.md`): hoverTooltip answering only while the bar is `:hover`, text read from the bar, `removalText.ts` display rules; real app dark/light screenshots. Reviews → #1063 (plan #73 amended), #1064–#1067, #1069–#1071 → `f731f50` (`RemovalTooltipR1`), both re-checks pass; #1068 dropped. Browser tests not runnable here (host libs) |
+| 3   | final run (`briefs/3.R-removal-verify.md`): `just check`, `just mutants 3e465cb`, the real app on `language-tools-script-setup`, fixture whitespace case                                                    | verifier  | done   | `RemovalVerify` at `1b7ccd1`, gate **pass** (notes `.omp/run/notes/RemovalVerify.md`): Rust mutants 0 missed, TS survivors on changed lines dropped (#1072, #1073); real app a–f pass (hover, 1 px beside none, into tooltip, apply closes/undo, light, 4 px bar); fixture `→`/`↵`/`·` pass; browser tests not runnable here (#1074)                                                                   |
 
 ## Release 0.3.2 (session 19, owner request #1075)
 
@@ -609,11 +609,69 @@ Contents: the `[Unreleased]` changelog section — the removal tooltip (plan §2
 theme with the native window's matching background. Product code as checked by the tooltip's final run (`1b7ccd1`); the
 release commit changes version and docs only. Not pushed yet: `main` holds the owner's `3e465cb` and the tooltip commits.
 
-| row | slice                                                                                                                         | owner        | status  | evidence                                                                                              |
-| --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------ | ------- | ----------------------------------------------------------------------------------------------------- |
-| 1   | version 0.3.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.3.2] - 2026-10-15`, README file names (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `184ab85`; no product file changes; `readmer check` passes                                        |
-| 2   | final run before tagging (`briefs/release-0.3.2-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict, removal and language-server projects | verifier     | done    | `Release032Verify` at `184ab85`, gate **pass** (notes `.omp/run/notes/Release032Verify.md`): `just check` 0 (458 Rust, 1349 web); licences unchanged; `yamt_0.3.2_amd64.deb` 4.96 MiB, `yamt 0.3.2`; release binary: Mark resolved → next file, removal tooltip and 1 px beside none, 11 servers + hovers + Ctrl+S ruff; no leftovers |
-| 3   | release build and publishing (`docs/slices/handoff-release-0.3.2.md`)                                                         | human        | handed over |                                                                                                       |
+| row | slice                                                                                                                                                                                   | owner        | status      | evidence                                                                                                                                                                                                                                                                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | version 0.3.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.3.2] - 2026-10-15`, README file names (`.readmer/readme.json` + `readmer`)                                                 | orchestrator | done        | `184ab85`; no product file changes; `readmer check` passes                                                                                                                                                                                                                                                                            |
+| 2   | final run before tagging (`briefs/release-0.3.2-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict, removal and language-server projects | verifier     | done        | `Release032Verify` at `184ab85`, gate **pass** (notes `.omp/run/notes/Release032Verify.md`): `just check` 0 (458 Rust, 1349 web); licences unchanged; `yamt_0.3.2_amd64.deb` 4.96 MiB, `yamt 0.3.2`; release binary: Mark resolved → next file, removal tooltip and 1 px beside none, 11 servers + hovers + Ctrl+S ruff; no leftovers |
+| 3   | release build and publishing (`docs/slices/handoff-release-0.3.2.md`)                                                                                                                   | human        | handed over |                                                                                                                                                                                                                                                                                                                                       |
+
+## Change marks — ticks in the scrollbars while Alt is held (session 20, branch `feat/change-marks-alt`)
+
+Owner request (2026-10-16): "While Alt is held, each pane's scrollbar shows coloured ticks: the side panes show their
+own waiting changes and conflicts. The Result shows waiting changes, conflicts and language-server problems. Clicking a
+tick jumps to that place. Releasing Alt hides the ticks." Option on macOS. To settle along the way: the window losing
+focus while Alt is held, Alt+click on a tick versus CodeMirror's Alt-drag selection, Alt pressed alone on Windows, where
+ticks go when unchanged lines are collapsed. A parallel session works in `../yamt` (`feat/abort-merge`): this section's
+findings are numbered from #1200 and its plan rows from #80; real-app sessions are named `b-…`; the fixture page uses
+`just webdriver 4446`; nothing under `.omp/` but `.omp/run/` changes here (suggestions go to the handoff).
+
+Rules (orchestrator as owner, OR13; plan §2 #80 once the design is chosen):
+
+1. **Shown** while the Alt key (Option on macOS) is held in the focused yamt window: every pane of the shown file draws
+   ticks in a lane over its scrollbar. They appear on Alt's own key press (`key` "Alt"; AltGr reports "AltGraph" and
+   never shows them, so typing with AltGr does not flash them).
+2. **Hidden** on Alt's release; on any other key pressed while Alt is held (Alt+key is a shortcut, not a hold: they stay
+   hidden until Alt is pressed again); when the window loses focus (Alt+Tab never sends the release) or the page is
+   hidden; and on any key or pointer event that reports Alt up (a release the window missed). Coming back with Alt still
+   held shows nothing until Alt is pressed again.
+3. **Side panes**: one tick per change of that side still waiting on that side, in the colour the pane gives it
+   (conflicts in the conflict colour). Applied or ignored on that side: no tick. **Result**: one tick per change with a
+   side still waiting, in the Result's colour for it, plus one per language-server problem the Result underlines, in its
+   severity colour (errors drawn above warnings above changes where they overlap).
+4. **Place**: a tick sits where the scrollbar thumb is when that place is in view — the place's top over the pane's
+   whole scrollable height, scaled to the lane — and spans the change's height, never thinner than a minimum. Collapsed
+   unchanged lines take one wave line of height, so ticks follow what the pane shows; a problem inside collapsed lines
+   sits at that wave line.
+5. **Click** on a tick (Alt held): the pane scrolls the place into view with the placement keyboard navigation uses, the
+   other panes follow the locked scroll. A side tick makes that change the side's outlined change and gives that side
+   the keyboard, as a click on the change does (#54); a Result tick puts the cursor at the place's start (a problem's
+   start, a change's first line) and gives the Result the keyboard, showing collapsed lines around it as find does
+   (#63). The press never reaches the text: no selection, no apply, no drag.
+6. **Alt and the text**: yamt has no Alt-drag column selection (`rectangularSelection` is not in any pane), and
+   CodeMirror listens for presses on the text only (`@codemirror/view` 6.43.14 attaches its handlers to `contentDOM`,
+   `dist/index.js:4605–4616`), so a tick never starts a selection and an Alt+press on the text behaves as before.
+7. **Hidden ticks cost nothing**: no lane catches presses and nothing is computed while Alt is up; the scrollbar works
+   exactly as before; scrolling is no slower.
+8. **Windows, Alt alone**: WebView2 hands Alt to the page and not to the window's menu (R. Strahl, "WebView2: Forwarding
+   Alt Keys to a Host WPF Window", 2021; wry 0.57 registers no accelerator-key handler, `src/webview2/mod.rs:649–653`
+   only turns browser shortcuts off), so Alt alone enters no menu mode and yamt blocks nothing. Not checkable on this
+   machine: an owner check on Windows in the handoff.
+
+Acceptance: in WebKit (fixture page) and in the real app with real X input, on a file with changes far apart and a
+problem: no ticks without Alt; Alt shows them in all three panes, release hides them; each side shows exactly its
+waiting changes (conflicts in the conflict colour), the Result its waiting changes and one tick per problem; applying a
+change while Alt is held removes its tick at once; with collapsing on, ticks below a run sit higher than with it off, a
+problem in hidden lines ticks at the wave and its click shows the lines; a side tick click outlines that change and
+Enter then applies it; a Result tick click puts the cursor there; no text selected and nothing applied by a tick press;
+Alt held and the window losing focus hides them, and they stay hidden on return until Alt is pressed again; Alt+another
+key hides them; Alt+press on text acts as a plain press; scrollbar presses and drags without Alt as before; dark and light
+colours; scroll timing no worse. Non-goals: ticks without Alt, a setting or another key for it, hover text on ticks,
+marks in the file list or toolbar, keyboard access to ticks, word-level marks, find matches or the cursor as ticks,
+Rust or IPC changes.
+
+| row | slice                                                                                                                 | owner    | status  | evidence |
+| --- | --------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: Alt state, the lane over each scrollbar, tick places and colours, the jump (`briefs/3.O-alt-marks-design.md`) | designer | running |          |
 
 ## Open product questions
 
