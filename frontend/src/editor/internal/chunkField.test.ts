@@ -96,7 +96,6 @@ test("a real fixture's chunks start at line starts; an empty middle range is a p
   });
   expect(insertion).toMatchObject({
     chunk: { id: 1, kind: "LocalOnly" },
-    tone: "inserted",
     from: doc.line(9).from,
     to: doc.line(9).from,
   });

@@ -50,6 +50,7 @@ export type MergeOptions = {
   readonly readOnly: boolean;
   readonly preferences: Preferences;
   readonly collapsed: boolean;
+  readonly marks: boolean;
   readonly servers: LanguageServers | null;
 };
 
@@ -92,6 +93,8 @@ export class MergeController {
       folds: this.#folds.fields,
       drag: this.#drag,
       strips: this.#strips,
+      focus: this.#focus,
+      marks: options.marks,
     });
     this.#frame.request();
     if (description !== null && description.support === undefined) {
@@ -220,6 +223,10 @@ export class MergeController {
   setCollapsed(collapsed: boolean): void {
     this.#folds.setCollapsed(collapsed);
     this.#frame.realign();
+  }
+
+  showMarks(shown: boolean): void {
+    this.#frame.showMarks(shown);
   }
 
   undo(): boolean {

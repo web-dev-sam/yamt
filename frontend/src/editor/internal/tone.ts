@@ -1,5 +1,6 @@
 import type { Chunk } from "../../ipc";
 import type { Side } from "./side";
+import { isResolved, isSideOpen, type ChunkStatus } from "./status";
 
 export type Tone = "inserted" | "modified" | "deleted" | "conflict";
 
@@ -21,4 +22,9 @@ export function chunkTone(chunk: Chunk, pane: Side | "center"): Tone {
     return "deleted";
   }
   return "modified";
+}
+
+export function paneTone(chunk: Chunk, status: ChunkStatus, pane: Side | "center"): Tone | null {
+  const waiting = pane === "center" ? !isResolved(chunk, status) : isSideOpen(chunk, status, pane);
+  return waiting ? chunkTone(chunk, pane) : null;
 }

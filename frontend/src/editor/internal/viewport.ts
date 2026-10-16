@@ -64,3 +64,17 @@ export function revealScrollTop(
   const offset = fits ? Math.min(height / REVEAL_PARTS, height - gap - changeHeight) : gap;
   return Math.max(0, span.top - offset + paddingTop);
 }
+
+// WebStorm's error-stripe jump: the line a third of the way down, also when it is on screen
+// (intellij-community ScrollPositionCalculatorImpl.getVerticalOffset, CENTER).
+export function thirdScrollTop(
+  top: number,
+  pane: {
+    readonly clientHeight: number;
+    readonly scrollHeight: number;
+    readonly paddingTop: number;
+  },
+): number {
+  const wanted = top + pane.paddingTop - pane.clientHeight / REVEAL_PARTS;
+  return Math.min(Math.max(0, wanted), Math.max(0, pane.scrollHeight - pane.clientHeight));
+}

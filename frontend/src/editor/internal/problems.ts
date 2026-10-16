@@ -1,4 +1,5 @@
-import { forEachDiagnostic, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import { forEachDiagnostic, setDiagnostics, setDiagnosticsEffect } from "@codemirror/lint";
+import type { Diagnostic } from "@codemirror/lint";
 import {
   ChangeSet,
   StateEffect,
@@ -6,6 +7,7 @@ import {
   type ChangeDesc,
   type EditorState,
   type Text,
+  type Transaction,
   type TransactionSpec,
 } from "@codemirror/state";
 
@@ -167,4 +169,8 @@ export function problemCounts(state: EditorState): ProblemCounts {
     }
   });
   return { errors, warnings, other };
+}
+
+export function linted(transactions: readonly Transaction[]): boolean {
+  return transactions.some((tr) => tr.effects.some((effect) => effect.is(setDiagnosticsEffect)));
 }

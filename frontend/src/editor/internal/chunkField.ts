@@ -11,12 +11,10 @@ import type { Chunk } from "../../ipc";
 import { toDocPos, type DocPos } from "./docPos";
 import { lineSpan } from "./lineSpan";
 import { DELETED_BY_USER, isResolved, PENDING, type ChunkState, type ChunkStatus } from "./status";
-import { chunkTone, type Tone } from "./tone";
 
 type StatusChanges = ReadonlyMap<Chunk["id"], ChunkStatus>;
 
 export type ChunkSpan = ChunkState & {
-  readonly tone: Tone;
   readonly from: DocPos;
   readonly to: DocPos;
 };
@@ -94,7 +92,6 @@ export function chunkField(chunks: readonly Chunk[]): StateField<readonly ChunkS
         const { from, to } = lineSpan(state.doc, chunk.middle);
         return {
           chunk,
-          tone: chunkTone(chunk, "center"),
           status: PENDING,
           from: toDocPos(from),
           to: toDocPos(to),
