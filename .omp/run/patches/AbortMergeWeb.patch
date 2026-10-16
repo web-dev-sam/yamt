@@ -1,17 +1,17 @@
-diff --git c/frontend/src/ui/AGENTS.md w/frontend/src/ui/AGENTS.md
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
 index 3d87c3b..2ef5c80 100644
---- c/frontend/src/ui/AGENTS.md
-+++ w/frontend/src/ui/AGENTS.md
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
 @@ -5,3 +5,5 @@ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageSer
  Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
  
  Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
 +
 +Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `FileList` gets one `AbortButton` (`hidden` / `ready` / `running`); `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path.
-diff --git c/frontend/src/ui/App.vue w/frontend/src/ui/App.vue
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
 index 57241e4..322ff58 100644
---- c/frontend/src/ui/App.vue
-+++ w/frontend/src/ui/App.vue
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
 @@ -32,6 +32,8 @@ const {
    dismissQuestion,
    watchWindowClose,
@@ -37,10 +37,10 @@ index 57241e4..322ff58 100644
      <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
        <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
        <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
-diff --git c/frontend/src/ui/FileList.vue w/frontend/src/ui/FileList.vue
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
 index 8c0ec80..e592f92 100644
---- c/frontend/src/ui/FileList.vue
-+++ w/frontend/src/ui/FileList.vue
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
 @@ -1,17 +1,23 @@
  <script setup lang="ts">
  import { computed, shallowRef, useTemplateRef, watch } from "vue";
@@ -88,10 +88,91 @@ index 8c0ec80..e592f92 100644
        <button
          type="button"
          :title="viewButton.label"
-diff --git c/frontend/src/ui/listing.ts w/frontend/src/ui/listing.ts
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+new file mode 100644
+index 0000000..b49463a
+--- /dev/null
++++ b/frontend/src/ui/aborting.ts
+@@ -0,0 +1,43 @@
++import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++
++import type { ChunkSource } from "../ipc";
++import type { Asking } from "./asking";
++import { attempt, report, type Problem } from "./problem";
++
++export type AbortButton = "hidden" | "ready" | "running";
++
++type AbortTarget = {
++  readonly source: ChunkSource;
++  readonly asking: Asking;
++  readonly merging: Readonly<ShallowRef<boolean>>;
++  readonly problem: ShallowRef<Problem | null>;
++};
++
++export type Aborting = {
++  readonly abortButton: ComputedRef<AbortButton>;
++  readonly abortMerge: () => Promise<void>;
++};
++
++export function createAborting(target: AbortTarget): Aborting {
++  const running = shallowRef(false);
++  const abortButton = computed((): AbortButton => {
++    if (!target.merging.value) {
++      return "hidden";
++    }
++    return running.value ? "running" : "ready";
++  });
++
++  async function abortMerge(): Promise<void> {
++    if (abortButton.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
++      return;
++    }
++    running.value = true;
++    const outcome = await attempt(() => target.source.abortMerge());
++    if (!outcome.ok) {
++      running.value = false;
++      report(target, { action: "abort", cause: outcome.cause });
++    }
++  }
++
++  return { abortButton, abortMerge };
++}
+diff --git a/frontend/src/ui/fileListKey.ts b/frontend/src/ui/fileListKey.ts
+new file mode 100644
+index 0000000..9e46e4f
+--- /dev/null
++++ b/frontend/src/ui/fileListKey.ts
+@@ -0,0 +1,26 @@
++import type { ShallowRef } from "vue";
++
++import { pressesKey } from "../ipc";
++import type { Asking } from "./asking";
++import type { SettingsInUse } from "./settings";
++
++export type KeyPress = Parameters<typeof pressesKey>[0] &
++  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
++
++type FileListToggle = {
++  readonly asking: Asking;
++  readonly settings: Readonly<ShallowRef<SettingsInUse>>;
++  readonly fileListShown: ShallowRef<boolean>;
++};
++
++export function fileListKey(target: FileListToggle, event: KeyPress, platform: string): void {
++  if (
++    event.defaultPrevented ||
++    target.asking.question.value !== null ||
++    !pressesKey(event, target.settings.value.keys.bindings["toggle-file-list"], platform)
++  ) {
++    return;
++  }
++  event.preventDefault();
++  target.fileListShown.value = !target.fileListShown.value;
++}
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
 index f453a38..9115fc6 100644
---- c/frontend/src/ui/listing.ts
-+++ w/frontend/src/ui/listing.ts
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
 @@ -5,7 +5,10 @@ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
  import type { Notice } from "./noticeText";
  import { attempt, report, unexpected } from "./problem";
@@ -115,10 +196,10 @@ index f453a38..9115fc6 100644
    if (listing.problem.value?.action === "list") {
      listing.problem.value = null;
    }
-diff --git c/frontend/src/ui/problem.ts w/frontend/src/ui/problem.ts
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
 index 5eeb2ff..67da9a2 100644
---- c/frontend/src/ui/problem.ts
-+++ w/frontend/src/ui/problem.ts
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
 @@ -14,6 +14,7 @@ export type ProblemCause = SourceFailure | Unexpected;
  
  export type Problem =
@@ -149,10 +230,10 @@ index 5eeb2ff..67da9a2 100644
      return;
    }
    if (problem.path === path) {
-diff --git c/frontend/src/ui/problemText.ts w/frontend/src/ui/problemText.ts
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
 index 580edf6..a49bebd 100644
---- c/frontend/src/ui/problemText.ts
-+++ w/frontend/src/ui/problemText.ts
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
 @@ -22,6 +22,8 @@ function attempted(problem: Problem): string {
        return `Could not reset ${problem.path}`;
      case "settings":
@@ -162,10 +243,10 @@ index 580edf6..a49bebd 100644
      default: {
        const _exhaustive: never = problem;
        return _exhaustive;
-diff --git c/frontend/src/ui/question.ts w/frontend/src/ui/question.ts
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
 index a0343d2..f06b2f3 100644
---- c/frontend/src/ui/question.ts
-+++ w/frontend/src/ui/question.ts
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
 @@ -8,6 +8,7 @@ import type { MergeSummary } from "./useMergeController";
  export type Question =
    | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
@@ -200,10 +281,10 @@ index a0343d2..f06b2f3 100644
      default: {
        const _exhaustive: never = question;
        return _exhaustive;
-diff --git c/frontend/src/ui/store.test.ts w/frontend/src/ui/store.test.ts
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
 index 6297644..b860d0b 100644
---- c/frontend/src/ui/store.test.ts
-+++ w/frontend/src/ui/store.test.ts
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
 @@ -25,6 +25,7 @@ import {
  import { LanguageServers } from "../lsp";
  import { resultLine } from "./choiceText";
@@ -353,10 +434,10 @@ index 6297644..b860d0b 100644
 +  expect(store.abortButton.value).toBe("hidden");
 +  await pressUnasked(store);
 +});
-diff --git c/frontend/src/ui/store.ts w/frontend/src/ui/store.ts
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
 index d5d505d..be5f330 100644
---- c/frontend/src/ui/store.ts
-+++ w/frontend/src/ui/store.ts
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
 @@ -1,7 +1,6 @@
  import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
  
