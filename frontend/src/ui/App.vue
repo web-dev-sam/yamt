@@ -32,6 +32,8 @@ const {
   dismissQuestion,
   watchWindowClose,
   fileListKey,
+  abortButton,
+  abortMerge,
 } = useAppStore();
 
 const focused = useWindowFocus();
@@ -59,7 +61,14 @@ onMounted(() => {
 
 <template>
   <div class="flex h-full gap-island p-island">
-    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
+    <FileList
+      v-show="fileListShown"
+      :files="files"
+      :active="active"
+      :abort-button="abortButton"
+      @select="pick"
+      @abort="abortMerge"
+    />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />

@@ -22,6 +22,8 @@ function attempted(problem: Problem): string {
       return `Could not reset ${problem.path}`;
     case "settings":
       return "Could not use the settings file";
+    case "abort":
+      return "Could not abort the merge";
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;

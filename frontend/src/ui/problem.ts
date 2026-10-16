@@ -14,6 +14,7 @@ export type ProblemCause = SourceFailure | Unexpected;
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
+  | { readonly action: "abort"; readonly cause: ProblemCause }
   | {
       readonly action: "open" | "finish" | "save" | "take" | "reset";
       readonly path: string;
@@ -44,6 +45,7 @@ export function logProblem(problem: Problem): void {
   const event = `store.${problem.action}_failed`;
   switch (problem.action) {
     case "list":
+    case "abort":
       log.error(event, { ...problem.cause });
       return;
     case "settings": {
@@ -73,7 +75,12 @@ export function report(target: Target, failure: Problem): void {
 
 export function clearProblemAbout(target: Target, path: string): void {
   const problem = target.problem.value;
-  if (problem === null || problem.action === "list" || problem.action === "settings") {
+  if (
+    problem === null ||
+    problem.action === "list" ||
+    problem.action === "abort" ||
+    problem.action === "settings"
+  ) {
     return;
   }
   if (problem.path === path) {

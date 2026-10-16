@@ -1,7 +1,6 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
-  pressesKey,
   type ChunkSource,
   type DiskVersion,
   type FileEntry,
@@ -13,9 +12,11 @@ import {
   type Theme,
 } from "../ipc";
 import type { LanguageServers } from "../lsp";
+import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
+import { fileListKey, type KeyPress } from "./fileListKey";
 import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
@@ -33,11 +34,9 @@ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from ".
 import type { Preferences } from "./useMergeController";
 import { fetchView, isShown, reload } from "./views";
 
-type KeyPress = Parameters<typeof pressesKey>[0] &
-  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
-
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
+  readonly merging: ShallowRef<boolean>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
   readonly choices: ShallowRef<readonly FileSides[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
@@ -85,6 +84,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly preferences: ComputedRef<Preferences>;
   readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions &
+  Aborting &
   Collapsing &
   Saving &
   Servers &
@@ -95,6 +95,7 @@ let store: AppStore | null = null;
 function createRefs(startTheme: Theme): Refs {
   return {
     files: shallowRef<readonly FileEntry[]>([]),
+    merging: shallowRef(false),
     opened: shallowRef<readonly FileMergeData[]>([]),
     choices: shallowRef<readonly FileSides[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
@@ -138,6 +139,7 @@ export function createAppStore(
     hiddenButtons: buttons.hidden,
     ...acts,
     ...createCollapsing(),
+    ...createAborting(state),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
     ...createServerSetup({ ...state, ...acts, host, servers }),
@@ -278,18 +280,6 @@ async function reset(state: State, path: string, diskVersion: DiskVersion): Prom
       clearProblemAbout(state, path);
     }
   });
-}
-
-function fileListKey(state: State, event: KeyPress, platform: string): void {
-  if (
-    event.defaultPrevented ||
-    state.asking.question.value !== null ||
-    !pressesKey(event, state.settings.value.keys.bindings["toggle-file-list"], platform)
-  ) {
-    return;
-  }
-  event.preventDefault();
-  state.fileListShown.value = !state.fileListShown.value;
 }
 
 export function useAppStore(): AppStore {

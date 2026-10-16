@@ -5,7 +5,10 @@ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import type { Notice } from "./noticeText";
 import { attempt, report, unexpected } from "./problem";
 
-type Listing = DiskChangeTarget & { readonly files: ShallowRef<readonly FileEntry[]> };
+type Listing = DiskChangeTarget & {
+  readonly files: ShallowRef<readonly FileEntry[]>;
+  readonly merging: ShallowRef<boolean>;
+};
 
 type SideNamesTarget = {
   readonly source: ChunkSource;
@@ -21,8 +24,9 @@ export async function refreshFiles(
     report(listing, { action: "list", cause: listed.cause });
     return null;
   }
-  const { files, diskChanges } = listed.value;
+  const { files, diskChanges, merging } = listed.value;
   listing.files.value = files;
+  listing.merging.value = merging;
   if (listing.problem.value?.action === "list") {
     listing.problem.value = null;
   }
