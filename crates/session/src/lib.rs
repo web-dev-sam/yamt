@@ -6,6 +6,7 @@ mod disk;
 mod locate;
 mod markers;
 mod merge_data;
+mod merging;
 mod open;
 mod seed;
 mod session;

@@ -10,7 +10,8 @@ use crate::disk::{
     read_on_disk, settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
-use crate::side_names::{MERGE_HEAD, SideNames};
+use crate::merging::is_merging;
+use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
 use crate::stages::CapturedStages;
 use crate::waiting::MarkerStyle;
@@ -217,24 +218,6 @@ impl MergeSession {
             .filter(|file| file.status == FileStatus::Unresolved)
             .count()
     }
-}
-
-fn is_merging(repo: &Repo) -> bool {
-    match merge_in_progress(repo) {
-        Ok(merging) => merging,
-        Err(error) => {
-            tracing::warn!(target: LOG_TARGET, event = "merge_state_unread", %error, "no merge to abort is assumed");
-            false
-        }
-    }
-}
-
-// A `git rebase -r` stopped on a merge commit's conflict writes MERGE_HEAD too; `git merge --abort` there would leave the rebase half done.
-fn merge_in_progress(repo: &Repo) -> yamt_gitio::Result<bool> {
-    if repo.commit_named(MERGE_HEAD)?.is_none() {
-        return Ok(false);
-    }
-    Ok(!repo.rebase_in_progress()?)
 }
 
 pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {

@@ -111,6 +111,21 @@ fn rebase_in_progress_is_false_in_a_merge() {
     assert!(!repo.rebase_in_progress().unwrap());
 }
 
+#[cfg(unix)]
+#[test]
+fn rebase_in_progress_fails_when_the_rebase_state_cannot_be_looked_at() {
+    let (dir, repo) = merging();
+    let rebase_merge = dir.path().join(".git").join("rebase-merge");
+    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
+
+    let error = repo.rebase_in_progress().unwrap_err();
+
+    assert!(
+        matches!(&error, Error::ReadFailed { path, .. } if path.ends_with("rebase-merge")),
+        "{error:?}"
+    );
+}
+
 fn stopped_rebase(backend: &str) -> TempDir {
     let dir = diverged_repo(&files()).unwrap();
     let rebase = git(dir.path(), &["rebase", backend, "remote"]).unwrap();
