@@ -1,12 +1,6 @@
 {
-  "AltMarksEditorR1": {
-    "owned": [
-      "frontend/src/editor/**",
-      "frontend/src/style.css",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/ui/useMergeController.test.ts",
-      "frontend/src/ui/MergeView.vue"
-    ],
+  "AltMarksEditorR2": {
+    "owned": ["frontend/src/editor/**"],
     "readonly": ["**"]
   }
 }
