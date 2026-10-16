@@ -95,7 +95,12 @@ export class MergeController {
       drag: this.#drag,
       strips: this.#strips,
       jump: (pane, target, rows) => {
-        jumpTo({ views: this.#views, spans: this.#field, focus: this.#focus, rows }, pane, target);
+        const folds = this.#folds.fields;
+        jumpTo(
+          { views: this.#views, spans: this.#field, folds, focus: this.#focus, rows },
+          pane,
+          target,
+        );
       },
       marks: options.marks,
     });
