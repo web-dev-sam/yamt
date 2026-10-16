@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Holding Alt (Option on macOS) shows coloured marks in each pane's scrollbar: the left and right panes mark their
+  own changes still waiting, conflicts in the conflict colour; the Result marks every change still waiting and every
+  language-server problem in its colour. Clicking a mark jumps there: in a side pane that change gets the keyboard
+  outline, in the Result the cursor moves to it, and collapsed lines around it open. Releasing Alt, pressing another
+  key or leaving the window hides them.
+
 ## [0.3.2] - 2026-10-15
 
 ### Added
