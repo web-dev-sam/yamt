@@ -320,7 +320,7 @@ path.chunk-band {
 
 .change-mark::before {
   position: absolute;
-  inset: -4px 0;
+  inset: calc(-1 * var(--mark-pick)) 0;
   content: "";
 }
 

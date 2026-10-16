@@ -15,6 +15,7 @@ import { Frame } from "./internal/frame";
 import type { PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
+import { jumpTo } from "./internal/markJump";
 import type { Direction } from "./internal/navigation";
 import { preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
@@ -93,7 +94,9 @@ export class MergeController {
       folds: this.#folds.fields,
       drag: this.#drag,
       strips: this.#strips,
-      focus: this.#focus,
+      jump: (pane, target, rows) => {
+        jumpTo({ views: this.#views, spans: this.#field, focus: this.#focus, rows }, pane, target);
+      },
       marks: options.marks,
     });
     this.#frame.request();

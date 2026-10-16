@@ -2,8 +2,9 @@ import type { ViewUpdate } from "@codemirror/view";
 
 import type { ChunkRow, Pane, PaneViews } from "./geometry";
 import { PANES } from "./geometry";
-import { changePlaces, laneBox, problemPlaces, tickAt, ticks } from "./marks";
+import { changePlaces, laneBox, PICK_DISTANCE_PX, problemPlaces, tickAt, ticks } from "./marks";
 import type { MarkTarget, Tick } from "./marks";
+import { LINE_HEIGHT_PX } from "./pane";
 import { linted } from "./problems";
 
 type Jump = (pane: Pane, target: MarkTarget) => void;
@@ -14,6 +15,17 @@ function tickElement({ top, height, kind }: Tick): HTMLDivElement {
   element.style.top = `${top}px`;
   element.style.height = `${height}px`;
   return element;
+}
+
+function wheelScale(event: WheelEvent, scroller: HTMLElement): number {
+  switch (event.deltaMode) {
+    case WheelEvent.DOM_DELTA_LINE:
+      return LINE_HEIGHT_PX;
+    case WheelEvent.DOM_DELTA_PAGE:
+      return scroller.clientHeight;
+    default:
+      return 1;
+  }
 }
 
 export class MarkLanes {
@@ -72,7 +84,17 @@ export class MarkLanes {
     const lane = document.createElement("div");
     lane.className = "change-marks";
     lane.setAttribute("aria-hidden", "true");
+    lane.style.setProperty("--mark-pick", `${PICK_DISTANCE_PX}px`);
     const signal = this.#listeners.signal;
+    const scroller = this.#views[pane].scrollDOM;
+    lane.addEventListener(
+      "wheel",
+      (event) => {
+        const scale = wheelScale(event, scroller);
+        scroller.scrollBy({ left: event.deltaX * scale, top: event.deltaY * scale });
+      },
+      { signal, passive: true },
+    );
     lane.addEventListener(
       "mousedown",
       (event) => {

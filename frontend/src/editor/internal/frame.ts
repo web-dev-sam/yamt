@@ -7,12 +7,11 @@ import { pushCovered } from "./covered";
 import { coveredAction, type IconDrag } from "./drag";
 import { syncFindSpace } from "./find";
 import { waveStarts, type FoldFields } from "./folds";
-import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
+import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
 import type { ChunkRow, WaveRow } from "./geometry";
-import { jumpTo } from "./markJump";
 import { MarkLanes } from "./markLanes";
+import type { MarkTarget } from "./marks";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
-import type { SideFocus } from "./sideFocus";
 import type { Strips } from "./strips";
 
 type Layout = {
@@ -27,7 +26,7 @@ type FrameParts = {
   readonly folds: FoldFields;
   readonly drag: IconDrag;
   readonly strips: Strips;
-  readonly focus: SideFocus;
+  readonly jump: (pane: Pane, target: MarkTarget, rows: readonly ChunkRow[]) => void;
   readonly marks: boolean;
 };
 
@@ -43,9 +42,8 @@ export class Frame {
     this.#scroll = new ScrollSync(parts.views, () => {
       this.request();
     });
-    const { views, spans, focus } = parts;
-    this.#marks = new MarkLanes(views, parts.marks, (pane, target) => {
-      jumpTo({ views, spans, focus, rows: this.layout().rows }, pane, target);
+    this.#marks = new MarkLanes(parts.views, parts.marks, (pane, target) => {
+      parts.jump(pane, target, this.layout().rows);
       this.#scroll.follow(pane);
     });
   }
@@ -56,8 +54,9 @@ export class Frame {
     if (moved) {
       this.#layoutCache = null;
     }
+    const marksDirty = this.#marks.changed(update, moved);
     if (
-      this.#marks.changed(update, moved) ||
+      marksDirty ||
       update.docChanged ||
       update.geometryChanged ||
       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)

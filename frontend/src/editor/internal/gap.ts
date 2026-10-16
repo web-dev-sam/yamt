@@ -5,7 +5,7 @@ import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry"
 import { modKeyName } from "./modClick";
 import type { Side } from "./side";
 import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
-import { chunkTone, type Tone } from "./tone";
+import { paneTone, type Tone } from "./tone";
 
 export type Arrow = {
   readonly top: number;
@@ -76,7 +76,8 @@ export function bandPaints(
   const panes = STRIP_PANES[side];
   const paints = [];
   for (const row of rows) {
-    if (isSideOpen(row.chunk, row.status, side)) {
+    const tone = paneTone(row.chunk, row.status, side);
+    if (tone !== null) {
       const left = row[panes.left];
       const right = row[panes.right];
       const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
@@ -84,7 +85,7 @@ export function bandPaints(
       const top = Math.min(onLeft.top, onRight.top);
       if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
         const d = bandPath({ left: onLeft, right: onRight }, size.width);
-        paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
+        paints.push({ chunk: row.chunk, tone, d });
       }
     }
   }

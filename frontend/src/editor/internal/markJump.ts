@@ -1,9 +1,9 @@
 import { forEachDiagnostic } from "@codemirror/lint";
-import type { EditorState, StateField } from "@codemirror/state";
+import type { EditorState, StateField, Text, TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import type { ChunkSpan } from "./chunkField";
-import type { ChunkRow, Pane, PaneViews } from "./geometry";
+import { PANE_TINT, type ChunkRow, type Pane, type PaneViews } from "./geometry";
 import type { MarkTarget } from "./marks";
 import type { SideFocus } from "./sideFocus";
 import { thirdScrollTop } from "./viewport";
@@ -48,16 +48,20 @@ function scrollToThird(view: EditorView, top: number): void {
   });
 }
 
-// WebStorm's stripe click puts the caret at the line's end first to open a fold around it, then at
-// the mark's start (intellij-community EditorMarkupModelImpl.kt doClick).
+export function revealSteps(doc: Text, start: number): readonly TransactionSpec[] {
+  const line = doc.lineAt(start);
+  return [{ selection: { anchor: line.from, head: line.to } }, { selection: { anchor: start } }];
+}
+
 function jumpInResult({ views, spans }: JumpParts, target: MarkTarget): void {
   const view = views.center;
   const start = startOf(view.state, spans, target);
   if (start === null) {
     return;
   }
-  view.dispatch({ selection: { anchor: view.state.doc.lineAt(start).to } });
-  view.dispatch({ selection: { anchor: start } });
+  for (const step of revealSteps(view.state.doc, start)) {
+    view.dispatch(step);
+  }
   view.focus();
   scrollToThird(view, view.lineBlockAt(start).top);
 }
@@ -72,6 +76,6 @@ export function jumpTo(parts: JumpParts, pane: Pane, target: MarkTarget): void {
   if (row === undefined) {
     return;
   }
-  parts.focus.focusChange(pane === "left" ? "local" : "remote", row.chunk.id);
+  parts.focus.focusChange(PANE_TINT[pane], row.chunk.id);
   scrollToThird(parts.views[pane], row[pane].top);
 }

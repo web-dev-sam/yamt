@@ -3,8 +3,7 @@ import type { EditorState } from "@codemirror/state";
 
 import type { Span } from "../../connectors";
 import type { Chunk } from "../../ipc";
-import type { ChunkRow, Pane } from "./geometry";
-import type { Side } from "./side";
+import { PANE_TINT, type ChunkRow, type Pane } from "./geometry";
 import { paneTone, type Tone } from "./tone";
 
 export type MarkKind = Tone | "error" | "warning" | "info";
@@ -43,7 +42,7 @@ export type Tick = {
 // HighlighterLayer ERROR > DiffDrawUtil.STRIPE_LAYER > WARNING).
 const LANE_MIN_WIDTH_PX = 14;
 const TICK_MIN_HEIGHT_PX = 2;
-const PICK_DISTANCE_PX = 4;
+export const PICK_DISTANCE_PX = 4;
 
 const PAINT_ORDER: Readonly<Record<MarkKind, number>> = {
   info: 0,
@@ -62,15 +61,9 @@ const SEVERITY_KIND: Readonly<Record<Diagnostic["severity"], MarkKind>> = {
   hint: "info",
 };
 
-const TINT_OF: Readonly<Record<Pane, Side | "center">> = {
-  left: "local",
-  center: "center",
-  right: "remote",
-};
-
 export function changePlaces(rows: readonly ChunkRow[], pane: Pane): MarkPlace[] {
   return rows.flatMap((row) => {
-    const kind = paneTone(row.chunk, row.status, TINT_OF[pane]);
+    const kind = paneTone(row.chunk, row.status, PANE_TINT[pane]);
     const target: MarkTarget = { kind: "change", id: row.chunk.id };
     return kind === null ? [] : [{ ...row[pane], kind, target }];
   });

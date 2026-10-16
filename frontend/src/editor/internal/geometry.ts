@@ -19,6 +19,12 @@ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
   remote: "right",
 };
 
+export const PANE_TINT = {
+  left: "local",
+  center: "center",
+  right: "remote",
+} as const satisfies Readonly<Record<Pane, Side | "center">>;
+
 export const STRIP_PANES: Readonly<Record<Side, { readonly left: Pane; readonly right: Pane }>> = {
   local: { left: "left", right: "center" },
   remote: { left: "center", right: "right" },
