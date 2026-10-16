@@ -1,24 +1,5 @@
 {
-  "AbortMergeRust": {
-    "owned": [
-      "crates/gitio/**",
-      "crates/session/**",
-      "crates/conflict-repo/**",
-      "src-tauri/src/**",
-      "src-tauri/tests/**",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/saving.test.ts"
-    ]
+  "AbortMergeWeb": {
+    "owned": ["frontend/src/ui/**"]
   }
 }

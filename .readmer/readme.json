@@ -79,7 +79,8 @@
         "**Mark resolved** writes the result, stages the file and opens the next unresolved one. It turns blue once nothing is left to process. **Reset**, next to \"Result\", brings the file back as it was when this run of yamt opened it.",
         "Right-click the toolbar to choose which of its icon buttons show (previous/next change, collapse unchanged fragments, apply all from either side, undo, redo; Undo and Redo start hidden). The choice applies to every file and is remembered after a restart; the keys work either way.",
         "A file deleted on one side and changed on the other shows the changed side with its changes, and two buttons: **Keep** and **Delete**. Other files the editor cannot show (binary, symlinks, submodules) get a choice between the two sides.",
-        "Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can tell. Then continue as usual (`git commit`, `git rebase --continue`, …)."
+        "Closing the window exits with status 0 when every file is resolved and 1 otherwise, so scripts can tell. Then continue as usual (`git commit`, `git rebase --continue`, …).",
+        "During a `git merge`, the icon next to \"Files\" aborts it: after one question it runs `git merge --abort`, so every resolution and save is lost and the repository goes back to how it was before the merge. yamt then closes with status 1. Untracked files and changes from before the merge in files it did not touch stay; if git refuses (for example a file staged and then changed again), yamt shows git's message and changes nothing."
       ]
     },
     {
