@@ -22,9 +22,19 @@ export type HiddenButtons = {
   readonly toggle: (id: ToolbarButtonId) => void;
 };
 
-type HiddenByUser = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
+type Decisions = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
 
 const STORAGE_KEY = "yamt.toolbar.hidden";
+
+const OLD_FORMAT_IDS = [
+  "previous",
+  "next",
+  "collapse",
+  "applyLeft",
+  "applyRight",
+  "undo",
+  "redo",
+] as const satisfies readonly ToolbarButtonId[];
 
 // Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
 // keys of Undo and Redo still work.
@@ -58,20 +68,18 @@ function parseJson(raw: string): unknown {
   }
 }
 
-function readHiddenList(names: readonly unknown[]): HiddenByUser {
+function readHiddenList(names: readonly unknown[]): Decisions {
   if (!names.every((name) => typeof name === "string")) {
     return {};
   }
   const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
-  for (const id of TOOLBAR_BUTTONS) {
-    if (id !== "abortMerge") {
-      decided[id] = names.includes(id);
-    }
+  for (const id of OLD_FORMAT_IDS) {
+    decided[id] = names.includes(id);
   }
   return decided;
 }
 
-function readDecided(stored: object): HiddenByUser {
+function readDecided(stored: object): Decisions {
   const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
   for (const id of TOOLBAR_BUTTONS) {
     const hidden: unknown = Reflect.get(stored, id);
@@ -82,7 +90,7 @@ function readDecided(stored: object): HiddenByUser {
   return decided;
 }
 
-function readHiddenByUser(raw: string): HiddenByUser {
+function readDecisions(raw: string): Decisions {
   const stored = parseJson(raw);
   if (Array.isArray(stored)) {
     return readHiddenList(stored);
@@ -91,10 +99,10 @@ function readHiddenByUser(raw: string): HiddenByUser {
 }
 
 export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
-  const decided = storedValue<HiddenByUser>(
+  const decided = storedValue<Decisions>(
     STORAGE_KEY,
     {},
-    { read: readHiddenByUser, write: (value) => JSON.stringify(value) },
+    { read: readDecisions, write: (value) => JSON.stringify(value) },
     "toolbar.storage_failed",
     storage,
   );

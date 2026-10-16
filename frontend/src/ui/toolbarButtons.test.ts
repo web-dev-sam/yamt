@@ -124,6 +124,23 @@ test("a hidden list stored before Abort merge existed is rewritten as decisions 
   expect(hiddenList(createHiddenButtons(storage))).toEqual(["undo"]);
 });
 
+test("a hidden list stored before Abort merge existed decides exactly its seven ids, no later button", () => {
+  const storage = memoryStorage({ [KEY]: '["undo"]' });
+  const buttons = createHiddenButtons(storage);
+
+  buttons.toggle("redo");
+
+  expect(storedDecisions(storage)).toStrictEqual({
+    previous: false,
+    next: false,
+    collapse: false,
+    applyLeft: false,
+    applyRight: false,
+    undo: true,
+    redo: true,
+  });
+});
+
 test("a hidden list from before drops ids yamt does not know and collapses duplicates", () => {
   const buttons = createHiddenButtons(
     memoryStorage({ [KEY]: '["redo","save","applyLeft","redo"]' }),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, type Component, type Ref } from "vue";
+import { computed, nextTick, shallowRef, type Component, type Ref } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
 import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
@@ -57,7 +57,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     icon: GitPullRequestClosed,
     keepsKeyboard: true,
     run: () => {
-      void abortMerge();
+      void abortKeepingKeyboard();
     },
     selected: null,
     disabled: abortRunning,
@@ -141,6 +141,17 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
 function pressed(button: IconButton, event: MouseEvent): void {
   if (button.keepsKeyboard) {
     event.preventDefault();
+  }
+}
+
+// Removing an open modal <dialog> does not give focus back; only close() does (HTML, "dialog
+// removing steps": https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
+async function abortKeepingKeyboard(): Promise<void> {
+  const before = document.activeElement;
+  await abortMerge();
+  await nextTick();
+  if (document.activeElement === document.body && before instanceof HTMLElement) {
+    before.focus();
   }
 }
 
