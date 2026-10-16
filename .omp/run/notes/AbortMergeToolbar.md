@@ -30,3 +30,11 @@ renamed to dodge the ownership hook's `cp` pattern. Docs (architecture, project 
 ## Open risks
 toolbarButtons.ts: 10 survivors on module-level constants (evaluated once under vitest, #732 class), `catch` equivalent.
 Exit status/stderr not re-observed (Rust unchanged) → final run 2.
+
+## Reviews and fix round 1
+Boundary fail: #1093 block (old array read against the live list), #1094 promoted (names), #1095 dropped. Correctness fail:
+#1096 block (keyboard not back after Cancel/Escape). #1092 static survivors dropped (killed by toolbarButtons.test.ts:55/:60).
+Fix round `62bd371` (`AbortMergeToolbarR1`): `OLD_FORMAT_IDS` fixed literal + strict test; `Decisions`/`readDecisions`;
+`abortKeepingKeyboard` in MergeToolbar.vue gives focus back to the element focused before the press when the question
+left it on <body> (reproduced on the fixture page before: BODY, no cm-focused; after: cm-content, cm-focused, Down/Up move
+the outline). Both re-checks pass; mutants: only the #1092 constants.
