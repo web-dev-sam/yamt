@@ -1,9 +1,11 @@
 {
-  "AltMarksHold": {
+  "AltMarksEditor": {
     "owned": [
-      "frontend/src/ui/altHold.ts",
-      "frontend/src/ui/altHold.test.ts",
-      "frontend/src/ui/App.vue"
+      "frontend/src/editor/**",
+      "frontend/src/style.css",
+      "frontend/src/ui/useMergeController.ts",
+      "frontend/src/ui/useMergeController.test.ts",
+      "frontend/src/ui/MergeView.vue"
     ],
     "readonly": ["**"]
   }

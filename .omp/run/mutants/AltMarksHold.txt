@@ -1,0 +1,40 @@
+mutants: no Rust changes since e415827
+[32m20:23:22 (2392561) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m20:23:22 (2392561) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m20:23:22 (2392561) INFO ProjectReader[39m Found 1 of 325 file(s) to be mutated.
+[32m20:23:22 (2392561) INFO Instrumenter[39m Instrumented 1 source file(s) with 68 mutant(s)
+[32m20:23:22 (2392561) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m20:23:23 (2392561) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m20:23:24 (2392561) INFO DryRunExecutor[39m Initial test run succeeded. Ran 20 tests in 0 seconds (net 10.950248999999076 ms, overhead 931.0497510000009 ms).
+
+All tests/altHold.test.ts
+  ✓ Alt's press shows, from shown or hidden (killed 6)
+  ✓ AltGraph's press never shows (shown before: true) (killed 3)
+  ~ AltGraph's press never shows (shown before: false) (covered 8)
+  ✓ Alt's release hides, whatever altKey says (killed 8)
+  ~ another key hides, and Alt's repeat keeps them hidden (covered 8)
+  ~ Alt's repeat while shown keeps them shown (covered 6)
+  ✓ another key's release with Alt up hides, with Alt down keeps (killed 2)
+  ✓ a pointer event with Alt up hides, with Alt down keeps, and never shows (killed 5)
+  ✓ leaving the window hides (killed 3)
+  ~ back with Alt still held shows nothing until a fresh press (covered 12)
+  ✓ keys are heard in the capture phase; pointers not while Alt is up (killed 9)
+  ✓ while held, pointer and wheel events are heard in the capture phase, passively (killed 12)
+  ✓ a pointerdown with Alt down keeps them, with Alt up hides them (killed 3)
+  ~ a pointermove with Alt down keeps them, with Alt up hides them (covered 34)
+  ~ a pointerup with Alt down keeps them, with Alt up hides them (covered 34)
+  ~ a wheel with Alt down keeps them, with Alt up hides them (covered 34)
+  ~ another key's press and release reach the hold with their own fields (covered 38)
+  ✓ the window losing focus hides (killed 3)
+  ✓ the page becoming hidden hides; becoming visible does not (killed 8)
+  ~ no event's default is prevented (covered 46)
+
+Ran 1.01 tests per mutant on average.
+------------|------------------|----------|-----------|------------|----------|----------|
+            | % Mutation score |          |           |            |          |          |
+File        |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+------------|--------|---------|----------|-----------|------------|----------|----------|
+All files   | 100.00 |  100.00 |       62 |         0 |          0 |        0 |        0 |
+ altHold.ts | 100.00 |  100.00 |       62 |         0 |          0 |        0 |        0 |
+------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m20:23:26 (2392561) INFO MutationTestExecutor[39m Done in 4 seconds.
