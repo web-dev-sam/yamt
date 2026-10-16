@@ -624,8 +624,10 @@ Internals (`editor/internal/`, not importable from `ui/`):
   only ticks take them; a wheel over a tick is forwarded to that pane's scroller) and paints only while
   shown and dirty. `markJump.ts` acts on a tick's click, handed to `Frame` as its `jump` part by the
   controller: a side change through `SideFocus.focusChange` (outline + keyboard), a Result place by
-  selecting its whole line, then putting the cursor at its start (`revealSteps`: `foldField` shows hidden
-  lines that hold a non-empty selection, also for a zero-length problem at their end) and focusing it;
+  selecting the innermost hidden middle range holding it, both ends counted, then putting the cursor at
+  its start (`revealSteps(state, folds, start)`: `foldField` shows hidden lines that hold a non-empty
+  selection, so also a problem at the very end of a collapsed tail; nothing hidden → only the cursor) and
+  focusing it;
   either pane is then scrolled to put the line a third of the way down (`viewport.ts` `thirdScrollTop`,
   WebStorm's `ScrollType.CENTER`), and the others follow the sync. One pane→side table, `geometry.ts`
   `PANE_TINT`, serves the marks and the jump.
