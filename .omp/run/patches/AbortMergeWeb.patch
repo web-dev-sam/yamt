@@ -1,0 +1,435 @@
+diff --git c/frontend/src/ui/AGENTS.md w/frontend/src/ui/AGENTS.md
+index 3d87c3b..2ef5c80 100644
+--- c/frontend/src/ui/AGENTS.md
++++ w/frontend/src/ui/AGENTS.md
+@@ -5,3 +5,5 @@ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageSer
+ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
++
++Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `FileList` gets one `AbortButton` (`hidden` / `ready` / `running`); `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path.
+diff --git c/frontend/src/ui/App.vue w/frontend/src/ui/App.vue
+index 57241e4..322ff58 100644
+--- c/frontend/src/ui/App.vue
++++ w/frontend/src/ui/App.vue
+@@ -32,6 +32,8 @@ const {
+   dismissQuestion,
+   watchWindowClose,
+   fileListKey,
++  abortButton,
++  abortMerge,
+ } = useAppStore();
+ 
+ const focused = useWindowFocus();
+@@ -59,7 +61,14 @@ onMounted(() => {
+ 
+ <template>
+   <div class="flex h-full gap-island p-island">
+-    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
++    <FileList
++      v-show="fileListShown"
++      :files="files"
++      :active="active"
++      :abort-button="abortButton"
++      @select="pick"
++      @abort="abortMerge"
++    />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+diff --git c/frontend/src/ui/FileList.vue w/frontend/src/ui/FileList.vue
+index 8c0ec80..e592f92 100644
+--- c/frontend/src/ui/FileList.vue
++++ w/frontend/src/ui/FileList.vue
+@@ -1,17 +1,23 @@
+ <script setup lang="ts">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ import Check from "~icons/lucide/check";
++import GitPullRequestClosed from "~icons/lucide/git-pull-request-closed";
+ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+ import type { FileEntry } from "../ipc";
++import type { AbortButton } from "./aborting";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+ 
+-const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+-const emit = defineEmits<{ select: [path: string] }>();
++const props = defineProps<{
++  files: readonly FileEntry[];
++  active: string | null;
++  abortButton: AbortButton;
++}>();
++const emit = defineEmits<{ select: [path: string]; abort: [] }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+ const handle = useTemplateRef<HTMLDivElement>("handle");
+@@ -68,7 +74,19 @@ function toggleFolder(path: string): void {
+     :style="widthStyle"
+   >
+     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
+-      <h2 class="font-semibold">Files</h2>
++      <h2 class="mr-auto font-semibold">Files</h2>
++      <button
++        v-if="abortButton !== 'hidden'"
++        type="button"
++        title="Abort merge"
++        aria-label="Abort merge"
++        class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++        :disabled="abortButton === 'running'"
++        @mousedown.prevent
++        @click="emit('abort')"
++      >
++        <GitPullRequestClosed class="size-4" aria-hidden="true" />
++      </button>
+       <button
+         type="button"
+         :title="viewButton.label"
+diff --git c/frontend/src/ui/listing.ts w/frontend/src/ui/listing.ts
+index f453a38..9115fc6 100644
+--- c/frontend/src/ui/listing.ts
++++ w/frontend/src/ui/listing.ts
+@@ -5,7 +5,10 @@ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import type { Notice } from "./noticeText";
+ import { attempt, report, unexpected } from "./problem";
+ 
+-type Listing = DiskChangeTarget & { readonly files: ShallowRef<readonly FileEntry[]> };
++type Listing = DiskChangeTarget & {
++  readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly merging: ShallowRef<boolean>;
++};
+ 
+ type SideNamesTarget = {
+   readonly source: ChunkSource;
+@@ -21,8 +24,9 @@ export async function refreshFiles(
+     report(listing, { action: "list", cause: listed.cause });
+     return null;
+   }
+-  const { files, diskChanges } = listed.value;
++  const { files, diskChanges, merging } = listed.value;
+   listing.files.value = files;
++  listing.merging.value = merging;
+   if (listing.problem.value?.action === "list") {
+     listing.problem.value = null;
+   }
+diff --git c/frontend/src/ui/problem.ts w/frontend/src/ui/problem.ts
+index 5eeb2ff..67da9a2 100644
+--- c/frontend/src/ui/problem.ts
++++ w/frontend/src/ui/problem.ts
+@@ -14,6 +14,7 @@ export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
++  | { readonly action: "abort"; readonly cause: ProblemCause }
+   | {
+       readonly action: "open" | "finish" | "save" | "take" | "reset";
+       readonly path: string;
+@@ -44,6 +45,7 @@ export function logProblem(problem: Problem): void {
+   const event = `store.${problem.action}_failed`;
+   switch (problem.action) {
+     case "list":
++    case "abort":
+       log.error(event, { ...problem.cause });
+       return;
+     case "settings": {
+@@ -73,7 +75,12 @@ export function report(target: Target, failure: Problem): void {
+ 
+ export function clearProblemAbout(target: Target, path: string): void {
+   const problem = target.problem.value;
+-  if (problem === null || problem.action === "list" || problem.action === "settings") {
++  if (
++    problem === null ||
++    problem.action === "list" ||
++    problem.action === "abort" ||
++    problem.action === "settings"
++  ) {
+     return;
+   }
+   if (problem.path === path) {
+diff --git c/frontend/src/ui/problemText.ts w/frontend/src/ui/problemText.ts
+index 580edf6..a49bebd 100644
+--- c/frontend/src/ui/problemText.ts
++++ w/frontend/src/ui/problemText.ts
+@@ -22,6 +22,8 @@ function attempted(problem: Problem): string {
+       return `Could not reset ${problem.path}`;
+     case "settings":
+       return "Could not use the settings file";
++    case "abort":
++      return "Could not abort the merge";
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+diff --git c/frontend/src/ui/question.ts w/frontend/src/ui/question.ts
+index a0343d2..f06b2f3 100644
+--- c/frontend/src/ui/question.ts
++++ w/frontend/src/ui/question.ts
+@@ -8,6 +8,7 @@ import type { MergeSummary } from "./useMergeController";
+ export type Question =
+   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
+   | { readonly kind: "exit"; readonly files: readonly string[] }
++  | { readonly kind: "abort" }
+   | ({ readonly kind: "clash" } & Clash)
+   | {
+       readonly kind: "servers";
+@@ -29,6 +30,16 @@ export type QuestionText = {
+   readonly cancel: string;
+ };
+ 
++const ABORT_TEXT: QuestionText = {
++  title: "Abort Merge",
++  message:
++    "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
++  list: { kind: "none" },
++  note: null,
++  confirm: "Abort Merge",
++  cancel: "Cancel",
++};
++
+ function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
+   const folders = [...new Set(found.map((spec) => spec.project))];
+   const foundLines = folders.map((folder) => {
+@@ -95,6 +106,8 @@ export function questionText(question: Question, platform: string): QuestionText
+       };
+     case "servers":
+       return serversText(question.found, question.added);
++    case "abort":
++      return ABORT_TEXT;
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
+diff --git c/frontend/src/ui/store.test.ts w/frontend/src/ui/store.test.ts
+index 6297644..b860d0b 100644
+--- c/frontend/src/ui/store.test.ts
++++ w/frontend/src/ui/store.test.ts
+@@ -25,6 +25,7 @@ import {
+ import { LanguageServers } from "../lsp";
+ import { resultLine } from "./choiceText";
+ import type { FileWork } from "./closeGuard";
++import { problemText } from "./problemText";
+ import { formatNote } from "./serverText";
+ import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
+ import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
+@@ -2532,3 +2533,140 @@ test("the format note: shown after a Save for the four refusals, hidden for the
+     expect(formatNote(store.formatOutcomes.value.get("a.ts"))).toBe(note);
+   }
+ });
++
++function abortingStore(abortMerge: ChunkSource["abortMerge"]): {
++  store: AppStore;
++  pending: PendingLoad[];
++} {
++  const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
++  return { store: createAppStore({ ...source, abortMerge }), pending };
++}
++
++async function pressUnasked(store: AppStore): Promise<void> {
++  const pressed = store.abortMerge();
++  expect(store.question.value).toBeNull();
++  store.dismissQuestion();
++  await pressed;
++}
++
++test("Abort merge calls git only after a yes; No and Escape change nothing", async () => {
++  spyConsole();
++  let aborts = 0;
++  const { store } = abortingStore(() => {
++    aborts += 1;
++    return Promise.resolve(ok(null));
++  });
++  await store.refreshFiles();
++
++  const declined = store.abortMerge();
++  expect(store.question.value).toEqual({ kind: "abort" });
++  store.answer(false);
++  await declined;
++  const escaped = store.abortMerge();
++  expect(store.question.value).toEqual({ kind: "abort" });
++  store.dismissQuestion();
++  await escaped;
++
++  expect(aborts).toBe(0);
++  expect(store.abortButton.value).toBe("ready");
++  expect(store.problem.value).toBeNull();
++
++  const confirmed = store.abortMerge();
++  store.answer(true);
++  await confirmed;
++
++  expect(aborts).toBe(1);
++  expect(store.abortButton.value).toBe("running");
++  expect(store.problem.value).toBeNull();
++  await pressUnasked(store);
++  expect(aborts).toBe(1);
++});
++
++test("a press while the abort runs asks nothing and calls git no second time", async () => {
++  spyConsole();
++  const answers: ((result: SourceResult<null>) => void)[] = [];
++  const { store } = abortingStore(
++    () =>
++      new Promise((resolve) => {
++        answers.push(resolve);
++      }),
++  );
++  await store.refreshFiles();
++  const first = store.abortMerge();
++  store.answer(true);
++  await vi.waitFor(() => {
++    expect(answers).toHaveLength(1);
++  });
++
++  expect(store.abortButton.value).toBe("running");
++  await pressUnasked(store);
++  answers[0]?.(ok(null));
++  await first;
++
++  expect(answers).toHaveLength(1);
++  expect(store.abortButton.value).toBe("running");
++});
++
++test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
++  const lines = spyConsole();
++  const refused: SourceFailure = {
++    kind: "Git",
++    message: "error: Entry 'a.ts' not uptodate. Cannot merge.\n",
++  };
++  let aborts = 0;
++  const { store, pending } = abortingStore(() => {
++    aborts += 1;
++    return Promise.resolve({ ok: false, failure: refused });
++  });
++  await store.refreshFiles();
++  await openNow(store, pending, "a.ts");
++  const { files, opened } = store;
++  const before = { files: files.value, opened: opened.value };
++
++  const refusing = store.abortMerge();
++  store.answer(true);
++  await refusing;
++
++  const problem = store.problem.value;
++  expect(problem).toEqual({ action: "abort", cause: refused });
++  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
++    "Could not abort the merge: error: Entry 'a.ts' not uptodate. Cannot merge.",
++  );
++  expect(lines.error).toEqual([
++    `[error] store.abort_failed {kind: "Git", message: ${JSON.stringify(refused.message)}}`,
++  ]);
++  expect({ files: files.value, opened: opened.value }).toEqual(before);
++  expect(files.value).toBe(before.files);
++  expect(opened.value).toBe(before.opened);
++  expect(store.active.value).toBe("a.ts");
++  expect(store.abortButton.value).toBe("ready");
++
++  const again = store.abortMerge();
++  expect(store.question.value).toEqual({ kind: "abort" });
++  store.answer(true);
++  await again;
++  expect(aborts).toBe(2);
++});
++
++test("the abort button follows git's merging with each list and is hidden before the first", async () => {
++  spyConsole();
++  const merging = [true, false];
++  const { source } = handSource([entry("a.ts")]);
++  const store = createAppStore({
++    ...source,
++    listFiles: () =>
++      Promise.resolve(
++        ok({ files: [entry("a.ts")], diskChanges: [], merging: merging.shift() ?? true }),
++      ),
++  });
++
++  expect(store.merging.value).toBe(false);
++  expect(store.abortButton.value).toBe("hidden");
++  await store.refreshFiles();
++  expect(store.merging.value).toBe(true);
++  expect(store.abortButton.value).toBe("ready");
++  await store.refreshFiles();
++  expect(store.merging.value).toBe(false);
++  expect(store.abortButton.value).toBe("hidden");
++  await pressUnasked(store);
++});
+diff --git c/frontend/src/ui/store.ts w/frontend/src/ui/store.ts
+index d5d505d..be5f330 100644
+--- c/frontend/src/ui/store.ts
++++ w/frontend/src/ui/store.ts
+@@ -1,7 +1,6 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import {
+-  pressesKey,
+   type ChunkSource,
+   type DiskVersion,
+   type FileEntry,
+@@ -13,9 +12,11 @@ import {
+   type Theme,
+ } from "../ipc";
+ import type { LanguageServers } from "../lsp";
++import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { createCollapsing, type Collapsing } from "./collapsing";
++import { fileListKey, type KeyPress } from "./fileListKey";
+ import { loadSideNames, refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
+@@ -33,11 +34,9 @@ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from ".
+ import type { Preferences } from "./useMergeController";
+ import { fetchView, isShown, reload } from "./views";
+ 
+-type KeyPress = Parameters<typeof pressesKey>[0] &
+-  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
+-
+ type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly merging: ShallowRef<boolean>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+@@ -85,6 +84,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly preferences: ComputedRef<Preferences>;
+   readonly hiddenButtons: HiddenButtons["hidden"];
+ } & Actions &
++  Aborting &
+   Collapsing &
+   Saving &
+   Servers &
+@@ -95,6 +95,7 @@ let store: AppStore | null = null;
+ function createRefs(startTheme: Theme): Refs {
+   return {
+     files: shallowRef<readonly FileEntry[]>([]),
++    merging: shallowRef(false),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+@@ -138,6 +139,7 @@ export function createAppStore(
+     hiddenButtons: buttons.hidden,
+     ...acts,
+     ...createCollapsing(),
++    ...createAborting(state),
+     ...createSaving(state),
+     ...createServers(refs.screen, servers),
+     ...createServerSetup({ ...state, ...acts, host, servers }),
+@@ -280,18 +282,6 @@ async function reset(state: State, path: string, diskVersion: DiskVersion): Prom
+   });
+ }
+ 
+-function fileListKey(state: State, event: KeyPress, platform: string): void {
+-  if (
+-    event.defaultPrevented ||
+-    state.asking.question.value !== null ||
+-    !pressesKey(event, state.settings.value.keys.bindings["toggle-file-list"], platform)
+-  ) {
+-    return;
+-  }
+-  event.preventDefault();
+-  state.fileListShown.value = !state.fileListShown.value;
+-}
+-
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
