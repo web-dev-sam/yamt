@@ -1,0 +1,749 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 2ef5c80..d2da1fb 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -6,4 +6,4 @@ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start an
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
+ 
+-Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `FileList` gets one `AbortButton` (`hidden` / `ready` / `running`); `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path.
++Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `AbortState` is `noMerge` / `ready` / `running`; `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path. The button is the toolbar's first icon button (#58): `toolbarButtons.ts` `listedButtons` leaves it out of the menu and the toolbar while git has `noMerge`; whether the user hid it is a separate fact, `hiddenButtons`, which starts it hidden.
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 322ff58..57241e4 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -32,8 +32,6 @@ const {
+   dismissQuestion,
+   watchWindowClose,
+   fileListKey,
+-  abortButton,
+-  abortMerge,
+ } = useAppStore();
+ 
+ const focused = useWindowFocus();
+@@ -61,14 +59,7 @@ onMounted(() => {
+ 
+ <template>
+   <div class="flex h-full gap-island p-island">
+-    <FileList
+-      v-show="fileListShown"
+-      :files="files"
+-      :active="active"
+-      :abort-button="abortButton"
+-      @select="pick"
+-      @abort="abortMerge"
+-    />
++    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index e592f92..8c0ec80 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -1,23 +1,17 @@
+ <script setup lang="ts">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ import Check from "~icons/lucide/check";
+-import GitPullRequestClosed from "~icons/lucide/git-pull-request-closed";
+ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+ import type { FileEntry } from "../ipc";
+-import type { AbortButton } from "./aborting";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+ 
+-const props = defineProps<{
+-  files: readonly FileEntry[];
+-  active: string | null;
+-  abortButton: AbortButton;
+-}>();
+-const emit = defineEmits<{ select: [path: string]; abort: [] }>();
++const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
++const emit = defineEmits<{ select: [path: string] }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+ const handle = useTemplateRef<HTMLDivElement>("handle");
+@@ -74,19 +68,7 @@ function toggleFolder(path: string): void {
+     :style="widthStyle"
+   >
+     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
+-      <h2 class="mr-auto font-semibold">Files</h2>
+-      <button
+-        v-if="abortButton !== 'hidden'"
+-        type="button"
+-        title="Abort merge"
+-        aria-label="Abort merge"
+-        class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        :disabled="abortButton === 'running'"
+-        @mousedown.prevent
+-        @click="emit('abort')"
+-      >
+-        <GitPullRequestClosed class="size-4" aria-hidden="true" />
+-      </button>
++      <h2 class="font-semibold">Files</h2>
+       <button
+         type="button"
+         :title="viewButton.label"
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index 883ae86..73dd971 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -5,6 +5,7 @@ import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+ import ChevronsLeft from "~icons/lucide/chevrons-left";
+ import ChevronsRight from "~icons/lucide/chevrons-right";
++import GitPullRequestClosed from "~icons/lucide/git-pull-request-closed";
+ import Redo2 from "~icons/lucide/redo-2";
+ import Undo2 from "~icons/lucide/undo-2";
+ 
+@@ -14,7 +15,7 @@ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { useAppStore } from "./store";
+ import { summaryLabel } from "./summaryLabel";
+-import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
++import { shownButtons, type ToolbarButtonId } from "./toolbarButtons";
+ import ToolbarMenu from "./ToolbarMenu.vue";
+ import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
+ 
+@@ -24,6 +25,7 @@ type IconButton = {
+   readonly keepsKeyboard: boolean;
+   readonly run: () => void;
+   readonly selected: Readonly<Ref<boolean>> | null;
++  readonly disabled: Readonly<Ref<boolean>>;
+ };
+ 
+ const props = defineProps<{
+@@ -42,9 +44,24 @@ const emit = defineEmits<{
+ 
+ const SECONDARY_BUTTON = 2;
+ 
+-const { hiddenButtons, collapsing, toggleCollapsing } = useAppStore();
++const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortMerge } = useAppStore();
++
++const menuAt = shallowRef<Point | null>(null);
++
++const noSummary = computed(() => props.summary === null);
++const abortRunning = computed(() => abortState.value === "running");
+ 
+ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
++  abortMerge: {
++    label: "Abort merge",
++    icon: GitPullRequestClosed,
++    keepsKeyboard: true,
++    run: () => {
++      void abortMerge();
++    },
++    selected: null,
++    disabled: abortRunning,
++  },
+   previous: {
+     label: "Previous change",
+     icon: ArrowUp,
+@@ -53,6 +70,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("move", "up");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+   next: {
+     label: "Next change",
+@@ -62,6 +80,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("move", "down");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+   collapse: {
+     label: "Collapse unchanged fragments",
+@@ -69,6 +88,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     keepsKeyboard: true,
+     run: toggleCollapsing,
+     selected: collapsing,
++    disabled: noSummary,
+   },
+   applyLeft: {
+     label: "Apply non-conflicting changes from the left",
+@@ -78,6 +98,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("applyLeft");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+   applyRight: {
+     label: "Apply non-conflicting changes from the right",
+@@ -87,6 +108,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("applyRight");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+   undo: {
+     label: "Undo",
+@@ -96,6 +118,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("undo");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+   redo: {
+     label: "Redo",
+@@ -105,16 +128,12 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+       emit("redo");
+     },
+     selected: null,
++    disabled: noSummary,
+   },
+ };
+ 
+-const menuAt = shallowRef<Point | null>(null);
+-
+-const shownButtons = computed(() =>
+-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
+-    id,
+-    ...ICON_BUTTONS[id],
+-  })),
++const shown = computed(() =>
++  shownButtons(abortState.value, hiddenButtons.value).map((id) => ({ id, ...ICON_BUTTONS[id] })),
+ );
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -160,13 +179,13 @@ function closeMenu(): void {
+       Mark resolved
+     </button>
+     <button
+-      v-for="button in shownButtons"
++      v-for="button in shown"
+       :key="button.id"
+       type="button"
+       :title="button.label"
+       :aria-label="button.label"
+       :aria-pressed="button.selected?.value"
+-      :disabled="summary === null"
++      :disabled="button.disabled.value"
+       class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+       @mousedown="pressed(button, $event)"
+       @click="button.run"
+diff --git a/frontend/src/ui/ToolbarMenu.vue b/frontend/src/ui/ToolbarMenu.vue
+index 18cd82c..628f713 100644
+--- a/frontend/src/ui/ToolbarMenu.vue
++++ b/frontend/src/ui/ToolbarMenu.vue
+@@ -5,7 +5,7 @@ import Check from "~icons/lucide/check";
+ 
+ import { menuPosition, type Point, type Size } from "./menuPosition";
+ import { useAppStore } from "./store";
+-import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
++import { listedButtons, type ToolbarButtonId } from "./toolbarButtons";
+ 
+ type Item = { readonly id: ToolbarButtonId; readonly label: string; readonly shown: boolean };
+ 
+@@ -15,7 +15,7 @@ const props = defineProps<{
+ }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+-const { hiddenButtons, toggleButton } = useAppStore();
++const { hiddenButtons, toggleButton, abortState } = useAppStore();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+ const size = shallowRef<Size>({ width: 0, height: 0 });
+ const viewport = useWindowSize();
+@@ -25,7 +25,7 @@ useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
+ useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
+ 
+ const items = computed(() =>
+-  TOOLBAR_BUTTONS.map((id): Item => ({
++  listedButtons(abortState.value).map((id): Item => ({
+     id,
+     label: props.buttons[id].label,
+     shown: !hiddenButtons.value.has(id),
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index b49463a..96c1ba8 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -4,7 +4,7 @@ import type { ChunkSource } from "../ipc";
+ import type { Asking } from "./asking";
+ import { attempt, report, type Problem } from "./problem";
+ 
+-export type AbortButton = "hidden" | "ready" | "running";
++export type AbortState = "noMerge" | "ready" | "running";
+ 
+ type AbortTarget = {
+   readonly source: ChunkSource;
+@@ -14,21 +14,21 @@ type AbortTarget = {
+ };
+ 
+ export type Aborting = {
+-  readonly abortButton: ComputedRef<AbortButton>;
++  readonly abortState: ComputedRef<AbortState>;
+   readonly abortMerge: () => Promise<void>;
+ };
+ 
+ export function createAborting(target: AbortTarget): Aborting {
+   const running = shallowRef(false);
+-  const abortButton = computed((): AbortButton => {
++  const abortState = computed((): AbortState => {
+     if (!target.merging.value) {
+-      return "hidden";
++      return "noMerge";
+     }
+     return running.value ? "running" : "ready";
+   });
+ 
+   async function abortMerge(): Promise<void> {
+-    if (abortButton.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
++    if (abortState.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
+       return;
+     }
+     running.value = true;
+@@ -39,5 +39,5 @@ export function createAborting(target: AbortTarget): Aborting {
+     }
+   }
+ 
+-  return { abortButton, abortMerge };
++  return { abortState, abortMerge };
+ }
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index b860d0b..dd4a281 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -2568,7 +2568,7 @@ test("Abort merge calls git only after a yes; No and Escape change nothing", asy
+   await escaped;
+ 
+   expect(aborts).toBe(0);
+-  expect(store.abortButton.value).toBe("ready");
++  expect(store.abortState.value).toBe("ready");
+   expect(store.problem.value).toBeNull();
+ 
+   const confirmed = store.abortMerge();
+@@ -2576,7 +2576,7 @@ test("Abort merge calls git only after a yes; No and Escape change nothing", asy
+   await confirmed;
+ 
+   expect(aborts).toBe(1);
+-  expect(store.abortButton.value).toBe("running");
++  expect(store.abortState.value).toBe("running");
+   expect(store.problem.value).toBeNull();
+   await pressUnasked(store);
+   expect(aborts).toBe(1);
+@@ -2598,13 +2598,13 @@ test("a press while the abort runs asks nothing and calls git no second time", a
+     expect(answers).toHaveLength(1);
+   });
+ 
+-  expect(store.abortButton.value).toBe("running");
++  expect(store.abortState.value).toBe("running");
+   await pressUnasked(store);
+   answers[0]?.(ok(null));
+   await first;
+ 
+   expect(answers).toHaveLength(1);
+-  expect(store.abortButton.value).toBe("running");
++  expect(store.abortState.value).toBe("running");
+ });
+ 
+ test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
+@@ -2639,7 +2639,7 @@ test("git's refusal shows its message, keeps files and opened views, and a later
+   expect(files.value).toBe(before.files);
+   expect(opened.value).toBe(before.opened);
+   expect(store.active.value).toBe("a.ts");
+-  expect(store.abortButton.value).toBe("ready");
++  expect(store.abortState.value).toBe("ready");
+ 
+   const again = store.abortMerge();
+   expect(store.question.value).toEqual({ kind: "abort" });
+@@ -2648,7 +2648,7 @@ test("git's refusal shows its message, keeps files and opened views, and a later
+   expect(aborts).toBe(2);
+ });
+ 
+-test("the abort button follows git's merging with each list and is hidden before the first", async () => {
++test("the abort state follows git's merging with each list and is noMerge before the first", async () => {
+   spyConsole();
+   const merging = [true, false];
+   const { source } = handSource([entry("a.ts")]);
+@@ -2661,12 +2661,12 @@ test("the abort button follows git's merging with each list and is hidden before
+   });
+ 
+   expect(store.merging.value).toBe(false);
+-  expect(store.abortButton.value).toBe("hidden");
++  expect(store.abortState.value).toBe("noMerge");
+   await store.refreshFiles();
+   expect(store.merging.value).toBe(true);
+-  expect(store.abortButton.value).toBe("ready");
++  expect(store.abortState.value).toBe("ready");
+   await store.refreshFiles();
+   expect(store.merging.value).toBe(false);
+-  expect(store.abortButton.value).toBe("hidden");
++  expect(store.abortState.value).toBe("noMerge");
+   await pressUnasked(store);
+ });
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index 4169388..aca9530 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -1,7 +1,14 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { createHiddenButtons, TOOLBAR_BUTTONS, type HiddenButtons } from "./toolbarButtons";
++import {
++  createHiddenButtons,
++  listedButtons,
++  shownButtons,
++  TOOLBAR_BUTTONS,
++  type HiddenButtons,
++  type ToolbarButtonId,
++} from "./toolbarButtons";
+ 
+ const KEY = "yamt.toolbar.hidden";
+ 
+@@ -37,36 +44,42 @@ function spyWarnings(): string[] {
+   return lines;
+ }
+ 
+-test("Undo and Redo start hidden; toggling shows or hides a button and stores the hidden ones in toolbar order", () => {
++function storedDecisions(storage: { readonly items: Map<string, string> }): unknown {
++  const raw = storage.items.get(KEY);
++  return raw === undefined ? undefined : JSON.parse(raw);
++}
++
++test("Abort merge, Undo and Redo start hidden; toggling stores each decided button", () => {
+   const storage = memoryStorage();
+   const buttons = createHiddenButtons(storage);
+-  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo", "redo"]);
+   expect(storage.items.get(KEY)).toBeUndefined();
+ 
+   buttons.toggle("redo");
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo"]);
++  expect(storedDecisions(storage)).toEqual({ redo: false });
++
++  buttons.toggle("previous");
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "previous", "undo"]);
++  expect(storedDecisions(storage)).toEqual({ previous: true, redo: false });
++
++  buttons.toggle("abortMerge");
++  expect(hiddenList(buttons)).toEqual(["previous", "undo"]);
++  expect(storedDecisions(storage)).toEqual({ abortMerge: false, previous: true, redo: false });
++
++  buttons.toggle("previous");
+   expect(hiddenList(buttons)).toEqual(["undo"]);
+-  expect(storage.items.get(KEY)).toBe('["undo"]');
+-
+-  buttons.toggle("previous");
+-  expect([...buttons.hidden.value].sort()).toEqual(["previous", "undo"]);
+-  expect(storage.items.get(KEY)).toBe('["previous","undo"]');
+-
+-  buttons.toggle("undo");
+-  expect(hiddenList(buttons)).toEqual(["previous"]);
+-  expect(storage.items.get(KEY)).toBe('["previous"]');
+-
+-  buttons.toggle("previous");
+-  expect(hiddenList(buttons)).toEqual([]);
+-  expect(storage.items.get(KEY)).toBe("[]");
++  expect(storedDecisions(storage)).toEqual({ abortMerge: false, previous: false, redo: false });
+ });
+ 
+-test("a second start over the same storage keeps the choice, also once every button shows", () => {
++test("a second start over the same storage keeps the choice, Abort merge shown included", () => {
+   const storage = memoryStorage();
+   const first = createHiddenButtons(storage);
+   first.toggle("undo");
+   first.toggle("next");
++  first.toggle("abortMerge");
+ 
+-  expect([...createHiddenButtons(storage).hidden.value].sort()).toEqual(["next", "redo"]);
++  expect(hiddenList(createHiddenButtons(storage))).toEqual(["next", "redo"]);
+ 
+   first.toggle("redo");
+   first.toggle("next");
+@@ -74,16 +87,66 @@ test("a second start over the same storage keeps the choice, also once every but
+   expect(hiddenList(createHiddenButtons(storage))).toEqual([]);
+ });
+ 
+-test("stored ids yamt does not know are dropped and duplicates collapse", () => {
+-  const storage = memoryStorage({ [KEY]: '["redo","save","applyLeft","redo"]' });
++test.each([
++  ["[]", ["abortMerge"]],
++  ['["undo"]', ["abortMerge", "undo"]],
++  ['["undo","redo"]', ["abortMerge", "undo", "redo"]],
++  ['["next","collapse"]', ["abortMerge", "next", "collapse"]],
++])(
++  "a hidden list stored before Abort merge existed (%s) keeps the seven decisions and hides Abort merge",
++  (stored, hidden) => {
++    const storage = memoryStorage({ [KEY]: stored });
+ 
++    const buttons = createHiddenButtons(storage);
++
++    expect(hiddenList(buttons)).toEqual(hidden);
++    expect(storage.items.get(KEY)).toBe(stored);
++  },
++);
++
++test("a hidden list stored before Abort merge existed is rewritten as decisions at the first toggle", () => {
++  const storage = memoryStorage({ [KEY]: '["undo"]' });
+   const buttons = createHiddenButtons(storage);
+ 
+-  expect([...buttons.hidden.value].sort()).toEqual(["applyLeft", "redo"]);
++  buttons.toggle("abortMerge");
++
++  expect(hiddenList(buttons)).toEqual(["undo"]);
++  expect(storedDecisions(storage)).toEqual({
++    abortMerge: false,
++    previous: false,
++    next: false,
++    collapse: false,
++    applyLeft: false,
++    applyRight: false,
++    undo: true,
++    redo: false,
++  });
++  expect(hiddenList(createHiddenButtons(storage))).toEqual(["undo"]);
+ });
+ 
+-test("the toolbar order puts the collapse toggle after Next change and before the apply-all buttons", () => {
++test("a hidden list from before drops ids yamt does not know and collapses duplicates", () => {
++  const buttons = createHiddenButtons(
++    memoryStorage({ [KEY]: '["redo","save","applyLeft","redo"]' }),
++  );
++
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "applyLeft", "redo"]);
++});
++
++test("stored decisions drop ids yamt does not know and values that are not true or false", () => {
++  const storage = memoryStorage({
++    [KEY]: '{"save":true,"undo":false,"next":"yes","abortMerge":false,"redo":null}',
++  });
++
++  const buttons = createHiddenButtons(storage);
++  expect(hiddenList(buttons)).toEqual(["redo"]);
++
++  buttons.toggle("previous");
++  expect(storedDecisions(storage)).toEqual({ abortMerge: false, previous: true, undo: false });
++});
++
++test("the toolbar order puts Abort merge first and the collapse toggle after Next change", () => {
+   expect(TOOLBAR_BUTTONS).toEqual([
++    "abortMerge",
+     "previous",
+     "next",
+     "collapse",
+@@ -94,43 +157,59 @@ test("the toolbar order puts the collapse toggle after Next change and before th
+   ]);
+ });
+ 
+-test("a hidden list stored before the collapse toggle existed shows it; hiding it stores it in toolbar order", () => {
+-  const storage = memoryStorage({ [KEY]: '["undo","redo"]' });
+-  const buttons = createHiddenButtons(storage);
++test("the menu lists Abort merge only while git has a merge to abort", () => {
++  const withoutAbort = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge");
+ 
+-  expect(buttons.hidden.value.has("collapse")).toBe(false);
++  expect(listedButtons("noMerge")).toEqual(withoutAbort);
++  expect(listedButtons("ready")).toEqual(TOOLBAR_BUTTONS);
++  expect(listedButtons("running")).toEqual(TOOLBAR_BUTTONS);
++});
+ 
+-  buttons.toggle("collapse");
++test("the toolbar shows Abort merge only while git has a merge to abort and the user shows it", () => {
++  const userHidesUndo = new Set<ToolbarButtonId>(["undo"]);
++  const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
+ 
+-  expect(storage.items.get(KEY)).toBe('["collapse","undo","redo"]');
++  expect(shownButtons("ready", userHidesUndo)).toEqual([
++    "abortMerge",
++    "previous",
++    "next",
++    "collapse",
++    "applyLeft",
++    "applyRight",
++    "redo",
++  ]);
++  expect(shownButtons("running", userHidesUndo)[0]).toBe("abortMerge");
++  expect(shownButtons("noMerge", userHidesUndo)).not.toContain("abortMerge");
++  expect(shownButtons("noMerge", userHidesUndo)).toHaveLength(6);
++  expect(shownButtons("ready", userHidesAbort)).not.toContain("abortMerge");
++  expect(shownButtons("ready", userHidesAbort)).toHaveLength(6);
+ });
+ 
+ test.each([
+   ["not JSON", "[undo"],
+-  ["a JSON object", '{"undo":true}'],
+   ["a number", "4"],
+   ["a string", '"undo"'],
+   ["null", "null"],
+   ["an array holding a non-string", '["undo",4]'],
+-])("a stored value that is %s hides Undo and Redo, as at first", (_name, value) => {
++])("a stored value that is %s hides Abort merge, Undo and Redo, as at first", (_name, value) => {
+   const warnings = spyWarnings();
+ 
+   const buttons = createHiddenButtons(memoryStorage({ [KEY]: value }));
+ 
+-  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo", "redo"]);
+   expect(warnings).toEqual([]);
+ });
+ 
+-test("a missing key hides Undo and Redo and writes nothing until a toggle", () => {
++test("a missing key hides Abort merge, Undo and Redo and writes nothing until a toggle", () => {
+   const storage = memoryStorage({ other: "x" });
+ 
+   const buttons = createHiddenButtons(storage);
+ 
+-  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo", "redo"]);
+   expect([...storage.items.keys()]).toEqual(["other"]);
+ });
+ 
+-test("a storage that throws hides Undo and Redo, still toggles in memory and logs warnings", () => {
++test("a storage that throws hides Abort merge, Undo and Redo, still toggles in memory and logs warnings", () => {
+   const warnings = spyWarnings();
+   const failing: StorageLike = {
+     getItem: () => {
+@@ -145,13 +224,13 @@ test("a storage that throws hides Undo and Redo, still toggles in memory and log
+   };
+ 
+   const buttons = createHiddenButtons(failing);
+-  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo", "redo"]);
+   expect(warnings).toEqual([
+     '[warn] toolbar.storage_failed {kind: "Unexpected", message: "storage disabled"}',
+   ]);
+ 
+   buttons.toggle("undo");
+-  expect(hiddenList(buttons)).toEqual(["redo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "redo"]);
+   expect(warnings).toHaveLength(2);
+ });
+ 
+@@ -167,7 +246,7 @@ test("a storage that throws only on write keeps the toggle and logs the write's
+ 
+   buttons.toggle("redo");
+ 
+-  expect([...buttons.hidden.value].sort()).toEqual(["redo", "undo"]);
++  expect(hiddenList(buttons)).toEqual(["abortMerge", "undo", "redo"]);
+   expect(warnings).toEqual([
+     '[warn] toolbar.storage_failed {kind: "Unexpected", message: "quota exceeded"}',
+   ]);
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index b0772b7..47a0c10 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -1,9 +1,11 @@
+ import type { StorageLike } from "@vueuse/core";
+-import type { Ref } from "vue";
++import { computed, type Ref } from "vue";
+ 
++import type { AbortState } from "./aborting";
+ import { storedValue } from "./windowStorage";
+ 
+ export const TOOLBAR_BUTTONS = [
++  "abortMerge",
+   "previous",
+   "next",
+   "collapse",
+@@ -20,10 +22,33 @@ export type HiddenButtons = {
+   readonly toggle: (id: ToolbarButtonId) => void;
+ };
+ 
++type HiddenByUser = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
++
+ const STORAGE_KEY = "yamt.toolbar.hidden";
+ 
+-// Undo and Redo start hidden until the user shows them (plan §2 #58); their keys still work.
+-const HIDDEN_AT_FIRST: ReadonlySet<ToolbarButtonId> = new Set(["undo", "redo"]);
++// Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
++// keys of Undo and Redo still work.
++const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
++  abortMerge: true,
++  previous: false,
++  next: false,
++  collapse: false,
++  applyLeft: false,
++  applyRight: false,
++  undo: true,
++  redo: true,
++};
++
++export function listedButtons(abort: AbortState): readonly ToolbarButtonId[] {
++  return TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" || abort !== "noMerge");
++}
++
++export function shownButtons(
++  abort: AbortState,
++  hidden: ReadonlySet<ToolbarButtonId>,
++): readonly ToolbarButtonId[] {
++  return listedButtons(abort).filter((id) => !hidden.has(id));
++}
+ 
+ function parseJson(raw: string): unknown {
+   try {
+@@ -33,34 +58,54 @@ function parseJson(raw: string): unknown {
+   }
+ }
+ 
+-function readHidden(raw: string): ReadonlySet<ToolbarButtonId> {
+-  const names = parseJson(raw);
+-  if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
+-    return HIDDEN_AT_FIRST;
++function readHiddenList(names: readonly unknown[]): HiddenByUser {
++  if (!names.every((name) => typeof name === "string")) {
++    return {};
+   }
+-  return new Set(TOOLBAR_BUTTONS.filter((id) => names.includes(id)));
++  const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
++  for (const id of TOOLBAR_BUTTONS) {
++    if (id !== "abortMerge") {
++      decided[id] = names.includes(id);
++    }
++  }
++  return decided;
+ }
+ 
+-function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
+-  return JSON.stringify(TOOLBAR_BUTTONS.filter((id) => hidden.has(id)));
++function readDecided(stored: object): HiddenByUser {
++  const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
++  for (const id of TOOLBAR_BUTTONS) {
++    const hidden: unknown = Reflect.get(stored, id);
++    if (typeof hidden === "boolean") {
++      decided[id] = hidden;
++    }
++  }
++  return decided;
++}
++
++function readHiddenByUser(raw: string): HiddenByUser {
++  const stored = parseJson(raw);
++  if (Array.isArray(stored)) {
++    return readHiddenList(stored);
++  }
++  return typeof stored === "object" && stored !== null ? readDecided(stored) : {};
+ }
+ 
+ export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
+-  const hidden = storedValue<ReadonlySet<ToolbarButtonId>>(
++  const decided = storedValue<HiddenByUser>(
+     STORAGE_KEY,
+-    HIDDEN_AT_FIRST,
+-    { read: readHidden, write: writeHidden },
++    {},
++    { read: readHiddenByUser, write: (value) => JSON.stringify(value) },
+     "toolbar.storage_failed",
+     storage,
+   );
++  const hidden = computed(
++    (): ReadonlySet<ToolbarButtonId> =>
++      new Set(TOOLBAR_BUTTONS.filter((id) => decided.value[id] ?? HIDDEN_AT_FIRST[id])),
++  );
+   return {
+     hidden,
+     toggle: (id) => {
+-      const next = new Set(hidden.value);
+-      if (!next.delete(id)) {
+-        next.add(id);
+-      }
+-      hidden.value = next;
++      decided.value = { ...decided.value, [id]: !hidden.value.has(id) };
+     },
+   };
+ }

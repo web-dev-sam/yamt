@@ -9,10 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Abort merge: during a `git merge`, an icon next to "Files" runs `git merge --abort` after one question. Every
-  resolution and save is lost, the repository goes back to how it was before the merge, and yamt closes with
-  status 1. If git refuses, its message shows and nothing changes. Not shown for a rebase, cherry-pick, revert or
-  squash merge.
+- Abort merge: an icon button right after Mark resolved, hidden at first; show it from the toolbar's right-click
+  menu. During a `git merge` it runs `git merge --abort` after one question. Every resolution and save is lost,
+  the repository goes back to how it was before the merge, and yamt closes with status 1. If git refuses, its
+  message shows and nothing changes. Not offered for a rebase, cherry-pick, revert or squash merge.
+
+### Changed
+
+- The toolbar's right-click menu remembers each button you decided, shown or hidden, so a button added later keeps
+  its own starting state; choices made before carry over.
 
 ## [0.3.2] - 2026-10-15
 
