@@ -1,1 +1,5 @@
-{}
+{
+  "AbortMergeToolbar": {
+    "owned": ["frontend/src/ui/**"]
+  }
+}
