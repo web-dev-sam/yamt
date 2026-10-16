@@ -1,5 +1,8 @@
 {
   "AbortMergeWeb": {
     "owned": ["frontend/src/ui/**"]
+  },
+  "AbortMergeRustR1": {
+    "owned": ["crates/session/**", "crates/gitio/tests/**"]
   }
 }

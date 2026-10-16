@@ -247,6 +247,9 @@ impl Repo {
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>>;        // MERGE_MSG through rev-parse --git-path
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary>; // log -1 %h %s %B
     pub fn current_branch(&self) -> Result<Option<Vec<u8>>>;      // branch --show-current; detached (empty output) → None
+    // Abort merge (plan §2 #74)
+    pub fn rebase_in_progress(&self) -> Result<bool>;              // rebase-merge or rebase-apply exists (rev-parse --git-path)
+    pub fn abort_merge(&self) -> Result<()>;                       // merge --abort; git's refusal is GitFailed with its stderr
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
@@ -278,7 +281,7 @@ pub struct FileMergeData { pub path: String, pub middle: Middle, pub local: Stri
                            pub deleted: Option<Side>, pub eol: Eol, pub chunks: Vec<MergeChunk>, pub disk_version: DiskVersion }
 pub enum DiskResult { Staged, MarkersLeft { conflicts: u32 }, LeftAsIs, StageFailed { message: String } }
 pub struct DiskChange { pub path: String, pub result: DiskResult }
-pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange> }
+pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange>, pub merging: bool /* MERGE_HEAD names a commit, no rebase stopped (#74) */ }
 pub enum WriteReply { Written { files: Vec<FileEntry> }, ChangedOnDisk { files: Vec<FileEntry>, change: DiskChange } }
 
 impl MergeSession {
@@ -293,6 +296,7 @@ impl MergeSession {
     pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages, then the at-open bytes (`AtOpen::reset_to`, #66); checkout -m only for a link, submodule, other entry or unread file; all or nothing
     pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
+    pub fn abort_merge(&self) -> Result<()>;                         // git merge --abort (#74); src-tauri then drops the session (`Merge::Aborted`)
 }
 ```
 
@@ -378,10 +382,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
-  `NoConfigFolder`) mirrored into TS; no stringly errors. A disk change is never an error.
+  `NoConfigFolder`, `MergeAborted`) mirrored into TS; no stringly errors. A disk change is never an error.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
-  `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
+  `remaining() == 0`, else 1; after Abort merge exit 1 with `merge aborted` (#74). Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`. It needs the `bindings` feature, so
   `cargo tauri build` neither builds nor bundles it: tauri bundles every bin of the package unless
   its required features are off, and the universal macOS build makes only the main binary.
@@ -428,7 +432,7 @@ export type MergeChunk = { chunk: Chunk; middle: LineRange<MiddleLine>; words: W
 export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };
 export type FileMergeData = { path: string; middle: Middle; local: string; remote: string; deleted: Side | null; eol: Eol; chunks: MergeChunk[]; disk_version: DiskVersion };
 export type DiskResult = { kind: "Staged" } | { kind: "MarkersLeft"; conflicts: number } | { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
-export type FileList = { files: FileEntry[]; disk_changes: DiskChange[] };     // DiskChange = { path; result: DiskResult }
+export type FileList = { files: FileEntry[]; disk_changes: DiskChange[]; merging: boolean };     // DiskChange = { path; result: DiskResult }; merging (#74)
 export type WriteReply = { kind: "Written"; files: FileEntry[] } | { kind: "ChangedOnDisk"; files: FileEntry[]; change: DiskChange };
 export const commands: { listFiles(): Promise<FileList>; loadFile(path: string): Promise<FileMergeData>; … };
 ```
@@ -951,7 +955,7 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   uses, a trait needs two implementations, else write the concrete thing; derive macros only
   (`serde`, `thiserror`, `specta`), no `macro_rules!`; iterator chains of at most three
   adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s two `Mutex`es
-  (`MergeSession`, the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
+  (`Merge` = the held `MergeSession` or none after an abort, #74; the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
   diffs are synchronous and fast; the language-server host uses std threads and channels).
   Per milestone the orchestrator writes `docs/walkthroughs/M<n>.md`: what was built and the
   handful of non-obvious Rust constructs, with the reason each was chosen.

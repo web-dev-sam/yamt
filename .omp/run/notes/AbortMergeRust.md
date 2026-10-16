@@ -37,5 +37,11 @@ src-tauri 7 caught 25 unviable. TS: none on changed lines.
 ## Open risks
 - `rebase_in_progress`'s `Err` arm (a git-dir path that cannot be checked) untested (repo.rs:112).
 - `destroy()` failing only warns; the state is already Aborted, so a normal close ends with exit 1.
+- The mock window harness cannot observe `destroy()` (MockRuntime drops its window map, emits no `Destroyed`): deleting
+  it passes `cargo test`; only the real-app smoke proves the app ends (#1087).
 - Real app observed on Linux/WebKitGTK only; macOS/Windows [INFERENCE] same.
 - Leftover dirs `/var/tmp/yamt-mutants/{out,out-s,out-a}` (bash-guard blocks `rm -r`).
+
+## Reviews
+Boundary pass: #1079, #1080 (docs, orchestrator synced), #1081, #1082 promoted; #1083, #1084, #1085 dropped. Correctness pass:
+#1086 promoted (fallback untested), #1087 dropped (note added). Fix round 1: `briefs/3.A-abort-rust-rework-1.md`.
