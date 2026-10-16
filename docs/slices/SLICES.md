@@ -625,7 +625,7 @@ ticks go when unchanged lines are collapsed. A parallel session works in `../yam
 findings are numbered from #1200 and its plan rows from #80; real-app sessions are named `b-…`; the fixture page uses
 `just webdriver 4446`; nothing under `.omp/` but `.omp/run/` changes here (suggestions go to the handoff).
 
-Rules (orchestrator as owner, OR13; plan §2 #80 once the design is chosen):
+Rules (orchestrator as owner, OR13; recorded as plan §2 #80, rules 3 and 5 corrected from WebStorm's source by the design):
 
 1. **Shown** while the Alt key (Option on macOS) is held in the focused yamt window: every pane of the shown file draws
    ticks in a lane over its scrollbar. They appear on Alt's own key press (`key` "Alt"; AltGr reports "AltGraph" and
@@ -637,16 +637,19 @@ Rules (orchestrator as owner, OR13; plan §2 #80 once the design is chosen):
 3. **Side panes**: one tick per change of that side still waiting on that side, in the colour the pane gives it
    (conflicts in the conflict colour). Applied or ignored on that side: no tick. **Result**: one tick per change with a
    side still waiting, in the Result's colour for it, plus one per language-server problem the Result underlines, in its
-   severity colour (errors drawn above warnings above changes where they overlap).
+   severity colour (hints as info). Where they overlap, errors paint over changes over warnings over info (WebStorm's
+   layers).
 4. **Place**: a tick sits where the scrollbar thumb is when that place is in view — the place's top over the pane's
    whole scrollable height, scaled to the lane — and spans the change's height, never thinner than a minimum. Collapsed
    unchanged lines take one wave line of height, so ticks follow what the pane shows; a problem inside collapsed lines
    sits at that wave line.
-5. **Click** on a tick (Alt held): the pane scrolls the place into view with the placement keyboard navigation uses, the
-   other panes follow the locked scroll. A side tick makes that change the side's outlined change and gives that side
-   the keyboard, as a click on the change does (#54); a Result tick puts the cursor at the place's start (a problem's
-   start, a change's first line) and gives the Result the keyboard, showing collapsed lines around it as find does
-   (#63). The press never reaches the text: no selection, no apply, no drag.
+5. **Click** on a tick (Alt held; acting on the click, the press itself prevented; the tick whose top is nearest within
+   4 px): the pane scrolls to put that line a third of the way down, also when it was already in view (WebStorm's
+   error-stripe click), the other panes follow the locked scroll. A side tick makes that change the side's outlined
+   change and gives that side the keyboard, as a click on the change does (#54); a Result tick puts the cursor at the
+   place's start (a problem's start, a change's first line) and gives the Result the keyboard, showing collapsed lines
+   around it as find does (#63). The press never reaches the text: no selection, no apply, no drag; presses between
+   ticks still reach the scrollbar.
 6. **Alt and the text**: yamt has no Alt-drag column selection (`rectangularSelection` is not in any pane), and
    CodeMirror listens for presses on the text only (`@codemirror/view` 6.43.14 attaches its handlers to `contentDOM`,
    `dist/index.js:4605–4616`), so a tick never starts a selection and an Alt+press on the text behaves as before.
@@ -669,9 +672,11 @@ colours; scroll timing no worse. Non-goals: ticks without Alt, a setting or anot
 marks in the file list or toolbar, keyboard access to ticks, word-level marks, find matches or the cursor as ticks,
 Rust or IPC changes.
 
-| row | slice                                                                                                                 | owner    | status  | evidence |
-| --- | --------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1   | design: Alt state, the lane over each scrollbar, tick places and colours, the jump (`briefs/3.O-alt-marks-design.md`) | designer | running |          |
+| row | slice                                                                                                                        | owner    | status  | evidence                                                                                                                                                                                                                                                                                 |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design: Alt state, the lane over each scrollbar, tick places and colours, the jump (`briefs/3.O-alt-marks-design.md`)        | designer | done    | `AltMarksDesign`: 3 options, A chosen (plan §2 #80): hold in `ui/altHold.ts`, lanes in each `view.dom` painted from `Frame`'s rows; WebStorm corrections to rules 3/5; open questions decided as owner (third-down placement, info ticks kept); notes `.omp/run/notes/AltMarksDesign.md` |
+| 2   | 3.O-hold (`briefs/3.O-alt-hold.md`; `ui/altHold.ts`, its test, `ui/App.vue`)                                                 | web-impl | running |                                                                                                                                                                                                                                                                                          |
+| 3   | 3.O-editor (`briefs/3.O-marks-editor.md`; `editor/**`, `style.css`, `ui/useMergeController.ts`, `ui/MergeView.vue`; needs 2) | web-impl | planned |                                                                                                                                                                                                                                                                                          |
 
 ## Open product questions
 

@@ -1,1 +1,10 @@
-{}
+{
+  "AltMarksHold": {
+    "owned": [
+      "frontend/src/ui/altHold.ts",
+      "frontend/src/ui/altHold.test.ts",
+      "frontend/src/ui/App.vue"
+    ],
+    "readonly": ["**"]
+  }
+}
