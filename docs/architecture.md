@@ -618,14 +618,17 @@ Internals (`editor/internal/`, not importable from `ui/`):
   wave line), WebStorm's error-stripe geometry (`laneBox`: the scrollbar's own width, 14 px over an
   overlay one, a classic scrollbar's arrows left out on Windows; `ticks`: top over the scroll height
   scaled to the track, the find space included, never under 2 px, painted info < warning < changes <
-  error) and `tickAt` (the nearest top within 4 px). `MarkLanes` keeps one lane per pane in its
-  `view.dom` (outside `scrollDOM` and `contentDOM`, so neither CodeMirror nor `SideFocus` sees its
-  presses; the lane lets presses through, only ticks take them) and paints only while shown and
-  dirty. `markJump.ts` acts on a tick's click: a side change through `SideFocus.focusChange`
-  (outline + keyboard), a Result place by moving the cursor through the line's end to its start
-  (`foldField` shows hidden lines) and focusing it; either pane is then scrolled to put the line a
-  third of the way down (`viewport.ts` `thirdScrollTop`, WebStorm's `ScrollType.CENTER`), and the
-  others follow the sync.
+  error) and `tickAt` (the nearest top within `PICK_DISTANCE_PX`, 4 px, also each tick's hit band through
+  `--mark-pick`). `MarkLanes` keeps one lane per pane in its `view.dom` (outside `scrollDOM` and
+  `contentDOM`, so neither CodeMirror nor `SideFocus` sees its presses; the lane lets presses through,
+  only ticks take them; a wheel over a tick is forwarded to that pane's scroller) and paints only while
+  shown and dirty. `markJump.ts` acts on a tick's click, handed to `Frame` as its `jump` part by the
+  controller: a side change through `SideFocus.focusChange` (outline + keyboard), a Result place by
+  selecting its whole line, then putting the cursor at its start (`revealSteps`: `foldField` shows hidden
+  lines that hold a non-empty selection, also for a zero-length problem at their end) and focusing it;
+  either pane is then scrolled to put the line a third of the way down (`viewport.ts` `thirdScrollTop`,
+  WebStorm's `ScrollType.CENTER`), and the others follow the sync. One pane→side table, `geometry.ts`
+  `PANE_TINT`, serves the marks and the jump.
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
   bar where the side removed text, carrying that text; `removalAt` reads it back) from `chunk.words`
   (plan §2 #30, #31). `removalTooltip.ts` shows a bar's text on hover (`hoverTooltip`, only while the

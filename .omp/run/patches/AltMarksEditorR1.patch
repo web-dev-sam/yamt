@@ -1,0 +1,319 @@
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index be809a7..3125a91 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -6,4 +6,4 @@ Save (plan §2 #65, #69): `internal/fileText.ts` builds the file Save writes fro
+ 
+ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `RemovalPoint`, class `REMOVAL_BAR_CLASS`) carries its removed text, and `eq` compares tone and text; `removalTooltip.ts` opens a `hoverTooltip` (in `document.body`) only while the pointer is on a bar's own box (`:hover` on that class), reads the text from that bar's decoration (`removalAt`), never from `chunk.words`, copies the pane's font, ligatures and code colour from its computed style, and closes when the bar goes; `removalText.ts` holds the pure display rules (the one joining line break left out — on an empty line the trailing one first — whitespace-only text as `·`/`→`/`↵` marks); `theme.css` draws a kept final line break as its empty line (`::after` zero-width space, not copied).
+ 
+-Change marks (plan §2 #80): `Frame` owns `internal/markLanes.ts` (`MarkLanes`), one `.change-marks` lane appended to each pane's `view.dom` over its scrollbar, `hidden` while `MergeOptions.marks`/`showMarks` say no; it repaints from `Frame`'s rows only while shown and dirty (rows or geometry changed, `setDiagnosticsEffect`), never on scroll. `marks.ts` holds the pure rules: places from `tone.ts` `paneTone` (the one tint rule, bands use it too) and from `forEachDiagnostic` on the line block (a problem in collapsed lines sits on its wave line), WebStorm's stripe geometry (14 px lane, 2 px floor, Windows arrows), paint order (errors over changes over warnings over info) and `tickAt` (nearest top within 4 px). `markJump.ts` acts on a tick's click, positions read at click time: a side tick outlines its change through `SideFocus.focusChange`, a Result tick puts the cursor at the line's end and then the place's start so `foldField` shows hidden lines; both put the line a third down (`viewport.ts` `thirdScrollTop`).
++Change marks (plan §2 #80): `Frame` owns `internal/markLanes.ts` (`MarkLanes`), one `.change-marks` lane appended to each pane's `view.dom` over its scrollbar, `hidden` while `MergeOptions.marks`/`showMarks` say no; it repaints from `Frame`'s rows only while shown and dirty (rows or geometry changed, `setDiagnosticsEffect`), never on scroll. A wheel over a lane is forwarded to that pane's `scrollDOM` (the lane is not inside it). `marks.ts` holds the pure rules: places from `tone.ts` `paneTone` (the one tint rule, bands use it too) and from `forEachDiagnostic` on the line block (a problem in collapsed lines sits on its wave line), WebStorm's stripe geometry (14 px lane, 2 px floor, Windows arrows), paint order (errors over changes over warnings over info) and `tickAt` (nearest top within `PICK_DISTANCE_PX`, which the lane hands the CSS hit band as `--mark-pick`). `markJump.ts` acts on a tick's click, positions read at click time; the controller builds it into `Frame`'s `jump` part: a side tick outlines its change through `SideFocus.focusChange`, a Result tick selects the place's whole line (`revealSteps`: a non-empty selection inside hidden lines shows them, also for a zero-length problem at their end) and then puts the cursor at the place's start; both put the line a third down (`viewport.ts` `thirdScrollTop`).
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 94e3610..d2f1a77 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -15,6 +15,7 @@ import { Frame } from "./internal/frame";
+ import type { PaneViews } from "./internal/geometry";
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf, loadLanguage } from "./internal/language";
++import { jumpTo } from "./internal/markJump";
+ import type { Direction } from "./internal/navigation";
+ import { preferenceEffects } from "./internal/pane";
+ import type { PaneSettings, Preferences } from "./internal/pane";
+@@ -93,7 +94,9 @@ export class MergeController {
+       folds: this.#folds.fields,
+       drag: this.#drag,
+       strips: this.#strips,
+-      focus: this.#focus,
++      jump: (pane, target, rows) => {
++        jumpTo({ views: this.#views, spans: this.#field, focus: this.#focus, rows }, pane, target);
++      },
+       marks: options.marks,
+     });
+     this.#frame.request();
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+index d22a8ba..23748c0 100644
+--- a/frontend/src/editor/internal/folds.test.ts
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -28,6 +28,7 @@ import {
+ import { revealKeep } from "./foldSelection";
+ import { centerFolds, sideFolds } from "./foldView";
+ import type { Pane } from "./geometry";
++import { revealSteps } from "./markJump";
+ import { paneState, type PaneSettings } from "./pane";
+ import { paneDocs } from "./paneDocs";
+ 
+@@ -325,6 +326,20 @@ test("a selection with both ends exactly on a range's edges shows it", async ()
+   expect(centerLines(after(merge, selectMatch({ from, to })), 1)).toEqual(["41-62", "49-54"]);
+ });
+ 
++test("a problem tick's jump to a zero-length problem at a hidden range's first or last position shows it with the cursor there", async () => {
++  const merge = await open();
++  const { from, to } = levelOf(merge, 1, 0);
++
++  for (const pos of [from, to]) {
++    const jumped = revealSteps(merge.state.doc, pos).reduce(
++      (done, step) => after(done, step),
++      merge,
++    );
++    expect(centerLines(jumped, 1), `${pos}`).toEqual(["41-62", "49-54"]);
++    expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(pos));
++  }
++});
++
+ test("a side's reveal reads its own ranges and shows what the middle shows for the same line", async () => {
+   const merge = await open();
+   const leftDoc = merge.sides.local;
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index abecb1f..9d65db0 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -7,12 +7,11 @@ import { pushCovered } from "./covered";
+ import { coveredAction, type IconDrag } from "./drag";
+ import { syncFindSpace } from "./find";
+ import { waveStarts, type FoldFields } from "./folds";
+-import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
++import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
+ import type { ChunkRow, WaveRow } from "./geometry";
+-import { jumpTo } from "./markJump";
+ import { MarkLanes } from "./markLanes";
++import type { MarkTarget } from "./marks";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
+-import type { SideFocus } from "./sideFocus";
+ import type { Strips } from "./strips";
+ 
+ type Layout = {
+@@ -27,7 +26,7 @@ type FrameParts = {
+   readonly folds: FoldFields;
+   readonly drag: IconDrag;
+   readonly strips: Strips;
+-  readonly focus: SideFocus;
++  readonly jump: (pane: Pane, target: MarkTarget, rows: readonly ChunkRow[]) => void;
+   readonly marks: boolean;
+ };
+ 
+@@ -43,9 +42,8 @@ export class Frame {
+     this.#scroll = new ScrollSync(parts.views, () => {
+       this.request();
+     });
+-    const { views, spans, focus } = parts;
+-    this.#marks = new MarkLanes(views, parts.marks, (pane, target) => {
+-      jumpTo({ views, spans, focus, rows: this.layout().rows }, pane, target);
++    this.#marks = new MarkLanes(parts.views, parts.marks, (pane, target) => {
++      parts.jump(pane, target, this.layout().rows);
+       this.#scroll.follow(pane);
+     });
+   }
+@@ -56,8 +54,9 @@ export class Frame {
+     if (moved) {
+       this.#layoutCache = null;
+     }
++    const marksDirty = this.#marks.changed(update, moved);
+     if (
+-      this.#marks.changed(update, moved) ||
++      marksDirty ||
+       update.docChanged ||
+       update.geometryChanged ||
+       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 1453b3e..5b9626f 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -5,7 +5,7 @@ import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry"
+ import { modKeyName } from "./modClick";
+ import type { Side } from "./side";
+ import { applyMode, decidesOtherSide, isSideOpen, type ApplyMode } from "./status";
+-import { chunkTone, type Tone } from "./tone";
++import { paneTone, type Tone } from "./tone";
+ 
+ export type Arrow = {
+   readonly top: number;
+@@ -76,7 +76,8 @@ export function bandPaints(
+   const panes = STRIP_PANES[side];
+   const paints = [];
+   for (const row of rows) {
+-    if (isSideOpen(row.chunk, row.status, side)) {
++    const tone = paneTone(row.chunk, row.status, side);
++    if (tone !== null) {
+       const left = row[panes.left];
+       const right = row[panes.right];
+       const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+@@ -84,7 +85,7 @@ export function bandPaints(
+       const top = Math.min(onLeft.top, onRight.top);
+       if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
+         const d = bandPath({ left: onLeft, right: onRight }, size.width);
+-        paints.push({ chunk: row.chunk, tone: chunkTone(row.chunk, side), d });
++        paints.push({ chunk: row.chunk, tone, d });
+       }
+     }
+   }
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index 51b76eb..40002d0 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -19,6 +19,12 @@ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+   remote: "right",
+ };
+ 
++export const PANE_TINT = {
++  left: "local",
++  center: "center",
++  right: "remote",
++} as const satisfies Readonly<Record<Pane, Side | "center">>;
++
+ export const STRIP_PANES: Readonly<Record<Side, { readonly left: Pane; readonly right: Pane }>> = {
+   local: { left: "left", right: "center" },
+   remote: { left: "center", right: "right" },
+diff --git a/frontend/src/editor/internal/markJump.ts b/frontend/src/editor/internal/markJump.ts
+index a9bcb22..31f9b57 100644
+--- a/frontend/src/editor/internal/markJump.ts
++++ b/frontend/src/editor/internal/markJump.ts
+@@ -1,9 +1,9 @@
+ import { forEachDiagnostic } from "@codemirror/lint";
+-import type { EditorState, StateField } from "@codemirror/state";
++import type { EditorState, StateField, Text, TransactionSpec } from "@codemirror/state";
+ import type { EditorView } from "@codemirror/view";
+ 
+ import type { ChunkSpan } from "./chunkField";
+-import type { ChunkRow, Pane, PaneViews } from "./geometry";
++import { PANE_TINT, type ChunkRow, type Pane, type PaneViews } from "./geometry";
+ import type { MarkTarget } from "./marks";
+ import type { SideFocus } from "./sideFocus";
+ import { thirdScrollTop } from "./viewport";
+@@ -48,16 +48,20 @@ function scrollToThird(view: EditorView, top: number): void {
+   });
+ }
+ 
+-// WebStorm's stripe click puts the caret at the line's end first to open a fold around it, then at
+-// the mark's start (intellij-community EditorMarkupModelImpl.kt doClick).
++export function revealSteps(doc: Text, start: number): readonly TransactionSpec[] {
++  const line = doc.lineAt(start);
++  return [{ selection: { anchor: line.from, head: line.to } }, { selection: { anchor: start } }];
++}
++
+ function jumpInResult({ views, spans }: JumpParts, target: MarkTarget): void {
+   const view = views.center;
+   const start = startOf(view.state, spans, target);
+   if (start === null) {
+     return;
+   }
+-  view.dispatch({ selection: { anchor: view.state.doc.lineAt(start).to } });
+-  view.dispatch({ selection: { anchor: start } });
++  for (const step of revealSteps(view.state.doc, start)) {
++    view.dispatch(step);
++  }
+   view.focus();
+   scrollToThird(view, view.lineBlockAt(start).top);
+ }
+@@ -72,6 +76,6 @@ export function jumpTo(parts: JumpParts, pane: Pane, target: MarkTarget): void {
+   if (row === undefined) {
+     return;
+   }
+-  parts.focus.focusChange(pane === "left" ? "local" : "remote", row.chunk.id);
++  parts.focus.focusChange(PANE_TINT[pane], row.chunk.id);
+   scrollToThird(parts.views[pane], row[pane].top);
+ }
+diff --git a/frontend/src/editor/internal/markLanes.ts b/frontend/src/editor/internal/markLanes.ts
+index 83d6c0f..b509fe0 100644
+--- a/frontend/src/editor/internal/markLanes.ts
++++ b/frontend/src/editor/internal/markLanes.ts
+@@ -2,8 +2,9 @@ import type { ViewUpdate } from "@codemirror/view";
+ 
+ import type { ChunkRow, Pane, PaneViews } from "./geometry";
+ import { PANES } from "./geometry";
+-import { changePlaces, laneBox, problemPlaces, tickAt, ticks } from "./marks";
++import { changePlaces, laneBox, PICK_DISTANCE_PX, problemPlaces, tickAt, ticks } from "./marks";
+ import type { MarkTarget, Tick } from "./marks";
++import { LINE_HEIGHT_PX } from "./pane";
+ import { linted } from "./problems";
+ 
+ type Jump = (pane: Pane, target: MarkTarget) => void;
+@@ -16,6 +17,17 @@ function tickElement({ top, height, kind }: Tick): HTMLDivElement {
+   return element;
+ }
+ 
++function wheelScale(event: WheelEvent, scroller: HTMLElement): number {
++  switch (event.deltaMode) {
++    case WheelEvent.DOM_DELTA_LINE:
++      return LINE_HEIGHT_PX;
++    case WheelEvent.DOM_DELTA_PAGE:
++      return scroller.clientHeight;
++    default:
++      return 1;
++  }
++}
++
+ export class MarkLanes {
+   readonly #views: PaneViews;
+   readonly #lanes: Readonly<Record<Pane, HTMLDivElement>>;
+@@ -72,7 +84,17 @@ export class MarkLanes {
+     const lane = document.createElement("div");
+     lane.className = "change-marks";
+     lane.setAttribute("aria-hidden", "true");
++    lane.style.setProperty("--mark-pick", `${PICK_DISTANCE_PX}px`);
+     const signal = this.#listeners.signal;
++    const scroller = this.#views[pane].scrollDOM;
++    lane.addEventListener(
++      "wheel",
++      (event) => {
++        const scale = wheelScale(event, scroller);
++        scroller.scrollBy({ left: event.deltaX * scale, top: event.deltaY * scale });
++      },
++      { signal, passive: true },
++    );
+     lane.addEventListener(
+       "mousedown",
+       (event) => {
+diff --git a/frontend/src/editor/internal/marks.ts b/frontend/src/editor/internal/marks.ts
+index dfe1d38..93e4be8 100644
+--- a/frontend/src/editor/internal/marks.ts
++++ b/frontend/src/editor/internal/marks.ts
+@@ -3,8 +3,7 @@ import type { EditorState } from "@codemirror/state";
+ 
+ import type { Span } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+-import type { ChunkRow, Pane } from "./geometry";
+-import type { Side } from "./side";
++import { PANE_TINT, type ChunkRow, type Pane } from "./geometry";
+ import { paneTone, type Tone } from "./tone";
+ 
+ export type MarkKind = Tone | "error" | "warning" | "info";
+@@ -43,7 +42,7 @@ export type Tick = {
+ // HighlighterLayer ERROR > DiffDrawUtil.STRIPE_LAYER > WARNING).
+ const LANE_MIN_WIDTH_PX = 14;
+ const TICK_MIN_HEIGHT_PX = 2;
+-const PICK_DISTANCE_PX = 4;
++export const PICK_DISTANCE_PX = 4;
+ 
+ const PAINT_ORDER: Readonly<Record<MarkKind, number>> = {
+   info: 0,
+@@ -62,15 +61,9 @@ const SEVERITY_KIND: Readonly<Record<Diagnostic["severity"], MarkKind>> = {
+   hint: "info",
+ };
+ 
+-const TINT_OF: Readonly<Record<Pane, Side | "center">> = {
+-  left: "local",
+-  center: "center",
+-  right: "remote",
+-};
+-
+ export function changePlaces(rows: readonly ChunkRow[], pane: Pane): MarkPlace[] {
+   return rows.flatMap((row) => {
+-    const kind = paneTone(row.chunk, row.status, TINT_OF[pane]);
++    const kind = paneTone(row.chunk, row.status, PANE_TINT[pane]);
+     const target: MarkTarget = { kind: "change", id: row.chunk.id };
+     return kind === null ? [] : [{ ...row[pane], kind, target }];
+   });
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index e177ce5..f50a357 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -320,7 +320,7 @@ path.chunk-band {
+ 
+ .change-mark::before {
+   position: absolute;
+-  inset: -4px 0;
++  inset: calc(-1 * var(--mark-pick)) 0;
+   content: "";
+ }
+ 
