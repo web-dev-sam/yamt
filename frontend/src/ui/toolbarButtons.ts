@@ -1,9 +1,11 @@
 import type { StorageLike } from "@vueuse/core";
-import type { Ref } from "vue";
+import { computed, type Ref } from "vue";
 
+import type { AbortState } from "./aborting";
 import { storedValue } from "./windowStorage";
 
 export const TOOLBAR_BUTTONS = [
+  "abortMerge",
   "previous",
   "next",
   "collapse",
@@ -20,10 +22,33 @@ export type HiddenButtons = {
   readonly toggle: (id: ToolbarButtonId) => void;
 };
 
+type HiddenByUser = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
+
 const STORAGE_KEY = "yamt.toolbar.hidden";
 
-// Undo and Redo start hidden until the user shows them (plan §2 #58); their keys still work.
-const HIDDEN_AT_FIRST: ReadonlySet<ToolbarButtonId> = new Set(["undo", "redo"]);
+// Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
+// keys of Undo and Redo still work.
+const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+  abortMerge: true,
+  previous: false,
+  next: false,
+  collapse: false,
+  applyLeft: false,
+  applyRight: false,
+  undo: true,
+  redo: true,
+};
+
+export function listedButtons(abort: AbortState): readonly ToolbarButtonId[] {
+  return TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" || abort !== "noMerge");
+}
+
+export function shownButtons(
+  abort: AbortState,
+  hidden: ReadonlySet<ToolbarButtonId>,
+): readonly ToolbarButtonId[] {
+  return listedButtons(abort).filter((id) => !hidden.has(id));
+}
 
 function parseJson(raw: string): unknown {
   try {
@@ -33,34 +58,54 @@ function parseJson(raw: string): unknown {
   }
 }
 
-function readHidden(raw: string): ReadonlySet<ToolbarButtonId> {
-  const names = parseJson(raw);
-  if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
-    return HIDDEN_AT_FIRST;
+function readHiddenList(names: readonly unknown[]): HiddenByUser {
+  if (!names.every((name) => typeof name === "string")) {
+    return {};
   }
-  return new Set(TOOLBAR_BUTTONS.filter((id) => names.includes(id)));
+  const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
+  for (const id of TOOLBAR_BUTTONS) {
+    if (id !== "abortMerge") {
+      decided[id] = names.includes(id);
+    }
+  }
+  return decided;
 }
 
-function writeHidden(hidden: ReadonlySet<ToolbarButtonId>): string {
-  return JSON.stringify(TOOLBAR_BUTTONS.filter((id) => hidden.has(id)));
+function readDecided(stored: object): HiddenByUser {
+  const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
+  for (const id of TOOLBAR_BUTTONS) {
+    const hidden: unknown = Reflect.get(stored, id);
+    if (typeof hidden === "boolean") {
+      decided[id] = hidden;
+    }
+  }
+  return decided;
+}
+
+function readHiddenByUser(raw: string): HiddenByUser {
+  const stored = parseJson(raw);
+  if (Array.isArray(stored)) {
+    return readHiddenList(stored);
+  }
+  return typeof stored === "object" && stored !== null ? readDecided(stored) : {};
 }
 
 export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
-  const hidden = storedValue<ReadonlySet<ToolbarButtonId>>(
+  const decided = storedValue<HiddenByUser>(
     STORAGE_KEY,
-    HIDDEN_AT_FIRST,
-    { read: readHidden, write: writeHidden },
+    {},
+    { read: readHiddenByUser, write: (value) => JSON.stringify(value) },
     "toolbar.storage_failed",
     storage,
+  );
+  const hidden = computed(
+    (): ReadonlySet<ToolbarButtonId> =>
+      new Set(TOOLBAR_BUTTONS.filter((id) => decided.value[id] ?? HIDDEN_AT_FIRST[id])),
   );
   return {
     hidden,
     toggle: (id) => {
-      const next = new Set(hidden.value);
-      if (!next.delete(id)) {
-        next.add(id);
-      }
-      hidden.value = next;
+      decided.value = { ...decided.value, [id]: !hidden.value.has(id) };
     },
   };
 }

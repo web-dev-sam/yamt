@@ -2568,7 +2568,7 @@ test("Abort merge calls git only after a yes; No and Escape change nothing", asy
   await escaped;
 
   expect(aborts).toBe(0);
-  expect(store.abortButton.value).toBe("ready");
+  expect(store.abortState.value).toBe("ready");
   expect(store.problem.value).toBeNull();
 
   const confirmed = store.abortMerge();
@@ -2576,7 +2576,7 @@ test("Abort merge calls git only after a yes; No and Escape change nothing", asy
   await confirmed;
 
   expect(aborts).toBe(1);
-  expect(store.abortButton.value).toBe("running");
+  expect(store.abortState.value).toBe("running");
   expect(store.problem.value).toBeNull();
   await pressUnasked(store);
   expect(aborts).toBe(1);
@@ -2598,13 +2598,13 @@ test("a press while the abort runs asks nothing and calls git no second time", a
     expect(answers).toHaveLength(1);
   });
 
-  expect(store.abortButton.value).toBe("running");
+  expect(store.abortState.value).toBe("running");
   await pressUnasked(store);
   answers[0]?.(ok(null));
   await first;
 
   expect(answers).toHaveLength(1);
-  expect(store.abortButton.value).toBe("running");
+  expect(store.abortState.value).toBe("running");
 });
 
 test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
@@ -2639,7 +2639,7 @@ test("git's refusal shows its message, keeps files and opened views, and a later
   expect(files.value).toBe(before.files);
   expect(opened.value).toBe(before.opened);
   expect(store.active.value).toBe("a.ts");
-  expect(store.abortButton.value).toBe("ready");
+  expect(store.abortState.value).toBe("ready");
 
   const again = store.abortMerge();
   expect(store.question.value).toEqual({ kind: "abort" });
@@ -2648,7 +2648,7 @@ test("git's refusal shows its message, keeps files and opened views, and a later
   expect(aborts).toBe(2);
 });
 
-test("the abort button follows git's merging with each list and is hidden before the first", async () => {
+test("the abort state follows git's merging with each list and is noMerge before the first", async () => {
   spyConsole();
   const merging = [true, false];
   const { source } = handSource([entry("a.ts")]);
@@ -2661,12 +2661,12 @@ test("the abort button follows git's merging with each list and is hidden before
   });
 
   expect(store.merging.value).toBe(false);
-  expect(store.abortButton.value).toBe("hidden");
+  expect(store.abortState.value).toBe("noMerge");
   await store.refreshFiles();
   expect(store.merging.value).toBe(true);
-  expect(store.abortButton.value).toBe("ready");
+  expect(store.abortState.value).toBe("ready");
   await store.refreshFiles();
   expect(store.merging.value).toBe(false);
-  expect(store.abortButton.value).toBe("hidden");
+  expect(store.abortState.value).toBe("noMerge");
   await pressUnasked(store);
 });

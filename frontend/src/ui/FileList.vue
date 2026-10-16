@@ -1,23 +1,17 @@
 <script setup lang="ts">
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import Check from "~icons/lucide/check";
-import GitPullRequestClosed from "~icons/lucide/git-pull-request-closed";
 import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
 import type { FileEntry } from "../ipc";
-import type { AbortButton } from "./aborting";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
 import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
 
-const props = defineProps<{
-  files: readonly FileEntry[];
-  active: string | null;
-  abortButton: AbortButton;
-}>();
-const emit = defineEmits<{ select: [path: string]; abort: [] }>();
+const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+const emit = defineEmits<{ select: [path: string] }>();
 
 const list = useTemplateRef<HTMLElement>("list");
 const handle = useTemplateRef<HTMLDivElement>("handle");
@@ -74,19 +68,7 @@ function toggleFolder(path: string): void {
     :style="widthStyle"
   >
     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
-      <h2 class="mr-auto font-semibold">Files</h2>
-      <button
-        v-if="abortButton !== 'hidden'"
-        type="button"
-        title="Abort merge"
-        aria-label="Abort merge"
-        class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-        :disabled="abortButton === 'running'"
-        @mousedown.prevent
-        @click="emit('abort')"
-      >
-        <GitPullRequestClosed class="size-4" aria-hidden="true" />
-      </button>
+      <h2 class="font-semibold">Files</h2>
       <button
         type="button"
         :title="viewButton.label"

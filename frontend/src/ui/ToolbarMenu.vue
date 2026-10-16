@@ -5,7 +5,7 @@ import Check from "~icons/lucide/check";
 
 import { menuPosition, type Point, type Size } from "./menuPosition";
 import { useAppStore } from "./store";
-import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
+import { listedButtons, type ToolbarButtonId } from "./toolbarButtons";
 
 type Item = { readonly id: ToolbarButtonId; readonly label: string; readonly shown: boolean };
 
@@ -15,7 +15,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [] }>();
 
-const { hiddenButtons, toggleButton } = useAppStore();
+const { hiddenButtons, toggleButton, abortState } = useAppStore();
 const panel = useTemplateRef<HTMLDivElement>("panel");
 const size = shallowRef<Size>({ width: 0, height: 0 });
 const viewport = useWindowSize();
@@ -25,7 +25,7 @@ useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
 useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
 
 const items = computed(() =>
-  TOOLBAR_BUTTONS.map((id): Item => ({
+  listedButtons(abortState.value).map((id): Item => ({
     id,
     label: props.buttons[id].label,
     shown: !hiddenButtons.value.has(id),

@@ -4,7 +4,7 @@ import type { ChunkSource } from "../ipc";
 import type { Asking } from "./asking";
 import { attempt, report, type Problem } from "./problem";
 
-export type AbortButton = "hidden" | "ready" | "running";
+export type AbortState = "noMerge" | "ready" | "running";
 
 type AbortTarget = {
   readonly source: ChunkSource;
@@ -14,21 +14,21 @@ type AbortTarget = {
 };
 
 export type Aborting = {
-  readonly abortButton: ComputedRef<AbortButton>;
+  readonly abortState: ComputedRef<AbortState>;
   readonly abortMerge: () => Promise<void>;
 };
 
 export function createAborting(target: AbortTarget): Aborting {
   const running = shallowRef(false);
-  const abortButton = computed((): AbortButton => {
+  const abortState = computed((): AbortState => {
     if (!target.merging.value) {
-      return "hidden";
+      return "noMerge";
     }
     return running.value ? "running" : "ready";
   });
 
   async function abortMerge(): Promise<void> {
-    if (abortButton.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
+    if (abortState.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
       return;
     }
     running.value = true;
@@ -39,5 +39,5 @@ export function createAborting(target: AbortTarget): Aborting {
     }
   }
 
-  return { abortButton, abortMerge };
+  return { abortState, abortMerge };
 }
