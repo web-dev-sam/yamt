@@ -14,6 +14,7 @@ const BRANCH: &str = "branch";
 const LOG: &str = "log";
 const HASH_OBJECT: &str = "hash-object";
 const MERGE_MSG: &str = "MERGE_MSG";
+const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
 const UNRESOLVED_NAME_STATUS: i32 = 1;
 const NON_SYMBOLIC_SHORT_NAME: &str =
     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
@@ -93,14 +94,42 @@ impl Repo {
     }
 
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
-        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
-        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        let path = self.root.join(path_from_git(&git_path));
+        let path = self.git_path(MERGE_MSG)?;
         match fs::read(&path) {
             Ok(message) => Ok(Some(message)),
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(source) => Err(Error::ReadFailed { path, source }),
         }
+    }
+
+    /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
+    pub fn rebase_in_progress(&self) -> Result<bool> {
+        for name in REBASE_STATE_DIRS {
+            let path = self.git_path(name)?;
+            match path.try_exists() {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(source) => return Err(Error::ReadFailed { path, source }),
+            }
+        }
+        Ok(false)
+    }
+
+    /// `git merge --abort`; git's own refusal comes back as `Error::GitFailed` with its stderr.
+    pub fn abort_merge(&self) -> Result<()> {
+        run(
+            self.command(Access::Write, &["merge", "--abort"]),
+            None,
+            GIT_TIMEOUT,
+        )?;
+        Ok(())
+    }
+
+    // git-rev-parse(1) `--git-path`: the path inside the git directory, relative to the cwd.
+    fn git_path(&self, name: &str) -> Result<PathBuf> {
+        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", name]);
+        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+        Ok(self.root.join(path_from_git(&git_path)))
     }
 
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {

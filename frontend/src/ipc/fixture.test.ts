@@ -576,6 +576,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   expect(valueOf(await source.listFiles())).toEqual({
     files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
     diskChanges: [],
+    merging: true,
   });
   expect(entries).toEqual([]);
 });
@@ -614,9 +615,23 @@ test("finish marks the file resolved and logs its text once; reset returns it un
     ok: true,
     value: { kind: "Written", files: unresolved },
   });
-  expect(valueOf(await source.listFiles())).toEqual({ files: unresolved, diskChanges: [] });
+  expect(valueOf(await source.listFiles())).toEqual({
+    files: unresolved,
+    diskChanges: [],
+    merging: true,
+  });
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
+});
+
+test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
+  const { log, entries } = quietLog();
+  const source = createFixtureSource(log, { "a.json": record("a.ts") });
+
+  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
+
+  expect(entries).toEqual([{ level: "info", event: "fixture.abort_merge", fields: {} }]);
+  expect(valueOf(await source.listFiles()).merging).toBe(true);
 });
 
 test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {

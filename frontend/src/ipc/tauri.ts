@@ -96,8 +96,15 @@ export function createTauriSource(): ChunkSource {
     async takeSide(path, side, diskVersion) {
       return toResult(await commands.takeSide(path, side, diskVersion));
     },
-    sideNames() {
-      return commands.sideNames();
+    async sideNames() {
+      const result = toResult(await commands.sideNames());
+      if (!result.ok) {
+        throw new Error(`side_names failed: ${result.failure.kind}`);
+      }
+      return result.value;
+    },
+    async abortMerge() {
+      return toResult(await commands.abortMerge());
     },
     ...createTauriSettings(),
   };

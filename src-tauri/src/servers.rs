@@ -108,11 +108,13 @@ mod tests {
     use serde_json::json;
     use tauri::Manager;
 
-    use crate::commands::{SessionState, lock as lock_session};
+    use crate::merge::{MergeState, lock as lock_merge};
     use crate::mock_window::{Window, open_window};
 
     fn session_root(window: &Window) -> std::path::PathBuf {
-        lock_session(&window.app.state::<SessionState>())
+        lock_merge(&window.app.state::<MergeState>())
+            .session()
+            .unwrap()
             .root()
             .to_owned()
     }

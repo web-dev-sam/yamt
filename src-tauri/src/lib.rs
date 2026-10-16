@@ -10,6 +10,7 @@ mod frontend_log;
 #[cfg(target_os = "linux")]
 mod graphics;
 mod ipc_error;
+mod merge;
 #[cfg(test)]
 mod mock_window;
 mod outcome;

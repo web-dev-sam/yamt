@@ -3,6 +3,10 @@ use std::process::ExitCode;
 
 use yamt_session::MergeSession;
 
+use crate::merge::Merge;
+
+const MERGE_ABORTED: &str = "merge aborted";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Exit {
     Success = 0,
@@ -48,7 +52,17 @@ pub(crate) fn startup(repo: &Path) -> Startup {
     }
 }
 
-pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
+pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+    match merge {
+        Merge::Held(session) => held_merge_ending(session),
+        Merge::Aborted => Ending {
+            exit: Exit::Unresolved,
+            message: Some(MERGE_ABORTED.to_owned()),
+        },
+    }
+}
+
+fn held_merge_ending(session: &mut MergeSession) -> Ending {
     if let Err(error) = session.refresh() {
         tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
     }
@@ -147,7 +161,7 @@ mod tests {
         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
         let mut session = MergeSession::open(repo.path()).unwrap();
         assert_eq!(
-            ending_on_close(&mut session),
+            held_merge_ending(&mut session),
             Ending {
                 exit: Exit::Unresolved,
                 message: Some("2 of 2 files still unresolved".to_owned()),
@@ -155,12 +169,12 @@ mod tests {
         );
         session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
         assert_eq!(
-            ending_on_close(&mut session).message.as_deref(),
+            held_merge_ending(&mut session).message.as_deref(),
             Some("1 of 2 files still unresolved")
         );
         session.finish("b.ts", "done\n", DiskVersion(0)).unwrap();
         assert_eq!(
-            ending_on_close(&mut session),
+            held_merge_ending(&mut session),
             Ending {
                 exit: Exit::Success,
                 message: None,
@@ -175,16 +189,16 @@ mod tests {
         let mut session = MergeSession::open(repo.path()).unwrap();
         git_ok(repo.path(), &["add", "a.ts"]).unwrap();
         assert_eq!(
-            ending_on_close(&mut session),
+            held_merge_ending(&mut session),
             Ending {
                 exit: Exit::Unresolved,
                 message: Some("1 of 2 files still unresolved".to_owned()),
             }
         );
         git_ok(repo.path(), &["add", "b.ts"]).unwrap();
-        assert_eq!(ending_on_close(&mut session).exit, Exit::Success);
+        assert_eq!(held_merge_ending(&mut session).exit, Exit::Success);
         git_ok(repo.path(), &["checkout", "-m", "b.ts"]).unwrap();
-        assert_eq!(ending_on_close(&mut session).exit, Exit::Unresolved);
+        assert_eq!(held_merge_ending(&mut session).exit, Exit::Unresolved);
     }
 
     #[test]
@@ -195,7 +209,7 @@ mod tests {
         let with_markers = "<<<<<<< ours\nlocal\n=======\nremote, edited\n>>>>>>> theirs\n";
         std::fs::write(repo.path().join("b.ts"), with_markers).unwrap();
 
-        let ending = ending_on_close(&mut session);
+        let ending = held_merge_ending(&mut session);
 
         assert_eq!(
             ending.message.as_deref(),
@@ -216,7 +230,7 @@ mod tests {
         session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
         std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
 
-        let (ending, logged) = logged(|| ending_on_close(&mut session));
+        let (ending, logged) = logged(|| held_merge_ending(&mut session));
 
         assert_eq!(
             ending.message.as_deref(),

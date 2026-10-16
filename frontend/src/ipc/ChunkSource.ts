@@ -31,6 +31,7 @@ export interface ChunkSource {
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   sideNames(): Promise<SideNames>;
+  abortMerge(): Promise<SourceResult<null>>;
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
   setAntialiasing(

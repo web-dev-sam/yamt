@@ -16,6 +16,8 @@ pub enum Error {
     GitFailed { args: Vec<String>, stderr: String },
     #[error("merging `remote` into `local` did not conflict")]
     MergeDidNotConflict,
+    #[error("`git rebase -r` did not stop on the merge commit's conflict")]
+    RebaseDidNotConflict,
     #[error("`git hash-object` started without a stdin pipe")]
     NoStdin,
 }
@@ -160,6 +162,27 @@ fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> 
     git_ok(root, &["checkout", "--quiet", "-b", "remote", "main"])?;
     commit_side(root, files, |file| file.remote, "remote")?;
     git_ok(root, &["checkout", "--quiet", "local"])?;
+    Ok(dir)
+}
+
+/// A repo where `git rebase -r` stopped re-doing the merge of `remote` into `local`, with `files`
+/// conflicted: git has written both `MERGE_HEAD` and `REBASE_HEAD`.
+pub fn rebase_merges_repo(files: &[ConflictFile]) -> Result<TempDir> {
+    let dir = conflict_repo(files)?;
+    let root = dir.path();
+    commit_side(root, files, |file| file.local, "merge")?;
+    git_ok(root, &["branch", "--quiet", "merged"])?;
+    git_ok(root, &["reset", "--quiet", "--hard", "HEAD^"])?;
+    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", "onto"])?;
+    let rebase = git(
+        root,
+        &[
+            "rebase", "--quiet", "-r", "--onto", "local", "HEAD^", "merged",
+        ],
+    )?;
+    if rebase.status.success() {
+        return Err(Error::RebaseDidNotConflict);
+    }
     Ok(dir)
 }
 

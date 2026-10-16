@@ -32,6 +32,7 @@ pub enum IpcError {
         path: String,
     },
     NoConfigFolder,
+    MergeAborted,
 }
 
 impl From<yamt_session::Error> for IpcError {

@@ -7,7 +7,7 @@ use crate::session::LOG_TARGET;
 use crate::sides::Side;
 
 const HEAD: &str = "HEAD";
-const MERGE_HEAD: &str = "MERGE_HEAD";
+pub(crate) const MERGE_HEAD: &str = "MERGE_HEAD";
 const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
 const QUOTE: char = '\'';
 

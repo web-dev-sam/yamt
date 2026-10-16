@@ -89,7 +89,7 @@ function listing(
   files: readonly FileEntry[],
   diskChanges: readonly DiskChange[] = [],
 ): SourceResult<FileList> {
-  return ok({ files, diskChanges });
+  return ok({ files, diskChanges, merging: true });
 }
 
 function written(files: FileEntry[]): SourceResult<WriteReply> {
@@ -130,6 +130,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
     sideNames: () => Promise.resolve({ local: null, remote: null }),
+    abortMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
   };
   return { source, pending };
@@ -1073,6 +1074,7 @@ function choiceSource(
       return Promise.resolve(written(taken));
     },
     sideNames: () => Promise.resolve({ local: null, remote: null }),
+    abortMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
     ...overrides,
   };

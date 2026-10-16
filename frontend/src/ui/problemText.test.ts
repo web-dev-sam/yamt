@@ -152,6 +152,12 @@ test("the other settings failures say the settings file could not be used and wh
   ).toBe(`Could not use the settings file: writing ${SETTINGS} failed: Read-only file system`);
 });
 
+test("an action after an abort says the merge was aborted", () => {
+  expect(text({ action: "save", path: PATH, cause: { kind: "MergeAborted" } })).toBe(
+    `Could not save ${PATH}: the merge was aborted.`,
+  );
+});
+
 test("key problems name the action, the key and what yamt does instead", () => {
   const said = problemText(
     {

@@ -25,9 +25,9 @@ from them and committed.
 - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
   (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`; #53:
   `NotAFile { path }`, `ReadFailed { path, message }`; #57: `SettingsBroken { path, message }`,
-  `NotAbsolute { path }`, `NoConfigFolder`); never a string. The frontend `switch`es on
+  `NotAbsolute { path }`, `NoConfigFolder`; #74: `MergeAborted`); never a string. The frontend `switch`es on
   `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `FileList.disk_changes`), never an error.
-- [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
+- [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<Merge>` (`src-tauri/src/merge.rs`), call one `session`
   method, map the error — or, for settings, compute `Places` and call one `yamt_settings`
   function. No logic in `src-tauri`.
 - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
@@ -36,7 +36,7 @@ from them and committed.
 ## Commands (v0)
 
 ```
-list_files()                      -> FileList { files, disk_changes }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53
+list_files()                      -> FileList { files, disk_changes, merging }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53; `merging` = MERGE_HEAD and no rebase, re-read each time (#74)
 load_file(path)                   -> FileMergeData   `middle: Stages{text} | Disk{text} | DiskNotText{found}`, chunks with their middle range, words and `waiting` (SideLines | Markers{open, between, close} | AsShown: what Save writes while a side waits, #69), `disk_version`; `deleted: Side | null` (#47)
 finish_file(path, text, disk_version)   -> WriteReply   Written{files} | ChangedOnDisk{files, change} (old version or unseen disk change: nothing written, #53)
 save_file(path, text, disk_version)     -> WriteReply   finish_file without `git add`: the file stays conflicted; the own write updates `seen` only, never a DiskChange, the disk version stays (#65/#69)
@@ -44,6 +44,7 @@ reset_file(path, disk_version)    -> WriteReply   back to this run's start: capt
 describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit), `disk_version`
 take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
 side_names()                      -> SideNames { local, remote }   each SideName Branch{name} | Commit{short_id, subject, message} or null; HEAD's branch or commit, what is merged in; read once at open, #50/#62
+abort_merge()                     -> ()          `git merge --abort`; refused → Git{message}, the merge stays; done → every merge command answers MergeAborted, the window is destroyed (no close question), exit 1 `merge aborted` (#74)
 log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
 load_settings(current: StoredSettings)          -> SettingsRead   the file in use, created from `current` when missing, never rewritten by a read, #57
 set_theme(current, theme: Theme)                -> SettingsRead   re-reads, replaces `theme`, writes; each settings command recolours the native window

@@ -238,7 +238,7 @@ export function createFixtureSource(
 
   return {
     async listFiles() {
-      return { ok: true, value: { files: entries(records), diskChanges: [] } };
+      return { ok: true, value: { files: entries(records), diskChanges: [], merging: true } };
     },
     async loadFile(path) {
       const data = records.fixtures.get(path);
@@ -249,6 +249,10 @@ export function createFixtureSource(
     },
     async sideNames() {
       return { local: null, remote: null };
+    },
+    async abortMerge() {
+      log.info("fixture.abort_merge", {});
+      return { ok: true, value: null };
     },
     ...fixtureWrites(log, records),
     ...createFixtureSettings(),

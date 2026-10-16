@@ -331,22 +331,26 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 
 ### 3.5 `src-tauri`
 
-- `tauri::State<Mutex<MergeSession>>` and `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never
-  locked together.
+- `tauri::State<Mutex<Merge>>` (`merge.rs`: `Merge = Held(MergeSession) | Aborted`, plan §2 #74) and
+  `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. After a successful
+  `abort_merge` the app holds no merge: `Merge::session()` answers `MergeAborted` for every merge command.
 - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
   (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
-  §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
+  §2 #49/#53; `merging`: `MERGE_HEAD` names a commit and no rebase is stopped, re-read each time, #74),
+  `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
   `finish_file(path, text, disk_version) -> WriteReply`, `save_file(path, text, disk_version) -> WriteReply`
   (`finish_file` without `git add`: the own write updates `seen` only, the disk version stays, plan §2 #65/#69),
   `reset_file(path, disk_version) -> WriteReply` (back to this run's start: the stages captured at open and the
   bytes found at open, `FileState.at_open`, #66/#69),
   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
-  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> SideNames`
+  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> Result<SideNames>`
   (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
-  open, each side on its own, #50/#62), `log(entry)`. No `quit_if_done`:
-  the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
-  so it settles disk changes and uses git's view (#49).
+  open, each side on its own, #50/#62), `abort_merge() -> Result<()>` (`git merge --abort`; git's refusal is `Git`
+  with its message and the merge stays held; on success the merge becomes `Aborted` and the calling window is
+  destroyed, which emits no close request, so the page's unsaved-work question never runs, #74), `log(entry)`. No
+  `quit_if_done`: the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
+  so it settles disk changes and uses git's view (#49); after an abort it is 1 with `merge aborted`, nothing re-read.
 - Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
   (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
   `load_settings(current)`, `set_theme(current, theme)`, `set_antialiasing(current, antialiasing)`,
@@ -475,7 +479,8 @@ export interface ChunkSource {
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
-  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null
+  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null; an error reply rejects
+  abortMerge(): Promise<SourceResult<null>>; // git merge --abort (#74); the app then ends; fixture: logs, answers null
   // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
