@@ -15,6 +15,7 @@ import { Frame } from "./internal/frame";
 import type { PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
+import { jumpTo } from "./internal/markJump";
 import type { Direction } from "./internal/navigation";
 import { preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
@@ -50,6 +51,7 @@ export type MergeOptions = {
   readonly readOnly: boolean;
   readonly preferences: Preferences;
   readonly collapsed: boolean;
+  readonly marks: boolean;
   readonly servers: LanguageServers | null;
 };
 
@@ -92,6 +94,15 @@ export class MergeController {
       folds: this.#folds.fields,
       drag: this.#drag,
       strips: this.#strips,
+      jump: (pane, target, rows) => {
+        const folds = this.#folds.fields;
+        jumpTo(
+          { views: this.#views, spans: this.#field, folds, focus: this.#focus, rows },
+          pane,
+          target,
+        );
+      },
+      marks: options.marks,
     });
     this.#frame.request();
     if (description !== null && description.support === undefined) {
@@ -220,6 +231,10 @@ export class MergeController {
   setCollapsed(collapsed: boolean): void {
     this.#folds.setCollapsed(collapsed);
     this.#frame.realign();
+  }
+
+  showMarks(shown: boolean): void {
+    this.#frame.showMarks(shown);
   }
 
   undo(): boolean {

@@ -14,8 +14,8 @@ import type { ChunkSpan } from "./chunkField";
 import { lineSpan } from "./lineSpan";
 import type { Side } from "./side";
 import { sideMarks } from "./sideMark";
-import { isResolved, isSideOpen, type ChunkState } from "./status";
-import { chunkTone, type Tone } from "./tone";
+import type { ChunkState } from "./status";
+import { paneTone, type Tone } from "./tone";
 import { sideWordDecorations } from "./words";
 
 type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
@@ -48,14 +48,11 @@ export function sideDecorations(
   side: Side,
 ): Extension {
   return EditorView.decorations.computeN([statuses], (state) => {
-    const tinted = state
-      .field(statuses)
-      .filter(({ chunk, status }) => isSideOpen(chunk, status, side))
-      .map(({ chunk }) => chunk);
-    const bands = tinted.map((chunk) => ({
-      ...lineSpan(state.doc, chunk[side]),
-      tone: chunkTone(chunk, side),
-    }));
+    const bands = state.field(statuses).flatMap(({ chunk, status }) => {
+      const tone = paneTone(chunk, status, side);
+      return tone === null ? [] : [{ chunk, ...lineSpan(state.doc, chunk[side]), tone }];
+    });
+    const tinted = bands.map(({ chunk }) => chunk);
     return [bandDecorations(state.doc, bands), sideWordDecorations(state.doc, tinted, side)];
   });
 }
@@ -103,7 +100,10 @@ export function centerDecorations(field: StateField<readonly ChunkSpan[]>): Exte
   return EditorView.decorations.compute([field, "doc"], (state) =>
     bandDecorations(
       state.doc,
-      state.field(field).filter(({ chunk, status }) => !isResolved(chunk, status)),
+      state.field(field).flatMap(({ chunk, status, from, to }) => {
+        const tone = paneTone(chunk, status, "center");
+        return tone === null ? [] : [{ from, to, tone }];
+      }),
     ),
   );
 }

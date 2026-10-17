@@ -1,0 +1,140 @@
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 3125a91..435b37a 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -6,4 +6,4 @@ Save (plan §2 #65, #69): `internal/fileText.ts` builds the file Save writes fro
+ 
+ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `RemovalPoint`, class `REMOVAL_BAR_CLASS`) carries its removed text, and `eq` compares tone and text; `removalTooltip.ts` opens a `hoverTooltip` (in `document.body`) only while the pointer is on a bar's own box (`:hover` on that class), reads the text from that bar's decoration (`removalAt`), never from `chunk.words`, copies the pane's font, ligatures and code colour from its computed style, and closes when the bar goes; `removalText.ts` holds the pure display rules (the one joining line break left out — on an empty line the trailing one first — whitespace-only text as `·`/`→`/`↵` marks); `theme.css` draws a kept final line break as its empty line (`::after` zero-width space, not copied).
+ 
+-Change marks (plan §2 #80): `Frame` owns `internal/markLanes.ts` (`MarkLanes`), one `.change-marks` lane appended to each pane's `view.dom` over its scrollbar, `hidden` while `MergeOptions.marks`/`showMarks` say no; it repaints from `Frame`'s rows only while shown and dirty (rows or geometry changed, `setDiagnosticsEffect`), never on scroll. A wheel over a lane is forwarded to that pane's `scrollDOM` (the lane is not inside it). `marks.ts` holds the pure rules: places from `tone.ts` `paneTone` (the one tint rule, bands use it too) and from `forEachDiagnostic` on the line block (a problem in collapsed lines sits on its wave line), WebStorm's stripe geometry (14 px lane, 2 px floor, Windows arrows), paint order (errors over changes over warnings over info) and `tickAt` (nearest top within `PICK_DISTANCE_PX`, which the lane hands the CSS hit band as `--mark-pick`). `markJump.ts` acts on a tick's click, positions read at click time; the controller builds it into `Frame`'s `jump` part: a side tick outlines its change through `SideFocus.focusChange`, a Result tick selects the place's whole line (`revealSteps`: a non-empty selection inside hidden lines shows them, also for a zero-length problem at their end) and then puts the cursor at the place's start; both put the line a third down (`viewport.ts` `thirdScrollTop`).
++Change marks (plan §2 #80): `Frame` owns `internal/markLanes.ts` (`MarkLanes`), one `.change-marks` lane appended to each pane's `view.dom` over its scrollbar, `hidden` while `MergeOptions.marks`/`showMarks` say no; it repaints from `Frame`'s rows only while shown and dirty (rows or geometry changed, `setDiagnosticsEffect`), never on scroll. A wheel over a lane is forwarded to that pane's `scrollDOM` (the lane is not inside it). `marks.ts` holds the pure rules: places from `tone.ts` `paneTone` (the one tint rule, bands use it too) and from `forEachDiagnostic` on the line block (a problem in collapsed lines sits on its wave line), WebStorm's stripe geometry (14 px lane, 2 px floor, Windows arrows), paint order (errors over changes over warnings over info) and `tickAt` (nearest top within `PICK_DISTANCE_PX`, which the lane hands the CSS hit band as `--mark-pick`). `markJump.ts` acts on a tick's click, positions read at click time; the controller builds it into `Frame`'s `jump` part: a side tick outlines its change through `SideFocus.focusChange`, a Result tick first selects the innermost hidden middle range holding the place, both ends counted (`revealSteps`: `foldField` shows hidden lines holding a non-empty selection, so also an empty line at a range's edge, such as a file's end after its last line break), and then puts the cursor at the place's start; both put the line a third down (`viewport.ts` `thirdScrollTop`).
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index d2f1a77..5b710a4 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -95,7 +95,12 @@ export class MergeController {
+       drag: this.#drag,
+       strips: this.#strips,
+       jump: (pane, target, rows) => {
+-        jumpTo({ views: this.#views, spans: this.#field, focus: this.#focus, rows }, pane, target);
++        const folds = this.#folds.fields;
++        jumpTo(
++          { views: this.#views, spans: this.#field, folds, focus: this.#focus, rows },
++          pane,
++          target,
++        );
+       },
+       marks: options.marks,
+     });
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+index 23748c0..c2c2cdb 100644
+--- a/frontend/src/editor/internal/folds.test.ts
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -326,20 +326,47 @@ test("a selection with both ends exactly on a range's edges shows it", async ()
+   expect(centerLines(after(merge, selectMatch({ from, to })), 1)).toEqual(["41-62", "49-54"]);
+ });
+ 
++function jumpAt(merge: Merge, pos: number): Merge {
++  return revealSteps(merge.state, merge.fields, pos).reduce(
++    (done, step) => after(done, step),
++    merge,
++  );
++}
++
+ test("a problem tick's jump to a zero-length problem at a hidden range's first or last position shows it with the cursor there", async () => {
+   const merge = await open();
+   const { from, to } = levelOf(merge, 1, 0);
+ 
+   for (const pos of [from, to]) {
+-    const jumped = revealSteps(merge.state.doc, pos).reduce(
+-      (done, step) => after(done, step),
+-      merge,
+-    );
++    const jumped = jumpAt(merge, pos);
+     expect(centerLines(jumped, 1), `${pos}`).toEqual(["41-62", "49-54"]);
+     expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(pos));
+   }
+ });
+ 
++test("a problem tick's jump to the end of a file ending with a line break shows the collapsed tail", async () => {
++  const merge = await open();
++  const end = merge.state.doc.length;
++
++  expect(merge.state.doc.lineAt(end).length).toBe(0);
++  expect(levelOf(merge, 2, 0).to).toBe(end);
++  const jumped = jumpAt(merge, end);
++  expect(centerLines(jumped, 2)).toEqual([]);
++  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(end));
++});
++
++test("a problem tick's jump to an empty first hidden line shows the range holding it", async () => {
++  const opened = await open();
++  const first = opened.state.doc.lineAt(levelOf(opened, 1, 0).from);
++  const merge = after(opened, { changes: { from: first.from, to: first.to } });
++  const { from } = levelOf(merge, 1, 0);
++
++  expect(merge.state.doc.lineAt(from).length).toBe(0);
++  const jumped = jumpAt(merge, from);
++  expect(centerLines(jumped, 1)).toEqual(["41-62", "49-54"]);
++  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(from));
++});
++
+ test("a side's reveal reads its own ranges and shows what the middle shows for the same line", async () => {
+   const merge = await open();
+   const leftDoc = merge.sides.local;
+diff --git a/frontend/src/editor/internal/markJump.ts b/frontend/src/editor/internal/markJump.ts
+index 31f9b57..79af014 100644
+--- a/frontend/src/editor/internal/markJump.ts
++++ b/frontend/src/editor/internal/markJump.ts
+@@ -1,8 +1,9 @@
+ import { forEachDiagnostic } from "@codemirror/lint";
+-import type { EditorState, StateField, Text, TransactionSpec } from "@codemirror/state";
++import type { EditorState, StateField, TransactionSpec } from "@codemirror/state";
+ import type { EditorView } from "@codemirror/view";
+ 
+ import type { ChunkSpan } from "./chunkField";
++import { paneFolds, type FoldFields } from "./folds";
+ import { PANE_TINT, type ChunkRow, type Pane, type PaneViews } from "./geometry";
+ import type { MarkTarget } from "./marks";
+ import type { SideFocus } from "./sideFocus";
+@@ -11,6 +12,7 @@ import { thirdScrollTop } from "./viewport";
+ type JumpParts = {
+   readonly views: PaneViews;
+   readonly spans: StateField<readonly ChunkSpan[]>;
++  readonly folds: FoldFields;
+   readonly focus: SideFocus;
+   readonly rows: readonly ChunkRow[];
+ };
+@@ -48,18 +50,27 @@ function scrollToThird(view: EditorView, top: number): void {
+   });
+ }
+ 
+-export function revealSteps(doc: Text, start: number): readonly TransactionSpec[] {
+-  const line = doc.lineAt(start);
+-  return [{ selection: { anchor: line.from, head: line.to } }, { selection: { anchor: start } }];
++export function revealSteps(
++  state: EditorState,
++  folds: FoldFields,
++  start: number,
++): readonly TransactionSpec[] {
++  const cursor = { selection: { anchor: start } };
++  const hidden = paneFolds(folds, "center", state)
++    .flatMap(({ hidden: levels }) => levels.flatMap(({ center }) => center ?? []))
++    .findLast(({ from, to }) => from <= start && start <= to);
++  return hidden === undefined
++    ? [cursor]
++    : [{ selection: { anchor: hidden.from, head: hidden.to } }, cursor];
+ }
+ 
+-function jumpInResult({ views, spans }: JumpParts, target: MarkTarget): void {
++function jumpInResult({ views, spans, folds }: JumpParts, target: MarkTarget): void {
+   const view = views.center;
+   const start = startOf(view.state, spans, target);
+   if (start === null) {
+     return;
+   }
+-  for (const step of revealSteps(view.state.doc, start)) {
++  for (const step of revealSteps(view.state, folds, start)) {
+     view.dispatch(step);
+   }
+   view.focus();

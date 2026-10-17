@@ -1,4 +1,3 @@
-import { setDiagnosticsEffect } from "@codemirror/lint";
 import type { EditorState, StateField, Transaction } from "@codemirror/state";
 
 import type {
@@ -12,7 +11,7 @@ import type { ChunkSpan } from "./chunkField";
 import { formatResult, type FormatOutcome, type ResultPane } from "./format";
 import type { Pane } from "./geometry";
 import { paneText } from "./pane";
-import { problemCounts, problemsSpec, tookSpec, type ProblemCounts } from "./problems";
+import { linted, problemCounts, problemsSpec, tookSpec, type ProblemCounts } from "./problems";
 
 type Servers = Pick<LanguageServers, "open">;
 
@@ -63,10 +62,7 @@ export class ServerDoc implements ResultDocument {
     if (update.docChanged) {
       this.#open.changed();
     }
-    const linted = update.transactions.some((tr) =>
-      tr.effects.some((effect) => effect.is(setDiagnosticsEffect)),
-    );
-    if (!update.docChanged && !linted) {
+    if (!update.docChanged && !linted(update.transactions)) {
       return;
     }
     const before = problemCounts(update.startState);

@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk } from "../../ipc";
-import { chunkTone } from "./tone";
+import { PENDING } from "./status";
+import { chunkTone, paneTone } from "./tone";
 
 async function chunkWith(
   kind: Chunk["kind"],
@@ -88,4 +89,25 @@ test("the center takes its tone from remote for RemoteOnly and from local otherw
 
   expect(chunkTone(remoteOnly, "center")).toBe("deleted");
   expect(chunkTone(localOnly, "center")).toBe("deleted");
+});
+
+test("paneTone: a side tints a change still waiting there, in its own tone; decided there or unchanged there, none", async () => {
+  const localOnly = await chunkWith("LocalOnly", { middle: 2, local: 0, remote: 2 });
+  const conflict = await chunkWith("Conflict", { middle: 2, local: 1, remote: 3 });
+
+  expect(paneTone(localOnly, PENDING, "local")).toBe("deleted");
+  expect(paneTone(localOnly, PENDING, "remote")).toBeNull();
+  expect(paneTone(localOnly, { local: "applied", remote: "pending" }, "local")).toBeNull();
+  expect(paneTone(conflict, { local: "ignored", remote: "pending" }, "local")).toBeNull();
+  expect(paneTone(conflict, { local: "ignored", remote: "pending" }, "remote")).toBe("conflict");
+});
+
+test("paneTone: the Result tints a change while any side still waits, in the Result's tone; resolved, none", async () => {
+  const remoteOnly = await chunkWith("RemoteOnly", { middle: 2, local: 2, remote: 0 });
+  const conflict = await chunkWith("Conflict", { middle: 2, local: 1, remote: 3 });
+
+  expect(paneTone(remoteOnly, PENDING, "center")).toBe("deleted");
+  expect(paneTone(remoteOnly, { local: "pending", remote: "ignored" }, "center")).toBeNull();
+  expect(paneTone(conflict, { local: "applied", remote: "pending" }, "center")).toBe("conflict");
+  expect(paneTone(conflict, { local: "applied", remote: "ignored" }, "center")).toBeNull();
 });

@@ -651,6 +651,72 @@ place of "the file list's header".
 | 4   | 3.A-abort-toolbar (`briefs/3.A-abort-toolbar.md`, `-rework-1.md`): the button after Mark resolved, the menu's eighth entry, hidden at first for everyone, the file-list button removed                                                             | web-impl  | accepted | `cac453b` (`AbortMergeToolbar`): id `abortMerge` first, `listedButtons`/`shownButtons`, `AbortState`, storage = decisions object, old arrays read; fixture + real app: 8 entries, hidden at first, abort ends app, cherry-pick 7. Reviews → #1093, #1094, #1096 → `62bd371` (`AbortMergeToolbarR1`: fixed old-format ids, names, keyboard back after the question, reproduced before/after); both re-checks pass; #1092, #1095 dropped. Notes `AbortMergeToolbar.md`                         |
 | 5   | final run again (`briefs/3.A-abort-verify-2.md`): `just check`, `just mutants 407ec81`, the real app with the toolbar button                                                                                                                       | verifier  | done     | `AbortMergeVerify2` at `17eead1`, gate **pass** (notes `.omp/run/notes/AbortMergeVerify2.md`): Rust 0 missed; toolbarButtons.ts constant survivors dropped after a hand-applied proof (#1097: 16/10/9 tests fail). Real app a–e pass: hidden at first, 8-entry menu, button after Mark resolved, kept on restart; keyboard back after Escape/Cancel; abort → exit 1, `yamt: merge aborted`, repo as before; old `["undo"]` storage honoured; cherry-pick 7 entries; refusal shows git's text |
 
+## Change marks — ticks in the scrollbars while Alt is held (session 20, branch `feat/change-marks-alt`)
+
+Owner request (2026-10-16): "While Alt is held, each pane's scrollbar shows coloured ticks: the side panes show their
+own waiting changes and conflicts. The Result shows waiting changes, conflicts and language-server problems. Clicking a
+tick jumps to that place. Releasing Alt hides the ticks." Option on macOS. To settle along the way: the window losing
+focus while Alt is held, Alt+click on a tick versus CodeMirror's Alt-drag selection, Alt pressed alone on Windows, where
+ticks go when unchanged lines are collapsed. A parallel session works in `../yamt` (`feat/abort-merge`): this section's
+findings are numbered from #1200 and its plan rows from #80; real-app sessions are named `b-…`; the fixture page uses
+`just webdriver 4446`; nothing under `.omp/` but `.omp/run/` changes here (suggestions go to the handoff).
+
+Rules (orchestrator as owner, OR13; recorded as plan §2 #80, rules 3 and 5 corrected from WebStorm's source by the design):
+
+1. **Shown** while the Alt key (Option on macOS) is held in the focused yamt window: every pane of the shown file draws
+   ticks in a lane over its scrollbar. They appear on Alt's own key press (`key` "Alt"; AltGr reports "AltGraph" and
+   never shows them, so typing with AltGr does not flash them).
+2. **Hidden** on Alt's release; on any other key pressed while Alt is held (Alt+key is a shortcut, not a hold: they stay
+   hidden until Alt is pressed again); when the window loses focus (Alt+Tab never sends the release) or the page is
+   hidden; and on any key or pointer event that reports Alt up (a release the window missed). Coming back with Alt still
+   held shows nothing until Alt is pressed again.
+3. **Side panes**: one tick per change of that side still waiting on that side, in the colour the pane gives it
+   (conflicts in the conflict colour). Applied or ignored on that side: no tick. **Result**: one tick per change with a
+   side still waiting, in the Result's colour for it, plus one per language-server problem the Result underlines, in its
+   severity colour (hints as info). Where they overlap, errors paint over changes over warnings over info (WebStorm's
+   layers).
+4. **Place**: a tick sits where the scrollbar thumb is when that place is in view — the place's top over the pane's
+   whole scrollable height, scaled to the lane — and spans the change's height, never thinner than a minimum. Collapsed
+   unchanged lines take one wave line of height, so ticks follow what the pane shows; a problem inside collapsed lines
+   sits at that wave line.
+5. **Click** on a tick (Alt held; acting on the click, the press itself prevented; the tick whose top is nearest within
+   4 px): the pane scrolls to put that line a third of the way down, also when it was already in view (WebStorm's
+   error-stripe click), the other panes follow the locked scroll. A side tick makes that change the side's outlined
+   change and gives that side the keyboard, as a click on the change does (#54); a Result tick puts the cursor at the
+   place's start (a problem's start, a change's first line) and gives the Result the keyboard, showing collapsed lines
+   around it as find does (#63). The press never reaches the text: no selection, no apply, no drag; presses between
+   ticks still reach the scrollbar.
+6. **Alt and the text**: yamt has no Alt-drag column selection (`rectangularSelection` is not in any pane), and
+   CodeMirror listens for presses on the text only (`@codemirror/view` 6.43.14 attaches its handlers to `contentDOM`,
+   `dist/index.js:4605–4616`), so a tick never starts a selection and an Alt+press on the text behaves as before.
+7. **Hidden ticks cost nothing**: no lane catches presses and nothing is computed while Alt is up; the scrollbar works
+   exactly as before; scrolling is no slower.
+8. **Windows, Alt alone**: WebView2 hands Alt to the page and not to the window's menu (R. Strahl, "WebView2: Forwarding
+   Alt Keys to a Host WPF Window", 2021; wry 0.57 registers no accelerator-key handler, `src/webview2/mod.rs:649–653`
+   only turns browser shortcuts off), so Alt alone enters no menu mode and yamt blocks nothing. Not checkable on this
+   machine: an owner check on Windows in the handoff.
+
+Acceptance: in WebKit (fixture page) and in the real app with real X input, on a file with changes far apart and a
+problem: no ticks without Alt; Alt shows them in all three panes, release hides them; each side shows exactly its
+waiting changes (conflicts in the conflict colour), the Result its waiting changes and one tick per problem; applying a
+change while Alt is held removes its tick at once; with collapsing on or off, each tick sits where the scrollbar thumb is
+when its place is in view (corrected after the final run, #1218: "below a run, higher with it on" holds only when little
+is collapsed after the change), a problem in hidden lines ticks at the wave and its click shows the lines; a side tick
+click outlines that change and
+Enter then applies it; a Result tick click puts the cursor there; no text selected and nothing applied by a tick press;
+Alt held and the window losing focus hides them, and they stay hidden on return until Alt is pressed again; Alt+another
+key hides them; Alt+press on text acts as a plain press; scrollbar presses and drags without Alt as before; dark and light
+colours; scroll timing no worse. Non-goals: ticks without Alt, a setting or another key for it, hover text on ticks,
+marks in the file list or toolbar, keyboard access to ticks, word-level marks, find matches or the cursor as ticks,
+Rust or IPC changes.
+
+| row | slice                                                                                                                                                                                   | owner    | status   | evidence                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design: Alt state, the lane over each scrollbar, tick places and colours, the jump (`briefs/3.O-alt-marks-design.md`)                                                                   | designer | done     | `AltMarksDesign`: 3 options, A chosen (plan §2 #80): hold in `ui/altHold.ts`, lanes in each `view.dom` painted from `Frame`'s rows; WebStorm corrections to rules 3/5; open questions decided as owner (third-down placement, info ticks kept); notes `.omp/run/notes/AltMarksDesign.md`                                                                                                                                                          |
+| 2   | 3.O-hold (`briefs/3.O-alt-hold.md`; `ui/altHold.ts`, its test, `ui/App.vue`)                                                                                                            | web-impl | done     | `e5cd4cf` (`AltMarksHold`): `heldAfter` + `useAltHold`, 20 node tests; WebKit (4446) and real app `b-hold` with `xdotool` keydown/keyup alt, focus-away/back as plan #80; mutants 62/62 killed. Both reviews pass; #1201/#1203 dropped, #1202 (map line) → handoff. Notes `AltMarksHold*.md`                                                                                                                                                      |
+| 3   | 3.O-editor (`briefs/3.O-marks-editor.md`, `-rework-1.md`, `-rework-2.md`; `editor/**`, `style.css`, `ui/useMergeController.ts`, `ui/MergeView.vue`; needs 2)                            | web-impl | accepted | round 1 `502e997` (`AltMarksEditor`): `paneTone`, `marks.ts`, `MarkLanes` under `Frame`, `markJump.ts`, `thirdScrollTop`. Reviews fail (#1204, #1205, #1210, #1211; promoted #1206–#1208) → `3615586` (`AltMarksEditorR1`), boundary pass, correctness #1215 → `52a0121` (`AltMarksEditorR2`: innermost hidden range selected first), pass. Mutants: 0 survivors on new lines (#1214). `editor/index.ts` at 300 lines. Notes `AltMarksEditor*.md` |
+| 4   | final run (`briefs/3.O-verify.md`): `just check` (map-check with the handoff lines in a scratch clone), `just mutants 407ec81`, WebKit 4446, the real app (`b-verify-…`), scroll timing | verifier | done     | `AltMarksVerify` at `0a97a3b`, gate **pass** with the map lines (without: `map-check` names only the 3 new files): 1389 web tests, golden, hooks 16/16; mutants 0 on changed lines; WebKit and real app a–k pass but 5d wording (#1218) and a doc-end jump twice off (#1219, to the owner); scroll no slower. Notes `AltMarksVerify.md`                                                                                                           |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

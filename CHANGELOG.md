@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   menu. During a `git merge` it runs `git merge --abort` after one question. Every resolution and save is lost,
   the repository goes back to how it was before the merge, and yamt closes with status 1. If git refuses, its
   message shows and nothing changes. Not offered for a rebase, cherry-pick, revert or squash merge.
+- Holding Alt (Option on macOS) shows coloured marks in each pane's scrollbar: the left and right panes mark their
+  own changes still waiting, conflicts in the conflict colour; the Result marks every change still waiting and every
+  language-server problem in its colour. Clicking a mark jumps there: in a side pane that change gets the keyboard
+  outline, in the Result the cursor moves to it, and collapsed lines around it open. Releasing Alt, pressing another
+  key or leaving the window hides them.
 
 ### Changed
 

@@ -556,6 +556,8 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | whether the file list shows                                                                             | `fileListShown` shallowRef in `ui/store.ts`, true at every start (never stored); flipped only by the store's `fileListKey`, which `App.vue` calls from a window `keydown`: nothing on a press already handled, while a question waits, or for a key not bound to "Toggle file list" (`pressesKey`)                                                                                                                                                                                                                                                                                                                | `App.vue` hides `FileList` with `v-show`, so its width, view and closed folders survive (plan §2 #61)                                                                     |
 | the file list's view (list or tree) and its closed folders                                              | `FileList.vue`'s own state: the view from `createFileListMode` (`ui/fileListMode.ts`, `storedValue`, localStorage `yamt.files.view`, anything but `tree` is the list); closed folder paths in a session-only `shallowRef`, the shown file's folders opened whenever `active` changes                                                                                                                                                                                                                                                                                                                              | one reader and one writer, both in `FileList`; the view is remembered across restarts like #58, folders are not (plan §2 #61)                                             |
 | git's "merging" and the Abort merge button                                                              | `merging` shallowRef in `ui/store.ts`, written only by `refreshFiles` (`ui/listing.ts`) from each list's `merging` (`MERGE_HEAD` and no rebase, re-read at start and on every focus); the running state inside `createAborting` (`ui/aborting.ts`); `abortState` (`noMerge` \| `ready` \| `running`) computed from both; `MergeToolbar` shows the button by `shownButtons(abortState, hidden)` and its menu lists it by `listedButtons(abortState)` (`ui/toolbarButtons.ts`)                                                                                                                                      | one source for whether the button can show (git's view, plan §2 #74); a success keeps it `running` while Rust ends the app                                                |
+| whether the change marks show (Alt held)                                                                | `useAltHold()` (`ui/altHold.ts`), one instance in `App.vue`: a `shallowRef` set by Alt's own key press and cleared by its release, another key, window blur, the page hidden or a key/pointer event reporting Alt up (`heldAfter`, pure); pointer listeners exist only while held; never stored. `App.vue` passes it to every `MergeView` as `marks`; MergeView hands `shown && marks` to `useMergeController`'s `marks` option → `MergeOptions.marks` / `showMarks` (plan §2 #80)                                                                                                                                | one window-wide fact, one writer; hidden files never get it, so they compute nothing                                                                                      |
+| each pane's change marks (lanes, ticks)                                                                 | `MarkLanes` (`editor/internal/markLanes.ts`), owned by `Frame`: one `.change-marks` lane in each pane's `view.dom`, `hidden` while not shown; ticks recomputed from `Frame`'s rows and the Result's diagnostics only while shown and dirty (rows or geometry changed, problems arrived), never on scroll; no history (plan §2 #80)                                                                                                                                                                                                                                                                                | derived from the one geometry cache and the one tint rule (`paneTone`); nothing to keep                                                                                   |
 
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
 (`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event.
@@ -568,9 +570,10 @@ snapshot then marks its own saved point (`markSaved`).
 
 ```ts
 export class MergeController {
-  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), servers: LanguageServers | null (plan §2 #70) }
+  constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), marks (change marks shown at build, plan §2 #80), servers: LanguageServers | null (plan §2 #70) }
   setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
   setCollapsed(on: boolean): void; // the collapse toggle: off shows every hidden line, on hides every run back to its start; keeps the middle's top line, re-aligns the sides at once; not in history (plan §2 #68)
+  showMarks(shown: boolean): void; // the change marks in each pane's scrollbar while Alt is held: shown paints at once, hidden takes the lanes out of hit testing (plan §2 #80)
   applyAllNonConflicting(side: Side): void; // one undo step
   undo(): boolean;
   redo(): boolean;
@@ -617,7 +620,27 @@ Internals (`editor/internal/`, not importable from `ui/`):
 - `decorations.ts`, `side.ts`, `tone.ts`, `sideStatus.ts` — line colours per tone and status; one
   rule per side pane (that side still open) decides which blocks are tinted and feeds the line
   bands, the word marks and the removal bars; the middle pane draws bands only, until both sides
-  are handled (plan §2 #31, #33).
+  are handled (plan §2 #31, #33). `tone.ts` `paneTone(chunk, status, pane)` is that one tint rule for
+  bands and change marks alike.
+- `marks.ts`, `markLanes.ts`, `markJump.ts` — the change marks while Alt is held (plan §2 #80).
+  `marks.ts` is pure: the places each pane marks (`changePlaces` from the rows through `paneTone`;
+  `problemPlaces` from `forEachDiagnostic` on line blocks, so a problem in collapsed lines sits on its
+  wave line), WebStorm's error-stripe geometry (`laneBox`: the scrollbar's own width, 14 px over an
+  overlay one, a classic scrollbar's arrows left out on Windows; `ticks`: top over the scroll height
+  scaled to the track, the find space included, never under 2 px, painted info < warning < changes <
+  error) and `tickAt` (the nearest top within `PICK_DISTANCE_PX`, 4 px, also each tick's hit band through
+  `--mark-pick`). `MarkLanes` keeps one lane per pane in its `view.dom` (outside `scrollDOM` and
+  `contentDOM`, so neither CodeMirror nor `SideFocus` sees its presses; the lane lets presses through,
+  only ticks take them; a wheel over a tick is forwarded to that pane's scroller) and paints only while
+  shown and dirty. `markJump.ts` acts on a tick's click, handed to `Frame` as its `jump` part by the
+  controller: a side change through `SideFocus.focusChange` (outline + keyboard), a Result place by
+  selecting the innermost hidden middle range holding it, both ends counted, then putting the cursor at
+  its start (`revealSteps(state, folds, start)`: `foldField` shows hidden lines that hold a non-empty
+  selection, so also a problem at the very end of a collapsed tail; nothing hidden → only the cursor) and
+  focusing it;
+  either pane is then scrolled to put the line a third of the way down (`viewport.ts` `thirdScrollTop`,
+  WebStorm's `ScrollType.CENTER`), and the others follow the sync. One pane→side table, `geometry.ts`
+  `PANE_TINT`, serves the marks and the jump.
 - `words.ts` — side-pane word marks and removal bars (`RemovalPoint` widgets: zero width, a bright
   bar where the side removed text, carrying that text; `removalAt` reads it back) from `chunk.words`
   (plan §2 #30, #31). `removalTooltip.ts` shows a bar's text on hover (`hoverTooltip`, only while the
@@ -711,9 +734,9 @@ Internals (`editor/internal/`, not importable from `ui/`):
   `ResizeObserver` on the pane hosts plus a `matchMedia` resolution listener writing two custom
   properties.
 - `frame.ts` — the once-per-frame paint (`Frame`): find space, the layout cache, scroll sync, the
-  covered highlight and the strips; moved out of `index.ts`. `paneDocs.ts` builds the three `Text`s
-  once with the file's line separator (the views, the runs and the tests use them); `docPos.ts` is the
-  `DocPos` brand (chunk spans and hidden ranges).
+  covered highlight, the strips and the change-mark lanes (`MarkLanes`, `showMarks`); moved out of
+  `index.ts`. `paneDocs.ts` builds the three `Text`s once with the file's line separator (the views,
+  the runs and the tests use them); `docPos.ts` is the `DocPos` brand (chunk spans and hidden ranges).
 - `cutOnce.ts` — every pane takes one `cut` event per task: WebKitGTK 2.54 runs its Cut command twice
   for one Ctrl+X on an empty selection (two `cut` events inside the keydown's task), which cut two
   lines and defeated the wave line's delete filter (#849). The gate reopens on a 0 ms timer, so it
@@ -822,7 +845,8 @@ dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Alread
 `ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button of `listedButtons` — `TOOLBAR_BUTTONS`
 order, Abort merge only while git has a merge to abort —, toggles through the store, teleported to the body and placed by
 `menuPosition.ts`; closes on Escape, another key, a press elsewhere, a choice or window blur, never moving the keyboard,
-plan §2 #58),
+plan §2 #58); `altHold.ts` (`useAltHold`, called once by `App.vue`: whether Alt is held for the change marks,
+the pure `heldAfter` rule, plan §2 #80),
 `ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
 `report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
@@ -859,6 +883,7 @@ export function useMergeController(
     readOnly: MaybeRefOrGetter<boolean>; // MergeView's one rule: deleted side or a middle that is not text on disk
     preferences: MaybeRefOrGetter<Preferences>; // the store's; a change reaches the controller through setPreferences, no rebuild (plan §2 #57)
     collapsed: MaybeRefOrGetter<boolean>; // the store's collapse toggle; read when a controller is built, a change reaches every live one through setCollapsed (never through Preferences, plan §2 #68)
+    marks: MaybeRefOrGetter<boolean>; // MergeView's `shown && marks` (Alt held, `ui/altHold.ts`); read when a controller is built, a change reaches it through showMarks, no rebuild (plan §2 #80)
   },
 ): {
   summary: Readonly<ShallowRef<MergeSummary | null>>;

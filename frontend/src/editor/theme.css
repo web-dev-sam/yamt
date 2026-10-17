@@ -317,3 +317,52 @@ path.chunk-band {
 :root .removal-tooltip-whitespace {
   color: var(--color-fg-muted);
 }
+
+.cm-editor > .change-marks {
+  position: absolute;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.change-mark {
+  position: absolute;
+  right: 0;
+  left: 0;
+  background-color: var(--mark-tone);
+  pointer-events: auto;
+}
+
+.change-mark::before {
+  position: absolute;
+  inset: calc(-1 * var(--mark-pick)) 0;
+  content: "";
+}
+
+.change-mark-inserted {
+  --mark-tone: var(--color-mark-inserted);
+}
+
+.change-mark-modified {
+  --mark-tone: var(--color-mark-modified);
+}
+
+.change-mark-deleted {
+  --mark-tone: var(--color-mark-deleted);
+}
+
+.change-mark-conflict {
+  --mark-tone: var(--color-mark-conflict);
+}
+
+.change-mark-error {
+  --mark-tone: var(--color-mark-error);
+}
+
+.change-mark-warning {
+  --mark-tone: var(--color-mark-warning);
+}
+
+.change-mark-info {
+  --mark-tone: var(--color-mark-info);
+}

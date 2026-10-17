@@ -7,8 +7,10 @@ import { pushCovered } from "./covered";
 import { coveredAction, type IconDrag } from "./drag";
 import { syncFindSpace } from "./find";
 import { waveStarts, type FoldFields } from "./folds";
-import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
+import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
 import type { ChunkRow, WaveRow } from "./geometry";
+import { MarkLanes } from "./markLanes";
+import type { MarkTarget } from "./marks";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
 import type { Strips } from "./strips";
 
@@ -24,11 +26,14 @@ type FrameParts = {
   readonly folds: FoldFields;
   readonly drag: IconDrag;
   readonly strips: Strips;
+  readonly jump: (pane: Pane, target: MarkTarget, rows: readonly ChunkRow[]) => void;
+  readonly marks: boolean;
 };
 
 export class Frame {
   readonly #parts: FrameParts;
   readonly #scroll: ScrollSync;
+  readonly #marks: MarkLanes;
   #frameId: number | null = null;
   #layoutCache: Layout | null = null;
 
@@ -37,14 +42,21 @@ export class Frame {
     this.#scroll = new ScrollSync(parts.views, () => {
       this.request();
     });
+    this.#marks = new MarkLanes(parts.views, parts.marks, (pane, target) => {
+      parts.jump(pane, target, this.layout().rows);
+      this.#scroll.follow(pane);
+    });
   }
 
   changed(update: ViewUpdate): void {
     const { spans, folds } = this.#parts;
-    if (rowsChanged(update, [spans, folds.center, folds.sides])) {
+    const moved = rowsChanged(update, [spans, folds.center, folds.sides]);
+    if (moved) {
       this.#layoutCache = null;
     }
+    const marksDirty = this.#marks.changed(update, moved);
     if (
+      marksDirty ||
       update.docChanged ||
       update.geometryChanged ||
       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
@@ -70,6 +82,7 @@ export class Frame {
       const { views, drag, strips } = this.#parts;
       syncFindSpace(views);
       const layout = this.layout();
+      this.#marks.paint(layout.rows);
       this.#scroll.sync(layout.anchors);
       const press = drag.press;
       const covered = press === null ? null : coveredAction(press, layout.rows, views);
@@ -82,10 +95,16 @@ export class Frame {
     this.#scroll.follow("center");
   }
 
+  showMarks(shown: boolean): void {
+    this.#marks.show(shown);
+    this.#marks.paint(this.layout().rows);
+  }
+
   destroy(): void {
     if (this.#frameId !== null) {
       cancelAnimationFrame(this.#frameId);
     }
     this.#scroll.destroy();
+    this.#marks.destroy();
   }
 }
