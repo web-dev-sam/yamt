@@ -18,7 +18,7 @@ The product owner is a Rust beginner and reads every crate (vision 1). Idiomatic
   no proc-macro crates beyond those.
 - [RS4] Iterator chains: at most three adapters; beyond that, a `for` loop with a named
   accumulator. Violation: `.iter().filter().map().enumerate().skip_while().collect()`.
-- [RS5] No `Rc`, `RefCell`, `Arc`, `Cell` outside `src-tauri`'s two `Mutex`es (`MergeSession`, the language-server
+- [RS5] No `Rc`, `RefCell`, `Arc`, `Cell` outside `src-tauri`'s two `Mutex`es (`Merge` — the held `MergeSession` or none after an abort, plan §2 #74 — and the language-server
   `Host`, plan §2 #70), never held together. No `async`, no `tokio`: git subprocesses and diffs are synchronous and
   fast; the language-server host uses std threads and channels.
 - [RS6] Functions ≤ 40 lines, files ≤ 400 lines; split by responsibility, not by count.

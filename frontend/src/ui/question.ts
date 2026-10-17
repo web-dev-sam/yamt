@@ -8,6 +8,7 @@ import type { MergeSummary } from "./useMergeController";
 export type Question =
   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
   | { readonly kind: "exit"; readonly files: readonly string[] }
+  | { readonly kind: "abort" }
   | ({ readonly kind: "clash" } & Clash)
   | {
       readonly kind: "servers";
@@ -27,6 +28,16 @@ export type QuestionText = {
   readonly note: string | null;
   readonly confirm: string;
   readonly cancel: string;
+};
+
+const ABORT_TEXT: QuestionText = {
+  title: "Abort Merge",
+  message:
+    "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
+  list: { kind: "none" },
+  note: null,
+  confirm: "Abort Merge",
+  cancel: "Cancel",
 };
 
 function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
@@ -95,6 +106,8 @@ export function questionText(question: Question, platform: string): QuestionText
       };
     case "servers":
       return serversText(question.found, question.added);
+    case "abort":
+      return ABORT_TEXT;
     default: {
       const _exhaustive: never = question;
       return _exhaustive;

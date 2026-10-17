@@ -1,15 +1,14 @@
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::Mutex;
 
-use tauri::{Manager, Runtime, State};
+use tauri::{Manager, Runtime, State, WebviewWindow};
 use yamt_session::{
     DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
 };
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
+use crate::merge::{Merge, MergeState, lock};
 use crate::{servers, settings};
-
-pub(crate) type SessionState = Mutex<MergeSession>;
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
@@ -21,6 +20,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         describe_file,
         take_side,
         side_names,
+        abort_merge::<tauri::Wry>,
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
@@ -43,7 +43,7 @@ pub(crate) fn with_session<R: Runtime>(
     session: MergeSession,
 ) -> tauri::Builder<R> {
     servers::manage(builder, session.root())
-        .manage(Mutex::new(session))
+        .manage(Mutex::new(Merge::Held(session)))
         .invoke_handler(specta_builder().invoke_handler())
         // A reloaded page's channels still take events (tauri 2.12 ipc/channel.rs:409-449 fails a
         // send only when `eval` fails), so its runs would never stop themselves.
@@ -52,83 +52,98 @@ pub(crate) fn with_session<R: Runtime>(
         })
 }
 
-pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
-    state.lock().unwrap_or_else(PoisonError::into_inner)
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn list_files(state: State<'_, MergeState>) -> Result<FileList, IpcError> {
+    Ok(lock(&state).session()?.refresh()?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn list_files(state: State<'_, SessionState>) -> Result<FileList, IpcError> {
-    Ok(lock(&state).refresh()?)
+fn side_names(state: State<'_, MergeState>) -> Result<SideNames, IpcError> {
+    Ok(lock(&state).session()?.side_names().clone())
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn side_names(state: State<'_, SessionState>) -> SideNames {
-    lock(&state).side_names().clone()
-}
-
-#[tauri::command]
-#[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn load_file(state: State<'_, SessionState>, path: &str) -> Result<FileMergeData, IpcError> {
-    Ok(lock(&state).load(path)?)
+fn load_file(state: State<'_, MergeState>, path: &str) -> Result<FileMergeData, IpcError> {
+    Ok(lock(&state).session()?.load(path)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn finish_file(
-    state: State<'_, SessionState>,
+    state: State<'_, MergeState>,
     path: &str,
     text: &str,
     disk_version: DiskVersion,
 ) -> Result<WriteReply, IpcError> {
-    Ok(lock(&state).finish(path, text, disk_version)?)
+    Ok(lock(&state).session()?.finish(path, text, disk_version)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn save_file(
-    state: State<'_, SessionState>,
+    state: State<'_, MergeState>,
     path: &str,
     text: &str,
     disk_version: DiskVersion,
 ) -> Result<WriteReply, IpcError> {
-    Ok(lock(&state).save(path, text, disk_version)?)
+    Ok(lock(&state).session()?.save(path, text, disk_version)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn reset_file(
-    state: State<'_, SessionState>,
+    state: State<'_, MergeState>,
     path: &str,
     disk_version: DiskVersion,
 ) -> Result<WriteReply, IpcError> {
-    Ok(lock(&state).reset(path, disk_version)?)
+    Ok(lock(&state).session()?.reset(path, disk_version)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn describe_file(state: State<'_, SessionState>, path: &str) -> Result<FileSides, IpcError> {
-    Ok(lock(&state).describe(path)?)
+fn describe_file(state: State<'_, MergeState>, path: &str) -> Result<FileSides, IpcError> {
+    Ok(lock(&state).session()?.describe(path)?)
 }
 
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn take_side(
-    state: State<'_, SessionState>,
+    state: State<'_, MergeState>,
     path: &str,
     side: Side,
     disk_version: DiskVersion,
 ) -> Result<WriteReply, IpcError> {
-    Ok(lock(&state).take(path, side, disk_version)?)
+    Ok(lock(&state).session()?.take(path, side, disk_version)?)
+}
+
+// tauri 2.12 `WebviewWindow::destroy` "does not emit any events": no `CloseRequested`, so the page's
+// unsaved-work question does not run; the last window gone ends `run_return`.
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
+fn abort_merge<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, MergeState>,
+) -> Result<(), IpcError> {
+    lock(&state).abort()?;
+    if let Err(error) = window.destroy() {
+        tracing::warn!(%error, "the merge is aborted but the window stays: closing it ends yamt");
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -152,7 +167,7 @@ mod tests {
 
     impl Window {
         fn exit_on_close(&self) -> Exit {
-            ending_on_close(&mut lock(&self.app.state::<SessionState>())).exit
+            ending_on_close(&mut lock(&self.app.state::<MergeState>())).exit
         }
 
         fn unmerged(&self) -> String {
@@ -178,7 +193,8 @@ mod tests {
     fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
         let window = open_window();
         let unresolved = "Unresolved";
-        let listed = |statuses| json!({ "files": entries(statuses), "disk_changes": [] });
+        let listed =
+            |statuses| json!({ "files": entries(statuses), "disk_changes": [], "merging": true });
         assert_eq!(
             window.invoke("list_files", json!({})),
             Ok(listed([unresolved, unresolved, unresolved]))
@@ -203,7 +219,7 @@ mod tests {
 
         assert_eq!(
             listed,
-            Ok(json!({ "files": after, "disk_changes": [staged] }))
+            Ok(json!({ "files": after, "disk_changes": [staged], "merging": true }))
         );
         let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
         assert_eq!(finished, Ok(changed));
@@ -286,7 +302,7 @@ mod tests {
             text.as_bytes()
         );
         assert_eq!(window.unmerged(), unmerged_before);
-        let listed = json!({ "files": entries(unresolved), "disk_changes": [] });
+        let listed = json!({ "files": entries(unresolved), "disk_changes": [], "merging": true });
         assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
     }
 

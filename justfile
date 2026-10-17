@@ -86,8 +86,9 @@ test-window-check:
 
 # Drives the real app on a private display or the fixture page (`just app-session start-app --name s --fresh-repo`,
 # then click/press/type/scroll/read/shot/colours, `stop`); see skill://verification.
+[positional-arguments]
 app-session *args:
-    pnpm -C frontend exec tsx scripts/app-session.ts {{ args }}
+    pnpm -C frontend exec tsx scripts/app-session.ts "$@"
 
 # Desktop app in dev mode; arguments go to yamt (`just dev-app --repo /tmp/yamt-test-merge`).
 dev-app *args:

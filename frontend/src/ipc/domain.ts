@@ -85,6 +85,7 @@ export type SettingsRead = {
 export type FileList = {
   readonly files: readonly FileEntry[];
   readonly diskChanges: readonly DiskChange[];
+  readonly merging: boolean;
 };
 
 export type FileMergeData = {
@@ -209,7 +210,7 @@ export function toSides(dto: Generated.FileSides): FileSides {
 }
 
 export function toFileList(dto: Generated.FileList): FileList {
-  return { files: dto.files, diskChanges: dto.disk_changes };
+  return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
 }
 
 export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {

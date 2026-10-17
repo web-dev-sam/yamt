@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, shallowRef, type Component, type Ref } from "vue";
+import { computed, nextTick, shallowRef, type Component, type Ref } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
 import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
 import ChevronsLeft from "~icons/lucide/chevrons-left";
 import ChevronsRight from "~icons/lucide/chevrons-right";
+import GitPullRequestClosed from "~icons/lucide/git-pull-request-closed";
 import Redo2 from "~icons/lucide/redo-2";
 import Undo2 from "~icons/lucide/undo-2";
 
@@ -14,7 +15,7 @@ import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useAppStore } from "./store";
 import { summaryLabel } from "./summaryLabel";
-import { TOOLBAR_BUTTONS, type ToolbarButtonId } from "./toolbarButtons";
+import { shownButtons, type ToolbarButtonId } from "./toolbarButtons";
 import ToolbarMenu from "./ToolbarMenu.vue";
 import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
 
@@ -24,6 +25,7 @@ type IconButton = {
   readonly keepsKeyboard: boolean;
   readonly run: () => void;
   readonly selected: Readonly<Ref<boolean>> | null;
+  readonly disabled: Readonly<Ref<boolean>>;
 };
 
 const props = defineProps<{
@@ -42,9 +44,24 @@ const emit = defineEmits<{
 
 const SECONDARY_BUTTON = 2;
 
-const { hiddenButtons, collapsing, toggleCollapsing } = useAppStore();
+const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortMerge } = useAppStore();
+
+const menuAt = shallowRef<Point | null>(null);
+
+const noSummary = computed(() => props.summary === null);
+const abortRunning = computed(() => abortState.value === "running");
 
 const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+  abortMerge: {
+    label: "Abort merge",
+    icon: GitPullRequestClosed,
+    keepsKeyboard: true,
+    run: () => {
+      void abortKeepingKeyboard();
+    },
+    selected: null,
+    disabled: abortRunning,
+  },
   previous: {
     label: "Previous change",
     icon: ArrowUp,
@@ -53,6 +70,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("move", "up");
     },
     selected: null,
+    disabled: noSummary,
   },
   next: {
     label: "Next change",
@@ -62,6 +80,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("move", "down");
     },
     selected: null,
+    disabled: noSummary,
   },
   collapse: {
     label: "Collapse unchanged fragments",
@@ -69,6 +88,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     keepsKeyboard: true,
     run: toggleCollapsing,
     selected: collapsing,
+    disabled: noSummary,
   },
   applyLeft: {
     label: "Apply non-conflicting changes from the left",
@@ -78,6 +98,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("applyLeft");
     },
     selected: null,
+    disabled: noSummary,
   },
   applyRight: {
     label: "Apply non-conflicting changes from the right",
@@ -87,6 +108,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("applyRight");
     },
     selected: null,
+    disabled: noSummary,
   },
   undo: {
     label: "Undo",
@@ -96,6 +118,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("undo");
     },
     selected: null,
+    disabled: noSummary,
   },
   redo: {
     label: "Redo",
@@ -105,16 +128,12 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
       emit("redo");
     },
     selected: null,
+    disabled: noSummary,
   },
 };
 
-const menuAt = shallowRef<Point | null>(null);
-
-const shownButtons = computed(() =>
-  TOOLBAR_BUTTONS.filter((id) => !hiddenButtons.value.has(id)).map((id) => ({
-    id,
-    ...ICON_BUTTONS[id],
-  })),
+const shown = computed(() =>
+  shownButtons(abortState.value, hiddenButtons.value).map((id) => ({ id, ...ICON_BUTTONS[id] })),
 );
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -122,6 +141,17 @@ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(prop
 function pressed(button: IconButton, event: MouseEvent): void {
   if (button.keepsKeyboard) {
     event.preventDefault();
+  }
+}
+
+// Removing an open modal <dialog> does not give focus back; only close() does (HTML, "dialog
+// removing steps": https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
+async function abortKeepingKeyboard(): Promise<void> {
+  const before = document.activeElement;
+  await abortMerge();
+  await nextTick();
+  if (document.activeElement === document.body && before instanceof HTMLElement) {
+    before.focus();
   }
 }
 
@@ -160,13 +190,13 @@ function closeMenu(): void {
       Mark resolved
     </button>
     <button
-      v-for="button in shownButtons"
+      v-for="button in shown"
       :key="button.id"
       type="button"
       :title="button.label"
       :aria-label="button.label"
       :aria-pressed="button.selected?.value"
-      :disabled="summary === null"
+      :disabled="button.disabled.value"
       class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
       @mousedown="pressed(button, $event)"
       @click="button.run"

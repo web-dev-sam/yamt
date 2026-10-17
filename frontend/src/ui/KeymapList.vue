@@ -142,7 +142,7 @@ async function recorded(key: Key): Promise<void> {
               </span>
               <span class="block text-fg-muted">{{ ACTION_PLACES[row.action] }}</span>
             </span>
-            <span class="flex shrink-0 flex-wrap justify-end gap-1">
+            <span class="flex max-w-1/2 shrink-0 flex-wrap justify-end gap-1">
               <kbd
                 v-for="label in row.labels"
                 :key="label"

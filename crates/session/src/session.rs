@@ -10,6 +10,7 @@ use crate::disk::{
     read_on_disk, settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+use crate::merging::is_merging;
 use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
 use crate::stages::CapturedStages;
@@ -29,11 +30,13 @@ pub struct FileEntry {
     pub unsupported: Option<UnsupportedReason>,
 }
 
-/// The files as git sees them, and the disk changes settled while looking.
+/// The files as git sees them, the disk changes settled while looking, and whether a merge is in progress.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct FileList {
     pub files: Vec<FileEntry>,
     pub disk_changes: Vec<DiskChange>,
+    /// A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74).
+    pub merging: bool,
 }
 
 /// What a write did: written, or nothing written because the file changed on disk first.
@@ -107,7 +110,14 @@ impl MergeSession {
         Ok(FileList {
             files: self.files(),
             disk_changes,
+            merging: is_merging(&self.repo),
         })
+    }
+
+    /// `git merge --abort`. The session must not be used for the merge afterwards.
+    pub fn abort_merge(&self) -> Result<()> {
+        self.repo.abort_merge()?;
+        Ok(())
     }
 
     pub(crate) fn refresh_statuses(&mut self) -> Result<()> {

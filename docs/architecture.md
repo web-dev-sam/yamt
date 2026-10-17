@@ -247,6 +247,9 @@ impl Repo {
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>>;        // MERGE_MSG through rev-parse --git-path
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary>; // log -1 %h %s %B
     pub fn current_branch(&self) -> Result<Option<Vec<u8>>>;      // branch --show-current; detached (empty output) → None
+    // Abort merge (plan §2 #74)
+    pub fn rebase_in_progress(&self) -> Result<bool>;              // rebase-merge or rebase-apply exists (rev-parse --git-path)
+    pub fn abort_merge(&self) -> Result<()>;                       // merge --abort; git's refusal is GitFailed with its stderr
 }
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
@@ -278,7 +281,7 @@ pub struct FileMergeData { pub path: String, pub middle: Middle, pub local: Stri
                            pub deleted: Option<Side>, pub eol: Eol, pub chunks: Vec<MergeChunk>, pub disk_version: DiskVersion }
 pub enum DiskResult { Staged, MarkersLeft { conflicts: u32 }, LeftAsIs, StageFailed { message: String } }
 pub struct DiskChange { pub path: String, pub result: DiskResult }
-pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange> }
+pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange>, pub merging: bool /* MERGE_HEAD names a commit, no rebase stopped (#74) */ }
 pub enum WriteReply { Written { files: Vec<FileEntry> }, ChangedOnDisk { files: Vec<FileEntry>, change: DiskChange } }
 
 impl MergeSession {
@@ -293,6 +296,7 @@ impl MergeSession {
     pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages, then the at-open bytes (`AtOpen::reset_to`, #66); checkout -m only for a link, submodule, other entry or unread file; all or nothing
     pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
+    pub fn abort_merge(&self) -> Result<()>;                         // git merge --abort (#74); src-tauri then drops the session (`Merge::Aborted`)
 }
 ```
 
@@ -331,22 +335,26 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 
 ### 3.5 `src-tauri`
 
-- `tauri::State<Mutex<MergeSession>>` and `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never
-  locked together.
+- `tauri::State<Mutex<Merge>>` (`merge.rs`: `Merge = Held(MergeSession) | Aborted`, plan §2 #74) and
+  `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. After a successful
+  `abort_merge` the app holds no merge: `Merge::session()` answers `MergeAborted` for every merge command.
 - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
   (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
-  §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
+  §2 #49/#53; `merging`: `MERGE_HEAD` names a commit and no rebase is stopped, re-read each time, #74),
+  `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
   `finish_file(path, text, disk_version) -> WriteReply`, `save_file(path, text, disk_version) -> WriteReply`
   (`finish_file` without `git add`: the own write updates `seen` only, the disk version stays, plan §2 #65/#69),
   `reset_file(path, disk_version) -> WriteReply` (back to this run's start: the stages captured at open and the
   bytes found at open, `FileState.at_open`, #66/#69),
   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
-  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> SideNames`
+  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> Result<SideNames>`
   (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
-  open, each side on its own, #50/#62), `log(entry)`. No `quit_if_done`:
-  the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
-  so it settles disk changes and uses git's view (#49).
+  open, each side on its own, #50/#62), `abort_merge() -> Result<()>` (`git merge --abort`; git's refusal is `Git`
+  with its message and the merge stays held; on success the merge becomes `Aborted` and the calling window is
+  destroyed, which emits no close request, so the page's unsaved-work question never runs, #74), `log(entry)`. No
+  `quit_if_done`: the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
+  so it settles disk changes and uses git's view (#49); after an abort it is 1 with `merge aborted`, nothing re-read.
 - Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
   (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
   `load_settings(current)`, `set_theme(current, theme)`, `set_antialiasing(current, antialiasing)`,
@@ -374,10 +382,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
-  `NoConfigFolder`) mirrored into TS; no stringly errors. A disk change is never an error.
+  `NoConfigFolder`, `MergeAborted`) mirrored into TS; no stringly errors. A disk change is never an error.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
-  `remaining() == 0`, else 1. Window title `<repository folder> — yamt`.
+  `remaining() == 0`, else 1; after Abort merge exit 1 with `merge aborted` (#74). Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`. It needs the `bindings` feature, so
   `cargo tauri build` neither builds nor bundles it: tauri bundles every bin of the package unless
   its required features are off, and the universal macOS build makes only the main binary.
@@ -424,7 +432,7 @@ export type MergeChunk = { chunk: Chunk; middle: LineRange<MiddleLine>; words: W
 export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };
 export type FileMergeData = { path: string; middle: Middle; local: string; remote: string; deleted: Side | null; eol: Eol; chunks: MergeChunk[]; disk_version: DiskVersion };
 export type DiskResult = { kind: "Staged" } | { kind: "MarkersLeft"; conflicts: number } | { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
-export type FileList = { files: FileEntry[]; disk_changes: DiskChange[] };     // DiskChange = { path; result: DiskResult }
+export type FileList = { files: FileEntry[]; disk_changes: DiskChange[]; merging: boolean };     // DiskChange = { path; result: DiskResult }; merging (#74)
 export type WriteReply = { kind: "Written"; files: FileEntry[] } | { kind: "ChangedOnDisk"; files: FileEntry[]; change: DiskChange };
 export const commands: { listFiles(): Promise<FileList>; loadFile(path: string): Promise<FileMergeData>; … };
 ```
@@ -475,7 +483,8 @@ export interface ChunkSource {
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
-  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null
+  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null; an error reply rejects
+  abortMerge(): Promise<SourceResult<null>>; // git merge --abort (#74); the app then ends; fixture: logs, answers null
   // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
@@ -542,10 +551,11 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 | the settings in use (theme, key bindings, the file's path)                                              | `settings` shallowRef in `ui/store.ts`, changed only by the replies of the four settings calls (`ui/settings.ts`), re-read on window focus with the file list; `preferences` is computed from it and handed to every opened file's controller                                                                                                                                                                                                                                                                                                                                                                     | the file is the truth (Rust `yamt-settings`); a failed call keeps the settings in use (plan §2 #57)                                                                       |
 | the page's theme attribute (`<html data-theme>`)                                                        | set before the first frame by the shell's start script; `main.ts` reads it as the start theme; afterwards written only by `App.vue` from `settings.theme`                                                                                                                                                                                                                                                                                                                                                                                                                                                         | one palette per theme in `style.css` (plan §2 #57)                                                                                                                        |
 | each pane's dark flag and key bindings                                                                  | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                                                                   |
-| toolbar buttons the user hid                                                                            | `HiddenButtons` (`ui/toolbarButtons.ts`, `storedValue` from `ui/windowStorage.ts`) held by the store: read as `hiddenButtons`, changed only by `toggleButton` from the toolbar's right-click menu; Undo/Redo hidden at first; stored in localStorage `yamt.toolbar.hidden` as the hidden ids in toolbar order                                                                                                                                                                                                                                                                                                     | one choice for every file, remembered across restarts; a button added later shows until hidden (plan §2 #58)                                                              |
+| toolbar buttons the user hid                                                                            | `HiddenButtons` (`ui/toolbarButtons.ts`, `storedValue` from `ui/windowStorage.ts`) held by the store: read as `hiddenButtons`, changed only by `toggleButton` from the toolbar's right-click menu; Abort merge, Undo and Redo hidden at first (`HIDDEN_AT_FIRST`, one start state per id); stored in localStorage `yamt.toolbar.hidden` as an object of the buttons the user decided (id → hidden); an array stored before #74 (hidden ids) reads as decisions for the seven ids it can name                                                                                                                      | one choice for every file, remembered across restarts; a button added later keeps its own start state until decided (plan §2 #58, #74, #1091)                             |
 | whether unchanged lines collapse                                                                        | `Collapsing` (`ui/collapsing.ts`, `storedValue`) held by the store: read as `collapsing`, flipped only by `toggleCollapsing` from the toolbar's "Collapse unchanged fragments" button; stored in localStorage `yamt.collapse.unchanged`, anything but `"false"` is on; each `MergeView` passes it to `useMergeController`'s `collapsed` option, whose watch calls `setCollapsed` on every live controller                                                                                                                                                                                                         | one choice for every file, remembered across restarts; never part of `Preferences`, so re-applying preferences cannot reset shown runs (plan §2 #68)                      |
 | whether the file list shows                                                                             | `fileListShown` shallowRef in `ui/store.ts`, true at every start (never stored); flipped only by the store's `fileListKey`, which `App.vue` calls from a window `keydown`: nothing on a press already handled, while a question waits, or for a key not bound to "Toggle file list" (`pressesKey`)                                                                                                                                                                                                                                                                                                                | `App.vue` hides `FileList` with `v-show`, so its width, view and closed folders survive (plan §2 #61)                                                                     |
 | the file list's view (list or tree) and its closed folders                                              | `FileList.vue`'s own state: the view from `createFileListMode` (`ui/fileListMode.ts`, `storedValue`, localStorage `yamt.files.view`, anything but `tree` is the list); closed folder paths in a session-only `shallowRef`, the shown file's folders opened whenever `active` changes                                                                                                                                                                                                                                                                                                                              | one reader and one writer, both in `FileList`; the view is remembered across restarts like #58, folders are not (plan §2 #61)                                             |
+| git's "merging" and the Abort merge button                                                              | `merging` shallowRef in `ui/store.ts`, written only by `refreshFiles` (`ui/listing.ts`) from each list's `merging` (`MERGE_HEAD` and no rebase, re-read at start and on every focus); the running state inside `createAborting` (`ui/aborting.ts`); `abortState` (`noMerge` \| `ready` \| `running`) computed from both; `MergeToolbar` shows the button by `shownButtons(abortState, hidden)` and its menu lists it by `listedButtons(abortState)` (`ui/toolbarButtons.ts`)                                                                                                                                      | one source for whether the button can show (git's view, plan §2 #74); a success keeps it `running` while Rust ends the app                                                |
 
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
 (`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event.
@@ -792,7 +802,9 @@ its space-separated names; `nameKey`: a path's last segment in lower case), plan
 one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
 paint, editors, scroll positions and work kept, plan §2 #51;
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
-data object changes and destroys it with the component), `MergeToolbar.vue` (previous/next change
+data object changes and destroys it with the component), `MergeToolbar.vue` (Abort merge right after "Mark
+resolved" — hidden at first, shown from the right-click menu, only while git has a merge to abort, disabled while it
+runs; the store's `abortMerge` asks once, then `source.abortMerge()`, #74 —, previous/next change
 arrows that keep the side's keyboard on a pointer press, the "Collapse unchanged fragments" toggle —
 `aria-pressed` while on, keeps the keyboard too, #68 —, bulk apply left/right, undo/redo — hidden
 at first, shown from the right-click menu, #58 —, counts, finish, reset — `MergeView` calls the store's
@@ -807,10 +819,10 @@ labels, WebStorm's Keymap edit menu per row), `PresetPicker.vue` (Settings → L
 `presetChoices()` fills Command and File types through `addedServerFields`, plan §2 #72; its drop-down and the key
 list's row menus share `useDropdownMenu.ts`) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
 dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Already used by" line),
-`ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button in `TOOLBAR_BUTTONS`
-order, toggles through the store, teleported to the body and placed by `menuPosition.ts`; closes on
-Escape, another key, a press elsewhere, a choice or window blur, never moving the keyboard, plan §2
-#58),
+`ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button of `listedButtons` — `TOOLBAR_BUTTONS`
+order, Abort merge only while git has a merge to abort —, toggles through the store, teleported to the body and placed by
+`menuPosition.ts`; closes on Escape, another key, a press elsewhere, a choice or window blur, never moving the keyboard,
+plan §2 #58),
 `ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
 `report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
@@ -946,7 +958,7 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   uses, a trait needs two implementations, else write the concrete thing; derive macros only
   (`serde`, `thiserror`, `specta`), no `macro_rules!`; iterator chains of at most three
   adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s two `Mutex`es
-  (`MergeSession`, the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
+  (`Merge` = the held `MergeSession` or none after an abort, #74; the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
   diffs are synchronous and fast; the language-server host uses std threads and channels).
   Per milestone the orchestrator writes `docs/walkthroughs/M<n>.md`: what was built and the
   handful of non-obvious Rust constructs, with the reason each was chosen.

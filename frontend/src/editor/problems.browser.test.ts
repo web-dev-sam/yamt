@@ -156,7 +156,6 @@ test("a problem's tooltip inside will-change: transform wrappers shows its messa
   await page.screenshot({ path: SCREENSHOT });
 
   expect(range.textContent).toBe("undefinedThing");
-  expect(getComputedStyle(range).textDecorationStyle).toBe("wavy");
   expect(tooltip.textContent).toContain(MESSAGE);
   expect(tooltip.textContent).toContain("oxlint eslint(no-undef)");
   expect(shown.width).toBeGreaterThan(0);

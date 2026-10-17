@@ -7,6 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Abort merge: an icon button right after Mark resolved, hidden at first; show it from the toolbar's right-click
+  menu. During a `git merge` it runs `git merge --abort` after one question. Every resolution and save is lost,
+  the repository goes back to how it was before the merge, and yamt closes with status 1. If git refuses, its
+  message shows and nothing changes. Not offered for a rebase, cherry-pick, revert or squash merge.
+
+### Changed
+
+- The toolbar's right-click menu remembers each button you decided, shown or hidden, so a button added later keeps
+  its own starting state; choices made before carry over.
+
+### Fixed
+
+- The focus ring of a button or menu item reached by keyboard is in the theme's primary colour instead of the
+  system's focus colour (blue on Linux).
+- Problems from language servers are underlined with a visible squiggle; on Linux the wavy line was drawn flat.
+- Settings lists wrap long text onto the next line instead of cutting it off or pushing it out of view: a long
+  file-type list no longer hides the language server's command, and many shortcuts on one keymap action no longer
+  squeeze its name.
+
 ## [0.3.2] - 2026-10-15
 
 ### Added

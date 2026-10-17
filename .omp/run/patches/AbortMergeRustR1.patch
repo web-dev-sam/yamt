@@ -1,0 +1,138 @@
+diff --git a/crates/gitio/tests/abort.rs b/crates/gitio/tests/abort.rs
+index 561dd01..aa9b40b 100644
+--- a/crates/gitio/tests/abort.rs
++++ b/crates/gitio/tests/abort.rs
+@@ -111,6 +111,21 @@ fn rebase_in_progress_is_false_in_a_merge() {
+     assert!(!repo.rebase_in_progress().unwrap());
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn rebase_in_progress_fails_when_the_rebase_state_cannot_be_looked_at() {
++    let (dir, repo) = merging();
++    let rebase_merge = dir.path().join(".git").join("rebase-merge");
++    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
++
++    let error = repo.rebase_in_progress().unwrap_err();
++
++    assert!(
++        matches!(&error, Error::ReadFailed { path, .. } if path.ends_with("rebase-merge")),
++        "{error:?}"
++    );
++}
++
+ fn stopped_rebase(backend: &str) -> TempDir {
+     let dir = diverged_repo(&files()).unwrap();
+     let rebase = git(dir.path(), &["rebase", backend, "remote"]).unwrap();
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 25141ab..52a1985 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in local, remote and base (a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open`: what is checked out (HEAD's branch, else HEAD's commit) and what is merged in; a git failure there only drops that side's name (plan §2 #50, #62). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts); `describe.rs` and `take.rs` share the `every_kind/` fixture.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in local, remote and base (a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open`: what is checked out (HEAD's branch, else HEAD's commit) and what is merged in; a git failure there only drops that side's name (plan §2 #50, #62). `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts); `describe.rs` and `take.rs` share the `every_kind/` fixture.
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index 444f2ce..539a933 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -6,6 +6,7 @@ mod disk;
+ mod locate;
+ mod markers;
+ mod merge_data;
++mod merging;
+ mod open;
+ mod seed;
+ mod session;
+diff --git a/crates/session/src/merging.rs b/crates/session/src/merging.rs
+new file mode 100644
+index 0000000..a6a48b6
+--- /dev/null
++++ b/crates/session/src/merging.rs
+@@ -0,0 +1,22 @@
++use yamt_gitio::Repo;
++
++use crate::session::LOG_TARGET;
++use crate::side_names::MERGE_HEAD;
++
++pub(crate) fn is_merging(repo: &Repo) -> bool {
++    match merge_in_progress(repo) {
++        Ok(merging) => merging,
++        Err(error) => {
++            tracing::warn!(target: LOG_TARGET, event = "merge_state_unread", %error, "no merge to abort is assumed");
++            false
++        }
++    }
++}
++
++// A `git rebase -r` stopped on a merge commit's conflict writes MERGE_HEAD too; `git merge --abort` there would leave the rebase half done.
++fn merge_in_progress(repo: &Repo) -> yamt_gitio::Result<bool> {
++    if repo.commit_named(MERGE_HEAD)?.is_none() {
++        return Ok(false);
++    }
++    Ok(!repo.rebase_in_progress()?)
++}
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index db95dd8..eec67d1 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -10,7 +10,8 @@ use crate::disk::{
+     read_on_disk, settlement, stage, warn_unread,
+ };
+ use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+-use crate::side_names::{MERGE_HEAD, SideNames};
++use crate::merging::is_merging;
++use crate::side_names::SideNames;
+ use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
+ use crate::stages::CapturedStages;
+ use crate::waiting::MarkerStyle;
+@@ -219,24 +220,6 @@ impl MergeSession {
+     }
+ }
+ 
+-fn is_merging(repo: &Repo) -> bool {
+-    match merge_in_progress(repo) {
+-        Ok(merging) => merging,
+-        Err(error) => {
+-            tracing::warn!(target: LOG_TARGET, event = "merge_state_unread", %error, "no merge to abort is assumed");
+-            false
+-        }
+-    }
+-}
+-
+-// A `git rebase -r` stopped on a merge commit's conflict writes MERGE_HEAD too; `git merge --abort` there would leave the rebase half done.
+-fn merge_in_progress(repo: &Repo) -> yamt_gitio::Result<bool> {
+-    if repo.commit_named(MERGE_HEAD)?.is_none() {
+-        return Ok(false);
+-    }
+-    Ok(!repo.rebase_in_progress()?)
+-}
+-
+ pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {
+     files
+         .iter_mut()
+diff --git a/crates/session/tests/merging.rs b/crates/session/tests/merging.rs
+index 1ac450b..72eb44f 100644
+--- a/crates/session/tests/merging.rs
++++ b/crates/session/tests/merging.rs
+@@ -63,6 +63,21 @@ fn a_merge_aborted_outside_is_not_merging_on_the_next_refresh() {
+     assert!(!session.refresh().unwrap().merging);
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn an_unreadable_rebase_state_is_not_merging_and_never_fails_the_list() {
++    let dir = conflict_repo(&FILES).unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    let rebase_merge = dir.path().join(".git").join("rebase-merge");
++    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
++    assert!(rebase_merge.try_exists().is_err());
++
++    let list = session.refresh().unwrap();
++
++    assert!(!list.merging);
++    assert_eq!(list.files.len(), FILES.len());
++}
++
+ #[test]
+ fn abort_merge_runs_git_merge_abort() {
+     let dir = conflict_repo(&FILES).unwrap();

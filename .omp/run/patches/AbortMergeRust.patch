@@ -1,0 +1,1294 @@
+diff --git a/.omp/skills/ipc-contract/SKILL.md b/.omp/skills/ipc-contract/SKILL.md
+index 715bdff..e6c49ec 100644
+--- a/.omp/skills/ipc-contract/SKILL.md
++++ b/.omp/skills/ipc-contract/SKILL.md
+@@ -25,9 +25,9 @@ from them and committed.
+ - [IPC4] Errors cross as one `#[serde(tag = "kind")] enum IpcError` with structured fields
+   (plan §2 #41: `Git`, `UnknownPath`, `Unsupported { path, reason }`, `WriteFailed`; #53:
+   `NotAFile { path }`, `ReadFailed { path, message }`; #57: `SettingsBroken { path, message }`,
+-  `NotAbsolute { path }`, `NoConfigFolder`); never a string. The frontend `switch`es on
++  `NotAbsolute { path }`, `NoConfigFolder`; #74: `MergeAborted`); never a string. The frontend `switch`es on
+   `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `FileList.disk_changes`), never an error.
+-- [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<MergeSession>`, call one `session`
++- [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<Merge>` (`src-tauri/src/merge.rs`), call one `session`
+   method, map the error — or, for settings, compute `Places` and call one `yamt_settings`
+   function. No logic in `src-tauri`.
+ - [IPC6] Strings are UTF-8 text already validated by `session`; binary/non-UTF-8 never
+@@ -36,7 +36,7 @@ from them and committed.
+ ## Commands (v0)
+ 
+ ```
+-list_files()                      -> FileList { files, disk_changes }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53
++list_files()                      -> FileList { files, disk_changes, merging }   settles disk changes, then re-reads `git ls-files -u`: marks are git's view, plan §2 #49/#53; `merging` = MERGE_HEAD and no rebase, re-read each time (#74)
+ load_file(path)                   -> FileMergeData   `middle: Stages{text} | Disk{text} | DiskNotText{found}`, chunks with their middle range, words and `waiting` (SideLines | Markers{open, between, close} | AsShown: what Save writes while a side waits, #69), `disk_version`; `deleted: Side | null` (#47)
+ finish_file(path, text, disk_version)   -> WriteReply   Written{files} | ChangedOnDisk{files, change} (old version or unseen disk change: nothing written, #53)
+ save_file(path, text, disk_version)     -> WriteReply   finish_file without `git add`: the file stays conflicted; the own write updates `seen` only, never a DiskChange, the disk version stays (#65/#69)
+@@ -44,6 +44,7 @@ reset_file(path, disk_version)    -> WriteReply   back to this run's start: capt
+ describe_file(path)               -> FileSides   what each side holds (Missing/Text/Binary/NonUtf8/TooLarge/Link/Commit), `disk_version`
+ take_side(path, side: Side, disk_version) -> WriteReply   resolve with one side (deleted side = git rm), plan §2 #36
+ side_names()                      -> SideNames { local, remote }   each SideName Branch{name} | Commit{short_id, subject, message} or null; HEAD's branch or commit, what is merged in; read once at open, #50/#62
++abort_merge()                     -> ()          `git merge --abort`; refused → Git{message}, the merge stays; done → every merge command answers MergeAborted, the window is destroyed (no close question), exit 1 `merge aborted` (#74)
+ log(entry: LogEntry)              -> ()          fire-and-forget; frontend never awaits it
+ load_settings(current: StoredSettings)          -> SettingsRead   the file in use, created from `current` when missing, never rewritten by a read, #57
+ set_theme(current, theme: Theme)                -> SettingsRead   re-reads, replaces `theme`, writes; each settings command recolours the native window
+diff --git a/crates/conflict-repo/AGENTS.md b/crates/conflict-repo/AGENTS.md
+index f866f3c..b9ec017 100644
+--- a/crates/conflict-repo/AGENTS.md
++++ b/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base; `rebase_merges_repo(files)` stops a `git rebase -r` on re-doing that merge (`MERGE_HEAD` and `REBASE_HEAD` both written). `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index ba53958..219167d 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -16,6 +16,8 @@ pub enum Error {
+     GitFailed { args: Vec<String>, stderr: String },
+     #[error("merging `remote` into `local` did not conflict")]
+     MergeDidNotConflict,
++    #[error("`git rebase -r` did not stop on the merge commit's conflict")]
++    RebaseDidNotConflict,
+     #[error("`git hash-object` started without a stdin pipe")]
+     NoStdin,
+ }
+@@ -163,6 +165,27 @@ fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir>
+     Ok(dir)
+ }
+ 
++/// A repo where `git rebase -r` stopped re-doing the merge of `remote` into `local`, with `files`
++/// conflicted: git has written both `MERGE_HEAD` and `REBASE_HEAD`.
++pub fn rebase_merges_repo(files: &[ConflictFile]) -> Result<TempDir> {
++    let dir = conflict_repo(files)?;
++    let root = dir.path();
++    commit_side(root, files, |file| file.local, "merge")?;
++    git_ok(root, &["branch", "--quiet", "merged"])?;
++    git_ok(root, &["reset", "--quiet", "--hard", "HEAD^"])?;
++    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", "onto"])?;
++    let rebase = git(
++        root,
++        &[
++            "rebase", "--quiet", "-r", "--onto", "local", "HEAD^", "merged",
++        ],
++    )?;
++    if rebase.status.success() {
++        return Err(Error::RebaseDidNotConflict);
++    }
++    Ok(dir)
++}
++
+ fn commit_side<'a>(
+     root: &Path,
+     files: &[ConflictFile<'a>],
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 31e887b..31820ab 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,6 +1,6 @@
+ //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads the merge heads,
+-//! the refs that point at them, the merge message and the merge driver config, and re-runs git's
+-//! merge of one file.
++//! the refs that point at them, the merge message and the merge driver config, re-runs git's
++//! merge of one file, and aborts the merge.
+ #![forbid(unsafe_code)]
+ 
+ mod attributes;
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 82d30bd..46a2b7e 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -14,6 +14,7 @@ const BRANCH: &str = "branch";
+ const LOG: &str = "log";
+ const HASH_OBJECT: &str = "hash-object";
+ const MERGE_MSG: &str = "MERGE_MSG";
++const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
+ const UNRESOLVED_NAME_STATUS: i32 = 1;
+ const NON_SYMBOLIC_SHORT_NAME: &str =
+     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+@@ -93,9 +94,7 @@ impl Repo {
+     }
+ 
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+-        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", MERGE_MSG]);
+-        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+-        let path = self.root.join(path_from_git(&git_path));
++        let path = self.git_path(MERGE_MSG)?;
+         match fs::read(&path) {
+             Ok(message) => Ok(Some(message)),
+             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+@@ -103,6 +102,36 @@ impl Repo {
+         }
+     }
+ 
++    /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
++    pub fn rebase_in_progress(&self) -> Result<bool> {
++        for name in REBASE_STATE_DIRS {
++            let path = self.git_path(name)?;
++            match path.try_exists() {
++                Ok(true) => return Ok(true),
++                Ok(false) => {}
++                Err(source) => return Err(Error::ReadFailed { path, source }),
++            }
++        }
++        Ok(false)
++    }
++
++    /// `git merge --abort`; git's own refusal comes back as `Error::GitFailed` with its stderr.
++    pub fn abort_merge(&self) -> Result<()> {
++        run(
++            self.command(Access::Write, &["merge", "--abort"]),
++            None,
++            GIT_TIMEOUT,
++        )?;
++        Ok(())
++    }
++
++    // git-rev-parse(1) `--git-path`: the path inside the git directory, relative to the cwd.
++    fn git_path(&self, name: &str) -> Result<PathBuf> {
++        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", name]);
++        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
++        Ok(self.root.join(path_from_git(&git_path)))
++    }
++
+     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
+         let args = [
+             LOG,
+diff --git a/crates/gitio/tests/abort.rs b/crates/gitio/tests/abort.rs
+new file mode 100644
+index 0000000..561dd01
+--- /dev/null
++++ b/crates/gitio/tests/abort.rs
+@@ -0,0 +1,139 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok, rebase_merges_repo,
++};
++use yamt_gitio::{Error, Repo};
++
++const ADDED: &str = "src/added.ts";
++const REMOVED: &str = "docs/removed.md";
++const CRLF: &str = "notes/crlf.txt";
++const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
++const UNTRACKED: &str = "scratch.txt";
++const REFUSED_STATUS: i32 = 128;
++
++fn regular<'a>(
++    path: &'a str,
++    base: Option<&'a [u8]>,
++    local: Option<&'a [u8]>,
++    remote: Option<&'a [u8]>,
++) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote,
++    }
++}
++
++fn files() -> [ConflictFile<'static>; 3] {
++    [
++        regular(ADDED, None, Some(b"local\n"), Some(b"remote\n")),
++        regular(REMOVED, Some(b"one\n"), None, Some(b"remote\n")),
++        regular(
++            CRLF,
++            Some(b"a\r\nb\r\n"),
++            Some(CRLF_AT_HEAD),
++            Some(b"a\r\nremote\r\n"),
++        ),
++    ]
++}
++
++fn merging() -> (TempDir, Repo) {
++    let dir = conflict_repo(&files()).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    (dir, repo)
++}
++
++fn output_text(root: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(root, args).unwrap()).unwrap()
++}
++
++fn index_and_worktree(root: &Path) -> (String, String) {
++    (
++        output_text(root, &["status", "--porcelain"]),
++        output_text(root, &["ls-files", "-s"]),
++    )
++}
++
++#[test]
++fn abort_merge_drops_resolutions_saves_and_merge_head_but_keeps_untracked_files() {
++    let (dir, repo) = merging();
++    let root = dir.path();
++    fs::write(root.join(ADDED), "resolved\n").unwrap();
++    git_ok(root, &["add", "--", ADDED]).unwrap();
++    git_ok(root, &["rm", "--quiet", "--", REMOVED]).unwrap();
++    fs::write(root.join(CRLF), "a\r\nsaved\r\n").unwrap();
++    fs::write(root.join(UNTRACKED), "mine\n").unwrap();
++
++    repo.abort_merge().unwrap();
++
++    assert_eq!(
++        output_text(root, &["status", "--porcelain"]),
++        format!("?? {UNTRACKED}\n")
++    );
++    assert_eq!(repo.commit_named("MERGE_HEAD").unwrap(), None);
++    assert_eq!(fs::read(root.join(CRLF)).unwrap(), CRLF_AT_HEAD);
++}
++
++#[test]
++fn abort_merge_of_a_file_staged_then_changed_is_git_s_refusal_and_touches_nothing() {
++    let (dir, repo) = merging();
++    let root = dir.path();
++    fs::write(root.join(ADDED), "resolved\n").unwrap();
++    git_ok(root, &["add", "--", ADDED]).unwrap();
++    fs::write(root.join(ADDED), "saved again\n").unwrap();
++    let before = index_and_worktree(root);
++
++    let error = repo.abort_merge().unwrap_err();
++
++    let Error::GitFailed { status, stderr, .. } = error else {
++        panic!("expected git's refusal, got {error:?}");
++    };
++    assert_eq!(status, Some(REFUSED_STATUS));
++    assert!(
++        stderr.contains(&format!(
++            "error: Entry '{ADDED}' not uptodate. Cannot merge."
++        )),
++        "{stderr}"
++    );
++    assert_eq!(index_and_worktree(root), before);
++    assert!(repo.commit_named("MERGE_HEAD").unwrap().is_some());
++}
++
++#[test]
++fn rebase_in_progress_is_false_in_a_merge() {
++    let (_dir, repo) = merging();
++    assert!(!repo.rebase_in_progress().unwrap());
++}
++
++fn stopped_rebase(backend: &str) -> TempDir {
++    let dir = diverged_repo(&files()).unwrap();
++    let rebase = git(dir.path(), &["rebase", backend, "remote"]).unwrap();
++    assert!(!rebase.status.success(), "the rebase did not stop");
++    dir
++}
++
++#[test]
++fn rebase_in_progress_is_true_in_a_stopped_rebase_of_either_backend() {
++    for backend in ["--merge", "--apply"] {
++        let dir = stopped_rebase(backend);
++
++        let repo = Repo::discover(dir.path()).unwrap();
++
++        assert!(repo.rebase_in_progress().unwrap(), "{backend}");
++    }
++}
++
++#[test]
++fn rebase_in_progress_is_true_in_a_rebase_stopped_on_a_merge_commit_with_merge_head() {
++    let dir = rebase_merges_repo(&files()).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++
++    assert!(repo.commit_named("MERGE_HEAD").unwrap().is_some());
++    assert!(repo.rebase_in_progress().unwrap());
++}
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 5df350e..db95dd8 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -10,7 +10,7 @@ use crate::disk::{
+     read_on_disk, settlement, stage, warn_unread,
+ };
+ use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+-use crate::side_names::SideNames;
++use crate::side_names::{MERGE_HEAD, SideNames};
+ use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
+ use crate::stages::CapturedStages;
+ use crate::waiting::MarkerStyle;
+@@ -29,11 +29,13 @@ pub struct FileEntry {
+     pub unsupported: Option<UnsupportedReason>,
+ }
+ 
+-/// The files as git sees them, and the disk changes settled while looking.
++/// The files as git sees them, the disk changes settled while looking, and whether a merge is in progress.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct FileList {
+     pub files: Vec<FileEntry>,
+     pub disk_changes: Vec<DiskChange>,
++    /// A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74).
++    pub merging: bool,
+ }
+ 
+ /// What a write did: written, or nothing written because the file changed on disk first.
+@@ -107,9 +109,16 @@ impl MergeSession {
+         Ok(FileList {
+             files: self.files(),
+             disk_changes,
++            merging: is_merging(&self.repo),
+         })
+     }
+ 
++    /// `git merge --abort`. The session must not be used for the merge afterwards.
++    pub fn abort_merge(&self) -> Result<()> {
++        self.repo.abort_merge()?;
++        Ok(())
++    }
++
+     pub(crate) fn refresh_statuses(&mut self) -> Result<()> {
+         let unmerged = self.repo.unmerged()?;
+         for file in &mut self.files {
+@@ -210,6 +219,24 @@ impl MergeSession {
+     }
+ }
+ 
++fn is_merging(repo: &Repo) -> bool {
++    match merge_in_progress(repo) {
++        Ok(merging) => merging,
++        Err(error) => {
++            tracing::warn!(target: LOG_TARGET, event = "merge_state_unread", %error, "no merge to abort is assumed");
++            false
++        }
++    }
++}
++
++// A `git rebase -r` stopped on a merge commit's conflict writes MERGE_HEAD too; `git merge --abort` there would leave the rebase half done.
++fn merge_in_progress(repo: &Repo) -> yamt_gitio::Result<bool> {
++    if repo.commit_named(MERGE_HEAD)?.is_none() {
++        return Ok(false);
++    }
++    Ok(!repo.rebase_in_progress()?)
++}
++
+ pub(crate) fn find_file<'a>(files: &'a mut [FileState], path: &str) -> Result<&'a mut FileState> {
+     files
+         .iter_mut()
+diff --git a/crates/session/src/side_names.rs b/crates/session/src/side_names.rs
+index c7da823..ab96159 100644
+--- a/crates/session/src/side_names.rs
++++ b/crates/session/src/side_names.rs
+@@ -7,7 +7,7 @@ use crate::session::LOG_TARGET;
+ use crate::sides::Side;
+ 
+ const HEAD: &str = "HEAD";
+-const MERGE_HEAD: &str = "MERGE_HEAD";
++pub(crate) const MERGE_HEAD: &str = "MERGE_HEAD";
+ const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
+ const QUOTE: char = '\'';
+ 
+diff --git a/crates/session/tests/merging.rs b/crates/session/tests/merging.rs
+new file mode 100644
+index 0000000..1ac450b
+--- /dev/null
++++ b/crates/session/tests/merging.rs
+@@ -0,0 +1,76 @@
++#![cfg(test)]
++
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok, rebase_merges_repo,
++};
++use yamt_session::MergeSession;
++
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "cart.ts",
++    kind: FileKind::Regular,
++    base: Some(b"one\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn merging_after_refresh(root: &Path) -> bool {
++    MergeSession::open(root).unwrap().refresh().unwrap().merging
++}
++
++fn stopped_by(args: &[&str]) -> TempDir {
++    let dir = diverged_repo(&FILES).unwrap();
++    let output = git(dir.path(), args).unwrap();
++    assert!(!output.status.success(), "{args:?} did not stop");
++    dir
++}
++
++#[test]
++fn a_merge_stopped_on_conflicts_is_merging() {
++    let dir = conflict_repo(&FILES).unwrap();
++    assert!(merging_after_refresh(dir.path()));
++}
++
++#[test]
++fn stops_that_git_merge_abort_refuses_are_not_merging() {
++    for args in [
++        ["cherry-pick", "remote"].as_slice(),
++        ["rebase", "remote"].as_slice(),
++        ["revert", "--no-edit", "remote"].as_slice(),
++        ["merge", "--squash", "remote"].as_slice(),
++    ] {
++        let dir = stopped_by(args);
++        assert!(!merging_after_refresh(dir.path()), "{args:?}");
++    }
++}
++
++#[test]
++fn a_rebase_stopped_on_a_merge_commit_has_merge_head_but_is_not_merging() {
++    let dir = rebase_merges_repo(&FILES).unwrap();
++    assert!(git_ok(dir.path(), &["rev-parse", "--verify", "MERGE_HEAD"]).is_ok());
++    assert!(!merging_after_refresh(dir.path()));
++}
++
++#[test]
++fn a_merge_aborted_outside_is_not_merging_on_the_next_refresh() {
++    let dir = conflict_repo(&FILES).unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    assert!(session.refresh().unwrap().merging);
++
++    git_ok(dir.path(), &["merge", "--abort"]).unwrap();
++
++    assert!(!session.refresh().unwrap().merging);
++}
++
++#[test]
++fn abort_merge_runs_git_merge_abort() {
++    let dir = conflict_repo(&FILES).unwrap();
++    let session = MergeSession::open(dir.path()).unwrap();
++
++    session.abort_merge().unwrap();
++
++    let status = git_ok(dir.path(), &["status", "--porcelain"]).unwrap();
++    assert_eq!(String::from_utf8(status).unwrap(), "");
++    assert!(git_ok(dir.path(), &["rev-parse", "--verify", "MERGE_HEAD"]).is_err());
++}
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 9a1d44b..6b84f3e 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -331,22 +331,26 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
+ 
+ ### 3.5 `src-tauri`
+ 
+-- `tauri::State<Mutex<MergeSession>>` and `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never
+-  locked together.
++- `tauri::State<Mutex<Merge>>` (`merge.rs`: `Merge = Held(MergeSession) | Aborted`, plan §2 #74) and
++  `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. After a successful
++  `abort_merge` the app holds no merge: `Merge::session()` answers `MergeAborted` for every merge command.
+ - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
+   (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
+-  §2 #49/#53), `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
++  §2 #49/#53; `merging`: `MERGE_HEAD` names a commit and no rebase is stopped, re-read each time, #74),
++  `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
+   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
+   `finish_file(path, text, disk_version) -> WriteReply`, `save_file(path, text, disk_version) -> WriteReply`
+   (`finish_file` without `git add`: the own write updates `seen` only, the disk version stays, plan §2 #65/#69),
+   `reset_file(path, disk_version) -> WriteReply` (back to this run's start: the stages captured at open and the
+   bytes found at open, `FileState.at_open`, #66/#69),
+   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
+-  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> SideNames`
++  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> Result<SideNames>`
+   (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
+-  open, each side on its own, #50/#62), `log(entry)`. No `quit_if_done`:
+-  the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
+-  so it settles disk changes and uses git's view (#49).
++  open, each side on its own, #50/#62), `abort_merge() -> Result<()>` (`git merge --abort`; git's refusal is `Git`
++  with its message and the merge stays held; on success the merge becomes `Aborted` and the calling window is
++  destroyed, which emits no close request, so the page's unsaved-work question never runs, #74), `log(entry)`. No
++  `quit_if_done`: the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
++  so it settles disk changes and uses git's view (#49); after an abort it is 1 with `merge aborted`, nothing re-read.
+ - Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
+   (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
+   `load_settings(current)`, `set_theme(current, theme)`, `set_antialiasing(current, antialiasing)`,
+@@ -475,7 +479,8 @@ export interface ChunkSource {
+   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
+   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
+-  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null
++  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null; an error reply rejects
++  abortMerge(): Promise<SourceResult<null>>; // git merge --abort (#74); the app then ends; fixture: logs, answers null
+   // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
+   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index f1a862a..a071c70 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -31,6 +31,7 @@ export interface ChunkSource {
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   sideNames(): Promise<SideNames>;
++  abortMerge(): Promise<SourceResult<null>>;
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+   setAntialiasing(
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 3a238e9..613d5fd 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -85,6 +85,7 @@ export type SettingsRead = {
+ export type FileList = {
+   readonly files: readonly FileEntry[];
+   readonly diskChanges: readonly DiskChange[];
++  readonly merging: boolean;
+ };
+ 
+ export type FileMergeData = {
+@@ -209,7 +210,7 @@ export function toSides(dto: Generated.FileSides): FileSides {
+ }
+ 
+ export function toFileList(dto: Generated.FileList): FileList {
+-  return { files: dto.files, diskChanges: dto.disk_changes };
++  return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
+ }
+ 
+ export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index 4078c42..23cca69 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -576,6 +576,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
+   expect(valueOf(await source.listFiles())).toEqual({
+     files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
+     diskChanges: [],
++    merging: true,
+   });
+   expect(entries).toEqual([]);
+ });
+@@ -614,11 +615,25 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+     ok: true,
+     value: { kind: "Written", files: unresolved },
+   });
+-  expect(valueOf(await source.listFiles())).toEqual({ files: unresolved, diskChanges: [] });
++  expect(valueOf(await source.listFiles())).toEqual({
++    files: unresolved,
++    diskChanges: [],
++    merging: true,
++  });
+   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
+   expect(entries).toHaveLength(1);
+ });
+ 
++test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureSource(log, { "a.json": record("a.ts") });
++
++  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
++
++  expect(entries).toEqual([{ level: "info", event: "fixture.abort_merge", fields: {} }]);
++  expect(valueOf(await source.listFiles()).merging).toBe(true);
++});
++
+ test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index b2d6104..1057335 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -238,7 +238,7 @@ export function createFixtureSource(
+ 
+   return {
+     async listFiles() {
+-      return { ok: true, value: { files: entries(records), diskChanges: [] } };
++      return { ok: true, value: { files: entries(records), diskChanges: [], merging: true } };
+     },
+     async loadFile(path) {
+       const data = records.fixtures.get(path);
+@@ -250,6 +250,10 @@ export function createFixtureSource(
+     async sideNames() {
+       return { local: null, remote: null };
+     },
++    async abortMerge() {
++      log.info("fixture.abort_merge", {});
++      return { ok: true, value: null };
++    },
+     ...fixtureWrites(log, records),
+     ...createFixtureSettings(),
+   };
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 04a888a..aebcd6e 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -13,6 +13,7 @@ const commands = vi.hoisted(() => ({
+   describeFile: vi.fn(),
+   takeSide: vi.fn(),
+   sideNames: vi.fn(),
++  abortMerge: vi.fn(),
+   log: vi.fn(),
+   loadSettings: vi.fn(),
+   setTheme: vi.fn(),
+@@ -99,18 +100,26 @@ beforeEach(() => {
+   vi.resetAllMocks();
+ });
+ 
+-test("listFiles returns the app's entries and disk changes, and its failure unchanged", async () => {
++test("listFiles returns the app's entries, disk changes and merge state, and its failure unchanged", async () => {
+   const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
+   commands.listFiles.mockResolvedValueOnce({
+     status: "ok",
+-    data: { files: ENTRIES, disk_changes: [CHANGE] },
++    data: { files: ENTRIES, disk_changes: [CHANGE], merging: true },
++  });
++  commands.listFiles.mockResolvedValueOnce({
++    status: "ok",
++    data: { files: ENTRIES, disk_changes: [], merging: false },
+   });
+   commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
+   const source = createTauriSource();
+ 
+   expect(await source.listFiles()).toEqual({
+     ok: true,
+-    value: { files: ENTRIES, diskChanges: [CHANGE] },
++    value: { files: ENTRIES, diskChanges: [CHANGE], merging: true },
++  });
++  expect(await source.listFiles()).toEqual({
++    ok: true,
++    value: { files: ENTRIES, diskChanges: [], merging: false },
+   });
+   expect(await source.listFiles()).toEqual({ ok: false, failure: git });
+ });
+@@ -123,6 +132,29 @@ test("a string error from listFiles rejects the call with that message", async (
+   );
+ });
+ 
++test("abortMerge answers null, and git's refusal or a later abort as the failure unchanged", async () => {
++  const refused: Generated.IpcError = { kind: "Git", message: "Entry 'a.ts' not uptodate" };
++  const aborted: Generated.IpcError = { kind: "MergeAborted" };
++  commands.abortMerge.mockResolvedValueOnce({ status: "ok", data: null });
++  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: refused });
++  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: aborted });
++  const source = createTauriSource();
++
++  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
++  expect(await source.abortMerge()).toEqual({ ok: false, failure: refused });
++  expect(await source.abortMerge()).toEqual({ ok: false, failure: aborted });
++});
++
++test("sideNames returns the app's names and rejects a failure naming its kind", async () => {
++  const names: Generated.SideNames = { local: { kind: "Branch", name: "main" }, remote: null };
++  commands.sideNames.mockResolvedValueOnce({ status: "ok", data: names });
++  commands.sideNames.mockResolvedValueOnce({ status: "error", error: { kind: "MergeAborted" } });
++  const source = createTauriSource();
++
++  expect(await source.sideNames()).toEqual(names);
++  await expect(source.sideNames()).rejects.toThrow(new Error("side_names failed: MergeAborted"));
++});
++
+ test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
+   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index ad532c8..99c7fa3 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -96,8 +96,15 @@ export function createTauriSource(): ChunkSource {
+     async takeSide(path, side, diskVersion) {
+       return toResult(await commands.takeSide(path, side, diskVersion));
+     },
+-    sideNames() {
+-      return commands.sideNames();
++    async sideNames() {
++      const result = toResult(await commands.sideNames());
++      if (!result.ok) {
++        throw new Error(`side_names failed: ${result.failure.kind}`);
++      }
++      return result.value;
++    },
++    async abortMerge() {
++      return toResult(await commands.abortMerge());
+     },
+     ...createTauriSettings(),
+   };
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index b015623..85431e5 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -152,6 +152,12 @@ test("the other settings failures say the settings file could not be used and wh
+   ).toBe(`Could not use the settings file: writing ${SETTINGS} failed: Read-only file system`);
+ });
+ 
++test("an action after an abort says the merge was aborted", () => {
++  expect(text({ action: "save", path: PATH, cause: { kind: "MergeAborted" } })).toBe(
++    `Could not save ${PATH}: the merge was aborted.`,
++  );
++});
++
+ test("key problems name the action, the key and what yamt does instead", () => {
+   const said = problemText(
+     {
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 9a3a9eb..580edf6 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -98,6 +98,8 @@ export function problemText(problem: Problem, platform: string): string {
+       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
+     case "NoConfigFolder":
+       return `${attempted(problem)}: this system has no config folder to keep it in.`;
++    case "MergeAborted":
++      return `${attempted(problem)}: the merge was aborted.`;
+     case "Keys":
+       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
+     case "Unexpected":
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 3ecc197..a60e664 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -112,6 +112,7 @@ function writeTarget(
+     describeFile: notUsed,
+     takeSide: notUsed,
+     sideNames: notUsed,
++    abortMerge: notUsed,
+     loadSettings: notUsed,
+     setTheme: notUsed,
+     setAntialiasing: notUsed,
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 56feac6..6297644 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -89,7 +89,7 @@ function listing(
+   files: readonly FileEntry[],
+   diskChanges: readonly DiskChange[] = [],
+ ): SourceResult<FileList> {
+-  return ok({ files, diskChanges });
++  return ok({ files, diskChanges, merging: true });
+ }
+ 
+ function written(files: FileEntry[]): SourceResult<WriteReply> {
+@@ -130,6 +130,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     describeFile: () => Promise.reject(new Error("not used")),
+     takeSide: () => Promise.reject(new Error("not used")),
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
++    abortMerge: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+   };
+   return { source, pending };
+@@ -1073,6 +1074,7 @@ function choiceSource(
+       return Promise.resolve(written(taken));
+     },
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
++    abortMerge: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+     ...overrides,
+   };
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 4d3e70f..4c4bb5e 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session`; `with_session` manages `Mutex<MergeSession>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the settings commands; `set_server_answer` keys the answer by the host's root), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict repository opened in a mock-runtime window, `invoke` a command by name; used by the command tests in `commands.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; after an abort the close ending is 1 with `merge aborted`, reading and writing nothing), `merge.rs` (`Merge` = `Held(MergeSession)` | `Aborted`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `IpcError::MergeAborted` once aborted, `abort()` runs `git merge --abort` and becomes `Aborted` only on success, plan §2 #74), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`; `abort_merge` destroys the window after a successful abort, which ends the event loop without a close request, so the page asks nothing; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the settings commands; `set_server_answer` keys the answer by the host's root), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error`, plus `MergeAborted`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict repository opened in a mock-runtime window, `invoke` a command by name; used by the command tests in `commands.rs`, `merge.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 8cdab90..7e0f015 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -1,16 +1,15 @@
+-use std::sync::{Mutex, MutexGuard, PoisonError};
++use std::sync::Mutex;
+ 
+-use tauri::{Manager, Runtime, State};
++use tauri::{Manager, Runtime, State, WebviewWindow};
+ use yamt_session::{
+     DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
+ };
+ 
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
++use crate::merge::{Merge, MergeState, lock};
+ use crate::{servers, settings};
+ 
+-pub(crate) type SessionState = Mutex<MergeSession>;
+-
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+         list_files,
+@@ -21,6 +20,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         describe_file,
+         take_side,
+         side_names,
++        abort_merge::<tauri::Wry>,
+         log,
+         settings::load_settings::<tauri::Wry>,
+         settings::set_theme::<tauri::Wry>,
+@@ -43,7 +43,7 @@ pub(crate) fn with_session<R: Runtime>(
+     session: MergeSession,
+ ) -> tauri::Builder<R> {
+     servers::manage(builder, session.root())
+-        .manage(Mutex::new(session))
++        .manage(Mutex::new(Merge::Held(session)))
+         .invoke_handler(specta_builder().invoke_handler())
+         // A reloaded page's channels still take events (tauri 2.12 ipc/channel.rs:409-449 fails a
+         // send only when `eval` fails), so its runs would never stop themselves.
+@@ -52,83 +52,98 @@ pub(crate) fn with_session<R: Runtime>(
+         })
+ }
+ 
+-pub(crate) fn lock(state: &SessionState) -> MutexGuard<'_, MergeSession> {
+-    state.lock().unwrap_or_else(PoisonError::into_inner)
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++fn list_files(state: State<'_, MergeState>) -> Result<FileList, IpcError> {
++    Ok(lock(&state).session()?.refresh()?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn list_files(state: State<'_, SessionState>) -> Result<FileList, IpcError> {
+-    Ok(lock(&state).refresh()?)
++fn side_names(state: State<'_, MergeState>) -> Result<SideNames, IpcError> {
++    Ok(lock(&state).session()?.side_names().clone())
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn side_names(state: State<'_, SessionState>) -> SideNames {
+-    lock(&state).side_names().clone()
+-}
+-
+-#[tauri::command]
+-#[specta::specta]
+-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn load_file(state: State<'_, SessionState>, path: &str) -> Result<FileMergeData, IpcError> {
+-    Ok(lock(&state).load(path)?)
++fn load_file(state: State<'_, MergeState>, path: &str) -> Result<FileMergeData, IpcError> {
++    Ok(lock(&state).session()?.load(path)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn finish_file(
+-    state: State<'_, SessionState>,
++    state: State<'_, MergeState>,
+     path: &str,
+     text: &str,
+     disk_version: DiskVersion,
+ ) -> Result<WriteReply, IpcError> {
+-    Ok(lock(&state).finish(path, text, disk_version)?)
++    Ok(lock(&state).session()?.finish(path, text, disk_version)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn save_file(
+-    state: State<'_, SessionState>,
++    state: State<'_, MergeState>,
+     path: &str,
+     text: &str,
+     disk_version: DiskVersion,
+ ) -> Result<WriteReply, IpcError> {
+-    Ok(lock(&state).save(path, text, disk_version)?)
++    Ok(lock(&state).session()?.save(path, text, disk_version)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn reset_file(
+-    state: State<'_, SessionState>,
++    state: State<'_, MergeState>,
+     path: &str,
+     disk_version: DiskVersion,
+ ) -> Result<WriteReply, IpcError> {
+-    Ok(lock(&state).reset(path, disk_version)?)
++    Ok(lock(&state).session()?.reset(path, disk_version)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn describe_file(state: State<'_, SessionState>, path: &str) -> Result<FileSides, IpcError> {
+-    Ok(lock(&state).describe(path)?)
++fn describe_file(state: State<'_, MergeState>, path: &str) -> Result<FileSides, IpcError> {
++    Ok(lock(&state).session()?.describe(path)?)
+ }
+ 
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+ fn take_side(
+-    state: State<'_, SessionState>,
++    state: State<'_, MergeState>,
+     path: &str,
+     side: Side,
+     disk_version: DiskVersion,
+ ) -> Result<WriteReply, IpcError> {
+-    Ok(lock(&state).take(path, side, disk_version)?)
++    Ok(lock(&state).session()?.take(path, side, disk_version)?)
++}
++
++// tauri 2.12 `WebviewWindow::destroy` "does not emit any events": no `CloseRequested`, so the page's
++// unsaved-work question does not run; the last window gone ends `run_return`.
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++fn abort_merge<R: Runtime>(
++    window: WebviewWindow<R>,
++    state: State<'_, MergeState>,
++) -> Result<(), IpcError> {
++    lock(&state).abort()?;
++    if let Err(error) = window.destroy() {
++        tracing::warn!(%error, "the merge is aborted but the window stays: closing it ends yamt");
++    }
++    Ok(())
+ }
+ 
+ #[tauri::command]
+@@ -152,7 +167,7 @@ mod tests {
+ 
+     impl Window {
+         fn exit_on_close(&self) -> Exit {
+-            ending_on_close(&mut lock(&self.app.state::<SessionState>())).exit
++            ending_on_close(&mut lock(&self.app.state::<MergeState>())).exit
+         }
+ 
+         fn unmerged(&self) -> String {
+@@ -178,7 +193,8 @@ mod tests {
+     fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
+         let window = open_window();
+         let unresolved = "Unresolved";
+-        let listed = |statuses| json!({ "files": entries(statuses), "disk_changes": [] });
++        let listed =
++            |statuses| json!({ "files": entries(statuses), "disk_changes": [], "merging": true });
+         assert_eq!(
+             window.invoke("list_files", json!({})),
+             Ok(listed([unresolved, unresolved, unresolved]))
+@@ -203,7 +219,7 @@ mod tests {
+ 
+         assert_eq!(
+             listed,
+-            Ok(json!({ "files": after, "disk_changes": [staged] }))
++            Ok(json!({ "files": after, "disk_changes": [staged], "merging": true }))
+         );
+         let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
+         assert_eq!(finished, Ok(changed));
+@@ -286,7 +302,7 @@ mod tests {
+             text.as_bytes()
+         );
+         assert_eq!(window.unmerged(), unmerged_before);
+-        let listed = json!({ "files": entries(unresolved), "disk_changes": [] });
++        let listed = json!({ "files": entries(unresolved), "disk_changes": [], "merging": true });
+         assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
+     }
+ 
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index 25c8444..3aae496 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -32,6 +32,7 @@ pub enum IpcError {
+         path: String,
+     },
+     NoConfigFolder,
++    MergeAborted,
+ }
+ 
+ impl From<yamt_session::Error> for IpcError {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 8d824c1..abbd258 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -10,6 +10,7 @@ mod frontend_log;
+ #[cfg(target_os = "linux")]
+ mod graphics;
+ mod ipc_error;
++mod merge;
+ #[cfg(test)]
+ mod mock_window;
+ mod outcome;
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+new file mode 100644
+index 0000000..a231240
+--- /dev/null
++++ b/src-tauri/src/merge.rs
+@@ -0,0 +1,145 @@
++use std::sync::{Mutex, MutexGuard, PoisonError};
++
++use yamt_session::MergeSession;
++
++use crate::ipc_error::IpcError;
++
++/// The merge this run works on: held from the start until `git merge --abort` succeeds (plan §2 #74).
++#[expect(
++    clippy::large_enum_variant,
++    reason = "one value per run, built once and kept in the app's state"
++)]
++pub(crate) enum Merge {
++    Held(MergeSession),
++    Aborted,
++}
++
++pub(crate) type MergeState = Mutex<Merge>;
++
++pub(crate) fn lock(state: &MergeState) -> MutexGuard<'_, Merge> {
++    state.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++impl Merge {
++    pub(crate) fn session(&mut self) -> Result<&mut MergeSession, IpcError> {
++        match self {
++            Merge::Held(session) => Ok(session),
++            Merge::Aborted => Err(IpcError::MergeAborted),
++        }
++    }
++
++    pub(crate) fn abort(&mut self) -> Result<(), IpcError> {
++        self.session()?.abort_merge()?;
++        *self = Merge::Aborted;
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::fs;
++
++    use serde_json::{Value, json};
++    use tauri::Manager;
++    use yamt_conflict_repo::git_ok;
++
++    use super::*;
++    use crate::mock_window::{CRLF_PATH, Window, open_window};
++    use crate::outcome::{Ending, Exit, ending_on_close};
++
++    const ADDED: &str = "added.ts";
++    const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
++
++    impl Window {
++        fn ending(&self) -> Ending {
++            ending_on_close(&mut lock(&self.app.state::<MergeState>()))
++        }
++
++        fn git_text(&self, args: &[&str]) -> String {
++            String::from_utf8(git_ok(self.repo.path(), args).unwrap()).unwrap()
++        }
++    }
++
++    fn merge_aborted() -> Result<Value, Value> {
++        Err(json!({ "kind": "MergeAborted" }))
++    }
++
++    fn merge_commands() -> [(&'static str, Value); 9] {
++        let path = json!({ "path": CRLF_PATH });
++        let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
++        [
++            ("list_files", json!({})),
++            ("load_file", path.clone()),
++            ("describe_file", path),
++            ("finish_file", write.clone()),
++            ("save_file", write),
++            ("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 })),
++            (
++                "take_side",
++                json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
++            ),
++            ("side_names", json!({})),
++            ("abort_merge", json!({})),
++        ]
++    }
++
++    #[test]
++    fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
++        let window = open_window();
++
++        assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
++
++        for (command, args) in merge_commands() {
++            assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
++        }
++        assert_eq!(window.git_text(&["status", "--porcelain"]), "");
++        assert_eq!(
++            fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
++            CRLF_AT_HEAD
++        );
++        assert!(window.invoke("servers_context", json!({})).is_ok());
++    }
++
++    #[test]
++    fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
++        let window = open_window();
++        window.invoke("abort_merge", json!({})).unwrap();
++        fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
++        let index_before = window.git_text(&["ls-files", "-s"]);
++
++        let ending = window.ending();
++
++        let aborted = Ending {
++            exit: Exit::Unresolved,
++            message: Some("merge aborted".to_owned()),
++        };
++        assert_eq!(ending, aborted);
++        assert_eq!(window.git_text(&["ls-files", "-s"]), index_before);
++    }
++
++    #[test]
++    fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
++        let window = open_window();
++        let added = window.repo.path().join(ADDED);
++        fs::write(&added, "resolved\n").unwrap();
++        git_ok(window.repo.path(), &["add", "--", ADDED]).unwrap();
++        fs::write(&added, "saved again\n").unwrap();
++        let status_before = window.git_text(&["status", "--porcelain"]);
++
++        let refused = window.invoke("abort_merge", json!({})).unwrap_err();
++
++        assert_eq!(refused["kind"], "Git", "{refused}");
++        let message = refused["message"].as_str().unwrap();
++        assert!(
++            message.contains("error: Entry 'added.ts' not uptodate. Cannot merge."),
++            "{message}"
++        );
++        assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
++        let listed = window.invoke("list_files", json!({})).unwrap();
++        assert_eq!(listed["merging"], true, "{listed}");
++        assert_eq!(
++            window.ending().message.as_deref(),
++            Some("2 of 3 files still unresolved")
++        );
++    }
++}
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index ee37439..33f8561 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -3,6 +3,10 @@ use std::process::ExitCode;
+ 
+ use yamt_session::MergeSession;
+ 
++use crate::merge::Merge;
++
++const MERGE_ABORTED: &str = "merge aborted";
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub(crate) enum Exit {
+     Success = 0,
+@@ -48,7 +52,17 @@ pub(crate) fn startup(repo: &Path) -> Startup {
+     }
+ }
+ 
+-pub(crate) fn ending_on_close(session: &mut MergeSession) -> Ending {
++pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
++    match merge {
++        Merge::Held(session) => held_merge_ending(session),
++        Merge::Aborted => Ending {
++            exit: Exit::Unresolved,
++            message: Some(MERGE_ABORTED.to_owned()),
++        },
++    }
++}
++
++fn held_merge_ending(session: &mut MergeSession) -> Ending {
+     if let Err(error) = session.refresh() {
+         tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+     }
+@@ -147,7 +161,7 @@ mod tests {
+         let repo = conflict_repo(&[text_conflict("a.ts"), text_conflict("b.ts")]).unwrap();
+         let mut session = MergeSession::open(repo.path()).unwrap();
+         assert_eq!(
+-            ending_on_close(&mut session),
++            held_merge_ending(&mut session),
+             Ending {
+                 exit: Exit::Unresolved,
+                 message: Some("2 of 2 files still unresolved".to_owned()),
+@@ -155,12 +169,12 @@ mod tests {
+         );
+         session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
+         assert_eq!(
+-            ending_on_close(&mut session).message.as_deref(),
++            held_merge_ending(&mut session).message.as_deref(),
+             Some("1 of 2 files still unresolved")
+         );
+         session.finish("b.ts", "done\n", DiskVersion(0)).unwrap();
+         assert_eq!(
+-            ending_on_close(&mut session),
++            held_merge_ending(&mut session),
+             Ending {
+                 exit: Exit::Success,
+                 message: None,
+@@ -175,16 +189,16 @@ mod tests {
+         let mut session = MergeSession::open(repo.path()).unwrap();
+         git_ok(repo.path(), &["add", "a.ts"]).unwrap();
+         assert_eq!(
+-            ending_on_close(&mut session),
++            held_merge_ending(&mut session),
+             Ending {
+                 exit: Exit::Unresolved,
+                 message: Some("1 of 2 files still unresolved".to_owned()),
+             }
+         );
+         git_ok(repo.path(), &["add", "b.ts"]).unwrap();
+-        assert_eq!(ending_on_close(&mut session).exit, Exit::Success);
++        assert_eq!(held_merge_ending(&mut session).exit, Exit::Success);
+         git_ok(repo.path(), &["checkout", "-m", "b.ts"]).unwrap();
+-        assert_eq!(ending_on_close(&mut session).exit, Exit::Unresolved);
++        assert_eq!(held_merge_ending(&mut session).exit, Exit::Unresolved);
+     }
+ 
+     #[test]
+@@ -195,7 +209,7 @@ mod tests {
+         let with_markers = "<<<<<<< ours\nlocal\n=======\nremote, edited\n>>>>>>> theirs\n";
+         std::fs::write(repo.path().join("b.ts"), with_markers).unwrap();
+ 
+-        let ending = ending_on_close(&mut session);
++        let ending = held_merge_ending(&mut session);
+ 
+         assert_eq!(
+             ending.message.as_deref(),
+@@ -216,7 +230,7 @@ mod tests {
+         session.finish("a.ts", "done\n", DiskVersion(0)).unwrap();
+         std::fs::write(repo.path().join(".git/index"), "not an index").unwrap();
+ 
+-        let (ending, logged) = logged(|| ending_on_close(&mut session));
++        let (ending, logged) = logged(|| held_merge_ending(&mut session));
+ 
+         assert_eq!(
+             ending.message.as_deref(),
+diff --git a/src-tauri/src/servers.rs b/src-tauri/src/servers.rs
+index 2e65096..a51b2bb 100644
+--- a/src-tauri/src/servers.rs
++++ b/src-tauri/src/servers.rs
+@@ -108,11 +108,13 @@ mod tests {
+     use serde_json::json;
+     use tauri::Manager;
+ 
+-    use crate::commands::{SessionState, lock as lock_session};
++    use crate::merge::{MergeState, lock as lock_merge};
+     use crate::mock_window::{Window, open_window};
+ 
+     fn session_root(window: &Window) -> std::path::PathBuf {
+-        lock_session(&window.app.state::<SessionState>())
++        lock_merge(&window.app.state::<MergeState>())
++            .session()
++            .unwrap()
+             .root()
+             .to_owned()
+     }
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index ded4c18..75b64a6 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -11,7 +11,8 @@ use tauri::{
+ use yamt_session::MergeSession;
+ use yamt_settings::{StoredSettings, Theme};
+ 
+-use crate::commands::{SessionState, lock, with_session};
++use crate::commands::with_session;
++use crate::merge::{MergeState, lock};
+ use crate::outcome::{Ending, ending_on_close};
+ use crate::servers::{self, HostState};
+ use crate::settings;
+@@ -55,7 +56,7 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     let mut close_watch = CloseWatch::new();
+     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+     servers::lock(&handle.state::<HostState>()).stop_all();
+-    Ok(ending_on_close(&mut lock(&handle.state::<SessionState>())))
++    Ok(ending_on_close(&mut lock(&handle.state::<MergeState>())))
+ }
+ 
+ fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {

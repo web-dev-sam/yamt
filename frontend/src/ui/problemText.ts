@@ -22,6 +22,8 @@ function attempted(problem: Problem): string {
       return `Could not reset ${problem.path}`;
     case "settings":
       return "Could not use the settings file";
+    case "abort":
+      return "Could not abort the merge";
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -98,6 +100,8 @@ export function problemText(problem: Problem, platform: string): string {
       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
     case "NoConfigFolder":
       return `${attempted(problem)}: this system has no config folder to keep it in.`;
+    case "MergeAborted":
+      return `${attempted(problem)}: the merge was aborted.`;
     case "Keys":
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "Unexpected":

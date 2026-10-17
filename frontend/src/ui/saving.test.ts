@@ -112,6 +112,7 @@ function writeTarget(
     describeFile: notUsed,
     takeSide: notUsed,
     sideNames: notUsed,
+    abortMerge: notUsed,
     loadSettings: notUsed,
     setTheme: notUsed,
     setAntialiasing: notUsed,

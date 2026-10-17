@@ -13,6 +13,7 @@ const commands = vi.hoisted(() => ({
   describeFile: vi.fn(),
   takeSide: vi.fn(),
   sideNames: vi.fn(),
+  abortMerge: vi.fn(),
   log: vi.fn(),
   loadSettings: vi.fn(),
   setTheme: vi.fn(),
@@ -99,18 +100,26 @@ beforeEach(() => {
   vi.resetAllMocks();
 });
 
-test("listFiles returns the app's entries and disk changes, and its failure unchanged", async () => {
+test("listFiles returns the app's entries, disk changes and merge state, and its failure unchanged", async () => {
   const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
   commands.listFiles.mockResolvedValueOnce({
     status: "ok",
-    data: { files: ENTRIES, disk_changes: [CHANGE] },
+    data: { files: ENTRIES, disk_changes: [CHANGE], merging: true },
+  });
+  commands.listFiles.mockResolvedValueOnce({
+    status: "ok",
+    data: { files: ENTRIES, disk_changes: [], merging: false },
   });
   commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
   const source = createTauriSource();
 
   expect(await source.listFiles()).toEqual({
     ok: true,
-    value: { files: ENTRIES, diskChanges: [CHANGE] },
+    value: { files: ENTRIES, diskChanges: [CHANGE], merging: true },
+  });
+  expect(await source.listFiles()).toEqual({
+    ok: true,
+    value: { files: ENTRIES, diskChanges: [], merging: false },
   });
   expect(await source.listFiles()).toEqual({ ok: false, failure: git });
 });
@@ -121,6 +130,29 @@ test("a string error from listFiles rejects the call with that message", async (
   await expect(createTauriSource().listFiles()).rejects.toThrow(
     new Error("list_files not allowed"),
   );
+});
+
+test("abortMerge answers null, and git's refusal or a later abort as the failure unchanged", async () => {
+  const refused: Generated.IpcError = { kind: "Git", message: "Entry 'a.ts' not uptodate" };
+  const aborted: Generated.IpcError = { kind: "MergeAborted" };
+  commands.abortMerge.mockResolvedValueOnce({ status: "ok", data: null });
+  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: refused });
+  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: aborted });
+  const source = createTauriSource();
+
+  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
+  expect(await source.abortMerge()).toEqual({ ok: false, failure: refused });
+  expect(await source.abortMerge()).toEqual({ ok: false, failure: aborted });
+});
+
+test("sideNames returns the app's names and rejects a failure naming its kind", async () => {
+  const names: Generated.SideNames = { local: { kind: "Branch", name: "main" }, remote: null };
+  commands.sideNames.mockResolvedValueOnce({ status: "ok", data: names });
+  commands.sideNames.mockResolvedValueOnce({ status: "error", error: { kind: "MergeAborted" } });
+  const source = createTauriSource();
+
+  expect(await source.sideNames()).toEqual(names);
+  await expect(source.sideNames()).rejects.toThrow(new Error("side_names failed: MergeAborted"));
 });
 
 test("loadFile turns the app's data into domain data: the middle range, not base", async () => {

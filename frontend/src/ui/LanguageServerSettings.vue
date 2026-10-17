@@ -66,11 +66,17 @@ async function add(): Promise<void> {
     <section v-if="serverRoot !== null" aria-labelledby="servers-found">
       <h4 id="servers-found" class="mb-1 text-fg-muted">Found in this repository</h4>
       <ul v-if="foundServers.length > 0" class="flex flex-col">
-        <li v-for="spec in foundServers" :key="spec.name" class="flex gap-3 px-2 py-1">
-          <span class="w-40 shrink-0 truncate">{{ spec.name }}</span>
-          <span class="w-32 shrink-0 truncate text-fg-muted">{{ projectLabel(spec.project) }}</span>
+        <li
+          v-for="spec in foundServers"
+          :key="spec.name"
+          class="flex flex-wrap gap-x-3 gap-y-1 px-2 py-1"
+        >
+          <span class="w-40 shrink-0 wrap-break-word">{{ spec.name }}</span>
+          <span class="w-32 shrink-0 wrap-break-word text-fg-muted">{{
+            projectLabel(spec.project)
+          }}</span>
           <span
-            class="min-w-0 flex-1 truncate"
+            class="min-w-0 flex-1 basis-48 wrap-break-word"
             :class="spec.install === null ? 'font-mono' : 'text-fg-muted'"
           >
             {{ commandOf(spec) }}
@@ -85,18 +91,22 @@ async function add(): Promise<void> {
         <li
           v-for="(server, index) in added"
           :key="index"
-          class="flex items-center gap-3 rounded px-2 py-1 hover:bg-row-hover"
+          class="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded px-2 py-1 hover:bg-row-hover"
         >
-          <span class="min-w-0 flex-1 truncate font-mono">{{ server.command }}</span>
-          <span class="shrink-0 text-fg-muted">{{ server.fileTypes }}</span>
-          <button
-            type="button"
-            class="shrink-0 rounded border border-control-border px-2.5 py-0.5 hover:bg-hover"
-            :aria-label="`Remove ${server.command}`"
-            @click="removeServer(index)"
-          >
-            Remove
-          </button>
+          <span class="min-w-0 font-mono wrap-break-word">{{ server.command }}</span>
+          <span class="flex min-w-0 flex-1 basis-56 items-baseline gap-3">
+            <span class="min-w-0 flex-1 text-right wrap-break-word text-fg-muted">{{
+              server.fileTypes
+            }}</span>
+            <button
+              type="button"
+              class="shrink-0 rounded border border-control-border px-2.5 py-0.5 hover:bg-hover"
+              :aria-label="`Remove ${server.command}`"
+              @click="removeServer(index)"
+            >
+              Remove
+            </button>
+          </span>
         </li>
       </ul>
       <form class="flex items-end gap-2" @submit.prevent="add">

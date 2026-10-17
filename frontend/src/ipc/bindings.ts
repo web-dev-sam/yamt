@@ -11,7 +11,8 @@ export const commands = {
 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
-	sideNames: () => __TAURI_INVOKE<SideNames>("side_names"),
+	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
+	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
@@ -99,10 +100,12 @@ export type FileEntry = {
 	unsupported: UnsupportedReason | null,
 };
 
-/**  The files as git sees them, and the disk changes settled while looking. */
+/**  The files as git sees them, the disk changes settled while looking, and whether a merge is in progress. */
 export type FileList = {
 	files: FileEntry[],
 	disk_changes: DiskChange[],
+	/**  A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74). */
+	merging: boolean,
 };
 
 export type FileMergeData = {
@@ -153,7 +156,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);

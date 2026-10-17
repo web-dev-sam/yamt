@@ -141,4 +141,10 @@
     overflow: hidden;
     font-size: 13px;
   }
+
+  /* WebKitGTK 2.54 paints `outline-style: auto` in the system accent and ignores outline-color. */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
 }

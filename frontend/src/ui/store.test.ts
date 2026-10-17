@@ -25,6 +25,7 @@ import {
 import { LanguageServers } from "../lsp";
 import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
+import { problemText } from "./problemText";
 import { formatNote } from "./serverText";
 import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
 import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
@@ -89,7 +90,7 @@ function listing(
   files: readonly FileEntry[],
   diskChanges: readonly DiskChange[] = [],
 ): SourceResult<FileList> {
-  return ok({ files, diskChanges });
+  return ok({ files, diskChanges, merging: true });
 }
 
 function written(files: FileEntry[]): SourceResult<WriteReply> {
@@ -130,6 +131,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
     sideNames: () => Promise.resolve({ local: null, remote: null }),
+    abortMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
   };
   return { source, pending };
@@ -1073,6 +1075,7 @@ function choiceSource(
       return Promise.resolve(written(taken));
     },
     sideNames: () => Promise.resolve({ local: null, remote: null }),
+    abortMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
     ...overrides,
   };
@@ -2529,4 +2532,141 @@ test("the format note: shown after a Save for the four refusals, hidden for the 
 
     expect(formatNote(store.formatOutcomes.value.get("a.ts"))).toBe(note);
   }
+});
+
+function abortingStore(abortMerge: ChunkSource["abortMerge"]): {
+  store: AppStore;
+  pending: PendingLoad[];
+} {
+  const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
+  return { store: createAppStore({ ...source, abortMerge }), pending };
+}
+
+async function pressUnasked(store: AppStore): Promise<void> {
+  const pressed = store.abortMerge();
+  expect(store.question.value).toBeNull();
+  store.dismissQuestion();
+  await pressed;
+}
+
+test("Abort merge calls git only after a yes; No and Escape change nothing", async () => {
+  spyConsole();
+  let aborts = 0;
+  const { store } = abortingStore(() => {
+    aborts += 1;
+    return Promise.resolve(ok(null));
+  });
+  await store.refreshFiles();
+
+  const declined = store.abortMerge();
+  expect(store.question.value).toEqual({ kind: "abort" });
+  store.answer(false);
+  await declined;
+  const escaped = store.abortMerge();
+  expect(store.question.value).toEqual({ kind: "abort" });
+  store.dismissQuestion();
+  await escaped;
+
+  expect(aborts).toBe(0);
+  expect(store.abortState.value).toBe("ready");
+  expect(store.problem.value).toBeNull();
+
+  const confirmed = store.abortMerge();
+  store.answer(true);
+  await confirmed;
+
+  expect(aborts).toBe(1);
+  expect(store.abortState.value).toBe("running");
+  expect(store.problem.value).toBeNull();
+  await pressUnasked(store);
+  expect(aborts).toBe(1);
+});
+
+test("a press while the abort runs asks nothing and calls git no second time", async () => {
+  spyConsole();
+  const answers: ((result: SourceResult<null>) => void)[] = [];
+  const { store } = abortingStore(
+    () =>
+      new Promise((resolve) => {
+        answers.push(resolve);
+      }),
+  );
+  await store.refreshFiles();
+  const first = store.abortMerge();
+  store.answer(true);
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+
+  expect(store.abortState.value).toBe("running");
+  await pressUnasked(store);
+  answers[0]?.(ok(null));
+  await first;
+
+  expect(answers).toHaveLength(1);
+  expect(store.abortState.value).toBe("running");
+});
+
+test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
+  const lines = spyConsole();
+  const refused: SourceFailure = {
+    kind: "Git",
+    message: "error: Entry 'a.ts' not uptodate. Cannot merge.\n",
+  };
+  let aborts = 0;
+  const { store, pending } = abortingStore(() => {
+    aborts += 1;
+    return Promise.resolve({ ok: false, failure: refused });
+  });
+  await store.refreshFiles();
+  await openNow(store, pending, "a.ts");
+  const { files, opened } = store;
+  const before = { files: files.value, opened: opened.value };
+
+  const refusing = store.abortMerge();
+  store.answer(true);
+  await refusing;
+
+  const problem = store.problem.value;
+  expect(problem).toEqual({ action: "abort", cause: refused });
+  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
+    "Could not abort the merge: error: Entry 'a.ts' not uptodate. Cannot merge.",
+  );
+  expect(lines.error).toEqual([
+    `[error] store.abort_failed {kind: "Git", message: ${JSON.stringify(refused.message)}}`,
+  ]);
+  expect({ files: files.value, opened: opened.value }).toEqual(before);
+  expect(files.value).toBe(before.files);
+  expect(opened.value).toBe(before.opened);
+  expect(store.active.value).toBe("a.ts");
+  expect(store.abortState.value).toBe("ready");
+
+  const again = store.abortMerge();
+  expect(store.question.value).toEqual({ kind: "abort" });
+  store.answer(true);
+  await again;
+  expect(aborts).toBe(2);
+});
+
+test("the abort state follows git's merging with each list and is noMerge before the first", async () => {
+  spyConsole();
+  const merging = [true, false];
+  const { source } = handSource([entry("a.ts")]);
+  const store = createAppStore({
+    ...source,
+    listFiles: () =>
+      Promise.resolve(
+        ok({ files: [entry("a.ts")], diskChanges: [], merging: merging.shift() ?? true }),
+      ),
+  });
+
+  expect(store.merging.value).toBe(false);
+  expect(store.abortState.value).toBe("noMerge");
+  await store.refreshFiles();
+  expect(store.merging.value).toBe(true);
+  expect(store.abortState.value).toBe("ready");
+  await store.refreshFiles();
+  expect(store.merging.value).toBe(false);
+  expect(store.abortState.value).toBe("noMerge");
+  await pressUnasked(store);
 });

@@ -1,0 +1,139 @@
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index 73dd971..7f1378b 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, shallowRef, type Component, type Ref } from "vue";
++import { computed, nextTick, shallowRef, type Component, type Ref } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+@@ -57,7 +57,7 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     icon: GitPullRequestClosed,
+     keepsKeyboard: true,
+     run: () => {
+-      void abortMerge();
++      void abortKeepingKeyboard();
+     },
+     selected: null,
+     disabled: abortRunning,
+@@ -144,6 +144,17 @@ function pressed(button: IconButton, event: MouseEvent): void {
+   }
+ }
+ 
++// Removing an open modal <dialog> does not give focus back; only close() does (HTML, "dialog
++// removing steps": https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
++async function abortKeepingKeyboard(): Promise<void> {
++  const before = document.activeElement;
++  await abortMerge();
++  await nextTick();
++  if (document.activeElement === document.body && before instanceof HTMLElement) {
++    before.focus();
++  }
++}
++
+ function barPressed(event: MouseEvent): void {
+   if (event.button === SECONDARY_BUTTON || event.ctrlKey) {
+     event.preventDefault();
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index aca9530..f2ea0b5 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -124,6 +124,23 @@ test("a hidden list stored before Abort merge existed is rewritten as decisions
+   expect(hiddenList(createHiddenButtons(storage))).toEqual(["undo"]);
+ });
+ 
++test("a hidden list stored before Abort merge existed decides exactly its seven ids, no later button", () => {
++  const storage = memoryStorage({ [KEY]: '["undo"]' });
++  const buttons = createHiddenButtons(storage);
++
++  buttons.toggle("redo");
++
++  expect(storedDecisions(storage)).toStrictEqual({
++    previous: false,
++    next: false,
++    collapse: false,
++    applyLeft: false,
++    applyRight: false,
++    undo: true,
++    redo: true,
++  });
++});
++
+ test("a hidden list from before drops ids yamt does not know and collapses duplicates", () => {
+   const buttons = createHiddenButtons(
+     memoryStorage({ [KEY]: '["redo","save","applyLeft","redo"]' }),
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index 47a0c10..06b3b64 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -22,10 +22,20 @@ export type HiddenButtons = {
+   readonly toggle: (id: ToolbarButtonId) => void;
+ };
+ 
+-type HiddenByUser = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
++type Decisions = Readonly<Partial<Record<ToolbarButtonId, boolean>>>;
+ 
+ const STORAGE_KEY = "yamt.toolbar.hidden";
+ 
++const OLD_FORMAT_IDS = [
++  "previous",
++  "next",
++  "collapse",
++  "applyLeft",
++  "applyRight",
++  "undo",
++  "redo",
++] as const satisfies readonly ToolbarButtonId[];
++
+ // Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
+ // keys of Undo and Redo still work.
+ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+@@ -58,20 +68,18 @@ function parseJson(raw: string): unknown {
+   }
+ }
+ 
+-function readHiddenList(names: readonly unknown[]): HiddenByUser {
++function readHiddenList(names: readonly unknown[]): Decisions {
+   if (!names.every((name) => typeof name === "string")) {
+     return {};
+   }
+   const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
+-  for (const id of TOOLBAR_BUTTONS) {
+-    if (id !== "abortMerge") {
+-      decided[id] = names.includes(id);
+-    }
++  for (const id of OLD_FORMAT_IDS) {
++    decided[id] = names.includes(id);
+   }
+   return decided;
+ }
+ 
+-function readDecided(stored: object): HiddenByUser {
++function readDecided(stored: object): Decisions {
+   const decided: Partial<Record<ToolbarButtonId, boolean>> = {};
+   for (const id of TOOLBAR_BUTTONS) {
+     const hidden: unknown = Reflect.get(stored, id);
+@@ -82,7 +90,7 @@ function readDecided(stored: object): HiddenByUser {
+   return decided;
+ }
+ 
+-function readHiddenByUser(raw: string): HiddenByUser {
++function readDecisions(raw: string): Decisions {
+   const stored = parseJson(raw);
+   if (Array.isArray(stored)) {
+     return readHiddenList(stored);
+@@ -91,10 +99,10 @@ function readHiddenByUser(raw: string): HiddenByUser {
+ }
+ 
+ export function createHiddenButtons(storage?: StorageLike): HiddenButtons {
+-  const decided = storedValue<HiddenByUser>(
++  const decided = storedValue<Decisions>(
+     STORAGE_KEY,
+     {},
+-    { read: readHiddenByUser, write: (value) => JSON.stringify(value) },
++    { read: readDecisions, write: (value) => JSON.stringify(value) },
+     "toolbar.storage_failed",
+     storage,
+   );
