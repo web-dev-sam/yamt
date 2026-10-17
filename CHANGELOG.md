@@ -23,6 +23,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The focus ring of a button or menu item reached by keyboard is in the theme's primary colour instead of the
   system's focus colour (blue on Linux).
+- Problems from language servers are underlined with a visible squiggle; on Linux the wavy line was drawn flat.
 - Settings lists wrap long text onto the next line instead of cutting it off or pushing it out of view: a long
   file-type list no longer hides the language server's command, and many shortcuts on one keymap action no longer
   squeeze its name.
