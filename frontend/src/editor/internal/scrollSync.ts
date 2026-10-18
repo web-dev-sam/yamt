@@ -1,6 +1,4 @@
-import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
-import type { Extension, SelectionRange } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 import { PANES, type Pane, type PaneViews } from "./geometry";
@@ -11,7 +9,6 @@ type ScrollPane = {
   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
   readonly documentPadding: { readonly top: number };
 };
-type Placed = { readonly range: SelectionRange; readonly top: number };
 
 const ANCHOR_AT = 0.5;
 
@@ -65,62 +62,6 @@ function middle(view: ScrollPane): number {
   const { scrollTop, clientHeight } = view.scrollDOM;
   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
 }
-
-const placeTop = StateEffect.define<Placed>();
-
-const placed = StateField.define<Placed | null>({
-  create: () => null,
-  update(value, tr) {
-    let next = value;
-    for (const effect of tr.effects) {
-      if (effect.is(placeTop)) {
-        next = effect.value;
-      }
-    }
-    return next;
-  },
-});
-
-// WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror
-// swaps its viewport in the scroll handler's measure (@codemirror/view DocView.updateInner:
-// "Chrome sometimes messes with the scroll position during DOM mutation"); a scroll request
-// places the viewport first.
-function placeFarScroll(view: EditorView): void {
-  const top = view.scrollDOM.scrollTop;
-  const visibleTop = top - view.documentPadding.top;
-  const { from, to } = view.viewport;
-  const overlaps =
-    visibleTop < view.lineBlockAt(to).bottom &&
-    visibleTop + view.scrollDOM.clientHeight > view.lineBlockAt(from).top;
-  if (overlaps) {
-    return;
-  }
-  const line = view.lineBlockAtHeight(visibleTop);
-  const range = EditorSelection.cursor(line.from);
-  view.dispatch({
-    effects: [
-      placeTop.of({ range, top }),
-      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
-    ],
-  });
-}
-
-export const exactScroll: Extension = [
-  placed,
-  EditorView.domEventObservers({
-    scroll: (_event, view) => {
-      placeFarScroll(view);
-    },
-  }),
-  EditorView.scrollHandler.of((view, range) => {
-    const place = view.state.field(placed);
-    if (place === null || place.range !== range) {
-      return false;
-    }
-    view.scrollDOM.scrollTop = place.top;
-    return true;
-  }),
-];
 
 export class ScrollSync {
   readonly #views: Readonly<Record<Pane, ScrollPane>>;

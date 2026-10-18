@@ -7,12 +7,12 @@ import type { ChunkAction } from "./apply";
 import type { ChunkSpan } from "./chunkField";
 import { coveredDecorations } from "./covered";
 import { centerDecorations, focusDecorations, sideDecorations } from "./decorations";
+import { exactScroll } from "./exactScroll";
 import type { Folds } from "./foldView";
 import { SIDE_PANE, type ChunkRow, type Pane, type PaneViews } from "./geometry";
 import { modClicks } from "./modClick";
 import { centerKind, createPane, type PaneSettings } from "./pane";
 import { removalTooltip } from "./removalTooltip";
-import { exactScroll } from "./scrollSync";
 import type { Side } from "./side";
 import { sideRunner, type SideCommand } from "./sideKeys";
 import { sideStatusField } from "./sideStatus";
@@ -38,9 +38,12 @@ export type PaneWiring = {
 };
 
 function everyPane(): Extension {
-  // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
-  // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
-  return [tooltips({ parent: document.body }), exactScroll];
+  return [
+    // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
+    // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
+    tooltips({ parent: document.body }),
+    exactScroll,
+  ];
 }
 
 function sideExtensions(
