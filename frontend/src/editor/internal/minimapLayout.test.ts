@@ -11,6 +11,7 @@ import {
   rowTop,
   topOfRow,
   type MinimapInput,
+  type MinimapLayout,
 } from "./minimapLayout";
 
 // The Result's scroller and the minimap are both 900 CSS px high; CodeMirror pads the content by
@@ -33,6 +34,13 @@ function at(scrollTop: number, input: Partial<MinimapInput> = {}): MinimapInput 
 
 function rowCss(input: MinimapInput): number {
   return minimapLayout(input, null).rowPx / input.pixelRatio;
+}
+
+function sliderBottom({ slider }: MinimapLayout): number {
+  if (slider === null) {
+    throw new Error("no slider");
+  }
+  return slider.top + slider.height;
 }
 
 test("scale doubles at ratio ≥ 2: a row is 2 CSS px at 1 and 2, 1.6 at 1.25", () => {
@@ -112,12 +120,32 @@ test("7,277 rows, 900 px, scrollTop 72,770: slider 90 high at 408.6, rows 3,435�
   expect(layout.slider?.top).toBeCloseTo((3639 - 3435 + 0.3) * 2, 9);
 });
 
-test("the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810.4", () => {
+test("the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810, its bottom at the box's", () => {
   const layout = minimapLayout(at(LAST_SCROLL_TOP), null);
 
   expect([layout.startRow, layout.endRow]).toEqual([6828, 7277]);
-  expect(layout.slider?.top).toBeCloseTo(810.4, 9);
+  expect(sliderBottom(layout)).toBeLessThanOrEqual(900);
+  expect(layout.slider?.top).toBe(810);
   expect(rowTop(layout, 7277)).toBe(449 * 2);
+});
+
+test("the end with the top row 0.85 cut off: 618 rows at ratio 2 end at row 618, the slider inside", () => {
+  // 618 × 20 + 8 − 867 = 11,501 px of scrolling; row 575 is 17 px above the top. The canvas
+  // holds 1,734 / 4 = 433 rows, so the last one is drawn from row 618 − 433 + 1 = 186.
+  const end = at(11_501, { rows: 618, height: 867, viewportHeight: 867, pixelRatio: 2 });
+  const layout = minimapLayout(end, null);
+
+  expect([layout.startRow, layout.endRow]).toEqual([186, 618]);
+  expect(sliderBottom(layout)).toBeLessThanOrEqual(867);
+  expect(rowTop(layout, 618)).toBe(432 * 4);
+});
+
+test("the end at 868 px: 434 rows fit, the last drawn is row 618, the slider inside", () => {
+  const end = at(11_500, { rows: 618, height: 868, viewportHeight: 868, pixelRatio: 2 });
+  const layout = minimapLayout(end, null);
+
+  expect([layout.startRow, layout.endRow]).toEqual([185, 618]);
+  expect(sliderBottom(layout)).toBeLessThanOrEqual(868);
 });
 
 test("scrolling up never moves the window down, down never up", () => {

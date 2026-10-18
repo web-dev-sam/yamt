@@ -3,13 +3,11 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import type { FoldFields } from "./folds";
 import type { ChunkRow, PaneViews, WaveRow } from "./geometry";
-import { MAX_COLUMNS, minimapColumns, minimapLayout, minimapScale } from "./minimapLayout";
-import { rowOfTop, rowTop, topOfRow } from "./minimapLayout";
+import { minimapColumns, minimapLayout, minimapScale, rowOfTop, rowTop } from "./minimapLayout";
 import type { Columns, MinimapInput, MinimapLayout, Slider } from "./minimapLayout";
 import { changeMarks, markBoxes, problemMarks, type EdgeMark } from "./minimapMarks";
-import { paintRow, paintWave } from "./minimapPixels";
 import { MinimapPointer } from "./minimapPointer";
-import { readLook, rowColours, waveRowsOf, type Look } from "./minimapRows";
+import { readLook, rowPainter, type Look } from "./minimapRows";
 import { MinimapTiles, staleTiles, TILE_ROWS, type TileRenderer } from "./minimapTiles";
 import { linted } from "./problems";
 
@@ -23,8 +21,6 @@ type MinimapParts = {
 type FrameLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
 
 type Edges = { readonly left: readonly EdgeMark[]; readonly right: readonly EdgeMark[] };
-
-const ROW_MIDDLE = 0.5;
 
 export class Minimap {
   readonly #views: PaneViews;
@@ -208,28 +204,15 @@ export class Minimap {
     const view = this.#views.center;
     const { rowPx } = layout;
     const width = columns.code.width;
-    let waveRows: ReadonlySet<number> | null = null;
-    return {
+    const paintRow = rowPainter({
+      state: view.state,
+      blockAtHeight: (height) => view.lineBlockAtHeight(height),
+      waves,
+      look,
       width,
       rowPx,
-      rows: layout.input.rows,
-      paintRow: (target, row, y) => {
-        // A height on a line boundary gives the line above (@codemirror/view lineBlockAtHeight,
-        // viewportLines `l.bottom >= height`), so each row is looked up at its middle.
-        const block = view.lineBlockAtHeight(topOfRow(row + ROW_MIDDLE));
-        waveRows ??= waveRowsOf(waves);
-        if (waveRows.has(row)) {
-          paintWave(target, { y, x: 0, width, rowPx }, look.wave);
-          return block.to;
-        }
-        const { state } = view;
-        const to = Math.min(block.to, block.from + MAX_COLUMNS);
-        const text = state.sliceDoc(block.from, to);
-        const colours = rowColours(state, block.from, to);
-        paintRow(target, { y, x: 0, text, colours, tabSize: state.tabSize }, look.glyphs);
-        return block.to;
-      },
-    };
+    });
+    return { width, rowPx, rows: layout.input.rows, paintRow };
   }
 
   #paintEdges(

@@ -4,9 +4,10 @@ import { highlightTree } from "@lezer/highlight";
 
 import type { WaveRow } from "./geometry";
 import type { Scale } from "./minimapGlyphs";
-import { rowOfTop } from "./minimapLayout";
+import { MAX_COLUMNS, rowOfTop, topOfRow } from "./minimapLayout";
 import type { EdgeKind } from "./minimapMarks";
-import { rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
+import { paintRow, paintWave, rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
+import type { TileRenderer } from "./minimapTiles";
 import { SYNTAX_COLOURS, syntaxColourClasses } from "./pane";
 
 export type Look = {
@@ -15,12 +16,22 @@ export type Look = {
   readonly edges: Readonly<Record<EdgeKind, string>>;
 };
 
+type RowSource = {
+  readonly state: EditorState;
+  readonly blockAtHeight: (height: number) => { readonly from: number; readonly to: number };
+  readonly waves: readonly WaveRow[];
+  readonly look: Look;
+  readonly width: number;
+  readonly rowPx: number;
+};
+
 const CODE_TOKEN = "--color-code";
 const PALETTE_TOKENS: readonly string[] = [
   CODE_TOKEN,
   ...new Set(SYNTAX_COLOURS.map(({ colour }) => colour)),
 ];
 const NO_COLOUR: Rgb = { r: 0, g: 0, b: 0 };
+const ROW_MIDDLE = 0.5;
 
 function paletteIndex(classes: string): number {
   for (const name of classes.split(" ")) {
@@ -76,4 +87,24 @@ export function readLook(
 
 export function waveRowsOf(waves: readonly WaveRow[]): ReadonlySet<number> {
   return new Set(waves.flatMap(({ center }) => (center === null ? [] : [rowOfTop(center)])));
+}
+
+export function rowPainter(source: RowSource): TileRenderer["paintRow"] {
+  const { state, blockAtHeight, waves, look, width, rowPx } = source;
+  let waveRows: ReadonlySet<number> | null = null;
+  return (target, row, y) => {
+    // A height on a line boundary gives the line above (@codemirror/view lineBlockAtHeight,
+    // viewportLines `l.bottom >= height`), so each row is looked up at its middle.
+    const block = blockAtHeight(topOfRow(row + ROW_MIDDLE));
+    waveRows ??= waveRowsOf(waves);
+    if (waveRows.has(row)) {
+      paintWave(target, { y, x: 0, width, rowPx }, look.wave);
+      return block.to;
+    }
+    const to = Math.min(block.to, block.from + MAX_COLUMNS);
+    const text = state.sliceDoc(block.from, to);
+    const colours = rowColours(state, block.from, to);
+    paintRow(target, { y, x: 0, text, colours, tabSize: state.tabSize }, look.glyphs);
+    return block.to;
+  };
 }

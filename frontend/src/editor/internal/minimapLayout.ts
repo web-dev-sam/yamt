@@ -98,9 +98,11 @@ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | nul
     const fit = { startRow: 1, endRow: rows, topPaddingRows: extraTop };
     return { input, ...fit, canvasHeight, rowPx, slider, ratio };
   }
-  const shown = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
+  const found = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
+  const shown = scrollTop >= scrollable ? reachingLastRow(input, found, fitting) : found;
   const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
-  const slider = { top: alignedSliderTop(input, shown, rowCss), height: sliderHeight };
+  const top = Math.min(alignedSliderTop(input, shown, rowCss), height - sliderHeight);
+  const slider = { top, height: sliderHeight };
   return { input, ...shown, endRow, canvasHeight, rowPx, slider, ratio };
 }
 
@@ -141,6 +143,13 @@ function steadied(input: MinimapInput, found: Window, previous: MinimapLayout | 
     };
   }
   return found;
+}
+
+// VS Code's window reaches the last row at the end only through scrollBeyondLastLine
+// (common/config/editorOptions.ts), which yamt does not have.
+function reachingLastRow({ rows }: MinimapInput, shown: Window, fitting: number): Window {
+  const lastRowFirst = rows - fitting + 1 + shown.topPaddingRows;
+  return { ...shown, startRow: Math.max(shown.startRow, lastRowFirst) };
 }
 
 function alignedSliderTop(input: MinimapInput, shown: Window, rowCss: number): number {
