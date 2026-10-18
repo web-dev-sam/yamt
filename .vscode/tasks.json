@@ -38,9 +38,9 @@
     },
     {
       "label": "merge: new conflict project",
-      "detail": "Replace /tmp/yamt-conflict-project with a fresh repo in the middle of a merge: 7 conflicted files (text, CRLF, both added, binary, deleted on one side).",
+      "detail": "Replace /tmp/yamt-conflict-project with the demo project (scripts/demo-repo.sh): Taskboard, a small TypeScript kanban app with oxlint and oxfmt, stopped while main merges feature/reminders. 7 conflicted files: src/board/board.ts (about 450 lines, changes on both sides all through it), card.ts, cardView.ts, client.ts, mockBoards.ts (deleted on one side), docs/shortcuts.md, public/logo.png (an image changed on both sides). The merge causes one TypeScript error in board.ts and leaves one oxlint warning, shown once main's changes there are applied. Installs typescript-language-server once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh).",
       "type": "shell",
-      "command": "rm -rf /tmp/yamt-conflict-project && scripts/conflict-repo.sh /tmp/yamt-conflict-project",
+      "command": "rm -rf /tmp/yamt-conflict-project && scripts/demo-repo.sh /tmp/yamt-conflict-project",
       "problemMatcher": [],
       "presentation": { "panel": "shared", "reveal": "always" },
       "options": {
@@ -49,9 +49,9 @@
     },
     {
       "label": "merge: open in WebStorm",
-      "detail": "Open /tmp/yamt-conflict-project in WebStorm (made first if missing); then Git → Resolve Conflicts.",
+      "detail": "Open the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing) in WebStorm; then Git → Resolve Conflicts.",
       "type": "shell",
-      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
+      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
       "problemMatcher": [],
       "presentation": { "panel": "shared", "reveal": "silent" },
       "options": {
@@ -61,9 +61,9 @@
     },
     {
       "label": "merge: open in yamt",
-      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-conflict-project (made first if missing). Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
+      "detail": "Build yamt (debug, pages built in) from the current code and open it on the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so typescript-language-server is found; oxlint and oxfmt come from the project's node_modules. The first time, yamt asks whether to start the project's language servers. Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
       "type": "shell",
-      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
+      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "reveal": "always" },
       "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },

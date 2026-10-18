@@ -12,7 +12,8 @@
 # rust-analyzer is the release binary, not rustup's proxy (`rustup component add` changes the toolchain).
 # PHP: static-php-cli's prebuilt CLI (https://dl.static-php.dev/static-php-cli/common/); Phpactor needs PHP 8.2
 # (https://phpactor.readthedocs.io/en/master/usage/standalone.html). Sourced by scripts/lsp-repo.sh for its versions
-# and folders; it calls install_servers with --servers.
+# and folders; it calls install_servers with --servers. Sourced by scripts/demo-repo.sh, which calls
+# install_typescript_server: typescript-language-server alone, linked into servers-path beside what is there.
 set -euo pipefail
 # shellcheck source=scripts/git-sandbox.sh
 source "$(dirname "${BASH_SOURCE[0]}")/git-sandbox.sh"
@@ -175,6 +176,14 @@ install_servers() {
         "gopls $gopls_version, rust-analyzer $rust_analyzer_version, php $php_version (runs: $php_runs)," \
         "phpactor $phpactor_version, composer $composer_version, phpstan $phpstan_version, phpcs $phpcs_version;" \
         "in project venvs: ruff $ruff_version, ty $ty_version, basedpyright $basedpyright_version"
+    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
+}
+
+install_typescript_server() {
+    install_npm "$tsls_home" typescript-language-server "$tsls_version"
+    mkdir -p "$servers_path"
+    ln -sfn "$tsls_home/node_modules/.bin/typescript-language-server" "$servers_path/typescript-language-server"
+    echo "lsp-servers: typescript-language-server $tsls_version"
     echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
 }
 

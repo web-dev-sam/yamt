@@ -1,0 +1,20 @@
+{
+  "name": "taskboard",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.4"
+  },
+  "packageManager": "pnpm@10.18.0"
+}

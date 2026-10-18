@@ -1,0 +1,74 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+
+#app {
+  display: flex;
+  gap: 16px;
+  padding: 24px;
+  align-items: flex-start;
+}
+
+.column {
+  flex: 0 0 280px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #ebeef1;
+}
+
+.card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.labels {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.label {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #fff;
+}
+
+.label-grey {
+  background: #6e7781;
+}
+.label-red {
+  background: #cf222e;
+}
+.label-orange {
+  background: #bc4c00;
+}
+.label-green {
+  background: #1a7f37;
+}
+.label-blue {
+  background: #0969da;
+}
+.label-purple {
+  background: #8250df;
+}
+
+.badge {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #57606a;
+}
