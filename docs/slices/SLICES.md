@@ -717,6 +717,34 @@ Rust or IPC changes.
 | 3   | 3.O-editor (`briefs/3.O-marks-editor.md`, `-rework-1.md`, `-rework-2.md`; `editor/**`, `style.css`, `ui/useMergeController.ts`, `ui/MergeView.vue`; needs 2)                            | web-impl | accepted | round 1 `502e997` (`AltMarksEditor`): `paneTone`, `marks.ts`, `MarkLanes` under `Frame`, `markJump.ts`, `thirdScrollTop`. Reviews fail (#1204, #1205, #1210, #1211; promoted #1206–#1208) → `3615586` (`AltMarksEditorR1`), boundary pass, correctness #1215 → `52a0121` (`AltMarksEditorR2`: innermost hidden range selected first), pass. Mutants: 0 survivors on new lines (#1214). `editor/index.ts` at 300 lines. Notes `AltMarksEditor*.md` |
 | 4   | final run (`briefs/3.O-verify.md`): `just check` (map-check with the handoff lines in a scratch clone), `just mutants 407ec81`, WebKit 4446, the real app (`b-verify-…`), scroll timing | verifier | done     | `AltMarksVerify` at `0a97a3b`, gate **pass** with the map lines (without: `map-check` names only the 3 new files): 1389 web tests, golden, hooks 16/16; mutants 0 on changed lines; WebKit and real app a–k pass but 5d wording (#1218) and a doc-end jump twice off (#1219, to the owner); scroll no slower. Notes `AltMarksVerify.md`                                                                                                           |
 
+Superseded (owner 2026-10-18, #1223): the scrollbar marks and their jump are removed by the minimap below; the hold
+(row 2) stays and now shows the minimap.
+
+## Minimap — the Result's code and its marks while Alt is held (session 21, branch `feat/minimap` off main `7141a81`)
+
+Owner request (2026-10-18, #1223, answers #1224): "im looking more like a vscode minimap of the code and its
+conflicts/errors. With the twist that it shows errors on the left of minimap and conflicts on the right of minimap";
+"remove them, the new minimap is still only visible on alt modifier". Intent, answers, rules 1–10, the cutover table,
+sourced facts, acceptance, non-goals, orchestrator defaults and owner checks: `docs/slices/request-minimap.md` (settled;
+no question to the owner, OR13). Plan §2 #81 (written from the chosen design) replaces #80's marks; #80's hold stays.
+
+Acceptance (request § Acceptance): in WebKit (fixture page) and the real app with real Alt input, on a long file with
+far-apart changes, conflicts and errors and warnings: no minimap without Alt; Alt shows it over the right pane's right
+edge, release, Alt+key and blur hide it; the Result's code in syntax colours, collapsed runs one row; problems on the
+left edge (red over yellow), waiting changes on the right (conflicts purple), an applied change's mark gone at once;
+it scrolls with the Result, the slider covers the visible rows; click centres, drag and wheel scroll, sides follow,
+cursor/selection/folds/keyboard unchanged, nothing reaches the right pane; no `.change-marks`; `just check` passes;
+dark and light; scroll timing no worse with Alt up and held.
+Non-goals: request § Non-goals (no minimap without Alt, no setting, no side-pane minimap, no find/selection/cursor in
+it, no info/hints, no hover, no resizing, no keyboard access, no cursor move or unfolding on click, no Rust/IPC).
+
+| row | slice                                                                                                           | owner    | status  | evidence |
+| --- | --------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: owner of the minimap, its element over the right pane, drawing, edges, scroll, `editor/index.ts` budget | designer | running |          |
+| 2   | cutover: remove #80's scrollbar marks and the jump, make room in `editor/index.ts` (needs 1)                    | web-impl | todo    |          |
+| 3   | the minimap: code, slider, click/drag/wheel, both edges, shown by the Alt hold (needs 2)                        | web-impl | todo    |          |
+| 4   | final run: `just check`, `just mutants 7141a81`, WebKit and the real app per the acceptance, scroll timing      | verifier | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
