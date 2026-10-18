@@ -40,9 +40,9 @@ superseded, its Alt hold kept) and #82 (a far scroll lands where it was sent, in
 5. **Browser tests** (#1242, as #1074/#1222): Playwright WebKit still cannot launch here and CI does not run
    `test:browser`; this feature added no browser test.
 
+## Open points
+
 - #1219 (a jump to a side's very end landing wrong) was not reproduced after #82: a drag to the very end lands
   `[2785, 2785, 2725]` and stays; its earlier reports may share #1240's cause [INFERENCE].
-- #1219 (a jump to a side's very end landing wrong) was not reproduced after #82: a drag to the very end lands
-  `[2785, 2785, 2725]` and stays; its remaining reports may share #1240's cause.
 - Alt-held scroll timing: one of eight rows 15 late frames of 200 against base 11 + 3; medians over repeats equal
   (8 / 8 / 9). Within the run-to-run spread on this machine.
