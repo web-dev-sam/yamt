@@ -1,0 +1,1867 @@
+From a0c110d83139b8588ddb9f72df280321c2f12a02 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 12:31:42 +0200
+Subject: [PATCH] feat(editor): Result minimap while Alt is held
+
+Canvas in the right pane's view.dom, owned by Frame: 128-row tiles,
+VS Code slider, press centres, drag and wheel scroll the Result;
+problems left, waiting changes right (plan #81). Fixes #1227-#1230.
+---
+ .omp/run/notes/MinimapWindow.md               | 121 ++++++++
+ frontend/src/editor/AGENTS.md                 |   2 +
+ frontend/src/editor/index.ts                  |   6 +
+ frontend/src/editor/internal/frame.ts         |  23 +-
+ frontend/src/editor/internal/minimap.ts       | 259 ++++++++++++++++++
+ .../src/editor/internal/minimapLayout.test.ts |  15 +
+ frontend/src/editor/internal/minimapLayout.ts |  36 ++-
+ .../src/editor/internal/minimapMarks.test.ts  |  21 ++
+ frontend/src/editor/internal/minimapMarks.ts  |  21 +-
+ frontend/src/editor/internal/minimapPixels.ts |   5 +
+ .../editor/internal/minimapPointer.test.ts    | 156 +++++++++++
+ .../src/editor/internal/minimapPointer.ts     | 123 +++++++++
+ .../src/editor/internal/minimapRows.test.ts   | 101 +++++++
+ frontend/src/editor/internal/minimapRows.ts   |  79 ++++++
+ .../src/editor/internal/minimapTiles.test.ts  | 106 ++++++-
+ frontend/src/editor/internal/minimapTiles.ts  |  71 +++++
+ frontend/src/editor/problems.browser.test.ts  |   1 +
+ frontend/src/editor/removals.browser.test.ts  |   1 +
+ frontend/src/editor/theme.css                 |  45 +++
+ frontend/src/style.css                        |   8 +
+ frontend/src/ui/App.vue                       |   3 +
+ frontend/src/ui/MergeView.vue                 |  39 ++-
+ frontend/src/ui/useMergeController.test.ts    |  39 ++-
+ frontend/src/ui/useMergeController.ts         |  31 ++-
+ 24 files changed, 1264 insertions(+), 48 deletions(-)
+ create mode 100644 .omp/run/notes/MinimapWindow.md
+ create mode 100644 frontend/src/editor/internal/minimap.ts
+ create mode 100644 frontend/src/editor/internal/minimapPointer.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapPointer.ts
+ create mode 100644 frontend/src/editor/internal/minimapRows.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapRows.ts
+
+diff --git a/.omp/run/notes/MinimapWindow.md b/.omp/run/notes/MinimapWindow.md
+new file mode 100644
+index 0000000..d0ce20e
+--- /dev/null
++++ b/.omp/run/notes/MinimapWindow.md
+@@ -0,0 +1,121 @@
++**summary**
++- When Alt is held, the Result now has a minimap. It is drawn on a canvas inside the right pane's `view.dom`, owned by `Frame` (`editor/internal/minimap.ts`) and painted after `ScrollSync.sync`. The code rows are cached in 128-row tiles (`MinimapTiles`). It also has a slider, problems on the left edge and waiting changes on the right edge.
++- New files: `minimapPointer.ts` handles press, slider drag and wheel; `minimapRows.ts` holds row colours, theme tokens and wave rows.
++- The hold is connected again: App `useAltHold()` → MergeView `minimap` → `useMergeController` (`followWithoutRebuild` holds the preferences, collapsed and minimap watches) → `MergeOptions.minimap` / `showMinimap`.
++- Fixed the review items #1227–#1230 (details under deviations).
++- All six layer recipes exit 0. Both WebKit and the real app were run with real Alt input.
++
++**files_changed**
++- `frontend/src/editor/AGENTS.md`, `index.ts` (286 lines), `theme.css`, `problems.browser.test.ts`, `removals.browser.test.ts`
++- `frontend/src/editor/internal/frame.ts`
++- `frontend/src/editor/internal/minimap.ts` (new, 259 lines), `minimapPointer.ts` (new) + test, `minimapRows.ts` (new) + test
++- `frontend/src/editor/internal/minimapTiles.ts` + test, `minimapLayout.ts` + test, `minimapMarks.ts` + test, `minimapPixels.ts`
++- `frontend/src/style.css`
++- `frontend/src/ui/useMergeController.ts` + test, `MergeView.vue`, `App.vue`
++
++**tests_added**
++- `useMergeController.test.ts`:
++  - "an editor is built showing the minimap as the view says, and follows a change without a rebuild" → `["1 built true","1 show false","1 show true"]`, built once.
++  - "a minimap shown before the file loaded reaches no editor, and the editor built later shows it".
++- `minimapTiles.test.ts`:
++  - each tile paints its 128 rows once, each at its own y, and the last tile stops at the last row;
++  - a grown tree drops only the tiles whose `to` is past the old length (a tile ending exactly there stays);
++  - `keep` drops tiles outside the window; `"all"` drops every tile.
++- `minimapRows.test.ts`:
++  - `rowColours` gives the palette index from the row's start, using the TypeScript grammar;
++  - text with no grammar is drawn in the code colour;
++  - `readLook`: code colour first, a missing token falls back to the code colour, edge values are validated;
++  - wave rows come from `rowOfTop`.
++- `minimapPointer.test.ts`:
++  - wheel pixels, lines and pages; a wheel scrolls and calls `follow`;
++  - a primary press gives `centredScrollTop`; a secondary mouse button does nothing; a touch press works;
++  - a slider drag (capture, `active`, `draggedScrollTop` from the start, stops propagation) ends on `pointerup`;
++  - `release()` mid-drag ends the drag;
++  - `mousedown` is prevented and stopped.
++- `minimapLayout.test.ts`: "the canvas is the minimap's height in whole device px"; "row n covers document px (n − 1) × 20 up to n × 20".
++- `minimapMarks.test.ts`: rows 3,434 and 3,885 are dropped and an insertion point at 3434×20 is kept (#1228); a fractional-ratio case at 1.25 and 1.1 (#1230).
++- Hand mutations, each failing then restored:
++  - `start - from` → `start`: rows test.
++  - DOM_DELTA_LINE → 1: `[1,1,700]` instead of `[1,20,700]`.
++  - Tile `first` without +1: 173 painted instead of 172.
++  - Old window filter: `expected [ …(4) ] to deeply equal [ …(2) ]`.
++  - `?? code` → `?? NO_COLOUR`: look test.
++  - Drop the touch case in `primary`: `follow` called 0 times.
++  - `>` → `>=` in stale tiles: 256 rows repainted instead of 128.
++  - Inset without `Math.round`: fractional-ratio test.
++  - Width without `Math.round`: `width: 4.4`.
++  - `rowOfTop` with `round`: `[1,2,2,7278]`.
++  - `topOfRow` = `row*20` plus unfloored canvas height: 7 tests fail, including `1126.25`.
++  - Edge value not validated: `"warning": "not a colour"`.
++
++**smoke_evidence**
++1. Node: `vitest run --project node src/editor/internal/minimap src/ui/useMergeController` → `Tests 58 passed (58)`.
++2. Recipes, each `exit 0`:
++   - `lint`, `typecheck`, `unused` (knip, no findings);
++   - `test` → `Test Files 108 passed (108) Tests 1431 passed (1431)`;
++   - `fmt:check` → `All matched files use the correct format.`;
++   - `just sfc-order` → `exit 0`;
++   - `wc -l frontend/src/editor/index.ts` → `286`.
++3. Failing paths in WebKit, each then restored:
++   - `#box.hidden = false`: `b. Alt up: {"displayed":true…}`, `b. blur: {"displayed":true…}`.
++   - `keepFocus` emptied: before the press `"active":"cm-content"`, after `"active":""` → `facts unchanged: false`.
++   - Edges kept on `rowsMoved`: after an apply the right edge still had four marks (`[20,31]`, `[68,87]`, `[98,105]`, conflict `[140,195]`); restored, it had three.
++4. WebKit fixture page (dev server 5277, `just webdriver 4447`, window 1600×1000, ratio 2, `language-tools-script-setup.ts`, 618 rows uncollapsed, one conflict):
++   - a. Before Alt: `"displayed":false,"hit":"cm-scroller","canvas":[0,0]`.
++   - b. Hold:
++     - Alt held: `boxRect [1458,88.5,1591,955]`, `rightRect [1172,88.5,1591,955]`, `right/top/bottom equal: true`, `panes unchanged: true`.
++     - Alt up, Alt then `a`, and blur each hide it.
++     - After blur, a repeated keydown leaves it hidden; a fresh keydown shows it.
++   - c. Pixels:
++     - Keyword row 35 `"export"`: glyph `[224,152,107,174]` against token `[224,152,107]`.
++     - Wave row 1: `[86,83,98,255]` against `[86,83,98]`.
++     - Background is `--color-panel`; canvas opacity 0.9.
++     - Collapsing toggled while held: painted rows `54` → `434` (618-row file) → back to `54`.
++   - d. Right edge:
++     - Before: three marks of kind `modified` plus one of kind `conflict` (the run reader names a mark by matching its colour to the four tokens, so this reads as "modified tone"); left edge empty (fixture, no server).
++     - Applied through the strip icon while held: next frame shows `[modified, modified, conflict]`, still shown.
++   - e. Scrolling (the fixture file after one apply, 616 rows):
++     - scrollTop 3000: slider `{top:207.6,height:86}` equals `minimapLayout` `{top:207.6,height:86}`; window start row 47, canvas content changed.
++     - At the end (11461): `lastTextCanvasRow 434 = lastPaintedCanvasRow 434`.
++   - f. Pointer:
++     - Press: `scrollTop 2950` against `centredScrollTop 2950.5` (WebKit stores an integer `scrollTop`); sides `[1301,1322]` → `[2950,3030]`; focus, both selections, folds and height unchanged.
++     - Drag 50 px: `3684` equals `draggedScrollTop 3684`; `active` during, cleared after.
++     - Wheel (3 lines, `altKey` true): `3984` → `4044`, sides follow, still shown.
++   - g. Light theme: keyword `[0,51,179,181]` against `[0,51,179]`, wave `[208,208,208,255]`, background `rgb(255,255,255)`.
++   - h. `.change-marks` count 0. Console errors and warnings collected from the start of the check runs (after page load): `[]`.
++   - Screenshots: `/tmp/yamt-m/window-dark.png`, `window-light.png`, `window-long.png`.
++5. Real app (`scripts/lsp-repo.sh --servers /tmp/yamt-m/lsp`, sessions `m-window` / `m-window2` / `m-window3`, display `:2`, ratio 1):
++   - `py/api/stats.py`: the status shows "2 errors, 1 warning". Diagnostics: warning (ruff) and hint (basedpyright) on line 1, two errors on line 11.
++   - `xdotool keydown alt` → left edge `[{y:[0,3],"warning"},{y:[15,18],"error"}]`, right edge one conflict. Alt up → `{"shown":false}`.
++   - `focus-away` → hidden; `focus-back` with Alt still down → stays hidden.
++   - Screenshot: `/tmp/yamt-m/window-app-py.png`.
++   - Press and drag (`vOn.ts` from `scripts/conflict-repo.sh /tmp/yamt-m/long`, collapsing off, 184 rows):
++     - Click on minimap row 101: scrollTops `[0,0,0]` → `[1552,1552,1492]` (centred is 1552.5); `focusedPane 1`, cursor `[[286,286]]`, right selection unchanged.
++     - Slider drag of 100 px: `2554` during and after; my hand value of `draggedScrollTop` is 2554; `sliderActive` true during, false after.
++     - Wheel: 2554 → 2455, sides follow.
++     - `focus-away` → hidden.
++   - All three sessions stopped. The `pgrep` check found none of my processes; the matches were VS Code's rust-analyzer and a `yamt --repo /tmp/yamt-conflict-project` that was already running.
++
++**deviations_from_brief**
++- **#1227:** `MinimapLayout.canvasHeight` is computed once in `minimapLayout`. `rowOfTop`/`topOfRow` are exported and used in `viewportStart`, `centredScrollTop`, `markBoxes`, the canvas size, the row count, wave rows and the block lookup.
++  - Proof: `topOfRow` = `row*20` plus unfloored canvas height fails 7 tests; `rowOfTop` with `round` fails 2.
++- **#1228:** the window filter now handles boundaries. The old filter fails the new case: `expected [ …(4) ] to deeply equal [ …(2) ]`.
++- **#1229:** VS Code source headers (commit 789f2c4…, MIT) added to `minimapLayout.ts` and `minimapPixels.ts`.
++- **#1230:** fractional-ratio cases added. The 1.25 case gives `{x:129,y:21,width:5,height:5}`. I added a 1.1 case because at 1.25 the width (4×1.25) is already whole, so dropping its `Math.round` would not be caught. Dropping the inset's round fails; dropping the width's round fails (`width: 4.4`).
++- **Two extra files**, needed to stay under the 300-line cap and to test the pure parts in node: `minimapPointer.ts` (press, drag, wheel; `wheelPixels`) and `minimapRows.ts` (`rowColours`, `readLook`, `waveRowsOf`). Not named in the Change list; they match `minimap*.ts`. Both need entries in the project map and architecture doc (map-check).
++- **Row lookup uses the row's middle** (`topOfRow(row + 0.5)`). `lineBlockAtHeight` at an exact line boundary returns the line above (`@codemirror/view` `l.bottom >= height`). Querying at the top, as the design said, drew each row one line late; the keyword-pixel step caught it.
++- **Edge colours are the token values themselves**, checked with `rgbOf` and falling back to `--color-code`, rather than `rgb(...)` built from `rgbOf`. A built `rgb(` string fails the palette test (VU17).
++- **MergeView**: `minimap: showsMinimap`. This function declaration computes the same rule as `centerLine` (now `resultLine(deletedViewNow())`). The contract's `centerLine.value` would throw a TDZ error when the file mounts while Alt is held: the immediate watch reads it during setup, before the computed exists.
++- **Minimap marks reach `Frame`** through `changed()` returning true (`minimapStale`), on top of Frame's own reasons to request a frame.
++- **Not copied from VS Code** (as the design already says): the mouse-over slider, the Windows drag reset, touch gestures, full-width characters counting as two columns.
++- **Real-app press and drag** ran on `scripts/conflict-repo.sh` (`vOn.ts`, 184 rows). Every file in the language-server repo fits the window, and `--size 1600x320` still gave a 600 px high viewport, so there was no slider there.
++- **"None for info" was not observable in the real app.** The repo has no info or hint diagnostic on a line of its own; its hints share a line with a warning or an error. The rule is covered by `minimapMarks.test.ts`.
++- **WebKit hold step**: the blur, repeated keydown and fresh keydown were dispatched as synthetic events. WebDriver key actions covered Alt down, Alt up and Alt then `a`.
++- **WebKit press value**: the brief's "`scrollTop` equals `centredScrollTop`" holds only within the browser's integer `scrollTop` (2950 against 2950.5; 1552 against 1552.5 in the real app).
++
++**open_risks**
++- `minimapLayout.ts:102` (`endRow`): when the canvas holds a half row (1734 device px / 4), the end layout ends at row 616 of 618. The last text row is drawn half visible, and the slider can stick up to ~3 px past the box bottom (top 783.7 + 86 > 867). This follows VS Code's formula.
++- WebDriver's wheel source and pointer clicks do not report `altKey`, so the hold hides the minimap; real `xdotool` input keeps it shown. `minimap.ts:217` relies on the CodeMirror boundary behaviour described above.
++- In `frame.ts`, `paint` runs every frame while shown. In a long file the window moves on most scroll frames, so the canvas is cleared and the tiles redrawn on each of them. Scroll timing was not measured; it is the final run's job.
++
++Checks for you to run: `just check` (map-check needs `minimap.ts`, `minimapPointer.ts` and `minimapRows.ts` in the project map and architecture doc), `just mutants 6087e93`, and the scroll timing.
+\ No newline at end of file
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index b4b2f9c..51e9da1 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -5,3 +5,5 @@ An editable Result is one document of `lsp/` (plan §2 #67, #70): `internal/serv
+ Save (plan §2 #65, #69): `internal/fileText.ts` builds the file Save writes from the chunk field, each chunk's `waiting` and the side texts, as one `ChangeSet` over the Result (no transaction, so no chunk mapping), with `apply.ts`'s `wholeLines`; its `dropsShownText` is the one rule for a change whose shown text the file leaves out. `savedPoint.ts` owns the saved point (the Result's `Text`, every status and which text was written — `markSaved("asShown" | "fileText")` — at open or the last save) behind `MergeController.snapshot()` and `onUnsavedChange`; typing that `dropsShownText` leaves out keeps the dot only after a `fileText` write.
+ 
+ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `RemovalPoint`, class `REMOVAL_BAR_CLASS`) carries its removed text, and `eq` compares tone and text; `removalTooltip.ts` opens a `hoverTooltip` (in `document.body`) only while the pointer is on a bar's own box (`:hover` on that class), reads the text from that bar's decoration (`removalAt`), never from `chunk.words`, copies the pane's font, ligatures and code colour from its computed style, and closes when the bar goes; `removalText.ts` holds the pure display rules (the one joining line break left out — on an empty line the trailing one first — whitespace-only text as `·`/`→`/`↵` marks); `theme.css` draws a kept final line break as its empty line (`::after` zero-width space, not copied).
++
++Minimap (plan §2 #81): `Frame` owns `internal/minimap.ts` (`Minimap`), one `.minimap` box (a `<canvas>` and a `.minimap-slider`) appended to the right pane's `view.dom`, outside `scrollDOM`/`contentDOM`, so no pane handler sees its presses; `display: none` while `MergeOptions.minimap`/`showMinimap` say no, and then `changed` and `paint` return at once and every tile is dropped. It paints in `Frame`'s frame after `ScrollSync.sync`, from the Result's `scrollTop` and `minimapLayout.ts` (VS Code's `MinimapLayout.create`; rows by `rowOfTop`/`topOfRow`): the slider moves on every frame, the canvas is redrawn only when its window, padding rows, size, tiles or edges changed. Code rows come from `minimapTiles.ts` (`MinimapTiles`: 128 Result rows per detached canvas through `ImageData`, `minimapPixels.ts` glyphs, `minimapRows.ts` syntax colours and theme tokens read once per show or theme change; dropped by `staleTiles`), each row looked up at its middle; a collapsed run's row is a wave line. Edges (`minimapMarks.ts`): problems left, waiting changes right, cached until rows move or diagnostics arrive. `minimapPointer.ts`: `mousedown` is prevented and stopped (focus and selection stay), a press puts its row's top in the Result's middle, the slider drags with pointer capture, a wheel scrolls the Result; each ends in `ScrollSync.follow("center")`.
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 6bb1e6d..4c3f7e7 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -50,6 +50,7 @@ export type MergeOptions = {
+   readonly readOnly: boolean;
+   readonly preferences: Preferences;
+   readonly collapsed: boolean;
++  readonly minimap: boolean;
+   readonly servers: LanguageServers | null;
+ };
+ 
+@@ -92,6 +93,7 @@ export class MergeController {
+       folds: this.#folds.fields,
+       drag: this.#drag,
+       strips: this.#strips,
++      minimap: options.minimap,
+     });
+     this.#frame.request();
+     if (description !== null && description.support === undefined) {
+@@ -217,6 +219,10 @@ export class MergeController {
+     this.#frame.realign();
+   }
+ 
++  showMinimap(shown: boolean): void {
++    this.#frame.showMinimap(shown);
++  }
++
+   undo(): boolean {
+     return undo(this.#views.center);
+   }
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index 2a71bcd..a241161 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -9,6 +9,7 @@ import { syncFindSpace } from "./find";
+ import { waveStarts, type FoldFields } from "./folds";
+ import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
+ import type { ChunkRow, WaveRow } from "./geometry";
++import { Minimap } from "./minimap";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
+ import type { Strips } from "./strips";
+ 
+@@ -24,11 +25,13 @@ type FrameParts = {
+   readonly folds: FoldFields;
+   readonly drag: IconDrag;
+   readonly strips: Strips;
++  readonly minimap: boolean;
+ };
+ 
+ export class Frame {
+   readonly #parts: FrameParts;
+   readonly #scroll: ScrollSync;
++  readonly #minimap: Minimap;
+   #frameId: number | null = null;
+   #layoutCache: Layout | null = null;
+ 
+@@ -37,14 +40,25 @@ export class Frame {
+     this.#scroll = new ScrollSync(parts.views, () => {
+       this.request();
+     });
++    this.#minimap = new Minimap({
++      views: parts.views,
++      folds: parts.folds,
++      shown: parts.minimap,
++      follow: () => {
++        this.#scroll.follow("center");
++      },
++    });
+   }
+ 
+   changed(update: ViewUpdate): void {
+     const { spans, folds } = this.#parts;
+-    if (rowsChanged(update, [spans, folds.center, folds.sides])) {
++    const moved = rowsChanged(update, [spans, folds.center, folds.sides]);
++    if (moved) {
+       this.#layoutCache = null;
+     }
++    const minimapStale = this.#minimap.changed(update, moved);
+     if (
++      minimapStale ||
+       update.docChanged ||
+       update.geometryChanged ||
+       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
+@@ -75,6 +89,7 @@ export class Frame {
+       const covered = press === null ? null : coveredAction(press, layout.rows, views);
+       pushCovered(views, covered);
+       strips.paint(views, layout, covered);
++      this.#minimap.paint(layout);
+     });
+   }
+ 
+@@ -82,10 +97,16 @@ export class Frame {
+     this.#scroll.follow("center");
+   }
+ 
++  showMinimap(shown: boolean): void {
++    this.#minimap.show(shown);
++    this.request();
++  }
++
+   destroy(): void {
+     if (this.#frameId !== null) {
+       cancelAnimationFrame(this.#frameId);
+     }
+     this.#scroll.destroy();
++    this.#minimap.destroy();
+   }
+ }
+diff --git a/frontend/src/editor/internal/minimap.ts b/frontend/src/editor/internal/minimap.ts
+new file mode 100644
+index 0000000..0d5584f
+--- /dev/null
++++ b/frontend/src/editor/internal/minimap.ts
+@@ -0,0 +1,259 @@
++import { language, syntaxTree } from "@codemirror/language";
++import { EditorView, type ViewUpdate } from "@codemirror/view";
++
++import type { FoldFields } from "./folds";
++import type { ChunkRow, PaneViews, WaveRow } from "./geometry";
++import { MAX_COLUMNS, minimapColumns, minimapLayout, minimapScale } from "./minimapLayout";
++import { rowOfTop, rowTop, topOfRow } from "./minimapLayout";
++import type { Columns, MinimapInput, MinimapLayout, Slider } from "./minimapLayout";
++import { changeMarks, markBoxes, problemMarks, type EdgeMark } from "./minimapMarks";
++import { paintRow, paintWave } from "./minimapPixels";
++import { MinimapPointer } from "./minimapPointer";
++import { readLook, rowColours, waveRowsOf, type Look } from "./minimapRows";
++import { MinimapTiles, staleTiles, TILE_ROWS, type TileRenderer } from "./minimapTiles";
++import { linted } from "./problems";
++
++type MinimapParts = {
++  readonly views: PaneViews;
++  readonly folds: FoldFields;
++  readonly shown: boolean;
++  readonly follow: () => void;
++};
++
++type FrameLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonly WaveRow[] };
++
++type Edges = { readonly left: readonly EdgeMark[]; readonly right: readonly EdgeMark[] };
++
++const ROW_MIDDLE = 0.5;
++
++export class Minimap {
++  readonly #views: PaneViews;
++  readonly #folds: FoldFields;
++  readonly #box = document.createElement("div");
++  readonly #canvas = document.createElement("canvas");
++  readonly #slider = document.createElement("div");
++  readonly #tiles = new MinimapTiles();
++  readonly #pointer: MinimapPointer;
++  #shown = false;
++  #layout: MinimapLayout | null = null;
++  #drawn: MinimapLayout | null = null;
++  #placed: Slider | null = null;
++  #look: Look | null = null;
++  #edges: Edges | null = null;
++
++  constructor({ views, folds, shown, follow }: MinimapParts) {
++    this.#views = views;
++    this.#folds = folds;
++    this.#box.className = "minimap";
++    this.#box.setAttribute("aria-hidden", "true");
++    this.#slider.className = "minimap-slider";
++    this.#box.append(this.#canvas, this.#slider);
++    this.#pointer = new MinimapPointer({
++      box: this.#box,
++      slider: this.#slider,
++      scroller: views.center.scrollDOM,
++      layout: () => this.#layout,
++      follow,
++    });
++    views.right.dom.append(this.#box);
++    this.show(shown);
++  }
++
++  show(shown: boolean): void {
++    this.#pointer.release();
++    this.#shown = shown;
++    this.#box.hidden = !shown;
++    this.#slider.hidden = true;
++    this.#canvas.width = 0;
++    this.#canvas.height = 0;
++    this.#tiles.clear();
++    this.#layout = null;
++    this.#drawn = null;
++    this.#placed = null;
++    this.#look = null;
++    this.#edges = null;
++  }
++
++  changed(update: ViewUpdate, rowsMoved: boolean): boolean {
++    if (!this.#shown || update.view !== this.#views.center) {
++      return false;
++    }
++    const { startState, state } = update;
++    const themeChanged =
++      startState.facet(EditorView.darkTheme) !== state.facet(EditorView.darkTheme);
++    const stale = staleTiles({
++      docChanged: update.docChanged,
++      foldsChanged: startState.field(this.#folds.center) !== state.field(this.#folds.center),
++      themeChanged,
++      languageChanged: startState.facet(language) !== state.facet(language),
++      treeBefore: syntaxTree(startState).length,
++      treeAfter: syntaxTree(state).length,
++    });
++    this.#tiles.drop(stale);
++    if (themeChanged) {
++      this.#look = null;
++    }
++    if (rowsMoved || linted(update.transactions)) {
++      this.#edges = null;
++    }
++    const redraw = stale !== "none" || themeChanged || this.#edges === null;
++    if (redraw) {
++      this.#drawn = null;
++    }
++    return redraw;
++  }
++
++  paint(frame: FrameLayout): void {
++    if (!this.#shown) {
++      return;
++    }
++    const input = this.#input();
++    const layout = minimapLayout(input, this.#layout);
++    this.#layout = layout;
++    this.#fit(layout);
++    this.#place(layout.slider);
++    const drawn = this.#drawn;
++    if (
++      drawn?.startRow === layout.startRow &&
++      drawn.endRow === layout.endRow &&
++      drawn.topPaddingRows === layout.topPaddingRows
++    ) {
++      return;
++    }
++    this.#drawn = layout;
++    this.#draw(layout, frame);
++  }
++
++  destroy(): void {
++    this.#pointer.destroy();
++    this.#tiles.clear();
++    this.#box.remove();
++  }
++
++  #input(): MinimapInput {
++    const center = this.#views.center;
++    const { scrollTop, clientHeight } = center.scrollDOM;
++    const { top, bottom } = center.documentPadding;
++    return {
++      scrollTop,
++      viewportHeight: clientHeight,
++      paddingTop: top,
++      paddingBottom: bottom,
++      rows: rowOfTop(center.lineBlockAt(center.state.doc.length).top),
++      height: this.#box.clientHeight,
++      pixelRatio: devicePixelRatio,
++    };
++  }
++
++  #fit({ input, canvasHeight }: MinimapLayout): void {
++    const { pixelRatio } = input;
++    if (this.#look !== null && this.#look.glyphs.scale !== minimapScale(pixelRatio)) {
++      this.#tiles.clear();
++      this.#look = null;
++    }
++    const canvas = this.#canvas;
++    const width = minimapColumns(pixelRatio).width;
++    if (canvas.width === width && canvas.height === canvasHeight) {
++      return;
++    }
++    canvas.width = width;
++    canvas.height = canvasHeight;
++    canvas.style.width = `${width / pixelRatio}px`;
++    canvas.style.height = `${canvasHeight / pixelRatio}px`;
++    this.#box.style.width = canvas.style.width;
++    this.#drawn = null;
++  }
++
++  #place(slider: Slider | null): void {
++    const placed = this.#placed;
++    if (placed?.top === slider?.top && placed?.height === slider?.height) {
++      return;
++    }
++    this.#placed = slider;
++    this.#slider.hidden = slider === null;
++    if (slider !== null) {
++      this.#slider.style.transform = `translateY(${slider.top}px)`;
++      this.#slider.style.height = `${slider.height}px`;
++    }
++  }
++
++  #draw(layout: MinimapLayout, frame: FrameLayout): void {
++    const context = this.#canvas.getContext("2d");
++    if (context === null) {
++      return;
++    }
++    const { pixelRatio } = layout.input;
++    const columns = minimapColumns(pixelRatio);
++    const light = !this.#views.center.state.facet(EditorView.darkTheme);
++    const scale = minimapScale(pixelRatio);
++    const look = (this.#look ??= readLook(getComputedStyle(this.#box), light, scale));
++    context.clearRect(0, 0, this.#canvas.width, this.#canvas.height);
++    const first = Math.floor((layout.startRow - 1) / TILE_ROWS);
++    const last = Math.floor((layout.endRow - 1) / TILE_ROWS);
++    const renderer = this.#renderer(layout, look, frame.waves, columns);
++    for (let index = first; index <= last; index += 1) {
++      const y = rowTop(layout, index * TILE_ROWS + 1);
++      context.drawImage(this.#tiles.canvas(index, renderer), columns.code.x, y);
++    }
++    this.#tiles.keep(first - 1, last + 1);
++    this.#paintEdges(context, { layout, rows: frame.rows, look, columns });
++  }
++
++  #renderer(
++    layout: MinimapLayout,
++    look: Look,
++    waves: readonly WaveRow[],
++    columns: Columns,
++  ): TileRenderer {
++    const view = this.#views.center;
++    const { rowPx } = layout;
++    const width = columns.code.width;
++    let waveRows: ReadonlySet<number> | null = null;
++    return {
++      width,
++      rowPx,
++      rows: layout.input.rows,
++      paintRow: (target, row, y) => {
++        // A height on a line boundary gives the line above (@codemirror/view lineBlockAtHeight,
++        // viewportLines `l.bottom >= height`), so each row is looked up at its middle.
++        const block = view.lineBlockAtHeight(topOfRow(row + ROW_MIDDLE));
++        waveRows ??= waveRowsOf(waves);
++        if (waveRows.has(row)) {
++          paintWave(target, { y, x: 0, width, rowPx }, look.wave);
++          return block.to;
++        }
++        const { state } = view;
++        const to = Math.min(block.to, block.from + MAX_COLUMNS);
++        const text = state.sliceDoc(block.from, to);
++        const colours = rowColours(state, block.from, to);
++        paintRow(target, { y, x: 0, text, colours, tabSize: state.tabSize }, look.glyphs);
++        return block.to;
++      },
++    };
++  }
++
++  #paintEdges(
++    context: CanvasRenderingContext2D,
++    paint: {
++      readonly layout: MinimapLayout;
++      readonly rows: readonly ChunkRow[];
++      readonly look: Look;
++      readonly columns: Columns;
++    },
++  ): void {
++    const { layout, rows, look, columns } = paint;
++    const center = this.#views.center;
++    const edges = (this.#edges ??= {
++      left: problemMarks(center.state, (pos) => center.lineBlockAt(pos)),
++      right: changeMarks(rows),
++    });
++    const boxes = [
++      ...markBoxes(edges.left, layout, columns.left),
++      ...markBoxes(edges.right, layout, columns.right),
++    ];
++    for (const { x, y, width, height, kind } of boxes) {
++      context.fillStyle = look.edges[kind];
++      context.fillRect(x, y, width, height);
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/minimapLayout.test.ts b/frontend/src/editor/internal/minimapLayout.test.ts
+index aafd1e0..38fcef3 100644
+--- a/frontend/src/editor/internal/minimapLayout.test.ts
++++ b/frontend/src/editor/internal/minimapLayout.test.ts
+@@ -7,7 +7,9 @@ import {
+   minimapLayout,
+   minimapScale,
+   rowAt,
++  rowOfTop,
+   rowTop,
++  topOfRow,
+   type MinimapInput,
+ } from "./minimapLayout";
+ 
+@@ -69,12 +71,25 @@ test("a file that fits: rows from the first, no slider", () => {
+     startRow: 1,
+     endRow: 30,
+     topPaddingRows: 0,
++    canvasHeight: 900,
+     rowPx: 2,
+     slider: null,
+     ratio: 0,
+   });
+ });
+ 
++test("the canvas is the minimap's height in whole device px", () => {
++  expect(minimapLayout(at(0, { height: 901, pixelRatio: 1.25 }), null).canvasHeight).toBe(1126);
++  expect(minimapLayout(at(0, { rows: 30, height: 901, pixelRatio: 2 }), null).canvasHeight).toBe(
++    1802,
++  );
++});
++
++test("row n covers document px (n − 1) × 20 up to n × 20", () => {
++  expect([0, 19, 20, 145_539].map(rowOfTop)).toEqual([1, 1, 2, 7277]);
++  expect([1, 2, 7277].map(topOfRow)).toEqual([0, 20, 145_520]);
++});
++
+ test("taller than the Result, shorter than the minimap: rows stay, the slider moves by scrollTop × ratio", () => {
+   // 450 rows fill the 900 px minimap exactly; the slider travels 450 × 2 − 90 = 810 px over
+   // 450 × 20 + 8 − 900 = 8,108 px of scrolling.
+diff --git a/frontend/src/editor/internal/minimapLayout.ts b/frontend/src/editor/internal/minimapLayout.ts
+index 642d9ec..58a8bd3 100644
+--- a/frontend/src/editor/internal/minimapLayout.ts
++++ b/frontend/src/editor/internal/minimapLayout.ts
+@@ -1,3 +1,9 @@
++// The layout, the press and the drag below follow Visual Studio Code line by line
++// (microsoft/vscode at 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/:
++// browser/viewParts/minimap/minimap.ts MinimapLayout.create and getDesiredScrollTopFromDelta,
++// common/config/editorOptions.ts _computeMinimapLayout, browser/viewParts/viewLines/viewLines.ts
++// the Center reveal). Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License.
++
+ import { GLYPH_ROWS_PER_SCALE, HIDPI_SCALE, type Scale } from "./minimapGlyphs";
+ import { LINE_HEIGHT_PX } from "./pane";
+ 
+@@ -11,13 +17,14 @@ export type MinimapInput = {
+   readonly pixelRatio: number;
+ };
+ 
+-type Slider = { readonly top: number; readonly height: number };
++export type Slider = { readonly top: number; readonly height: number };
+ 
+ export type MinimapLayout = {
+   readonly input: MinimapInput;
+   readonly startRow: number;
+   readonly endRow: number;
+   readonly topPaddingRows: number;
++  readonly canvasHeight: number;
+   readonly rowPx: number;
+   readonly slider: Slider | null;
+   readonly ratio: number;
+@@ -25,7 +32,7 @@ export type MinimapLayout = {
+ 
+ export type Box = { readonly x: number; readonly width: number };
+ 
+-type Columns = {
++export type Columns = {
+   readonly left: Box;
+   readonly code: Box;
+   readonly right: Box;
+@@ -63,11 +70,20 @@ function scrollHeightOf({ rows, paddingTop, paddingBottom }: MinimapInput): numb
+   return rows * LINE_HEIGHT_PX + paddingTop + paddingBottom;
+ }
+ 
++export function rowOfTop(top: number): number {
++  return Math.floor(top / LINE_HEIGHT_PX) + 1;
++}
++
++export function topOfRow(row: number): number {
++  return (row - 1) * LINE_HEIGHT_PX;
++}
++
+ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | null): MinimapLayout {
+   const { scrollTop, viewportHeight, paddingTop, rows, height, pixelRatio } = input;
+   const rowPx = GLYPH_ROWS_PER_SCALE * minimapScale(pixelRatio);
+   const rowCss = rowPx / pixelRatio;
+-  const fitting = Math.floor(Math.floor(pixelRatio * height) / rowPx);
++  const canvasHeight = Math.floor(pixelRatio * height);
++  const fitting = Math.floor(canvasHeight / rowPx);
+   const sliderHeight = Math.floor((viewportHeight / LINE_HEIGHT_PX) * rowCss);
+   const extraTop = Math.floor(paddingTop / LINE_HEIGHT_PX);
+   const travel = Math.min(
+@@ -79,23 +95,21 @@ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | nul
+   const sliderTop = scrollTop * ratio;
+   if (fitting >= extraTop + rows) {
+     const slider = travel > 0 ? { top: sliderTop, height: sliderHeight } : null;
+-    return { input, startRow: 1, endRow: rows, topPaddingRows: extraTop, rowPx, slider, ratio };
++    const fit = { startRow: 1, endRow: rows, topPaddingRows: extraTop };
++    return { input, ...fit, canvasHeight, rowPx, slider, ratio };
+   }
+   const shown = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
+   const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
+   const slider = { top: alignedSliderTop(input, shown, rowCss), height: sliderHeight };
+-  return { input, ...shown, endRow, rowPx, slider, ratio };
++  return { input, ...shown, endRow, canvasHeight, rowPx, slider, ratio };
+ }
+ 
+ function viewportStart({ scrollTop, paddingTop, rows }: MinimapInput): {
+   readonly row: number;
+   readonly partial: number;
+ } {
+-  const row = Math.min(
+-    rows,
+-    Math.max(1, Math.floor((scrollTop - paddingTop) / LINE_HEIGHT_PX) + 1),
+-  );
+-  const partial = (scrollTop - paddingTop - (row - 1) * LINE_HEIGHT_PX) / LINE_HEIGHT_PX;
++  const row = Math.min(rows, Math.max(1, rowOfTop(scrollTop - paddingTop)));
++  const partial = (scrollTop - paddingTop - topOfRow(row)) / LINE_HEIGHT_PX;
+   return { row, partial };
+ }
+ 
+@@ -149,7 +163,7 @@ export function rowTop(layout: MinimapLayout, row: number): number {
+ }
+ 
+ export function centredScrollTop(row: number, input: MinimapInput): number {
+-  const top = input.paddingTop + (row - 1) * LINE_HEIGHT_PX;
++  const top = input.paddingTop + topOfRow(row);
+   // The minimap reveals with source "mouse", which pads the box with one line above and none
+   // below (vscode viewLines.ts _computeScrollTopToRevealRange, shouldIgnoreScrollOff).
+   const boxStart = top - LINE_HEIGHT_PX;
+diff --git a/frontend/src/editor/internal/minimapMarks.test.ts b/frontend/src/editor/internal/minimapMarks.test.ts
+index c44a53f..45276a4 100644
+--- a/frontend/src/editor/internal/minimapMarks.test.ts
++++ b/frontend/src/editor/internal/minimapMarks.test.ts
+@@ -174,12 +174,33 @@ test("only marks in the window; through start row and padding", () => {
+     { ...rows(100, 100), kind: "error" },
+     { ...rows(3436, 3436), kind: "warning" },
+     { ...rows(3900, 3901), kind: "error" },
++    { ...rows(3434, 3434), kind: "modified" },
++    { ...rows(3885, 3885), kind: "modified" },
++    { top: 3434 * LINE_PX, bottom: 3434 * LINE_PX, kind: "deleted" },
+   ];
+ 
+   expect(markBoxes(marks, tall, minimapColumns(1).right)).toEqual([
+     { x: 127, y: 1, width: 4, height: 4, kind: "warning" },
++    { x: 127, y: 0, width: 4, height: 4, kind: "deleted" },
+   ]);
+   expect(markBoxes([{ ...rows(1, 1), kind: "inserted" }], padded, minimapColumns(2).right)).toEqual(
+     [{ x: 254, y: 2, width: 8, height: 8, kind: "inserted" }],
+   );
+ });
++
++test("at a fractional ratio the inset, the width and the minimum height are whole device px", () => {
++  const quarter = minimapLayout({ ...TALL, pixelRatio: 1.25 }, null);
++  const row = quarter.startRow + 11;
++  const tenth = minimapLayout({ ...TALL, pixelRatio: 1.1 }, null);
++
++  expect(
++    markBoxes([{ ...rows(row, row), kind: "error" }], quarter, minimapColumns(1.25).right),
++  ).toEqual([{ x: 129, y: 21, width: 5, height: 5, kind: "error" }]);
++  expect(
++    markBoxes(
++      [{ ...rows(tenth.startRow, tenth.startRow), kind: "error" }],
++      tenth,
++      minimapColumns(1.1).right,
++    ),
++  ).toEqual([{ x: 128, y: 0, width: 4, height: 4, kind: "error" }]);
++});
+diff --git a/frontend/src/editor/internal/minimapMarks.ts b/frontend/src/editor/internal/minimapMarks.ts
+index 3c4438d..9bf003a 100644
+--- a/frontend/src/editor/internal/minimapMarks.ts
++++ b/frontend/src/editor/internal/minimapMarks.ts
+@@ -3,11 +3,10 @@ import type { EditorState } from "@codemirror/state";
+ 
+ import type { Span } from "../../connectors";
+ import type { ChunkRow } from "./geometry";
+-import { rowTop, type Box, type MinimapLayout } from "./minimapLayout";
+-import { LINE_HEIGHT_PX } from "./pane";
++import { rowOfTop, rowTop, topOfRow, type Box, type MinimapLayout } from "./minimapLayout";
+ import { paneTone, type Tone } from "./tone";
+ 
+-type EdgeKind = Tone | "error" | "warning";
++export type EdgeKind = Tone | "error" | "warning";
+ 
+ export type EdgeMark = { readonly top: number; readonly bottom: number; readonly kind: EdgeKind };
+ 
+@@ -55,18 +54,20 @@ export function problemMarks(state: EditorState, blockAt: (pos: number) => Span)
+ }
+ 
+ export function markBoxes(marks: readonly EdgeMark[], layout: MinimapLayout, edge: Box): MarkBox[] {
+-  const { pixelRatio, height } = layout.input;
+-  const canvasHeight = Math.floor(pixelRatio * height);
++  const { canvasHeight, input } = layout;
++  const { pixelRatio } = input;
+   const x = edge.x + Math.round(MARK_INSET_CSS_PX * pixelRatio);
+   const width = Math.round(MARK_WIDTH_CSS_PX * pixelRatio);
+   const minHeight = Math.round(MARK_MIN_HEIGHT_CSS_PX * pixelRatio);
+-  const first = (layout.startRow - 1) * LINE_HEIGHT_PX;
+-  const last = layout.endRow * LINE_HEIGHT_PX;
++  const first = topOfRow(layout.startRow);
++  const last = topOfRow(layout.endRow + 1);
+   return marks
+-    .filter(({ top, bottom }) => bottom >= first && top <= last)
++    .filter(({ top, bottom }) =>
++      top === bottom ? first <= top && top <= last : first < bottom && top < last,
++    )
+     .map(({ top, bottom, kind }) => {
+-      const from = Math.max(0, rowTop(layout, 1 + top / LINE_HEIGHT_PX));
+-      const to = Math.min(canvasHeight, rowTop(layout, 1 + bottom / LINE_HEIGHT_PX));
++      const from = Math.max(0, rowTop(layout, rowOfTop(top)));
++      const to = Math.min(canvasHeight, rowTop(layout, rowOfTop(bottom)));
+       const boxHeight = Math.max(to - from, minHeight);
+       const centred = (from + to - boxHeight) / HALVES;
+       const y = Math.round(Math.min(Math.max(0, centred), canvasHeight - boxHeight));
+diff --git a/frontend/src/editor/internal/minimapPixels.ts b/frontend/src/editor/internal/minimapPixels.ts
+index 2bcbe48..871ab60 100644
+--- a/frontend/src/editor/internal/minimapPixels.ts
++++ b/frontend/src/editor/internal/minimapPixels.ts
+@@ -1,3 +1,8 @@
++// The glyph painting and the row walk below follow Visual Studio Code line by line
++// (microsoft/vscode at 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/minimap/:
++// minimapCharRenderer.ts renderChar, minimap.ts _renderLine).
++// Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License.
++
+ import { charIndex, glyphIntensity, GLYPH_ROWS_PER_SCALE, type Scale } from "./minimapGlyphs";
+ import { MAX_COLUMNS } from "./minimapLayout";
+ 
+diff --git a/frontend/src/editor/internal/minimapPointer.test.ts b/frontend/src/editor/internal/minimapPointer.test.ts
+new file mode 100644
+index 0000000..2b5fd2d
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapPointer.test.ts
+@@ -0,0 +1,156 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import {
++  centredScrollTop,
++  draggedScrollTop,
++  minimapLayout,
++  type MinimapInput,
++} from "./minimapLayout";
++import { MinimapPointer, wheelPixels } from "./minimapPointer";
++
++const TALL: MinimapInput = {
++  scrollTop: 72_770,
++  viewportHeight: 900,
++  paddingTop: 4,
++  paddingBottom: 4,
++  rows: 7277,
++  height: 900,
++  pixelRatio: 1,
++};
++const BOX_TOP = 100;
++const WHEEL_MODES = { DOM_DELTA_PIXEL: 0, DOM_DELTA_LINE: 1, DOM_DELTA_PAGE: 2 };
++
++class FakeElement extends EventTarget {
++  scrollTop = 0;
++  readonly clientHeight = 900;
++  readonly scrolled: ScrollToOptions[] = [];
++  readonly classes = new Set<string>();
++  readonly captured = new Set<number>();
++  readonly classList = {
++    add: (name: string): void => {
++      this.classes.add(name);
++    },
++    remove: (name: string): void => {
++      this.classes.delete(name);
++    },
++  };
++  getBoundingClientRect(): { top: number } {
++    return { top: BOX_TOP };
++  }
++  setPointerCapture(id: number): void {
++    this.captured.add(id);
++  }
++  hasPointerCapture(id: number): boolean {
++    return this.captured.has(id);
++  }
++  releasePointerCapture(id: number): void {
++    this.captured.delete(id);
++  }
++  scrollBy(options: ScrollToOptions): void {
++    this.scrolled.push(options);
++  }
++}
++
++function pointer(
++  type: string,
++  fields: { button?: number; pointerType?: string; clientY: number },
++): Event {
++  return Object.assign(new Event(type, { bubbles: true }), {
++    button: 0,
++    pointerType: "mouse",
++    pointerId: 7,
++    ...fields,
++  });
++}
++
++function mounted() {
++  const box = new FakeElement();
++  const slider = new FakeElement();
++  const scroller = new FakeElement();
++  const follow = vi.fn();
++  const layout = minimapLayout(TALL, null);
++  const created = new MinimapPointer({ box, slider, scroller, layout: () => layout, follow });
++  return { box, slider, scroller, follow, layout, created };
++}
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++test("a wheel scrolls by pixels, by lines of 20 px, or by pages of the Result's height", () => {
++  vi.stubGlobal("WheelEvent", WHEEL_MODES);
++
++  expect([0, 1, 2].map((mode) => wheelPixels(mode, { clientHeight: 700 }))).toEqual([1, 20, 700]);
++});
++
++test("a wheel over the box scrolls the Result by the wheel's pixels and the sides follow", () => {
++  vi.stubGlobal("WheelEvent", WHEEL_MODES);
++  const { box, scroller, follow } = mounted();
++
++  box.dispatchEvent(Object.assign(new Event("wheel"), { deltaMode: 1, deltaX: 0, deltaY: 3 }));
++
++  expect(scroller.scrolled).toEqual([{ left: 0, top: 60 }]);
++  expect(follow).toHaveBeenCalledTimes(1);
++});
++
++test("a primary press puts its row's top in the Result's middle and the sides follow", () => {
++  const { box, scroller, follow, layout } = mounted();
++
++  box.dispatchEvent(pointer("pointerdown", { clientY: BOX_TOP + 130 }));
++
++  expect(layout.startRow).toBe(3435);
++  expect(scroller.scrollTop).toBe(centredScrollTop(3500, TALL));
++  expect(follow).toHaveBeenCalledTimes(1);
++});
++
++test("a secondary mouse button does nothing; a touch press does", () => {
++  const { box, scroller, follow } = mounted();
++
++  box.dispatchEvent(pointer("pointerdown", { button: 2, clientY: BOX_TOP + 130 }));
++  expect(scroller.scrollTop).toBe(0);
++  box.dispatchEvent(pointer("pointerdown", { button: -1, pointerType: "touch", clientY: BOX_TOP }));
++  expect(follow).toHaveBeenCalledTimes(1);
++});
++
++test("a slider drag scrolls from where it started and never reaches the box's press", () => {
++  const { box, slider, scroller, follow, layout } = mounted();
++  const boxPress = vi.fn();
++  box.addEventListener("pointerdown", boxPress);
++  const press = pointer("pointerdown", { clientY: 500 });
++
++  slider.dispatchEvent(press);
++  expect(press.cancelBubble).toBe(true);
++  expect(slider.classes.has("active")).toBe(true);
++  expect(slider.captured.has(7)).toBe(true);
++  slider.dispatchEvent(pointer("pointermove", { clientY: 550 }));
++  slider.dispatchEvent(pointer("pointerup", { clientY: 550 }));
++  slider.dispatchEvent(pointer("pointermove", { clientY: 600 }));
++
++  expect(scroller.scrollTop).toBe(draggedScrollTop(layout, 50));
++  expect(follow).toHaveBeenCalledTimes(1);
++  expect(slider.classes.has("active")).toBe(false);
++  expect(slider.captured.has(7)).toBe(false);
++  expect(boxPress).not.toHaveBeenCalled();
++});
++
++test("release mid-drag lets the capture go and ends the drag", () => {
++  const { slider, scroller, created } = mounted();
++
++  slider.dispatchEvent(pointer("pointerdown", { clientY: 500 }));
++  created.release();
++  slider.dispatchEvent(pointer("pointermove", { clientY: 550 }));
++
++  expect(slider.captured.has(7)).toBe(false);
++  expect(slider.classes.has("active")).toBe(false);
++  expect(scroller.scrollTop).toBe(0);
++});
++
++test("a mouse press on the box keeps the focus and the selection where they are", () => {
++  const { box } = mounted();
++  const press = new Event("mousedown", { bubbles: true, cancelable: true });
++
++  box.dispatchEvent(press);
++
++  expect(press.defaultPrevented).toBe(true);
++  expect(press.cancelBubble).toBe(true);
++});
+diff --git a/frontend/src/editor/internal/minimapPointer.ts b/frontend/src/editor/internal/minimapPointer.ts
+new file mode 100644
+index 0000000..4766516
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapPointer.ts
+@@ -0,0 +1,123 @@
++import { centredScrollTop, draggedScrollTop, rowAt, type MinimapLayout } from "./minimapLayout";
++import { LINE_HEIGHT_PX } from "./pane";
++
++type PointerParts = {
++  readonly box: Pick<HTMLElement, "addEventListener"> & {
++    getBoundingClientRect(): { readonly top: number };
++  };
++  readonly slider: Pick<
++    HTMLElement,
++    "addEventListener" | "setPointerCapture" | "hasPointerCapture" | "releasePointerCapture"
++  > & { readonly classList: Pick<DOMTokenList, "add" | "remove"> };
++  readonly scroller: {
++    scrollTop: number;
++    readonly clientHeight: number;
++    scrollBy(options: ScrollToOptions): void;
++  };
++  readonly layout: () => MinimapLayout | null;
++  readonly follow: () => void;
++};
++
++type Drag = { readonly start: MinimapLayout; readonly startY: number; readonly pointerId: number };
++
++const ACTIVE_CLASS = "active";
++
++export function wheelPixels(
++  deltaMode: number,
++  scroller: Pick<HTMLElement, "clientHeight">,
++): number {
++  switch (deltaMode) {
++    case WheelEvent.DOM_DELTA_LINE:
++      return LINE_HEIGHT_PX;
++    case WheelEvent.DOM_DELTA_PAGE:
++      return scroller.clientHeight;
++    default:
++      return 1;
++  }
++}
++
++function primary(event: PointerEvent): boolean {
++  return event.button === 0 || event.pointerType !== "mouse";
++}
++
++function keepFocus(event: MouseEvent): void {
++  event.preventDefault();
++  event.stopPropagation();
++}
++
++export class MinimapPointer {
++  readonly #parts: PointerParts;
++  readonly #listeners = new AbortController();
++  #drag: Drag | null = null;
++
++  constructor(parts: PointerParts) {
++    this.#parts = parts;
++    const { box, slider } = parts;
++    const signal = this.#listeners.signal;
++    box.addEventListener("mousedown", keepFocus, { signal });
++    box.addEventListener("pointerdown", (event) => this.#press(event), { signal });
++    box.addEventListener("wheel", (event) => this.#wheel(event), { signal, passive: true });
++    slider.addEventListener("pointerdown", (event) => this.#startDrag(event), { signal });
++    slider.addEventListener("pointermove", (event) => this.#dragTo(event), { signal });
++    for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) {
++      slider.addEventListener(type, () => this.release(), { signal });
++    }
++  }
++
++  release(): void {
++    const drag = this.#drag;
++    if (drag === null) {
++      return;
++    }
++    this.#drag = null;
++    const { slider } = this.#parts;
++    slider.classList.remove(ACTIVE_CLASS);
++    if (slider.hasPointerCapture(drag.pointerId)) {
++      slider.releasePointerCapture(drag.pointerId);
++    }
++  }
++
++  destroy(): void {
++    this.release();
++    this.#listeners.abort();
++  }
++
++  #press(event: PointerEvent): void {
++    const { box, scroller, layout, follow } = this.#parts;
++    const shown = layout();
++    if (shown === null || !primary(event)) {
++      return;
++    }
++    const row = rowAt(shown, event.clientY - box.getBoundingClientRect().top);
++    scroller.scrollTop = centredScrollTop(row, shown.input);
++    follow();
++  }
++
++  #startDrag(event: PointerEvent): void {
++    const { slider, layout } = this.#parts;
++    const start = layout();
++    if (start === null || !primary(event)) {
++      return;
++    }
++    event.stopPropagation();
++    slider.setPointerCapture(event.pointerId);
++    slider.classList.add(ACTIVE_CLASS);
++    this.#drag = { start, startY: event.clientY, pointerId: event.pointerId };
++  }
++
++  #dragTo(event: PointerEvent): void {
++    const drag = this.#drag;
++    if (drag === null) {
++      return;
++    }
++    this.#parts.scroller.scrollTop = draggedScrollTop(drag.start, event.clientY - drag.startY);
++    this.#parts.follow();
++  }
++
++  #wheel(event: WheelEvent): void {
++    const { scroller, follow } = this.#parts;
++    const pixels = wheelPixels(event.deltaMode, scroller);
++    scroller.scrollBy({ left: event.deltaX * pixels, top: event.deltaY * pixels });
++    follow();
++  }
++}
+diff --git a/frontend/src/editor/internal/minimapRows.test.ts b/frontend/src/editor/internal/minimapRows.test.ts
+new file mode 100644
+index 0000000..8e0546e
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapRows.test.ts
+@@ -0,0 +1,101 @@
++import { EditorState } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { languageOf } from "./language";
++import { readLook, rowColours, waveRowsOf } from "./minimapRows";
++
++const CODE = 0;
++const KEYWORD = 1;
++const STRING = 2;
++const NUMBER = 3;
++
++async function typescript(text: string): Promise<EditorState> {
++  const description = languageOf("a.ts");
++  if (description === null) {
++    throw new Error("no language for a.ts");
++  }
++  const { language } = await description.load();
++  return EditorState.create({ doc: text, extensions: language });
++}
++
++test("a row's colours are the palette index of each character's syntax token, from the row's start", async () => {
++  const state = await typescript("const x = 1;\nlet y = 'a';\n");
++  const second = state.doc.line(2);
++  const first = state.doc.line(1);
++
++  expect([...rowColours(state, second.from, second.to)]).toEqual([
++    KEYWORD,
++    KEYWORD,
++    KEYWORD,
++    CODE,
++    CODE,
++    CODE,
++    CODE,
++    CODE,
++    STRING,
++    STRING,
++    STRING,
++    CODE,
++  ]);
++  expect([...rowColours(state, first.from + 6, first.to)]).toEqual([
++    CODE,
++    CODE,
++    CODE,
++    CODE,
++    NUMBER,
++    CODE,
++  ]);
++});
++
++test("text no grammar colours is drawn in the code colour", () => {
++  const state = EditorState.create({ doc: "const x = 1;" });
++
++  expect([...rowColours(state, 0, state.doc.length)]).toEqual(
++    Array.from({ length: 12 }, () => CODE),
++  );
++});
++
++function hexOf({ r, g, b }: { r: number; g: number; b: number }): string {
++  return ["#", ...[r, g, b].map((channel) => channel.toString(16).padStart(2, "0"))].join("");
++}
++
++test("the look reads each token once: code first, a missing token in the code colour, edges as given", () => {
++  const code = { r: 196, g: 194, b: 206 };
++  const keyword = { r: 224, g: 152, b: 107 };
++  const wave = { r: 86, g: 83, b: 98 };
++  const conflict = hexOf({ r: 129, g: 80, b: 190 });
++  const error = hexOf({ r: 246, g: 107, b: 113 });
++  const values: Readonly<Record<string, string>> = {
++    "--color-code": ` ${hexOf(code)}`,
++    "--color-syntax-keyword": hexOf(keyword),
++    "--color-diff-wave": hexOf(wave),
++    "--color-mark-conflict": ` ${conflict}`,
++    "--color-problem-error": error,
++    "--color-problem-warning": "not a colour",
++  };
++  const style = { getPropertyValue: (name: string): string => values[name] ?? "" };
++  const look = readLook(style, true, 2);
++
++  expect(look.glyphs.scale).toBe(2);
++  expect(look.glyphs.light).toBe(true);
++  expect(look.glyphs.palette.slice(0, 3)).toEqual([code, keyword, code]);
++  expect(look.wave).toEqual(wave);
++  expect(look.edges).toEqual({
++    inserted: hexOf(code),
++    modified: hexOf(code),
++    deleted: hexOf(code),
++    conflict,
++    error,
++    warning: hexOf(code),
++  });
++});
++
++test("a collapsed run's row is the row of its wave line's top in the Result", () => {
++  const waves = [
++    { left: 0, center: 40, right: 0 },
++    { left: 100, center: null, right: 100 },
++    { left: 200, center: 2000, right: 220 },
++  ];
++
++  expect([...waveRowsOf(waves)]).toEqual([3, 101]);
++});
+diff --git a/frontend/src/editor/internal/minimapRows.ts b/frontend/src/editor/internal/minimapRows.ts
+new file mode 100644
+index 0000000..6b47878
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapRows.ts
+@@ -0,0 +1,79 @@
++import { syntaxTree } from "@codemirror/language";
++import type { EditorState } from "@codemirror/state";
++import { highlightTree } from "@lezer/highlight";
++
++import type { WaveRow } from "./geometry";
++import type { Scale } from "./minimapGlyphs";
++import { rowOfTop } from "./minimapLayout";
++import type { EdgeKind } from "./minimapMarks";
++import { rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
++import { SYNTAX_COLOURS, syntaxColourClasses } from "./pane";
++
++export type Look = {
++  readonly glyphs: GlyphLook;
++  readonly wave: Rgb;
++  readonly edges: Readonly<Record<EdgeKind, string>>;
++};
++
++const CODE_TOKEN = "--color-code";
++const PALETTE_TOKENS: readonly string[] = [
++  CODE_TOKEN,
++  ...new Set(SYNTAX_COLOURS.map(({ colour }) => colour)),
++];
++const NO_COLOUR: Rgb = { r: 0, g: 0, b: 0 };
++
++function paletteIndex(classes: string): number {
++  for (const name of classes.split(" ")) {
++    const index = PALETTE_TOKENS.indexOf(name);
++    if (index > 0) {
++      return index;
++    }
++  }
++  return 0;
++}
++
++export function rowColours(state: EditorState, from: number, to: number): Uint8Array {
++  const colours = new Uint8Array(to - from);
++  highlightTree(
++    syntaxTree(state),
++    syntaxColourClasses,
++    (start, end, classes) => {
++      colours.fill(paletteIndex(classes), start - from, end - from);
++    },
++    from,
++    to,
++  );
++  return colours;
++}
++
++export function readLook(
++  style: Pick<CSSStyleDeclaration, "getPropertyValue">,
++  light: boolean,
++  scale: Scale,
++): Look {
++  const codeValue = style.getPropertyValue(CODE_TOKEN).trim();
++  const code = rgbOf(codeValue) ?? NO_COLOUR;
++  function read(token: string): Rgb {
++    return rgbOf(style.getPropertyValue(token)) ?? code;
++  }
++  function css(token: string): string {
++    const value = style.getPropertyValue(token).trim();
++    return rgbOf(value) === null ? codeValue : value;
++  }
++  return {
++    glyphs: { scale, light, palette: PALETTE_TOKENS.map(read) },
++    wave: read("--color-diff-wave"),
++    edges: {
++      inserted: css("--color-mark-inserted"),
++      modified: css("--color-mark-modified"),
++      deleted: css("--color-mark-deleted"),
++      conflict: css("--color-mark-conflict"),
++      error: css("--color-problem-error"),
++      warning: css("--color-problem-warning"),
++    },
++  };
++}
++
++export function waveRowsOf(waves: readonly WaveRow[]): ReadonlySet<number> {
++  return new Set(waves.flatMap(({ center }) => (center === null ? [] : [rowOfTop(center)])));
++}
+diff --git a/frontend/src/editor/internal/minimapTiles.test.ts b/frontend/src/editor/internal/minimapTiles.test.ts
+index 66f9ce8..b05acaf 100644
+--- a/frontend/src/editor/internal/minimapTiles.test.ts
++++ b/frontend/src/editor/internal/minimapTiles.test.ts
+@@ -1,6 +1,7 @@
+-import { expect, test } from "vitest";
++import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { staleTiles } from "./minimapTiles";
++import type { PixelRows } from "./minimapPixels";
++import { MinimapTiles, staleTiles, TILE_ROWS, type TileRenderer } from "./minimapTiles";
+ 
+ const QUIET = {
+   docChanged: false,
+@@ -10,6 +11,51 @@ const QUIET = {
+   treeBefore: 4000,
+   treeAfter: 4000,
+ };
++const ROW_PX = 2;
++const ROW_CHARS = 30;
++
++type Painted = { readonly row: number; readonly y: number; readonly width: number };
++
++function stubCanvas(): unknown[] {
++  const put: unknown[] = [];
++  vi.stubGlobal("document", {
++    createElement: () => ({
++      width: 0,
++      height: 0,
++      getContext: () => ({
++        putImageData: (image: unknown) => {
++          put.push(image);
++        },
++      }),
++    }),
++  });
++  vi.stubGlobal(
++    "ImageData",
++    class {
++      readonly data: Uint8ClampedArray;
++      constructor(width: number, height: number) {
++        this.data = new Uint8ClampedArray(width * height * 4);
++      }
++    },
++  );
++  return put;
++}
++
++function renderer(rows: number, painted: Painted[]): TileRenderer {
++  return {
++    width: 120,
++    rowPx: ROW_PX,
++    rows,
++    paintRow: (target: PixelRows, row: number, y: number) => {
++      painted.push({ row, y, width: target.width });
++      return row * ROW_CHARS;
++    },
++  };
++}
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
+ 
+ test("doc or folds or theme or language → all; tree grown → from the old length; statuses → none", () => {
+   expect(staleTiles({ ...QUIET, docChanged: true, treeAfter: 9000 })).toBe("all");
+@@ -19,3 +65,59 @@ test("doc or folds or theme or language → all; tree grown → from the old len
+   expect(staleTiles({ ...QUIET, treeAfter: 9000 })).toEqual({ from: 4000 });
+   expect(staleTiles(QUIET)).toBe("none");
+ });
++
++test("a tile paints its 128 rows once, each at its own y, and the last tile stops at the last row", () => {
++  const put = stubCanvas();
++  const painted: Painted[] = [];
++  const tiles = new MinimapTiles();
++  const source = renderer(300, painted);
++
++  const first = tiles.canvas(0, source);
++  expect(tiles.canvas(0, source)).toBe(first);
++  tiles.canvas(2, source);
++
++  expect(first).toMatchObject({ width: 120, height: TILE_ROWS * ROW_PX });
++  expect(put).toHaveLength(2);
++  expect(painted).toHaveLength(TILE_ROWS + 300 - 2 * TILE_ROWS);
++  expect(painted.slice(0, 2)).toEqual([
++    { row: 1, y: 0, width: 120 },
++    { row: 2, y: 2, width: 120 },
++  ]);
++  expect(painted.at(TILE_ROWS - 1)).toEqual({ row: 128, y: 254, width: 120 });
++  expect(painted.slice(TILE_ROWS, TILE_ROWS + 1)).toEqual([{ row: 257, y: 0, width: 120 }]);
++  expect(painted.at(-1)).toEqual({ row: 300, y: 86, width: 120 });
++});
++
++test("a grown tree drops the tiles ending past its old length; keep drops tiles outside the window", () => {
++  stubCanvas();
++  const painted: Painted[] = [];
++  const tiles = new MinimapTiles();
++  const source = renderer(1000, painted);
++  for (const index of [0, 1, 2, 3]) {
++    tiles.canvas(index, source);
++  }
++
++  tiles.drop({ from: 256 * ROW_CHARS });
++  painted.length = 0;
++  tiles.canvas(1, source);
++  tiles.canvas(2, source);
++  expect(painted.map(({ row }) => row)).toEqual(
++    Array.from({ length: TILE_ROWS }, (_, row) => 2 * TILE_ROWS + row + 1),
++  );
++  tiles.canvas(3, source);
++
++  tiles.keep(2, 3);
++  tiles.drop("none");
++  painted.length = 0;
++  for (const index of [0, 2, 3]) {
++    tiles.canvas(index, source);
++  }
++  expect(painted.map(({ row }) => row)).toEqual(
++    Array.from({ length: TILE_ROWS }, (_, row) => row + 1),
++  );
++
++  tiles.drop("all");
++  painted.length = 0;
++  tiles.canvas(3, source);
++  expect(painted).toHaveLength(TILE_ROWS);
++});
+diff --git a/frontend/src/editor/internal/minimapTiles.ts b/frontend/src/editor/internal/minimapTiles.ts
+index cceb2a9..ab6dbcb 100644
+--- a/frontend/src/editor/internal/minimapTiles.ts
++++ b/frontend/src/editor/internal/minimapTiles.ts
+@@ -1,5 +1,18 @@
++import type { PixelRows } from "./minimapPixels";
++
+ type Stale = "none" | "all" | { readonly from: number };
+ 
++export type TileRenderer = {
++  readonly width: number;
++  readonly rowPx: number;
++  readonly rows: number;
++  paintRow(target: PixelRows, row: number, y: number): number;
++};
++
++type Tile = { readonly canvas: HTMLCanvasElement; readonly to: number };
++
++export const TILE_ROWS = 128;
++
+ export function staleTiles(facts: {
+   readonly docChanged: boolean;
+   readonly foldsChanged: boolean;
+@@ -14,3 +27,61 @@ export function staleTiles(facts: {
+   }
+   return treeAfter > treeBefore ? { from: treeBefore } : "none";
+ }
++
++function renderTile(index: number, renderer: TileRenderer): Tile {
++  const { width, rowPx, rows } = renderer;
++  const canvas = document.createElement("canvas");
++  canvas.width = width;
++  canvas.height = TILE_ROWS * rowPx;
++  const image = new ImageData(width, canvas.height);
++  const target = { data: image.data, width };
++  const first = index * TILE_ROWS + 1;
++  const last = Math.min(rows, first + TILE_ROWS - 1);
++  let to = 0;
++  for (let row = first; row <= last; row += 1) {
++    to = renderer.paintRow(target, row, (row - first) * rowPx);
++  }
++  canvas.getContext("2d")?.putImageData(image, 0, 0);
++  return { canvas, to };
++}
++
++export class MinimapTiles {
++  readonly #tiles = new Map<number, Tile>();
++
++  canvas(index: number, renderer: TileRenderer): HTMLCanvasElement {
++    const cached = this.#tiles.get(index);
++    if (cached !== undefined) {
++      return cached.canvas;
++    }
++    const tile = renderTile(index, renderer);
++    this.#tiles.set(index, tile);
++    return tile.canvas;
++  }
++
++  keep(first: number, last: number): void {
++    for (const index of this.#tiles.keys()) {
++      if (index < first || index > last) {
++        this.#tiles.delete(index);
++      }
++    }
++  }
++
++  drop(stale: Stale): void {
++    if (stale === "none") {
++      return;
++    }
++    if (stale === "all") {
++      this.#tiles.clear();
++      return;
++    }
++    for (const [index, tile] of this.#tiles) {
++      if (tile.to > stale.from) {
++        this.#tiles.delete(index);
++      }
++    }
++  }
++
++  clear(): void {
++    this.#tiles.clear();
++  }
++}
+diff --git a/frontend/src/editor/problems.browser.test.ts b/frontend/src/editor/problems.browser.test.ts
+index 5c56972..f570381 100644
+--- a/frontend/src/editor/problems.browser.test.ts
++++ b/frontend/src/editor/problems.browser.test.ts
+@@ -116,6 +116,7 @@ function options(servers: LanguageServers | null, readOnly = false): MergeOption
+     readOnly,
+     preferences: { theme: "dark", keys: DEFAULT_KEYS },
+     collapsed: false,
++    minimap: false,
+     servers,
+   };
+ }
+diff --git a/frontend/src/editor/removals.browser.test.ts b/frontend/src/editor/removals.browser.test.ts
+index 9978332..e862089 100644
+--- a/frontend/src/editor/removals.browser.test.ts
++++ b/frontend/src/editor/removals.browser.test.ts
+@@ -27,6 +27,7 @@ const OPTIONS: MergeOptions = {
+   readOnly: false,
+   preferences: { theme: "dark", keys: DEFAULT_KEYS },
+   collapsed: false,
++  minimap: false,
+   servers: null,
+ };
+ 
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index f60b778..8873d96 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -317,3 +317,48 @@ path.chunk-band {
+ :root .removal-tooltip-whitespace {
+   color: var(--color-fg-muted);
+ }
++
++.cm-editor > .minimap {
++  position: absolute;
++  top: 0;
++  right: 0;
++  bottom: 0;
++  z-index: 400;
++  box-sizing: content-box;
++  max-width: 100%;
++  overflow: hidden;
++  border-left: 1px solid var(--color-control-border);
++  background: var(--color-panel);
++  visibility: visible;
++}
++
++.cm-editor > .minimap[hidden] {
++  display: none;
++}
++
++.minimap > canvas {
++  position: absolute;
++  top: 0;
++  right: 0;
++  opacity: 0.9;
++}
++
++.minimap-slider {
++  position: absolute;
++  top: 0;
++  right: 0;
++  left: 0;
++  background: var(--color-minimap-slider);
++}
++
++.minimap-slider:hover {
++  background: var(--color-minimap-slider-hover);
++}
++
++.minimap-slider.active {
++  background: var(--color-minimap-slider-active);
++}
++
++.minimap-slider[hidden] {
++  display: none;
++}
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index eba1b76..67bb867 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -64,6 +64,10 @@
+   --color-mark-modified: #43698d;
+   --color-mark-deleted: #656e76;
+   --color-mark-conflict: #8150be;
++
++  --color-minimap-slider: #79797933;
++  --color-minimap-slider-hover: #64646459;
++  --color-minimap-slider-active: #bfbfbf33;
+ }
+ 
+ :root[data-theme="light"] {
+@@ -124,6 +128,10 @@
+   --color-mark-modified: #b6d2f2;
+   --color-mark-deleted: #c8c8c8;
+   --color-mark-conflict: #c6bbf5;
++
++  --color-minimap-slider: #64646433;
++  --color-minimap-slider-hover: #64646459;
++  --color-minimap-slider-active: #0000004d;
+ }
+ 
+ /* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 57241e4..3c79add 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -2,6 +2,7 @@
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { onMounted, watch } from "vue";
+ 
++import { useAltHold } from "./altHold";
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+@@ -35,6 +36,7 @@ const {
+ } = useAppStore();
+ 
+ const focused = useWindowFocus();
++const altHeld = useAltHold();
+ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+@@ -76,6 +78,7 @@ onMounted(() => {
+           :key="file.path"
+           :data="file"
+           :shown="file.path === active && screen.kind === 'files'"
++          :minimap="altHeld"
+         />
+         <ChoiceView
+           v-for="sides in choices"
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 2373ebc..84d6f59 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -5,7 +5,7 @@ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
+ import { pressesKey, type FileMergeData, type Side } from "../ipc";
+ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./choiceText";
+ import type { FileWork } from "./closeGuard";
+-import { deletedSideView, keptToApply } from "./deletedSide";
++import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+@@ -25,7 +25,7 @@ type Column = {
+   readonly delete: boolean;
+ };
+ 
+-const props = defineProps<{ data: FileMergeData; shown: boolean }>();
++const props = defineProps<{ data: FileMergeData; shown: boolean; minimap: boolean }>();
+ 
+ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
+ 
+@@ -56,6 +56,7 @@ const handle = useMergeController(
+     readOnly: () => !isEditable(props.data),
+     preferences,
+     collapsed: collapsing,
++    minimap: showsMinimap,
+     servers,
+   },
+ );
+@@ -77,12 +78,7 @@ if (props.data.deleted === null) {
+ useEventListener(window, "keydown", historyKeyInShownFile);
+ useEventListener(window, "keydown", saveKeyInShownFile);
+ 
+-const deletedView = computed(() => {
+-  const { deleted, path, middle } = props.data;
+-  return deleted === null
+-    ? null
+-    : deletedSideView(deleted, taken.value.get(path) ?? null, middle.kind);
+-});
++const deletedView = computed(deletedViewNow);
+ const columns = computed(() =>
+   SIDES.map((side): Column => ({
+     side,
+@@ -93,13 +89,7 @@ const columns = computed(() =>
+     delete: deletedView.value?.deleteIn === side,
+   })),
+ );
+-const centerLine = computed(() => {
+-  const { middle } = props.data;
+-  if (deletedView.value?.middle === "deleted") {
+-    return DELETED_LINE;
+-  }
+-  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
+-});
++const centerLine = computed(() => resultLine(deletedView.value));
+ const editable = computed(() => isEditable(props.data));
+ const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
+ const keptSideToApply = computed(() =>
+@@ -120,6 +110,25 @@ onUnmounted(() => {
+   untrack(props.data.path, work);
+ });
+ 
++function deletedViewNow(): DeletedSideView | null {
++  const { deleted, path, middle } = props.data;
++  return deleted === null
++    ? null
++    : deletedSideView(deleted, taken.value.get(path) ?? null, middle.kind);
++}
++
++function resultLine(view: DeletedSideView | null): string | null {
++  const { middle } = props.data;
++  if (view?.middle === "deleted") {
++    return DELETED_LINE;
++  }
++  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
++}
++
++function showsMinimap(): boolean {
++  return props.shown && props.minimap && resultLine(deletedViewNow()) === null;
++}
++
+ function markResolved(): void {
+   const result = snapshot();
+   if (result !== null && summary.value !== null) {
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index f630001..065ebfd 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -16,6 +16,7 @@ const editor = vi.hoisted(() => {
+     readOnly: new Array<boolean>(),
+     themes: new Array<string>(),
+     collapsed: new Array<string>(),
++    minimap: new Array<string>(),
+     servers: new Array<unknown>(),
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0 },
+@@ -32,6 +33,7 @@ const editor = vi.hoisted(() => {
+         readOnly: boolean;
+         preferences: { theme: string };
+         collapsed: boolean;
++        minimap: boolean;
+         servers: unknown;
+       },
+     ) {
+@@ -41,6 +43,7 @@ const editor = vi.hoisted(() => {
+       state.readOnly.push(options.readOnly);
+       state.themes.push(`built ${options.preferences.theme}`);
+       state.collapsed.push(`${this.#id} built ${options.collapsed}`);
++      state.minimap.push(`${this.#id} built ${options.minimap}`);
+       state.servers.push(options.servers);
+     }
+     summary(): Summary {
+@@ -64,6 +67,9 @@ const editor = vi.hoisted(() => {
+     setCollapsed(on: boolean): void {
+       state.collapsed.push(`${this.#id} set ${on}`);
+     }
++    showMinimap(shown: boolean): void {
++      state.minimap.push(`${this.#id} show ${shown}`);
++    }
+     snapshot(): { asShown(): string; editor: number } {
+       const text = state.text;
+       return { asShown: () => text, editor: this.#id };
+@@ -90,6 +96,7 @@ afterEach(() => {
+     readOnly: [],
+     themes: [],
+     collapsed: [],
++    minimap: [],
+     servers: [],
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0 },
+@@ -110,6 +117,7 @@ function mount(
+     readOnly = shallowRef(false),
+     preferences = shallowRef(DARK),
+     collapsed = shallowRef(true),
++    minimap = shallowRef(false),
+     servers = shallowRef<LanguageServers | null>(null),
+   } = {},
+ ): { scope: EffectScope; handle: MergeHandle } {
+@@ -123,7 +131,7 @@ function mount(
+         right: host(present),
+         strips: [host(present), host(present)],
+       },
+-      { readOnly, preferences, collapsed, servers },
++      { readOnly, preferences, collapsed, minimap, servers },
+     ),
+   );
+   if (handle === undefined) {
+@@ -288,6 +296,35 @@ test("a preferences change never resets collapsing", async () => {
+   expect(editor.state.themes).toEqual(["built dark", "set light"]);
+ });
+ 
++test("an editor is built showing the minimap as the view says, and follows a change without a rebuild", async () => {
++  const minimap = shallowRef(true);
++  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { minimap });
++  await nextTick();
++
++  minimap.value = false;
++  await nextTick();
++  minimap.value = true;
++  await nextTick();
++
++  expect(editor.state.built).toBe(1);
++  expect(editor.state.minimap).toEqual(["1 built true", "1 show false", "1 show true"]);
++});
++
++test("a minimap shown before the file loaded reaches no editor, and the editor built later shows it", async () => {
++  const minimap = shallowRef(false);
++  const data = shallowRef<FileMergeData | null>(null);
++  mount(data, { minimap });
++  await nextTick();
++
++  minimap.value = true;
++  await nextTick();
++  expect(editor.state.minimap).toEqual([]);
++
++  data.value = await fileData("a\n");
++  await nextTick();
++  expect(editor.state.minimap).toEqual(["1 built true"]);
++});
++
+ test("problems: the editor's counts when built, then each change it reports; null once it is gone", async () => {
+   editor.state.counts = { errors: 2, warnings: 1, other: 0 };
+   const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index 53308ce..bf0eb04 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -44,6 +44,7 @@ type ControllerOptions = {
+   readonly readOnly: MaybeRefOrGetter<boolean>;
+   readonly preferences: MaybeRefOrGetter<Preferences>;
+   readonly collapsed: MaybeRefOrGetter<boolean>;
++  readonly minimap: MaybeRefOrGetter<boolean>;
+   readonly servers: MaybeRefOrGetter<LanguageServers | null>;
+ };
+ 
+@@ -139,10 +140,29 @@ function handleOf(shown: Shown, current: () => MergeController | null): MergeHan
+   };
+ }
+ 
++function followWithoutRebuild(
++  current: () => MergeController | null,
++  {
++    preferences,
++    collapsed,
++    minimap,
++  }: Pick<ControllerOptions, "preferences" | "collapsed" | "minimap">,
++): void {
++  watch(toRef(preferences), (next) => {
++    current()?.setPreferences(next);
++  });
++  watch(toRef(collapsed), (on) => {
++    current()?.setCollapsed(on);
++  });
++  watch(toRef(minimap), (shown) => {
++    current()?.showMinimap(shown);
++  });
++}
++
+ export function useMergeController(
+   data: MaybeRefOrGetter<FileMergeData | null>,
+   hosts: Hosts,
+-  { readOnly, preferences, collapsed, servers }: ControllerOptions,
++  { readOnly, preferences, collapsed, minimap, servers }: ControllerOptions,
+ ): MergeHandle {
+   const shown = emptyShown();
+   let controller: MergeController | null = null;
+@@ -162,6 +182,7 @@ export function useMergeController(
+         readOnly: currentReadOnly,
+         preferences: toValue(preferences),
+         collapsed: toValue(collapsed),
++        minimap: toValue(minimap),
+         servers: currentServers,
+       };
+       controller = reloaded(controller, () => createController(current, options, elements), shown);
+@@ -169,13 +190,7 @@ export function useMergeController(
+     { immediate: true, flush: "post" },
+   );
+ 
+-  watch(toRef(preferences), (next) => {
+-    controller?.setPreferences(next);
+-  });
+-
+-  watch(toRef(collapsed), (on) => {
+-    controller?.setCollapsed(on);
+-  });
++  followWithoutRebuild(() => controller, { preferences, collapsed, minimap });
+ 
+   onScopeDispose(() => {
+     controller = reloaded(controller, () => null, shown);
+-- 
+2.56.0
+
