@@ -33,6 +33,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Settings lists wrap long text onto the next line instead of cutting it off or pushing it out of view: a long
   file-type list no longer hides the language server's command, and many shortcuts on one keymap action no longer
   squeeze its name.
+- A jump far down a file in one go (from the top, to a part not drawn yet) lands where it was sent; on Linux the
+  panes stopped about halfway and the other panes followed the wrong place.
 
 ## [0.3.2] - 2026-10-15
 
