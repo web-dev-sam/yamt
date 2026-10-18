@@ -1,7 +1,7 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { revealScrollTop, textLineEdges, thirdScrollTop } from "./viewport";
+import { revealScrollTop, textLineEdges } from "./viewport";
 
 const LINE_PX = 20;
 const FIND_SPACE_PX = 29;
@@ -33,22 +33,6 @@ test("a change taller than the pane minus two gaps starts two lines below the to
 test("a change near line 1 clamps at 0, keeping the space above line 1 in view", () => {
   expect(revealScrollTop({ top: 20, bottom: 40 }, PANE)).toBe(0);
   expect(revealScrollTop({ top: 20, bottom: 40 }, { ...PANE, paddingTop: FIND_SPACE_PX })).toBe(0);
-});
-
-const SCROLLER = { clientHeight: 600, scrollHeight: 5000, paddingTop: 0 };
-
-test("a tick's jump puts the line a third of the way down, also when it is already on screen", () => {
-  expect(thirdScrollTop(2000, SCROLLER)).toBe(2000 - 200);
-  expect(thirdScrollTop(300, SCROLLER)).toBe(100);
-  expect(thirdScrollTop(2000, { ...SCROLLER, paddingTop: FIND_SPACE_PX })).toBe(
-    2000 + FIND_SPACE_PX - 200,
-  );
-});
-
-test("a tick's jump never scrolls above 0 nor past the end", () => {
-  expect(thirdScrollTop(60, SCROLLER)).toBe(0);
-  expect(thirdScrollTop(4900, SCROLLER)).toBe(5000 - 600);
-  expect(thirdScrollTop(100, { ...SCROLLER, scrollHeight: 400 })).toBe(0);
 });
 
 const DOC = Text.of(Array.from({ length: 100 }, (_, index) => `line ${index + 1}`));

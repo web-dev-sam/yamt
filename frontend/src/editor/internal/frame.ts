@@ -7,10 +7,9 @@ import { pushCovered } from "./covered";
 import { coveredAction, type IconDrag } from "./drag";
 import { syncFindSpace } from "./find";
 import { waveStarts, type FoldFields } from "./folds";
-import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
+import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
 import type { ChunkRow, WaveRow } from "./geometry";
-import { MarkLanes } from "./markLanes";
-import type { MarkTarget } from "./marks";
+import { Minimap } from "./minimap";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
 import type { Strips } from "./strips";
 
@@ -26,14 +25,13 @@ type FrameParts = {
   readonly folds: FoldFields;
   readonly drag: IconDrag;
   readonly strips: Strips;
-  readonly jump: (pane: Pane, target: MarkTarget, rows: readonly ChunkRow[]) => void;
-  readonly marks: boolean;
+  readonly minimap: boolean;
 };
 
 export class Frame {
   readonly #parts: FrameParts;
   readonly #scroll: ScrollSync;
-  readonly #marks: MarkLanes;
+  readonly #minimap: Minimap;
   #frameId: number | null = null;
   #layoutCache: Layout | null = null;
 
@@ -42,9 +40,13 @@ export class Frame {
     this.#scroll = new ScrollSync(parts.views, () => {
       this.request();
     });
-    this.#marks = new MarkLanes(parts.views, parts.marks, (pane, target) => {
-      parts.jump(pane, target, this.layout().rows);
-      this.#scroll.follow(pane);
+    this.#minimap = new Minimap({
+      views: parts.views,
+      folds: parts.folds,
+      shown: parts.minimap,
+      follow: () => {
+        this.#scroll.follow("center");
+      },
     });
   }
 
@@ -54,9 +56,9 @@ export class Frame {
     if (moved) {
       this.#layoutCache = null;
     }
-    const marksDirty = this.#marks.changed(update, moved);
+    const minimapStale = this.#minimap.changed(update, moved);
     if (
-      marksDirty ||
+      minimapStale ||
       update.docChanged ||
       update.geometryChanged ||
       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
@@ -82,12 +84,12 @@ export class Frame {
       const { views, drag, strips } = this.#parts;
       syncFindSpace(views);
       const layout = this.layout();
-      this.#marks.paint(layout.rows);
       this.#scroll.sync(layout.anchors);
       const press = drag.press;
       const covered = press === null ? null : coveredAction(press, layout.rows, views);
       pushCovered(views, covered);
       strips.paint(views, layout, covered);
+      this.#minimap.paint(layout);
     });
   }
 
@@ -95,9 +97,9 @@ export class Frame {
     this.#scroll.follow("center");
   }
 
-  showMarks(shown: boolean): void {
-    this.#marks.show(shown);
-    this.#marks.paint(this.layout().rows);
+  showMinimap(shown: boolean): void {
+    this.#minimap.show(shown);
+    this.request();
   }
 
   destroy(): void {
@@ -105,6 +107,6 @@ export class Frame {
       cancelAnimationFrame(this.#frameId);
     }
     this.#scroll.destroy();
-    this.#marks.destroy();
+    this.#minimap.destroy();
   }
 }

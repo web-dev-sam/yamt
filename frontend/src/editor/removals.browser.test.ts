@@ -27,7 +27,7 @@ const OPTIONS: MergeOptions = {
   readOnly: false,
   preferences: { theme: "dark", keys: DEFAULT_KEYS },
   collapsed: false,
-  marks: false,
+  minimap: false,
   servers: null,
 };
 

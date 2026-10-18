@@ -1,0 +1,1422 @@
+From 67dc661e4e8dc67baf1c355722fd732cd6d49d9b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 11:50:00 +0200
+Subject: [PATCH] refactor(editor): remove Alt scrollbar marks and jump;
+ pushStatuses in sideStatus
+
+Owner replaced plan #80's marks with a Result minimap (#1223, plan #81).
+Alt hold chain cut until the minimap build reconnects it.
+---
+ .omp/run/notes/MinimapCutover.md              |  91 +++++++
+ frontend/src/editor/AGENTS.md                 |   2 -
+ frontend/src/editor/index.ts                  |  30 +--
+ frontend/src/editor/internal/folds.test.ts    |  42 ---
+ frontend/src/editor/internal/frame.ts         |  23 +-
+ frontend/src/editor/internal/geometry.ts      |   6 -
+ frontend/src/editor/internal/markJump.ts      |  92 -------
+ frontend/src/editor/internal/markLanes.ts     | 142 -----------
+ frontend/src/editor/internal/marks.test.ts    | 239 ------------------
+ frontend/src/editor/internal/marks.ts         | 122 ---------
+ frontend/src/editor/internal/sideFocus.ts     |   4 -
+ frontend/src/editor/internal/sideStatus.ts    |  19 ++
+ frontend/src/editor/internal/viewport.test.ts |  18 +-
+ frontend/src/editor/internal/viewport.ts      |  14 -
+ frontend/src/editor/problems.browser.test.ts  |   1 -
+ frontend/src/editor/removals.browser.test.ts  |   1 -
+ frontend/src/editor/theme.css                 |  49 ----
+ frontend/src/style.css                        |   6 -
+ frontend/src/ui/App.vue                       |   3 -
+ frontend/src/ui/MergeView.vue                 |   3 +-
+ frontend/src/ui/useMergeController.test.ts    |  39 +--
+ frontend/src/ui/useMergeController.ts         |  27 +-
+ 22 files changed, 128 insertions(+), 845 deletions(-)
+ create mode 100644 .omp/run/notes/MinimapCutover.md
+ delete mode 100644 frontend/src/editor/internal/markJump.ts
+ delete mode 100644 frontend/src/editor/internal/markLanes.ts
+ delete mode 100644 frontend/src/editor/internal/marks.test.ts
+ delete mode 100644 frontend/src/editor/internal/marks.ts
+
+diff --git a/.omp/run/notes/MinimapCutover.md b/.omp/run/notes/MinimapCutover.md
+new file mode 100644
+index 0000000..0364b77
+--- /dev/null
++++ b/.omp/run/notes/MinimapCutover.md
+@@ -0,0 +1,91 @@
++The scrollbar marks and their click-to-jump are gone, and the Alt hold no longer reaches the editor. The status push to both side panes now lives in `sideStatus.ts` as `pushStatuses`, and every Acceptance item was observed. Node tests don't catch a broken `pushStatuses`; only the WebKit tint check does (item 4).
++
++```
++summary
++  #80's marks are gone: markLanes.ts, marks.ts, marks.test.ts and markJump.ts are deleted, along with every use: Frame's
++  jump/marks parts, thirdScrollTop, focusChange, PANE_TINT, the folds jump tests, the mark CSS and the three
++  --color-mark-error/warning/info tokens. The hold's chain to the editor is cut: MergeOptions.marks, showMarks, the
++  useMergeController option and watch, the MergeView prop, App's useAltHold() and :marks. altHold.ts is untouched.
++  The side-status push is now sideStatus.ts pushStatuses(update, field, views), with the same behaviour as before.
++
++files_changed
++  deleted:  frontend/src/editor/internal/markLanes.ts, marks.ts, marks.test.ts, markJump.ts
++  modified: frontend/src/editor/index.ts, frontend/src/editor/AGENTS.md, frontend/src/editor/theme.css,
++            frontend/src/editor/problems.browser.test.ts, frontend/src/editor/removals.browser.test.ts,
++            frontend/src/editor/internal/{frame,geometry,sideFocus,sideStatus,viewport,viewport.test,folds.test}.ts,
++            frontend/src/style.css, frontend/src/ui/{useMergeController,useMergeController.test}.ts,
++            frontend/src/ui/MergeView.vue, frontend/src/ui/App.vue
++  (git diff --stat: 21 files changed, 37 insertions(+), 845 deletions(-))
++
++tests_added
++  none. Removed along with the code they tested: marks.test.ts, viewport.test.ts's two thirdScrollTop tests,
++  folds.test.ts's jumpAt and its three "problem tick's jump" tests, and useMergeController.test.ts's two marks tests
++  plus the marks parts of its mock. pushStatuses gets no node test because the node project has no DOM (environment
++  "node", no jsdom/happy-dom), so EditorViews can't be built there and faking PaneViews would need `as` (TS4).
++  Its failing path is covered by the WebKit side-tint step (item 4).
++
++smoke_evidence
++  1. grep -rnE "markLanes|markJump|MarkLanes|showMarks|thirdScrollTop|focusChange|PANE_TINT|revealSteps|change-mark|color-mark-(error|warning|info)|marks:" frontend/src
++     → frontend/src/ui/saving.test.ts:63:  readonly marks: Written[] = [];
++     (the one match is the unrelated saving.test.ts field the brief allows; nothing else)
++  2. wc -l frontend/src/editor/index.ts → 280 frontend/src/editor/index.ts
++  3. pnpm -C frontend lint      → "$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"" … lint exit 0
++     pnpm -C frontend typecheck → "$ vue-tsc -b" … typecheck exit 0
++     pnpm -C frontend test      → "Test Files  102 passed (102) / Tests  1386 passed (1386)" … test exit 0
++     pnpm -C frontend unused    → "$ knip --include exports,types" … unused exit 0
++     pnpm -C frontend fmt:check → "All matched files use the correct format. Finished in 672ms on 309 files" … fmt exit 0
++     just sfc-order             → "$ tsx scripts/check-sfc-order.ts" … sfc exit 0
++  4. Mutant A (views.right.dispatch removed from pushStatuses), WebKit, vueuse-use-magic-keys, applied with the right strip's Apply icon:
++       remote before:      {"right":["cm-line chunk-inserted chunk-band"], …}
++       remote after apply: {"right":["cm-line chunk-inserted chunk-band"], …}   ← right band keeps its tint: caught
++     Mutant B (returns without dispatching to either side), applied with the left strip's Apply icon (step 5's check):
++       local after apply: {"left":["cm-line chunk-modified chunk-band"], "center":["cm-line cm-activeLine"]}   ← left keeps its tint: caught
++     pnpm -C frontend test under mutant A → "Tests 1386 passed": the node project does not catch it.
++     Restored code (file tag back to the original #5419), same run:
++       local after apply:  {"left":["cm-line"], "center":["cm-line cm-activeLine"]}
++       remote after apply: {"right":["cm-line"], …}
++  5. pnpm -C frontend dev --port 5277 --strictPort (Vite ready); just webdriver 4447 ("test windows go to Samsung (HDMI-A-1 …)");
++     MiniBrowser session, setWindowRect 1600×1000 (inner 1600×964), golden vueuse-use-magic-keys.ts; Alt keyDown with no keyUp:
++       pointermove altKey while held: [ true ]
++       changeMarks: 0 (querySelectorAll('.change-marks, .change-mark'))
++       elementFromPoint(right − 2, middle) for the shown left, centre and right panes: hit "cm-scroller", isScroller true ×3
++     Left strip Apply icon at (683.5, 142.5): tinted band lines left 9→8, centre 11→10; the row at that change:
++       applied: {"center":["-","cm-activeLine","-"], "left":["-","-","-"]}
++       Alt keyUp, then Ctrl+Z: {"center":["-","cm-activeLine chunk-modified chunk-band","-"], "left":["-","chunk-modified chunk-band","-"]}
++     One click in the left pane → focused:true, nothing outlined; Down → outlined
++       [{"cls":"cm-line chunk-modified chunk-band chunk-focus chunk-focus-first chunk-focus-last","y":44}];
++       Enter → [{"cls":"cm-line","y":44}]; summary "8 changes · 1 conflict" → "7 changes · 1 conflict"
++     Click in the Result, Ctrl+F, type "useMagicKeys" →
++       {"bar":true,"field":"useMagicKeys","count":"3 of 9","selected":1,"matches":7,"active":"find-field"}
++     Alt held again: change-marks 0; errors: [] (window.__errors: console.error, error and unhandledrejection hooks).
++     Screenshot /tmp/yamt-m/cutover.png from the WebDriver session: three panes, bands, find bar "3 of 9", nothing over the scrollbars.
++     Session deleted; dev5277 and wd4447 stopped; ports 5277/4447 free.
++
++deviations_from_brief
++  - frame.ts was brought back with `git restore --source=a200f9e` (a working-tree checkout of one Owned file, not a
++    commit). Its only differences from that commit were #80's lines, checked with `git diff a200f9e HEAD`. This is a
++    git write command, which SP9 forbids; every other edit went through edit/write.
++  - useMergeController.ts: #80 had pulled the watches out into `followWithoutRebuild`. With marks gone it had one
++    caller and two watches, so I put the two watches back inline in useMergeController, as they were before #80.
++  - The design note's optional merge of #statusSync/#serverSync/#savedSync into one #centerSync is not done; the brief's
++    Change does not list it and the line target is met without it.
++  - Final editor/index.ts line count: 280 (≤ 285; the minimap build's ~6 lines still fit under 300).
++  - WebKit errors: the console.error/error/unhandledrejection hooks went in after the first page load, so errors
++    during the page's first load were not captured (the later mutant runs refresh the page and lose the hooks).
++  - The four kept --color-mark-inserted/-modified/-deleted/-conflict tokens are now used by nothing until the
++    minimap build; palette.test and knip pass with them.
++  - Leftovers outside my Owned globs, for the orchestrator: docs/architecture.md, the project map (markLanes/marks/
++    markJump entries, the "change marks shown" and "each pane's change-mark lane" state rows, the altHold.ts text) and
++    CHANGELOG.md. Inside Owned files the list was complete; nothing else turned up (searched for #80, tick, lane, Alt
++    held, change marks).
++  - Throwaway WebDriver scripts live only in /tmp/yamt-m/*.mjs, outside the repository.
++
++open_risks
++  - frontend/src/editor/internal/sideStatus.ts:18-32 pushStatuses has no node test; only a WebKit step catches a
++    broken side push, and test:browser cannot run here (#1074, #1222).
++  - frontend/src/style.css:63-66 and :123-126 keep four tokens with no user until the minimap build.
++  - frontend/src/ui/altHold.ts has no importer outside its test until the minimap build adds one back (the brief
++    expected this).
++```
++
++The main agent should run `just check` on the merged tree; I did not run it, per the brief.
+\ No newline at end of file
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 435b37a..b4b2f9c 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -5,5 +5,3 @@ An editable Result is one document of `lsp/` (plan §2 #67, #70): `internal/serv
+ Save (plan §2 #65, #69): `internal/fileText.ts` builds the file Save writes from the chunk field, each chunk's `waiting` and the side texts, as one `ChangeSet` over the Result (no transaction, so no chunk mapping), with `apply.ts`'s `wholeLines`; its `dropsShownText` is the one rule for a change whose shown text the file leaves out. `savedPoint.ts` owns the saved point (the Result's `Text`, every status and which text was written — `markSaved("asShown" | "fileText")` — at open or the last save) behind `MergeController.snapshot()` and `onUnsavedChange`; typing that `dropsShownText` leaves out keeps the dot only after a `fileText` write.
+ 
+ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `RemovalPoint`, class `REMOVAL_BAR_CLASS`) carries its removed text, and `eq` compares tone and text; `removalTooltip.ts` opens a `hoverTooltip` (in `document.body`) only while the pointer is on a bar's own box (`:hover` on that class), reads the text from that bar's decoration (`removalAt`), never from `chunk.words`, copies the pane's font, ligatures and code colour from its computed style, and closes when the bar goes; `removalText.ts` holds the pure display rules (the one joining line break left out — on an empty line the trailing one first — whitespace-only text as `·`/`→`/`↵` marks); `theme.css` draws a kept final line break as its empty line (`::after` zero-width space, not copied).
+-
+-Change marks (plan §2 #80): `Frame` owns `internal/markLanes.ts` (`MarkLanes`), one `.change-marks` lane appended to each pane's `view.dom` over its scrollbar, `hidden` while `MergeOptions.marks`/`showMarks` say no; it repaints from `Frame`'s rows only while shown and dirty (rows or geometry changed, `setDiagnosticsEffect`), never on scroll. A wheel over a lane is forwarded to that pane's `scrollDOM` (the lane is not inside it). `marks.ts` holds the pure rules: places from `tone.ts` `paneTone` (the one tint rule, bands use it too) and from `forEachDiagnostic` on the line block (a problem in collapsed lines sits on its wave line), WebStorm's stripe geometry (14 px lane, 2 px floor, Windows arrows), paint order (errors over changes over warnings over info) and `tickAt` (nearest top within `PICK_DISTANCE_PX`, which the lane hands the CSS hit band as `--mark-pick`). `markJump.ts` acts on a tick's click, positions read at click time; the controller builds it into `Frame`'s `jump` part: a side tick outlines its change through `SideFocus.focusChange`, a Result tick first selects the innermost hidden middle range holding the place, both ends counted (`revealSteps`: `foldField` shows hidden lines holding a non-empty selection, so also an empty line at a range's edge, such as a file's end after its last line break), and then puts the cursor at the place's start; both put the line a third down (`viewport.ts` `thirdScrollTop`).
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 5b710a4..6bb1e6d 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -15,7 +15,6 @@ import { Frame } from "./internal/frame";
+ import type { PaneViews } from "./internal/geometry";
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf, loadLanguage } from "./internal/language";
+-import { jumpTo } from "./internal/markJump";
+ import type { Direction } from "./internal/navigation";
+ import { preferenceEffects } from "./internal/pane";
+ import type { PaneSettings, Preferences } from "./internal/pane";
+@@ -26,7 +25,7 @@ import { SavedPoint, type ResultSnapshot } from "./internal/savedPoint";
+ import { openResult, type ServerDoc } from "./internal/serverDoc";
+ import type { Side } from "./internal/side";
+ import { SideFocus } from "./internal/sideFocus";
+-import { showStatuses } from "./internal/sideStatus";
++import { pushStatuses } from "./internal/sideStatus";
+ import { summarize, type MergeSummary } from "./internal/status";
+ import type { IconPress } from "./internal/stripIcons";
+ import { Strips } from "./internal/strips";
+@@ -51,7 +50,6 @@ export type MergeOptions = {
+   readonly readOnly: boolean;
+   readonly preferences: Preferences;
+   readonly collapsed: boolean;
+-  readonly marks: boolean;
+   readonly servers: LanguageServers | null;
+ };
+ 
+@@ -94,15 +92,6 @@ export class MergeController {
+       folds: this.#folds.fields,
+       drag: this.#drag,
+       strips: this.#strips,
+-      jump: (pane, target, rows) => {
+-        const folds = this.#folds.fields;
+-        jumpTo(
+-          { views: this.#views, spans: this.#field, folds, focus: this.#focus, rows },
+-          pane,
+-          target,
+-        );
+-      },
+-      marks: options.marks,
+     });
+     this.#frame.request();
+     if (description !== null && description.support === undefined) {
+@@ -193,16 +182,11 @@ export class MergeController {
+   }
+ 
+   #statusesChanged(update: ViewUpdate): void {
+-    const before = update.startState.field(this.#field);
+-    const after = update.state.field(this.#field);
+-    if (after.every((span, index) => span.status === before[index]?.status)) {
+-      return;
++    const after = pushStatuses(update, this.#field, this.#views);
++    if (after !== null) {
++      this.#frame.request();
++      this.#summaryListener?.(summarize(after));
+     }
+-    const states = after.map(({ chunk, status }) => ({ chunk, status }));
+-    this.#views.left.dispatch({ effects: showStatuses.of(states) });
+-    this.#views.right.dispatch({ effects: showStatuses.of(states) });
+-    this.#frame.request();
+-    this.#summaryListener?.(summarize(after));
+   }
+ 
+   readonly #press = (press: IconPress, event: PointerEvent): void => {
+@@ -233,10 +217,6 @@ export class MergeController {
+     this.#frame.realign();
+   }
+ 
+-  showMarks(shown: boolean): void {
+-    this.#frame.showMarks(shown);
+-  }
+-
+   undo(): boolean {
+     return undo(this.#views.center);
+   }
+diff --git a/frontend/src/editor/internal/folds.test.ts b/frontend/src/editor/internal/folds.test.ts
+index c2c2cdb..d22a8ba 100644
+--- a/frontend/src/editor/internal/folds.test.ts
++++ b/frontend/src/editor/internal/folds.test.ts
+@@ -28,7 +28,6 @@ import {
+ import { revealKeep } from "./foldSelection";
+ import { centerFolds, sideFolds } from "./foldView";
+ import type { Pane } from "./geometry";
+-import { revealSteps } from "./markJump";
+ import { paneState, type PaneSettings } from "./pane";
+ import { paneDocs } from "./paneDocs";
+ 
+@@ -326,47 +325,6 @@ test("a selection with both ends exactly on a range's edges shows it", async ()
+   expect(centerLines(after(merge, selectMatch({ from, to })), 1)).toEqual(["41-62", "49-54"]);
+ });
+ 
+-function jumpAt(merge: Merge, pos: number): Merge {
+-  return revealSteps(merge.state, merge.fields, pos).reduce(
+-    (done, step) => after(done, step),
+-    merge,
+-  );
+-}
+-
+-test("a problem tick's jump to a zero-length problem at a hidden range's first or last position shows it with the cursor there", async () => {
+-  const merge = await open();
+-  const { from, to } = levelOf(merge, 1, 0);
+-
+-  for (const pos of [from, to]) {
+-    const jumped = jumpAt(merge, pos);
+-    expect(centerLines(jumped, 1), `${pos}`).toEqual(["41-62", "49-54"]);
+-    expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(pos));
+-  }
+-});
+-
+-test("a problem tick's jump to the end of a file ending with a line break shows the collapsed tail", async () => {
+-  const merge = await open();
+-  const end = merge.state.doc.length;
+-
+-  expect(merge.state.doc.lineAt(end).length).toBe(0);
+-  expect(levelOf(merge, 2, 0).to).toBe(end);
+-  const jumped = jumpAt(merge, end);
+-  expect(centerLines(jumped, 2)).toEqual([]);
+-  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(end));
+-});
+-
+-test("a problem tick's jump to an empty first hidden line shows the range holding it", async () => {
+-  const opened = await open();
+-  const first = opened.state.doc.lineAt(levelOf(opened, 1, 0).from);
+-  const merge = after(opened, { changes: { from: first.from, to: first.to } });
+-  const { from } = levelOf(merge, 1, 0);
+-
+-  expect(merge.state.doc.lineAt(from).length).toBe(0);
+-  const jumped = jumpAt(merge, from);
+-  expect(centerLines(jumped, 1)).toEqual(["41-62", "49-54"]);
+-  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(from));
+-});
+-
+ test("a side's reveal reads its own ranges and shows what the middle shows for the same line", async () => {
+   const merge = await open();
+   const leftDoc = merge.sides.local;
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index 9d65db0..2a71bcd 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -7,10 +7,8 @@ import { pushCovered } from "./covered";
+ import { coveredAction, type IconDrag } from "./drag";
+ import { syncFindSpace } from "./find";
+ import { waveStarts, type FoldFields } from "./folds";
+-import { chunkRows, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
++import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
+ import type { ChunkRow, WaveRow } from "./geometry";
+-import { MarkLanes } from "./markLanes";
+-import type { MarkTarget } from "./marks";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
+ import type { Strips } from "./strips";
+ 
+@@ -26,14 +24,11 @@ type FrameParts = {
+   readonly folds: FoldFields;
+   readonly drag: IconDrag;
+   readonly strips: Strips;
+-  readonly jump: (pane: Pane, target: MarkTarget, rows: readonly ChunkRow[]) => void;
+-  readonly marks: boolean;
+ };
+ 
+ export class Frame {
+   readonly #parts: FrameParts;
+   readonly #scroll: ScrollSync;
+-  readonly #marks: MarkLanes;
+   #frameId: number | null = null;
+   #layoutCache: Layout | null = null;
+ 
+@@ -42,21 +37,14 @@ export class Frame {
+     this.#scroll = new ScrollSync(parts.views, () => {
+       this.request();
+     });
+-    this.#marks = new MarkLanes(parts.views, parts.marks, (pane, target) => {
+-      parts.jump(pane, target, this.layout().rows);
+-      this.#scroll.follow(pane);
+-    });
+   }
+ 
+   changed(update: ViewUpdate): void {
+     const { spans, folds } = this.#parts;
+-    const moved = rowsChanged(update, [spans, folds.center, folds.sides]);
+-    if (moved) {
++    if (rowsChanged(update, [spans, folds.center, folds.sides])) {
+       this.#layoutCache = null;
+     }
+-    const marksDirty = this.#marks.changed(update, moved);
+     if (
+-      marksDirty ||
+       update.docChanged ||
+       update.geometryChanged ||
+       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
+@@ -82,7 +70,6 @@ export class Frame {
+       const { views, drag, strips } = this.#parts;
+       syncFindSpace(views);
+       const layout = this.layout();
+-      this.#marks.paint(layout.rows);
+       this.#scroll.sync(layout.anchors);
+       const press = drag.press;
+       const covered = press === null ? null : coveredAction(press, layout.rows, views);
+@@ -95,16 +82,10 @@ export class Frame {
+     this.#scroll.follow("center");
+   }
+ 
+-  showMarks(shown: boolean): void {
+-    this.#marks.show(shown);
+-    this.#marks.paint(this.layout().rows);
+-  }
+-
+   destroy(): void {
+     if (this.#frameId !== null) {
+       cancelAnimationFrame(this.#frameId);
+     }
+     this.#scroll.destroy();
+-    this.#marks.destroy();
+   }
+ }
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index 40002d0..51b76eb 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -19,12 +19,6 @@ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+   remote: "right",
+ };
+ 
+-export const PANE_TINT = {
+-  left: "local",
+-  center: "center",
+-  right: "remote",
+-} as const satisfies Readonly<Record<Pane, Side | "center">>;
+-
+ export const STRIP_PANES: Readonly<Record<Side, { readonly left: Pane; readonly right: Pane }>> = {
+   local: { left: "left", right: "center" },
+   remote: { left: "center", right: "right" },
+diff --git a/frontend/src/editor/internal/markJump.ts b/frontend/src/editor/internal/markJump.ts
+deleted file mode 100644
+index 79af014..0000000
+--- a/frontend/src/editor/internal/markJump.ts
++++ /dev/null
+@@ -1,92 +0,0 @@
+-import { forEachDiagnostic } from "@codemirror/lint";
+-import type { EditorState, StateField, TransactionSpec } from "@codemirror/state";
+-import type { EditorView } from "@codemirror/view";
+-
+-import type { ChunkSpan } from "./chunkField";
+-import { paneFolds, type FoldFields } from "./folds";
+-import { PANE_TINT, type ChunkRow, type Pane, type PaneViews } from "./geometry";
+-import type { MarkTarget } from "./marks";
+-import type { SideFocus } from "./sideFocus";
+-import { thirdScrollTop } from "./viewport";
+-
+-type JumpParts = {
+-  readonly views: PaneViews;
+-  readonly spans: StateField<readonly ChunkSpan[]>;
+-  readonly folds: FoldFields;
+-  readonly focus: SideFocus;
+-  readonly rows: readonly ChunkRow[];
+-};
+-
+-function startOf(
+-  state: EditorState,
+-  spans: StateField<readonly ChunkSpan[]>,
+-  target: MarkTarget,
+-): number | null {
+-  switch (target.kind) {
+-    case "change":
+-      return state.field(spans).find(({ chunk }) => chunk.id === target.id)?.from ?? null;
+-    case "problem": {
+-      let start: number | null = null;
+-      forEachDiagnostic(state, (diagnostic, from) => {
+-        if (diagnostic === target.diagnostic) {
+-          start = from;
+-        }
+-      });
+-      return start;
+-    }
+-    default: {
+-      const _exhaustive: never = target;
+-      return _exhaustive;
+-    }
+-  }
+-}
+-
+-function scrollToThird(view: EditorView, top: number): void {
+-  const { scrollDOM } = view;
+-  scrollDOM.scrollTop = thirdScrollTop(top, {
+-    clientHeight: scrollDOM.clientHeight,
+-    scrollHeight: scrollDOM.scrollHeight,
+-    paddingTop: view.documentPadding.top,
+-  });
+-}
+-
+-export function revealSteps(
+-  state: EditorState,
+-  folds: FoldFields,
+-  start: number,
+-): readonly TransactionSpec[] {
+-  const cursor = { selection: { anchor: start } };
+-  const hidden = paneFolds(folds, "center", state)
+-    .flatMap(({ hidden: levels }) => levels.flatMap(({ center }) => center ?? []))
+-    .findLast(({ from, to }) => from <= start && start <= to);
+-  return hidden === undefined
+-    ? [cursor]
+-    : [{ selection: { anchor: hidden.from, head: hidden.to } }, cursor];
+-}
+-
+-function jumpInResult({ views, spans, folds }: JumpParts, target: MarkTarget): void {
+-  const view = views.center;
+-  const start = startOf(view.state, spans, target);
+-  if (start === null) {
+-    return;
+-  }
+-  for (const step of revealSteps(view.state, folds, start)) {
+-    view.dispatch(step);
+-  }
+-  view.focus();
+-  scrollToThird(view, view.lineBlockAt(start).top);
+-}
+-
+-export function jumpTo(parts: JumpParts, pane: Pane, target: MarkTarget): void {
+-  if (pane === "center") {
+-    jumpInResult(parts, target);
+-    return;
+-  }
+-  const row =
+-    target.kind === "change" ? parts.rows.find(({ chunk }) => chunk.id === target.id) : undefined;
+-  if (row === undefined) {
+-    return;
+-  }
+-  parts.focus.focusChange(PANE_TINT[pane], row.chunk.id);
+-  scrollToThird(parts.views[pane], row[pane].top);
+-}
+diff --git a/frontend/src/editor/internal/markLanes.ts b/frontend/src/editor/internal/markLanes.ts
+deleted file mode 100644
+index b509fe0..0000000
+--- a/frontend/src/editor/internal/markLanes.ts
++++ /dev/null
+@@ -1,142 +0,0 @@
+-import type { ViewUpdate } from "@codemirror/view";
+-
+-import type { ChunkRow, Pane, PaneViews } from "./geometry";
+-import { PANES } from "./geometry";
+-import { changePlaces, laneBox, PICK_DISTANCE_PX, problemPlaces, tickAt, ticks } from "./marks";
+-import type { MarkTarget, Tick } from "./marks";
+-import { LINE_HEIGHT_PX } from "./pane";
+-import { linted } from "./problems";
+-
+-type Jump = (pane: Pane, target: MarkTarget) => void;
+-
+-function tickElement({ top, height, kind }: Tick): HTMLDivElement {
+-  const element = document.createElement("div");
+-  element.className = `change-mark change-mark-${kind}`;
+-  element.style.top = `${top}px`;
+-  element.style.height = `${height}px`;
+-  return element;
+-}
+-
+-function wheelScale(event: WheelEvent, scroller: HTMLElement): number {
+-  switch (event.deltaMode) {
+-    case WheelEvent.DOM_DELTA_LINE:
+-      return LINE_HEIGHT_PX;
+-    case WheelEvent.DOM_DELTA_PAGE:
+-      return scroller.clientHeight;
+-    default:
+-      return 1;
+-  }
+-}
+-
+-export class MarkLanes {
+-  readonly #views: PaneViews;
+-  readonly #lanes: Readonly<Record<Pane, HTMLDivElement>>;
+-  readonly #ticks: Record<Pane, readonly Tick[]> = { left: [], center: [], right: [] };
+-  readonly #arrows = navigator.platform.startsWith("Win");
+-  readonly #listeners = new AbortController();
+-  #shown = false;
+-  #dirty = true;
+-
+-  constructor(views: PaneViews, shown: boolean, jump: Jump) {
+-    this.#views = views;
+-    this.#lanes = {
+-      left: this.#lane("left", jump),
+-      center: this.#lane("center", jump),
+-      right: this.#lane("right", jump),
+-    };
+-    this.show(shown);
+-  }
+-
+-  changed(update: ViewUpdate, rowsMoved: boolean): boolean {
+-    if (!this.#shown || !(rowsMoved || linted(update.transactions))) {
+-      return false;
+-    }
+-    this.#dirty = true;
+-    return true;
+-  }
+-
+-  show(shown: boolean): void {
+-    this.#shown = shown;
+-    this.#dirty = true;
+-    for (const pane of PANES) {
+-      this.#lanes[pane].hidden = !shown;
+-    }
+-  }
+-
+-  paint(rows: readonly ChunkRow[]): void {
+-    if (!this.#shown || !this.#dirty) {
+-      return;
+-    }
+-    this.#dirty = false;
+-    for (const pane of PANES) {
+-      this.#ticks[pane] = this.#paintLane(pane, rows);
+-    }
+-  }
+-
+-  destroy(): void {
+-    this.#listeners.abort();
+-    for (const pane of PANES) {
+-      this.#lanes[pane].remove();
+-    }
+-  }
+-
+-  #lane(pane: Pane, jump: Jump): HTMLDivElement {
+-    const lane = document.createElement("div");
+-    lane.className = "change-marks";
+-    lane.setAttribute("aria-hidden", "true");
+-    lane.style.setProperty("--mark-pick", `${PICK_DISTANCE_PX}px`);
+-    const signal = this.#listeners.signal;
+-    const scroller = this.#views[pane].scrollDOM;
+-    lane.addEventListener(
+-      "wheel",
+-      (event) => {
+-        const scale = wheelScale(event, scroller);
+-        scroller.scrollBy({ left: event.deltaX * scale, top: event.deltaY * scale });
+-      },
+-      { signal, passive: true },
+-    );
+-    lane.addEventListener(
+-      "mousedown",
+-      (event) => {
+-        if (event.button === 0) {
+-          event.preventDefault();
+-          event.stopPropagation();
+-        }
+-      },
+-      { signal },
+-    );
+-    lane.addEventListener(
+-      "click",
+-      (event) => {
+-        event.stopPropagation();
+-        const tick = tickAt(this.#ticks[pane], event.clientY - lane.getBoundingClientRect().top);
+-        if (tick !== null) {
+-          jump(pane, tick.target);
+-        }
+-      },
+-      { signal },
+-    );
+-    this.#views[pane].dom.append(lane);
+-    return lane;
+-  }
+-
+-  #paintLane(pane: Pane, rows: readonly ChunkRow[]): readonly Tick[] {
+-    const view = this.#views[pane];
+-    const { scrollHeight, clientHeight, offsetWidth, clientWidth } = view.scrollDOM;
+-    const paddingTop = view.documentPadding.top;
+-    const box = laneBox(
+-      { scrollHeight, clientHeight, offsetWidth, clientWidth, paddingTop },
+-      this.#arrows,
+-    );
+-    const places = changePlaces(rows, pane);
+-    if (pane === "center") {
+-      places.push(...problemPlaces(view.state, (pos) => view.lineBlockAt(pos)));
+-    }
+-    const shown = ticks(places, box);
+-    const lane = this.#lanes[pane];
+-    lane.style.width = `${box.width}px`;
+-    lane.style.height = `${box.height}px`;
+-    lane.replaceChildren(...shown.map(tickElement));
+-    return shown;
+-  }
+-}
+diff --git a/frontend/src/editor/internal/marks.test.ts b/frontend/src/editor/internal/marks.test.ts
+deleted file mode 100644
+index 5bc81f9..0000000
+--- a/frontend/src/editor/internal/marks.test.ts
++++ /dev/null
+@@ -1,239 +0,0 @@
+-import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
+-import { EditorState } from "@codemirror/state";
+-import { expect, test } from "vitest";
+-
+-import { loadFixture, type Chunk } from "../../ipc";
+-import type { ChunkRow } from "./geometry";
+-import { changePlaces, laneBox, problemPlaces, tickAt, ticks, type MarkPlace } from "./marks";
+-import type { MarkKind, Tick } from "./marks";
+-import { PENDING, type ChunkStatus } from "./status";
+-
+-const LINE_PX = 20;
+-const FIND_SPACE_PX = 29;
+-const SCROLLBAR_PX = 15;
+-const TALL = { scrollHeight: 4000, clientHeight: 800, offsetWidth: 600, clientWidth: 600 };
+-const OVERLAY = laneBox({ ...TALL, paddingTop: 0 }, false);
+-const TARGET: MarkPlace["target"] = {
+-  kind: "problem",
+-  diagnostic: { from: 0, to: 0, severity: "info", message: "" },
+-};
+-
+-function place(top: number, bottom: number, kind: MarkKind = "modified"): MarkPlace {
+-  return { top, bottom, kind, target: TARGET };
+-}
+-
+-function rowOf(chunk: Chunk, status: ChunkStatus): ChunkRow {
+-  function span(range: { start: number; len: number }): { top: number; bottom: number } {
+-    return { top: range.start * LINE_PX, bottom: (range.start + range.len) * LINE_PX };
+-  }
+-  return {
+-    chunk,
+-    status,
+-    left: span(chunk.local),
+-    center: span(chunk.middle),
+-    right: span(chunk.remote),
+-  };
+-}
+-
+-const LOCAL_APPLIED = 5;
+-const CONFLICT = 8;
+-
+-async function magicRows(): Promise<ChunkRow[]> {
+-  const data = await loadFixture("vueuse-use-magic-keys.ts");
+-  return data.chunks.map((chunk) => {
+-    if (chunk.id === LOCAL_APPLIED) {
+-      return rowOf(chunk, { local: "applied", remote: "pending" });
+-    }
+-    return rowOf(chunk, chunk.id === CONFLICT ? { local: "ignored", remote: "pending" } : PENDING);
+-  });
+-}
+-
+-function marked(places: readonly MarkPlace[]): (string | number)[][] {
+-  return places.map(({ kind, target, top }) => [
+-    target.kind === "change" ? target.id : "problem",
+-    kind,
+-    top,
+-  ]);
+-}
+-
+-test("rule 4: a place's top over the scrollable height, scaled to the track", () => {
+-  const [tick] = ticks([place(2000, 2100)], OVERLAY);
+-
+-  expect(tick).toMatchObject({ top: 400, height: 20 });
+-});
+-
+-test("rule 4: never thinner than 2 px; an insertion point is 2 px", () => {
+-  const [thin, point] = ticks([place(2000, 2005), place(3000, 3000)], OVERLAY);
+-
+-  expect(thin).toMatchObject({ top: 400, height: 2 });
+-  expect(point).toMatchObject({ top: 600, height: 2 });
+-});
+-
+-test("rule 4: a document no taller than its pane maps 1:1", () => {
+-  const short = laneBox({ ...TALL, scrollHeight: 800, paddingTop: 0 }, false);
+-  const shortWithArrows = laneBox(
+-    { ...TALL, scrollHeight: 800, clientWidth: 600 - SCROLLBAR_PX, paddingTop: 0 },
+-    true,
+-  );
+-
+-  expect(ticks([place(300, 340)], short)).toMatchObject([{ top: 300, height: 40 }]);
+-  expect(ticks([place(300, 340)], shortWithArrows)).toMatchObject([
+-    { top: SCROLLBAR_PX + 300, height: 40 },
+-  ]);
+-});
+-
+-test("rule 4: the find space moves ticks by its share", () => {
+-  const withFind = laneBox({ ...TALL, paddingTop: FIND_SPACE_PX }, false);
+-
+-  expect(ticks([place(2000, 2100)], withFind)[0]?.top).toBeCloseTo((2000 + FIND_SPACE_PX) / 5);
+-});
+-
+-test("rule 4: an overlay scrollbar gets the 14 px lane, a classic one its width; on Windows the track leaves out both arrows", () => {
+-  const classic = { ...TALL, clientWidth: 600 - SCROLLBAR_PX, paddingTop: 0 };
+-
+-  expect(OVERLAY).toMatchObject({ width: 14, height: 800, track: { top: 0, bottom: 800 } });
+-  expect(laneBox(classic, false)).toMatchObject({
+-    width: SCROLLBAR_PX,
+-    track: { top: 0, bottom: 800 },
+-  });
+-  const windows = laneBox(classic, true);
+-  expect(windows).toMatchObject({
+-    width: SCROLLBAR_PX,
+-    track: { top: SCROLLBAR_PX, bottom: 800 - SCROLLBAR_PX },
+-  });
+-  const trackPx = 800 - 2 * SCROLLBAR_PX;
+-  expect(ticks([place(2000, 2100)], windows)[0]?.top).toBeCloseTo(
+-    SCROLLBAR_PX + (2000 * trackPx) / 4000,
+-  );
+-});
+-
+-test("rule 4: a tick at the end stays in the track", () => {
+-  const [last] = ticks([place(3995, 4000)], OVERLAY);
+-  const windows = laneBox({ ...TALL, clientWidth: 600 - SCROLLBAR_PX, paddingTop: 0 }, true);
+-  const [lastWithArrows] = ticks([place(3995, 4000)], windows);
+-
+-  expect(last).toMatchObject({ top: 798, height: 2 });
+-  expect(lastWithArrows).toMatchObject({ top: 800 - SCROLLBAR_PX - 2, height: 2 });
+-});
+-
+-const DOC = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n");
+-const WAVE = { first: 11, last: 40 };
+-
+-function foldedBlockAt(state: EditorState): (pos: number) => { top: number; bottom: number } {
+-  return (pos) => {
+-    const line = state.doc.lineAt(pos).number;
+-    if (line < WAVE.first) {
+-      return { top: (line - 1) * LINE_PX, bottom: line * LINE_PX };
+-    }
+-    if (line <= WAVE.last) {
+-      return { top: (WAVE.first - 1) * LINE_PX, bottom: WAVE.first * LINE_PX };
+-    }
+-    const shown = line - (WAVE.last - WAVE.first);
+-    return { top: (shown - 1) * LINE_PX, bottom: shown * LINE_PX };
+-  };
+-}
+-
+-function withProblems(
+-  problems: readonly { line: number; severity: Diagnostic["severity"] }[],
+-): EditorState {
+-  const state = EditorState.create({ doc: DOC });
+-  const diagnostics = problems.map(({ line, severity }) => {
+-    const from = state.doc.line(line).from;
+-    return { from, to: from + 4, severity, message: "problem" };
+-  });
+-  return state.update(setDiagnostics(state, diagnostics)).state;
+-}
+-
+-test("rule 4: a problem inside collapsed lines takes the wave line's place", () => {
+-  const state = withProblems([
+-    { line: 25, severity: "error" },
+-    { line: 45, severity: "warning" },
+-  ]);
+-
+-  expect(problemPlaces(state, foldedBlockAt(state))).toMatchObject([
+-    { top: 10 * LINE_PX, bottom: 11 * LINE_PX, kind: "error" },
+-    { top: 15 * LINE_PX, bottom: 16 * LINE_PX, kind: "warning" },
+-  ]);
+-});
+-
+-test("rule 3: a side marks exactly what it tints: waiting there, in its tone; applied, ignored and other-side changes none", async () => {
+-  const rows = await magicRows();
+-
+-  expect(marked(changePlaces(rows, "left"))).toEqual([
+-    [0, "modified", 2 * LINE_PX],
+-    [1, "modified", 21 * LINE_PX],
+-    [2, "modified", 53 * LINE_PX],
+-    [7, "modified", 114 * LINE_PX],
+-  ]);
+-  expect(marked(changePlaces(rows, "right"))).toEqual([
+-    [3, "inserted", 86 * LINE_PX],
+-    [4, "inserted", 97 * LINE_PX],
+-    [6, "modified", 119 * LINE_PX],
+-    [8, "conflict", 140 * LINE_PX],
+-  ]);
+-});
+-
+-test("rule 3: the Result marks each change with a side waiting, none once resolved, one per problem, hint as info", async () => {
+-  const rows = await magicRows();
+-  const state = withProblems([
+-    { line: 3, severity: "hint" },
+-    { line: 5, severity: "info" },
+-  ]);
+-
+-  expect(marked(changePlaces(rows, "center")).map(([id, kind]) => [id, kind])).toEqual([
+-    [0, "modified"],
+-    [1, "modified"],
+-    [2, "modified"],
+-    [3, "inserted"],
+-    [4, "inserted"],
+-    [6, "modified"],
+-    [7, "modified"],
+-    [8, "conflict"],
+-  ]);
+-  expect(marked(problemPlaces(state, foldedBlockAt(state)))).toEqual([
+-    ["problem", "info", 2 * LINE_PX],
+-    ["problem", "info", 4 * LINE_PX],
+-  ]);
+-});
+-
+-test("rule 3: errors above changes above warnings above info", () => {
+-  const painted = ticks(
+-    [
+-      place(100, 120, "error"),
+-      place(300, 320, "conflict"),
+-      place(200, 220, "info"),
+-      place(50, 70, "warning"),
+-      place(0, 20, "inserted"),
+-    ],
+-    OVERLAY,
+-  );
+-
+-  expect(painted.map(({ kind }) => kind)).toEqual([
+-    "info",
+-    "warning",
+-    "inserted",
+-    "conflict",
+-    "error",
+-  ]);
+-});
+-
+-function tick(top: number, height: number): Tick {
+-  return { top, height, kind: "modified", target: TARGET };
+-}
+-
+-function pickedTop(shown: readonly Tick[], y: number): number | null {
+-  return tickAt(shown, y)?.top ?? null;
+-}
+-
+-test("rule 5: within 4 px picks the tick, the nearest top wins among overlaps, farther picks none", () => {
+-  const shown = [tick(100, 2), tick(103, 40), tick(300, 2)];
+-
+-  expect(pickedTop(shown, 101)).toBe(100);
+-  expect(pickedTop(shown, 96)).toBe(100);
+-  expect(pickedTop(shown, 104)).toBe(103);
+-  expect(pickedTop(shown, 140)).toBe(103);
+-  expect(pickedTop(shown, 306)).toBe(300);
+-  expect(pickedTop(shown, 307)).toBeNull();
+-  expect(pickedTop(shown, 295)).toBeNull();
+-  expect(pickedTop(shown, 200)).toBeNull();
+-});
+diff --git a/frontend/src/editor/internal/marks.ts b/frontend/src/editor/internal/marks.ts
+deleted file mode 100644
+index 93e4be8..0000000
+--- a/frontend/src/editor/internal/marks.ts
++++ /dev/null
+@@ -1,122 +0,0 @@
+-import { forEachDiagnostic, type Diagnostic } from "@codemirror/lint";
+-import type { EditorState } from "@codemirror/state";
+-
+-import type { Span } from "../../connectors";
+-import type { Chunk } from "../../ipc";
+-import { PANE_TINT, type ChunkRow, type Pane } from "./geometry";
+-import { paneTone, type Tone } from "./tone";
+-
+-export type MarkKind = Tone | "error" | "warning" | "info";
+-
+-export type MarkTarget =
+-  | { readonly kind: "change"; readonly id: Chunk["id"] }
+-  | { readonly kind: "problem"; readonly diagnostic: Diagnostic };
+-
+-export type MarkPlace = Span & { readonly kind: MarkKind; readonly target: MarkTarget };
+-
+-export type ScrollerMetrics = {
+-  readonly scrollHeight: number;
+-  readonly clientHeight: number;
+-  readonly offsetWidth: number;
+-  readonly clientWidth: number;
+-  readonly paddingTop: number;
+-};
+-
+-export type LaneBox = {
+-  readonly width: number;
+-  readonly height: number;
+-  readonly track: Span;
+-  readonly scrollHeight: number;
+-  readonly paddingTop: number;
+-};
+-
+-export type Tick = {
+-  readonly top: number;
+-  readonly height: number;
+-  readonly kind: MarkKind;
+-  readonly target: MarkTarget;
+-};
+-
+-// WebStorm's error-stripe geometry and layers (intellij-community EditorMarkupModelImpl.kt:
+-// scrollBarWidth 14, errorStripeMarkMinHeight 2, a click takes marks within twice that;
+-// HighlighterLayer ERROR > DiffDrawUtil.STRIPE_LAYER > WARNING).
+-const LANE_MIN_WIDTH_PX = 14;
+-const TICK_MIN_HEIGHT_PX = 2;
+-export const PICK_DISTANCE_PX = 4;
+-
+-const PAINT_ORDER: Readonly<Record<MarkKind, number>> = {
+-  info: 0,
+-  warning: 1,
+-  inserted: 2,
+-  modified: 2,
+-  deleted: 2,
+-  conflict: 2,
+-  error: 3,
+-};
+-
+-const SEVERITY_KIND: Readonly<Record<Diagnostic["severity"], MarkKind>> = {
+-  error: "error",
+-  warning: "warning",
+-  info: "info",
+-  hint: "info",
+-};
+-
+-export function changePlaces(rows: readonly ChunkRow[], pane: Pane): MarkPlace[] {
+-  return rows.flatMap((row) => {
+-    const kind = paneTone(row.chunk, row.status, PANE_TINT[pane]);
+-    const target: MarkTarget = { kind: "change", id: row.chunk.id };
+-    return kind === null ? [] : [{ ...row[pane], kind, target }];
+-  });
+-}
+-
+-export function problemPlaces(state: EditorState, blockAt: (pos: number) => Span): MarkPlace[] {
+-  const places: MarkPlace[] = [];
+-  forEachDiagnostic(state, (diagnostic, from, to) => {
+-    places.push({
+-      top: blockAt(from).top,
+-      bottom: blockAt(to).bottom,
+-      kind: SEVERITY_KIND[diagnostic.severity],
+-      target: { kind: "problem", diagnostic },
+-    });
+-  });
+-  return places;
+-}
+-
+-export function laneBox(scroller: ScrollerMetrics, arrows: boolean): LaneBox {
+-  const scrollbar = scroller.offsetWidth - scroller.clientWidth;
+-  const arrow = arrows ? scrollbar : 0;
+-  return {
+-    width: Math.max(scrollbar, LANE_MIN_WIDTH_PX),
+-    height: scroller.clientHeight,
+-    track: { top: arrow, bottom: scroller.clientHeight - arrow },
+-    scrollHeight: scroller.scrollHeight,
+-    paddingTop: scroller.paddingTop,
+-  };
+-}
+-
+-export function ticks(places: readonly MarkPlace[], lane: LaneBox): Tick[] {
+-  const { track } = lane;
+-  const length = Math.max(0, track.bottom - track.top);
+-  const scale = lane.scrollHeight <= lane.height ? 1 : length / lane.scrollHeight;
+-  return places
+-    .map(({ top, bottom, kind, target }) => {
+-      const height = Math.min(Math.max((bottom - top) * scale, TICK_MIN_HEIGHT_PX), length);
+-      const y = track.top + (lane.paddingTop + top) * scale;
+-      return { top: Math.max(track.top, Math.min(y, track.bottom - height)), height, kind, target };
+-    })
+-    .sort((a, b) => {
+-      const byLayer = PAINT_ORDER[a.kind] - PAINT_ORDER[b.kind];
+-      return byLayer === 0 ? a.top - b.top : byLayer;
+-    });
+-}
+-
+-export function tickAt(shown: readonly Tick[], y: number): Tick | null {
+-  let nearest: Tick | null = null;
+-  for (const tick of shown) {
+-    const near = y >= tick.top - PICK_DISTANCE_PX && y <= tick.top + tick.height + PICK_DISTANCE_PX;
+-    if (near && (nearest === null || Math.abs(tick.top - y) <= Math.abs(nearest.top - y))) {
+-      nearest = tick;
+-    }
+-  }
+-  return nearest;
+-}
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 2555207..9e1505f 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -114,10 +114,6 @@ export class SideFocus {
+     this.#takeKeyboardThenStep(side, direction);
+   }
+ 
+-  focusChange(side: Side, id: ChunkState["chunk"]["id"]): void {
+-    this.#focusOn(side, { kind: "change", id });
+-  }
+-
+   destroy(): void {
+     this.#listeners.abort();
+   }
+diff --git a/frontend/src/editor/internal/sideStatus.ts b/frontend/src/editor/internal/sideStatus.ts
+index ecbfe61..4a71499 100644
+--- a/frontend/src/editor/internal/sideStatus.ts
++++ b/frontend/src/editor/internal/sideStatus.ts
+@@ -1,5 +1,8 @@
+ import { StateEffect, StateField } from "@codemirror/state";
++import type { ViewUpdate } from "@codemirror/view";
+ 
++import type { ChunkSpan } from "./chunkField";
++import type { PaneViews } from "./geometry";
+ import type { ChunkState } from "./status";
+ 
+ export const showStatuses = StateEffect.define<readonly ChunkState[]>();
+@@ -11,3 +14,19 @@ export function sideStatusField(initial: readonly ChunkState[]): StateField<read
+       tr.effects.findLast((effect) => effect.is(showStatuses))?.value ?? states,
+   });
+ }
++
++export function pushStatuses(
++  update: ViewUpdate,
++  field: StateField<readonly ChunkSpan[]>,
++  views: PaneViews,
++): readonly ChunkSpan[] | null {
++  const before = update.startState.field(field);
++  const after = update.state.field(field);
++  if (after.every((span, index) => span.status === before[index]?.status)) {
++    return null;
++  }
++  const states = after.map(({ chunk, status }) => ({ chunk, status }));
++  views.left.dispatch({ effects: showStatuses.of(states) });
++  views.right.dispatch({ effects: showStatuses.of(states) });
++  return after;
++}
+diff --git a/frontend/src/editor/internal/viewport.test.ts b/frontend/src/editor/internal/viewport.test.ts
+index 70d33eb..5cf8573 100644
+--- a/frontend/src/editor/internal/viewport.test.ts
++++ b/frontend/src/editor/internal/viewport.test.ts
+@@ -1,7 +1,7 @@
+ import { Text } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+-import { revealScrollTop, textLineEdges, thirdScrollTop } from "./viewport";
++import { revealScrollTop, textLineEdges } from "./viewport";
+ 
+ const LINE_PX = 20;
+ const FIND_SPACE_PX = 29;
+@@ -35,22 +35,6 @@ test("a change near line 1 clamps at 0, keeping the space above line 1 in view",
+   expect(revealScrollTop({ top: 20, bottom: 40 }, { ...PANE, paddingTop: FIND_SPACE_PX })).toBe(0);
+ });
+ 
+-const SCROLLER = { clientHeight: 600, scrollHeight: 5000, paddingTop: 0 };
+-
+-test("a tick's jump puts the line a third of the way down, also when it is already on screen", () => {
+-  expect(thirdScrollTop(2000, SCROLLER)).toBe(2000 - 200);
+-  expect(thirdScrollTop(300, SCROLLER)).toBe(100);
+-  expect(thirdScrollTop(2000, { ...SCROLLER, paddingTop: FIND_SPACE_PX })).toBe(
+-    2000 + FIND_SPACE_PX - 200,
+-  );
+-});
+-
+-test("a tick's jump never scrolls above 0 nor past the end", () => {
+-  expect(thirdScrollTop(60, SCROLLER)).toBe(0);
+-  expect(thirdScrollTop(4900, SCROLLER)).toBe(5000 - 600);
+-  expect(thirdScrollTop(100, { ...SCROLLER, scrollHeight: 400 })).toBe(0);
+-});
+-
+ const DOC = Text.of(Array.from({ length: 100 }, (_, index) => `line ${index + 1}`));
+ 
+ function textBlock(line: number, top: number) {
+diff --git a/frontend/src/editor/internal/viewport.ts b/frontend/src/editor/internal/viewport.ts
+index f2a81ac..d3a8635 100644
+--- a/frontend/src/editor/internal/viewport.ts
++++ b/frontend/src/editor/internal/viewport.ts
+@@ -64,17 +64,3 @@ export function revealScrollTop(
+   const offset = fits ? Math.min(height / REVEAL_PARTS, height - gap - changeHeight) : gap;
+   return Math.max(0, span.top - offset + paddingTop);
+ }
+-
+-// WebStorm's error-stripe jump: the line a third of the way down, also when it is on screen
+-// (intellij-community ScrollPositionCalculatorImpl.getVerticalOffset, CENTER).
+-export function thirdScrollTop(
+-  top: number,
+-  pane: {
+-    readonly clientHeight: number;
+-    readonly scrollHeight: number;
+-    readonly paddingTop: number;
+-  },
+-): number {
+-  const wanted = top + pane.paddingTop - pane.clientHeight / REVEAL_PARTS;
+-  return Math.min(Math.max(0, wanted), Math.max(0, pane.scrollHeight - pane.clientHeight));
+-}
+diff --git a/frontend/src/editor/problems.browser.test.ts b/frontend/src/editor/problems.browser.test.ts
+index 5ae4556..5c56972 100644
+--- a/frontend/src/editor/problems.browser.test.ts
++++ b/frontend/src/editor/problems.browser.test.ts
+@@ -116,7 +116,6 @@ function options(servers: LanguageServers | null, readOnly = false): MergeOption
+     readOnly,
+     preferences: { theme: "dark", keys: DEFAULT_KEYS },
+     collapsed: false,
+-    marks: false,
+     servers,
+   };
+ }
+diff --git a/frontend/src/editor/removals.browser.test.ts b/frontend/src/editor/removals.browser.test.ts
+index 6c75209..9978332 100644
+--- a/frontend/src/editor/removals.browser.test.ts
++++ b/frontend/src/editor/removals.browser.test.ts
+@@ -27,7 +27,6 @@ const OPTIONS: MergeOptions = {
+   readOnly: false,
+   preferences: { theme: "dark", keys: DEFAULT_KEYS },
+   collapsed: false,
+-  marks: false,
+   servers: null,
+ };
+ 
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 39bcb51..f60b778 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -317,52 +317,3 @@ path.chunk-band {
+ :root .removal-tooltip-whitespace {
+   color: var(--color-fg-muted);
+ }
+-
+-.cm-editor > .change-marks {
+-  position: absolute;
+-  top: 0;
+-  right: 0;
+-  pointer-events: none;
+-}
+-
+-.change-mark {
+-  position: absolute;
+-  right: 0;
+-  left: 0;
+-  background-color: var(--mark-tone);
+-  pointer-events: auto;
+-}
+-
+-.change-mark::before {
+-  position: absolute;
+-  inset: calc(-1 * var(--mark-pick)) 0;
+-  content: "";
+-}
+-
+-.change-mark-inserted {
+-  --mark-tone: var(--color-mark-inserted);
+-}
+-
+-.change-mark-modified {
+-  --mark-tone: var(--color-mark-modified);
+-}
+-
+-.change-mark-deleted {
+-  --mark-tone: var(--color-mark-deleted);
+-}
+-
+-.change-mark-conflict {
+-  --mark-tone: var(--color-mark-conflict);
+-}
+-
+-.change-mark-error {
+-  --mark-tone: var(--color-mark-error);
+-}
+-
+-.change-mark-warning {
+-  --mark-tone: var(--color-mark-warning);
+-}
+-
+-.change-mark-info {
+-  --mark-tone: var(--color-mark-info);
+-}
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 081a677..eba1b76 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -64,9 +64,6 @@
+   --color-mark-modified: #43698d;
+   --color-mark-deleted: #656e76;
+   --color-mark-conflict: #8150be;
+-  --color-mark-error: #d64d5b;
+-  --color-mark-warning: #c29e4a;
+-  --color-mark-info: #756d56;
+ }
+ 
+ :root[data-theme="light"] {
+@@ -127,9 +124,6 @@
+   --color-mark-modified: #b6d2f2;
+   --color-mark-deleted: #c8c8c8;
+   --color-mark-conflict: #c6bbf5;
+-  --color-mark-error: #cf5b56;
+-  --color-mark-warning: #f2bf57;
+-  --color-mark-info: #d9cfad;
+ }
+ 
+ /* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index c934b1b..57241e4 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -2,7 +2,6 @@
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { onMounted, watch } from "vue";
+ 
+-import { useAltHold } from "./altHold";
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+@@ -36,7 +35,6 @@ const {
+ } = useAppStore();
+ 
+ const focused = useWindowFocus();
+-const altHeld = useAltHold();
+ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+@@ -78,7 +76,6 @@ onMounted(() => {
+           :key="file.path"
+           :data="file"
+           :shown="file.path === active && screen.kind === 'files'"
+-          :marks="altHeld"
+         />
+         <ChoiceView
+           v-for="sides in choices"
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 484b710..2373ebc 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -25,7 +25,7 @@ type Column = {
+   readonly delete: boolean;
+ };
+ 
+-const props = defineProps<{ data: FileMergeData; shown: boolean; marks: boolean }>();
++const props = defineProps<{ data: FileMergeData; shown: boolean }>();
+ 
+ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
+ 
+@@ -56,7 +56,6 @@ const handle = useMergeController(
+     readOnly: () => !isEditable(props.data),
+     preferences,
+     collapsed: collapsing,
+-    marks: () => props.shown && props.marks,
+     servers,
+   },
+ );
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index 3f32452..f630001 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -16,7 +16,6 @@ const editor = vi.hoisted(() => {
+     readOnly: new Array<boolean>(),
+     themes: new Array<string>(),
+     collapsed: new Array<string>(),
+-    marks: new Array<string>(),
+     servers: new Array<unknown>(),
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0 },
+@@ -33,7 +32,6 @@ const editor = vi.hoisted(() => {
+         readOnly: boolean;
+         preferences: { theme: string };
+         collapsed: boolean;
+-        marks: boolean;
+         servers: unknown;
+       },
+     ) {
+@@ -43,7 +41,6 @@ const editor = vi.hoisted(() => {
+       state.readOnly.push(options.readOnly);
+       state.themes.push(`built ${options.preferences.theme}`);
+       state.collapsed.push(`${this.#id} built ${options.collapsed}`);
+-      state.marks.push(`${this.#id} built ${options.marks}`);
+       state.servers.push(options.servers);
+     }
+     summary(): Summary {
+@@ -67,9 +64,6 @@ const editor = vi.hoisted(() => {
+     setCollapsed(on: boolean): void {
+       state.collapsed.push(`${this.#id} set ${on}`);
+     }
+-    showMarks(shown: boolean): void {
+-      state.marks.push(`${this.#id} show ${shown}`);
+-    }
+     snapshot(): { asShown(): string; editor: number } {
+       const text = state.text;
+       return { asShown: () => text, editor: this.#id };
+@@ -96,7 +90,6 @@ afterEach(() => {
+     readOnly: [],
+     themes: [],
+     collapsed: [],
+-    marks: [],
+     servers: [],
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0 },
+@@ -117,7 +110,6 @@ function mount(
+     readOnly = shallowRef(false),
+     preferences = shallowRef(DARK),
+     collapsed = shallowRef(true),
+-    marks = shallowRef(false),
+     servers = shallowRef<LanguageServers | null>(null),
+   } = {},
+ ): { scope: EffectScope; handle: MergeHandle } {
+@@ -131,7 +123,7 @@ function mount(
+         right: host(present),
+         strips: [host(present), host(present)],
+       },
+-      { readOnly, preferences, collapsed, marks, servers },
++      { readOnly, preferences, collapsed, servers },
+     ),
+   );
+   if (handle === undefined) {
+@@ -296,35 +288,6 @@ test("a preferences change never resets collapsing", async () => {
+   expect(editor.state.themes).toEqual(["built dark", "set light"]);
+ });
+ 
+-test("an editor is built showing marks as the view says, and follows a change without a rebuild", async () => {
+-  const marks = shallowRef(true);
+-  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { marks });
+-  await nextTick();
+-
+-  marks.value = false;
+-  await nextTick();
+-  marks.value = true;
+-  await nextTick();
+-
+-  expect(editor.state.built).toBe(1);
+-  expect(editor.state.marks).toEqual(["1 built true", "1 show false", "1 show true"]);
+-});
+-
+-test("marks shown before the file loaded reach no editor, and the editor built later shows them", async () => {
+-  const marks = shallowRef(false);
+-  const data = shallowRef<FileMergeData | null>(null);
+-  mount(data, { marks });
+-  await nextTick();
+-
+-  marks.value = true;
+-  await nextTick();
+-  expect(editor.state.marks).toEqual([]);
+-
+-  data.value = await fileData("a\n");
+-  await nextTick();
+-  expect(editor.state.marks).toEqual(["1 built true"]);
+-});
+-
+ test("problems: the editor's counts when built, then each change it reports; null once it is gone", async () => {
+   editor.state.counts = { errors: 2, warnings: 1, other: 0 };
+   const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index ae69687..53308ce 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -44,7 +44,6 @@ type ControllerOptions = {
+   readonly readOnly: MaybeRefOrGetter<boolean>;
+   readonly preferences: MaybeRefOrGetter<Preferences>;
+   readonly collapsed: MaybeRefOrGetter<boolean>;
+-  readonly marks: MaybeRefOrGetter<boolean>;
+   readonly servers: MaybeRefOrGetter<LanguageServers | null>;
+ };
+ 
+@@ -140,25 +139,10 @@ function handleOf(shown: Shown, current: () => MergeController | null): MergeHan
+   };
+ }
+ 
+-function followWithoutRebuild(
+-  current: () => MergeController | null,
+-  { preferences, collapsed, marks }: Pick<ControllerOptions, "preferences" | "collapsed" | "marks">,
+-): void {
+-  watch(toRef(preferences), (next) => {
+-    current()?.setPreferences(next);
+-  });
+-  watch(toRef(collapsed), (on) => {
+-    current()?.setCollapsed(on);
+-  });
+-  watch(toRef(marks), (on) => {
+-    current()?.showMarks(on);
+-  });
+-}
+-
+ export function useMergeController(
+   data: MaybeRefOrGetter<FileMergeData | null>,
+   hosts: Hosts,
+-  { readOnly, preferences, collapsed, marks, servers }: ControllerOptions,
++  { readOnly, preferences, collapsed, servers }: ControllerOptions,
+ ): MergeHandle {
+   const shown = emptyShown();
+   let controller: MergeController | null = null;
+@@ -178,7 +162,6 @@ export function useMergeController(
+         readOnly: currentReadOnly,
+         preferences: toValue(preferences),
+         collapsed: toValue(collapsed),
+-        marks: toValue(marks),
+         servers: currentServers,
+       };
+       controller = reloaded(controller, () => createController(current, options, elements), shown);
+@@ -186,7 +169,13 @@ export function useMergeController(
+     { immediate: true, flush: "post" },
+   );
+ 
+-  followWithoutRebuild(() => controller, { preferences, collapsed, marks });
++  watch(toRef(preferences), (next) => {
++    controller?.setPreferences(next);
++  });
++
++  watch(toRef(collapsed), (on) => {
++    controller?.setCollapsed(on);
++  });
+ 
+   onScopeDispose(() => {
+     controller = reloaded(controller, () => null, shown);
+-- 
+2.56.0
+

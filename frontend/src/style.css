@@ -64,9 +64,10 @@
   --color-mark-modified: #43698d;
   --color-mark-deleted: #656e76;
   --color-mark-conflict: #8150be;
-  --color-mark-error: #d64d5b;
-  --color-mark-warning: #c29e4a;
-  --color-mark-info: #756d56;
+
+  --color-minimap-slider: #79797933;
+  --color-minimap-slider-hover: #64646459;
+  --color-minimap-slider-active: #bfbfbf33;
 }
 
 :root[data-theme="light"] {
@@ -127,9 +128,10 @@
   --color-mark-modified: #b6d2f2;
   --color-mark-deleted: #c8c8c8;
   --color-mark-conflict: #c6bbf5;
-  --color-mark-error: #cf5b56;
-  --color-mark-warning: #f2bf57;
-  --color-mark-info: #d9cfad;
+
+  --color-minimap-slider: #64646433;
+  --color-minimap-slider-hover: #64646459;
+  --color-minimap-slider-active: #0000004d;
 }
 
 /* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */

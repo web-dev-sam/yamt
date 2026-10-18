@@ -78,7 +78,7 @@ onMounted(() => {
           :key="file.path"
           :data="file"
           :shown="file.path === active && screen.kind === 'files'"
-          :marks="altHeld"
+          :minimap="altHeld"
         />
         <ChoiceView
           v-for="sides in choices"

@@ -1,0 +1,549 @@
+From 8c07b924afd806bcaeca86b25a8e266ac7d2eb60 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 14:57:29 +0200
+Subject: [PATCH] fix(editor): a far scroll jump lands where sent in every pane
+ (#1240)
+
+WebKitGTK moves the scroll position while CodeMirror swaps a fully
+off-screen viewport; a scroll that shows none of the rendered lines
+becomes a CodeMirror scroll request with an exact scrollTop.
+Minimap compositing layer measured, no gain, not kept (#1241).
+---
+ .../__pycache__/scroll-timing.cpython-314.pyc | Bin 10235 -> 0 bytes
+ .omp/run/notes/MinimapVerifyDiagnostics.md    | 121 +++---------------
+ .omp/run/notes/MinimapWindowR3.md             | 109 ++++++++++++++++
+ frontend/src/editor/AGENTS.md                 |   2 +
+ frontend/src/editor/internal/paneViews.ts     |  13 +-
+ frontend/src/editor/internal/scrollSync.ts    |  61 ++++++++-
+ 6 files changed, 198 insertions(+), 108 deletions(-)
+ delete mode 100644 .omp/run/__pycache__/scroll-timing.cpython-314.pyc
+ create mode 100644 .omp/run/notes/MinimapWindowR3.md
+
+diff --git a/.omp/run/__pycache__/scroll-timing.cpython-314.pyc b/.omp/run/__pycache__/scroll-timing.cpython-314.pyc
+deleted file mode 100644
+index 07aa6e334b10e305a68204f17c0d5a5cceeb939b..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 10235
+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
+XPe;`iX33i@9BpnNnHgB5z#SX_3D8It
+
+diff --git a/.omp/run/notes/MinimapVerifyDiagnostics.md b/.omp/run/notes/MinimapVerifyDiagnostics.md
+index 051f1f4..1460bdc 100644
+--- a/.omp/run/notes/MinimapVerifyDiagnostics.md
++++ b/.omp/run/notes/MinimapVerifyDiagnostics.md
+@@ -1,109 +1,28 @@
+-**gate: pass. Overall result: fail.** Recipes 1, 2 and 4 pass and recipe 6 Alt up passes. These fail:
+-- **Recipe 3:** Playwright WebKit cannot launch on this machine.
+-- **Recipe 5b:** a real click on a far row, from the top of the file, scrolls to the wrong place.
+-- **Recipe 6, Alt held:** two rows go over the late-frame limit.
+-- **Recipe 4h, first half:** it could not run on the fixture page, so I ran it in the real app instead (passed there).
++# MinimapVerify — diagnostics after the final run (orchestrator's record of the verifier's two follow-up answers)
+ 
+-I fixed nothing and retried no failing step.
++The first save of this file copied the main report by mistake; the verifier's two follow-up answers were:
+ 
+-**Environment (VF5):** HEAD `f8da9db`, clean tree before the run. rustc 1.99.0 (b940084d7 2026-09-28), node v24.22.0, pnpm 12.0.0. MiniBrowser through WebKitWebDriver: its windows went to the Samsung screen (HDMI-A-1, `test-screen` placed them). Playwright WebKit: missing host libraries. The real app ran on a private Xvfb (`:2` for recipe 5, `:91` for recipe 6), device ratio 1. `target/debug/yamt` was rebuilt at HEAD with `cargo tauri build --debug --no-bundle`; the base binary was built at `7141a81` in a scratch clone under `/tmp/yamt-m/verify/base`.
++## 1. Where 5b comes from (real app `:2`, `/tmp/yamt-m/verify/long`, `vOn.ts`, collapsing off, fresh session each run)
+ 
+-```
+-gate: pass
+-failures:
+-  - step: "3 test:browser"
+-    excerpt: "Error: browserType.launch: … ║ Host system is missing dependencies to run browsers. ║ … sudo apt-get install libicu74 libxml2 libflite1 … [ELIFECYCLE] Command failed with exit code 1."
+-  - step: "5b real press on a far row from scrollTop 0"
+-    excerpt: "Alt held, xdotool click at box offsetY 301.5 (row 151, centredScrollTop 2552.5) from scrollTop 0 → scrollTops [1405,1405,1345]; reproduced twice. The same click from scrollTop 1405 → [2552,2552,2492] (correct). Sweep from 0, by screen y: 290 (row 101) → 1552 ✓; 300 (row 106, expected 1652.5) → [1645,1652,1592]: the left pane is not at the centre's value; 310 (row 111, expected 1752.5) → 1565; 320 (row 116, expected 1852.5) → 1465; 330/340/390/440 → 1405. Farther rows land higher, not lower. Values unchanged 1 s later."
+-  - step: "6 scroll timing, HEAD Alt held"
+-    excerpt: "renderer.ts all opened middle: 13 late frames vs base 8 (+3 allows 11); pnpm-lock.yaml all opened middle: 25 vs base 20 (+3 allows 23)."
+-```
++Before every write: tops `[0,0,0]`, centre `scrollHeight 3688`, `clientHeight 903`. Arrays are `[left, center, right]`.
+ 
+-### smoke
++- D1 HEAD, Alt up, `center.scrollDOM.scrollTop = 2552`: frames `[[0,1385,0],[1385,1385,1325]]`, after 1 s `[1385,1385,1325]`.
++- D1b same, read back synchronously: `sync:[0,2552,0]`, `syncScrollHeight:3688`; frames as D1.
++- D2 base `7141a81` (scratch build), same write: identical to D1.
++- D3 HEAD, `left.scrollDOM.scrollTop = 2552`: frames `[[1385,0,0],[1385,1385,1325]]`, after 1 s the same.
++- D4 HEAD, Alt held, real press on row 151 (y 390), capture-phase `pointerdown` probe: `atDown [0,0,0]`; frames 1–5
++  `[[0,1405,0],[1405,1405,1345],…]`, after 1 s `[1405,1405,1345]`.
++- D5 toolbar Next change: `vOn.ts` has no change below row 120 (changes at rows ~16, ~19–21, ~87); not answerable here.
+ 
+-**1. `just check`, run once: pass.**
+-- Exit 0, wall time 29.8 s.
+-- nextest: `473 tests run: 473 passed, 1 skipped`.
+-- deny: `advisories ok, bans ok, licenses ok, sources ok`.
+-- web-test: `Test Files 108 passed (108)`, `Tests 1439 passed (1439)`.
+-- `arch-check: ok`, `map-check: ok`; golden: 10× `ok`; hooks-test: `pass 16, fail 0`.
++Conclusion: the pull-back happens before the first frame, in the written pane, whichever pane is written, on the base too;
++the sides follow a frame later. The locked scroll's family (#1219), not the minimap.
+ 
+-**2. `just mutants 7141a81`: pass.**
+-- Exit 0. Rust: `mutants: no Rust changes since 7141a81`.
+-- StrykerJS on `ui/useMergeController.ts`: 69 killed, 14 survived, 1 error (the clear-text report does not list the errored mutant).
+-- The lines this feature changed are 47, 145–149, 157–158, 165, 185 and 193. No survivor is on any of them.
+-- The 14 survivors are exactly the known older ones (#582/#658): 79–83, 89 (twice), 104, 133–136, 190, 196. None needs a new finding.
++## 2. Scroll timing repeats (three interleaved runs per column; late frames of 200, mean ms)
+ 
+-**3. `pnpm -C frontend test:browser`: fail.** Playwright WebKit could not launch (excerpt above, exit 1), so the probe did not run. I re-ran it twice only to grep the first error lines; both re-runs failed the same way.
++| row                                | base `7141a81`                  | HEAD Alt up                     | HEAD Alt held                   |
++| ---------------------------------- | ------------------------------- | ------------------------------- | ------------------------------- |
++| renderer.ts, all opened, middle    | 9 (16.5), 9 (16.4), 11 (16.5)   | 11 (16.5), 12 (16.5), 8 (16.5)  | 15 (16.5), 14 (16.5), 7 (16.5)  |
++| pnpm-lock.yaml, all opened, middle | 25 (16.7), 23 (16.7), 19 (16.6) | 22 (16.7), 19 (16.6), 19 (16.6) | 20 (16.7), 23 (16.6), 21 (16.6) |
+ 
+-**4. WebKit fixture page: pass for a–g and the second half of h.**
+-Setup: dev server on 5277, `just webdriver 4447`, window 1600×1000, device ratio 2, `language-tools-script-setup.ts`.
+-- **a. Before Alt:** `displayed:false`, `canvas:[0,0]`, `hit:"cm-scroller"`.
+-- **b. The hold:**
+-  - Alt held: `boxRect [1458,88.5,1591,955]` against `rightRect [1172,88.5,1591,955]` → `right/top/bottom equal: true`, `panes unchanged: true`, canvas `[264,1734]`.
+-  - Alt up → hidden. Alt then `a` → hidden, with Alt still down. Fresh Alt → shown.
+-  - Window `blur` → hidden; a repeated keydown → still hidden; a fresh keydown → shown. These three were synthetic events.
+-- **c. Two files open, Alt held:** visible file `displayed:true, paintedPx 12390`; hidden file `displayed:false, canvas [0,0], paintedPx 0`.
+-- **d. Colours:**
+-  - Keyword row 35 `export`: glyph `[224,152,107,174]` against token `[224,152,107]`.
+-  - Wave row 1: `[86,83,98,255]` against `[86,83,98]`. Collapsed: 54 painted rows for 54 document rows.
+-  - Collapsing toggled with Alt held → `paintedRows 434` (620 document rows); toggled back → 54.
+-- **e. Right edge:**
+-  - Before: modified `[20,31]`, `[68,87]`, `[98,105]`, conflict `[140,195]`.
+-  - Apply icon clicked; the next frame shows modified `[60,79]`, `[90,97]`, conflict `[132,187]`, still shown.
+-- **f. Slider:**
+-  - scrollTop 3000: slider `{top:205.6,height:86}`, equal to `minimapLayout` (start row 48).
+-  - At the end (scrollTop 11501): rows 186–618, last text row 617 drawn at canvas row 432 = last painted row 432.
+-  - `tanstack-query-svelte-base-query.ts` (scrollable 0): `sliderHidden:true`.
+-  - WebDriver press: 2830 against 2830.5 (WebKit stores whole-pixel scrollTop). Drag: 3566, equal to `draggedScrollTop` 3566. The WebDriver wheel hides the minimap because it sends no `altKey` (known); the real wheel is in 5d.
+-- **g. Light theme:**
+-  - Keyword `[0,51,179,181]` against `[0,51,179]`; wave `[208,208,208,255]`; background `rgb(255,255,255)`.
+-  - `.change-marks` count 0; `window.__errors` (console error/warn, onerror and rejections, collected from page load) was `[]`.
+-  - Theme set back to Dark afterwards.
+-- **h. Deleted file and the end:**
+-  - The fixture list has no deleted-side file (11 text files, no `"deleted"` record), so the first half ran in the real app (5, `docs/removed.md`).
+-  - Long file at the very end with Alt held: slider rect `[868.2, 954.2]` inside the box `[88.5, 955]`.
+-- Screenshots: `/tmp/yamt-m/verify/window-dark.png`, `window-light.png`, `window-long.png` (mid-scroll at 5000).
+-
+-**5. Real app, `xdotool` on `:2`: fail at b; everything else passed.**
+-Sessions `m-verify-long`, `m-verify-lsp`, `m-verify-light`; file `vOn.ts`, 184 rows, collapsing off.
+-- **a.** `keydown alt` → `shown:true`, box `[1458,88.5,1591,991]` at the window's right edge over the right pane. Screenshot `app-long-alt.png`. `keyup alt` → `shown:false`.
+-- **b.** Cursor `[[286,286]]`, focused pane 1, right selection `[[0,0]]`, DOM selection `""` and folds 0 were all unchanged, and nothing was applied. The scroll position is wrong from the top of the file (failure above). Row 101 from the top and row 151 from 1405 are correct.
+-- **c.** A 100 px drag gives 1002, my hand value of `draggedScrollTop` (100 / 0.09982 → 1002); `sliderActive` true during the drag, false after. A 30 px drag gives 1303 (expected 1303). `keyup alt` in the middle of the drag hides the minimap; mouse moves of +70 and +140 px leave it at 1303.
+-- **d.** Three wheel-down clicks over the minimap: 1303 → 1600; sides `[1600, 1540]`.
+-- **e.** Drag to the end: `[[2785,2785],[2785,2785],[2725,2725]]` (scrollTop, max) right after, and the same 1 s later.
+-- **f.** `py/api/stats.py` after Start; status ⓧ2 ⚠1.
+-  - Left edge: warning `[0,3]` (row 1) and error `[19,22]` (row 11).
+-  - Diagnostics: warning (ruff F401) and hint (basedpyright) on line 1; two errors on line 11.
+-  - No hint mark: the warning is drawn on row 1. Right edge: conflict `[13,16]` (row 8).
+-  - Not seen: an error and a warning on the same row, so "red over yellow" on one row was not observed.
+-  - Screenshot `app-lsp-alt.png`.
+-- **g.** Right-strip apply clicked with Alt held → the mark at `[29,32]` was gone on the next read: `[conflict [36,41], modified [172,175]]`; status "1 change · 1 conflict".
+-- **h.** `focus-away` → false; `focus-back` → false; `keyup` then `keydown` alt → true; `xdotool key Down` → false.
+-- **i.** Light theme (`--settings '{"theme":"light"}'`): `["light", true]`. Screenshot `app-light-alt.png`.
+-- **#1238 (from 4h):** I chose Delete on `docs/removed.md` and reopened it. The Result shows "Resolved by deleting the file." Alt held → no visible `.minimap` (1 editor). Screenshot `app-deleted-alt.png`.
+-- All three sessions were stopped (tauri-driver and Xvfb `stopped`).
+-
+-**6. Scroll timing (late frames out of 200; mean in ms): fail for Alt held.**
+-- The file list is a tree in the owner's real config, so the first run failed with `find(...).click` undefined. tauri-driver was restarted with a scratch `HOME=/tmp/yamt-m/verify/home`, which gives the default list view.
+-- The wrapper `/tmp/yamt-m/verify/timing.py` runs `.omp/run/scroll-timing.py` unchanged. In the Alt-held run it sends `keyup` then `keydown` alt before each scroll; the minimap was shown before and after every scroll (`(True, True)` ×8).
+-
+-| file / files opened / pane | base | HEAD Alt up | HEAD Alt held |
+-|---|---|---|---|
+-| renderer 1 opened middle | 6 (16.6) | 7 (16.6) | 7 (16.5) |
+-| renderer 1 opened left | 9 (16.7) | 7 (16.6) | 8 (16.7) |
+-| renderer all opened middle | 8 (16.5) | 11 (16.5) | **13** (16.5) ✗ |
+-| renderer all opened left | 11 (16.6) | 10 (16.7) | 11 (16.7) |
+-| pnpm-lock 1 opened middle | 15 (16.7) | 17 (16.7) | 17 (16.8) |
+-| pnpm-lock 1 opened left | 11 (16.6) | 11 (16.6) | 13 (16.6) |
+-| pnpm-lock all opened middle | 20 (16.7) | 19 (16.6) | **25** (16.8) ✗ |
+-| pnpm-lock all opened left | 11 (16.6) | 11 (16.6) | 12 (16.6) |
+-
+-- HEAD Alt up is within base + 3 everywhere: **pass**.
+-- HEAD Alt held: **fail**, 2 of 8 rows over the limit.
+-- An earlier Alt-held run, whose minimap state is unknown (my probe read the wrong pane), gave 11, 9, 12, 8, 16, 12, 21, 12; it is not counted.
+-
+-### Cleanup
+-- Stopped: the dev server on 5277, webdriver on 4447, all app sessions, tauri-driver and Xvfb `:91`. `pgrep` afterwards finds only the owner's `target/debug/yamt --repo /tmp/yamt-conflict-project` (pid 61860, untouched) and editor language servers.
+-- The rebuild overwrote `target/debug/yamt` on disk; the owner's running process is not affected.
+-- **One file left behind:** importing `scroll-timing.py` created `.omp/run/__pycache__/`, which now shows as untracked in `git status`. bash-guard blocked my `rm -r` of it, so it needs removing by you.
+\ No newline at end of file
++Medians: renderer base 9, Alt up 11, Alt held 14 (limit 12); pnpm-lock base 23, Alt up 19, Alt held 21 (limit 26).
++Run-to-run spread up to 8 frames; mean frame time 16.4–16.7 ms everywhere.
+diff --git a/.omp/run/notes/MinimapWindowR3.md b/.omp/run/notes/MinimapWindowR3.md
+new file mode 100644
+index 0000000..0d61bcf
+--- /dev/null
++++ b/.omp/run/notes/MinimapWindowR3.md
+@@ -0,0 +1,109 @@
++The far-jump pull-back (#1240) is fixed. The minimap's own compositing layer (#1241) gave no reliable drop in late frames, so I took it out.
++
++**The cause (acceptance 1).** This is WebKit timing, not yamt logic. Captured in the real app, fresh session, `vOn.ts`, collapsing off, all panes at 0, writing `center.scrollDOM.scrollTop = 2552`:
++- No script writes the scroll position after the 2552. I wrapped the `Element.prototype.scrollTop` setter and it logged only my write and the locked scroll's follower writes. Yet the first `scroll` event already reads 1385.
++- Order of events inside CodeMirror's scroll handler (`onScroll` → `onScrollChanged` → `EditorView.measure`, run synchronously):
++  1. The first `ViewState.measure` reads `.cm-content` and `.cm-scroller` at 2552.
++  2. CodeMirror moves its viewport and rebuilds the DOM: 69 old lines removed, 82 new lines inserted.
++  3. The next read, a `getBoundingClientRect` on `.cm-content` in `ViewState.measure`, already sees 1385, with `scrollHeight` still 3688.
++- The DOM just before that read: before the jump it was 70 lines plus a 2280 px gap. After the swap it is line 1, a 2020 px gap and 82 lines (3688 px). During the swap CodeMirror locks `.cm-content` at `height: 3688px`.
++- CodeMirror's own source describes the same browser behaviour (`DocView.updateInner`: "Chrome sometimes messes with the scroll position during DOM mutation (though no relayout is triggered …)").
++- Two other explanations ruled out: `* { overflow-anchor: none !important }` still gave 1385, and so did a test with the editor blurred and the selection cleared.
++- Sweep of single writes from 0, without the fix: 1452 and 1552 land; 1652 → 1645; 1752 → 1545; 1852 → 1445; 1952, 2152, 2352, 2552 and 2785 → 1385.
++- Follower writes suffer too. With the middle pane landed, the sides were pulled back to [1385, 1325]. From 1385 to 500 the sides went to [125, 125].
++- `[INFERENCE]` Why WebKit picks those exact numbers is inside WebKit; the fix does not depend on it.
++
++**The fix (`scrollSync.ts`, one extension in all three panes).** When a scroll event shows none of CodeMirror's rendered lines, yamt turns it into a CodeMirror scroll request before CodeMirror measures. CodeMirror then draws the target lines first, and a `scrollHandler` writes the exact `scrollTop`. Because the fix sits on the scroll event of every pane, it covers the minimap press, the follower writes, the side reveal, scripts and native jumps. A press still lands at `centredScrollTop`. During a 200-step × 40 px scroll of `renderer.ts` it fired 0 times; it fired once per pane for each far jump.
++
++summary
++- `exactScroll` in `editor/internal/scrollSync.ts`, carried by every pane: a scroll position that shows none of CodeMirror's rendered lines becomes a CodeMirror scroll request whose handler writes that exact `scrollTop`. Far jumps now land and the sides follow.
++- `paneViews.ts`: `bodyTooltips()` became `everyPane()` (body tooltips plus `exactScroll`).
++- `editor/AGENTS.md` describes it.
++- The `.minimap` layer was measured and removed.
++
++files_changed
++- `frontend/src/editor/internal/scrollSync.ts`
++- `frontend/src/editor/internal/paneViews.ts`
++- `frontend/src/editor/AGENTS.md`
++
++tests_added
++- None. The cause is WebKit and CodeMirror timing, so the proof is the real-app before/after numbers with the fix removed once (acceptance 3, below). Existing `scrollSync.test.ts` and `minimapPointer.test.ts` pass unchanged.
++
++smoke_evidence
++Real app on a private Xvfb, a fresh `m-r3-…` session per run, `vOn.ts`, collapsing off. Clicks are real `xdotool` clicks with Alt held; the probe records [left, center, right] `scrollTop` at the first frame, the second frame and 1 s after the `pointerdown`. Before each press the minimap was shown: `{"value":true}`.
++
++**2. Minimap presses from the top (fixed build):**
++
++| row | expected | first frame | after 2 frames | after 1 s |
++|---|---|---|---|---|
++| 101 | 1552.5 | [0,1552,0] | [1552,1552,1492] | [1552,1552,1492] |
++| 106 | 1652.5 | [0,1652,0] | [1652,1652,1592] | [1652,1652,1592] |
++| 111 | 1752.5 | [0,1752,0] | [1752,1752,1692] | [1752,1752,1692] |
++| 116 | 1852.5 | [0,1852,0] | [1852,1852,1792] | [1852,1852,1792] |
++| 151 | 2552.5 | [0,2552,0] | [2552,2552,2492] | [2552,2552,2492] |
++
++- **Row 151 from mid-file (1405):** [1405,2552,1345] → [2552,2552,2492], same after 1 s.
++- **Scripted D1 write, middle pane:** read back 2552; after 2 frames [2552,2552,2492]; after 1 s [2552,2552,2492].
++- **Scripted D1 write, left pane:** after 2 frames [2552,2552,2492]; after 1 s the same.
++- **More scripted writes from 0:** 1652, 1752, 1852 and 2785 all land; 2785 gives [2785,2785,2725].
++- **Writes from 2785 up to 0, 500, 1000, 1552, 1900 and 2300:** all land, for example 500 gives [500,500,440].
++- **Slider drag, wheel and end, the same with and without the fix:**
++  - Drag 100 px gives [1002,1002,942].
++  - 30 px more gives [1303,1303,1243].
++  - Three wheel clicks give [1600,1600,1540].
++  - Drag to the very end (scrollTop, max): `[[2785,2785],[2785,2785],[2725,2725]]` right after and 1 s later.
++- **Toolbar "Next change":** `vOn.ts` never scrolled, and `renderer.ts` moved only to [723,603,603] within 6 steps, with the same numbers with and without the fix. Neither file had a far change within reach, so a far arrow jump was not exercised.
++
++**3. The fix removed once (same `paneViews.ts` without `exactScroll`):**
++
++| row | first frame | after 2 frames / 1 s |
++|---|---|---|
++| 101 | [0,1552,0] | [1552,1552,1492] (lands) |
++| 106 | [0,1645,0] | [1645,1645,1585] |
++| 111 | [0,1545,0] | [1545,1545,1485] |
++| 116 | [0,1445,0] | [1445,1445,1385] |
++| 151 | [0,1385,0] | [1385,1385,1325] |
++
++- Scripted D1 2552 without the fix: [1385,1385,1325]. The failure is back.
++
++**4. Scroll timing** (`.omp/run/scroll-timing.py` through a wrapper, `renderer.ts`, all files opened, middle pane, private Xvfb `:93`, scratch `HOME`). Late frames out of 200, mean frame time in brackets:
++
++| run | Alt up | Alt held, no layer | Alt held, layer |
++|---|---|---|---|
++| 1 | 16 (16.5) | 17 (16.5) | 11 (16.5) |
++| 2 | 11 (16.5) | 16 (16.5) | 15 (16.6) |
++| 3 | 21 (16.6) | 20 (16.5) | 9 (16.5) |
++| 4 | 15 (16.5) | 13 (16.6) | 14 (16.5) |
++| 5 | 14 (16.5) | 15 (16.6) | 14 (16.5) |
++| 6 | 21 (16.5) | 13 (16.5) | 16 (16.5) |
++| median | 15.5 | 15.5 | 14 |
++
++- Runs 1–3 favoured the layer; runs 4–6 did not. No reliable drop, so the layer is removed.
++- With the minimap shown, the late-frame median now equals the Alt-up median (15.5 each).
++- Alt up with the fix removed vs with the fix, three runs each: 12/14/12 vs 20/14/12. That fix build was an earlier version that also pinned partly covered positions (7–15 times per pane in a 200-step scroll); the final fix pins none there.
++
++**5. Recipes:**
++- `pnpm -C frontend lint`: exit 0.
++- `pnpm -C frontend typecheck`: `vue-tsc -b`, exit 0.
++- `pnpm -C frontend test`: `Test Files 108 passed (108)`, `Tests 1439 passed (1439)`, exit 0.
++- `pnpm -C frontend unused`: `knip --include exports,types`, exit 0.
++- `pnpm -C frontend fmt:check`: `All matched files use the correct format.`, exit 0.
++- `just sfc-order`: `tsx scripts/check-sfc-order.ts`, exit 0.
++- Cleanup: every `m-r3-…` session, `tauri-driver` and Xvfb stopped. Only the owner's `target/debug/yamt --repo /tmp/yamt-conflict-project` (pid 61860) is still running, untouched.
++
++deviations_from_brief
++- `.omp/run/notes/MinimapVerifyDiagnostics.md` is a byte-identical copy of `MinimapVerify.md` and has no D1–D4. I used the brief's Facts and reproduced D1 myself.
++- The brief suggested routing the press and the follower writes. I first did that, but a raw scripted write still failed. So the fix sits on every pane's scroll event instead, and `minimapPointer.ts`, `frame.ts`, `sideFocus.ts` and `ScrollSync` are unchanged.
++- The `scroll` observer reads `scrollTop` and `clientHeight` synchronously, against CM13 ("no synchronous layout reads in scroll handlers"). It runs inside CodeMirror's own scroll handler right before CodeMirror's `measure`, which reads layout anyway, so it adds no layout pass.
++- `paneViews.ts` beyond the minimap files: `bodyTooltips()` became `everyPane()`. Adding the extension otherwise pushed `createPaneViews` to 41 lines (over the 40-line limit), and `pane.ts` is already at its 300-line cap.
++- No new file, so `just map-check` is unaffected. The project map and `docs/architecture.md` (not mine to edit) could mention that `editor/scrollSync` also holds `exactScroll`.
++- I used `git checkout <file>` to throw away my own intermediate edits and to restore `.omp/run/__pycache__/scroll-timing.cpython-314.pyc`, a tracked file that my timing wrapper regenerated.
++- `target/debug/yamt` was rebuilt in the worktree only. Scratch binaries are in `/tmp/yamt-m/r3/` (`yamt-fixed`, `yamt-nofix`, `yamt-layer`), and the timing repo is a copy at `/tmp/yamt-m/r3/vue`.
++
++open_risks
++- `frontend/src/editor/internal/scrollSync.ts:84-97`: the rule "pin only when none of the rendered lines is visible" comes from the sweep. Without the fix, partly covered jumps (900–1400 from 0) landed, and failures started at 1652, where no rendered line is visible. A partly covered jump that is still large was only tried on `vOn.ts` and `renderer.ts`.
++- `scrollSync.ts:71-82,108-122`: the `placed` field keeps the last request, matched by its `range` object. If the document changes between the request and CodeMirror's measure, CodeMirror maps the range and the handler steps aside. CodeMirror's default "start" scroll then applies, which was 1 px off in a test (2553 for 2552).
++- The far jump comes from WebKitGTK 2.54. Another engine or version may differ, though the fix only uses CodeMirror's own scroll request.
++- Timing noise is large on this machine: Alt up ranged 11–21 late frames across runs.
++- No far toolbar-arrow or Ctrl/Cmd+wheel jump was exercised. The side reveal goes through the same pin, but that is not shown in a run.
++- `pnpm -C frontend test:browser` cannot launch here (#1242), so the WebKit browser probes did not run.
+\ No newline at end of file
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 51e9da1..918bb25 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -7,3 +7,5 @@ Save (plan §2 #65, #69): `internal/fileText.ts` builds the file Save writes fro
+ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `RemovalPoint`, class `REMOVAL_BAR_CLASS`) carries its removed text, and `eq` compares tone and text; `removalTooltip.ts` opens a `hoverTooltip` (in `document.body`) only while the pointer is on a bar's own box (`:hover` on that class), reads the text from that bar's decoration (`removalAt`), never from `chunk.words`, copies the pane's font, ligatures and code colour from its computed style, and closes when the bar goes; `removalText.ts` holds the pure display rules (the one joining line break left out — on an empty line the trailing one first — whitespace-only text as `·`/`→`/`↵` marks); `theme.css` draws a kept final line break as its empty line (`::after` zero-width space, not copied).
+ 
+ Minimap (plan §2 #81): `Frame` owns `internal/minimap.ts` (`Minimap`), one `.minimap` box (a `<canvas>` and a `.minimap-slider`) appended to the right pane's `view.dom`, outside `scrollDOM`/`contentDOM`, so no pane handler sees its presses; `display: none` while `MergeOptions.minimap`/`showMinimap` say no, and then `changed` and `paint` return at once and every tile is dropped. It paints in `Frame`'s frame after `ScrollSync.sync`, from the Result's `scrollTop` and `minimapLayout.ts` (VS Code's `MinimapLayout.create`; rows by `rowOfTop`/`topOfRow`): the slider moves on every frame, the canvas is redrawn only when its window, padding rows, size, tiles or edges changed. Code rows come from `minimapTiles.ts` (`MinimapTiles`: 128 Result rows per detached canvas through `ImageData`, `minimapPixels.ts` glyphs, `minimapRows.ts` syntax colours and theme tokens read once per show or theme change; dropped by `staleTiles`), each row looked up at its middle; a collapsed run's row is a wave line. Edges (`minimapMarks.ts`): problems left, waiting changes right, cached until rows move or diagnostics arrive. `minimapPointer.ts`: `mousedown` is prevented and stopped (focus and selection stay), a press puts its row's top in the Result's middle, the slider drags with pointer capture, a wheel scrolls the Result; each ends in `ScrollSync.follow("center")`.
++
++Far scrolls (#1240): every pane carries `exactScroll` (`internal/scrollSync.ts`). A scroll event whose position shows none of CodeMirror's rendered lines is turned into a CodeMirror scroll request (`placeTop` + `EditorView.scrollIntoView`; the `scrollHandler` writes that exact `scrollTop`), so CodeMirror renders the target before its measure; without it WebKitGTK pulls such a jump back while the viewport is swapped inside CodeMirror's scroll handler (a minimap press, a follower write, a script). Code that scrolls a pane keeps writing `scrollTop`.
+diff --git a/frontend/src/editor/internal/paneViews.ts b/frontend/src/editor/internal/paneViews.ts
+index 64cc1c8..6cb4bcd 100644
+--- a/frontend/src/editor/internal/paneViews.ts
++++ b/frontend/src/editor/internal/paneViews.ts
+@@ -12,6 +12,7 @@ import { SIDE_PANE, type ChunkRow, type Pane, type PaneViews } from "./geometry"
+ import { modClicks } from "./modClick";
+ import { centerKind, createPane, type PaneSettings } from "./pane";
+ import { removalTooltip } from "./removalTooltip";
++import { exactScroll } from "./scrollSync";
+ import type { Side } from "./side";
+ import { sideRunner, type SideCommand } from "./sideKeys";
+ import { sideStatusField } from "./sideStatus";
+@@ -36,10 +37,10 @@ export type PaneWiring = {
+   readonly act: (action: ChunkAction) => void;
+ };
+ 
+-// Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
+-// pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
+-function bodyTooltips(): Extension {
+-  return tooltips({ parent: document.body });
++function everyPane(): Extension {
++  // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
++  // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
++  return [tooltips({ parent: document.body }), exactScroll];
+ }
+ 
+ function sideExtensions(
+@@ -59,7 +60,7 @@ function sideExtensions(
+     }),
+     wiring.repaint,
+     removalTooltip(),
+-    bodyTooltips(),
++    everyPane(),
+     readOnly ? [] : modClicks(side, { rows, act }),
+   ];
+ }
+@@ -75,7 +76,7 @@ export function createPaneViews(
+     kind: centerKind(wiring.readOnly),
+     doc: docs.center,
+     parent: hosts.center,
+-    extensions: [field, centerDecorations(field), folds.center(), bodyTooltips(), wiring.center],
++    extensions: [field, centerDecorations(field), folds.center(), everyPane(), wiring.center],
+   });
+   const statuses = sideStatusField(
+     center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index c1b5a64..0ac7903 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -1,4 +1,6 @@
+-import type { EditorView } from "@codemirror/view";
++import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
++import type { Extension, SelectionRange } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ import { PANES, type Pane, type PaneViews } from "./geometry";
+@@ -9,6 +11,7 @@ type ScrollPane = {
+   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+   readonly documentPadding: { readonly top: number };
+ };
++type Placed = { readonly range: SelectionRange; readonly top: number };
+ 
+ const ANCHOR_AT = 0.5;
+ 
+@@ -63,6 +66,62 @@ function middle(view: ScrollPane): number {
+   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
+ }
+ 
++const placeTop = StateEffect.define<Placed>();
++
++const placed = StateField.define<Placed | null>({
++  create: () => null,
++  update(value, tr) {
++    let next = value;
++    for (const effect of tr.effects) {
++      if (effect.is(placeTop)) {
++        next = effect.value;
++      }
++    }
++    return next;
++  },
++});
++
++// WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror
++// swaps its viewport in the scroll handler's measure (@codemirror/view DocView.updateInner:
++// "Chrome sometimes messes with the scroll position during DOM mutation"); a scroll request
++// places the viewport first.
++function placeFarScroll(view: EditorView): void {
++  const top = view.scrollDOM.scrollTop;
++  const visibleTop = top - view.documentPadding.top;
++  const { from, to } = view.viewport;
++  const overlaps =
++    visibleTop < view.lineBlockAt(to).bottom &&
++    visibleTop + view.scrollDOM.clientHeight > view.lineBlockAt(from).top;
++  if (overlaps) {
++    return;
++  }
++  const line = view.lineBlockAtHeight(visibleTop);
++  const range = EditorSelection.cursor(line.from);
++  view.dispatch({
++    effects: [
++      placeTop.of({ range, top }),
++      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
++    ],
++  });
++}
++
++export const exactScroll: Extension = [
++  placed,
++  EditorView.domEventObservers({
++    scroll: (_event, view) => {
++      placeFarScroll(view);
++    },
++  }),
++  EditorView.scrollHandler.of((view, range) => {
++    const place = view.state.field(placed);
++    if (place === null || place.range !== range) {
++      return false;
++    }
++    view.scrollDOM.scrollTop = place.top;
++    return true;
++  }),
++];
++
+ export class ScrollSync {
+   readonly #views: Readonly<Record<Pane, ScrollPane>>;
+   readonly #requestFrame: () => void;
+-- 
+2.56.0
+

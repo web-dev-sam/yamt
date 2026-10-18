@@ -1,0 +1,414 @@
+From 2f767a565c03dc281281ac0cda6a48cad7f0b4e4 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 12:49:18 +0200
+Subject: [PATCH] fix(editor): minimap draws the last rows at the end; row
+ painter in minimapRows (#1237, #1235)
+
+---
+ .omp/run/notes/MinimapWindowR1.md             | 65 ++++++++++++++
+ frontend/src/editor/internal/minimap.ts       | 35 ++------
+ .../src/editor/internal/minimapLayout.test.ts | 32 ++++++-
+ frontend/src/editor/internal/minimapLayout.ts | 13 ++-
+ .../src/editor/internal/minimapRows.test.ts   | 84 ++++++++++++++++++-
+ frontend/src/editor/internal/minimapRows.ts   | 35 +++++++-
+ 6 files changed, 231 insertions(+), 33 deletions(-)
+ create mode 100644 .omp/run/notes/MinimapWindowR1.md
+
+diff --git a/.omp/run/notes/MinimapWindowR1.md b/.omp/run/notes/MinimapWindowR1.md
+new file mode 100644
+index 0000000..1cedf6f
+--- /dev/null
++++ b/.omp/run/notes/MinimapWindowR1.md
+@@ -0,0 +1,65 @@
++Both findings are fixed. With the Result scrolled to its very end, the minimap now draws the last row and the slider stays inside the box. The row painter is out of `Minimap` and has node tests. All five layer recipes exit 0, and the WebKit check passes.
++
++**summary**
++- **#1237:** at the end of the scroll range, `minimapLayout` moves the window down so it ends on the last row (`reachingLastRow`). Everywhere else it keeps VS Code's formula. The slider top is also capped at `height − sliderHeight`, so its bottom never passes the box bottom.
++- **#1235:** the row painter is now `rowPainter(source)` in `minimapRows.ts`. It takes state, blockAtHeight, waves, look, width and rowPx, and returns `TileRenderer["paintRow"]`. `Minimap#renderer` just calls it. `minimap.ts` went from 259 to 242 lines.
++
++**files_changed**
++- `frontend/src/editor/internal/minimapLayout.ts`
++- `frontend/src/editor/internal/minimapLayout.test.ts`
++- `frontend/src/editor/internal/minimapRows.ts`
++- `frontend/src/editor/internal/minimapRows.test.ts`
++- `frontend/src/editor/internal/minimap.ts`
++
++**tests_added**
++- `minimapLayout.test.ts`:
++  - "the end with the top row 0.85 cut off: 618 rows at ratio 2 end at row 618, the slider inside" (height and viewport 867, scrollTop 11,501). Proves rows 186–618 are drawn, the slider bottom is ≤ 867, and row 618 sits at canvas y 432 × 4.
++  - "the end at 868 px: 434 rows fit, the last drawn is row 618, the slider inside" (scrollTop 11,500). Proves rows 185–618 and slider bottom ≤ 868.
++  - The 7,277-row end test now asserts slider bottom ≤ 900. Its expected slider top changed from 810.4 to 810, and its title now says so.
++- `minimapRows.test.ts`:
++  - "row n paints line n: its text and its end, also where a height falls on a line boundary". The fake `blockAtHeight` returns the first line with `top <= h && bottom >= h`. Each row returns line n's `to`, and the painted column counts are `[4,1,3,2]` for the lines `MMMM`, `M`, `MMM`, `MM`.
++  - "a collapsed run's row paints the wave across the row's middle, no text". The row returns line 3's `to`, its middle pixel row is the wave colour at 255 opacity, and its top pixel row is empty.
++
++**smoke_evidence**
++1. `pnpm exec vitest run --project node src/editor/internal/minimapLayout.test.ts`
++   - On round 1's code, before the fix:
++     - `AssertionError: expected 900.4 to be less than or equal to 900` (7,277-row end)
++     - `AssertionError: expected [ 184, 616 ] to deeply equal [ 186, 618 ]` (618 rows at 867)
++     - `AssertionError: expected [ 184, 617 ] to deeply equal [ 185, 618 ]` (868 case)
++     - `Tests  3 failed | 12 passed (15)`
++   - With the fix: passes. With only the slider cap removed: `expected 900.4 to be less than or equal to 900`, `1 failed | 14 passed`. Restored.
++   - In the 618-row case the `startRow`/`endRow` assertion comes first and is the one that fails on round 1. Its slider bottom there (783.7 + 86 = 869.7) is the reviewer's arithmetic; the run stopped at the first assertion, so that slider assertion was not reached.
++2. Rows test with the lookup moved back to the row's top (`blockAtHeight(topOfRow(row))`):
++   - `AssertionError: expected [ 4, 4, 6, 10 ] to deeply equal [ 4, 6, 10, 13 ]`
++   - `AssertionError: expected 6 to be 10 // Object.is equality`
++   - `Tests  2 failed | 4 passed (6)`. Restored → `Tests  21 passed (21)` (layout and rows together).
++3. Recipes, all in `frontend/`:
++   - `pnpm lint` → exit 0
++   - `pnpm typecheck` (`vue-tsc -b`) → exit 0
++   - `pnpm test` → `Test Files  108 passed (108)`, `Tests  1435 passed (1435)`, exit 0
++   - `pnpm unused` (`knip --include exports,types`) → exit 0
++   - `pnpm fmt:check` → `All matched files use the correct format.`, exit 0
++   - `wc -l src/editor/internal/minimap.ts` → `242`
++4. WebKit: `pnpm -C frontend dev --port 5277 --strictPort`, `just webdriver 4447`, window 1600×1000, device ratio 2, `language-tools-script-setup.ts` with collapsing off (620 rows; row 620 is the empty line after the final newline), Alt held by a WebDriver keyDown. Script: `/tmp/yamt-m/r1/end.mjs`.
++   - Very end (scrollTop 11541 = max, `firstRowCut 0.85`):
++     - layout `startRow 188, endRow 620`; `canvasRows 433`
++     - `lastDocTextRow 619 "}"`, `lastPaintedCanvasRow 432 = lastTextCanvasRow 432`
++     - slider `top 779.7, height 86`, `sliderBottom 865.7 ≤ boxHeight 867`; `sliderRectBottom 954.2 ≤ boxRectBottom 955`
++     - `mismatchCount 0` over all 433 rows. This compares each canvas row's rightmost painted glyph column with the text of the line `lineBlockAtHeight` gives, so it does not depend on the layout under test.
++   - The same run with the raise disabled: `endRow 618` of 620, the last text sat at canvas row 434 past the 433 that fit, and `rectInside: false` (955.5 > 955). Restored and run again: the numbers above.
++   - Mid-file (scrollTop 3000): rows 48–480, `mismatchCount 0`.
++   - Keyword check, row 143 `export`: glyph `[224,152,107,174]` against the token `[224,152,107]`; the row above is empty and has pixels `[0,0,0,0]`.
++   - Screenshot: `/tmp/yamt-m/r1/window-end.png`.
++   - The dev server and webdriver were stopped; `pgrep` and `ss` found nothing left on 5277 or 4447.
++
++**deviations_from_brief**
++- `rowPainter` takes the waves (`waves: readonly WaveRow[]`), not a ready set of wave rows, and builds the set on the first painted row, as round 1 did. That way a draw where every tile is cached does not compute the set.
++- The window is raised only when `scrollTop >= scrollable` (the brief's "end of the scroll range"). The slider cap applies in every scrolled position, not only at the end. That is a no-op elsewhere, because the aligned top stays inside the box there.
++- `RowSource` is a type private to `minimapRows.ts`.
++- The WebKit file now has 620 rows; round 1 reported 618.
++
++**open_risks**
++- `minimapLayout.ts:102`: one or two px short of the end (for example scrollTop 11500 of 11501), the viewport already shows the last row but the window is not raised yet, so the last one or two rows are not drawn until the end is reached. The slider cap still keeps the slider inside. The brief scoped the raise to the end.
++- The box's `clientHeight` is 867 while its rect is 866.5 (top 88.5, bottom 955). A slider bottom of exactly 867 would stick 0.5 CSS px past the rect. After the fix the end gives 865.7, which is inside.
++
++Checks for you to run: `just check` (no map change: the files are already named), and `just mutants` over the changed lines if you want it.
+\ No newline at end of file
+diff --git a/frontend/src/editor/internal/minimap.ts b/frontend/src/editor/internal/minimap.ts
+index 0d5584f..83564da 100644
+--- a/frontend/src/editor/internal/minimap.ts
++++ b/frontend/src/editor/internal/minimap.ts
+@@ -3,13 +3,11 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+ import type { FoldFields } from "./folds";
+ import type { ChunkRow, PaneViews, WaveRow } from "./geometry";
+-import { MAX_COLUMNS, minimapColumns, minimapLayout, minimapScale } from "./minimapLayout";
+-import { rowOfTop, rowTop, topOfRow } from "./minimapLayout";
++import { minimapColumns, minimapLayout, minimapScale, rowOfTop, rowTop } from "./minimapLayout";
+ import type { Columns, MinimapInput, MinimapLayout, Slider } from "./minimapLayout";
+ import { changeMarks, markBoxes, problemMarks, type EdgeMark } from "./minimapMarks";
+-import { paintRow, paintWave } from "./minimapPixels";
+ import { MinimapPointer } from "./minimapPointer";
+-import { readLook, rowColours, waveRowsOf, type Look } from "./minimapRows";
++import { readLook, rowPainter, type Look } from "./minimapRows";
+ import { MinimapTiles, staleTiles, TILE_ROWS, type TileRenderer } from "./minimapTiles";
+ import { linted } from "./problems";
+ 
+@@ -24,8 +22,6 @@ type FrameLayout = { readonly rows: readonly ChunkRow[]; readonly waves: readonl
+ 
+ type Edges = { readonly left: readonly EdgeMark[]; readonly right: readonly EdgeMark[] };
+ 
+-const ROW_MIDDLE = 0.5;
+-
+ export class Minimap {
+   readonly #views: PaneViews;
+   readonly #folds: FoldFields;
+@@ -208,28 +204,15 @@ export class Minimap {
+     const view = this.#views.center;
+     const { rowPx } = layout;
+     const width = columns.code.width;
+-    let waveRows: ReadonlySet<number> | null = null;
+-    return {
++    const paintRow = rowPainter({
++      state: view.state,
++      blockAtHeight: (height) => view.lineBlockAtHeight(height),
++      waves,
++      look,
+       width,
+       rowPx,
+-      rows: layout.input.rows,
+-      paintRow: (target, row, y) => {
+-        // A height on a line boundary gives the line above (@codemirror/view lineBlockAtHeight,
+-        // viewportLines `l.bottom >= height`), so each row is looked up at its middle.
+-        const block = view.lineBlockAtHeight(topOfRow(row + ROW_MIDDLE));
+-        waveRows ??= waveRowsOf(waves);
+-        if (waveRows.has(row)) {
+-          paintWave(target, { y, x: 0, width, rowPx }, look.wave);
+-          return block.to;
+-        }
+-        const { state } = view;
+-        const to = Math.min(block.to, block.from + MAX_COLUMNS);
+-        const text = state.sliceDoc(block.from, to);
+-        const colours = rowColours(state, block.from, to);
+-        paintRow(target, { y, x: 0, text, colours, tabSize: state.tabSize }, look.glyphs);
+-        return block.to;
+-      },
+-    };
++    });
++    return { width, rowPx, rows: layout.input.rows, paintRow };
+   }
+ 
+   #paintEdges(
+diff --git a/frontend/src/editor/internal/minimapLayout.test.ts b/frontend/src/editor/internal/minimapLayout.test.ts
+index 38fcef3..38aeb4d 100644
+--- a/frontend/src/editor/internal/minimapLayout.test.ts
++++ b/frontend/src/editor/internal/minimapLayout.test.ts
+@@ -11,6 +11,7 @@ import {
+   rowTop,
+   topOfRow,
+   type MinimapInput,
++  type MinimapLayout,
+ } from "./minimapLayout";
+ 
+ // The Result's scroller and the minimap are both 900 CSS px high; CodeMirror pads the content by
+@@ -35,6 +36,13 @@ function rowCss(input: MinimapInput): number {
+   return minimapLayout(input, null).rowPx / input.pixelRatio;
+ }
+ 
++function sliderBottom({ slider }: MinimapLayout): number {
++  if (slider === null) {
++    throw new Error("no slider");
++  }
++  return slider.top + slider.height;
++}
++
+ test("scale doubles at ratio ≥ 2: a row is 2 CSS px at 1 and 2, 1.6 at 1.25", () => {
+   expect([1, 1.25, 1.99, 2, 3].map(minimapScale)).toEqual([1, 1, 1, 2, 2]);
+   expect(rowCss(at(0, { pixelRatio: 1 }))).toBe(2);
+@@ -112,14 +120,34 @@ test("7,277 rows, 900 px, scrollTop 72,770: slider 90 high at 408.6, rows 3,435
+   expect(layout.slider?.top).toBeCloseTo((3639 - 3435 + 0.3) * 2, 9);
+ });
+ 
+-test("the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810.4", () => {
++test("the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810, its bottom at the box's", () => {
+   const layout = minimapLayout(at(LAST_SCROLL_TOP), null);
+ 
+   expect([layout.startRow, layout.endRow]).toEqual([6828, 7277]);
+-  expect(layout.slider?.top).toBeCloseTo(810.4, 9);
++  expect(sliderBottom(layout)).toBeLessThanOrEqual(900);
++  expect(layout.slider?.top).toBe(810);
+   expect(rowTop(layout, 7277)).toBe(449 * 2);
+ });
+ 
++test("the end with the top row 0.85 cut off: 618 rows at ratio 2 end at row 618, the slider inside", () => {
++  // 618 × 20 + 8 − 867 = 11,501 px of scrolling; row 575 is 17 px above the top. The canvas
++  // holds 1,734 / 4 = 433 rows, so the last one is drawn from row 618 − 433 + 1 = 186.
++  const end = at(11_501, { rows: 618, height: 867, viewportHeight: 867, pixelRatio: 2 });
++  const layout = minimapLayout(end, null);
++
++  expect([layout.startRow, layout.endRow]).toEqual([186, 618]);
++  expect(sliderBottom(layout)).toBeLessThanOrEqual(867);
++  expect(rowTop(layout, 618)).toBe(432 * 4);
++});
++
++test("the end at 868 px: 434 rows fit, the last drawn is row 618, the slider inside", () => {
++  const end = at(11_500, { rows: 618, height: 868, viewportHeight: 868, pixelRatio: 2 });
++  const layout = minimapLayout(end, null);
++
++  expect([layout.startRow, layout.endRow]).toEqual([185, 618]);
++  expect(sliderBottom(layout)).toBeLessThanOrEqual(868);
++});
++
+ test("scrolling up never moves the window down, down never up", () => {
+   // At 70,002 and 70,003 px the top row is 3,500 for both, but the slider's own fraction puts
+   // the window's start at 3,304 and 3,303.
+diff --git a/frontend/src/editor/internal/minimapLayout.ts b/frontend/src/editor/internal/minimapLayout.ts
+index 58a8bd3..464f80e 100644
+--- a/frontend/src/editor/internal/minimapLayout.ts
++++ b/frontend/src/editor/internal/minimapLayout.ts
+@@ -98,9 +98,11 @@ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | nul
+     const fit = { startRow: 1, endRow: rows, topPaddingRows: extraTop };
+     return { input, ...fit, canvasHeight, rowPx, slider, ratio };
+   }
+-  const shown = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
++  const found = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
++  const shown = scrollTop >= scrollable ? reachingLastRow(input, found, fitting) : found;
+   const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
+-  const slider = { top: alignedSliderTop(input, shown, rowCss), height: sliderHeight };
++  const top = Math.min(alignedSliderTop(input, shown, rowCss), height - sliderHeight);
++  const slider = { top, height: sliderHeight };
+   return { input, ...shown, endRow, canvasHeight, rowPx, slider, ratio };
+ }
+ 
+@@ -143,6 +145,13 @@ function steadied(input: MinimapInput, found: Window, previous: MinimapLayout |
+   return found;
+ }
+ 
++// VS Code's window reaches the last row at the end only through scrollBeyondLastLine
++// (common/config/editorOptions.ts), which yamt does not have.
++function reachingLastRow({ rows }: MinimapInput, shown: Window, fitting: number): Window {
++  const lastRowFirst = rows - fitting + 1 + shown.topPaddingRows;
++  return { ...shown, startRow: Math.max(shown.startRow, lastRowFirst) };
++}
++
+ function alignedSliderTop(input: MinimapInput, shown: Window, rowCss: number): number {
+   const { scrollTop, paddingTop } = input;
+   const { row, partial } = viewportStart(input);
+diff --git a/frontend/src/editor/internal/minimapRows.test.ts b/frontend/src/editor/internal/minimapRows.test.ts
+index 8e0546e..aa9afaf 100644
+--- a/frontend/src/editor/internal/minimapRows.test.ts
++++ b/frontend/src/editor/internal/minimapRows.test.ts
+@@ -2,7 +2,9 @@ import { EditorState } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+ import { languageOf } from "./language";
+-import { readLook, rowColours, waveRowsOf } from "./minimapRows";
++import { topOfRow } from "./minimapLayout";
++import type { PixelRows } from "./minimapPixels";
++import { readLook, rowColours, rowPainter, waveRowsOf, type Look } from "./minimapRows";
+ 
+ const CODE = 0;
+ const KEYWORD = 1;
+@@ -99,3 +101,83 @@ test("a collapsed run's row is the row of its wave line's top in the Result", ()
+ 
+   expect([...waveRowsOf(waves)]).toEqual([3, 101]);
+ });
++
++const ROW_PX = 2;
++const WIDTH = 120;
++const WHITE = { r: 255, g: 255, b: 255 };
++const WAVE = { r: 86, g: 83, b: 98 };
++const NOT_PAINTED = "";
++const LOOK: Look = {
++  glyphs: { scale: 1, light: false, palette: [WHITE] },
++  wave: WAVE,
++  edges: {
++    inserted: NOT_PAINTED,
++    modified: NOT_PAINTED,
++    deleted: NOT_PAINTED,
++    conflict: NOT_PAINTED,
++    error: NOT_PAINTED,
++    warning: NOT_PAINTED,
++  },
++};
++
++// Line n is 20 px high from (n − 1) × 20; a height is answered as @codemirror/view's
++// lineBlockAtHeight does: the first line with top <= height and bottom >= height.
++function blocksOf(state: EditorState): (height: number) => { from: number; to: number } {
++  const lines = Array.from({ length: state.doc.lines }, (_, index) => state.doc.line(index + 1));
++  return (height) => {
++    const found = lines.find(
++      ({ number }) => topOfRow(number) <= height && topOfRow(number + 1) >= height,
++    );
++    return found ?? state.doc.line(state.doc.lines);
++  };
++}
++
++function pixelRows(rows: number): PixelRows {
++  return { data: new Uint8ClampedArray(WIDTH * ROW_PX * rows * 4), width: WIDTH };
++}
++
++function paintedColumns(target: PixelRows, y: number): number {
++  let columns = 0;
++  for (let x = 0; x < WIDTH; x += 1) {
++    const alphas = [0, 1].map((dy) => target.data[((y + dy) * WIDTH + x) * 4 + 3] ?? 0);
++    columns += alphas.some((alpha) => alpha > 0) ? 1 : 0;
++  }
++  return columns;
++}
++
++test("row n paints line n: its text and its end, also where a height falls on a line boundary", () => {
++  const state = EditorState.create({ doc: "MMMM\nM\nMMM\nMM" });
++  const target = pixelRows(4);
++  const paint = rowPainter({
++    state,
++    blockAtHeight: blocksOf(state),
++    waves: [],
++    look: LOOK,
++    width: WIDTH,
++    rowPx: ROW_PX,
++  });
++
++  const ends = [1, 2, 3, 4].map((row) => paint(target, row, (row - 1) * ROW_PX));
++
++  expect(ends).toEqual([1, 2, 3, 4].map((line) => state.doc.line(line).to));
++  expect([0, 1, 2, 3].map((index) => paintedColumns(target, index * ROW_PX))).toEqual([4, 1, 3, 2]);
++});
++
++test("a collapsed run's row paints the wave across the row's middle, no text", () => {
++  const state = EditorState.create({ doc: "MMMM\nM\nMMM\nMM" });
++  const target = pixelRows(1);
++  const paint = rowPainter({
++    state,
++    blockAtHeight: blocksOf(state),
++    waves: [{ left: 0, center: topOfRow(3), right: 0 }],
++    look: LOOK,
++    width: WIDTH,
++    rowPx: ROW_PX,
++  });
++
++  expect(paint(target, 3, 0)).toBe(state.doc.line(3).to);
++  const middle = Array.from(target.data.subarray(WIDTH * 4, WIDTH * 4 * 2));
++  const wave = Array.from({ length: WIDTH }, () => [WAVE.r, WAVE.g, WAVE.b, 255]).flat();
++  expect(middle).toEqual(wave);
++  expect(target.data.subarray(0, WIDTH * 4).every((channel) => channel === 0)).toBe(true);
++});
+diff --git a/frontend/src/editor/internal/minimapRows.ts b/frontend/src/editor/internal/minimapRows.ts
+index 6b47878..49cfcbd 100644
+--- a/frontend/src/editor/internal/minimapRows.ts
++++ b/frontend/src/editor/internal/minimapRows.ts
+@@ -4,9 +4,10 @@ import { highlightTree } from "@lezer/highlight";
+ 
+ import type { WaveRow } from "./geometry";
+ import type { Scale } from "./minimapGlyphs";
+-import { rowOfTop } from "./minimapLayout";
++import { MAX_COLUMNS, rowOfTop, topOfRow } from "./minimapLayout";
+ import type { EdgeKind } from "./minimapMarks";
+-import { rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
++import { paintRow, paintWave, rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
++import type { TileRenderer } from "./minimapTiles";
+ import { SYNTAX_COLOURS, syntaxColourClasses } from "./pane";
+ 
+ export type Look = {
+@@ -15,12 +16,22 @@ export type Look = {
+   readonly edges: Readonly<Record<EdgeKind, string>>;
+ };
+ 
++type RowSource = {
++  readonly state: EditorState;
++  readonly blockAtHeight: (height: number) => { readonly from: number; readonly to: number };
++  readonly waves: readonly WaveRow[];
++  readonly look: Look;
++  readonly width: number;
++  readonly rowPx: number;
++};
++
+ const CODE_TOKEN = "--color-code";
+ const PALETTE_TOKENS: readonly string[] = [
+   CODE_TOKEN,
+   ...new Set(SYNTAX_COLOURS.map(({ colour }) => colour)),
+ ];
+ const NO_COLOUR: Rgb = { r: 0, g: 0, b: 0 };
++const ROW_MIDDLE = 0.5;
+ 
+ function paletteIndex(classes: string): number {
+   for (const name of classes.split(" ")) {
+@@ -77,3 +88,23 @@ export function readLook(
+ export function waveRowsOf(waves: readonly WaveRow[]): ReadonlySet<number> {
+   return new Set(waves.flatMap(({ center }) => (center === null ? [] : [rowOfTop(center)])));
+ }
++
++export function rowPainter(source: RowSource): TileRenderer["paintRow"] {
++  const { state, blockAtHeight, waves, look, width, rowPx } = source;
++  let waveRows: ReadonlySet<number> | null = null;
++  return (target, row, y) => {
++    // A height on a line boundary gives the line above (@codemirror/view lineBlockAtHeight,
++    // viewportLines `l.bottom >= height`), so each row is looked up at its middle.
++    const block = blockAtHeight(topOfRow(row + ROW_MIDDLE));
++    waveRows ??= waveRowsOf(waves);
++    if (waveRows.has(row)) {
++      paintWave(target, { y, x: 0, width, rowPx }, look.wave);
++      return block.to;
++    }
++    const to = Math.min(block.to, block.from + MAX_COLUMNS);
++    const text = state.sliceDoc(block.from, to);
++    const colours = rowColours(state, block.from, to);
++    paintRow(target, { y, x: 0, text, colours, tabSize: state.tabSize }, look.glyphs);
++    return block.to;
++  };
++}
+-- 
+2.56.0
+

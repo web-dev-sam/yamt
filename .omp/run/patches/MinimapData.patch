@@ -1,0 +1,1257 @@
+From fc98f339ef1f17d2201a27c4eaec8ef25b5afa9b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 12:01:06 +0200
+Subject: [PATCH] feat(editor): minimap layout, glyph pixels, edge marks, one
+ syntax table
+
+VS Code's proportional layout and prebaked glyphs (microsoft/vscode
+789f2c4, MIT) as pure node-tested parts; the window build wires them.
+---
+ .omp/run/notes/MinimapData.md                 | 101 ++++++++++
+ frontend/src/editor/internal/minimapGlyphs.ts |  42 ++++
+ .../src/editor/internal/minimapLayout.test.ts | 158 +++++++++++++++
+ frontend/src/editor/internal/minimapLayout.ts | 163 +++++++++++++++
+ .../src/editor/internal/minimapMarks.test.ts  | 185 ++++++++++++++++++
+ frontend/src/editor/internal/minimapMarks.ts  |  75 +++++++
+ .../src/editor/internal/minimapPixels.test.ts | 143 ++++++++++++++
+ frontend/src/editor/internal/minimapPixels.ts |  96 +++++++++
+ .../src/editor/internal/minimapTiles.test.ts  |  21 ++
+ frontend/src/editor/internal/minimapTiles.ts  |  16 ++
+ frontend/src/editor/internal/pane.test.ts     |  60 +++++-
+ frontend/src/editor/internal/pane.ts          |  54 +++--
+ 12 files changed, 1096 insertions(+), 18 deletions(-)
+ create mode 100644 .omp/run/notes/MinimapData.md
+ create mode 100644 frontend/src/editor/internal/minimapGlyphs.ts
+ create mode 100644 frontend/src/editor/internal/minimapLayout.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapLayout.ts
+ create mode 100644 frontend/src/editor/internal/minimapMarks.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapMarks.ts
+ create mode 100644 frontend/src/editor/internal/minimapPixels.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapPixels.ts
+ create mode 100644 frontend/src/editor/internal/minimapTiles.test.ts
+ create mode 100644 frontend/src/editor/internal/minimapTiles.ts
+
+diff --git a/.omp/run/notes/MinimapData.md b/.omp/run/notes/MinimapData.md
+new file mode 100644
+index 0000000..7a93109
+--- /dev/null
++++ b/.omp/run/notes/MinimapData.md
+@@ -0,0 +1,101 @@
++The minimap's data layer is in place: layout, glyph tables, pixel painting, tile staleness and edge marks, plus one shared syntax colour table in `pane.ts`. The pane's highlight CSS came out the same before and after the change. All five layer recipes exit 0. `just map-check` was not run, and it will probably fail until the new files are added to the project map and `docs/architecture.md`.
++
++**summary**
++- `minimapLayout.ts`: VS Code's proportional `MinimapLayout.create` in yamt's numbers, plus `minimapScale`, `minimapColumns`, `rowAt`, `rowTop`, `centredScrollTop` and `draggedScrollTop`.
++- `minimapGlyphs.ts`: VS Code's prebaked glyph tables for scales 1 and 2, decoded once, with `charIndex` (VS Code's `getCharIndex`) and an MIT header.
++- `minimapPixels.ts`: `rgbOf`, `paintRow` (intensities ×12/15 on dark and ×50/60 on light, tab stops, spaces, the 120-column cut) and `paintWave`.
++- `minimapTiles.ts`: `staleTiles`. `minimapMarks.ts`: `changeMarks`, `problemMarks` (warnings first) and `markBoxes`.
++- `pane.ts`: the `SYNTAX_COLOURS` table; `paletteHighlight` and the new `syntaxColourClasses` are both built from it.
++
++**files_changed**
++- `frontend/src/editor/internal/pane.ts`, `pane.test.ts`
++- new: `minimapLayout.ts`, `minimapLayout.test.ts`, `minimapGlyphs.ts`, `minimapPixels.ts`, `minimapPixels.test.ts`, `minimapMarks.ts`, `minimapMarks.test.ts`, `minimapTiles.ts`, `minimapTiles.test.ts` (all in `frontend/src/editor/internal/`)
++
++**tests_added**
++- `minimapLayout.test.ts` has the design's eleven tests: scale doubles at ≥ 2 (row 2/2/1.6 CSS px); 120 columns plus two 6 px edges (96 CSS px of code at 1.25); a file that fits has no slider; 450 rows fill the minimap exactly, so the rows stay and the slider moves by scrollTop × ratio; 7,277 rows at 72,770 give rows 3,435–3,884 and the slider at 408.6; the end gives 6,828–7,277 and 810.4; no flicker when scrolling up or down; the find space adds one padding row; press row; Center; drag.
++- `minimapPixels.test.ts` covers `rgbOf`; `T` at scales 1 and 2; light uses 50/60; tab and space; the column cut; non-ASCII through `getCharIndex`; the wave row.
++- `minimapTiles.test.ts` covers doc, folds, theme or language changes giving all tiles, a grown tree giving `{from}`, and nothing changed giving none.
++- `minimapMarks.test.ts` covers: right edge tone and resolved changes; left edge error and warning, with info and hint left out; errors after warnings; a problem in collapsed lines lands on its wave row; the 4 CSS px minimum, centring and clamping; only marks inside the window, through the start row and padding.
++- `pane.test.ts`:
++  - "the pane's highlight styles every tag as before the syntax table" pins all 25 tag styles.
++  - "the minimap classes and the pane's highlight give each tag the same token".
++
++**smoke_evidence**
++
++1. `pnpm -C frontend exec vitest run --project node src/editor/internal/minimap` → `Test Files 4 passed (4) Tests 25 passed (25)`.
++   Worked cases, by hand from VS Code's formulas:
++   - **7,277 rows:** padding 4/4 px, both heights 900. Slider height = ⌊45 × 2⌋ = 90. Travel = min(810, 14,554 − 90) = 810. Scrollable = 145,548 − 900 = 144,648. At scrollTop 72,770 the top row is ⌊72,766/20⌋+1 = 3,639 with 0.3 of it above the top. The plain slider top is 407.49, so the start is ⌊3,639 − 203.75⌋ = 3,435 and the end is 3,435 + 450 − 1 = 3,884. The aligned slider top is (3,639 − 3,435 + 0.3) × 2 = 408.6.
++   - **Fits exactly:** 450 rows, scrollTop 1,000 → slider top 1,000 × 810/8,108 = 99.901. The `>` mutation gives 99.6.
++   - **Center:** row 100's top is 4 + 1,980 = 1,984. The box runs 1,964–2,004 (one line above, from the "mouse" source), so scrollTop = 1,984 − 450 = 1,534.
++   - **Drag:** 72,770 + 50 / (810/144,648) = 81,698.9 → 81,699.
++   - **`T`:** glyph 52 has intensities 154 and 46 → alphas ⌊123.2⌋ = 123 and ⌊36.8⌋ = 36; on light, 128 and 38.
++   - **Marks:** row 3,500 in a window starting at 3,435 sits at 130 device px; a one-row mark becomes y 129, height 4.
++   - **Highlight unchanged:** `paletteHighlight.module.getRules()` was dumped before and after the change. Both give `.ͼq {color: var(--color-syntax-keyword);}` … `.ͼ14 {text-decoration: line-through;}`, all 15 rules the same.
++
++2. Each hand mutation was applied, the run showed the failing line below, and the code was put back. File tags after restoring match the originals: `#7156`, `#1082`, `#C26B`, `#0536`, `#B9CF`, `#7DA1`.
++   - `minimapScale` → `return 1;`: `expected [ 1, 1, 1, 1, 1 ] to deeply equal [ 1, 1, 1, 2, 2 ]` (minimapLayout.test.ts:37)
++   - `MAX_COLUMNS * scale` → `MAX_COLUMNS`: the columns test fails at :50
++   - `travel > 0` → `>= 0`: "a file that fits" fails at :67
++   - fit `>=` → `>`: `expected 99.6 to be close to 99.90133201776024` (:86)
++   - drop `- sliderTop·pr/rowPx`: `expected [ 3639, 4088, +0 ] to deeply equal [ 3435, 3884, +0 ]` (:95)
++   - drop the `min(height − sliderHeight, …)` cap: `expected [ 1, 450 ] to deeply equal [ 6828, 7277 ]` (:103)
++   - `Math.min(found.startRow, previous.startRow)` → `found.startRow`: `expected 3304 to be 3303` (:117)
++   - `extraTop = 0`: `expected +0 to be 1` (:124)
++   - drop `- layout.topPaddingRows` in `rowAt`: `expected 6 to be 5` (:140)
++   - `boxStart = top`: `expected 1544 to be 1534` (:147)
++   - `/ ratio` → `* ratio`: `expected 72770 to be 81699` (:154)
++   - rgbOf green parsed from the red group: `expected { r: 18, g: 18, b: 86 } to deeply equal { r: 18, g: 52, b: 86 }`
++   - glyph stride `glyph * scale`: `expected [ 224, 152, 107, 33 ] to deeply equal [ 224, 152, 107, 123 ]`
++   - light uses the dark ratio: `expected [ 123 ] to deeply equal [ 128 ]`
++   - `column += tabSize`: `expected [ +0, 123 ] to deeply equal [ 123, +0 ]`
++   - `< MAX_COLUMNS` → `<=`: `expected [ 123, 123, +0 ] to deeply equal [ 123, +0, +0 ]`
++   - modulo wrap removed: `expected 201 to be 9`
++   - wave `y = wave.y`: `expected [ [ +0, 255, 255, +0 ], …(2) ] to deeply equal [ [ +0, +0, +0, +0 ], …(2) ]`
++   - `{ from: treeBefore }` → `"none"`: `expected 'none' to deeply equal { from: 4000 }`
++   - one hard-coded colour for every entry in `paletteHighlight`: the "same token" test fails at pane.test.ts:505
++   - number mapped to the string token in `SYNTAX_COLOURS`: the "as before" test fails at :492
++   - `"center"` → `"local"`: `expected [ 'modified', 'modified', …(2) ] to deeply equal [ …(6) ]`
++   - `info: "warning"`: `expected [ … (2) ] to deeply equal [ … (1) ]` (minimapMarks.test.ts:112)
++   - errors before warnings: `expected [ 'error', 'error', 'warning', …(1) ] to deeply equal [ 'warning', 'warning', 'error', …(1) ]`
++   - `blockAt(to).bottom` → `blockAt(from).bottom`: the wave-row test fails at :140
++   - drop the minimum-height `Math.max`: the minimum-4 test fails at :158
++   - `rowTop` without `- startRow`: `expected [ { x: 127, y: 896, … } ] to deeply equal [ { x: 127, y: 1, … } ]` (:179)
++
++3. The recipes, each exit code read with `${PIPESTATUS[0]}`:
++   - `lint exit 0`, `typecheck exit 0`, `unused exit 0` (knip printed no findings)
++   - `test exit 0`: `Test Files 107 passed (107) Tests 1431 passed (1431)`
++   - `fmt:check exit 0`: `All matched files use the correct format.`
++
++4. `git diff --stat`: only `pane.test.ts | 60 +++-` and `pane.ts | 54 +++---` changed (2 files, +96/−18). `git status` shows only the nine new owned `minimap*` files as untracked.
++
++**deviations_from_brief**
++1. **Source of the copied code:** microsoft/vscode at `789f2c470d13c4760f2b5cc6a9e1919c05d04f7d` (main on 2026-10-18), files under `src/vs/editor/`:
++   - `browser/viewParts/minimap/minimapPreBaked.ts` (the glyph data; its sha256 matches the copy byte for byte)
++   - `browser/viewParts/minimap/minimapCharSheet.ts` (`getCharIndex`, `Constants`)
++   - `browser/viewParts/minimap/minimapCharRenderer.ts` (softening, `renderChar`)
++   - `browser/viewParts/minimap/minimap.ts` (`MinimapLayout.create`, `getDesiredScrollTopFromDelta`, the press handler, `_renderLine`)
++   - `common/config/editorOptions.ts` (`_computeMinimapLayout`)
++   - `browser/viewParts/viewLines/viewLines.ts` (Center reveal)
++
++   The `LICENSE.txt` at that commit is MIT, "Copyright (c) 2015 - present Microsoft Corporation".
++2. **Center differs from the design.** VS Code's minimap reveals with source `'mouse'` and `minimalReveal` false. That pads the box one line above and none below, so the row's **top** lands in the middle, not its centre. I copied VS Code: row 100 → 1,534, not the design's 1,564. My hand mutation is "drop `- LINE_HEIGHT_PX` from `boxStart`".
++3. **Contract items left unexported**, because knip fails on an export nobody imports yet; the later build adds the export: `SyntaxToken`, `Slider`, `Columns`, `Stale`, `EdgeKind`, `MarkBox` (all defined, just not exported). `TILE_ROWS` was left out entirely: as an unexported, unused constant it fails `no-unused-vars`.
++4. **Additions to the contract:**
++   - `minimapGlyphs.ts`: `glyphIntensity(scale, glyph, pixel)` reads the cached table without copying it. `glyphs()` returns a copy, as TS15 requires for parse-once caches, so `paintRow` uses `glyphIntensity` to avoid a copy per row.
++   - `minimapGlyphs.ts` also exports `GLYPH_ROWS_PER_SCALE`, `HIDPI_SCALE` and `type Scale = 1 | typeof HIDPI_SCALE`. This is the same type as `1 | 2`, but `no-magic-numbers` flags a `2` in a type.
++   - `minimapLayout.ts` exports `MAX_COLUMNS`, so the 120 lives in one place.
++5. **`charIndex` fixes an edge case.** VS Code's range check is `chCode > CHAR_COUNT`; I used `>=`. With VS Code's check, code 128 gives index 96, which is past the end of the table.
++6. **Not copied from VS Code:**
++   - Its bottom-padding rows (`extraLinesAtTheBottom` and that branch of the slider travel). yamt's bottom padding is 4 px, ⌊4/20⌋ = 0, so the result is the same; `paddingBottom` enters only the scroll height.
++   - Full-width characters counting twice, as the design already says.
++   - The ratio is set to 0 when the slider has no room to move or the file does not scroll, so it is never NaN; `draggedScrollTop` then returns the start position.
++7. **The softening ratios are written as decimals**, `0.8` and `0.8333333333333334`, because `no-magic-numbers` flags `12 / 15`. These are the same doubles as `12/15` and `50/60` (checked in node: `true true`).
++8. **`markBoxes` clips** a mark to the canvas before applying the 4 px minimum, so a mark that starts above the window is drawn from y 0 at its visible height.
++9. **Project map and `docs/architecture.md`:** the new non-test files are not named there (those files are outside my slice), so `just map-check` will probably fail until they are added.
++10. The `vitest run` command had to avoid the `>` character, because the ownership hook reads it as a redirect.
++
++**open_risks**
++- `minimapLayout.ts:132-139` (`alignedSliderTop`, copied as is): while a find bar is open and scrollTop is under 33 px, VS Code's formula gives a slightly negative slider top (down to about −0.7 CSS px).
++- `minimapLayout.ts:102-111` (`windowAt`, also copied as is): in a tall file with the find bar open, the padding row only appears when the start is below `extraTop` (strictly less). At scrollTop 0 that means no padding row.
++- `minimapPixels.ts:78`: a character whose palette index has no colour advances the column but paints nothing.
++- `minimapTiles.ts:15`: a tree that shrinks without a document or language change gives `"none"`, as the brief says.
+\ No newline at end of file
+diff --git a/frontend/src/editor/internal/minimapGlyphs.ts b/frontend/src/editor/internal/minimapGlyphs.ts
+new file mode 100644
+index 0000000..dc50a6d
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapGlyphs.ts
+@@ -0,0 +1,42 @@
++// The glyph intensities and the character index below are copied from Visual Studio Code
++// (microsoft/vscode at 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d,
++// src/vs/editor/browser/viewParts/minimap/minimapPreBaked.ts and minimapCharSheet.ts).
++// Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License.
++
++const FIRST_CODE = 32;
++const GLYPH_COUNT = 96;
++export const GLYPH_ROWS_PER_SCALE = 2;
++const HEX_DIGITS_PER_BYTE = 2;
++const HEX = 16;
++
++export const HIDPI_SCALE = 2;
++export type Scale = 1 | typeof HIDPI_SCALE;
++
++function decoded(hex: string): Uint8ClampedArray {
++  return Uint8ClampedArray.from({ length: hex.length / HEX_DIGITS_PER_BYTE }, (_, index) =>
++    Number.parseInt(hex.slice(index * HEX_DIGITS_PER_BYTE, (index + 1) * HEX_DIGITS_PER_BYTE), HEX),
++  );
++}
++
++// Each glyph is scale wide and 2 × scale tall, its pixels row by row (minimapCharRenderer.ts renderChar).
++const INTENSITIES: Readonly<Record<Scale, Uint8ClampedArray>> = {
++  1: decoded(
++    "0000511D6300CF609C709645A78432005642574171487021003C451900274D35D762755E8B629C5BA856AF57BA649530C167D1512A272A3F6038604460398526BCA2A968DB6F8957C768BE5FBE2FB467CF5D8D5B795DC7625B5DFF50DE64C466DB2FC47CD860A65E9A2EB96CB54CE06DA763AB2EA26860524D3763536601005116008177A8705E53AB738E6A982F88BAA35B5F5B626D9C636B449B737E5B7B678598869A662F6B5B8542706C704C80736A607578685B70594A49715A4522E792",
++  ),
++  2: decoded(
++    "000000000000000055394F383D2800008B8B1F210002000081B1CBCBCC820000847AAF6B9AAF2119BE08B8881AD60000A44FD07DCCF107015338130C00000000385972265F390B406E2437634B4B48031B12B8A0847000001E15B29A402F0000000000004B33460B00007A752C2A0000000000004D3900000084394B82013400ABA5CFC7AD9C0302A45A3E5A98AB000089A43382D97900008BA54AA087A70A0248A6A7AE6DBE0000BF6F94987EA40A01A06DCFA7A7A9030496C32F77891D0000A99FB1A0AFA80603B29AB9CA75930D010C0948354D3900000C0948354F37460D0028BE673D8400000000AF9D7B6E00002B007AA8933400007AA642675C2700007984CFB9C3985B768772A8A6B7B20000CAAECAAFC4B700009F94A6009F840009D09F9BA4CA9C0000CC8FC76DC87F0000C991C472A2000000A894A48CA7B501079BA2C9C69BA20000B19A5D3FA89000005CA6009DA2960901B0A7F0669FB200009D009E00B7890000DAD0F5D092820000D294D4C48BD10000B5A7A4A3B1A50402CAB6CBA6A2000000B5A7A4A3B1A8044FCDADD19D9CB00000B7778F7B8AAE0803C9AB5D3F5D3F00009EA09EA0BAB006039EA0989A8C7900009B9EF4D6B7C00000A9A7816CACA80000ABAC84705D3F000096DA635CDC8C00006F486F266F263D4784006124097B00374F6D2D6D2D6D4A3A95872322000000030000000000008D8939130000000000002E22A5C9CBC70600AB25C0B5C9B400061A2DB04CA67001082AA6BEBEBFC606002321DACBC19E03087AA08B6768380000282FBAC0B8CA7A88AD25BBA5A29900004C396C5894A6000040485A6E356E9442A32CD17EADA70000B4237923628600003E2DE9C1D7B500002F25BBA5A2990000231DB6AFB4A804023025C0B5CAB588062B2CBDBEC0C706882435A75CA20000002326BD6A82A908048B4B9A5A668000002423A09CB4BB060025259C9D8A7900001C1FCAB2C7C700002A2A9387ABA200002626A4A47D6E9D14333163A0C87500004B6F9C2D643A257049364936493647358A34438355497F1A0000A24C1D590000D38DFFBDD4CD3126",
++  ),
++};
++
++export function glyphs(scale: Scale): Uint8ClampedArray {
++  return INTENSITIES[scale].slice();
++}
++
++export function glyphIntensity(scale: Scale, glyph: number, pixel: number): number {
++  return INTENSITIES[scale][glyph * scale * scale * GLYPH_ROWS_PER_SCALE + pixel] ?? 0;
++}
++
++export function charIndex(code: number): number {
++  const index = code - FIRST_CODE;
++  return index < 0 || index >= GLYPH_COUNT ? (index + GLYPH_COUNT) % GLYPH_COUNT : index;
++}
+diff --git a/frontend/src/editor/internal/minimapLayout.test.ts b/frontend/src/editor/internal/minimapLayout.test.ts
+new file mode 100644
+index 0000000..aafd1e0
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapLayout.test.ts
+@@ -0,0 +1,158 @@
++import { expect, test } from "vitest";
++
++import {
++  centredScrollTop,
++  draggedScrollTop,
++  minimapColumns,
++  minimapLayout,
++  minimapScale,
++  rowAt,
++  rowTop,
++  type MinimapInput,
++} from "./minimapLayout";
++
++// The Result's scroller and the minimap are both 900 CSS px high; CodeMirror pads the content by
++// 4 px at the top and the bottom, so 7,277 rows scroll 7,277 × 20 + 8 − 900 = 144,648 px.
++const RESULT: MinimapInput = {
++  scrollTop: 0,
++  viewportHeight: 900,
++  paddingTop: 4,
++  paddingBottom: 4,
++  rows: 7277,
++  height: 900,
++  pixelRatio: 1,
++};
++const LAST_SCROLL_TOP = 144_648;
++const RATIO = 810 / LAST_SCROLL_TOP;
++
++function at(scrollTop: number, input: Partial<MinimapInput> = {}): MinimapInput {
++  return { ...RESULT, ...input, scrollTop };
++}
++
++function rowCss(input: MinimapInput): number {
++  return minimapLayout(input, null).rowPx / input.pixelRatio;
++}
++
++test("scale doubles at ratio ≥ 2: a row is 2 CSS px at 1 and 2, 1.6 at 1.25", () => {
++  expect([1, 1.25, 1.99, 2, 3].map(minimapScale)).toEqual([1, 1, 1, 2, 2]);
++  expect(rowCss(at(0, { pixelRatio: 1 }))).toBe(2);
++  expect(rowCss(at(0, { pixelRatio: 2 }))).toBe(2);
++  expect(rowCss(at(0, { pixelRatio: 1.25 }))).toBe(1.6);
++});
++
++test("120 columns of one scale each, two 6 px edges in device px; 96 + edges CSS at 1.25", () => {
++  expect(minimapColumns(1)).toEqual({
++    left: { x: 0, width: 6 },
++    code: { x: 6, width: 120 },
++    right: { x: 126, width: 6 },
++    width: 132,
++  });
++  expect(minimapColumns(2)).toEqual({
++    left: { x: 0, width: 12 },
++    code: { x: 12, width: 240 },
++    right: { x: 252, width: 12 },
++    width: 264,
++  });
++  const fractional = minimapColumns(1.25);
++  expect(fractional.code.width / 1.25).toBe(96);
++  expect(fractional).toEqual({
++    left: { x: 0, width: 8 },
++    code: { x: 8, width: 120 },
++    right: { x: 128, width: 8 },
++    width: 136,
++  });
++});
++
++test("a file that fits: rows from the first, no slider", () => {
++  expect(minimapLayout(at(0, { rows: 30 }), null)).toEqual({
++    input: at(0, { rows: 30 }),
++    startRow: 1,
++    endRow: 30,
++    topPaddingRows: 0,
++    rowPx: 2,
++    slider: null,
++    ratio: 0,
++  });
++});
++
++test("taller than the Result, shorter than the minimap: rows stay, the slider moves by scrollTop × ratio", () => {
++  // 450 rows fill the 900 px minimap exactly; the slider travels 450 × 2 − 90 = 810 px over
++  // 450 × 20 + 8 − 900 = 8,108 px of scrolling.
++  const layout = minimapLayout(at(1000, { rows: 450 }), null);
++
++  expect([layout.startRow, layout.endRow, layout.topPaddingRows]).toEqual([1, 450, 0]);
++  expect(layout.ratio).toBe(810 / 8108);
++  expect(layout.slider?.height).toBe(90);
++  expect(layout.slider?.top).toBeCloseTo((1000 * 810) / 8108, 6);
++});
++
++test("7,277 rows, 900 px, scrollTop 72,770: slider 90 high at 408.6, rows 3,435–3,884", () => {
++  // Row 3,639 starts 6 px above the top (0.3 rows); the plain slider top is 72,770 × ratio =
++  // 407.49, so the window starts at floor(3,639 − 407.49 / 2) = 3,435 and holds 450 rows.
++  const layout = minimapLayout(at(72_770), null);
++
++  expect(layout.ratio).toBe(RATIO);
++  expect([layout.startRow, layout.endRow, layout.topPaddingRows]).toEqual([3435, 3884, 0]);
++  expect(layout.slider?.height).toBe(90);
++  expect(layout.slider?.top).toBeCloseTo((3639 - 3435 + 0.3) * 2, 9);
++});
++
++test("the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810.4", () => {
++  const layout = minimapLayout(at(LAST_SCROLL_TOP), null);
++
++  expect([layout.startRow, layout.endRow]).toEqual([6828, 7277]);
++  expect(layout.slider?.top).toBeCloseTo(810.4, 9);
++  expect(rowTop(layout, 7277)).toBe(449 * 2);
++});
++
++test("scrolling up never moves the window down, down never up", () => {
++  // At 70,002 and 70,003 px the top row is 3,500 for both, but the slider's own fraction puts
++  // the window's start at 3,304 and 3,303.
++  expect(minimapLayout(at(70_002), null).startRow).toBe(3304);
++  expect(minimapLayout(at(70_003), null).startRow).toBe(3303);
++
++  const up = minimapLayout(at(70_002), minimapLayout(at(70_003), null));
++  const down = minimapLayout(at(70_003), minimapLayout(at(70_002), null));
++
++  expect(up.startRow).toBe(3303);
++  expect(down.startRow).toBe(3304);
++});
++
++test("find space 33 px in a small file: one padding row, row 1 drawn at 2 px", () => {
++  const layout = minimapLayout(at(0, { rows: 30, paddingTop: 33 }), null);
++
++  expect(layout.topPaddingRows).toBe(1);
++  expect(rowTop(layout, 1)).toBe(2);
++  expect(rowTop(layout, 30)).toBe(60);
++});
++
++test("a press: index + start − padding rows, within [1, rows]", () => {
++  const middle = minimapLayout(at(72_770), null);
++  const end = minimapLayout(at(LAST_SCROLL_TOP), null);
++  const padded = minimapLayout(at(0, { rows: 30, paddingTop: 33 }), null);
++  const sharp = minimapLayout(at(0, { rows: 30, paddingTop: 33, pixelRatio: 2 }), null);
++
++  expect(rowAt(middle, 100)).toBe(3435 + 50);
++  expect(rowAt(middle, 0)).toBe(3435);
++  expect(rowAt(end, 899)).toBe(7277);
++  expect(rowAt(end, 2000)).toBe(7277);
++  expect(rowAt(padded, 0)).toBe(1);
++  expect(rowAt(padded, 10)).toBe(5);
++  expect(rowAt(sharp, 10)).toBe(5);
++  expect(rowAt(padded, 500)).toBe(30);
++});
++
++test("Center: the row's top in the middle, as VS Code's mouse reveal; row 100 → 1,534; row 5 → 0", () => {
++  // Row 100's top is 4 + 99 × 20 = 1,984; the box runs one line above it to its bottom.
++  expect(centredScrollTop(100, RESULT)).toBe(1984 - 450);
++  expect(centredScrollTop(5, RESULT)).toBe(0);
++});
++
++test("drag: start + delta / ratio, from the start layout; no slider, no scroll", () => {
++  const start = minimapLayout(at(72_770), null);
++
++  expect(draggedScrollTop(start, 50)).toBe(Math.round(72_770 + 50 / RATIO));
++  expect(draggedScrollTop(start, 50)).toBe(81_699);
++  expect(draggedScrollTop(start, -10)).toBe(Math.round(72_770 - 10 / RATIO));
++  expect(draggedScrollTop(minimapLayout(at(0, { rows: 30 }), null), 50)).toBe(0);
++});
+diff --git a/frontend/src/editor/internal/minimapLayout.ts b/frontend/src/editor/internal/minimapLayout.ts
+new file mode 100644
+index 0000000..642d9ec
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapLayout.ts
+@@ -0,0 +1,163 @@
++import { GLYPH_ROWS_PER_SCALE, HIDPI_SCALE, type Scale } from "./minimapGlyphs";
++import { LINE_HEIGHT_PX } from "./pane";
++
++export type MinimapInput = {
++  readonly scrollTop: number;
++  readonly viewportHeight: number;
++  readonly paddingTop: number;
++  readonly paddingBottom: number;
++  readonly rows: number;
++  readonly height: number;
++  readonly pixelRatio: number;
++};
++
++type Slider = { readonly top: number; readonly height: number };
++
++export type MinimapLayout = {
++  readonly input: MinimapInput;
++  readonly startRow: number;
++  readonly endRow: number;
++  readonly topPaddingRows: number;
++  readonly rowPx: number;
++  readonly slider: Slider | null;
++  readonly ratio: number;
++};
++
++export type Box = { readonly x: number; readonly width: number };
++
++type Columns = {
++  readonly left: Box;
++  readonly code: Box;
++  readonly right: Box;
++  readonly width: number;
++};
++
++type Sizes = {
++  readonly rowPx: number;
++  readonly extraTop: number;
++  readonly sliderTop: number;
++};
++
++type Window = Pick<MinimapLayout, "startRow" | "topPaddingRows">;
++
++export const MAX_COLUMNS = 120;
++const EDGE_CSS_PX = 6;
++const HALVES = 2;
++
++export function minimapScale(pixelRatio: number): Scale {
++  return pixelRatio >= HIDPI_SCALE ? HIDPI_SCALE : 1;
++}
++
++export function minimapColumns(pixelRatio: number): Columns {
++  const edge = Math.round(EDGE_CSS_PX * pixelRatio);
++  const code = MAX_COLUMNS * minimapScale(pixelRatio);
++  return {
++    left: { x: 0, width: edge },
++    code: { x: edge, width: code },
++    right: { x: edge + code, width: edge },
++    width: edge + code + edge,
++  };
++}
++
++function scrollHeightOf({ rows, paddingTop, paddingBottom }: MinimapInput): number {
++  return rows * LINE_HEIGHT_PX + paddingTop + paddingBottom;
++}
++
++export function minimapLayout(input: MinimapInput, previous: MinimapLayout | null): MinimapLayout {
++  const { scrollTop, viewportHeight, paddingTop, rows, height, pixelRatio } = input;
++  const rowPx = GLYPH_ROWS_PER_SCALE * minimapScale(pixelRatio);
++  const rowCss = rowPx / pixelRatio;
++  const fitting = Math.floor(Math.floor(pixelRatio * height) / rowPx);
++  const sliderHeight = Math.floor((viewportHeight / LINE_HEIGHT_PX) * rowCss);
++  const extraTop = Math.floor(paddingTop / LINE_HEIGHT_PX);
++  const travel = Math.min(
++    height - sliderHeight,
++    Math.max(0, (extraTop + rows) * rowCss - sliderHeight),
++  );
++  const scrollable = scrollHeightOf(input) - viewportHeight;
++  const ratio = travel > 0 && scrollable > 0 ? travel / scrollable : 0;
++  const sliderTop = scrollTop * ratio;
++  if (fitting >= extraTop + rows) {
++    const slider = travel > 0 ? { top: sliderTop, height: sliderHeight } : null;
++    return { input, startRow: 1, endRow: rows, topPaddingRows: extraTop, rowPx, slider, ratio };
++  }
++  const shown = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
++  const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
++  const slider = { top: alignedSliderTop(input, shown, rowCss), height: sliderHeight };
++  return { input, ...shown, endRow, rowPx, slider, ratio };
++}
++
++function viewportStart({ scrollTop, paddingTop, rows }: MinimapInput): {
++  readonly row: number;
++  readonly partial: number;
++} {
++  const row = Math.min(
++    rows,
++    Math.max(1, Math.floor((scrollTop - paddingTop) / LINE_HEIGHT_PX) + 1),
++  );
++  const partial = (scrollTop - paddingTop - (row - 1) * LINE_HEIGHT_PX) / LINE_HEIGHT_PX;
++  return { row, partial };
++}
++
++function windowAt(input: MinimapInput, sizes: Sizes): Window {
++  const { rowPx, extraTop, sliderTop } = sizes;
++  const { row } = viewportStart(input);
++  const considering = row > 1 ? row + extraTop : Math.max(1, input.scrollTop / LINE_HEIGHT_PX);
++  const start = Math.max(1, Math.floor(considering - (sliderTop * input.pixelRatio) / rowPx));
++  if (start < extraTop) {
++    return { startRow: 1, topPaddingRows: extraTop - start + 1 };
++  }
++  return { startRow: Math.max(1, start - extraTop), topPaddingRows: 0 };
++}
++
++function steadied(input: MinimapInput, found: Window, previous: MinimapLayout | null): Window {
++  if (previous === null || scrollHeightOf(previous.input) !== scrollHeightOf(input)) {
++    return found;
++  }
++  if (previous.input.scrollTop > input.scrollTop) {
++    return {
++      startRow: Math.min(found.startRow, previous.startRow),
++      topPaddingRows: Math.max(found.topPaddingRows, previous.topPaddingRows),
++    };
++  }
++  if (previous.input.scrollTop < input.scrollTop) {
++    return {
++      startRow: Math.max(found.startRow, previous.startRow),
++      topPaddingRows: Math.min(found.topPaddingRows, previous.topPaddingRows),
++    };
++  }
++  return found;
++}
++
++function alignedSliderTop(input: MinimapInput, shown: Window, rowCss: number): number {
++  const { scrollTop, paddingTop } = input;
++  const { row, partial } = viewportStart(input);
++  if (scrollTop >= paddingTop) {
++    return (row - shown.startRow + shown.topPaddingRows + partial) * rowCss;
++  }
++  return (scrollTop / paddingTop) * (shown.topPaddingRows + partial) * rowCss;
++}
++
++export function rowAt(layout: MinimapLayout, offsetY: number): number {
++  const index = Math.floor((offsetY * layout.input.pixelRatio) / layout.rowPx);
++  const row = index + layout.startRow - layout.topPaddingRows;
++  return Math.min(layout.input.rows, Math.max(1, row));
++}
++
++export function rowTop(layout: MinimapLayout, row: number): number {
++  return (row - layout.startRow + layout.topPaddingRows) * layout.rowPx;
++}
++
++export function centredScrollTop(row: number, input: MinimapInput): number {
++  const top = input.paddingTop + (row - 1) * LINE_HEIGHT_PX;
++  // The minimap reveals with source "mouse", which pads the box with one line above and none
++  // below (vscode viewLines.ts _computeScrollTopToRevealRange, shouldIgnoreScrollOff).
++  const boxStart = top - LINE_HEIGHT_PX;
++  const boxEnd = top + LINE_HEIGHT_PX;
++  return Math.max(0, (boxStart + boxEnd - input.viewportHeight) / HALVES);
++}
++
++export function draggedScrollTop(start: MinimapLayout, delta: number): number {
++  const { scrollTop } = start.input;
++  return start.ratio === 0 ? scrollTop : Math.round(scrollTop + delta / start.ratio);
++}
+diff --git a/frontend/src/editor/internal/minimapMarks.test.ts b/frontend/src/editor/internal/minimapMarks.test.ts
+new file mode 100644
+index 0000000..c44a53f
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapMarks.test.ts
+@@ -0,0 +1,185 @@
++import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
++import { EditorState } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import type { Span } from "../../connectors";
++import { loadFixture, type Chunk } from "../../ipc";
++import type { ChunkRow } from "./geometry";
++import { minimapColumns, minimapLayout, type MinimapInput } from "./minimapLayout";
++import { changeMarks, markBoxes, problemMarks, type EdgeMark } from "./minimapMarks";
++import { PENDING, type ChunkStatus } from "./status";
++
++const LINE_PX = 20;
++const LOCAL_APPLIED = 5;
++const CONFLICT = 8;
++const DOC = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n");
++const WAVE = { first: 11, last: 40 };
++const TALL: MinimapInput = {
++  scrollTop: 72_770,
++  viewportHeight: 900,
++  paddingTop: 4,
++  paddingBottom: 4,
++  rows: 7277,
++  height: 900,
++  pixelRatio: 1,
++};
++
++function rowOf(chunk: Chunk, status: ChunkStatus): ChunkRow {
++  function span(range: { start: number; len: number }): Span {
++    return { top: range.start * LINE_PX, bottom: (range.start + range.len) * LINE_PX };
++  }
++  return {
++    chunk,
++    status,
++    left: span(chunk.local),
++    center: span(chunk.middle),
++    right: span(chunk.remote),
++  };
++}
++
++async function magicRows(): Promise<ChunkRow[]> {
++  const data = await loadFixture("vueuse-use-magic-keys.ts");
++  return data.chunks.map((chunk) => {
++    if (chunk.id === LOCAL_APPLIED) {
++      return rowOf(chunk, { local: "applied", remote: "pending" });
++    }
++    return rowOf(chunk, chunk.id === CONFLICT ? { local: "ignored", remote: "pending" } : PENDING);
++  });
++}
++
++// Lines 11-40 are collapsed into one wave line at line 11's place.
++function foldedBlockAt(state: EditorState): (pos: number) => Span {
++  return (pos) => {
++    const line = state.doc.lineAt(pos).number;
++    if (line < WAVE.first) {
++      return { top: (line - 1) * LINE_PX, bottom: line * LINE_PX };
++    }
++    if (line <= WAVE.last) {
++      return { top: (WAVE.first - 1) * LINE_PX, bottom: WAVE.first * LINE_PX };
++    }
++    const shown = line - (WAVE.last - WAVE.first);
++    return { top: (shown - 1) * LINE_PX, bottom: shown * LINE_PX };
++  };
++}
++
++function withProblems(
++  problems: readonly { from: number; to?: number; severity: Diagnostic["severity"] }[],
++): EditorState {
++  const state = EditorState.create({ doc: DOC });
++  const diagnostics = problems.map(({ from, to = from, severity }) => ({
++    from: state.doc.line(from).from,
++    to: state.doc.line(to).from + 4,
++    severity,
++    message: "problem",
++  }));
++  return state.update(setDiagnostics(state, diagnostics)).state;
++}
++
++function rows(first: number, last: number): Pick<EdgeMark, "top" | "bottom"> {
++  return { top: (first - 1) * LINE_PX, bottom: last * LINE_PX };
++}
++
++test("right edge: each change the Result tints, in its tone; resolved none", async () => {
++  const shown = await magicRows();
++  const waiting = shown.filter(({ chunk }) => chunk.id !== LOCAL_APPLIED);
++
++  expect(changeMarks(shown).map(({ kind }) => kind)).toEqual([
++    "modified",
++    "modified",
++    "modified",
++    "inserted",
++    "inserted",
++    "modified",
++    "modified",
++    "conflict",
++  ]);
++  expect(changeMarks(shown).map(({ top, bottom }) => ({ top, bottom }))).toEqual(
++    waiting.map(({ center }) => center),
++  );
++  expect(
++    changeMarks(shown.map((row) => ({ ...row, status: { local: "applied", remote: "ignored" } }))),
++  ).toEqual([]);
++});
++
++test("left edge: error and warning; info and hint none", () => {
++  const state = withProblems([
++    { from: 3, severity: "warning" },
++    { from: 5, severity: "info" },
++    { from: 7, severity: "hint" },
++    { from: 9, severity: "error" },
++  ]);
++
++  expect(problemMarks(state, foldedBlockAt(state))).toEqual([
++    { ...rows(3, 3), kind: "warning" },
++    { ...rows(9, 9), kind: "error" },
++  ]);
++});
++
++test("errors after warnings, so red is painted over yellow", () => {
++  const state = withProblems([
++    { from: 2, severity: "error" },
++    { from: 4, severity: "warning" },
++    { from: 50, severity: "error" },
++    { from: 52, severity: "warning" },
++  ]);
++
++  expect(problemMarks(state, foldedBlockAt(state)).map(({ kind }) => kind)).toEqual([
++    "warning",
++    "warning",
++    "error",
++    "error",
++  ]);
++});
++
++test("a problem in collapsed lines on its wave row", () => {
++  const state = withProblems([
++    { from: 30, severity: "error" },
++    { from: 25, to: 45, severity: "warning" },
++  ]);
++
++  expect(problemMarks(state, foldedBlockAt(state))).toEqual([
++    { ...rows(11, 16), kind: "warning" },
++    { ...rows(11, 11), kind: "error" },
++  ]);
++});
++
++test("minimum 4 CSS px, an insertion point centred, clamped", () => {
++  // The window shows rows 3,435-3,884 two device px each: row 3,500 starts at 130 px.
++  const layout = minimapLayout(TALL, null);
++  const edge = minimapColumns(1).left;
++  const marks: EdgeMark[] = [
++    { ...rows(3500, 3500), kind: "error" },
++    { top: 3499 * LINE_PX, bottom: 3499 * LINE_PX, kind: "deleted" },
++    { ...rows(3500, 3509), kind: "modified" },
++    { ...rows(3884, 3884), kind: "conflict" },
++    { ...rows(3430, 3440), kind: "warning" },
++  ];
++
++  expect(markBoxes(marks, layout, edge)).toEqual([
++    { x: 1, y: 129, width: 4, height: 4, kind: "error" },
++    { x: 1, y: 128, width: 4, height: 4, kind: "deleted" },
++    { x: 1, y: 130, width: 4, height: 20, kind: "modified" },
++    { x: 1, y: 896, width: 4, height: 4, kind: "conflict" },
++    { x: 1, y: 0, width: 4, height: 12, kind: "warning" },
++  ]);
++});
++
++test("only marks in the window; through start row and padding", () => {
++  const tall = minimapLayout(TALL, null);
++  const padded = minimapLayout(
++    { ...TALL, scrollTop: 0, rows: 30, paddingTop: 33, pixelRatio: 2 },
++    null,
++  );
++  const marks: EdgeMark[] = [
++    { ...rows(100, 100), kind: "error" },
++    { ...rows(3436, 3436), kind: "warning" },
++    { ...rows(3900, 3901), kind: "error" },
++  ];
++
++  expect(markBoxes(marks, tall, minimapColumns(1).right)).toEqual([
++    { x: 127, y: 1, width: 4, height: 4, kind: "warning" },
++  ]);
++  expect(markBoxes([{ ...rows(1, 1), kind: "inserted" }], padded, minimapColumns(2).right)).toEqual(
++    [{ x: 254, y: 2, width: 8, height: 8, kind: "inserted" }],
++  );
++});
+diff --git a/frontend/src/editor/internal/minimapMarks.ts b/frontend/src/editor/internal/minimapMarks.ts
+new file mode 100644
+index 0000000..3c4438d
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapMarks.ts
+@@ -0,0 +1,75 @@
++import { forEachDiagnostic, type Diagnostic } from "@codemirror/lint";
++import type { EditorState } from "@codemirror/state";
++
++import type { Span } from "../../connectors";
++import type { ChunkRow } from "./geometry";
++import { rowTop, type Box, type MinimapLayout } from "./minimapLayout";
++import { LINE_HEIGHT_PX } from "./pane";
++import { paneTone, type Tone } from "./tone";
++
++type EdgeKind = Tone | "error" | "warning";
++
++export type EdgeMark = { readonly top: number; readonly bottom: number; readonly kind: EdgeKind };
++
++type MarkBox = {
++  readonly x: number;
++  readonly y: number;
++  readonly width: number;
++  readonly height: number;
++  readonly kind: EdgeKind;
++};
++
++const MARK_WIDTH_CSS_PX = 4;
++const MARK_INSET_CSS_PX = 1;
++const MARK_MIN_HEIGHT_CSS_PX = 4;
++const HALVES = 2;
++
++const SEVERITY_EDGE: Readonly<Record<Diagnostic["severity"], "error" | "warning" | null>> = {
++  error: "error",
++  warning: "warning",
++  info: null,
++  hint: null,
++};
++
++export function changeMarks(rows: readonly ChunkRow[]): EdgeMark[] {
++  return rows.flatMap(({ chunk, status, center }) => {
++    const kind = paneTone(chunk, status, "center");
++    return kind === null ? [] : [{ top: center.top, bottom: center.bottom, kind }];
++  });
++}
++
++export function problemMarks(state: EditorState, blockAt: (pos: number) => Span): EdgeMark[] {
++  const warnings: EdgeMark[] = [];
++  const errors: EdgeMark[] = [];
++  forEachDiagnostic(state, ({ severity }, from, to) => {
++    const kind = SEVERITY_EDGE[severity];
++    if (kind !== null) {
++      (kind === "error" ? errors : warnings).push({
++        top: blockAt(from).top,
++        bottom: blockAt(to).bottom,
++        kind,
++      });
++    }
++  });
++  return [...warnings, ...errors];
++}
++
++export function markBoxes(marks: readonly EdgeMark[], layout: MinimapLayout, edge: Box): MarkBox[] {
++  const { pixelRatio, height } = layout.input;
++  const canvasHeight = Math.floor(pixelRatio * height);
++  const x = edge.x + Math.round(MARK_INSET_CSS_PX * pixelRatio);
++  const width = Math.round(MARK_WIDTH_CSS_PX * pixelRatio);
++  const minHeight = Math.round(MARK_MIN_HEIGHT_CSS_PX * pixelRatio);
++  const first = (layout.startRow - 1) * LINE_HEIGHT_PX;
++  const last = layout.endRow * LINE_HEIGHT_PX;
++  return marks
++    .filter(({ top, bottom }) => bottom >= first && top <= last)
++    .map(({ top, bottom, kind }) => {
++      const from = Math.max(0, rowTop(layout, 1 + top / LINE_HEIGHT_PX));
++      const to = Math.min(canvasHeight, rowTop(layout, 1 + bottom / LINE_HEIGHT_PX));
++      const boxHeight = Math.max(to - from, minHeight);
++      const centred = (from + to - boxHeight) / HALVES;
++      const y = Math.round(Math.min(Math.max(0, centred), canvasHeight - boxHeight));
++      return { x, y, width, height: Math.round(boxHeight), kind };
++    });
++}
+diff --git a/frontend/src/editor/internal/minimapPixels.test.ts b/frontend/src/editor/internal/minimapPixels.test.ts
+new file mode 100644
+index 0000000..cf91bfa
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapPixels.test.ts
+@@ -0,0 +1,143 @@
++import { expect, test } from "vitest";
++
++import { charIndex, glyphs } from "./minimapGlyphs";
++import {
++  paintRow,
++  paintWave,
++  rgbOf,
++  type CodeRow,
++  type GlyphLook,
++  type PixelRows,
++  type Rgb,
++} from "./minimapPixels";
++
++const CODE: Rgb = { r: 200, g: 201, b: 202 };
++const KEYWORD: Rgb = { r: 224, g: 152, b: 107 };
++const WAVE: Rgb = { r: 90, g: 91, b: 92 };
++const PALETTE: readonly Rgb[] = [CODE, KEYWORD];
++const DARK: GlyphLook = { scale: 1, light: false, palette: PALETTE };
++const WIDTH = 140;
++const HEIGHT = 8;
++const T = 84;
++
++// VS Code's prebaked intensities for `T` (glyph 52): 154 over 46 at scale 1, and 2 × 4 at scale 2.
++const T_SCALE_1 = [154, 46];
++const T_SCALE_2 = [201, 171, 93, 63, 93, 63, 0, 0];
++// `)` (glyph 9) at scale 1.
++const PAREN_SCALE_1 = [87, 65];
++
++function hex(...bytes: readonly number[]): string {
++  return `#${bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
++}
++
++function canvas(): PixelRows {
++  return { data: new Uint8ClampedArray(WIDTH * HEIGHT * 4), width: WIDTH };
++}
++
++function pixel(target: PixelRows, x: number, y: number): number[] {
++  const offset = (y * target.width + x) * 4;
++  return [...target.data.subarray(offset, offset + 4)];
++}
++
++function row(text: string, at: Partial<CodeRow> = {}): CodeRow {
++  return { y: 2, x: 3, text, colours: new Uint8Array(text.length).fill(1), tabSize: 4, ...at };
++}
++
++function alphas(target: PixelRows, y: number, xs: readonly number[]): number[] {
++  return xs.map((x) => pixel(target, x, y)[3] ?? -1);
++}
++
++test("rgbOf reads #rrggbb and #rrggbbaa, else null", () => {
++  expect(rgbOf(hex(18, 52, 86))).toEqual({ r: 18, g: 52, b: 86 });
++  expect(rgbOf(hex(18, 52, 86, 120))).toEqual({ r: 18, g: 52, b: 86 });
++  expect(rgbOf(` ${hex(255, 0, 171)}\n`)).toEqual({ r: 255, g: 0, b: 171 });
++  expect(rgbOf(hex(18, 52).concat("5"))).toBeNull();
++  expect(rgbOf("red")).toBeNull();
++  expect(rgbOf("")).toBeNull();
++});
++
++test("`T` at scale 1 paints VS Code's two intensities ×12/15 in the token's RGB; scale 2 paints 2×4", () => {
++  const one = canvas();
++  paintRow(one, row("T"), DARK);
++
++  expect(glyphs(1).subarray(charIndex(T) * 2, charIndex(T) * 2 + 2)).toEqual(
++    Uint8ClampedArray.from(T_SCALE_1),
++  );
++  expect(pixel(one, 3, 2)).toEqual([224, 152, 107, Math.trunc((154 * 12) / 15)]);
++  expect(pixel(one, 3, 3)).toEqual([224, 152, 107, 36]);
++  expect(pixel(one, 3, 2)[3]).toBe(123);
++  expect(pixel(one, 4, 2)).toEqual([0, 0, 0, 0]);
++  expect(pixel(one, 3, 4)).toEqual([0, 0, 0, 0]);
++
++  const two = canvas();
++  paintRow(two, row("T"), { ...DARK, scale: 2 });
++
++  expect(glyphs(2).subarray(charIndex(T) * 8, charIndex(T) * 8 + 8)).toEqual(
++    Uint8ClampedArray.from(T_SCALE_2),
++  );
++  expect([2, 3, 4, 5].flatMap((y) => alphas(two, y, [3, 4]))).toEqual(
++    T_SCALE_2.map((intensity) => Math.trunc((intensity * 12) / 15)),
++  );
++  expect([2, 3, 4, 5].flatMap((y) => alphas(two, y, [3, 4]))).toEqual([
++    160, 136, 74, 50, 74, 50, 0, 0,
++  ]);
++  expect(alphas(two, 6, [3, 4])).toEqual([0, 0]);
++});
++
++test("light uses 50/60", () => {
++  const target = canvas();
++  paintRow(target, row("T"), { ...DARK, light: true });
++
++  expect(alphas(target, 2, [3])).toEqual([Math.trunc((154 * 50) / 60)]);
++  expect([...alphas(target, 2, [3]), ...alphas(target, 3, [3])]).toEqual([128, 38]);
++});
++
++test("a tab advances to the next stop; a space paints nothing", () => {
++  const tabbed = canvas();
++  paintRow(tabbed, row("a\tT"), DARK);
++  const spaced = canvas();
++  paintRow(spaced, row(" T", { colours: Uint8Array.of(1, 0) }), DARK);
++
++  expect(alphas(tabbed, 2, [3 + 4, 3 + 5])).toEqual([123, 0]);
++  expect(pixel(spaced, 3, 2)).toEqual([0, 0, 0, 0]);
++  expect(pixel(spaced, 3, 3)).toEqual([0, 0, 0, 0]);
++  expect(pixel(spaced, 4, 2)).toEqual([200, 201, 202, 123]);
++});
++
++test("column 121 and on is cut", () => {
++  const target = canvas();
++  paintRow(target, row("T".repeat(130), { x: 0 }), DARK);
++  const tabbed = canvas();
++  paintRow(tabbed, row(`${"T".repeat(118)}\tTT`, { x: 0, tabSize: 2 }), DARK);
++
++  expect(alphas(target, 2, [119, 120, 121])).toEqual([123, 0, 0]);
++  expect(alphas(tabbed, 2, [117, 118, 119, 120])).toEqual([123, 0, 0, 0]);
++});
++
++test("outside ASCII uses VS Code's getCharIndex: wrapped into the 96 glyphs", () => {
++  const target = canvas();
++  paintRow(target, row("é"), DARK);
++
++  expect(charIndex(0xe9)).toBe(charIndex(")".charCodeAt(0)));
++  expect([charIndex(32), charIndex(126), charIndex(127), charIndex(31), charIndex(0x2028)]).toEqual(
++    [0, 94, 95, 95, (0x2028 - 32) % 96],
++  );
++  expect([...alphas(target, 2, [3]), ...alphas(target, 3, [3])]).toEqual(
++    PAREN_SCALE_1.map((intensity) => Math.trunc((intensity * 12) / 15)),
++  );
++});
++
++test("a wave row is one device px in the wave colour across the code", () => {
++  const thin = canvas();
++  paintWave(thin, { y: 2, x: 3, width: 5, rowPx: 2 }, WAVE);
++  const sharp = canvas();
++  paintWave(sharp, { y: 2, x: 3, width: 5, rowPx: 4 }, WAVE);
++
++  expect([2, 3, 4].map((y) => alphas(thin, y, [2, 3, 7, 8]))).toEqual([
++    [0, 0, 0, 0],
++    [0, 255, 255, 0],
++    [0, 0, 0, 0],
++  ]);
++  expect(pixel(thin, 5, 3)).toEqual([90, 91, 92, 255]);
++  expect([3, 4, 5].map((y) => alphas(sharp, y, [3]))).toEqual([[0], [255], [0]]);
++});
+diff --git a/frontend/src/editor/internal/minimapPixels.ts b/frontend/src/editor/internal/minimapPixels.ts
+new file mode 100644
+index 0000000..2bcbe48
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapPixels.ts
+@@ -0,0 +1,96 @@
++import { charIndex, glyphIntensity, GLYPH_ROWS_PER_SCALE, type Scale } from "./minimapGlyphs";
++import { MAX_COLUMNS } from "./minimapLayout";
++
++export type Rgb = { readonly r: number; readonly g: number; readonly b: number };
++
++export type PixelRows = { readonly data: Uint8ClampedArray; readonly width: number };
++
++export type CodeRow = {
++  readonly y: number;
++  readonly x: number;
++  readonly text: string;
++  readonly colours: Uint8Array;
++  readonly tabSize: number;
++};
++
++export type GlyphLook = {
++  readonly scale: Scale;
++  readonly light: boolean;
++  readonly palette: readonly Rgb[];
++};
++
++type GlyphAt = { readonly x: number; readonly y: number; readonly glyph: number };
++
++const HEX_RGB = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})(?:[0-9a-f]{2})?$/i;
++const HEX = 16;
++const TAB = 9;
++const SPACE = 32;
++const CHANNELS = 4;
++const GREEN = 1;
++const BLUE = 2;
++const ALPHA = 3;
++const OPAQUE = 255;
++const HALVES = 2;
++// VS Code softens its glyph intensities by 12/15 on dark and by 50/60 on light backgrounds
++// (minimapCharRenderer.ts constructor); these are the same doubles.
++const SOFTEN: Readonly<Record<"dark" | "light", number>> = {
++  dark: 0.8,
++  light: 0.8333333333333334,
++};
++
++export function rgbOf(value: string): Rgb | null {
++  const match = HEX_RGB.exec(value.trim());
++  if (match === null) {
++    return null;
++  }
++  const [, r = "", g = "", b = ""] = match;
++  return { r: Number.parseInt(r, HEX), g: Number.parseInt(g, HEX), b: Number.parseInt(b, HEX) };
++}
++
++function writePixel(target: PixelRows, at: { x: number; y: number }, colour: Rgb, alpha: number) {
++  const offset = (at.y * target.width + at.x) * CHANNELS;
++  target.data[offset] = colour.r;
++  target.data[offset + GREEN] = colour.g;
++  target.data[offset + BLUE] = colour.b;
++  target.data[offset + ALPHA] = alpha;
++}
++
++function paintGlyph(target: PixelRows, at: GlyphAt, colour: Rgb, look: GlyphLook): void {
++  const { scale, light } = look;
++  const soften = light ? SOFTEN.light : SOFTEN.dark;
++  for (let dy = 0; dy < GLYPH_ROWS_PER_SCALE * scale; dy += 1) {
++    for (let dx = 0; dx < scale; dx += 1) {
++      const intensity = glyphIntensity(scale, at.glyph, dy * scale + dx);
++      writePixel(target, { x: at.x + dx, y: at.y + dy }, colour, Math.trunc(intensity * soften));
++    }
++  }
++}
++
++export function paintRow(target: PixelRows, row: CodeRow, look: GlyphLook): void {
++  const { text, colours, tabSize } = row;
++  let column = 0;
++  for (let index = 0; index < text.length && column < MAX_COLUMNS; index += 1) {
++    const code = text.charCodeAt(index);
++    if (code === TAB) {
++      column += tabSize - (column % tabSize);
++      continue;
++    }
++    const colour = look.palette[colours[index] ?? 0];
++    if (code !== SPACE && colour !== undefined) {
++      const at = { x: row.x + column * look.scale, y: row.y, glyph: charIndex(code) };
++      paintGlyph(target, at, colour, look);
++    }
++    column += 1;
++  }
++}
++
++export function paintWave(
++  target: PixelRows,
++  wave: { readonly y: number; readonly x: number; readonly width: number; readonly rowPx: number },
++  colour: Rgb,
++): void {
++  const y = wave.y + wave.rowPx / HALVES;
++  for (let dx = 0; dx < wave.width; dx += 1) {
++    writePixel(target, { x: wave.x + dx, y }, colour, OPAQUE);
++  }
++}
+diff --git a/frontend/src/editor/internal/minimapTiles.test.ts b/frontend/src/editor/internal/minimapTiles.test.ts
+new file mode 100644
+index 0000000..66f9ce8
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapTiles.test.ts
+@@ -0,0 +1,21 @@
++import { expect, test } from "vitest";
++
++import { staleTiles } from "./minimapTiles";
++
++const QUIET = {
++  docChanged: false,
++  foldsChanged: false,
++  themeChanged: false,
++  languageChanged: false,
++  treeBefore: 4000,
++  treeAfter: 4000,
++};
++
++test("doc or folds or theme or language → all; tree grown → from the old length; statuses → none", () => {
++  expect(staleTiles({ ...QUIET, docChanged: true, treeAfter: 9000 })).toBe("all");
++  expect(staleTiles({ ...QUIET, foldsChanged: true })).toBe("all");
++  expect(staleTiles({ ...QUIET, themeChanged: true })).toBe("all");
++  expect(staleTiles({ ...QUIET, languageChanged: true, treeAfter: 0 })).toBe("all");
++  expect(staleTiles({ ...QUIET, treeAfter: 9000 })).toEqual({ from: 4000 });
++  expect(staleTiles(QUIET)).toBe("none");
++});
+diff --git a/frontend/src/editor/internal/minimapTiles.ts b/frontend/src/editor/internal/minimapTiles.ts
+new file mode 100644
+index 0000000..cceb2a9
+--- /dev/null
++++ b/frontend/src/editor/internal/minimapTiles.ts
+@@ -0,0 +1,16 @@
++type Stale = "none" | "all" | { readonly from: number };
++
++export function staleTiles(facts: {
++  readonly docChanged: boolean;
++  readonly foldsChanged: boolean;
++  readonly themeChanged: boolean;
++  readonly languageChanged: boolean;
++  readonly treeBefore: number;
++  readonly treeAfter: number;
++}): Stale {
++  const { docChanged, foldsChanged, themeChanged, languageChanged, treeBefore, treeAfter } = facts;
++  if (docChanged || foldsChanged || themeChanged || languageChanged) {
++    return "all";
++  }
++  return treeAfter > treeBefore ? { from: treeBefore } : "none";
++}
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index aa3bc24..1672d59 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -10,7 +10,7 @@ import {
+ import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
+ import { Text, type EditorState, type StateCommand } from "@codemirror/state";
+ import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
+-import { highlightTree } from "@lezer/highlight";
++import { highlightTree, tags, type Tag } from "@lezer/highlight";
+ import { expect, test } from "vitest";
+ 
+ import { DEFAULT_KEYS, loadFixture, parseKey, type Key, type KeyBindings } from "../../ipc";
+@@ -20,6 +20,8 @@ import { languageOf } from "./language";
+ import {
+   languageCompartment,
+   paletteHighlight,
++  SYNTAX_COLOURS,
++  syntaxColourClasses,
+   paneState,
+   preferenceEffects,
+   refuseNativeHistory,
+@@ -448,3 +450,59 @@ test("new preferences turn a side light, rebind its Apply and its find keys", ()
+   expect(commandsOn(state, "F10")).toHaveLength(1);
+   expect(commandsOn(state, "Escape")).toEqual([]);
+ });
++
++function ruleOf(tag: Tag): string | null {
++  const classes = paletteHighlight.style([tag]) ?? "";
++  const rules = paletteHighlight.module?.getRules().split("\n") ?? [];
++  const rule = rules.find((line) => line.startsWith(`.${classes} {`));
++  return rule === undefined ? null : rule.slice(rule.indexOf("{") + 1, -1);
++}
++
++test("the pane's highlight styles every tag as before the syntax table", () => {
++  const keyword = "color: var(--color-syntax-keyword);";
++  const string = "color: var(--color-syntax-string);";
++  const styled: readonly (readonly [Tag, string])[] = [
++    [tags.keyword, keyword],
++    [tags.bool, keyword],
++    [tags.null, keyword],
++    [tags.self, keyword],
++    [tags.atom, keyword],
++    [tags.string, string],
++    [tags.special(tags.string), string],
++    [tags.number, "color: var(--color-syntax-number);"],
++    [tags.comment, "color: var(--color-syntax-comment);"],
++    [tags.function(tags.variableName), "color: var(--color-syntax-function);"],
++    [tags.function(tags.propertyName), "color: var(--color-syntax-function);"],
++    [tags.propertyName, "color: var(--color-syntax-property);"],
++    [tags.constant(tags.variableName), "color: var(--color-syntax-property);"],
++    [tags.meta, "color: var(--color-syntax-decorator);"],
++    [tags.tagName, "color: var(--color-syntax-tag);"],
++    [tags.angleBracket, "color: var(--color-syntax-tag);"],
++    [tags.attributeValue, string],
++    [tags.escape, keyword],
++    [tags.regexp, "color: var(--color-syntax-regexp);"],
++    [tags.link, "color: var(--color-syntax-link);"],
++    [tags.url, "color: var(--color-syntax-link);"],
++    [tags.heading, "font-weight: bold;"],
++    [tags.strong, "font-weight: bold;"],
++    [tags.emphasis, "font-style: italic;"],
++    [tags.strikethrough, "text-decoration: line-through;"],
++  ];
++
++  expect(styled.map(([tag]) => ruleOf(tag))).toEqual(styled.map(([, rule]) => rule));
++});
++
++test("the minimap classes and the pane's highlight give each tag the same token", () => {
++  const probed: readonly Tag[] = [
++    ...SYNTAX_COLOURS.flatMap(({ tag }) => [tag].flat()),
++    tags.controlKeyword,
++    tags.docComment,
++    tags.definition(tags.propertyName),
++    tags.variableName,
++    tags.heading,
++  ];
++
++  expect(probed.map((tag) => syntaxColourClasses.style([tag]))).toEqual(
++    probed.map((tag) => /var\(([^)]+)\)/.exec(ruleOf(tag) ?? "")?.[1] ?? null),
++  );
++});
+diff --git a/frontend/src/editor/internal/pane.ts b/frontend/src/editor/internal/pane.ts
+index 527cdd2..1938300 100644
+--- a/frontend/src/editor/internal/pane.ts
++++ b/frontend/src/editor/internal/pane.ts
+@@ -34,7 +34,7 @@ import {
+   keymap,
+   lineNumbers,
+ } from "@codemirror/view";
+-import { tags } from "@lezer/highlight";
++import { tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
+ 
+ import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+ import { cutOnce } from "./cutOnce";
+@@ -109,28 +109,48 @@ const paneTheme = EditorView.theme({
+   },
+ });
+ 
+-export const paletteHighlight = HighlightStyle.define([
++type SyntaxToken =
++  | "--color-syntax-keyword"
++  | "--color-syntax-string"
++  | "--color-syntax-number"
++  | "--color-syntax-comment"
++  | "--color-syntax-function"
++  | "--color-syntax-property"
++  | "--color-syntax-decorator"
++  | "--color-syntax-tag"
++  | "--color-syntax-regexp"
++  | "--color-syntax-link";
++
++export const SYNTAX_COLOURS: readonly {
++  readonly tag: Tag | readonly Tag[];
++  readonly colour: SyntaxToken;
++}[] = [
+   {
+     tag: [tags.keyword, tags.bool, tags.null, tags.self, tags.atom],
+-    color: "var(--color-syntax-keyword)",
++    colour: "--color-syntax-keyword",
+   },
+-  { tag: [tags.string, tags.special(tags.string)], color: "var(--color-syntax-string)" },
+-  { tag: tags.number, color: "var(--color-syntax-number)" },
+-  { tag: tags.comment, color: "var(--color-syntax-comment)" },
++  { tag: [tags.string, tags.special(tags.string)], colour: "--color-syntax-string" },
++  { tag: tags.number, colour: "--color-syntax-number" },
++  { tag: tags.comment, colour: "--color-syntax-comment" },
+   {
+     tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
+-    color: "var(--color-syntax-function)",
++    colour: "--color-syntax-function",
+   },
+-  {
+-    tag: [tags.propertyName, tags.constant(tags.variableName)],
+-    color: "var(--color-syntax-property)",
+-  },
+-  { tag: tags.meta, color: "var(--color-syntax-decorator)" },
+-  { tag: [tags.tagName, tags.angleBracket], color: "var(--color-syntax-tag)" },
+-  { tag: tags.attributeValue, color: "var(--color-syntax-string)" },
+-  { tag: tags.escape, color: "var(--color-syntax-keyword)" },
+-  { tag: tags.regexp, color: "var(--color-syntax-regexp)" },
+-  { tag: [tags.link, tags.url], color: "var(--color-syntax-link)" },
++  { tag: [tags.propertyName, tags.constant(tags.variableName)], colour: "--color-syntax-property" },
++  { tag: tags.meta, colour: "--color-syntax-decorator" },
++  { tag: [tags.tagName, tags.angleBracket], colour: "--color-syntax-tag" },
++  { tag: tags.attributeValue, colour: "--color-syntax-string" },
++  { tag: tags.escape, colour: "--color-syntax-keyword" },
++  { tag: tags.regexp, colour: "--color-syntax-regexp" },
++  { tag: [tags.link, tags.url], colour: "--color-syntax-link" },
++];
++
++export const syntaxColourClasses: Highlighter = tagHighlighter(
++  SYNTAX_COLOURS.map(({ tag, colour }) => ({ tag, class: colour })),
++);
++
++export const paletteHighlight = HighlightStyle.define([
++  ...SYNTAX_COLOURS.map(({ tag, colour }) => ({ tag, color: `var(${colour})` })),
+   { tag: [tags.heading, tags.strong], fontWeight: "bold" },
+   { tag: tags.emphasis, fontStyle: "italic" },
+   { tag: tags.strikethrough, textDecoration: "line-through" },
+-- 
+2.56.0
+

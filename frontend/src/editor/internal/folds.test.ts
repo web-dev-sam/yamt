@@ -28,7 +28,6 @@ import {
 import { revealKeep } from "./foldSelection";
 import { centerFolds, sideFolds } from "./foldView";
 import type { Pane } from "./geometry";
-import { revealSteps } from "./markJump";
 import { paneState, type PaneSettings } from "./pane";
 import { paneDocs } from "./paneDocs";
 
@@ -324,47 +323,6 @@ test("a selection with both ends exactly on a range's edges shows it", async () 
   const { from, to } = levelOf(merge, 1, 0);
 
   expect(centerLines(after(merge, selectMatch({ from, to })), 1)).toEqual(["41-62", "49-54"]);
-});
-
-function jumpAt(merge: Merge, pos: number): Merge {
-  return revealSteps(merge.state, merge.fields, pos).reduce(
-    (done, step) => after(done, step),
-    merge,
-  );
-}
-
-test("a problem tick's jump to a zero-length problem at a hidden range's first or last position shows it with the cursor there", async () => {
-  const merge = await open();
-  const { from, to } = levelOf(merge, 1, 0);
-
-  for (const pos of [from, to]) {
-    const jumped = jumpAt(merge, pos);
-    expect(centerLines(jumped, 1), `${pos}`).toEqual(["41-62", "49-54"]);
-    expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(pos));
-  }
-});
-
-test("a problem tick's jump to the end of a file ending with a line break shows the collapsed tail", async () => {
-  const merge = await open();
-  const end = merge.state.doc.length;
-
-  expect(merge.state.doc.lineAt(end).length).toBe(0);
-  expect(levelOf(merge, 2, 0).to).toBe(end);
-  const jumped = jumpAt(merge, end);
-  expect(centerLines(jumped, 2)).toEqual([]);
-  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(end));
-});
-
-test("a problem tick's jump to an empty first hidden line shows the range holding it", async () => {
-  const opened = await open();
-  const first = opened.state.doc.lineAt(levelOf(opened, 1, 0).from);
-  const merge = after(opened, { changes: { from: first.from, to: first.to } });
-  const { from } = levelOf(merge, 1, 0);
-
-  expect(merge.state.doc.lineAt(from).length).toBe(0);
-  const jumped = jumpAt(merge, from);
-  expect(centerLines(jumped, 1)).toEqual(["41-62", "49-54"]);
-  expect(jumped.state.selection.main).toEqual(EditorSelection.cursor(from));
 });
 
 test("a side's reveal reads its own ranges and shows what the middle shows for the same line", async () => {

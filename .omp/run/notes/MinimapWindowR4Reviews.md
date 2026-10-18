@@ -1,0 +1,38 @@
+```json
+{
+  "lens": "boundary",
+  "round": "3.M-window fix round 4 (RV8 re-check), HEAD 74e1e3b on d0dfda9",
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "#1244 fixed: `Placed`, `placeTop`, `placed`, `placeFarScroll`, `exactScroll` and the workaround comment now sit only in `frontend/src/editor/internal/exactScroll.ts` (lines 7–80). `scrollSync.ts` starts with `import type { EditorView } from \"@codemirror/view\"` (line 1) and holds only the locked scroll: `anchorsOf`, `targets`, `contentEnds`, `ScrollSync`, the CodeMirror-free `ScrollPane`.",
+    "#1244 naming: `editor/AGENTS.md:11` names `internal/exactScroll.ts` beside `cutOnce.ts` and names `farTop`. The project map (SKILL.md:75, :158) and `docs/architecture.md` (538, 745–749) already name `exactScroll`/`farTop` as of d0dfda9. The Rule cell of plan §2 #82 names `editor/internal/exactScroll.ts`.",
+    "#1246 fixed: the comment at `exactScroll.ts:38-40` is three lines. It states the WebKitGTK 2.54 observation and cites `docs/plan.md §2 #82` and `docs/slices/briefs/3.M-minimap-window-rework-3.md`, which exists. Leaving `#1240` out is accepted as a deviation because VU17 `palette.ts` reads `#1240` as a hex colour; row #82 itself cites #1240 and the cause notes, so the evidence can still be found once #1240 is closed. The comment follows `cutOnce.ts:18-19` (the WebKit fact plus its brief).",
+    "Behaviour unchanged: `farTop` computes `visibleTop = scrollTop - paddingTop` and `overlaps = visibleTop < rendered.bottom && visibleTop + clientHeight > rendered.top`, the same as the removed inline code. `placeFarScroll` passes `lineBlockAt(from).top` and `lineBlockAt(to).bottom` in the right slots. The only difference is that both `lineBlockAt` reads always run; these are pure height-map lookups (accepted deviation).",
+    "One job per module: `exactScroll.ts` = the per-pane far-scroll workaround (its pure decision, field, effect, observer, scrollHandler); `scrollSync.ts` = the three-pane lock, owned by `Frame` (`frame.ts:13`). `scrollSync.test.ts:5` imports nothing that moved.",
+    "State: `placed` has one writer, `placeFarScroll` via `placeTop`, and is read only by its own `scrollHandler`. The 'scroll positions' row in project-map/architecture already covers it; no second owner.",
+    "Import edges: `exactScroll.ts` imports `@codemirror/state`, `@codemirror/view` and `type Span` from `../../connectors` (editor → connectors is allowed, PM3/PM5). Its only importer is `paneViews.ts:10`, a sibling inside `editor/internal`. No `vue`/`@tauri-apps`, no cycle.",
+    "No copied decision: `Span` is reused from connectors (TS6), the same document-space use as `SpanRow` in `scrollSync.ts`. `ScrollBox` is a single parameter type and does not repeat `ScrollPane`'s rule. The shared `scrollTop - paddingTop` in `middle()` is arithmetic, not a decision.",
+    "Ownership: the patch touches only Owned files (`exactScroll.ts`, `exactScroll.test.ts`, `scrollSync.ts`, `paneViews.ts`, `editor/AGENTS.md`) plus the report note. The project map, architecture and plan are untouched by the patch.",
+    "#1249 allowance used as the brief permits: in `paneViews.ts:41-46` each entry is on its own line, and the tooltip comment sits directly above `tooltips(...)`.",
+    "Dead weight: `exactScroll` and `farTop` (the test plus `placeFarScroll`) each have users. Nothing is left in `scrollSync.ts` from the moved code; grep finds `placeTop`/`placeFarScroll` only in `exactScroll.ts`."
+  ]
+}
+``````json
+{
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "#1245 is fixed. farTop (exactScroll.ts:14-21) makes the same decision as round 3's inline code (`git show 8c07b92:frontend/src/editor/internal/scrollSync.ts`, placeFarScroll lines 88-92): visibleTop = scrollTop − paddingTop; overlaps = visibleTop < lineBlockAt(to).bottom && visibleTop + clientHeight > lineBlockAt(from).top; on an overlap nothing happens, otherwise visibleTop. The caller passes { top: lineBlockAt(from).top, bottom: lineBlockAt(to).bottom } (exactScroll.ts:49), so each side of the comparison gets the same value as before. A null result returns early, the same as the old `if (overlaps) return`, and visibleTop then feeds lineBlockAtHeight and yMargin unchanged. Behaviour is unchanged.",
+    "The implementer reports one runtime difference (deviations): lineBlockAt(to) is now read even when the first comparison has already failed, where the old && skipped it. I accept it: it is a pure height-map lookup, it does not touch state or the DOM, and the result is the same.",
+    "Traced the six tests by hand (padding 4, height 600, rendered [1000, 2000]). at(404): 400 < 2000, 1000 > 1000 is false, so 400. at(405): 1001 > 1000 overlaps, so null. at(2004): 2000 < 2000 is false, so 2000. at(2003): 1999 < 2000 and 2599 > 1000, so null. at(1200): null. at(100): 96. at(2552): 2548. All six are correct for the original code.",
+    "Checked by hand that each bug I named in #1245 fails a test. Inverted return: every case fails. Top/bottom swapped inside farTop: at(405) gives 401, not null. Padding dropped: at(404) gives 404, not 400. `<` → `<=` at the bottom: at(2004) gives null, not 2000. `>` → `>=` at the top: at(404) gives null, not 400. Two more I traced fail too: && → || (at(100) gives null) and returning scrollTop instead of visibleTop (at(404) gives 404). These match the implementer's mutation table in .omp/run/notes/MinimapWindowR4.md. I did not run them: editor/ is not mutated, and RV6 allows a targeted test run only when a block depends on it.",
+    "Accepted residual: swapping from and to in the caller's one-line Span (exactScroll.ts:49) is not caught in node. It is CodeMirror-bound and outside the farTop shape my #1245 fix asked for. The top/bottom swap inside the decision is caught. The real-app repro (sessions m-r4-a and m-r4-b, [2552, 2552, 2492] after two frames and after 1 s) is the evidence for the glue.",
+    "Moved code is unchanged apart from farTop. Compared exactScroll.ts:23-80 with 8c07b92 scrollSync.ts:69-123: placeTop, placed, the rest of placeFarScroll (lineBlockAtHeight, cursor, placeTop.of({ range, top }), scrollIntoView yMargin line.top − visibleTop) and the exactScroll array (domEventObservers scroll, scrollHandler matched on range identity, writing place.top) are identical. Only the comment (#1246) and the farTop call differ.",
+    "Nothing else changed in the code. `git diff 8c07b92 HEAD` on scrollSync.ts shows only removals plus `import type { EditorView }`; the remaining EditorView use (contentEnd) is type-only. paneViews.ts changes only the import source and puts the array entries on separate lines (allowed by #1249), so exactScroll still reaches every pane through everyPane(). No other frontend file imports exactScroll, placeFarScroll or farTop.",
+    "#1244 is fixed: scrollSync.ts holds only the locked scroll again (ScrollSync, targets, anchorsOf, contentEnds), and exactScroll.ts is a separate module beside cutOnce.ts. The new import edges follow §2: editor/internal imports @codemirror and connectors' Span type, and nothing imports vue or ui. Span is reused ({ readonly top; readonly bottom }), so there is no second span type.",
+    "#1246 is fixed: the comment is three lines (exactScroll.ts:38-40) and cites docs/plan.md §2 #82 (whose row cites #1240) and docs/slices/briefs/3.M-minimap-window-rework-3.md, which exists. I accept the deviation from a literal #1240: palette.ts reads it as a hex colour (VU17).",
+    "The docs are aligned: editor/AGENTS.md:11, the scroll-positions row and module entry in docs/architecture.md (lines 538 and 745-749), plan §2 #82, and lines 75 and 158 of the project map all name exactScroll.ts and farTop, so the state owner is unchanged."
+  ]
+}
+```

@@ -229,6 +229,16 @@ icon_entries() {
     standard_text MIT "2013-present Cole Bemis"
 }
 
+# Code copied into yamt's own sources (no package carries it): holder and licence hand-checked.
+copied_entries() {
+    printf '\n---- Visual Studio Code minimap (MIT) ----\n\n'
+    printf 'frontend/src/editor/internal/minimapGlyphs.ts holds the prebaked minimap glyph intensities and the\n'
+    printf 'character index of Visual Studio Code; minimapLayout.ts and minimapPixels.ts follow its minimap layout and\n'
+    printf 'glyph drawing (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/\n'
+    printf 'minimap/minimapPreBaked.ts, minimapCharSheet.ts, minimapCharRenderer.ts and minimap.ts):\n\n'
+    standard_text MIT "2015 - present Microsoft Corporation"
+}
+
 ubuntu_section() {
     printf '\n==== System libraries in the Linux AppImage ====\n\n'
     printf 'The Linux AppImage carries GTK, WebKitGTK and the libraries they use, copied from the Ubuntu 22.04\n'
@@ -256,6 +266,8 @@ generate() {
         done <<<"$js_rows"
         printf '\n==== Icons (%s sets) ====\n' "${#icon_sets[@]}"
         icon_entries
+        printf '\n==== Copied code (1) ====\n'
+        copied_entries
         ubuntu_section
     } >"$tmp"
     chmod 644 "$tmp"

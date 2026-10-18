@@ -114,10 +114,6 @@ export class SideFocus {
     this.#takeKeyboardThenStep(side, direction);
   }
 
-  focusChange(side: Side, id: ChunkState["chunk"]["id"]): void {
-    this.#focusOn(side, { kind: "change", id });
-  }
-
   destroy(): void {
     this.#listeners.abort();
   }
