@@ -12,6 +12,7 @@ import { SIDE_PANE, type ChunkRow, type Pane, type PaneViews } from "./geometry"
 import { modClicks } from "./modClick";
 import { centerKind, createPane, type PaneSettings } from "./pane";
 import { removalTooltip } from "./removalTooltip";
+import { exactScroll } from "./scrollSync";
 import type { Side } from "./side";
 import { sideRunner, type SideCommand } from "./sideKeys";
 import { sideStatusField } from "./sideStatus";
@@ -36,10 +37,10 @@ export type PaneWiring = {
   readonly act: (action: ChunkAction) => void;
 };
 
-// Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
-// pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
-function bodyTooltips(): Extension {
-  return tooltips({ parent: document.body });
+function everyPane(): Extension {
+  // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
+  // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
+  return [tooltips({ parent: document.body }), exactScroll];
 }
 
 function sideExtensions(
@@ -59,7 +60,7 @@ function sideExtensions(
     }),
     wiring.repaint,
     removalTooltip(),
-    bodyTooltips(),
+    everyPane(),
     readOnly ? [] : modClicks(side, { rows, act }),
   ];
 }
@@ -75,7 +76,7 @@ export function createPaneViews(
     kind: centerKind(wiring.readOnly),
     doc: docs.center,
     parent: hosts.center,
-    extensions: [field, centerDecorations(field), folds.center(), bodyTooltips(), wiring.center],
+    extensions: [field, centerDecorations(field), folds.center(), everyPane(), wiring.center],
   });
   const statuses = sideStatusField(
     center.state.field(field).map(({ chunk, status }) => ({ chunk, status })),
