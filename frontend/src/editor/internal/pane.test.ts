@@ -10,7 +10,7 @@ import {
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import { Text, type EditorState, type StateCommand } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
-import { highlightTree } from "@lezer/highlight";
+import { highlightTree, tags, type Tag } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, loadFixture, parseKey, type Key, type KeyBindings } from "../../ipc";
@@ -20,6 +20,8 @@ import { languageOf } from "./language";
 import {
   languageCompartment,
   paletteHighlight,
+  SYNTAX_COLOURS,
+  syntaxColourClasses,
   paneState,
   preferenceEffects,
   refuseNativeHistory,
@@ -447,4 +449,60 @@ test("new preferences turn a side light, rebind its Apply and its find keys", ()
   expect(commandsOn(state, "Enter")).toEqual([]);
   expect(commandsOn(state, "F10")).toHaveLength(1);
   expect(commandsOn(state, "Escape")).toEqual([]);
+});
+
+function ruleOf(tag: Tag): string | null {
+  const classes = paletteHighlight.style([tag]) ?? "";
+  const rules = paletteHighlight.module?.getRules().split("\n") ?? [];
+  const rule = rules.find((line) => line.startsWith(`.${classes} {`));
+  return rule === undefined ? null : rule.slice(rule.indexOf("{") + 1, -1);
+}
+
+test("the pane's highlight styles every tag as before the syntax table", () => {
+  const keyword = "color: var(--color-syntax-keyword);";
+  const string = "color: var(--color-syntax-string);";
+  const styled: readonly (readonly [Tag, string])[] = [
+    [tags.keyword, keyword],
+    [tags.bool, keyword],
+    [tags.null, keyword],
+    [tags.self, keyword],
+    [tags.atom, keyword],
+    [tags.string, string],
+    [tags.special(tags.string), string],
+    [tags.number, "color: var(--color-syntax-number);"],
+    [tags.comment, "color: var(--color-syntax-comment);"],
+    [tags.function(tags.variableName), "color: var(--color-syntax-function);"],
+    [tags.function(tags.propertyName), "color: var(--color-syntax-function);"],
+    [tags.propertyName, "color: var(--color-syntax-property);"],
+    [tags.constant(tags.variableName), "color: var(--color-syntax-property);"],
+    [tags.meta, "color: var(--color-syntax-decorator);"],
+    [tags.tagName, "color: var(--color-syntax-tag);"],
+    [tags.angleBracket, "color: var(--color-syntax-tag);"],
+    [tags.attributeValue, string],
+    [tags.escape, keyword],
+    [tags.regexp, "color: var(--color-syntax-regexp);"],
+    [tags.link, "color: var(--color-syntax-link);"],
+    [tags.url, "color: var(--color-syntax-link);"],
+    [tags.heading, "font-weight: bold;"],
+    [tags.strong, "font-weight: bold;"],
+    [tags.emphasis, "font-style: italic;"],
+    [tags.strikethrough, "text-decoration: line-through;"],
+  ];
+
+  expect(styled.map(([tag]) => ruleOf(tag))).toEqual(styled.map(([, rule]) => rule));
+});
+
+test("the minimap classes and the pane's highlight give each tag the same token", () => {
+  const probed: readonly Tag[] = [
+    ...SYNTAX_COLOURS.flatMap(({ tag }) => [tag].flat()),
+    tags.controlKeyword,
+    tags.docComment,
+    tags.definition(tags.propertyName),
+    tags.variableName,
+    tags.heading,
+  ];
+
+  expect(probed.map((tag) => syntaxColourClasses.style([tag]))).toEqual(
+    probed.map((tag) => /var\(([^)]+)\)/.exec(ruleOf(tag) ?? "")?.[1] ?? null),
+  );
 });
