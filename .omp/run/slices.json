@@ -1,11 +1,1 @@
-{
-  "MinimapWindowR4": {
-    "owned": [
-      "frontend/src/editor/internal/exactScroll.ts",
-      "frontend/src/editor/internal/exactScroll.test.ts",
-      "frontend/src/editor/internal/scrollSync.ts",
-      "frontend/src/editor/internal/paneViews.ts",
-      "frontend/src/editor/AGENTS.md"
-    ]
-  }
-}
+{}

@@ -1,0 +1,356 @@
+From 74e1e3b3c533d7b46ac707954d3689e3a7979b95 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sun, 18 Oct 2026 15:14:10 +0200
+Subject: [PATCH] refactor(editor): far-scroll fix in exactScroll.ts, farTop
+ node-tested (#1244-#1246)
+
+---
+ .omp/run/notes/MinimapWindowR4.md             | 73 +++++++++++++++++
+ frontend/src/editor/AGENTS.md                 |  2 +-
+ .../src/editor/internal/exactScroll.test.ts   | 36 +++++++++
+ frontend/src/editor/internal/exactScroll.ts   | 80 +++++++++++++++++++
+ frontend/src/editor/internal/paneViews.ts     | 11 ++-
+ frontend/src/editor/internal/scrollSync.ts    | 61 +-------------
+ 6 files changed, 198 insertions(+), 65 deletions(-)
+ create mode 100644 .omp/run/notes/MinimapWindowR4.md
+ create mode 100644 frontend/src/editor/internal/exactScroll.test.ts
+ create mode 100644 frontend/src/editor/internal/exactScroll.ts
+
+diff --git a/.omp/run/notes/MinimapWindowR4.md b/.omp/run/notes/MinimapWindowR4.md
+new file mode 100644
+index 0000000..7057a8e
+--- /dev/null
++++ b/.omp/run/notes/MinimapWindowR4.md
+@@ -0,0 +1,73 @@
++I fixed #1244, #1245 and #1246 with no behaviour change. All five frontend recipes exit 0, and the round-3 repro in the real app lands where it was sent. One deviation: the comment can't contain `#1240` (details under deviations).
++
++**summary**
++- `editor/internal/exactScroll.ts` (new) now holds `Placed`, `placeTop`, `placed`, `placeFarScroll` and `exactScroll`. They sit beside `cutOnce.ts`, the other WebKitGTK quirk.
++- The far-scroll decision is a pure exported function, `farTop({ scrollTop, clientHeight, paddingTop }, rendered: Span): number | null`, called by `placeFarScroll`. `exactScroll.test.ts` pins it in node.
++- `scrollSync.ts` is back to the locked scroll only and imports `EditorView` with `import type`.
++- The workaround comment is three lines and cites plan §2 #82 and the round-3 brief.
++- `paneViews.ts` imports from `./exactScroll`, and each entry of `everyPane()` is on its own line with the tooltip comment above `tooltips(...)` (the #1249 allowance). `editor/AGENTS.md` names the new file and `farTop`.
++
++**files_changed**
++- `frontend/src/editor/internal/exactScroll.ts` (new)
++- `frontend/src/editor/internal/exactScroll.test.ts` (new)
++- `frontend/src/editor/internal/scrollSync.ts`
++- `frontend/src/editor/internal/paneViews.ts`
++- `frontend/src/editor/AGENTS.md`
++
++**tests_added** (all in `exactScroll.test.ts`; a 600 px view, a 4 px top padding, rendered lines from 1000 to 2000)
++- "a visible span that ends where the rendered lines start is far, measured below the padding": `at(404)` gives 400, so touching the top edge counts as far and the padding is subtracted.
++- "one pixel of the rendered lines' top in view is not far": `at(405)` gives null.
++- "a visible span that starts where the rendered lines end is far, measured below the padding": `at(2004)` gives 2000.
++- "one pixel of the rendered lines' bottom in view is not far": `at(2003)` gives null; this also fails if the padding is dropped.
++- "a visible span inside the rendered lines is not far": `at(1200)` gives null.
++- "a jump fully above or fully below the rendered lines places its visible top": 100 gives 96, and 2552 gives 2548.
++
++**smoke_evidence**
++
++1. `pnpm -C frontend exec vitest run --project node src/editor/internal/exactScroll.test.ts`. The original passes (`Test Files 2 passed (2)`, `Tests 13 passed (13)` together with `scrollSync.test.ts`). Each hand mutation was run, then the original restored:
++
++   | mutation | result | first failing assertion |
++   |---|---|---|
++   | top edge `>` → `>=` | `Tests 1 failed \| 5 passed (6)` | `ends where the rendered lines start … AssertionError: expected null to be 400` |
++   | bottom edge `<` → `<=` | `Tests 1 failed \| 5 passed (6)` | `starts where the rendered lines end … AssertionError: expected null to be 2000` |
++   | padding dropped (`visibleTop = scrollTop`) | `Tests 4 failed \| 2 passed (6)` | `expected null to be 400`, `expected 2004 to be 2000`, `expected 2003 to be null`, `expected 100 to be 96` |
++   | top and bottom swapped | `Tests 3 failed \| 3 passed (6)` | `expected 401 to be null`, `expected 1999 to be null`, `expected 1196 to be null` |
++   | return inverted | `Tests 6 failed (6)` | — |
++
++   After the restore, the full `pnpm -C frontend test` passes (item 3).
++
++2. `git diff 8c07b92 -- frontend/src/editor/internal/scrollSync.ts`: `1 insertions(+), 60 deletions(-)`. The one insertion is `import type { EditorView } from "@codemirror/view";`. The rest removes the two `@codemirror/state` imports, the `@codemirror/view` value import, `Placed`, and lines 69–123.
++   - `diff <(git show 8c07b92:…/scrollSync.ts) …/exactScroll.ts` shows the moved code differs only in:
++     - the new `ScrollBox` type and `farTop`;
++     - the comment;
++     - `placeFarScroll` calling `farTop` instead of its inline `overlaps` and `visibleTop`.
++
++3. Recipes, final run, all exit 0:
++   - `pnpm -C frontend lint`: `$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"`, exit 0.
++   - `pnpm -C frontend typecheck`: `$ vue-tsc -b`, exit 0.
++   - `pnpm -C frontend test`: `Test Files 109 passed (109)`, `Tests 1445 passed (1445)`, exit 0.
++   - `pnpm -C frontend unused`: `$ knip --include exports,types`, exit 0.
++   - `pnpm -C frontend fmt:check`: `All matched files use the correct format.`, exit 0.
++
++4. Real app, built with `cargo tauri build --debug --no-bundle` from this tree. Each run was a fresh session through `/tmp/yamt-m/r4/fresh.sh` (`conflict-repo.sh`, `vOn.ts` opened, collapsing toggled off) and started at `[[0,3688,903],[0,3688,903],[0,3628,903]]`.
++   - **Session `m-r4-a`, a real xdotool click with Alt held on minimap row 151:**
++     `row 151 expected 2552.5 minimap {"value":true} {"before":[0,0,0],"raf1":[0,2552,0],"raf2":[2552,2552,2492],"s1":[2552,2552,2492]}`
++   - **Session `m-r4-b`, a scripted `__panes[1].scrollTop = 2552`:**
++     `{"before":[0,0,0],"readBack":2552,"raf2":[2552,2552,2492],"s1":[2552,2552,2492]}`
++   - **Stopped:** both sessions' `tauri-driver` and `xvfb`, with their folders removed. Only the owner's `target/debug/yamt --repo /tmp/yamt-conflict-project` (pid 61860) is still running, untouched.
++
++**deviations_from_brief**
++- **#1246 does not cite `#1240` literally.** `scripts/palette.test.ts` (VU17) reads `#1240` in a source file as a hex colour (`HEX_COLOUR` in `frontend/scripts/palette.ts:31`), and the first `pnpm test` failed on `exactScroll.ts`. The comment instead cites `docs/plan.md §2 #82` (whose row cites #1240) and `docs/slices/briefs/3.M-minimap-window-rework-3.md`, the round-3 brief, in the way `cutOnce.ts` cites its brief.
++- **`farTop`'s `rendered` parameter is `Span` from `../../connectors`** (`{ top, bottom }`) rather than a new type, following TS6 (derive before declaring).
++- **Small runtime difference:** `placeFarScroll` now always reads both `lineBlockAt(from).top` and `lineBlockAt(to).bottom`. The old inline `&&` skipped the second when the first comparison failed. Both reads are pure height-map lookups, so the result is unchanged.
++- **#1249 taken up** as the brief allowed: each entry of `everyPane()` is on its own line, with the tooltip comment above `tooltips(...)`.
++- **For the orchestrator:**
++  - The project map (`editor` line, beside `cutOnce`) should name `exactScroll` (`farTop`: when a far scroll is pinned) for `just map-check` (PM6).
++  - `scrollSync` there now means only the locked scroll.
++  - `docs/architecture.md` may want the same note.
++- **Scratch files:** the repro scripts are in `/tmp/yamt-m/r4/` (`fresh.sh`, `press.sh`); `press.sh` reuses `/tmp/yamt-m/r3/pressprobe.js`. `target/debug/yamt` was built in this worktree only.
++
++**open_risks**
++- `frontend/src/editor/internal/exactScroll.ts:38-40`: if the next retro wants the issue number written out in source, it needs a form the palette detector accepts.
++- `pnpm -C frontend test:browser` was not run (not in the brief's recipes, and it cannot launch here per #1242).
++- The real-app repro covered only the round-3 row 151 press and the D1 scripted write, as the Acceptance asks. The other round-3 rows were not repeated.
+\ No newline at end of file
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 918bb25..d397fd4 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -8,4 +8,4 @@ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `Remova
+ 
+ Minimap (plan §2 #81): `Frame` owns `internal/minimap.ts` (`Minimap`), one `.minimap` box (a `<canvas>` and a `.minimap-slider`) appended to the right pane's `view.dom`, outside `scrollDOM`/`contentDOM`, so no pane handler sees its presses; `display: none` while `MergeOptions.minimap`/`showMinimap` say no, and then `changed` and `paint` return at once and every tile is dropped. It paints in `Frame`'s frame after `ScrollSync.sync`, from the Result's `scrollTop` and `minimapLayout.ts` (VS Code's `MinimapLayout.create`; rows by `rowOfTop`/`topOfRow`): the slider moves on every frame, the canvas is redrawn only when its window, padding rows, size, tiles or edges changed. Code rows come from `minimapTiles.ts` (`MinimapTiles`: 128 Result rows per detached canvas through `ImageData`, `minimapPixels.ts` glyphs, `minimapRows.ts` syntax colours and theme tokens read once per show or theme change; dropped by `staleTiles`), each row looked up at its middle; a collapsed run's row is a wave line. Edges (`minimapMarks.ts`): problems left, waiting changes right, cached until rows move or diagnostics arrive. `minimapPointer.ts`: `mousedown` is prevented and stopped (focus and selection stay), a press puts its row's top in the Result's middle, the slider drags with pointer capture, a wheel scrolls the Result; each ends in `ScrollSync.follow("center")`.
+ 
+-Far scrolls (#1240): every pane carries `exactScroll` (`internal/scrollSync.ts`). A scroll event whose position shows none of CodeMirror's rendered lines is turned into a CodeMirror scroll request (`placeTop` + `EditorView.scrollIntoView`; the `scrollHandler` writes that exact `scrollTop`), so CodeMirror renders the target before its measure; without it WebKitGTK pulls such a jump back while the viewport is swapped inside CodeMirror's scroll handler (a minimap press, a follower write, a script). Code that scrolls a pane keeps writing `scrollTop`.
++Far scrolls (#1240, plan §2 #82): every pane carries `exactScroll` (`internal/exactScroll.ts`, beside `cutOnce.ts`, the other WebKitGTK quirk). A scroll event whose position shows none of CodeMirror's rendered lines (the pure `farTop`, node-tested) is turned into a CodeMirror scroll request (`placeTop` + `EditorView.scrollIntoView`; the `scrollHandler` writes that exact `scrollTop`), so CodeMirror renders the target before its measure; without it WebKitGTK pulls such a jump back while the viewport is swapped inside CodeMirror's scroll handler (a minimap press, a follower write, a script). Code that scrolls a pane keeps writing `scrollTop`.
+diff --git a/frontend/src/editor/internal/exactScroll.test.ts b/frontend/src/editor/internal/exactScroll.test.ts
+new file mode 100644
+index 0000000..9cfa7f8
+--- /dev/null
++++ b/frontend/src/editor/internal/exactScroll.test.ts
+@@ -0,0 +1,36 @@
++import { expect, test } from "vitest";
++
++import { farTop } from "./exactScroll";
++
++const PADDING_PX = 4;
++const HEIGHT_PX = 600;
++const RENDERED = { top: 1000, bottom: 2000 };
++
++function at(scrollTop: number): number | null {
++  return farTop({ scrollTop, clientHeight: HEIGHT_PX, paddingTop: PADDING_PX }, RENDERED);
++}
++
++test("a visible span that ends where the rendered lines start is far, measured below the padding", () => {
++  expect(at(404)).toBe(400);
++});
++
++test("one pixel of the rendered lines' top in view is not far", () => {
++  expect(at(405)).toBeNull();
++});
++
++test("a visible span that starts where the rendered lines end is far, measured below the padding", () => {
++  expect(at(2004)).toBe(2000);
++});
++
++test("one pixel of the rendered lines' bottom in view is not far", () => {
++  expect(at(2003)).toBeNull();
++});
++
++test("a visible span inside the rendered lines is not far", () => {
++  expect(at(1200)).toBeNull();
++});
++
++test("a jump fully above or fully below the rendered lines places its visible top", () => {
++  expect(at(100)).toBe(96);
++  expect(at(2552)).toBe(2548);
++});
+diff --git a/frontend/src/editor/internal/exactScroll.ts b/frontend/src/editor/internal/exactScroll.ts
+new file mode 100644
+index 0000000..145b83b
+--- /dev/null
++++ b/frontend/src/editor/internal/exactScroll.ts
+@@ -0,0 +1,80 @@
++import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
++import type { Extension, SelectionRange } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++
++import type { Span } from "../../connectors";
++
++type Placed = { readonly range: SelectionRange; readonly top: number };
++type ScrollBox = {
++  readonly scrollTop: number;
++  readonly clientHeight: number;
++  readonly paddingTop: number;
++};
++
++export function farTop(
++  { scrollTop, clientHeight, paddingTop }: ScrollBox,
++  rendered: Span,
++): number | null {
++  const visibleTop = scrollTop - paddingTop;
++  const overlaps = visibleTop < rendered.bottom && visibleTop + clientHeight > rendered.top;
++  return overlaps ? null : visibleTop;
++}
++
++const placeTop = StateEffect.define<Placed>();
++
++const placed = StateField.define<Placed | null>({
++  create: () => null,
++  update(value, tr) {
++    let next = value;
++    for (const effect of tr.effects) {
++      if (effect.is(placeTop)) {
++        next = effect.value;
++      }
++    }
++    return next;
++  },
++});
++
++// WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror swaps
++// its viewport in its scroll measure (docs/plan.md §2 #82, docs/slices/briefs/3.M-minimap-window-rework-3.md);
++// a scroll request places the viewport first.
++function placeFarScroll(view: EditorView): void {
++  const top = view.scrollDOM.scrollTop;
++  const { from, to } = view.viewport;
++  const visibleTop = farTop(
++    {
++      scrollTop: top,
++      clientHeight: view.scrollDOM.clientHeight,
++      paddingTop: view.documentPadding.top,
++    },
++    { top: view.lineBlockAt(from).top, bottom: view.lineBlockAt(to).bottom },
++  );
++  if (visibleTop === null) {
++    return;
++  }
++  const line = view.lineBlockAtHeight(visibleTop);
++  const range = EditorSelection.cursor(line.from);
++  view.dispatch({
++    effects: [
++      placeTop.of({ range, top }),
++      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
++    ],
++  });
++}
++
++export const exactScroll: Extension = [
++  placed,
++  EditorView.domEventObservers({
++    scroll: (_event, view) => {
++      placeFarScroll(view);
++    },
++  }),
++  EditorView.scrollHandler.of((view, range) => {
++    const place = view.state.field(placed);
++    if (place === null || place.range !== range) {
++      return false;
++    }
++    view.scrollDOM.scrollTop = place.top;
++    return true;
++  }),
++];
+diff --git a/frontend/src/editor/internal/paneViews.ts b/frontend/src/editor/internal/paneViews.ts
+index 6cb4bcd..0f8aed6 100644
+--- a/frontend/src/editor/internal/paneViews.ts
++++ b/frontend/src/editor/internal/paneViews.ts
+@@ -7,12 +7,12 @@ import type { ChunkAction } from "./apply";
+ import type { ChunkSpan } from "./chunkField";
+ import { coveredDecorations } from "./covered";
+ import { centerDecorations, focusDecorations, sideDecorations } from "./decorations";
++import { exactScroll } from "./exactScroll";
+ import type { Folds } from "./foldView";
+ import { SIDE_PANE, type ChunkRow, type Pane, type PaneViews } from "./geometry";
+ import { modClicks } from "./modClick";
+ import { centerKind, createPane, type PaneSettings } from "./pane";
+ import { removalTooltip } from "./removalTooltip";
+-import { exactScroll } from "./scrollSync";
+ import type { Side } from "./side";
+ import { sideRunner, type SideCommand } from "./sideKeys";
+ import { sideStatusField } from "./sideStatus";
+@@ -38,9 +38,12 @@ export type PaneWiring = {
+ };
+ 
+ function everyPane(): Extension {
+-  // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
+-  // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
+-  return [tooltips({ parent: document.body }), exactScroll];
++  return [
++    // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
++    // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
++    tooltips({ parent: document.body }),
++    exactScroll,
++  ];
+ }
+ 
+ function sideExtensions(
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index 0ac7903..c1b5a64 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -1,6 +1,4 @@
+-import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
+-import type { Extension, SelectionRange } from "@codemirror/state";
+-import { EditorView } from "@codemirror/view";
++import type { EditorView } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ import { PANES, type Pane, type PaneViews } from "./geometry";
+@@ -11,7 +9,6 @@ type ScrollPane = {
+   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+   readonly documentPadding: { readonly top: number };
+ };
+-type Placed = { readonly range: SelectionRange; readonly top: number };
+ 
+ const ANCHOR_AT = 0.5;
+ 
+@@ -66,62 +63,6 @@ function middle(view: ScrollPane): number {
+   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
+ }
+ 
+-const placeTop = StateEffect.define<Placed>();
+-
+-const placed = StateField.define<Placed | null>({
+-  create: () => null,
+-  update(value, tr) {
+-    let next = value;
+-    for (const effect of tr.effects) {
+-      if (effect.is(placeTop)) {
+-        next = effect.value;
+-      }
+-    }
+-    return next;
+-  },
+-});
+-
+-// WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror
+-// swaps its viewport in the scroll handler's measure (@codemirror/view DocView.updateInner:
+-// "Chrome sometimes messes with the scroll position during DOM mutation"); a scroll request
+-// places the viewport first.
+-function placeFarScroll(view: EditorView): void {
+-  const top = view.scrollDOM.scrollTop;
+-  const visibleTop = top - view.documentPadding.top;
+-  const { from, to } = view.viewport;
+-  const overlaps =
+-    visibleTop < view.lineBlockAt(to).bottom &&
+-    visibleTop + view.scrollDOM.clientHeight > view.lineBlockAt(from).top;
+-  if (overlaps) {
+-    return;
+-  }
+-  const line = view.lineBlockAtHeight(visibleTop);
+-  const range = EditorSelection.cursor(line.from);
+-  view.dispatch({
+-    effects: [
+-      placeTop.of({ range, top }),
+-      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
+-    ],
+-  });
+-}
+-
+-export const exactScroll: Extension = [
+-  placed,
+-  EditorView.domEventObservers({
+-    scroll: (_event, view) => {
+-      placeFarScroll(view);
+-    },
+-  }),
+-  EditorView.scrollHandler.of((view, range) => {
+-    const place = view.state.field(placed);
+-    if (place === null || place.range !== range) {
+-      return false;
+-    }
+-    view.scrollDOM.scrollTop = place.top;
+-    return true;
+-  }),
+-];
+-
+ export class ScrollSync {
+   readonly #views: Readonly<Record<Pane, ScrollPane>>;
+   readonly #requestFrame: () => void;
+-- 
+2.56.0
+
