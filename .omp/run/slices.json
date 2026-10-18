@@ -1,1 +1,5 @@
-{}
+{
+  "MinimapWindowR3": {
+    "owned": ["frontend/src/editor/**"]
+  }
+}
