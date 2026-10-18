@@ -99,7 +99,7 @@ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | nul
     return { input, ...fit, canvasHeight, rowPx, slider, ratio };
   }
   const found = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
-  const shown = scrollTop >= scrollable ? reachingLastRow(input, found, fitting) : found;
+  const shown = drawingLastVisibleRow(input, found, fitting);
   const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
   const top = Math.min(alignedSliderTop(input, shown, rowCss), height - sliderHeight);
   const slider = { top, height: sliderHeight };
@@ -145,10 +145,12 @@ function steadied(input: MinimapInput, found: Window, previous: MinimapLayout | 
   return found;
 }
 
-// VS Code's window reaches the last row at the end only through scrollBeyondLastLine
-// (common/config/editorOptions.ts), which yamt does not have.
-function reachingLastRow({ rows }: MinimapInput, shown: Window, fitting: number): Window {
-  const lastRowFirst = rows - fitting + 1 + shown.topPaddingRows;
+// VS Code's window can leave the viewport's last rows out near the end; it reaches them only
+// through scrollBeyondLastLine (common/config/editorOptions.ts), which yamt does not have.
+function drawingLastVisibleRow(input: MinimapInput, shown: Window, fitting: number): Window {
+  const { scrollTop, viewportHeight, paddingTop, rows } = input;
+  const last = Math.min(rows, rowOfTop(scrollTop + viewportHeight - paddingTop - 1));
+  const lastRowFirst = last - fitting + 1 + shown.topPaddingRows;
   return { ...shown, startRow: Math.max(shown.startRow, lastRowFirst) };
 }
 

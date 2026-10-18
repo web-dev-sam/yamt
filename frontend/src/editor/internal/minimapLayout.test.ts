@@ -148,6 +148,60 @@ test("the end at 868 px: 434 rows fit, the last drawn is row 618, the slider ins
   expect(sliderBottom(layout)).toBeLessThanOrEqual(868);
 });
 
+const NEAR_END = { rows: 618, height: 867, viewportHeight: 867, pixelRatio: 2 };
+const NEAR_END_LAST = 11_501;
+
+function drawnY(layout: MinimapLayout, documentY: number): number {
+  const row = documentY / 20 + 1;
+  return ((row - layout.startRow + layout.topPaddingRows) * layout.rowPx) / layout.input.pixelRatio;
+}
+
+test("one pixel short of the end, after the end: rows 186–618, as at the end", () => {
+  const end = minimapLayout(at(NEAR_END_LAST, NEAR_END), null);
+  const short = minimapLayout(at(NEAR_END_LAST - 1, NEAR_END), end);
+
+  expect([short.startRow, short.endRow]).toEqual([186, 618]);
+});
+
+test("40 px short of the end: row 617, partly shown, is drawn", () => {
+  const layout = minimapLayout(at(11_460, NEAR_END), null);
+
+  expect(layout.endRow).toBeGreaterThanOrEqual(617);
+});
+
+test("from the end one pixel up: the window moves by at most one row", () => {
+  const end = minimapLayout(at(NEAR_END_LAST, NEAR_END), null);
+  const short = minimapLayout(at(NEAR_END_LAST - 1, NEAR_END), end);
+
+  expect(Math.abs(short.startRow - end.startRow)).toBeLessThanOrEqual(1);
+});
+
+test("the last 60 px, one pixel up at a time: the last visible row drawn, steps of one row, the slider on the drawn rows", () => {
+  let previous = minimapLayout(at(NEAR_END_LAST, NEAR_END), null);
+  for (let scrollTop = NEAR_END_LAST - 1; scrollTop >= NEAR_END_LAST - 3 * 20; scrollTop -= 1) {
+    const input = at(scrollTop, NEAR_END);
+    const layout = minimapLayout(input, previous);
+    const { slider } = layout;
+    const rowCssPx = layout.rowPx / input.pixelRatio;
+    const viewBottom = scrollTop + input.viewportHeight - input.paddingTop;
+    const lastVisible = Math.min(input.rows, rowOfTop(viewBottom - 1));
+
+    expect(layout.endRow, `scrollTop ${scrollTop}`).toBeGreaterThanOrEqual(lastVisible);
+    expect(Math.abs(layout.startRow - previous.startRow)).toBeLessThanOrEqual(1);
+    if (slider === null) {
+      throw new Error("no slider");
+    }
+    expect(slider.top).toBeGreaterThanOrEqual(0);
+    expect(sliderBottom(layout)).toBeLessThanOrEqual(input.height);
+    const shownTop = drawnY(layout, scrollTop - input.paddingTop);
+    expect(Math.abs(slider.top - shownTop), `scrollTop ${scrollTop}`).toBeLessThanOrEqual(rowCssPx);
+    expect(Math.abs(sliderBottom(layout) - drawnY(layout, viewBottom))).toBeLessThanOrEqual(
+      rowCssPx,
+    );
+    previous = layout;
+  }
+});
+
 test("scrolling up never moves the window down, down never up", () => {
   // At 70,002 and 70,003 px the top row is 3,500 for both, but the slider's own fraction puts
   // the window's start at 3,304 and 3,303.
