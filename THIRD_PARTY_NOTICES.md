@@ -21,6 +21,9 @@ release jobs regenerate it and fail when the committed copy is out of date.
 - **Icons**: hand-checked. Lucide (ISC, Lucide Contributors; some icons derived from Feather, MIT, Cole
   Bemis) and vscode-icons (MIT, Roberto Huertas) are build-time packages (`@iconify-json/*`); the build
   copies the SVGs the app uses into its code. Holder and license come from each package's `info.json`.
+- **Copied code**: hand-checked. The minimap's glyph intensities and character index are copied from Visual
+  Studio Code (MIT, Microsoft Corporation; `minimapPreBaked.ts`, `minimapCharSheet.ts`) into
+  `frontend/src/editor/internal/minimapGlyphs.ts`.
 - **System libraries in the AppImage**: the Linux AppImage carries the GTK and WebKitGTK libraries of the
   Ubuntu 22.04 build machine (LGPL-2.1-or-later and other licenses). The full-text file names their Ubuntu
   source packages; the release job appends the installed versions and the GNU LGPL and GPL texts before
@@ -40,3 +43,4 @@ If a package has neither a license file nor a license the script knows, the scri
 | [Lucide](https://lucide.dev) icons                                                                  | toolbar, arrow and mark icons          | ISC, Lucide Contributors    |
 | [vscode-icons](https://github.com/vscode-icons/vscode-icons)                                        | file-type icons                        | MIT, Roberto Huertas        |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) via `@fontsource/jetbrains-mono` 5.3.0 | the editor font                        | OFL-1.1, notice in the file |
+| [Visual Studio Code](https://github.com/microsoft/vscode) minimap glyphs                            | the Result's minimap                   | MIT, Microsoft Corporation  |
