@@ -16374,11 +16374,12 @@ SOFTWARE.
 
 ==== Copied code (1) ====
 
----- Visual Studio Code minimap glyphs (MIT) ----
+---- Visual Studio Code minimap (MIT) ----
 
 frontend/src/editor/internal/minimapGlyphs.ts holds the prebaked minimap glyph intensities and the
-character index of Visual Studio Code (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d,
-src/vs/editor/browser/viewParts/minimap/minimapPreBaked.ts and minimapCharSheet.ts):
+character index of Visual Studio Code; minimapLayout.ts and minimapPixels.ts follow its minimap layout and
+glyph drawing (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/
+minimap/minimapPreBaked.ts, minimapCharSheet.ts, minimapCharRenderer.ts and minimap.ts):
 
 Copyright (c) 2015 - present Microsoft Corporation
 

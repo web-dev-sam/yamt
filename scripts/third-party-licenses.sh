@@ -231,10 +231,11 @@ icon_entries() {
 
 # Code copied into yamt's own sources (no package carries it): holder and licence hand-checked.
 copied_entries() {
-    printf '\n---- Visual Studio Code minimap glyphs (MIT) ----\n\n'
+    printf '\n---- Visual Studio Code minimap (MIT) ----\n\n'
     printf 'frontend/src/editor/internal/minimapGlyphs.ts holds the prebaked minimap glyph intensities and the\n'
-    printf 'character index of Visual Studio Code (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d,\n'
-    printf 'src/vs/editor/browser/viewParts/minimap/minimapPreBaked.ts and minimapCharSheet.ts):\n\n'
+    printf 'character index of Visual Studio Code; minimapLayout.ts and minimapPixels.ts follow its minimap layout and\n'
+    printf 'glyph drawing (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/\n'
+    printf 'minimap/minimapPreBaked.ts, minimapCharSheet.ts, minimapCharRenderer.ts and minimap.ts):\n\n'
     standard_text MIT "2015 - present Microsoft Corporation"
 }
 
