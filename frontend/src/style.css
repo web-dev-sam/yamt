@@ -64,9 +64,6 @@
   --color-mark-modified: #43698d;
   --color-mark-deleted: #656e76;
   --color-mark-conflict: #8150be;
-  --color-mark-error: #d64d5b;
-  --color-mark-warning: #c29e4a;
-  --color-mark-info: #756d56;
 }
 
 :root[data-theme="light"] {
@@ -127,9 +124,6 @@
   --color-mark-modified: #b6d2f2;
   --color-mark-deleted: #c8c8c8;
   --color-mark-conflict: #c6bbf5;
-  --color-mark-error: #cf5b56;
-  --color-mark-warning: #f2bf57;
-  --color-mark-info: #d9cfad;
 }
 
 /* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */

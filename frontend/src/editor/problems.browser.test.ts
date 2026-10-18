@@ -116,7 +116,6 @@ function options(servers: LanguageServers | null, readOnly = false): MergeOption
     readOnly,
     preferences: { theme: "dark", keys: DEFAULT_KEYS },
     collapsed: false,
-    marks: false,
     servers,
   };
 }

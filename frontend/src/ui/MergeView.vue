@@ -25,7 +25,7 @@ type Column = {
   readonly delete: boolean;
 };
 
-const props = defineProps<{ data: FileMergeData; shown: boolean; marks: boolean }>();
+const props = defineProps<{ data: FileMergeData; shown: boolean }>();
 
 const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
 
@@ -56,7 +56,6 @@ const handle = useMergeController(
     readOnly: () => !isEditable(props.data),
     preferences,
     collapsed: collapsing,
-    marks: () => props.shown && props.marks,
     servers,
   },
 );

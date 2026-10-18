@@ -15,7 +15,6 @@ import { Frame } from "./internal/frame";
 import type { PaneViews } from "./internal/geometry";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
-import { jumpTo } from "./internal/markJump";
 import type { Direction } from "./internal/navigation";
 import { preferenceEffects } from "./internal/pane";
 import type { PaneSettings, Preferences } from "./internal/pane";
@@ -26,7 +25,7 @@ import { SavedPoint, type ResultSnapshot } from "./internal/savedPoint";
 import { openResult, type ServerDoc } from "./internal/serverDoc";
 import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
-import { showStatuses } from "./internal/sideStatus";
+import { pushStatuses } from "./internal/sideStatus";
 import { summarize, type MergeSummary } from "./internal/status";
 import type { IconPress } from "./internal/stripIcons";
 import { Strips } from "./internal/strips";
@@ -51,7 +50,6 @@ export type MergeOptions = {
   readonly readOnly: boolean;
   readonly preferences: Preferences;
   readonly collapsed: boolean;
-  readonly marks: boolean;
   readonly servers: LanguageServers | null;
 };
 
@@ -94,15 +92,6 @@ export class MergeController {
       folds: this.#folds.fields,
       drag: this.#drag,
       strips: this.#strips,
-      jump: (pane, target, rows) => {
-        const folds = this.#folds.fields;
-        jumpTo(
-          { views: this.#views, spans: this.#field, folds, focus: this.#focus, rows },
-          pane,
-          target,
-        );
-      },
-      marks: options.marks,
     });
     this.#frame.request();
     if (description !== null && description.support === undefined) {
@@ -193,16 +182,11 @@ export class MergeController {
   }
 
   #statusesChanged(update: ViewUpdate): void {
-    const before = update.startState.field(this.#field);
-    const after = update.state.field(this.#field);
-    if (after.every((span, index) => span.status === before[index]?.status)) {
-      return;
+    const after = pushStatuses(update, this.#field, this.#views);
+    if (after !== null) {
+      this.#frame.request();
+      this.#summaryListener?.(summarize(after));
     }
-    const states = after.map(({ chunk, status }) => ({ chunk, status }));
-    this.#views.left.dispatch({ effects: showStatuses.of(states) });
-    this.#views.right.dispatch({ effects: showStatuses.of(states) });
-    this.#frame.request();
-    this.#summaryListener?.(summarize(after));
   }
 
   readonly #press = (press: IconPress, event: PointerEvent): void => {
@@ -231,10 +215,6 @@ export class MergeController {
   setCollapsed(collapsed: boolean): void {
     this.#folds.setCollapsed(collapsed);
     this.#frame.realign();
-  }
-
-  showMarks(shown: boolean): void {
-    this.#frame.showMarks(shown);
   }
 
   undo(): boolean {

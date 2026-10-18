@@ -2,7 +2,6 @@
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { onMounted, watch } from "vue";
 
-import { useAltHold } from "./altHold";
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
@@ -36,7 +35,6 @@ const {
 } = useAppStore();
 
 const focused = useWindowFocus();
-const altHeld = useAltHold();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
@@ -78,7 +76,6 @@ onMounted(() => {
           :key="file.path"
           :data="file"
           :shown="file.path === active && screen.kind === 'files'"
-          :marks="altHeld"
         />
         <ChoiceView
           v-for="sides in choices"
