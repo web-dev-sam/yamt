@@ -1,30 +1,4 @@
 {
-  "MinimapCutover": {
-    "owned": [
-      "frontend/src/editor/index.ts",
-      "frontend/src/editor/AGENTS.md",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/problems.browser.test.ts",
-      "frontend/src/editor/removals.browser.test.ts",
-      "frontend/src/editor/internal/frame.ts",
-      "frontend/src/editor/internal/markLanes.ts",
-      "frontend/src/editor/internal/marks.ts",
-      "frontend/src/editor/internal/marks.test.ts",
-      "frontend/src/editor/internal/markJump.ts",
-      "frontend/src/editor/internal/viewport.ts",
-      "frontend/src/editor/internal/viewport.test.ts",
-      "frontend/src/editor/internal/sideFocus.ts",
-      "frontend/src/editor/internal/geometry.ts",
-      "frontend/src/editor/internal/folds.test.ts",
-      "frontend/src/editor/internal/sideStatus.ts",
-      "frontend/src/editor/internal/sideStatus.test.ts",
-      "frontend/src/style.css",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/ui/useMergeController.test.ts",
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/App.vue"
-    ]
-  },
   "MinimapData": {
     "owned": [
       "frontend/src/editor/internal/minimap*.ts",
