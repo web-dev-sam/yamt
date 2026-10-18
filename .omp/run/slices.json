@@ -1,8 +1,1 @@
-{
-  "MinimapWindowR2": {
-    "owned": [
-      "frontend/src/editor/internal/minimapLayout.ts",
-      "frontend/src/editor/internal/minimapLayout.test.ts"
-    ]
-  }
-}
+{}
