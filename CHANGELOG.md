@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-18
+
 ### Added
 
 - Abort merge: an icon button right after Mark resolved, hidden at first; show it from the toolbar's right-click
@@ -207,7 +209,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.3.2...HEAD
+[Unreleased]: ../../compare/v0.4.0...HEAD
+[0.4.0]: ../../compare/v0.3.2...v0.4.0
 [0.3.2]: ../../compare/v0.3.1...v0.3.2
 [0.3.1]: ../../compare/v0.3.0...v0.3.1
 [0.3.0]: ../../compare/v0.2.0...v0.3.0
