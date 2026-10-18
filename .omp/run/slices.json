@@ -1,1 +1,11 @@
-{}
+{
+  "MinimapWindowR1": {
+    "owned": [
+      "frontend/src/editor/internal/minimap.ts",
+      "frontend/src/editor/internal/minimapRows.ts",
+      "frontend/src/editor/internal/minimapRows.test.ts",
+      "frontend/src/editor/internal/minimapLayout.ts",
+      "frontend/src/editor/internal/minimapLayout.test.ts"
+    ]
+  }
+}
