@@ -7,7 +7,9 @@ import {
   minimapLayout,
   minimapScale,
   rowAt,
+  rowOfTop,
   rowTop,
+  topOfRow,
   type MinimapInput,
 } from "./minimapLayout";
 
@@ -69,10 +71,23 @@ test("a file that fits: rows from the first, no slider", () => {
     startRow: 1,
     endRow: 30,
     topPaddingRows: 0,
+    canvasHeight: 900,
     rowPx: 2,
     slider: null,
     ratio: 0,
   });
+});
+
+test("the canvas is the minimap's height in whole device px", () => {
+  expect(minimapLayout(at(0, { height: 901, pixelRatio: 1.25 }), null).canvasHeight).toBe(1126);
+  expect(minimapLayout(at(0, { rows: 30, height: 901, pixelRatio: 2 }), null).canvasHeight).toBe(
+    1802,
+  );
+});
+
+test("row n covers document px (n − 1) × 20 up to n × 20", () => {
+  expect([0, 19, 20, 145_539].map(rowOfTop)).toEqual([1, 1, 2, 7277]);
+  expect([1, 2, 7277].map(topOfRow)).toEqual([0, 20, 145_520]);
 });
 
 test("taller than the Result, shorter than the minimap: rows stay, the slider moves by scrollTop × ratio", () => {

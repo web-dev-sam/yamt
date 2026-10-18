@@ -174,12 +174,33 @@ test("only marks in the window; through start row and padding", () => {
     { ...rows(100, 100), kind: "error" },
     { ...rows(3436, 3436), kind: "warning" },
     { ...rows(3900, 3901), kind: "error" },
+    { ...rows(3434, 3434), kind: "modified" },
+    { ...rows(3885, 3885), kind: "modified" },
+    { top: 3434 * LINE_PX, bottom: 3434 * LINE_PX, kind: "deleted" },
   ];
 
   expect(markBoxes(marks, tall, minimapColumns(1).right)).toEqual([
     { x: 127, y: 1, width: 4, height: 4, kind: "warning" },
+    { x: 127, y: 0, width: 4, height: 4, kind: "deleted" },
   ]);
   expect(markBoxes([{ ...rows(1, 1), kind: "inserted" }], padded, minimapColumns(2).right)).toEqual(
     [{ x: 254, y: 2, width: 8, height: 8, kind: "inserted" }],
   );
+});
+
+test("at a fractional ratio the inset, the width and the minimum height are whole device px", () => {
+  const quarter = minimapLayout({ ...TALL, pixelRatio: 1.25 }, null);
+  const row = quarter.startRow + 11;
+  const tenth = minimapLayout({ ...TALL, pixelRatio: 1.1 }, null);
+
+  expect(
+    markBoxes([{ ...rows(row, row), kind: "error" }], quarter, minimapColumns(1.25).right),
+  ).toEqual([{ x: 129, y: 21, width: 5, height: 5, kind: "error" }]);
+  expect(
+    markBoxes(
+      [{ ...rows(tenth.startRow, tenth.startRow), kind: "error" }],
+      tenth,
+      minimapColumns(1.1).right,
+    ),
+  ).toEqual([{ x: 128, y: 0, width: 4, height: 4, kind: "error" }]);
 });

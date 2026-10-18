@@ -317,3 +317,48 @@ path.chunk-band {
 :root .removal-tooltip-whitespace {
   color: var(--color-fg-muted);
 }
+
+.cm-editor > .minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 400;
+  box-sizing: content-box;
+  max-width: 100%;
+  overflow: hidden;
+  border-left: 1px solid var(--color-control-border);
+  background: var(--color-panel);
+  visibility: visible;
+}
+
+.cm-editor > .minimap[hidden] {
+  display: none;
+}
+
+.minimap > canvas {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0.9;
+}
+
+.minimap-slider {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: var(--color-minimap-slider);
+}
+
+.minimap-slider:hover {
+  background: var(--color-minimap-slider-hover);
+}
+
+.minimap-slider.active {
+  background: var(--color-minimap-slider-active);
+}
+
+.minimap-slider[hidden] {
+  display: none;
+}

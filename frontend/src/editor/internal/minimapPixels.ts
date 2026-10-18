@@ -1,3 +1,8 @@
+// The glyph painting and the row walk below follow Visual Studio Code line by line
+// (microsoft/vscode at 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/minimap/:
+// minimapCharRenderer.ts renderChar, minimap.ts _renderLine).
+// Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License.
+
 import { charIndex, glyphIntensity, GLYPH_ROWS_PER_SCALE, type Scale } from "./minimapGlyphs";
 import { MAX_COLUMNS } from "./minimapLayout";
 

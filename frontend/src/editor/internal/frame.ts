@@ -9,6 +9,7 @@ import { syncFindSpace } from "./find";
 import { waveStarts, type FoldFields } from "./folds";
 import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
 import type { ChunkRow, WaveRow } from "./geometry";
+import { Minimap } from "./minimap";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
 import type { Strips } from "./strips";
 
@@ -24,11 +25,13 @@ type FrameParts = {
   readonly folds: FoldFields;
   readonly drag: IconDrag;
   readonly strips: Strips;
+  readonly minimap: boolean;
 };
 
 export class Frame {
   readonly #parts: FrameParts;
   readonly #scroll: ScrollSync;
+  readonly #minimap: Minimap;
   #frameId: number | null = null;
   #layoutCache: Layout | null = null;
 
@@ -37,14 +40,25 @@ export class Frame {
     this.#scroll = new ScrollSync(parts.views, () => {
       this.request();
     });
+    this.#minimap = new Minimap({
+      views: parts.views,
+      folds: parts.folds,
+      shown: parts.minimap,
+      follow: () => {
+        this.#scroll.follow("center");
+      },
+    });
   }
 
   changed(update: ViewUpdate): void {
     const { spans, folds } = this.#parts;
-    if (rowsChanged(update, [spans, folds.center, folds.sides])) {
+    const moved = rowsChanged(update, [spans, folds.center, folds.sides]);
+    if (moved) {
       this.#layoutCache = null;
     }
+    const minimapStale = this.#minimap.changed(update, moved);
     if (
+      minimapStale ||
       update.docChanged ||
       update.geometryChanged ||
       searchPanelOpen(update.startState) !== searchPanelOpen(update.state)
@@ -75,6 +89,7 @@ export class Frame {
       const covered = press === null ? null : coveredAction(press, layout.rows, views);
       pushCovered(views, covered);
       strips.paint(views, layout, covered);
+      this.#minimap.paint(layout);
     });
   }
 
@@ -82,10 +97,16 @@ export class Frame {
     this.#scroll.follow("center");
   }
 
+  showMinimap(shown: boolean): void {
+    this.#minimap.show(shown);
+    this.request();
+  }
+
   destroy(): void {
     if (this.#frameId !== null) {
       cancelAnimationFrame(this.#frameId);
     }
     this.#scroll.destroy();
+    this.#minimap.destroy();
   }
 }

@@ -44,6 +44,7 @@ type ControllerOptions = {
   readonly readOnly: MaybeRefOrGetter<boolean>;
   readonly preferences: MaybeRefOrGetter<Preferences>;
   readonly collapsed: MaybeRefOrGetter<boolean>;
+  readonly minimap: MaybeRefOrGetter<boolean>;
   readonly servers: MaybeRefOrGetter<LanguageServers | null>;
 };
 
@@ -139,10 +140,29 @@ function handleOf(shown: Shown, current: () => MergeController | null): MergeHan
   };
 }
 
+function followWithoutRebuild(
+  current: () => MergeController | null,
+  {
+    preferences,
+    collapsed,
+    minimap,
+  }: Pick<ControllerOptions, "preferences" | "collapsed" | "minimap">,
+): void {
+  watch(toRef(preferences), (next) => {
+    current()?.setPreferences(next);
+  });
+  watch(toRef(collapsed), (on) => {
+    current()?.setCollapsed(on);
+  });
+  watch(toRef(minimap), (shown) => {
+    current()?.showMinimap(shown);
+  });
+}
+
 export function useMergeController(
   data: MaybeRefOrGetter<FileMergeData | null>,
   hosts: Hosts,
-  { readOnly, preferences, collapsed, servers }: ControllerOptions,
+  { readOnly, preferences, collapsed, minimap, servers }: ControllerOptions,
 ): MergeHandle {
   const shown = emptyShown();
   let controller: MergeController | null = null;
@@ -162,6 +182,7 @@ export function useMergeController(
         readOnly: currentReadOnly,
         preferences: toValue(preferences),
         collapsed: toValue(collapsed),
+        minimap: toValue(minimap),
         servers: currentServers,
       };
       controller = reloaded(controller, () => createController(current, options, elements), shown);
@@ -169,13 +190,7 @@ export function useMergeController(
     { immediate: true, flush: "post" },
   );
 
-  watch(toRef(preferences), (next) => {
-    controller?.setPreferences(next);
-  });
-
-  watch(toRef(collapsed), (on) => {
-    controller?.setCollapsed(on);
-  });
+  followWithoutRebuild(() => controller, { preferences, collapsed, minimap });
 
   onScopeDispose(() => {
     controller = reloaded(controller, () => null, shown);

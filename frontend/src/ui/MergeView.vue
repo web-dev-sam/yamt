@@ -5,7 +5,7 @@ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 import { pressesKey, type FileMergeData, type Side } from "../ipc";
 import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
-import { deletedSideView, keptToApply } from "./deletedSide";
+import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
@@ -25,7 +25,7 @@ type Column = {
   readonly delete: boolean;
 };
 
-const props = defineProps<{ data: FileMergeData; shown: boolean }>();
+const props = defineProps<{ data: FileMergeData; shown: boolean; minimap: boolean }>();
 
 const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
 
@@ -56,6 +56,7 @@ const handle = useMergeController(
     readOnly: () => !isEditable(props.data),
     preferences,
     collapsed: collapsing,
+    minimap: showsMinimap,
     servers,
   },
 );
@@ -77,12 +78,7 @@ if (props.data.deleted === null) {
 useEventListener(window, "keydown", historyKeyInShownFile);
 useEventListener(window, "keydown", saveKeyInShownFile);
 
-const deletedView = computed(() => {
-  const { deleted, path, middle } = props.data;
-  return deleted === null
-    ? null
-    : deletedSideView(deleted, taken.value.get(path) ?? null, middle.kind);
-});
+const deletedView = computed(deletedViewNow);
 const columns = computed(() =>
   SIDES.map((side): Column => ({
     side,
@@ -93,13 +89,7 @@ const columns = computed(() =>
     delete: deletedView.value?.deleteIn === side,
   })),
 );
-const centerLine = computed(() => {
-  const { middle } = props.data;
-  if (deletedView.value?.middle === "deleted") {
-    return DELETED_LINE;
-  }
-  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
-});
+const centerLine = computed(() => resultLine(deletedView.value));
 const editable = computed(() => isEditable(props.data));
 const resettable = computed(() => deletedView.value?.resettable ?? summary.value !== null);
 const keptSideToApply = computed(() =>
@@ -119,6 +109,25 @@ watch(
 onUnmounted(() => {
   untrack(props.data.path, work);
 });
+
+function deletedViewNow(): DeletedSideView | null {
+  const { deleted, path, middle } = props.data;
+  return deleted === null
+    ? null
+    : deletedSideView(deleted, taken.value.get(path) ?? null, middle.kind);
+}
+
+function resultLine(view: DeletedSideView | null): string | null {
+  const { middle } = props.data;
+  if (view?.middle === "deleted") {
+    return DELETED_LINE;
+  }
+  return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
+}
+
+function showsMinimap(): boolean {
+  return props.shown && props.minimap && resultLine(deletedViewNow()) === null;
+}
 
 function markResolved(): void {
   const result = snapshot();

@@ -1,3 +1,9 @@
+// The layout, the press and the drag below follow Visual Studio Code line by line
+// (microsoft/vscode at 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/:
+// browser/viewParts/minimap/minimap.ts MinimapLayout.create and getDesiredScrollTopFromDelta,
+// common/config/editorOptions.ts _computeMinimapLayout, browser/viewParts/viewLines/viewLines.ts
+// the Center reveal). Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License.
+
 import { GLYPH_ROWS_PER_SCALE, HIDPI_SCALE, type Scale } from "./minimapGlyphs";
 import { LINE_HEIGHT_PX } from "./pane";
 
@@ -11,13 +17,14 @@ export type MinimapInput = {
   readonly pixelRatio: number;
 };
 
-type Slider = { readonly top: number; readonly height: number };
+export type Slider = { readonly top: number; readonly height: number };
 
 export type MinimapLayout = {
   readonly input: MinimapInput;
   readonly startRow: number;
   readonly endRow: number;
   readonly topPaddingRows: number;
+  readonly canvasHeight: number;
   readonly rowPx: number;
   readonly slider: Slider | null;
   readonly ratio: number;
@@ -25,7 +32,7 @@ export type MinimapLayout = {
 
 export type Box = { readonly x: number; readonly width: number };
 
-type Columns = {
+export type Columns = {
   readonly left: Box;
   readonly code: Box;
   readonly right: Box;
@@ -63,11 +70,20 @@ function scrollHeightOf({ rows, paddingTop, paddingBottom }: MinimapInput): numb
   return rows * LINE_HEIGHT_PX + paddingTop + paddingBottom;
 }
 
+export function rowOfTop(top: number): number {
+  return Math.floor(top / LINE_HEIGHT_PX) + 1;
+}
+
+export function topOfRow(row: number): number {
+  return (row - 1) * LINE_HEIGHT_PX;
+}
+
 export function minimapLayout(input: MinimapInput, previous: MinimapLayout | null): MinimapLayout {
   const { scrollTop, viewportHeight, paddingTop, rows, height, pixelRatio } = input;
   const rowPx = GLYPH_ROWS_PER_SCALE * minimapScale(pixelRatio);
   const rowCss = rowPx / pixelRatio;
-  const fitting = Math.floor(Math.floor(pixelRatio * height) / rowPx);
+  const canvasHeight = Math.floor(pixelRatio * height);
+  const fitting = Math.floor(canvasHeight / rowPx);
   const sliderHeight = Math.floor((viewportHeight / LINE_HEIGHT_PX) * rowCss);
   const extraTop = Math.floor(paddingTop / LINE_HEIGHT_PX);
   const travel = Math.min(
@@ -79,23 +95,21 @@ export function minimapLayout(input: MinimapInput, previous: MinimapLayout | nul
   const sliderTop = scrollTop * ratio;
   if (fitting >= extraTop + rows) {
     const slider = travel > 0 ? { top: sliderTop, height: sliderHeight } : null;
-    return { input, startRow: 1, endRow: rows, topPaddingRows: extraTop, rowPx, slider, ratio };
+    const fit = { startRow: 1, endRow: rows, topPaddingRows: extraTop };
+    return { input, ...fit, canvasHeight, rowPx, slider, ratio };
   }
   const shown = steadied(input, windowAt(input, { rowPx, extraTop, sliderTop }), previous);
   const endRow = Math.min(rows, shown.startRow - shown.topPaddingRows + fitting - 1);
   const slider = { top: alignedSliderTop(input, shown, rowCss), height: sliderHeight };
-  return { input, ...shown, endRow, rowPx, slider, ratio };
+  return { input, ...shown, endRow, canvasHeight, rowPx, slider, ratio };
 }
 
 function viewportStart({ scrollTop, paddingTop, rows }: MinimapInput): {
   readonly row: number;
   readonly partial: number;
 } {
-  const row = Math.min(
-    rows,
-    Math.max(1, Math.floor((scrollTop - paddingTop) / LINE_HEIGHT_PX) + 1),
-  );
-  const partial = (scrollTop - paddingTop - (row - 1) * LINE_HEIGHT_PX) / LINE_HEIGHT_PX;
+  const row = Math.min(rows, Math.max(1, rowOfTop(scrollTop - paddingTop)));
+  const partial = (scrollTop - paddingTop - topOfRow(row)) / LINE_HEIGHT_PX;
   return { row, partial };
 }
 
@@ -149,7 +163,7 @@ export function rowTop(layout: MinimapLayout, row: number): number {
 }
 
 export function centredScrollTop(row: number, input: MinimapInput): number {
-  const top = input.paddingTop + (row - 1) * LINE_HEIGHT_PX;
+  const top = input.paddingTop + topOfRow(row);
   // The minimap reveals with source "mouse", which pads the box with one line above and none
   // below (vscode viewLines.ts _computeScrollTopToRevealRange, shouldIgnoreScrollOff).
   const boxStart = top - LINE_HEIGHT_PX;

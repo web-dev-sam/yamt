@@ -16,6 +16,7 @@ const editor = vi.hoisted(() => {
     readOnly: new Array<boolean>(),
     themes: new Array<string>(),
     collapsed: new Array<string>(),
+    minimap: new Array<string>(),
     servers: new Array<unknown>(),
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0 },
@@ -32,6 +33,7 @@ const editor = vi.hoisted(() => {
         readOnly: boolean;
         preferences: { theme: string };
         collapsed: boolean;
+        minimap: boolean;
         servers: unknown;
       },
     ) {
@@ -41,6 +43,7 @@ const editor = vi.hoisted(() => {
       state.readOnly.push(options.readOnly);
       state.themes.push(`built ${options.preferences.theme}`);
       state.collapsed.push(`${this.#id} built ${options.collapsed}`);
+      state.minimap.push(`${this.#id} built ${options.minimap}`);
       state.servers.push(options.servers);
     }
     summary(): Summary {
@@ -63,6 +66,9 @@ const editor = vi.hoisted(() => {
     }
     setCollapsed(on: boolean): void {
       state.collapsed.push(`${this.#id} set ${on}`);
+    }
+    showMinimap(shown: boolean): void {
+      state.minimap.push(`${this.#id} show ${shown}`);
     }
     snapshot(): { asShown(): string; editor: number } {
       const text = state.text;
@@ -90,6 +96,7 @@ afterEach(() => {
     readOnly: [],
     themes: [],
     collapsed: [],
+    minimap: [],
     servers: [],
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0 },
@@ -110,6 +117,7 @@ function mount(
     readOnly = shallowRef(false),
     preferences = shallowRef(DARK),
     collapsed = shallowRef(true),
+    minimap = shallowRef(false),
     servers = shallowRef<LanguageServers | null>(null),
   } = {},
 ): { scope: EffectScope; handle: MergeHandle } {
@@ -123,7 +131,7 @@ function mount(
         right: host(present),
         strips: [host(present), host(present)],
       },
-      { readOnly, preferences, collapsed, servers },
+      { readOnly, preferences, collapsed, minimap, servers },
     ),
   );
   if (handle === undefined) {
@@ -286,6 +294,35 @@ test("a preferences change never resets collapsing", async () => {
 
   expect(editor.state.collapsed).toEqual(["1 built true"]);
   expect(editor.state.themes).toEqual(["built dark", "set light"]);
+});
+
+test("an editor is built showing the minimap as the view says, and follows a change without a rebuild", async () => {
+  const minimap = shallowRef(true);
+  mount(shallowRef<FileMergeData | null>(await fileData("a\n")), { minimap });
+  await nextTick();
+
+  minimap.value = false;
+  await nextTick();
+  minimap.value = true;
+  await nextTick();
+
+  expect(editor.state.built).toBe(1);
+  expect(editor.state.minimap).toEqual(["1 built true", "1 show false", "1 show true"]);
+});
+
+test("a minimap shown before the file loaded reaches no editor, and the editor built later shows it", async () => {
+  const minimap = shallowRef(false);
+  const data = shallowRef<FileMergeData | null>(null);
+  mount(data, { minimap });
+  await nextTick();
+
+  minimap.value = true;
+  await nextTick();
+  expect(editor.state.minimap).toEqual([]);
+
+  data.value = await fileData("a\n");
+  await nextTick();
+  expect(editor.state.minimap).toEqual(["1 built true"]);
 });
 
 test("problems: the editor's counts when built, then each change it reports; null once it is gone", async () => {
