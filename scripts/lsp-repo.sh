@@ -42,13 +42,10 @@ if [ "${1:-}" = "--servers" ]; then
 fi
 [ $# -eq 1 ] || die "usage: $0 [--servers] <dir>"
 dir=$1
-modules="$(cd "$(dirname "$0")/.." && pwd)/frontend/node_modules"
 expected_conflicts=9
 
-for tool in oxlint oxfmt tsc; do
-    [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
-done
-[ -e "$modules/vue/package.json" ] || die "missing $modules/vue; run pnpm -C frontend install"
+require_frontend_tools
+[ -e "$frontend_modules/vue/package.json" ] || die "missing $frontend_modules/vue; run pnpm -C frontend install"
 if $with_servers; then
     command -v uv >/dev/null || die "uv is needed to make py/.venv; see https://docs.astral.sh/uv/"
 fi
@@ -64,16 +61,6 @@ write() {
     mkdir -p "$(dirname "$dir/$1")"
     cat >"$dir/$1"
     repo_git add -- "$1"
-}
-
-# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
-link_package() {
-    mkdir -p "$2"
-    for entry in "$1"/*; do
-        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
-    done
-    rm "$2/package.json"
-    cp "$1/package.json" "$2/package.json"
 }
 
 write_web_project() {
@@ -356,15 +343,8 @@ put_sources() {
 }
 
 link_web_modules() {
-    mkdir -p "$dir/web/node_modules/.bin"
-    for package in oxlint oxfmt; do
-        ln -s "$modules/$package" "$dir/web/node_modules/$package"
-    done
-    link_package "$modules/typescript" "$dir/web/node_modules/typescript"
-    link_package "$modules/vue" "$dir/web/node_modules/vue"
-    for tool in oxlint oxfmt tsc; do
-        ln -s "$modules/.bin/$tool" "$dir/web/node_modules/.bin/$tool"
-    done
+    link_frontend_tools "$dir/web/node_modules"
+    link_package "$frontend_modules/vue" "$dir/web/node_modules/vue"
 }
 
 put_project_programs() {
@@ -399,9 +379,7 @@ repo_git checkout -q local
 if repo_git merge -q --no-edit remote >/dev/null; then
     die "merging remote into local was clean; expected conflicts"
 fi
-conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
-count=$(grep -c . <<<"$conflicted" || true)
-[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
+conflicted=$(require_conflicts "$expected_conflicts")
 
 link_web_modules
 if $with_servers; then

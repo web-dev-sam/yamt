@@ -40,3 +40,12 @@ repo_git() {
         -c commit.gpgsign=false -c core.autocrlf=false \
         -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
 }
+
+# $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.
+require_conflicts() {
+    local conflicted count
+    conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
+    count=$(grep -c . <<<"$conflicted" || true)
+    [ "$count" -eq "$1" ] || die "expected $1 conflicted files, got $count: $conflicted"
+    echo "$conflicted"
+}

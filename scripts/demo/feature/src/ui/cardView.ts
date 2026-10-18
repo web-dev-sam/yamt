@@ -15,10 +15,14 @@ export function renderCard(card: Card): HTMLElement {
     element.append(renderLabels(card.labels));
   }
   if (card.dueAt !== undefined) {
-    element.append(badge(`Due ${new Date(card.dueAt).toLocaleString()}`, "due"));
+    element.append(
+      badge(`Due ${new Date(card.dueAt).toLocaleString()}`, "due"),
+    );
   }
   if (card.remindBefore !== undefined) {
-    element.append(badge(`Reminder ${card.remindBefore} min before`, "reminder"));
+    element.append(
+      badge(`Reminder ${card.remindBefore} min before`, "reminder"),
+    );
   }
   return element;
 }

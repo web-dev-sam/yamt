@@ -2,7 +2,14 @@ import type { Board, Card, Column, Label, LabelColor } from "./types";
 
 export const FORMAT_VERSION = 2;
 
-const LABEL_COLORS: LabelColor[] = ["grey", "red", "orange", "green", "blue", "purple"];
+const LABEL_COLORS: LabelColor[] = [
+  "grey",
+  "red",
+  "orange",
+  "green",
+  "blue",
+  "purple",
+];
 
 type Stored = { version: number; board: Board };
 
@@ -24,13 +31,19 @@ export function fromJSON(text: string): Board {
     throw new StorageError("A stored board is a JSON object");
   }
   if (data.version !== FORMAT_VERSION) {
-    throw new StorageError(`Board format ${String(data.version)} is not supported`);
+    throw new StorageError(
+      `Board format ${String(data.version)} is not supported`,
+    );
   }
   return readBoard(data.board);
 }
 
 function readBoard(value: unknown): Board {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string"
+  ) {
     throw new StorageError("A board needs an id and a name");
   }
   if (!Array.isArray(value.columns) || !isRecord(value.cards)) {
@@ -40,20 +53,35 @@ function readBoard(value: unknown): Board {
   for (const card of Object.values(value.cards).map(readCard)) {
     cards[card.id] = card;
   }
-  return { id: value.id, name: value.name, columns: value.columns.map(readColumn), cards };
+  return {
+    id: value.id,
+    name: value.name,
+    columns: value.columns.map(readColumn),
+    cards,
+  };
 }
 
 function readColumn(value: unknown): Column {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string"
+  ) {
     throw new StorageError("A column needs an id and a name");
   }
-  const cardIds = Array.isArray(value.cardIds) ? value.cardIds.filter(isString) : [];
+  const cardIds = Array.isArray(value.cardIds)
+    ? value.cardIds.filter(isString)
+    : [];
   const limit = typeof value.limit === "number" ? value.limit : undefined;
   return { id: value.id, name: value.name, cardIds, limit };
 }
 
 function readCard(value: unknown): Card {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.title !== "string"
+  ) {
     throw new StorageError("A card needs an id and a title");
   }
   return {
@@ -63,7 +91,10 @@ function readCard(value: unknown): Card {
     labels: Array.isArray(value.labels) ? value.labels.filter(isLabel) : [],
     assignee: typeof value.assignee === "string" ? value.assignee : undefined,
     dueDate: typeof value.dueDate === "string" ? value.dueDate : undefined,
-    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
+    createdAt:
+      typeof value.createdAt === "string"
+        ? value.createdAt
+        : new Date(0).toISOString(),
     archived: value.archived === true,
   };
 }

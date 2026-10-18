@@ -1,7 +1,13 @@
 export type CardId = string;
 export type ColumnId = string;
 
-export type LabelColor = "grey" | "red" | "orange" | "green" | "blue" | "purple";
+export type LabelColor =
+  | "grey"
+  | "red"
+  | "orange"
+  | "green"
+  | "blue"
+  | "purple";
 
 export type Label = {
   name: string;

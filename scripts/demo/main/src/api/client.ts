@@ -4,7 +4,8 @@ import { mockBoard } from "./mockBoards";
 
 const API_URL = "/api/boards";
 const useMocks =
-  location.hostname === "localhost" || new URLSearchParams(location.search).has("mocks");
+  location.hostname === "localhost" ||
+  new URLSearchParams(location.search).has("mocks");
 
 export class ApiError extends Error {
   constructor(
@@ -22,7 +23,10 @@ export async function loadBoard(id: string): Promise<Board> {
   }
   const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
   if (!response.ok) {
-    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
+    throw new ApiError(
+      `Could not load board ${id}: ${response.statusText}`,
+      response.status,
+    );
   }
   return fromJSON(await response.text());
 }
@@ -37,6 +41,9 @@ export async function saveBoard(board: Board): Promise<void> {
     body: toJSON(board),
   });
   if (!response.ok) {
-    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
+    throw new ApiError(
+      `Could not save board ${board.id}: ${response.statusText}`,
+      response.status,
+    );
   }
 }

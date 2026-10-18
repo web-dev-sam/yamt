@@ -28,7 +28,10 @@ function newColumnId(): ColumnId {
   return id;
 }
 
-export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
+export function createBoard(
+  name: string,
+  columnNames: string[] = DEFAULT_COLUMNS,
+): Board {
   const trimmed = name.trim();
   if (trimmed === "") {
     throw new BoardError("A board needs a name");
@@ -47,7 +50,11 @@ export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMN
 
 // Columns
 
-export function addColumn(board: Board, name: string, position = board.columns.length): Column {
+export function addColumn(
+  board: Board,
+  name: string,
+  position = board.columns.length,
+): Column {
   const trimmed = name.trim();
   if (trimmed === "") {
     throw new BoardError("A column needs a name");
@@ -60,13 +67,21 @@ export function addColumn(board: Board, name: string, position = board.columns.l
   return column;
 }
 
-export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
+export function renameColumn(
+  board: Board,
+  columnId: ColumnId,
+  name: string,
+): void {
   const column = findColumn(board, columnId);
   const trimmed = name.trim();
   if (trimmed === "") {
     throw new BoardError("A column needs a name");
   }
-  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
+  if (
+    board.columns.some(
+      (other) => other.id !== columnId && other.name === trimmed,
+    )
+  ) {
     throw new BoardError(`There is already a column called "${trimmed}"`);
   }
   column.name = trimmed;
@@ -85,7 +100,11 @@ export function removeColumn(board: Board, columnId: ColumnId): Card[] {
   return removed;
 }
 
-export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
+export function setLimit(
+  board: Board,
+  columnId: ColumnId,
+  limit: number | undefined,
+): void {
   const column = findColumn(board, columnId);
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     throw new BoardError("A limit is a whole number of cards, at least 1");
@@ -95,6 +114,17 @@ export function setLimit(board: Board, columnId: ColumnId, limit: number | undef
 
 export function isFull(column: Column): boolean {
   return column.limit !== undefined && column.cardIds.length >= column.limit;
+}
+
+function fullError(column: Column): BoardError {
+  return new BoardError(`"${column.name}" already holds ${column.limit} cards`);
+}
+
+function remove(ids: CardId[], cardId: CardId): void {
+  const index = ids.indexOf(cardId);
+  if (index !== -1) {
+    ids.splice(index, 1);
+  }
 }
 
 // Lookups
@@ -116,7 +146,9 @@ export function findCard(board: Board, cardId: CardId): Card {
 }
 
 export function columnOf(board: Board, cardId: CardId): Column {
-  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
+  const column = board.columns.find((candidate) =>
+    candidate.cardIds.includes(cardId),
+  );
   if (column === undefined) {
     throw new BoardError(`Card ${cardId} is in no column`);
   }
@@ -131,40 +163,72 @@ export function cardsIn(board: Board, columnId: ColumnId): Card[] {
 
 // Cards
 
-export function moveCard(board: Board, cardId: CardId, toColumnId: ColumnId, index?: number): void {
+export function moveCard(
+  board: Board,
+  cardId: CardId,
+  toColumnId: ColumnId,
+  index?: number,
+): void {
   const from = columnOf(board, cardId);
   const to = findColumn(board, toColumnId);
   if (from.id !== to.id && isFull(to)) {
-    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
+    throw fullError(to);
   }
-  from.cardIds = from.cardIds.filter((id) => id !== cardId);
-  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
+  remove(from.cardIds, cardId);
+  const at = index ?? to.cardIds.length;
+  to.cardIds.splice(at, 0, cardId);
   if (from.id !== to.id) {
-    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
+    record(board, {
+      kind: "moved",
+      cardId,
+      from: from.id,
+      to: to.id,
+      at: now(),
+    });
   }
 }
 
-export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
+export function addCard(
+  board: Board,
+  columnId: ColumnId,
+  input: NewCard,
+): Card {
   const column = findColumn(board, columnId);
   if (isFull(column)) {
-    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
+    throw fullError(column);
   }
   const card = createCard(input, new Date());
   board.cards[card.id] = card;
+  record(board, {
+    kind: "added",
+    cardId: card.id,
+    columnId,
+    at: card.createdAt,
+  });
   column.cardIds.push(card.id);
-  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
   return card;
 }
 
-export function reorderCard(board: Board, cardId: CardId, index: number): void {
-  moveCard(board, cardId, columnOf(board, cardId).id, index);
+export function reorderCard(
+  board: Board,
+  cardId: CardId,
+  position: number,
+): void {
+  const column = columnOf(board, cardId);
+  moveCard(board, cardId, column.id, position);
 }
 
-export function sortColumn(board: Board, columnId: ColumnId, by: "title" | "created"): void {
+export function sortColumn(
+  board: Board,
+  columnId: ColumnId,
+  by: "title" | "created",
+): void {
   const column = findColumn(board, columnId);
   const cards = column.cardIds.map((id) => findCard(board, id));
   cards.sort((a, b) =>
-    by === "title" ? a.title.localeCompare(b.title) : a.createdAt.localeCompare(b.createdAt),
+    by === "title"
+      ? a.title.localeCompare(b.title)
+      : a.createdAt.localeCompare(b.createdAt),
   );
   column.cardIds = cards.map((card) => card.id);
 }
@@ -215,12 +279,18 @@ export function emptyArchive(board: Board): number {
   return archived.length;
 }
 
-export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
+export function moveAll(
+  board: Board,
+  fromColumnId: ColumnId,
+  toColumnId: ColumnId,
+): number {
   const from = findColumn(board, fromColumnId);
   const to = findColumn(board, toColumnId);
   const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
   if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
-    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
+    throw new BoardError(
+      `"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`,
+    );
   }
   for (const cardId of moving) {
     moveCard(board, cardId, toColumnId);
@@ -278,7 +348,11 @@ export function labelsInUse(board: Board): Label[] {
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function assign(board: Board, cardId: CardId, person: string | undefined): void {
+export function assign(
+  board: Board,
+  cardId: CardId,
+  person: string | undefined,
+): void {
   const card = findCard(board, cardId);
   const name = person?.trim();
   card.assignee = name === "" ? undefined : name;
@@ -323,7 +397,9 @@ export function columnCounts(board: Board): ColumnCount[] {
 
 export function overLimit(board: Board): Column[] {
   return board.columns.filter(
-    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
+    (column) =>
+      column.limit !== undefined &&
+      cardsIn(board, column.id).length > column.limit,
   );
 }
 
@@ -387,5 +463,8 @@ export function describeActivity(board: Board, entry: Activity): string {
 }
 
 function columnName(board: Board, columnId: ColumnId): string {
-  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
+  return (
+    board.columns.find((column) => column.id === columnId)?.name ??
+    "a removed column"
+  );
 }

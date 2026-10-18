@@ -4,7 +4,12 @@ import type { Board } from "../board/types";
 export function mockBoard(id: string): Board {
   const board = createBoard(id === "default" ? "Website relaunch" : id);
   const [todo, doing, review, done] = board.columns;
-  if (todo === undefined || doing === undefined || review === undefined || done === undefined) {
+  if (
+    todo === undefined ||
+    doing === undefined ||
+    review === undefined ||
+    done === undefined
+  ) {
     return board;
   }
   setLimit(board, doing.id, 3);

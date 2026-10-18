@@ -9,7 +9,8 @@ async function start(): Promise<void> {
   if (root === null) {
     throw new Error("index.html has no #app element");
   }
-  const boardId = new URLSearchParams(location.search).get("board") ?? "default";
+  const boardId =
+    new URLSearchParams(location.search).get("board") ?? "default";
   const board = await loadBoard(boardId);
   document.title = `${board.name} · Taskboard`;
 

@@ -14,6 +14,9 @@
 # (https://phpactor.readthedocs.io/en/master/usage/standalone.html). Sourced by scripts/lsp-repo.sh for its versions
 # and folders; it calls install_servers with --servers. Sourced by scripts/demo-repo.sh, which calls
 # install_typescript_server: typescript-language-server alone, linked into servers-path beside what is there.
+# Both link a project's node_modules from this checkout's frontend/node_modules with link_frontend_tools: oxlint and
+# oxfmt whole, typescript through link_package, whose package.json is a copy because yamt reads nothing whose real
+# path is outside the repository (crates/lsp-host/src/files.rs).
 set -euo pipefail
 # shellcheck source=scripts/git-sandbox.sh
 source "$(dirname "${BASH_SOURCE[0]}")/git-sandbox.sh"
@@ -36,7 +39,9 @@ basedpyright_version=1.40.2
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/yamt"
 servers_path="$cache/servers-path"
+frontend_modules="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/frontend/node_modules"
 tsls_home="$cache/typescript-language-server-$tsls_version"
+tsls_program="$tsls_home/node_modules/.bin/typescript-language-server"
 intelephense_home="$cache/intelephense-$intelephense_version"
 pyright_home="$cache/pyright-$pyright_version"
 biome_home="$cache/biome-$biome_version"
@@ -138,13 +143,17 @@ EOF
 
 # $1: link name in servers-path, $2: the program.
 put_on_path() {
-    ln -s "$2" "$servers_path/$1"
+    ln -sfn "$2" "$servers_path/$1"
+}
+
+print_launch_line() {
+    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
 }
 
 fill_servers_path() {
     rm -rf "$servers_path"
     mkdir -p "$servers_path"
-    put_on_path typescript-language-server "$tsls_home/node_modules/.bin/typescript-language-server"
+    put_on_path typescript-language-server "$tsls_program"
     put_on_path intelephense "$intelephense_home/node_modules/.bin/intelephense"
     put_on_path pyright "$pyright_home/node_modules/.bin/pyright"
     put_on_path pyright-langserver "$pyright_home/node_modules/.bin/pyright-langserver"
@@ -176,15 +185,47 @@ install_servers() {
         "gopls $gopls_version, rust-analyzer $rust_analyzer_version, php $php_version (runs: $php_runs)," \
         "phpactor $phpactor_version, composer $composer_version, phpstan $phpstan_version, phpcs $phpcs_version;" \
         "in project venvs: ruff $ruff_version, ty $ty_version, basedpyright $basedpyright_version"
-    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
+    print_launch_line
 }
 
 install_typescript_server() {
     install_npm "$tsls_home" typescript-language-server "$tsls_version"
     mkdir -p "$servers_path"
-    ln -sfn "$tsls_home/node_modules/.bin/typescript-language-server" "$servers_path/typescript-language-server"
+    put_on_path typescript-language-server "$tsls_program"
     echo "lsp-servers: typescript-language-server $tsls_version"
-    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
+    print_launch_line
+}
+
+require_frontend_tools() {
+    local tool
+    for tool in oxlint oxfmt tsc; do
+        [ -x "$frontend_modules/.bin/$tool" ] ||
+            die "missing $frontend_modules/.bin/$tool; run pnpm -C frontend install"
+    done
+}
+
+# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
+link_package() {
+    local entry
+    mkdir -p "$2"
+    for entry in "$1"/*; do
+        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
+    done
+    rm "$2/package.json"
+    cp "$1/package.json" "$2/package.json"
+}
+
+# $1: a project's node_modules folder. Links oxlint, oxfmt and typescript into it, with their .bin entries.
+link_frontend_tools() {
+    local package tool
+    mkdir -p "$1/.bin"
+    for package in oxlint oxfmt; do
+        ln -s "$frontend_modules/$package" "$1/$package"
+    done
+    link_package "$frontend_modules/typescript" "$1/typescript"
+    for tool in oxlint oxfmt tsc; do
+        ln -s "$frontend_modules/.bin/$tool" "$1/.bin/$tool"
+    done
 }
 
 # $1: the virtual environment's folder. Makes it with ruff, ty and basedpyright.

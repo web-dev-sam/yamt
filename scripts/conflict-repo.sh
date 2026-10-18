@@ -68,8 +68,6 @@ repo_git checkout -q local
 if repo_git merge -q --no-edit remote >/dev/null; then
     die "merging remote into local was clean; expected conflicts"
 fi
-conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
-count=$(grep -c . <<<"$conflicted" || true)
-[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
+conflicted=$(require_conflicts "$expected_conflicts")
 echo "conflict-repo: $dir is mid-merge; conflicted files:"
 echo "$conflicted"
