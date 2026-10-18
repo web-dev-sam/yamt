@@ -1,5 +1,1 @@
-{
-  "DemoRepoR1": {
-    "owned": ["scripts/demo-repo.sh", "scripts/demo/**", "scripts/lsp-servers.sh", "scripts/lsp-repo.sh", "scripts/conflict-repo.sh", "scripts/git-sandbox.sh", ".vscode/tasks.json"]
-  }
-}
+{}

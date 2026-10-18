@@ -1,0 +1,1601 @@
+diff --git a/.omp/skills/project-map/SKILL.md b/.omp/skills/project-map/SKILL.md
+index 043240a..9a51d82 100644
+--- a/.omp/skills/project-map/SKILL.md
++++ b/.omp/skills/project-map/SKILL.md
+@@ -55,9 +55,9 @@ scripts/map-check.sh     PM6 (`just map-check`): every source file is named in t
+ scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
+ scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
+ scripts/lsp-repo.sh     `[--servers] <dir>`: language-server smoke repository, one project per ecosystem left mid-merge (web/ with oxlint, oxfmt, TypeScript 5.9 and vue linked from frontend/node_modules, 3 conflicts incl. App.vue; biome/, py/, rs/ (Cargo workspace), go/, php/, c/ with 1 conflict each; one problem per server and one badly formatted line outside the conflicts); with the flag, the pinned servers from lsp-servers.sh, plus the Vue plugin, Biome, py/.venv (uv: ruff, ty, basedpyright) and php/vendor (PHPStan, phpcs); VS Code tasks "lsp: new conflict project" / "lsp: open in yamt"
+-scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh and demo-repo.sh (install_typescript_server)
++scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh and demo-repo.sh (install_typescript_server); also the one node_modules rule for both: require_frontend_tools, link_package, link_frontend_tools <node_modules> (links into frontend/node_modules, package.json copies)
+ scripts/demo-repo.sh    `<dir>`: the demo project behind the VS Code buttons "conflict" / "yamt" / "WebStorm" and the README screenshot: Taskboard (TypeScript, oxlint, oxfmt), `main` merging `feature/reminders`, 7 conflicts (the long board.ts, a binary logo, a file deleted on one side); files per side in scripts/demo/{base,main,feature}/: board, card, cardView, storage, types, client, mockBoards, main, styles, index, shortcuts, logo, .oxlintrc, .oxfmtrc, vite.config
+-scripts/git-sandbox.sh   sourced by conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
++scripts/git-sandbox.sh   sourced by conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path, require_conflicts <n>
+ scripts/third-party-licenses.sh  `just third-party-licenses`: THIRD_PARTY_LICENSES.txt from `cargo metadata` + `pnpm licenses list --prod` + licence files on disk (jq);
+                     `ubuntu-versions` appends the AppImage's library versions and the GNU GPL/LGPL texts (Linux job); both release jobs regenerate and `git diff --exit-code` it
+ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
+diff --git a/.vscode/tasks.json b/.vscode/tasks.json
+index e477213..d05c710 100644
+--- a/.vscode/tasks.json
++++ b/.vscode/tasks.json
+@@ -38,7 +38,7 @@
+     },
+     {
+       "label": "merge: new conflict project",
+-      "detail": "Replace /tmp/yamt-conflict-project with the demo project (scripts/demo-repo.sh): Taskboard, a small TypeScript kanban app with oxlint and oxfmt, stopped while main merges feature/reminders. 7 conflicted files: src/board/board.ts (about 450 lines, changes on both sides all through it), card.ts, cardView.ts, client.ts, mockBoards.ts (deleted on one side), docs/shortcuts.md, public/logo.png (an image changed on both sides). The merge causes one TypeScript error in board.ts and leaves one oxlint warning, shown once main's changes there are applied. Installs typescript-language-server once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh).",
++      "detail": "Replace /tmp/yamt-conflict-project with Taskboard, a TypeScript kanban app mid-merge: 7 conflicts incl. a long file, a binary and a delete; one merge-made TypeScript error and one oxlint warning; see scripts/demo-repo.sh. Installs typescript-language-server once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh).",
+       "type": "shell",
+       "command": "rm -rf /tmp/yamt-conflict-project && scripts/demo-repo.sh /tmp/yamt-conflict-project",
+       "problemMatcher": [],
+@@ -49,7 +49,7 @@
+     },
+     {
+       "label": "merge: open in WebStorm",
+-      "detail": "Open the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing) in WebStorm; then Git → Resolve Conflicts.",
++      "detail": "Open /tmp/yamt-conflict-project (Taskboard mid-merge, see scripts/demo-repo.sh; made first if missing) in WebStorm; then Git → Resolve Conflicts.",
+       "type": "shell",
+       "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
+       "problemMatcher": [],
+@@ -61,7 +61,7 @@
+     },
+     {
+       "label": "merge: open in yamt",
+-      "detail": "Build yamt (debug, pages built in) from the current code and open it on the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so typescript-language-server is found; oxlint and oxfmt come from the project's node_modules. The first time, yamt asks whether to start the project's language servers. Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
++      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-conflict-project (Taskboard mid-merge, see scripts/demo-repo.sh; made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so typescript-language-server is found. The first time, yamt asks whether to start the project's language servers. Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
+       "type": "shell",
+       "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
+       "problemMatcher": [],
+diff --git a/scripts/conflict-repo.sh b/scripts/conflict-repo.sh
+index 9ee79e6..6a22f80 100755
+--- a/scripts/conflict-repo.sh
++++ b/scripts/conflict-repo.sh
+@@ -68,8 +68,6 @@ repo_git checkout -q local
+ if repo_git merge -q --no-edit remote >/dev/null; then
+     die "merging remote into local was clean; expected conflicts"
+ fi
+-conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
+-count=$(grep -c . <<<"$conflicted" || true)
+-[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
++conflicted=$(require_conflicts "$expected_conflicts")
+ echo "conflict-repo: $dir is mid-merge; conflicted files:"
+ echo "$conflicted"
+diff --git a/scripts/demo-repo.sh b/scripts/demo-repo.sh
+index 5a99880..70e70b0 100755
+--- a/scripts/demo-repo.sh
++++ b/scripts/demo-repo.sh
+@@ -9,12 +9,14 @@
+ # moveCard), src/board/card.ts, src/ui/cardView.ts, src/api/client.ts, src/api/mockBoards.ts (deleted on
+ # feature/reminders, changed on main), docs/shortcuts.md and public/logo.png (changed on both sides).
+ # The merge causes one TypeScript error: feature/reminders renames Card.dueDate to dueAt (src/board/types.ts merges
+-# cleanly), and main's new lanesOf in board.ts still reads card.dueDate. Main also leaves an unused variable in
+-# searchCards (oxlint's no-unused-vars warning). Both show in yamt's Result once main's changes there are applied.
+-# After the merge, node_modules gets links into this checkout's frontend/node_modules: oxlint, oxfmt and typescript,
+-# with their .bin entries. The package.json files are copies: yamt reads nothing whose real path is outside the
+-# repository (crates/lsp-host/src/files.rs). typescript-language-server comes from scripts/lsp-servers.sh into the
+-# user's cache (the network is needed the first time); the PATH line to launch yamt with is printed.
++# cleanly), and dueOf in main's new lanes code in board.ts still reads card.dueDate. Main also leaves an unused
++# variable in searchCards (oxlint's no-unused-vars warning). Both show in yamt's Result once main's changes there are
++# applied. board.ts keeps its lines from the lanes code to reorderCard within 46 characters (oxfmt's printWidth is
++# 80), so the README screenshot's panes show them whole. A file under scripts/demo/<side>/ that no put line commits
++# stops the script.
++# After the merge, node_modules gets oxlint, oxfmt and typescript from scripts/lsp-servers.sh's link_frontend_tools.
++# typescript-language-server comes from scripts/lsp-servers.sh into the user's cache (the network is needed the first
++# time); the PATH line to launch yamt with is printed.
+ # Prints the conflicted paths. Uses no user or system git config (risk RK19).
+ set -euo pipefail
+ # shellcheck source=scripts/git-sandbox.sh
+@@ -24,18 +26,16 @@ source "$(dirname "$0")/lsp-servers.sh"
+ 
+ [ $# -eq 1 ] || die "usage: $0 <dir>"
+ dir=$1
+-checkout="$(cd "$(dirname "$0")/.." && pwd)"
+-files="$checkout/scripts/demo"
+-modules="$checkout/frontend/node_modules"
++files="$(cd "$(dirname "$0")" && pwd)/demo"
+ expected_conflicts=7
+ 
+-for tool in oxlint oxfmt tsc; do
+-    [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
+-done
++require_frontend_tools
+ require_empty_dir "$dir"
+ isolate_git_config
+ install_typescript_server
+ 
++declare -A was_put
++
+ # $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
+ put() {
+     local layer=$1 path
+@@ -44,9 +44,18 @@ put() {
+         mkdir -p "$(dirname "$dir/$path")"
+         cp "$files/$layer/$path" "$dir/$path"
+         repo_git add -- "$path"
++        was_put[$layer/$path]=1
+     done
+ }
+ 
++# $1: a layer under scripts/demo. Dies when it holds a file no put line committed.
++require_all_put() {
++    local path
++    while IFS= read -r path; do
++        [ -n "${was_put[$1/$path]:-}" ] || die "scripts/demo/$1/$path is never committed: add it to a put line"
++    done < <(cd "$files/$1" && find . -type f -printf '%P\n' | sort)
++}
++
+ # $1: author ("Name <email>"), $2: date, $3: message. Commits what is staged as that person.
+ commit_as() {
+     local name=${1% <*} email=${1#*<}
+@@ -56,27 +65,6 @@ commit_as() {
+         repo_git commit -q -m "$3"
+ }
+ 
+-# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
+-link_package() {
+-    mkdir -p "$2"
+-    for entry in "$1"/*; do
+-        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
+-    done
+-    rm "$2/package.json"
+-    cp "$1/package.json" "$2/package.json"
+-}
+-
+-link_modules() {
+-    mkdir -p "$dir/node_modules/.bin"
+-    for package in oxlint oxfmt; do
+-        ln -s "$modules/$package" "$dir/node_modules/$package"
+-    done
+-    link_package "$modules/typescript" "$dir/node_modules/typescript"
+-    for tool in oxlint oxfmt tsc; do
+-        ln -s "$modules/.bin/$tool" "$dir/node_modules/.bin/$tool"
+-    done
+-}
+-
+ priya="Priya Nair <priya@taskboard.example>"
+ tomas="Tomás Herrera <tomas@taskboard.example>"
+ maya="Maya Lindqvist <maya@taskboard.example>"
+@@ -93,6 +81,7 @@ put base src/api/client.ts src/api/mockBoards.ts src/main.ts
+ commit_as "$tomas" 2026-10-02T11:05:00+02:00 "Load boards from the API, with a mock board on localhost"
+ put base public/logo.png docs/shortcuts.md
+ commit_as "$maya" 2026-10-06T09:30:00+02:00 "Add the logo and the list of keyboard shortcuts"
++require_all_put base
+ 
+ repo_git checkout -q -b feature/reminders
+ put feature src/api/client.ts vite.config.ts README.md
+@@ -102,6 +91,7 @@ put feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/car
+ commit_as "$tomas" 2026-10-14T10:02:00+02:00 "Store due times instead of days (dueDate → dueAt)"
+ put feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
+ commit_as "$tomas" 2026-10-16T17:45:00+02:00 "Reminders before a card is due"
++require_all_put feature
+ 
+ repo_git checkout -q main
+ put main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
+@@ -110,15 +100,14 @@ put main src/api/mockBoards.ts src/api/client.ts
+ commit_as "$maya" 2026-10-15T11:25:00+02:00 "Mock board: people on the cards, ?mocks on any host"
+ put main public/logo.png
+ commit_as "$maya" 2026-10-17T09:50:00+02:00 "Refresh the logo"
++require_all_put main
+ 
+ if repo_git merge -q --no-edit feature/reminders >/dev/null 2>&1; then
+     die "merging feature/reminders into main was clean; expected conflicts"
+ fi
+-conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
+-count=$(grep -c . <<<"$conflicted" || true)
+-[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
++conflicted=$(require_conflicts "$expected_conflicts")
+ 
+-link_modules
++link_frontend_tools "$dir/node_modules"
+ 
+ echo "demo-repo: $dir is mid-merge (main merging feature/reminders); conflicted files:"
+ echo "$conflicted"
+diff --git a/scripts/demo/base/.oxfmtrc.json b/scripts/demo/base/.oxfmtrc.json
+index d350e4a..2b00204 100644
+--- a/scripts/demo/base/.oxfmtrc.json
++++ b/scripts/demo/base/.oxfmtrc.json
+@@ -1,5 +1,5 @@
+ {
+   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+-  "printWidth": 100,
++  "printWidth": 80,
+   "ignorePatterns": ["dist/**"]
+ }
+diff --git a/scripts/demo/base/src/api/client.ts b/scripts/demo/base/src/api/client.ts
+index 173948b..5253342 100644
+--- a/scripts/demo/base/src/api/client.ts
++++ b/scripts/demo/base/src/api/client.ts
+@@ -21,7 +21,10 @@ export async function loadBoard(id: string): Promise<Board> {
+   }
+   const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
+   if (!response.ok) {
+-    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not load board ${id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+   return fromJSON(await response.text());
+ }
+@@ -36,6 +39,9 @@ export async function saveBoard(board: Board): Promise<void> {
+     body: toJSON(board),
+   });
+   if (!response.ok) {
+-    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not save board ${board.id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+ }
+diff --git a/scripts/demo/base/src/api/mockBoards.ts b/scripts/demo/base/src/api/mockBoards.ts
+index 1cc8447..00788d6 100644
+--- a/scripts/demo/base/src/api/mockBoards.ts
++++ b/scripts/demo/base/src/api/mockBoards.ts
+@@ -4,12 +4,20 @@ import type { Board } from "../board/types";
+ export function mockBoard(id: string): Board {
+   const board = createBoard(id === "default" ? "Website relaunch" : id);
+   const [todo, doing, review, done] = board.columns;
+-  if (todo === undefined || doing === undefined || review === undefined || done === undefined) {
++  if (
++    todo === undefined ||
++    doing === undefined ||
++    review === undefined ||
++    done === undefined
++  ) {
+     return board;
+   }
+   setLimit(board, doing.id, 3);
+ 
+-  addCard(board, todo.id, { title: "Write the pricing page copy", dueDate: "2026-10-24" });
++  addCard(board, todo.id, {
++    title: "Write the pricing page copy",
++    dueDate: "2026-10-24",
++  });
+   addCard(board, todo.id, {
+     title: "Pick photos for the team page",
+     labels: [{ name: "design", color: "purple" }],
+@@ -18,12 +26,18 @@ export function mockBoard(id: string): Board {
+     title: "Move the blog to the new templates",
+     labels: [{ name: "frontend", color: "blue" }],
+   });
+-  addCard(board, doing.id, { title: "Redirects for the old URLs", dueDate: "2026-10-20" });
++  addCard(board, doing.id, {
++    title: "Redirects for the old URLs",
++    dueDate: "2026-10-20",
++  });
+   addCard(board, review.id, {
+     title: "Cookie banner",
+     labels: [{ name: "legal", color: "orange" }],
+     dueDate: "2026-10-19",
+   });
+-  addCard(board, done.id, { title: "New logo", labels: [{ name: "design", color: "purple" }] });
++  addCard(board, done.id, {
++    title: "New logo",
++    labels: [{ name: "design", color: "purple" }],
++  });
+   return board;
+ }
+diff --git a/scripts/demo/base/src/board/board.ts b/scripts/demo/base/src/board/board.ts
+index b0e200e..d8bbe05 100644
+--- a/scripts/demo/base/src/board/board.ts
++++ b/scripts/demo/base/src/board/board.ts
+@@ -28,7 +28,10 @@ function newColumnId(): ColumnId {
+   return id;
+ }
+ 
+-export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++export function createBoard(
++  name: string,
++  columnNames: string[] = DEFAULT_COLUMNS,
++): Board {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A board needs a name");
+@@ -47,7 +50,11 @@ export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMN
+ 
+ // Columns
+ 
+-export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++export function addColumn(
++  board: Board,
++  name: string,
++  position = board.columns.length,
++): Column {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+@@ -60,13 +67,21 @@ export function addColumn(board: Board, name: string, position = board.columns.l
+   return column;
+ }
+ 
+-export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++export function renameColumn(
++  board: Board,
++  columnId: ColumnId,
++  name: string,
++): void {
+   const column = findColumn(board, columnId);
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+   }
+-  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++  if (
++    board.columns.some(
++      (other) => other.id !== columnId && other.name === trimmed,
++    )
++  ) {
+     throw new BoardError(`There is already a column called "${trimmed}"`);
+   }
+   column.name = trimmed;
+@@ -85,7 +100,11 @@ export function removeColumn(board: Board, columnId: ColumnId): Card[] {
+   return removed;
+ }
+ 
+-export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++export function setLimit(
++  board: Board,
++  columnId: ColumnId,
++  limit: number | undefined,
++): void {
+   const column = findColumn(board, columnId);
+   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+     throw new BoardError("A limit is a whole number of cards, at least 1");
+@@ -97,6 +116,17 @@ export function isFull(column: Column): boolean {
+   return column.limit !== undefined && column.cardIds.length >= column.limit;
+ }
+ 
++function fullError(column: Column): BoardError {
++  return new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++}
++
++function remove(ids: CardId[], cardId: CardId): void {
++  const index = ids.indexOf(cardId);
++  if (index !== -1) {
++    ids.splice(index, 1);
++  }
++}
++
+ // Lookups
+ 
+ export function findColumn(board: Board, columnId: ColumnId): Column {
+@@ -116,7 +146,9 @@ export function findCard(board: Board, cardId: CardId): Card {
+ }
+ 
+ export function columnOf(board: Board, cardId: CardId): Column {
+-  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  const column = board.columns.find((candidate) =>
++    candidate.cardIds.includes(cardId),
++  );
+   if (column === undefined) {
+     throw new BoardError(`Card ${cardId} is in no column`);
+   }
+@@ -131,40 +163,72 @@ export function cardsIn(board: Board, columnId: ColumnId): Card[] {
+ 
+ // Cards
+ 
+-export function moveCard(board: Board, cardId: CardId, toColumnId: ColumnId, index?: number): void {
++export function moveCard(
++  board: Board,
++  cardId: CardId,
++  toColumnId: ColumnId,
++  index?: number,
++): void {
+   const from = columnOf(board, cardId);
+   const to = findColumn(board, toColumnId);
+   if (from.id !== to.id && isFull(to)) {
+-    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++    throw fullError(to);
+   }
+-  from.cardIds = from.cardIds.filter((id) => id !== cardId);
+-  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  remove(from.cardIds, cardId);
++  const at = index ?? to.cardIds.length;
++  to.cardIds.splice(at, 0, cardId);
+   if (from.id !== to.id) {
+-    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++    record(board, {
++      kind: "moved",
++      cardId,
++      from: from.id,
++      to: to.id,
++      at: now(),
++    });
+   }
+ }
+ 
+-export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++export function addCard(
++  board: Board,
++  columnId: ColumnId,
++  input: NewCard,
++): Card {
+   const column = findColumn(board, columnId);
+   if (isFull(column)) {
+-    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++    throw fullError(column);
+   }
+   const card = createCard(input, new Date());
+   board.cards[card.id] = card;
++  record(board, {
++    kind: "added",
++    cardId: card.id,
++    columnId,
++    at: card.createdAt,
++  });
+   column.cardIds.push(card.id);
+-  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
+   return card;
+ }
+ 
+-export function reorderCard(board: Board, cardId: CardId, index: number): void {
+-  moveCard(board, cardId, columnOf(board, cardId).id, index);
++export function reorderCard(
++  board: Board,
++  cardId: CardId,
++  position: number,
++): void {
++  const column = columnOf(board, cardId);
++  moveCard(board, cardId, column.id, position);
+ }
+ 
+-export function sortColumn(board: Board, columnId: ColumnId, by: "title" | "created"): void {
++export function sortColumn(
++  board: Board,
++  columnId: ColumnId,
++  by: "title" | "created",
++): void {
+   const column = findColumn(board, columnId);
+   const cards = column.cardIds.map((id) => findCard(board, id));
+   cards.sort((a, b) =>
+-    by === "title" ? a.title.localeCompare(b.title) : a.createdAt.localeCompare(b.createdAt),
++    by === "title"
++      ? a.title.localeCompare(b.title)
++      : a.createdAt.localeCompare(b.createdAt),
+   );
+   column.cardIds = cards.map((card) => card.id);
+ }
+@@ -215,12 +279,18 @@ export function emptyArchive(board: Board): number {
+   return archived.length;
+ }
+ 
+-export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++export function moveAll(
++  board: Board,
++  fromColumnId: ColumnId,
++  toColumnId: ColumnId,
++): number {
+   const from = findColumn(board, fromColumnId);
+   const to = findColumn(board, toColumnId);
+   const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
+   if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
+-    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++    throw new BoardError(
++      `"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`,
++    );
+   }
+   for (const cardId of moving) {
+     moveCard(board, cardId, toColumnId);
+@@ -278,7 +348,11 @@ export function labelsInUse(board: Board): Label[] {
+   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+ }
+ 
+-export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++export function assign(
++  board: Board,
++  cardId: CardId,
++  person: string | undefined,
++): void {
+   const card = findCard(board, cardId);
+   const name = person?.trim();
+   card.assignee = name === "" ? undefined : name;
+@@ -323,7 +397,9 @@ export function columnCounts(board: Board): ColumnCount[] {
+ 
+ export function overLimit(board: Board): Column[] {
+   return board.columns.filter(
+-    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++    (column) =>
++      column.limit !== undefined &&
++      cardsIn(board, column.id).length > column.limit,
+   );
+ }
+ 
+@@ -387,5 +463,8 @@ export function describeActivity(board: Board, entry: Activity): string {
+ }
+ 
+ function columnName(board: Board, columnId: ColumnId): string {
+-  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++  return (
++    board.columns.find((column) => column.id === columnId)?.name ??
++    "a removed column"
++  );
+ }
+diff --git a/scripts/demo/base/src/board/storage.ts b/scripts/demo/base/src/board/storage.ts
+index 92362cb..2c4f473 100644
+--- a/scripts/demo/base/src/board/storage.ts
++++ b/scripts/demo/base/src/board/storage.ts
+@@ -2,7 +2,14 @@ import type { Board, Card, Column, Label, LabelColor } from "./types";
+ 
+ export const FORMAT_VERSION = 2;
+ 
+-const LABEL_COLORS: LabelColor[] = ["grey", "red", "orange", "green", "blue", "purple"];
++const LABEL_COLORS: LabelColor[] = [
++  "grey",
++  "red",
++  "orange",
++  "green",
++  "blue",
++  "purple",
++];
+ 
+ type Stored = { version: number; board: Board };
+ 
+@@ -24,13 +31,19 @@ export function fromJSON(text: string): Board {
+     throw new StorageError("A stored board is a JSON object");
+   }
+   if (data.version !== FORMAT_VERSION) {
+-    throw new StorageError(`Board format ${String(data.version)} is not supported`);
++    throw new StorageError(
++      `Board format ${String(data.version)} is not supported`,
++    );
+   }
+   return readBoard(data.board);
+ }
+ 
+ function readBoard(value: unknown): Board {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.name !== "string"
++  ) {
+     throw new StorageError("A board needs an id and a name");
+   }
+   if (!Array.isArray(value.columns) || !isRecord(value.cards)) {
+@@ -40,20 +53,35 @@ function readBoard(value: unknown): Board {
+   for (const card of Object.values(value.cards).map(readCard)) {
+     cards[card.id] = card;
+   }
+-  return { id: value.id, name: value.name, columns: value.columns.map(readColumn), cards };
++  return {
++    id: value.id,
++    name: value.name,
++    columns: value.columns.map(readColumn),
++    cards,
++  };
+ }
+ 
+ function readColumn(value: unknown): Column {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.name !== "string"
++  ) {
+     throw new StorageError("A column needs an id and a name");
+   }
+-  const cardIds = Array.isArray(value.cardIds) ? value.cardIds.filter(isString) : [];
++  const cardIds = Array.isArray(value.cardIds)
++    ? value.cardIds.filter(isString)
++    : [];
+   const limit = typeof value.limit === "number" ? value.limit : undefined;
+   return { id: value.id, name: value.name, cardIds, limit };
+ }
+ 
+ function readCard(value: unknown): Card {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.title !== "string"
++  ) {
+     throw new StorageError("A card needs an id and a title");
+   }
+   return {
+@@ -63,7 +91,10 @@ function readCard(value: unknown): Card {
+     labels: Array.isArray(value.labels) ? value.labels.filter(isLabel) : [],
+     assignee: typeof value.assignee === "string" ? value.assignee : undefined,
+     dueDate: typeof value.dueDate === "string" ? value.dueDate : undefined,
+-    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
++    createdAt:
++      typeof value.createdAt === "string"
++        ? value.createdAt
++        : new Date(0).toISOString(),
+     archived: value.archived === true,
+   };
+ }
+diff --git a/scripts/demo/base/src/board/types.ts b/scripts/demo/base/src/board/types.ts
+index 26c3166..b0c1ffe 100644
+--- a/scripts/demo/base/src/board/types.ts
++++ b/scripts/demo/base/src/board/types.ts
+@@ -1,7 +1,13 @@
+ export type CardId = string;
+ export type ColumnId = string;
+ 
+-export type LabelColor = "grey" | "red" | "orange" | "green" | "blue" | "purple";
++export type LabelColor =
++  | "grey"
++  | "red"
++  | "orange"
++  | "green"
++  | "blue"
++  | "purple";
+ 
+ export type Label = {
+   name: string;
+diff --git a/scripts/demo/base/src/main.ts b/scripts/demo/base/src/main.ts
+index d4167f4..5f871bf 100644
+--- a/scripts/demo/base/src/main.ts
++++ b/scripts/demo/base/src/main.ts
+@@ -9,7 +9,8 @@ async function start(): Promise<void> {
+   if (root === null) {
+     throw new Error("index.html has no #app element");
+   }
+-  const boardId = new URLSearchParams(location.search).get("board") ?? "default";
++  const boardId =
++    new URLSearchParams(location.search).get("board") ?? "default";
+   const board = await loadBoard(boardId);
+   document.title = `${board.name} · Taskboard`;
+ 
+diff --git a/scripts/demo/feature/src/api/client.ts b/scripts/demo/feature/src/api/client.ts
+index 146fd9d..7ff000c 100644
+--- a/scripts/demo/feature/src/api/client.ts
++++ b/scripts/demo/feature/src/api/client.ts
+@@ -16,7 +16,10 @@ export class ApiError extends Error {
+ export async function loadBoard(id: string): Promise<Board> {
+   const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
+   if (!response.ok) {
+-    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not load board ${id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+   return fromJSON(await response.text());
+ }
+@@ -28,18 +31,27 @@ export async function saveBoard(board: Board): Promise<void> {
+     body: toJSON(board),
+   });
+   if (!response.ok) {
+-    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not save board ${board.id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+ }
+ 
+ export async function copyBoard(board: Board, name: string): Promise<Board> {
+-  const response = await fetch(`${API_URL}/${encodeURIComponent(board.id)}/copy`, {
+-    method: "POST",
+-    headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ name }),
+-  });
++  const response = await fetch(
++    `${API_URL}/${encodeURIComponent(board.id)}/copy`,
++    {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ name }),
++    },
++  );
+   if (!response.ok) {
+-    throw new ApiError(`Could not copy board ${board.id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not copy board ${board.id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+   return fromJSON(await response.text());
+ }
+diff --git a/scripts/demo/feature/src/board/board.ts b/scripts/demo/feature/src/board/board.ts
+index cde7e78..079324a 100644
+--- a/scripts/demo/feature/src/board/board.ts
++++ b/scripts/demo/feature/src/board/board.ts
+@@ -29,7 +29,10 @@ function newColumnId(): ColumnId {
+   return id;
+ }
+ 
+-export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++export function createBoard(
++  name: string,
++  columnNames: string[] = DEFAULT_COLUMNS,
++): Board {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A board needs a name");
+@@ -48,7 +51,11 @@ export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMN
+ 
+ // Columns
+ 
+-export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++export function addColumn(
++  board: Board,
++  name: string,
++  position = board.columns.length,
++): Column {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+@@ -61,13 +68,21 @@ export function addColumn(board: Board, name: string, position = board.columns.l
+   return column;
+ }
+ 
+-export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++export function renameColumn(
++  board: Board,
++  columnId: ColumnId,
++  name: string,
++): void {
+   const column = findColumn(board, columnId);
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+   }
+-  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++  if (
++    board.columns.some(
++      (other) => other.id !== columnId && other.name === trimmed,
++    )
++  ) {
+     throw new BoardError(`There is already a column called "${trimmed}"`);
+   }
+   column.name = trimmed;
+@@ -86,7 +101,11 @@ export function removeColumn(board: Board, columnId: ColumnId): Card[] {
+   return removed;
+ }
+ 
+-export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++export function setLimit(
++  board: Board,
++  columnId: ColumnId,
++  limit: number | undefined,
++): void {
+   const column = findColumn(board, columnId);
+   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+     throw new BoardError("A limit is a whole number of cards, at least 1");
+@@ -98,6 +117,17 @@ export function isFull(column: Column): boolean {
+   return column.limit !== undefined && column.cardIds.length >= column.limit;
+ }
+ 
++function fullError(column: Column): BoardError {
++  return new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++}
++
++function remove(ids: CardId[], cardId: CardId): void {
++  const index = ids.indexOf(cardId);
++  if (index !== -1) {
++    ids.splice(index, 1);
++  }
++}
++
+ // Lookups
+ 
+ export function findColumn(board: Board, columnId: ColumnId): Column {
+@@ -117,7 +147,9 @@ export function findCard(board: Board, cardId: CardId): Card {
+ }
+ 
+ export function columnOf(board: Board, cardId: CardId): Column {
+-  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  const column = board.columns.find((candidate) =>
++    candidate.cardIds.includes(cardId),
++  );
+   if (column === undefined) {
+     throw new BoardError(`Card ${cardId} is in no column`);
+   }
+@@ -132,43 +164,75 @@ export function cardsIn(board: Board, columnId: ColumnId): Card[] {
+ 
+ // Cards
+ 
+-export function moveCard(board: Board, cardId: CardId, toColumnId: ColumnId, index?: number): void {
++export function moveCard(
++  board: Board,
++  cardId: CardId,
++  toColumnId: ColumnId,
++  index?: number,
++): void {
+   const from = columnOf(board, cardId);
+   const to = findColumn(board, toColumnId);
+   if (from.id !== to.id && isFull(to)) {
+-    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++    throw fullError(to);
+   }
+-  from.cardIds = from.cardIds.filter((id) => id !== cardId);
+-  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  remove(from.cardIds, cardId);
++  const at = index ?? to.cardIds.length;
++  to.cardIds.splice(at, 0, cardId);
+   if (to.name === DONE_COLUMN) {
+     clearReminder(findCard(board, cardId));
+   }
+   if (from.id !== to.id) {
+-    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++    record(board, {
++      kind: "moved",
++      cardId,
++      from: from.id,
++      to: to.id,
++      at: now(),
++    });
+   }
+ }
+ 
+-export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++export function addCard(
++  board: Board,
++  columnId: ColumnId,
++  input: NewCard,
++): Card {
+   const column = findColumn(board, columnId);
+   if (isFull(column)) {
+-    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++    throw fullError(column);
+   }
+   const card = createCard(input);
+   board.cards[card.id] = card;
++  record(board, {
++    kind: "added",
++    cardId: card.id,
++    columnId,
++    at: card.createdAt,
++  });
+   column.cardIds.push(card.id);
+-  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
+   return card;
+ }
+ 
+-export function reorderCard(board: Board, cardId: CardId, index: number): void {
+-  moveCard(board, cardId, columnOf(board, cardId).id, index);
++export function reorderCard(
++  board: Board,
++  cardId: CardId,
++  position: number,
++): void {
++  const column = columnOf(board, cardId);
++  moveCard(board, cardId, column.id, position);
+ }
+ 
+-export function sortColumn(board: Board, columnId: ColumnId, by: "title" | "created"): void {
++export function sortColumn(
++  board: Board,
++  columnId: ColumnId,
++  by: "title" | "created",
++): void {
+   const column = findColumn(board, columnId);
+   const cards = column.cardIds.map((id) => findCard(board, id));
+   cards.sort((a, b) =>
+-    by === "title" ? a.title.localeCompare(b.title) : a.createdAt.localeCompare(b.createdAt),
++    by === "title"
++      ? a.title.localeCompare(b.title)
++      : a.createdAt.localeCompare(b.createdAt),
+   );
+   column.cardIds = cards.map((card) => card.id);
+ }
+@@ -221,12 +285,18 @@ export function emptyArchive(board: Board): number {
+   return archived.length;
+ }
+ 
+-export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++export function moveAll(
++  board: Board,
++  fromColumnId: ColumnId,
++  toColumnId: ColumnId,
++): number {
+   const from = findColumn(board, fromColumnId);
+   const to = findColumn(board, toColumnId);
+   const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
+   if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
+-    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++    throw new BoardError(
++      `"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`,
++    );
+   }
+   for (const cardId of moving) {
+     moveCard(board, cardId, toColumnId);
+@@ -266,7 +336,11 @@ export function labelsInUse(board: Board): Label[] {
+   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+ }
+ 
+-export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++export function assign(
++  board: Board,
++  cardId: CardId,
++  person: string | undefined,
++): void {
+   const card = findCard(board, cardId);
+   const name = person?.trim();
+   card.assignee = name === "" ? undefined : name;
+@@ -311,7 +385,9 @@ export function columnCounts(board: Board): ColumnCount[] {
+ 
+ export function overLimit(board: Board): Column[] {
+   return board.columns.filter(
+-    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++    (column) =>
++      column.limit !== undefined &&
++      cardsIn(board, column.id).length > column.limit,
+   );
+ }
+ 
+@@ -410,5 +486,8 @@ export function describeActivity(board: Board, entry: Activity): string {
+ }
+ 
+ function columnName(board: Board, columnId: ColumnId): string {
+-  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++  return (
++    board.columns.find((column) => column.id === columnId)?.name ??
++    "a removed column"
++  );
+ }
+diff --git a/scripts/demo/feature/src/board/storage.ts b/scripts/demo/feature/src/board/storage.ts
+index 2242095..47fef33 100644
+--- a/scripts/demo/feature/src/board/storage.ts
++++ b/scripts/demo/feature/src/board/storage.ts
+@@ -2,7 +2,14 @@ import type { Board, Card, Column, Label, LabelColor } from "./types";
+ 
+ export const FORMAT_VERSION = 3;
+ 
+-const LABEL_COLORS: LabelColor[] = ["grey", "red", "orange", "green", "blue", "purple"];
++const LABEL_COLORS: LabelColor[] = [
++  "grey",
++  "red",
++  "orange",
++  "green",
++  "blue",
++  "purple",
++];
+ 
+ type Stored = { version: number; board: Board };
+ 
+@@ -24,13 +31,19 @@ export function fromJSON(text: string): Board {
+     throw new StorageError("A stored board is a JSON object");
+   }
+   if (data.version !== FORMAT_VERSION && data.version !== 2) {
+-    throw new StorageError(`Board format ${String(data.version)} is not supported`);
++    throw new StorageError(
++      `Board format ${String(data.version)} is not supported`,
++    );
+   }
+   return readBoard(data.board);
+ }
+ 
+ function readBoard(value: unknown): Board {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.name !== "string"
++  ) {
+     throw new StorageError("A board needs an id and a name");
+   }
+   if (!Array.isArray(value.columns) || !isRecord(value.cards)) {
+@@ -40,20 +53,35 @@ function readBoard(value: unknown): Board {
+   for (const card of Object.values(value.cards).map(readCard)) {
+     cards[card.id] = card;
+   }
+-  return { id: value.id, name: value.name, columns: value.columns.map(readColumn), cards };
++  return {
++    id: value.id,
++    name: value.name,
++    columns: value.columns.map(readColumn),
++    cards,
++  };
+ }
+ 
+ function readColumn(value: unknown): Column {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.name !== "string"
++  ) {
+     throw new StorageError("A column needs an id and a name");
+   }
+-  const cardIds = Array.isArray(value.cardIds) ? value.cardIds.filter(isString) : [];
++  const cardIds = Array.isArray(value.cardIds)
++    ? value.cardIds.filter(isString)
++    : [];
+   const limit = typeof value.limit === "number" ? value.limit : undefined;
+   return { id: value.id, name: value.name, cardIds, limit };
+ }
+ 
+ function readCard(value: unknown): Card {
+-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
++  if (
++    !isRecord(value) ||
++    typeof value.id !== "string" ||
++    typeof value.title !== "string"
++  ) {
+     throw new StorageError("A card needs an id and a title");
+   }
+   return {
+@@ -63,8 +91,12 @@ function readCard(value: unknown): Card {
+     labels: Array.isArray(value.labels) ? value.labels.filter(isLabel) : [],
+     assignee: typeof value.assignee === "string" ? value.assignee : undefined,
+     dueAt: readDueAt(value),
+-    remindBefore: typeof value.remindBefore === "number" ? value.remindBefore : undefined,
+-    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
++    remindBefore:
++      typeof value.remindBefore === "number" ? value.remindBefore : undefined,
++    createdAt:
++      typeof value.createdAt === "string"
++        ? value.createdAt
++        : new Date(0).toISOString(),
+     archived: value.archived === true,
+   };
+ }
+@@ -74,7 +106,9 @@ function readDueAt(card: Record<string, unknown>): string | undefined {
+   if (typeof card.dueAt === "string") {
+     return card.dueAt;
+   }
+-  return typeof card.dueDate === "string" ? `${card.dueDate}T23:59:59Z` : undefined;
++  return typeof card.dueDate === "string"
++    ? `${card.dueDate}T23:59:59Z`
++    : undefined;
+ }
+ 
+ function isLabel(value: unknown): value is Label {
+diff --git a/scripts/demo/feature/src/board/types.ts b/scripts/demo/feature/src/board/types.ts
+index 300657c..372bb2a 100644
+--- a/scripts/demo/feature/src/board/types.ts
++++ b/scripts/demo/feature/src/board/types.ts
+@@ -1,7 +1,13 @@
+ export type CardId = string;
+ export type ColumnId = string;
+ 
+-export type LabelColor = "grey" | "red" | "orange" | "green" | "blue" | "purple";
++export type LabelColor =
++  | "grey"
++  | "red"
++  | "orange"
++  | "green"
++  | "blue"
++  | "purple";
+ 
+ export type Label = {
+   name: string;
+diff --git a/scripts/demo/feature/src/ui/cardView.ts b/scripts/demo/feature/src/ui/cardView.ts
+index 9e1e2e2..69e97f6 100644
+--- a/scripts/demo/feature/src/ui/cardView.ts
++++ b/scripts/demo/feature/src/ui/cardView.ts
+@@ -15,10 +15,14 @@ export function renderCard(card: Card): HTMLElement {
+     element.append(renderLabels(card.labels));
+   }
+   if (card.dueAt !== undefined) {
+-    element.append(badge(`Due ${new Date(card.dueAt).toLocaleString()}`, "due"));
++    element.append(
++      badge(`Due ${new Date(card.dueAt).toLocaleString()}`, "due"),
++    );
+   }
+   if (card.remindBefore !== undefined) {
+-    element.append(badge(`Reminder ${card.remindBefore} min before`, "reminder"));
++    element.append(
++      badge(`Reminder ${card.remindBefore} min before`, "reminder"),
++    );
+   }
+   return element;
+ }
+diff --git a/scripts/demo/feature/vite.config.ts b/scripts/demo/feature/vite.config.ts
+index 51cc199..8314751 100644
+--- a/scripts/demo/feature/vite.config.ts
++++ b/scripts/demo/feature/vite.config.ts
+@@ -3,7 +3,10 @@ import { defineConfig } from "vite";
+ export default defineConfig({
+   server: {
+     proxy: {
+-      "/api": { target: "https://staging.taskboard.example", changeOrigin: true },
++      "/api": {
++        target: "https://staging.taskboard.example",
++        changeOrigin: true,
++      },
+     },
+   },
+ });
+diff --git a/scripts/demo/main/src/api/client.ts b/scripts/demo/main/src/api/client.ts
+index fca3af8..bf75a1d 100644
+--- a/scripts/demo/main/src/api/client.ts
++++ b/scripts/demo/main/src/api/client.ts
+@@ -4,7 +4,8 @@ import { mockBoard } from "./mockBoards";
+ 
+ const API_URL = "/api/boards";
+ const useMocks =
+-  location.hostname === "localhost" || new URLSearchParams(location.search).has("mocks");
++  location.hostname === "localhost" ||
++  new URLSearchParams(location.search).has("mocks");
+ 
+ export class ApiError extends Error {
+   constructor(
+@@ -22,7 +23,10 @@ export async function loadBoard(id: string): Promise<Board> {
+   }
+   const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
+   if (!response.ok) {
+-    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not load board ${id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+   return fromJSON(await response.text());
+ }
+@@ -37,6 +41,9 @@ export async function saveBoard(board: Board): Promise<void> {
+     body: toJSON(board),
+   });
+   if (!response.ok) {
+-    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++    throw new ApiError(
++      `Could not save board ${board.id}: ${response.statusText}`,
++      response.status,
++    );
+   }
+ }
+diff --git a/scripts/demo/main/src/api/mockBoards.ts b/scripts/demo/main/src/api/mockBoards.ts
+index c0acbb9..7cc5c0f 100644
+--- a/scripts/demo/main/src/api/mockBoards.ts
++++ b/scripts/demo/main/src/api/mockBoards.ts
+@@ -4,7 +4,12 @@ import type { Board } from "../board/types";
+ export function mockBoard(id: string): Board {
+   const board = createBoard(id === "default" ? "Website relaunch" : id);
+   const [todo, doing, review, done] = board.columns;
+-  if (todo === undefined || doing === undefined || review === undefined || done === undefined) {
++  if (
++    todo === undefined ||
++    doing === undefined ||
++    review === undefined ||
++    done === undefined
++  ) {
+     return board;
+   }
+   setLimit(board, doing.id, 3);
+diff --git a/scripts/demo/main/src/board/board.ts b/scripts/demo/main/src/board/board.ts
+index db16e66..b496bb1 100644
+--- a/scripts/demo/main/src/board/board.ts
++++ b/scripts/demo/main/src/board/board.ts
+@@ -28,7 +28,10 @@ function newColumnId(): ColumnId {
+   return id;
+ }
+ 
+-export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++export function createBoard(
++  name: string,
++  columnNames: string[] = DEFAULT_COLUMNS,
++): Board {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A board needs a name");
+@@ -47,7 +50,11 @@ export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMN
+ 
+ // Columns
+ 
+-export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++export function addColumn(
++  board: Board,
++  name: string,
++  position = board.columns.length,
++): Column {
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+@@ -60,13 +67,21 @@ export function addColumn(board: Board, name: string, position = board.columns.l
+   return column;
+ }
+ 
+-export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++export function renameColumn(
++  board: Board,
++  columnId: ColumnId,
++  name: string,
++): void {
+   const column = findColumn(board, columnId);
+   const trimmed = name.trim();
+   if (trimmed === "") {
+     throw new BoardError("A column needs a name");
+   }
+-  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++  if (
++    board.columns.some(
++      (other) => other.id !== columnId && other.name === trimmed,
++    )
++  ) {
+     throw new BoardError(`There is already a column called "${trimmed}"`);
+   }
+   column.name = trimmed;
+@@ -85,7 +100,11 @@ export function removeColumn(board: Board, columnId: ColumnId): Card[] {
+   return removed;
+ }
+ 
+-export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++export function setLimit(
++  board: Board,
++  columnId: ColumnId,
++  limit: number | undefined,
++): void {
+   const column = findColumn(board, columnId);
+   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+     throw new BoardError("A limit is a whole number of cards, at least 1");
+@@ -97,6 +116,17 @@ export function isFull(column: Column): boolean {
+   return column.limit !== undefined && column.cardIds.length >= column.limit;
+ }
+ 
++function fullError(column: Column): BoardError {
++  return new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++}
++
++function remove(ids: CardId[], cardId: CardId): void {
++  const index = ids.indexOf(cardId);
++  if (index !== -1) {
++    ids.splice(index, 1);
++  }
++}
++
+ // Lookups
+ 
+ export function findColumn(board: Board, columnId: ColumnId): Column {
+@@ -116,7 +146,9 @@ export function findCard(board: Board, cardId: CardId): Card {
+ }
+ 
+ export function columnOf(board: Board, cardId: CardId): Column {
+-  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  const column = board.columns.find((candidate) =>
++    candidate.cardIds.includes(cardId),
++  );
+   if (column === undefined) {
+     throw new BoardError(`Card ${cardId} is in no column`);
+   }
+@@ -129,24 +161,49 @@ export function cardsIn(board: Board, columnId: ColumnId): Card[] {
+     .filter((card) => !card.archived);
+ }
+ 
++// Lanes
++
+ export const UNASSIGNED = "Unassigned";
+ const NO_DUE_DATE = "9999-12-31";
+ 
+-/** One lane per person, by name, and a last one for unassigned cards; the soonest due first. */
+-export function lanesOf(board: Board, columnId: ColumnId): Map<string, Card[]> {
++export function moveToLane(
++  board: Board,
++  cardId: CardId,
++  laneName: string,
++): void {
++  if (laneName === UNASSIGNED) {
++    assign(board, cardId, undefined);
++  } else {
++    assign(board, cardId, laneName);
++  }
++}
++
++/** A lane per person, soonest due first. */
++export function lanesOf(
++  board: Board,
++  columnId: ColumnId,
++): ReadonlyMap<string, Card[]> {
+   const lanes = new Map<string, Card[]>();
+-  for (const person of [...people(board), UNASSIGNED]) {
++  for (const person of people(board)) {
+     lanes.set(person, []);
+   }
+-  const byDue = cardsIn(board, columnId)
+-    .map((card) => ({ card, due: card.dueDate ?? NO_DUE_DATE }))
+-    .sort((a, b) => a.due.localeCompare(b.due));
+-  for (const { card } of byDue) {
+-    lanes.get(card.assignee ?? UNASSIGNED)?.push(card);
++  lanes.set(UNASSIGNED, []);
++  const cards = cardsIn(board, columnId);
++  for (const card of cards.sort(bySoonest)) {
++    const lane = card.assignee ?? UNASSIGNED;
++    lanes.get(lane)?.push(card);
+   }
+   return lanes;
+ }
+ 
++function bySoonest(a: Card, b: Card): number {
++  return dueOf(a).localeCompare(dueOf(b));
++}
++
++function dueOf(card: Card): string {
++  return card.dueDate ?? NO_DUE_DATE;
++}
++
+ // Cards
+ 
+ export function moveCard(
+@@ -159,36 +216,53 @@ export function moveCard(
+   const from = columnOf(board, cardId);
+   const to = findColumn(board, toColumnId);
+   if (from.id !== to.id && isFull(to)) {
+-    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++    throw fullError(to);
+   }
+-  from.cardIds = from.cardIds.filter((id) => id !== cardId);
+-  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  remove(from.cardIds, cardId);
++  const at = index ?? to.cardIds.length;
++  to.cardIds.splice(at, 0, cardId);
+   if (lane !== undefined) {
+     moveToLane(board, cardId, lane);
+   }
+   if (from.id !== to.id) {
+-    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++    record(board, {
++      kind: "moved",
++      cardId,
++      from: from.id,
++      to: to.id,
++      at: now(),
++    });
+   }
+ }
+ 
+-export function moveToLane(board: Board, cardId: CardId, lane: string): void {
+-  assign(board, cardId, lane === UNASSIGNED ? undefined : lane);
+-}
+-
+-export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++export function addCard(
++  board: Board,
++  columnId: ColumnId,
++  input: NewCard,
++): Card {
+   const column = findColumn(board, columnId);
+   if (isFull(column)) {
+-    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++    throw fullError(column);
+   }
+   const card = createCard(input, new Date());
+   board.cards[card.id] = card;
+-  column.cardIds.push(card.id);
+-  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
++  record(board, {
++    kind: "added",
++    cardId: card.id,
++    columnId,
++    at: card.createdAt,
++  });
++  column.cardIds.unshift(card.id);
+   return card;
+ }
+ 
+-export function reorderCard(board: Board, cardId: CardId, index: number): void {
+-  moveCard(board, cardId, columnOf(board, cardId).id, index);
++export function reorderCard(
++  board: Board,
++  cardId: CardId,
++  position: number,
++): void {
++  const column = columnOf(board, cardId);
++  moveCard(board, cardId, column.id, position);
+ }
+ 
+ export function editCard(
+@@ -237,12 +311,18 @@ export function emptyArchive(board: Board): number {
+   return archived.length;
+ }
+ 
+-export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++export function moveAll(
++  board: Board,
++  fromColumnId: ColumnId,
++  toColumnId: ColumnId,
++): number {
+   const from = findColumn(board, fromColumnId);
+   const to = findColumn(board, toColumnId);
+   const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
+   if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
+-    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++    throw new BoardError(
++      `"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`,
++    );
+   }
+   for (const cardId of moving) {
+     moveCard(board, cardId, toColumnId);
+@@ -300,7 +380,11 @@ export function labelsInUse(board: Board): Label[] {
+   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+ }
+ 
+-export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++export function assign(
++  board: Board,
++  cardId: CardId,
++  person: string | undefined,
++): void {
+   const card = findCard(board, cardId);
+   const name = person?.trim();
+   card.assignee = name === "" ? undefined : name;
+@@ -345,7 +429,9 @@ export function columnCounts(board: Board): ColumnCount[] {
+ 
+ export function overLimit(board: Board): Column[] {
+   return board.columns.filter(
+-    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++    (column) =>
++      column.limit !== undefined &&
++      cardsIn(board, column.id).length > column.limit,
+   );
+ }
+ 
+@@ -411,5 +497,8 @@ export function describeActivity(board: Board, entry: Activity): string {
+ }
+ 
+ function columnName(board: Board, columnId: ColumnId): string {
+-  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++  return (
++    board.columns.find((column) => column.id === columnId)?.name ??
++    "a removed column"
++  );
+ }
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+index 174f575..42e48d0 100644
+--- a/scripts/git-sandbox.sh
++++ b/scripts/git-sandbox.sh
+@@ -40,3 +40,12 @@ repo_git() {
+         -c commit.gpgsign=false -c core.autocrlf=false \
+         -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+ }
++
++# $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.
++require_conflicts() {
++    local conflicted count
++    conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
++    count=$(grep -c . <<<"$conflicted" || true)
++    [ "$count" -eq "$1" ] || die "expected $1 conflicted files, got $count: $conflicted"
++    echo "$conflicted"
++}
+diff --git a/scripts/lsp-repo.sh b/scripts/lsp-repo.sh
+index 3910af7..98fa7db 100755
+--- a/scripts/lsp-repo.sh
++++ b/scripts/lsp-repo.sh
+@@ -42,13 +42,10 @@ if [ "${1:-}" = "--servers" ]; then
+ fi
+ [ $# -eq 1 ] || die "usage: $0 [--servers] <dir>"
+ dir=$1
+-modules="$(cd "$(dirname "$0")/.." && pwd)/frontend/node_modules"
+ expected_conflicts=9
+ 
+-for tool in oxlint oxfmt tsc; do
+-    [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
+-done
+-[ -e "$modules/vue/package.json" ] || die "missing $modules/vue; run pnpm -C frontend install"
++require_frontend_tools
++[ -e "$frontend_modules/vue/package.json" ] || die "missing $frontend_modules/vue; run pnpm -C frontend install"
+ if $with_servers; then
+     command -v uv >/dev/null || die "uv is needed to make py/.venv; see https://docs.astral.sh/uv/"
+ fi
+@@ -66,16 +63,6 @@ write() {
+     repo_git add -- "$1"
+ }
+ 
+-# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
+-link_package() {
+-    mkdir -p "$2"
+-    for entry in "$1"/*; do
+-        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
+-    done
+-    rm "$2/package.json"
+-    cp "$1/package.json" "$2/package.json"
+-}
+-
+ write_web_project() {
+     local plugin_dependency=""
+     if $with_servers; then
+@@ -356,15 +343,8 @@ put_sources() {
+ }
+ 
+ link_web_modules() {
+-    mkdir -p "$dir/web/node_modules/.bin"
+-    for package in oxlint oxfmt; do
+-        ln -s "$modules/$package" "$dir/web/node_modules/$package"
+-    done
+-    link_package "$modules/typescript" "$dir/web/node_modules/typescript"
+-    link_package "$modules/vue" "$dir/web/node_modules/vue"
+-    for tool in oxlint oxfmt tsc; do
+-        ln -s "$modules/.bin/$tool" "$dir/web/node_modules/.bin/$tool"
+-    done
++    link_frontend_tools "$dir/web/node_modules"
++    link_package "$frontend_modules/vue" "$dir/web/node_modules/vue"
+ }
+ 
+ put_project_programs() {
+@@ -399,9 +379,7 @@ repo_git checkout -q local
+ if repo_git merge -q --no-edit remote >/dev/null; then
+     die "merging remote into local was clean; expected conflicts"
+ fi
+-conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
+-count=$(grep -c . <<<"$conflicted" || true)
+-[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
++conflicted=$(require_conflicts "$expected_conflicts")
+ 
+ link_web_modules
+ if $with_servers; then
+diff --git a/scripts/lsp-servers.sh b/scripts/lsp-servers.sh
+index d133c76..339c4da 100755
+--- a/scripts/lsp-servers.sh
++++ b/scripts/lsp-servers.sh
+@@ -14,6 +14,9 @@
+ # (https://phpactor.readthedocs.io/en/master/usage/standalone.html). Sourced by scripts/lsp-repo.sh for its versions
+ # and folders; it calls install_servers with --servers. Sourced by scripts/demo-repo.sh, which calls
+ # install_typescript_server: typescript-language-server alone, linked into servers-path beside what is there.
++# Both link a project's node_modules from this checkout's frontend/node_modules with link_frontend_tools: oxlint and
++# oxfmt whole, typescript through link_package, whose package.json is a copy because yamt reads nothing whose real
++# path is outside the repository (crates/lsp-host/src/files.rs).
+ set -euo pipefail
+ # shellcheck source=scripts/git-sandbox.sh
+ source "$(dirname "${BASH_SOURCE[0]}")/git-sandbox.sh"
+@@ -36,7 +39,9 @@ basedpyright_version=1.40.2
+ 
+ cache="${XDG_CACHE_HOME:-$HOME/.cache}/yamt"
+ servers_path="$cache/servers-path"
++frontend_modules="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/frontend/node_modules"
+ tsls_home="$cache/typescript-language-server-$tsls_version"
++tsls_program="$tsls_home/node_modules/.bin/typescript-language-server"
+ intelephense_home="$cache/intelephense-$intelephense_version"
+ pyright_home="$cache/pyright-$pyright_version"
+ biome_home="$cache/biome-$biome_version"
+@@ -138,13 +143,17 @@ EOF
+ 
+ # $1: link name in servers-path, $2: the program.
+ put_on_path() {
+-    ln -s "$2" "$servers_path/$1"
++    ln -sfn "$2" "$servers_path/$1"
++}
++
++print_launch_line() {
++    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
+ }
+ 
+ fill_servers_path() {
+     rm -rf "$servers_path"
+     mkdir -p "$servers_path"
+-    put_on_path typescript-language-server "$tsls_home/node_modules/.bin/typescript-language-server"
++    put_on_path typescript-language-server "$tsls_program"
+     put_on_path intelephense "$intelephense_home/node_modules/.bin/intelephense"
+     put_on_path pyright "$pyright_home/node_modules/.bin/pyright"
+     put_on_path pyright-langserver "$pyright_home/node_modules/.bin/pyright-langserver"
+@@ -176,15 +185,47 @@ install_servers() {
+         "gopls $gopls_version, rust-analyzer $rust_analyzer_version, php $php_version (runs: $php_runs)," \
+         "phpactor $phpactor_version, composer $composer_version, phpstan $phpstan_version, phpcs $phpcs_version;" \
+         "in project venvs: ruff $ruff_version, ty $ty_version, basedpyright $basedpyright_version"
+-    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
++    print_launch_line
+ }
+ 
+ install_typescript_server() {
+     install_npm "$tsls_home" typescript-language-server "$tsls_version"
+     mkdir -p "$servers_path"
+-    ln -sfn "$tsls_home/node_modules/.bin/typescript-language-server" "$servers_path/typescript-language-server"
++    put_on_path typescript-language-server "$tsls_program"
+     echo "lsp-servers: typescript-language-server $tsls_version"
+-    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
++    print_launch_line
++}
++
++require_frontend_tools() {
++    local tool
++    for tool in oxlint oxfmt tsc; do
++        [ -x "$frontend_modules/.bin/$tool" ] ||
++            die "missing $frontend_modules/.bin/$tool; run pnpm -C frontend install"
++    done
++}
++
++# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
++link_package() {
++    local entry
++    mkdir -p "$2"
++    for entry in "$1"/*; do
++        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
++    done
++    rm "$2/package.json"
++    cp "$1/package.json" "$2/package.json"
++}
++
++# $1: a project's node_modules folder. Links oxlint, oxfmt and typescript into it, with their .bin entries.
++link_frontend_tools() {
++    local package tool
++    mkdir -p "$1/.bin"
++    for package in oxlint oxfmt; do
++        ln -s "$frontend_modules/$package" "$1/$package"
++    done
++    link_package "$frontend_modules/typescript" "$1/typescript"
++    for tool in oxlint oxfmt tsc; do
++        ln -s "$frontend_modules/.bin/$tool" "$1/.bin/$tool"
++    done
+ }
+ 
+ # $1: the virtual environment's folder. Makes it with ruff, ty and basedpyright.
