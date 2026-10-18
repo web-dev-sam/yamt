@@ -1,0 +1,2951 @@
+diff --git a/.omp/skills/project-map/SKILL.md b/.omp/skills/project-map/SKILL.md
+index 76b5fb8..043240a 100644
+--- a/.omp/skills/project-map/SKILL.md
++++ b/.omp/skills/project-map/SKILL.md
+@@ -55,8 +55,9 @@ scripts/map-check.sh     PM6 (`just map-check`): every source file is named in t
+ scripts/test-screen.sh   `place`: KWin rules put test windows on the Samsung screen when one is connected; `check` = `just test-window-check` (VF8, plan §2 #40)
+ scripts/conflict-repo.sh `<dir>`: smoke repository with 7 conflicts (3 goldens .ts/.vue/.tsx, CRLF, add/add, binary, deleted on one side), no user git config
+ scripts/lsp-repo.sh     `[--servers] <dir>`: language-server smoke repository, one project per ecosystem left mid-merge (web/ with oxlint, oxfmt, TypeScript 5.9 and vue linked from frontend/node_modules, 3 conflicts incl. App.vue; biome/, py/, rs/ (Cargo workspace), go/, php/, c/ with 1 conflict each; one problem per server and one badly formatted line outside the conflicts); with the flag, the pinned servers from lsp-servers.sh, plus the Vue plugin, Biome, py/.venv (uv: ruff, ty, basedpyright) and php/vendor (PHPStan, phpcs); VS Code tasks "lsp: new conflict project" / "lsp: open in yamt"
+-scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh
+-scripts/git-sandbox.sh   sourced by conflict-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
++scripts/lsp-servers.sh  `[--path]`: pinned language servers installed once into ~/.cache/yamt/<tool>-<version> (npm, go install, rust-analyzer release binary, static PHP + Phpactor + composer.phar) and linked into ~/.cache/yamt/servers-path; prints the PATH line; sourced by lsp-repo.sh and demo-repo.sh (install_typescript_server)
++scripts/demo-repo.sh    `<dir>`: the demo project behind the VS Code buttons "conflict" / "yamt" / "WebStorm" and the README screenshot: Taskboard (TypeScript, oxlint, oxfmt), `main` merging `feature/reminders`, 7 conflicts (the long board.ts, a binary logo, a file deleted on one side); files per side in scripts/demo/{base,main,feature}/: board, card, cardView, storage, types, client, mockBoards, main, styles, index, shortcuts, logo, .oxlintrc, .oxfmtrc, vite.config
++scripts/git-sandbox.sh   sourced by conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: die, non-empty refusal, git ≥ 2.32 gate, user/system git config isolation (RK19), repo_git, golden_file_path
+ scripts/third-party-licenses.sh  `just third-party-licenses`: THIRD_PARTY_LICENSES.txt from `cargo metadata` + `pnpm licenses list --prod` + licence files on disk (jq);
+                     `ubuntu-versions` appends the AppImage's library versions and the GNU GPL/LGPL texts (Linux job); both release jobs regenerate and `git diff --exit-code` it
+ root config         clippy.toml (too-many-lines 40, unwrap/expect/panic allowed in tests), crates/merge-core/clippy.toml
+diff --git a/.vscode/tasks.json b/.vscode/tasks.json
+index 7039ce3..e477213 100644
+--- a/.vscode/tasks.json
++++ b/.vscode/tasks.json
+@@ -38,9 +38,9 @@
+     },
+     {
+       "label": "merge: new conflict project",
+-      "detail": "Replace /tmp/yamt-conflict-project with a fresh repo in the middle of a merge: 7 conflicted files (text, CRLF, both added, binary, deleted on one side).",
++      "detail": "Replace /tmp/yamt-conflict-project with the demo project (scripts/demo-repo.sh): Taskboard, a small TypeScript kanban app with oxlint and oxfmt, stopped while main merges feature/reminders. 7 conflicted files: src/board/board.ts (about 450 lines, changes on both sides all through it), card.ts, cardView.ts, client.ts, mockBoards.ts (deleted on one side), docs/shortcuts.md, public/logo.png (an image changed on both sides). The merge causes one TypeScript error in board.ts and leaves one oxlint warning, shown once main's changes there are applied. Installs typescript-language-server once into ~/.cache/yamt (needs the network the first time; scripts/lsp-servers.sh).",
+       "type": "shell",
+-      "command": "rm -rf /tmp/yamt-conflict-project && scripts/conflict-repo.sh /tmp/yamt-conflict-project",
++      "command": "rm -rf /tmp/yamt-conflict-project && scripts/demo-repo.sh /tmp/yamt-conflict-project",
+       "problemMatcher": [],
+       "presentation": { "panel": "shared", "reveal": "always" },
+       "options": {
+@@ -49,9 +49,9 @@
+     },
+     {
+       "label": "merge: open in WebStorm",
+-      "detail": "Open /tmp/yamt-conflict-project in WebStorm (made first if missing); then Git → Resolve Conflicts.",
++      "detail": "Open the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing) in WebStorm; then Git → Resolve Conflicts.",
+       "type": "shell",
+-      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
++      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
+       "problemMatcher": [],
+       "presentation": { "panel": "shared", "reveal": "silent" },
+       "options": {
+@@ -61,9 +61,9 @@
+     },
+     {
+       "label": "merge: open in yamt",
+-      "detail": "Build yamt (debug, pages built in) from the current code and open it on /tmp/yamt-conflict-project (made first if missing). Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
++      "detail": "Build yamt (debug, pages built in) from the current code and open it on the demo project /tmp/yamt-conflict-project (scripts/demo-repo.sh: Taskboard mid-merge, 7 conflicted files; made first if missing), with ~/.cache/yamt/servers-path first on PATH (scripts/lsp-servers.sh --path) so typescript-language-server is found; oxlint and oxfmt come from the project's node_modules. The first time, yamt asks whether to start the project's language servers. Running it again closes the open yamt window and rebuilds. The terminal shows yamt's exit status when you close it.",
+       "type": "shell",
+-      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/conflict-repo.sh /tmp/yamt-conflict-project; just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
++      "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
+       "problemMatcher": [],
+       "presentation": { "panel": "dedicated", "reveal": "always" },
+       "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+diff --git a/Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md b/Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md
+deleted file mode 100644
+index cc3e319..0000000
+--- a/Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md	
++++ /dev/null
+@@ -1,22 +0,0 @@
+-# Agent brief: Crisp code text rendering on macOS, Linux and Windows (Tauri)
+-
+-Oct 13, 2026 · @Samuel
+-
+-Make the code text in our Tauri 3-way merge tool render as crisply as WebStorm on macOS and Linux, and add a Windows build that does the same. Investigate, plan and implement the fix yourself; what follows is what we know so far.
+-
+-## The issue
+-
+-The app shows three CodeMirror 6 editors using JetBrains Mono at the same size and weight as WebStorm. Side by side, our text looks softer, slightly janky and less legible than WebStorm's, even though the font settings match.
+-
+-## What we found
+-
+-- **Antialiasing differs.** At 400%+ zoom, WebStorm's glyphs have colored subpixel fringes; ours are pure grayscale. This is the main visible difference.
+-- **It is not our CSS.** Web Inspector's Layers panel shows the code text is not on its own composited layer. The grayscale comes from the webview engine's text rendering path.
+-- **macOS (WKWebView):** macOS removed subpixel font smoothing in 10.14, so WKWebView cannot produce it. WebStorm only gets fringes because JetBrains Runtime rasterizes text itself. Here the realistic goal is matching stroke weight and contrast.
+-- **Linux (WebKitGTK):** the default GPU/compositing path rasterizes text in grayscale. The CPU rendering path (`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1` on 2.46+, `WEBKIT_DISABLE_COMPOSITING_MODE=1` on older versions) may honor fontconfig subpixel settings. This is unverified and may cost scrolling performance.
+-- **Fractional scaling:** our screenshots show about 1.45 device pixels per CSS pixel. GTK3 (used by Tauri on Linux) does not support fractional scaling on Wayland, so the compositor downscales a 2x render, which softens text further. Fractional line heights and font sizes can also put baselines on fractional pixels on any platform.
+-- **Windows (WebView2):** there is no Windows build yet. Chromium-based WebView2 renders ClearType text as long as every layer holding text is opaque and pixel-aligned (no window transparency, opaque scroll containers and sticky gutters, no transforms on text), so this is the one platform where we can likely match WebStorm exactly.
+-
+-## What we expect from you
+-
+-Fix it where the platform allows, compensate where it does not, and add the Windows build target with CI. Compare zoomed screenshots against WebStorm before and after each change, don't regress scrolling performance, put any engine-level hacks behind a setting, and write down what turned out to be impossible on each platform.
+diff --git a/scripts/demo-repo.sh b/scripts/demo-repo.sh
+new file mode 100755
+index 0000000..5a99880
+--- /dev/null
++++ b/scripts/demo-repo.sh
+@@ -0,0 +1,124 @@
++#!/usr/bin/env bash
++# Usage: scripts/demo-repo.sh <dir>
++# Builds the demo project the VS Code buttons "conflict", "yamt" and "WebStorm" make and open, and the README
++# screenshot shows: Taskboard, a small kanban web app in TypeScript (Vite, oxlint, oxfmt), stopped in the middle of
++# `git merge feature/reminders` on main. Its files live under scripts/demo/ as plain files, so the code stays readable
++# and editable: base/ is the project at the fork point, main/ the files Maya Lindqvist changed on main (swimlanes by
++# person), feature/ the files Tomás Herrera changed on feature/reminders (due times instead of days, reminders).
++# Seven files conflict: src/board/board.ts (the long file: changes on both sides all through it, one conflict in
++# moveCard), src/board/card.ts, src/ui/cardView.ts, src/api/client.ts, src/api/mockBoards.ts (deleted on
++# feature/reminders, changed on main), docs/shortcuts.md and public/logo.png (changed on both sides).
++# The merge causes one TypeScript error: feature/reminders renames Card.dueDate to dueAt (src/board/types.ts merges
++# cleanly), and main's new lanesOf in board.ts still reads card.dueDate. Main also leaves an unused variable in
++# searchCards (oxlint's no-unused-vars warning). Both show in yamt's Result once main's changes there are applied.
++# After the merge, node_modules gets links into this checkout's frontend/node_modules: oxlint, oxfmt and typescript,
++# with their .bin entries. The package.json files are copies: yamt reads nothing whose real path is outside the
++# repository (crates/lsp-host/src/files.rs). typescript-language-server comes from scripts/lsp-servers.sh into the
++# user's cache (the network is needed the first time); the PATH line to launch yamt with is printed.
++# Prints the conflicted paths. Uses no user or system git config (risk RK19).
++set -euo pipefail
++# shellcheck source=scripts/git-sandbox.sh
++source "$(dirname "$0")/git-sandbox.sh"
++# shellcheck source=scripts/lsp-servers.sh
++source "$(dirname "$0")/lsp-servers.sh"
++
++[ $# -eq 1 ] || die "usage: $0 <dir>"
++dir=$1
++checkout="$(cd "$(dirname "$0")/.." && pwd)"
++files="$checkout/scripts/demo"
++modules="$checkout/frontend/node_modules"
++expected_conflicts=7
++
++for tool in oxlint oxfmt tsc; do
++    [ -x "$modules/.bin/$tool" ] || die "missing $modules/.bin/$tool; run pnpm -C frontend install"
++done
++require_empty_dir "$dir"
++isolate_git_config
++install_typescript_server
++
++# $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
++put() {
++    local layer=$1 path
++    shift
++    for path in "$@"; do
++        mkdir -p "$(dirname "$dir/$path")"
++        cp "$files/$layer/$path" "$dir/$path"
++        repo_git add -- "$path"
++    done
++}
++
++# $1: author ("Name <email>"), $2: date, $3: message. Commits what is staged as that person.
++commit_as() {
++    local name=${1% <*} email=${1#*<}
++    email=${email%>}
++    GIT_AUTHOR_NAME=$name GIT_AUTHOR_EMAIL=$email GIT_AUTHOR_DATE=$2 \
++        GIT_COMMITTER_NAME=$name GIT_COMMITTER_EMAIL=$email GIT_COMMITTER_DATE=$2 \
++        repo_git commit -q -m "$3"
++}
++
++# $1: a package folder, $2: its place in the repo. Links every entry but package.json, which is copied.
++link_package() {
++    mkdir -p "$2"
++    for entry in "$1"/*; do
++        ln -s "$(readlink -f "$entry")" "$2/$(basename "$entry")"
++    done
++    rm "$2/package.json"
++    cp "$1/package.json" "$2/package.json"
++}
++
++link_modules() {
++    mkdir -p "$dir/node_modules/.bin"
++    for package in oxlint oxfmt; do
++        ln -s "$modules/$package" "$dir/node_modules/$package"
++    done
++    link_package "$modules/typescript" "$dir/node_modules/typescript"
++    for tool in oxlint oxfmt tsc; do
++        ln -s "$modules/.bin/$tool" "$dir/node_modules/.bin/$tool"
++    done
++}
++
++priya="Priya Nair <priya@taskboard.example>"
++tomas="Tomás Herrera <tomas@taskboard.example>"
++maya="Maya Lindqvist <maya@taskboard.example>"
++
++mkdir -p "$dir"
++git -c init.defaultBranch=main init -q "$dir"
++
++put base package.json tsconfig.json .oxlintrc.json .oxfmtrc.json .gitignore index.html README.md
++commit_as "$priya" 2026-09-28T10:12:00+02:00 "Set up Vite, TypeScript, oxlint and oxfmt"
++put base src/board/types.ts src/board/card.ts src/board/board.ts src/board/storage.ts src/ui/cardView.ts \
++    src/styles.css
++commit_as "$priya" 2026-09-30T16:40:00+02:00 "Board model: columns, cards, labels and the activity feed"
++put base src/api/client.ts src/api/mockBoards.ts src/main.ts
++commit_as "$tomas" 2026-10-02T11:05:00+02:00 "Load boards from the API, with a mock board on localhost"
++put base public/logo.png docs/shortcuts.md
++commit_as "$maya" 2026-10-06T09:30:00+02:00 "Add the logo and the list of keyboard shortcuts"
++
++repo_git checkout -q -b feature/reminders
++put feature src/api/client.ts vite.config.ts README.md
++repo_git rm -q -- src/api/mockBoards.ts
++commit_as "$tomas" 2026-10-12T14:20:00+02:00 "Drop the mock board: pnpm dev proxies /api to staging"
++put feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/cardView.ts
++commit_as "$tomas" 2026-10-14T10:02:00+02:00 "Store due times instead of days (dueDate → dueAt)"
++put feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
++commit_as "$tomas" 2026-10-16T17:45:00+02:00 "Reminders before a card is due"
++
++repo_git checkout -q main
++put main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
++commit_as "$maya" 2026-10-13T15:10:00+02:00 "Swimlanes: group a column's cards by person"
++put main src/api/mockBoards.ts src/api/client.ts
++commit_as "$maya" 2026-10-15T11:25:00+02:00 "Mock board: people on the cards, ?mocks on any host"
++put main public/logo.png
++commit_as "$maya" 2026-10-17T09:50:00+02:00 "Refresh the logo"
++
++if repo_git merge -q --no-edit feature/reminders >/dev/null 2>&1; then
++    die "merging feature/reminders into main was clean; expected conflicts"
++fi
++conflicted=$(repo_git ls-files -u | cut -f2 | sort -u)
++count=$(grep -c . <<<"$conflicted" || true)
++[ "$count" -eq "$expected_conflicts" ] || die "expected $expected_conflicts conflicted files, got $count: $conflicted"
++
++link_modules
++
++echo "demo-repo: $dir is mid-merge (main merging feature/reminders); conflicted files:"
++echo "$conflicted"
+diff --git a/scripts/demo/base/.gitignore b/scripts/demo/base/.gitignore
+new file mode 100644
+index 0000000..b947077
+--- /dev/null
++++ b/scripts/demo/base/.gitignore
+@@ -0,0 +1,2 @@
++node_modules/
++dist/
+diff --git a/scripts/demo/base/.oxfmtrc.json b/scripts/demo/base/.oxfmtrc.json
+new file mode 100644
+index 0000000..d350e4a
+--- /dev/null
++++ b/scripts/demo/base/.oxfmtrc.json
+@@ -0,0 +1,5 @@
++{
++  "$schema": "./node_modules/oxfmt/configuration_schema.json",
++  "printWidth": 100,
++  "ignorePatterns": ["dist/**"]
++}
+diff --git a/scripts/demo/base/.oxlintrc.json b/scripts/demo/base/.oxlintrc.json
+new file mode 100644
+index 0000000..f4c79cc
+--- /dev/null
++++ b/scripts/demo/base/.oxlintrc.json
+@@ -0,0 +1,9 @@
++{
++  "$schema": "./node_modules/oxlint/configuration_schema.json",
++  "plugins": ["typescript", "unicorn", "oxc"],
++  "ignorePatterns": ["dist/**"],
++  "rules": {
++    "no-console": "warn",
++    "eqeqeq": "error"
++  }
++}
+diff --git a/scripts/demo/base/README.md b/scripts/demo/base/README.md
+new file mode 100644
+index 0000000..97b99f5
+--- /dev/null
++++ b/scripts/demo/base/README.md
+@@ -0,0 +1,23 @@
++# Taskboard
++
++A small kanban board for the web team: columns with work-in-progress limits, cards with labels,
++people and due dates, and an activity feed.
++
++## Develop
++
++```sh
++pnpm install
++pnpm dev
++```
++
++On `localhost` the app shows a mock board (`src/api/mockBoards.ts`) instead of calling the API.
++
++## Check
++
++```sh
++pnpm typecheck
++pnpm lint
++pnpm format --check
++```
++
++Keyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md).
+diff --git a/scripts/demo/base/docs/shortcuts.md b/scripts/demo/base/docs/shortcuts.md
+new file mode 100644
+index 0000000..1453364
+--- /dev/null
++++ b/scripts/demo/base/docs/shortcuts.md
+@@ -0,0 +1,24 @@
++# Keyboard shortcuts
++
++Shortcuts work anywhere on the board except while typing in a text field.
++
++## Cards
++
++| Key     | Action                              |
++| ------- | ----------------------------------- |
++| `N`     | New card in the focused column      |
++| `E`     | Edit the focused card               |
++| `A`     | Archive the focused card            |
++| `L`     | Add a label to the focused card     |
++| `M`     | Assign the focused card to yourself |
++| `Enter` | Open the focused card               |
++
++## Moving around
++
++| Key        | Action                                  |
++| ---------- | --------------------------------------- |
++| `←` `→`    | Focus the previous or next column       |
++| `↑` `↓`    | Focus the previous or next card         |
++| `Shift+←→` | Move the focused card to another column |
++| `/`        | Search cards                            |
++| `?`        | Show this list                          |
+diff --git a/scripts/demo/base/index.html b/scripts/demo/base/index.html
+new file mode 100644
+index 0000000..625f8a8
+--- /dev/null
++++ b/scripts/demo/base/index.html
+@@ -0,0 +1,13 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <link rel="icon" type="image/png" href="/logo.png" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>Taskboard</title>
++  </head>
++  <body>
++    <main id="app"></main>
++    <script type="module" src="/src/main.ts"></script>
++  </body>
++</html>
+diff --git a/scripts/demo/base/package.json b/scripts/demo/base/package.json
+new file mode 100644
+index 0000000..cefde37
+--- /dev/null
++++ b/scripts/demo/base/package.json
+@@ -0,0 +1,20 @@
++{
++  "name": "taskboard",
++  "version": "0.4.0",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "dev": "vite",
++    "build": "tsc && vite build",
++    "lint": "oxlint",
++    "format": "oxfmt",
++    "typecheck": "tsc"
++  },
++  "devDependencies": {
++    "oxfmt": "^0.72.0",
++    "oxlint": "^1.87.0",
++    "typescript": "~5.9.3",
++    "vite": "^8.3.4"
++  },
++  "packageManager": "pnpm@10.18.0"
++}
+diff --git a/scripts/demo/base/public/logo.png b/scripts/demo/base/public/logo.png
+new file mode 100644
+index 0000000..ea9e653
+Binary files /dev/null and b/scripts/demo/base/public/logo.png differ
+diff --git a/scripts/demo/base/src/api/client.ts b/scripts/demo/base/src/api/client.ts
+new file mode 100644
+index 0000000..173948b
+--- /dev/null
++++ b/scripts/demo/base/src/api/client.ts
+@@ -0,0 +1,41 @@
++import { fromJSON, toJSON } from "../board/storage";
++import type { Board } from "../board/types";
++import { mockBoard } from "./mockBoards";
++
++const API_URL = "/api/boards";
++const useMocks = location.hostname === "localhost";
++
++export class ApiError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++  ) {
++    super(message);
++    this.name = "ApiError";
++  }
++}
++
++export async function loadBoard(id: string): Promise<Board> {
++  if (useMocks) {
++    return mockBoard(id);
++  }
++  const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
++  if (!response.ok) {
++    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++  }
++  return fromJSON(await response.text());
++}
++
++export async function saveBoard(board: Board): Promise<void> {
++  if (useMocks) {
++    return;
++  }
++  const response = await fetch(`${API_URL}/${encodeURIComponent(board.id)}`, {
++    method: "PUT",
++    headers: { "Content-Type": "application/json" },
++    body: toJSON(board),
++  });
++  if (!response.ok) {
++    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++  }
++}
+diff --git a/scripts/demo/base/src/api/mockBoards.ts b/scripts/demo/base/src/api/mockBoards.ts
+new file mode 100644
+index 0000000..1cc8447
+--- /dev/null
++++ b/scripts/demo/base/src/api/mockBoards.ts
+@@ -0,0 +1,29 @@
++import { addCard, createBoard, setLimit } from "../board/board";
++import type { Board } from "../board/types";
++
++export function mockBoard(id: string): Board {
++  const board = createBoard(id === "default" ? "Website relaunch" : id);
++  const [todo, doing, review, done] = board.columns;
++  if (todo === undefined || doing === undefined || review === undefined || done === undefined) {
++    return board;
++  }
++  setLimit(board, doing.id, 3);
++
++  addCard(board, todo.id, { title: "Write the pricing page copy", dueDate: "2026-10-24" });
++  addCard(board, todo.id, {
++    title: "Pick photos for the team page",
++    labels: [{ name: "design", color: "purple" }],
++  });
++  addCard(board, doing.id, {
++    title: "Move the blog to the new templates",
++    labels: [{ name: "frontend", color: "blue" }],
++  });
++  addCard(board, doing.id, { title: "Redirects for the old URLs", dueDate: "2026-10-20" });
++  addCard(board, review.id, {
++    title: "Cookie banner",
++    labels: [{ name: "legal", color: "orange" }],
++    dueDate: "2026-10-19",
++  });
++  addCard(board, done.id, { title: "New logo", labels: [{ name: "design", color: "purple" }] });
++  return board;
++}
+diff --git a/scripts/demo/base/src/board/board.ts b/scripts/demo/base/src/board/board.ts
+new file mode 100644
+index 0000000..b0e200e
+--- /dev/null
++++ b/scripts/demo/base/src/board/board.ts
+@@ -0,0 +1,391 @@
++import { createCard, hasLabel, type NewCard } from "./card";
++import type { Board, Card, CardId, Column, ColumnId, Label } from "./types";
++
++export const DONE_COLUMN = "Done";
++
++const DEFAULT_COLUMNS = ["To do", "In progress", "Review", DONE_COLUMN];
++const MAX_ACTIVITY = 200;
++
++export class BoardError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "BoardError";
++  }
++}
++
++export type Activity =
++  | { kind: "added"; cardId: CardId; columnId: ColumnId; at: string }
++  | { kind: "moved"; cardId: CardId; from: ColumnId; to: ColumnId; at: string }
++  | { kind: "archived"; cardId: CardId; at: string }
++  | { kind: "restored"; cardId: CardId; at: string };
++
++const activity = new WeakMap<Board, Activity[]>();
++let nextColumnId = 1;
++
++function newColumnId(): ColumnId {
++  const id = `col-${nextColumnId}`;
++  nextColumnId += 1;
++  return id;
++}
++
++export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A board needs a name");
++  }
++  return {
++    id: crypto.randomUUID(),
++    name: trimmed,
++    columns: columnNames.map((columnName) => ({
++      id: newColumnId(),
++      name: columnName,
++      cardIds: [],
++    })),
++    cards: {},
++  };
++}
++
++// Columns
++
++export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((column) => column.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  const column: Column = { id: newColumnId(), name: trimmed, cardIds: [] };
++  board.columns.splice(position, 0, column);
++  return column;
++}
++
++export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++  const column = findColumn(board, columnId);
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  column.name = trimmed;
++}
++
++export function removeColumn(board: Board, columnId: ColumnId): Card[] {
++  const column = findColumn(board, columnId);
++  if (board.columns.length === 1) {
++    throw new BoardError("A board needs at least one column");
++  }
++  const removed = column.cardIds.map((id) => findCard(board, id));
++  for (const card of removed) {
++    delete board.cards[card.id];
++  }
++  board.columns = board.columns.filter((other) => other.id !== columnId);
++  return removed;
++}
++
++export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++  const column = findColumn(board, columnId);
++  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
++    throw new BoardError("A limit is a whole number of cards, at least 1");
++  }
++  column.limit = limit;
++}
++
++export function isFull(column: Column): boolean {
++  return column.limit !== undefined && column.cardIds.length >= column.limit;
++}
++
++// Lookups
++
++export function findColumn(board: Board, columnId: ColumnId): Column {
++  const column = board.columns.find((candidate) => candidate.id === columnId);
++  if (column === undefined) {
++    throw new BoardError(`No column with id ${columnId}`);
++  }
++  return column;
++}
++
++export function findCard(board: Board, cardId: CardId): Card {
++  const card = board.cards[cardId];
++  if (card === undefined) {
++    throw new BoardError(`No card with id ${cardId}`);
++  }
++  return card;
++}
++
++export function columnOf(board: Board, cardId: CardId): Column {
++  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  if (column === undefined) {
++    throw new BoardError(`Card ${cardId} is in no column`);
++  }
++  return column;
++}
++
++export function cardsIn(board: Board, columnId: ColumnId): Card[] {
++  return findColumn(board, columnId)
++    .cardIds.map((id) => findCard(board, id))
++    .filter((card) => !card.archived);
++}
++
++// Cards
++
++export function moveCard(board: Board, cardId: CardId, toColumnId: ColumnId, index?: number): void {
++  const from = columnOf(board, cardId);
++  const to = findColumn(board, toColumnId);
++  if (from.id !== to.id && isFull(to)) {
++    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++  }
++  from.cardIds = from.cardIds.filter((id) => id !== cardId);
++  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  if (from.id !== to.id) {
++    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++  }
++}
++
++export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++  const column = findColumn(board, columnId);
++  if (isFull(column)) {
++    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++  }
++  const card = createCard(input, new Date());
++  board.cards[card.id] = card;
++  column.cardIds.push(card.id);
++  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
++  return card;
++}
++
++export function reorderCard(board: Board, cardId: CardId, index: number): void {
++  moveCard(board, cardId, columnOf(board, cardId).id, index);
++}
++
++export function sortColumn(board: Board, columnId: ColumnId, by: "title" | "created"): void {
++  const column = findColumn(board, columnId);
++  const cards = column.cardIds.map((id) => findCard(board, id));
++  cards.sort((a, b) =>
++    by === "title" ? a.title.localeCompare(b.title) : a.createdAt.localeCompare(b.createdAt),
++  );
++  column.cardIds = cards.map((card) => card.id);
++}
++
++export function editCard(
++  board: Board,
++  cardId: CardId,
++  changes: Partial<Pick<Card, "title" | "description">>,
++): void {
++  const card = findCard(board, cardId);
++  if (changes.title !== undefined) {
++    const title = changes.title.trim();
++    if (title === "") {
++      throw new BoardError("A card needs a title");
++    }
++    card.title = title;
++  }
++  if (changes.description !== undefined) {
++    card.description = changes.description.trim();
++  }
++}
++
++export function archiveCard(board: Board, cardId: CardId): void {
++  findCard(board, cardId).archived = true;
++  record(board, { kind: "archived", cardId, at: now() });
++}
++
++export function restoreCard(board: Board, cardId: CardId): void {
++  const card = findCard(board, cardId);
++  if (!card.archived) {
++    return;
++  }
++  card.archived = false;
++  record(board, { kind: "restored", cardId, at: now() });
++}
++
++export function archivedCards(board: Board): Card[] {
++  return Object.values(board.cards).filter((card) => card.archived);
++}
++
++export function emptyArchive(board: Board): number {
++  const archived = archivedCards(board);
++  for (const card of archived) {
++    const column = columnOf(board, card.id);
++    column.cardIds = column.cardIds.filter((id) => id !== card.id);
++    delete board.cards[card.id];
++  }
++  return archived.length;
++}
++
++export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++  const from = findColumn(board, fromColumnId);
++  const to = findColumn(board, toColumnId);
++  const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
++  if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
++    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++  }
++  for (const cardId of moving) {
++    moveCard(board, cardId, toColumnId);
++  }
++  return moving.length;
++}
++
++export function archiveColumn(board: Board, columnId: ColumnId): number {
++  const cards = cardsIn(board, columnId);
++  for (const card of cards) {
++    archiveCard(board, card.id);
++  }
++  return cards.length;
++}
++
++export function duplicateBoard(board: Board, name: string): Board {
++  const copy = createBoard(
++    name,
++    board.columns.map((column) => column.name),
++  );
++  for (const [index, column] of board.columns.entries()) {
++    const target = copy.columns[index];
++    if (target === undefined) {
++      continue;
++    }
++    target.limit = column.limit;
++    for (const card of cardsIn(board, column.id)) {
++      addCard(copy, target.id, { ...card, labels: [...card.labels] });
++    }
++  }
++  return copy;
++}
++
++// Labels and people
++
++export function addLabel(board: Board, cardId: CardId, label: Label): void {
++  const card = findCard(board, cardId);
++  if (!hasLabel(card, label.name)) {
++    card.labels.push(label);
++  }
++}
++
++export function removeLabel(board: Board, cardId: CardId, name: string): void {
++  const card = findCard(board, cardId);
++  card.labels = card.labels.filter((label) => label.name !== name);
++}
++
++export function labelsInUse(board: Board): Label[] {
++  const byName = new Map<string, Label>();
++  for (const card of Object.values(board.cards)) {
++    for (const label of card.labels) {
++      byName.set(label.name, label);
++    }
++  }
++  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
++}
++
++export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++  const card = findCard(board, cardId);
++  const name = person?.trim();
++  card.assignee = name === "" ? undefined : name;
++}
++
++export function people(board: Board): string[] {
++  const names = new Set<string>();
++  for (const card of Object.values(board.cards)) {
++    if (card.assignee !== undefined && !card.archived) {
++      names.add(card.assignee);
++    }
++  }
++  return [...names].sort((a, b) => a.localeCompare(b));
++}
++
++export function workload(board: Board): Map<string, number> {
++  const counts = new Map<string, number>();
++  for (const column of board.columns) {
++    if (column.name === DONE_COLUMN) {
++      continue;
++    }
++    for (const card of cardsIn(board, column.id)) {
++      if (card.assignee !== undefined) {
++        counts.set(card.assignee, (counts.get(card.assignee) ?? 0) + 1);
++      }
++    }
++  }
++  return counts;
++}
++
++// Statistics
++
++export type ColumnCount = { column: string; cards: number; limit?: number };
++
++export function columnCounts(board: Board): ColumnCount[] {
++  return board.columns.map((column) => ({
++    column: column.name,
++    cards: cardsIn(board, column.id).length,
++    limit: column.limit,
++  }));
++}
++
++export function overLimit(board: Board): Column[] {
++  return board.columns.filter(
++    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++  );
++}
++
++export function progress(board: Board): number {
++  const cards = Object.values(board.cards).filter((card) => !card.archived);
++  if (cards.length === 0) {
++    return 0;
++  }
++  const done = board.columns.find((column) => column.name === DONE_COLUMN);
++  const finished = done === undefined ? 0 : cardsIn(board, done.id).length;
++  return Math.round((finished / cards.length) * 100);
++}
++
++// Search
++
++export function searchCards(board: Board, query: string): Card[] {
++  const needle = query.trim().toLowerCase();
++  if (needle === "") {
++    return [];
++  }
++  return Object.values(board.cards).filter(
++    (card) =>
++      !card.archived &&
++      (card.title.toLowerCase().includes(needle) ||
++        card.description.toLowerCase().includes(needle) ||
++        card.labels.some((label) => label.name.toLowerCase() === needle)),
++  );
++}
++
++// Activity
++
++function now(): string {
++  return new Date().toISOString();
++}
++
++function record(board: Board, entry: Activity): void {
++  const entries = activity.get(board) ?? [];
++  entries.push(entry);
++  if (entries.length > MAX_ACTIVITY) {
++    entries.splice(0, entries.length - MAX_ACTIVITY);
++  }
++  activity.set(board, entries);
++}
++
++export function recentActivity(board: Board, count = 20): Activity[] {
++  return (activity.get(board) ?? []).slice(-count).reverse();
++}
++
++export function describeActivity(board: Board, entry: Activity): string {
++  const title = board.cards[entry.cardId]?.title ?? "A deleted card";
++  switch (entry.kind) {
++    case "added":
++      return `${title} was added to ${columnName(board, entry.columnId)}`;
++    case "moved":
++      return `${title} moved from ${columnName(board, entry.from)} to ${columnName(board, entry.to)}`;
++    case "archived":
++      return `${title} was archived`;
++    case "restored":
++      return `${title} was restored`;
++  }
++}
++
++function columnName(board: Board, columnId: ColumnId): string {
++  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++}
+diff --git a/scripts/demo/base/src/board/card.ts b/scripts/demo/base/src/board/card.ts
+new file mode 100644
+index 0000000..960b9d9
+--- /dev/null
++++ b/scripts/demo/base/src/board/card.ts
+@@ -0,0 +1,55 @@
++import type { Card, Label } from "./types";
++
++export type NewCard = {
++  title: string;
++  description?: string;
++  labels?: Label[];
++  assignee?: string;
++  dueDate?: string;
++};
++
++const MAX_TITLE_LENGTH = 200;
++
++export function createCard(input: NewCard, now = new Date()): Card {
++  const title = input.title.trim();
++  if (title === "") {
++    throw new Error("A card needs a title");
++  }
++  if (title.length > MAX_TITLE_LENGTH) {
++    throw new Error(`A card title has at most ${MAX_TITLE_LENGTH} characters`);
++  }
++  return {
++    id: crypto.randomUUID(),
++    title,
++    description: input.description?.trim() ?? "",
++    labels: input.labels ?? [],
++    assignee: input.assignee,
++    dueDate: input.dueDate,
++    createdAt: now.toISOString(),
++    archived: false,
++  };
++}
++
++export function hasLabel(card: Card, name: string): boolean {
++  return card.labels.some((label) => label.name === name);
++}
++
++export function initials(name: string): string {
++  return name
++    .split(/\s+/)
++    .filter((part) => part !== "")
++    .map((part) => part.charAt(0).toUpperCase())
++    .join("")
++    .slice(0, 2);
++}
++
++export function cardSummary(card: Card): string {
++  const parts = [card.title];
++  if (card.assignee !== undefined) {
++    parts.push(`@${card.assignee}`);
++  }
++  if (card.dueDate !== undefined) {
++    parts.push(`due ${card.dueDate}`);
++  }
++  return parts.join(" · ");
++}
+diff --git a/scripts/demo/base/src/board/storage.ts b/scripts/demo/base/src/board/storage.ts
+new file mode 100644
+index 0000000..92362cb
+--- /dev/null
++++ b/scripts/demo/base/src/board/storage.ts
+@@ -0,0 +1,85 @@
++import type { Board, Card, Column, Label, LabelColor } from "./types";
++
++export const FORMAT_VERSION = 2;
++
++const LABEL_COLORS: LabelColor[] = ["grey", "red", "orange", "green", "blue", "purple"];
++
++type Stored = { version: number; board: Board };
++
++export class StorageError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "StorageError";
++  }
++}
++
++export function toJSON(board: Board): string {
++  const stored: Stored = { version: FORMAT_VERSION, board };
++  return JSON.stringify(stored);
++}
++
++export function fromJSON(text: string): Board {
++  const data: unknown = JSON.parse(text);
++  if (!isRecord(data)) {
++    throw new StorageError("A stored board is a JSON object");
++  }
++  if (data.version !== FORMAT_VERSION) {
++    throw new StorageError(`Board format ${String(data.version)} is not supported`);
++  }
++  return readBoard(data.board);
++}
++
++function readBoard(value: unknown): Board {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++    throw new StorageError("A board needs an id and a name");
++  }
++  if (!Array.isArray(value.columns) || !isRecord(value.cards)) {
++    throw new StorageError(`Board ${value.id} has no columns or cards`);
++  }
++  const cards: Record<string, Card> = {};
++  for (const card of Object.values(value.cards).map(readCard)) {
++    cards[card.id] = card;
++  }
++  return { id: value.id, name: value.name, columns: value.columns.map(readColumn), cards };
++}
++
++function readColumn(value: unknown): Column {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++    throw new StorageError("A column needs an id and a name");
++  }
++  const cardIds = Array.isArray(value.cardIds) ? value.cardIds.filter(isString) : [];
++  const limit = typeof value.limit === "number" ? value.limit : undefined;
++  return { id: value.id, name: value.name, cardIds, limit };
++}
++
++function readCard(value: unknown): Card {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
++    throw new StorageError("A card needs an id and a title");
++  }
++  return {
++    id: value.id,
++    title: value.title,
++    description: typeof value.description === "string" ? value.description : "",
++    labels: Array.isArray(value.labels) ? value.labels.filter(isLabel) : [],
++    assignee: typeof value.assignee === "string" ? value.assignee : undefined,
++    dueDate: typeof value.dueDate === "string" ? value.dueDate : undefined,
++    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
++    archived: value.archived === true,
++  };
++}
++
++function isLabel(value: unknown): value is Label {
++  return (
++    isRecord(value) &&
++    typeof value.name === "string" &&
++    LABEL_COLORS.some((color) => color === value.color)
++  );
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value);
++}
++
++function isString(value: unknown): value is string {
++  return typeof value === "string";
++}
+diff --git a/scripts/demo/base/src/board/types.ts b/scripts/demo/base/src/board/types.ts
+new file mode 100644
+index 0000000..26c3166
+--- /dev/null
++++ b/scripts/demo/base/src/board/types.ts
+@@ -0,0 +1,36 @@
++export type CardId = string;
++export type ColumnId = string;
++
++export type LabelColor = "grey" | "red" | "orange" | "green" | "blue" | "purple";
++
++export type Label = {
++  name: string;
++  color: LabelColor;
++};
++
++export type Card = {
++  id: CardId;
++  title: string;
++  description: string;
++  labels: Label[];
++  assignee?: string;
++  /** A day, as `YYYY-MM-DD`. */
++  dueDate?: string;
++  createdAt: string;
++  archived: boolean;
++};
++
++export type Column = {
++  id: ColumnId;
++  name: string;
++  cardIds: CardId[];
++  /** The most cards the column takes (work in progress); none when unset. */
++  limit?: number;
++};
++
++export type Board = {
++  id: string;
++  name: string;
++  columns: Column[];
++  cards: Record<CardId, Card>;
++};
+diff --git a/scripts/demo/base/src/main.ts b/scripts/demo/base/src/main.ts
+new file mode 100644
+index 0000000..d4167f4
+--- /dev/null
++++ b/scripts/demo/base/src/main.ts
+@@ -0,0 +1,26 @@
++import "./styles.css";
++
++import { loadBoard } from "./api/client";
++import { cardsIn } from "./board/board";
++import { renderCard } from "./ui/cardView";
++
++async function start(): Promise<void> {
++  const root = document.querySelector<HTMLElement>("#app");
++  if (root === null) {
++    throw new Error("index.html has no #app element");
++  }
++  const boardId = new URLSearchParams(location.search).get("board") ?? "default";
++  const board = await loadBoard(boardId);
++  document.title = `${board.name} · Taskboard`;
++
++  for (const column of board.columns) {
++    const section = document.createElement("section");
++    section.className = "column";
++    const heading = document.createElement("h2");
++    heading.textContent = column.name;
++    section.append(heading, ...cardsIn(board, column.id).map(renderCard));
++    root.append(section);
++  }
++}
++
++void start();
+diff --git a/scripts/demo/base/src/styles.css b/scripts/demo/base/src/styles.css
+new file mode 100644
+index 0000000..f34196d
+--- /dev/null
++++ b/scripts/demo/base/src/styles.css
+@@ -0,0 +1,74 @@
++:root {
++  font-family: system-ui, sans-serif;
++  color: #1f2328;
++  background: #f6f8fa;
++}
++
++#app {
++  display: flex;
++  gap: 16px;
++  padding: 24px;
++  align-items: flex-start;
++}
++
++.column {
++  flex: 0 0 280px;
++  padding: 12px;
++  border-radius: 8px;
++  background: #ebeef1;
++}
++
++.card {
++  margin-top: 8px;
++  padding: 10px 12px;
++  border-radius: 6px;
++  background: #fff;
++  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
++}
++
++.card h3 {
++  margin: 0;
++  font-size: 14px;
++  font-weight: 500;
++}
++
++.labels {
++  display: flex;
++  gap: 4px;
++  margin: 8px 0 0;
++  padding: 0;
++  list-style: none;
++}
++
++.label {
++  padding: 0 6px;
++  border-radius: 4px;
++  font-size: 12px;
++  color: #fff;
++}
++
++.label-grey {
++  background: #6e7781;
++}
++.label-red {
++  background: #cf222e;
++}
++.label-orange {
++  background: #bc4c00;
++}
++.label-green {
++  background: #1a7f37;
++}
++.label-blue {
++  background: #0969da;
++}
++.label-purple {
++  background: #8250df;
++}
++
++.badge {
++  display: inline-block;
++  margin-top: 8px;
++  font-size: 12px;
++  color: #57606a;
++}
+diff --git a/scripts/demo/base/src/ui/cardView.ts b/scripts/demo/base/src/ui/cardView.ts
+new file mode 100644
+index 0000000..c0d0f71
+--- /dev/null
++++ b/scripts/demo/base/src/ui/cardView.ts
+@@ -0,0 +1,40 @@
++import { cardSummary } from "../board/card";
++import type { Card, Label } from "../board/types";
++
++export function renderCard(card: Card): HTMLElement {
++  const element = document.createElement("article");
++  element.className = "card";
++  element.dataset.cardId = card.id;
++  element.title = cardSummary(card);
++
++  const title = document.createElement("h3");
++  title.textContent = card.title;
++  element.append(title);
++
++  if (card.labels.length > 0) {
++    element.append(renderLabels(card.labels));
++  }
++  if (card.dueDate !== undefined) {
++    element.append(badge(`Due ${card.dueDate}`, "due"));
++  }
++  return element;
++}
++
++function renderLabels(labels: Label[]): HTMLElement {
++  const list = document.createElement("ul");
++  list.className = "labels";
++  for (const label of labels) {
++    const item = document.createElement("li");
++    item.className = `label label-${label.color}`;
++    item.textContent = label.name;
++    list.append(item);
++  }
++  return list;
++}
++
++function badge(text: string, kind: string): HTMLElement {
++  const element = document.createElement("span");
++  element.className = `badge badge-${kind}`;
++  element.textContent = text;
++  return element;
++}
+diff --git a/scripts/demo/base/tsconfig.json b/scripts/demo/base/tsconfig.json
+new file mode 100644
+index 0000000..9af26df
+--- /dev/null
++++ b/scripts/demo/base/tsconfig.json
+@@ -0,0 +1,14 @@
++{
++  "compilerOptions": {
++    "target": "ES2023",
++    "lib": ["ES2023", "DOM", "DOM.Iterable"],
++    "module": "ESNext",
++    "moduleResolution": "Bundler",
++    "strict": true,
++    "noEmit": true,
++    "noFallthroughCasesInSwitch": true,
++    "isolatedModules": true,
++    "skipLibCheck": true
++  },
++  "include": ["src"]
++}
+diff --git a/scripts/demo/feature/README.md b/scripts/demo/feature/README.md
+new file mode 100644
+index 0000000..a1b9a75
+--- /dev/null
++++ b/scripts/demo/feature/README.md
+@@ -0,0 +1,24 @@
++# Taskboard
++
++A small kanban board for the web team: columns with work-in-progress limits, cards with labels,
++people, due times and reminders, and an activity feed.
++
++## Develop
++
++```sh
++pnpm install
++pnpm dev
++```
++
++`pnpm dev` proxies `/api` to the staging server (`https://staging.taskboard.example/api`); sign in
++there once in the same browser.
++
++## Check
++
++```sh
++pnpm typecheck
++pnpm lint
++pnpm format --check
++```
++
++Keyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md).
+diff --git a/scripts/demo/feature/docs/shortcuts.md b/scripts/demo/feature/docs/shortcuts.md
+new file mode 100644
+index 0000000..68a171f
+--- /dev/null
++++ b/scripts/demo/feature/docs/shortcuts.md
+@@ -0,0 +1,26 @@
++# Keyboard shortcuts
++
++Shortcuts work anywhere on the board except while typing in a text field.
++
++## Cards
++
++| Key     | Action                              |
++| ------- | ----------------------------------- |
++| `N`     | New card in the focused column      |
++| `E`     | Edit the focused card               |
++| `A`     | Archive the focused card            |
++| `L`     | Add a label to the focused card     |
++| `M`     | Assign the focused card to yourself |
++| `D`     | Set the due date and time           |
++| `R`     | Set a reminder for the focused card |
++| `Enter` | Open the focused card               |
++
++## Moving around
++
++| Key        | Action                                  |
++| ---------- | --------------------------------------- |
++| `←` `→`    | Focus the previous or next column       |
++| `↑` `↓`    | Focus the previous or next card         |
++| `Shift+←→` | Move the focused card to another column |
++| `/`        | Search cards                            |
++| `?`        | Show this list                          |
+diff --git a/scripts/demo/feature/public/logo.png b/scripts/demo/feature/public/logo.png
+new file mode 100644
+index 0000000..b1e1e92
+Binary files /dev/null and b/scripts/demo/feature/public/logo.png differ
+diff --git a/scripts/demo/feature/src/api/client.ts b/scripts/demo/feature/src/api/client.ts
+new file mode 100644
+index 0000000..146fd9d
+--- /dev/null
++++ b/scripts/demo/feature/src/api/client.ts
+@@ -0,0 +1,45 @@
++import { fromJSON, toJSON } from "../board/storage";
++import type { Board } from "../board/types";
++
++const API_URL = "/api/boards";
++
++export class ApiError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++  ) {
++    super(message);
++    this.name = "ApiError";
++  }
++}
++
++export async function loadBoard(id: string): Promise<Board> {
++  const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
++  if (!response.ok) {
++    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++  }
++  return fromJSON(await response.text());
++}
++
++export async function saveBoard(board: Board): Promise<void> {
++  const response = await fetch(`${API_URL}/${encodeURIComponent(board.id)}`, {
++    method: "PUT",
++    headers: { "Content-Type": "application/json" },
++    body: toJSON(board),
++  });
++  if (!response.ok) {
++    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++  }
++}
++
++export async function copyBoard(board: Board, name: string): Promise<Board> {
++  const response = await fetch(`${API_URL}/${encodeURIComponent(board.id)}/copy`, {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({ name }),
++  });
++  if (!response.ok) {
++    throw new ApiError(`Could not copy board ${board.id}: ${response.statusText}`, response.status);
++  }
++  return fromJSON(await response.text());
++}
+diff --git a/scripts/demo/feature/src/board/board.ts b/scripts/demo/feature/src/board/board.ts
+new file mode 100644
+index 0000000..cde7e78
+--- /dev/null
++++ b/scripts/demo/feature/src/board/board.ts
+@@ -0,0 +1,414 @@
++import { createCard, hasLabel, type NewCard } from "./card";
++import type { Board, Card, CardId, Column, ColumnId, Label } from "./types";
++
++export const DONE_COLUMN = "Done";
++
++const DEFAULT_COLUMNS = ["To do", "In progress", "Review", DONE_COLUMN];
++const MAX_ACTIVITY = 200;
++
++export class BoardError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "BoardError";
++  }
++}
++
++export type Activity =
++  | { kind: "added"; cardId: CardId; columnId: ColumnId; at: string }
++  | { kind: "moved"; cardId: CardId; from: ColumnId; to: ColumnId; at: string }
++  | { kind: "archived"; cardId: CardId; at: string }
++  | { kind: "restored"; cardId: CardId; at: string }
++  | { kind: "reminded"; cardId: CardId; at: string };
++
++const activity = new WeakMap<Board, Activity[]>();
++let nextColumnId = 1;
++
++function newColumnId(): ColumnId {
++  const id = `col-${nextColumnId}`;
++  nextColumnId += 1;
++  return id;
++}
++
++export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A board needs a name");
++  }
++  return {
++    id: crypto.randomUUID(),
++    name: trimmed,
++    columns: columnNames.map((columnName) => ({
++      id: newColumnId(),
++      name: columnName,
++      cardIds: [],
++    })),
++    cards: {},
++  };
++}
++
++// Columns
++
++export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((column) => column.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  const column: Column = { id: newColumnId(), name: trimmed, cardIds: [] };
++  board.columns.splice(position, 0, column);
++  return column;
++}
++
++export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++  const column = findColumn(board, columnId);
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  column.name = trimmed;
++}
++
++export function removeColumn(board: Board, columnId: ColumnId): Card[] {
++  const column = findColumn(board, columnId);
++  if (board.columns.length === 1) {
++    throw new BoardError("A board needs at least one column");
++  }
++  const removed = column.cardIds.map((id) => findCard(board, id));
++  for (const card of removed) {
++    delete board.cards[card.id];
++  }
++  board.columns = board.columns.filter((other) => other.id !== columnId);
++  return removed;
++}
++
++export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++  const column = findColumn(board, columnId);
++  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
++    throw new BoardError("A limit is a whole number of cards, at least 1");
++  }
++  column.limit = limit;
++}
++
++export function isFull(column: Column): boolean {
++  return column.limit !== undefined && column.cardIds.length >= column.limit;
++}
++
++// Lookups
++
++export function findColumn(board: Board, columnId: ColumnId): Column {
++  const column = board.columns.find((candidate) => candidate.id === columnId);
++  if (column === undefined) {
++    throw new BoardError(`No column with id ${columnId}`);
++  }
++  return column;
++}
++
++export function findCard(board: Board, cardId: CardId): Card {
++  const card = board.cards[cardId];
++  if (card === undefined) {
++    throw new BoardError(`No card with id ${cardId}`);
++  }
++  return card;
++}
++
++export function columnOf(board: Board, cardId: CardId): Column {
++  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  if (column === undefined) {
++    throw new BoardError(`Card ${cardId} is in no column`);
++  }
++  return column;
++}
++
++export function cardsIn(board: Board, columnId: ColumnId): Card[] {
++  return findColumn(board, columnId)
++    .cardIds.map((id) => findCard(board, id))
++    .filter((card) => !card.archived);
++}
++
++// Cards
++
++export function moveCard(board: Board, cardId: CardId, toColumnId: ColumnId, index?: number): void {
++  const from = columnOf(board, cardId);
++  const to = findColumn(board, toColumnId);
++  if (from.id !== to.id && isFull(to)) {
++    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++  }
++  from.cardIds = from.cardIds.filter((id) => id !== cardId);
++  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  if (to.name === DONE_COLUMN) {
++    clearReminder(findCard(board, cardId));
++  }
++  if (from.id !== to.id) {
++    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++  }
++}
++
++export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++  const column = findColumn(board, columnId);
++  if (isFull(column)) {
++    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++  }
++  const card = createCard(input);
++  board.cards[card.id] = card;
++  column.cardIds.push(card.id);
++  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
++  return card;
++}
++
++export function reorderCard(board: Board, cardId: CardId, index: number): void {
++  moveCard(board, cardId, columnOf(board, cardId).id, index);
++}
++
++export function sortColumn(board: Board, columnId: ColumnId, by: "title" | "created"): void {
++  const column = findColumn(board, columnId);
++  const cards = column.cardIds.map((id) => findCard(board, id));
++  cards.sort((a, b) =>
++    by === "title" ? a.title.localeCompare(b.title) : a.createdAt.localeCompare(b.createdAt),
++  );
++  column.cardIds = cards.map((card) => card.id);
++}
++
++export function editCard(
++  board: Board,
++  cardId: CardId,
++  changes: Partial<Pick<Card, "title" | "description">>,
++): void {
++  const card = findCard(board, cardId);
++  if (changes.title !== undefined) {
++    const title = changes.title.trim();
++    if (title === "") {
++      throw new BoardError("A card needs a title");
++    }
++    card.title = title;
++  }
++  if (changes.description !== undefined) {
++    card.description = changes.description.trim();
++  }
++}
++
++export function archiveCard(board: Board, cardId: CardId): void {
++  const card = findCard(board, cardId);
++  card.archived = true;
++  clearReminder(card);
++  record(board, { kind: "archived", cardId, at: now() });
++}
++
++export function restoreCard(board: Board, cardId: CardId): void {
++  const card = findCard(board, cardId);
++  if (!card.archived) {
++    return;
++  }
++  card.archived = false;
++  record(board, { kind: "restored", cardId, at: now() });
++}
++
++export function archivedCards(board: Board): Card[] {
++  return Object.values(board.cards).filter((card) => card.archived);
++}
++
++export function emptyArchive(board: Board): number {
++  const archived = archivedCards(board);
++  for (const card of archived) {
++    const column = columnOf(board, card.id);
++    column.cardIds = column.cardIds.filter((id) => id !== card.id);
++    delete board.cards[card.id];
++  }
++  return archived.length;
++}
++
++export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++  const from = findColumn(board, fromColumnId);
++  const to = findColumn(board, toColumnId);
++  const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
++  if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
++    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++  }
++  for (const cardId of moving) {
++    moveCard(board, cardId, toColumnId);
++  }
++  return moving.length;
++}
++
++export function archiveColumn(board: Board, columnId: ColumnId): number {
++  const cards = cardsIn(board, columnId);
++  for (const card of cards) {
++    archiveCard(board, card.id);
++  }
++  return cards.length;
++}
++
++// Labels and people
++
++export function addLabel(board: Board, cardId: CardId, label: Label): void {
++  const card = findCard(board, cardId);
++  if (!hasLabel(card, label.name)) {
++    card.labels.push(label);
++  }
++}
++
++export function removeLabel(board: Board, cardId: CardId, name: string): void {
++  const card = findCard(board, cardId);
++  card.labels = card.labels.filter((label) => label.name !== name);
++}
++
++export function labelsInUse(board: Board): Label[] {
++  const byName = new Map<string, Label>();
++  for (const card of Object.values(board.cards)) {
++    for (const label of card.labels) {
++      byName.set(label.name, label);
++    }
++  }
++  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
++}
++
++export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++  const card = findCard(board, cardId);
++  const name = person?.trim();
++  card.assignee = name === "" ? undefined : name;
++}
++
++export function people(board: Board): string[] {
++  const names = new Set<string>();
++  for (const card of Object.values(board.cards)) {
++    if (card.assignee !== undefined && !card.archived) {
++      names.add(card.assignee);
++    }
++  }
++  return [...names].sort((a, b) => a.localeCompare(b));
++}
++
++export function workload(board: Board): Map<string, number> {
++  const counts = new Map<string, number>();
++  for (const column of board.columns) {
++    if (column.name === DONE_COLUMN) {
++      continue;
++    }
++    for (const card of cardsIn(board, column.id)) {
++      if (card.assignee !== undefined) {
++        counts.set(card.assignee, (counts.get(card.assignee) ?? 0) + 1);
++      }
++    }
++  }
++  return counts;
++}
++
++// Statistics
++
++export type ColumnCount = { column: string; cards: number; limit?: number };
++
++export function columnCounts(board: Board): ColumnCount[] {
++  return board.columns.map((column) => ({
++    column: column.name,
++    cards: cardsIn(board, column.id).length,
++    limit: column.limit,
++  }));
++}
++
++export function overLimit(board: Board): Column[] {
++  return board.columns.filter(
++    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++  );
++}
++
++export function progress(board: Board): number {
++  const cards = Object.values(board.cards).filter((card) => !card.archived);
++  if (cards.length === 0) {
++    return 0;
++  }
++  const done = board.columns.find((column) => column.name === DONE_COLUMN);
++  const finished = done === undefined ? 0 : cardsIn(board, done.id).length;
++  return Math.round((finished / cards.length) * 100);
++}
++
++// Reminders
++
++const MINUTE_MS = 60_000;
++
++export type Reminder = { cardId: CardId; title: string; at: Date };
++
++export function reminderTime(card: Card): Date | undefined {
++  if (card.dueAt === undefined || card.remindBefore === undefined) {
++    return undefined;
++  }
++  return new Date(Date.parse(card.dueAt) - card.remindBefore * MINUTE_MS);
++}
++
++export function remindersDue(board: Board, at: Date): Reminder[] {
++  const due: Reminder[] = [];
++  for (const card of Object.values(board.cards)) {
++    const time = reminderTime(card);
++    if (!card.archived && time !== undefined && time <= at) {
++      due.push({ cardId: card.id, title: card.title, at: time });
++    }
++  }
++  return due.sort((a, b) => a.at.getTime() - b.at.getTime());
++}
++
++export function remind(board: Board, reminder: Reminder): void {
++  clearReminder(findCard(board, reminder.cardId));
++  record(board, { kind: "reminded", cardId: reminder.cardId, at: now() });
++}
++
++export function clearReminder(card: Card): void {
++  delete card.remindBefore;
++}
++
++// Search
++
++export function searchCards(board: Board, query: string): Card[] {
++  const needle = query.trim().toLowerCase();
++  if (needle === "") {
++    return [];
++  }
++  return Object.values(board.cards).filter(
++    (card) =>
++      !card.archived &&
++      (card.title.toLowerCase().includes(needle) ||
++        card.description.toLowerCase().includes(needle) ||
++        card.labels.some((label) => label.name.toLowerCase() === needle)),
++  );
++}
++
++// Activity
++
++function now(): string {
++  return new Date().toISOString();
++}
++
++function record(board: Board, entry: Activity): void {
++  const entries = activity.get(board) ?? [];
++  entries.push(entry);
++  if (entries.length > MAX_ACTIVITY) {
++    entries.splice(0, entries.length - MAX_ACTIVITY);
++  }
++  activity.set(board, entries);
++}
++
++export function recentActivity(board: Board, count = 20): Activity[] {
++  return (activity.get(board) ?? []).slice(-count).reverse();
++}
++
++export function describeActivity(board: Board, entry: Activity): string {
++  const title = board.cards[entry.cardId]?.title ?? "A deleted card";
++  switch (entry.kind) {
++    case "added":
++      return `${title} was added to ${columnName(board, entry.columnId)}`;
++    case "moved":
++      return `${title} moved from ${columnName(board, entry.from)} to ${columnName(board, entry.to)}`;
++    case "archived":
++      return `${title} was archived`;
++    case "restored":
++      return `${title} was restored`;
++    case "reminded":
++      return `${title} is due soon`;
++  }
++}
++
++function columnName(board: Board, columnId: ColumnId): string {
++  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++}
+diff --git a/scripts/demo/feature/src/board/card.ts b/scripts/demo/feature/src/board/card.ts
+new file mode 100644
+index 0000000..73b6e1a
+--- /dev/null
++++ b/scripts/demo/feature/src/board/card.ts
+@@ -0,0 +1,57 @@
++import type { Card, Label } from "./types";
++
++export type NewCard = {
++  title: string;
++  description?: string;
++  labels?: Label[];
++  assignee?: string;
++  dueAt?: string;
++  remindBefore?: number;
++};
++
++const MAX_TITLE_LENGTH = 200;
++
++export function createCard(input: NewCard, now = new Date()): Card {
++  const title = input.title.trim();
++  if (title === "") {
++    throw new Error("A card needs a title");
++  }
++  if (title.length > MAX_TITLE_LENGTH) {
++    throw new Error(`A card title has at most ${MAX_TITLE_LENGTH} characters`);
++  }
++  return {
++    id: crypto.randomUUID(),
++    title,
++    description: input.description?.trim() ?? "",
++    labels: input.labels ?? [],
++    assignee: input.assignee,
++    dueAt: input.dueAt,
++    remindBefore: input.remindBefore,
++    createdAt: now.toISOString(),
++    archived: false,
++  };
++}
++
++export function hasLabel(card: Card, name: string): boolean {
++  return card.labels.some((label) => label.name === name);
++}
++
++export function initials(name: string): string {
++  return name
++    .split(/\s+/)
++    .filter((part) => part !== "")
++    .map((part) => part.charAt(0).toUpperCase())
++    .join("")
++    .slice(0, 2);
++}
++
++export function cardSummary(card: Card): string {
++  const parts = [card.title];
++  if (card.assignee !== undefined) {
++    parts.push(`@${card.assignee}`);
++  }
++  if (card.dueAt !== undefined) {
++    parts.push(`due ${new Date(card.dueAt).toLocaleString()}`);
++  }
++  return parts.join(" · ");
++}
+diff --git a/scripts/demo/feature/src/board/storage.ts b/scripts/demo/feature/src/board/storage.ts
+new file mode 100644
+index 0000000..2242095
+--- /dev/null
++++ b/scripts/demo/feature/src/board/storage.ts
+@@ -0,0 +1,94 @@
++import type { Board, Card, Column, Label, LabelColor } from "./types";
++
++export const FORMAT_VERSION = 3;
++
++const LABEL_COLORS: LabelColor[] = ["grey", "red", "orange", "green", "blue", "purple"];
++
++type Stored = { version: number; board: Board };
++
++export class StorageError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "StorageError";
++  }
++}
++
++export function toJSON(board: Board): string {
++  const stored: Stored = { version: FORMAT_VERSION, board };
++  return JSON.stringify(stored);
++}
++
++export function fromJSON(text: string): Board {
++  const data: unknown = JSON.parse(text);
++  if (!isRecord(data)) {
++    throw new StorageError("A stored board is a JSON object");
++  }
++  if (data.version !== FORMAT_VERSION && data.version !== 2) {
++    throw new StorageError(`Board format ${String(data.version)} is not supported`);
++  }
++  return readBoard(data.board);
++}
++
++function readBoard(value: unknown): Board {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++    throw new StorageError("A board needs an id and a name");
++  }
++  if (!Array.isArray(value.columns) || !isRecord(value.cards)) {
++    throw new StorageError(`Board ${value.id} has no columns or cards`);
++  }
++  const cards: Record<string, Card> = {};
++  for (const card of Object.values(value.cards).map(readCard)) {
++    cards[card.id] = card;
++  }
++  return { id: value.id, name: value.name, columns: value.columns.map(readColumn), cards };
++}
++
++function readColumn(value: unknown): Column {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") {
++    throw new StorageError("A column needs an id and a name");
++  }
++  const cardIds = Array.isArray(value.cardIds) ? value.cardIds.filter(isString) : [];
++  const limit = typeof value.limit === "number" ? value.limit : undefined;
++  return { id: value.id, name: value.name, cardIds, limit };
++}
++
++function readCard(value: unknown): Card {
++  if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
++    throw new StorageError("A card needs an id and a title");
++  }
++  return {
++    id: value.id,
++    title: value.title,
++    description: typeof value.description === "string" ? value.description : "",
++    labels: Array.isArray(value.labels) ? value.labels.filter(isLabel) : [],
++    assignee: typeof value.assignee === "string" ? value.assignee : undefined,
++    dueAt: readDueAt(value),
++    remindBefore: typeof value.remindBefore === "number" ? value.remindBefore : undefined,
++    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
++    archived: value.archived === true,
++  };
++}
++
++/** Format 2 kept a day in `dueDate`; such a card is due at the end of that day. */
++function readDueAt(card: Record<string, unknown>): string | undefined {
++  if (typeof card.dueAt === "string") {
++    return card.dueAt;
++  }
++  return typeof card.dueDate === "string" ? `${card.dueDate}T23:59:59Z` : undefined;
++}
++
++function isLabel(value: unknown): value is Label {
++  return (
++    isRecord(value) &&
++    typeof value.name === "string" &&
++    LABEL_COLORS.some((color) => color === value.color)
++  );
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value);
++}
++
++function isString(value: unknown): value is string {
++  return typeof value === "string";
++}
+diff --git a/scripts/demo/feature/src/board/types.ts b/scripts/demo/feature/src/board/types.ts
+new file mode 100644
+index 0000000..300657c
+--- /dev/null
++++ b/scripts/demo/feature/src/board/types.ts
+@@ -0,0 +1,38 @@
++export type CardId = string;
++export type ColumnId = string;
++
++export type LabelColor = "grey" | "red" | "orange" | "green" | "blue" | "purple";
++
++export type Label = {
++  name: string;
++  color: LabelColor;
++};
++
++export type Card = {
++  id: CardId;
++  title: string;
++  description: string;
++  labels: Label[];
++  assignee?: string;
++  /** When the card is due, as an ISO date-time (`2026-10-24T17:00:00Z`). */
++  dueAt?: string;
++  /** Minutes before `dueAt` to remind the assignee. */
++  remindBefore?: number;
++  createdAt: string;
++  archived: boolean;
++};
++
++export type Column = {
++  id: ColumnId;
++  name: string;
++  cardIds: CardId[];
++  /** The most cards the column takes (work in progress); none when unset. */
++  limit?: number;
++};
++
++export type Board = {
++  id: string;
++  name: string;
++  columns: Column[];
++  cards: Record<CardId, Card>;
++};
+diff --git a/scripts/demo/feature/src/styles.css b/scripts/demo/feature/src/styles.css
+new file mode 100644
+index 0000000..8beeed0
+--- /dev/null
++++ b/scripts/demo/feature/src/styles.css
+@@ -0,0 +1,79 @@
++:root {
++  font-family: system-ui, sans-serif;
++  color: #1f2328;
++  background: #f6f8fa;
++}
++
++#app {
++  display: flex;
++  gap: 16px;
++  padding: 24px;
++  align-items: flex-start;
++}
++
++.column {
++  flex: 0 0 280px;
++  padding: 12px;
++  border-radius: 8px;
++  background: #ebeef1;
++}
++
++.card {
++  margin-top: 8px;
++  padding: 10px 12px;
++  border-radius: 6px;
++  background: #fff;
++  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
++}
++
++.card h3 {
++  margin: 0;
++  font-size: 14px;
++  font-weight: 500;
++}
++
++.labels {
++  display: flex;
++  gap: 4px;
++  margin: 8px 0 0;
++  padding: 0;
++  list-style: none;
++}
++
++.label {
++  padding: 0 6px;
++  border-radius: 4px;
++  font-size: 12px;
++  color: #fff;
++}
++
++.label-grey {
++  background: #6e7781;
++}
++.label-red {
++  background: #cf222e;
++}
++.label-orange {
++  background: #bc4c00;
++}
++.label-green {
++  background: #1a7f37;
++}
++.label-blue {
++  background: #0969da;
++}
++.label-purple {
++  background: #8250df;
++}
++
++.badge {
++  display: inline-block;
++  margin-top: 8px;
++  font-size: 12px;
++  color: #57606a;
++}
++
++.badge-reminder {
++  margin-left: 8px;
++  color: #9a6700;
++}
+diff --git a/scripts/demo/feature/src/ui/cardView.ts b/scripts/demo/feature/src/ui/cardView.ts
+new file mode 100644
+index 0000000..9e1e2e2
+--- /dev/null
++++ b/scripts/demo/feature/src/ui/cardView.ts
+@@ -0,0 +1,43 @@
++import { cardSummary } from "../board/card";
++import type { Card, Label } from "../board/types";
++
++export function renderCard(card: Card): HTMLElement {
++  const element = document.createElement("article");
++  element.className = "card";
++  element.dataset.cardId = card.id;
++  element.title = cardSummary(card);
++
++  const title = document.createElement("h3");
++  title.textContent = card.title;
++  element.append(title);
++
++  if (card.labels.length > 0) {
++    element.append(renderLabels(card.labels));
++  }
++  if (card.dueAt !== undefined) {
++    element.append(badge(`Due ${new Date(card.dueAt).toLocaleString()}`, "due"));
++  }
++  if (card.remindBefore !== undefined) {
++    element.append(badge(`Reminder ${card.remindBefore} min before`, "reminder"));
++  }
++  return element;
++}
++
++function renderLabels(labels: Label[]): HTMLElement {
++  const list = document.createElement("ul");
++  list.className = "labels";
++  for (const label of labels) {
++    const item = document.createElement("li");
++    item.className = `label label-${label.color}`;
++    item.textContent = label.name;
++    list.append(item);
++  }
++  return list;
++}
++
++function badge(text: string, kind: string): HTMLElement {
++  const element = document.createElement("span");
++  element.className = `badge badge-${kind}`;
++  element.textContent = text;
++  return element;
++}
+diff --git a/scripts/demo/feature/vite.config.ts b/scripts/demo/feature/vite.config.ts
+new file mode 100644
+index 0000000..51cc199
+--- /dev/null
++++ b/scripts/demo/feature/vite.config.ts
+@@ -0,0 +1,9 @@
++import { defineConfig } from "vite";
++
++export default defineConfig({
++  server: {
++    proxy: {
++      "/api": { target: "https://staging.taskboard.example", changeOrigin: true },
++    },
++  },
++});
+diff --git a/scripts/demo/main/README.md b/scripts/demo/main/README.md
+new file mode 100644
+index 0000000..7791831
+--- /dev/null
++++ b/scripts/demo/main/README.md
+@@ -0,0 +1,24 @@
++# Taskboard
++
++A small kanban board for the web team: columns with work-in-progress limits, cards with labels,
++people and due dates, and an activity feed.
++
++## Develop
++
++```sh
++pnpm install
++pnpm dev
++```
++
++On `localhost` the app shows a mock board (`src/api/mockBoards.ts`) instead of calling the API.
++
++## Check
++
++```sh
++pnpm typecheck
++pnpm lint
++pnpm format --check
++```
++
++Keyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md); `S` shows the swimlanes
++(one row per person) in every column.
+diff --git a/scripts/demo/main/docs/shortcuts.md b/scripts/demo/main/docs/shortcuts.md
+new file mode 100644
+index 0000000..07e5055
+--- /dev/null
++++ b/scripts/demo/main/docs/shortcuts.md
+@@ -0,0 +1,26 @@
++# Keyboard shortcuts
++
++Shortcuts work anywhere on the board except while typing in a text field.
++
++## Cards
++
++| Key     | Action                              |
++| ------- | ----------------------------------- |
++| `N`     | New card in the focused column      |
++| `E`     | Edit the focused card               |
++| `A`     | Archive the focused card            |
++| `L`     | Add a label to the focused card     |
++| `M`     | Assign the focused card to yourself |
++| `S`     | Show or hide swimlanes by person    |
++| `Enter` | Open the focused card               |
++
++## Moving around
++
++| Key        | Action                                  |
++| ---------- | --------------------------------------- |
++| `←` `→`    | Focus the previous or next column       |
++| `↑` `↓`    | Focus the previous or next card         |
++| `Shift+←→` | Move the focused card to another column |
++| `Shift+↑↓` | Move the focused card to another lane   |
++| `/`        | Search cards                            |
++| `?`        | Show this list                          |
+diff --git a/scripts/demo/main/public/logo.png b/scripts/demo/main/public/logo.png
+new file mode 100644
+index 0000000..93cd329
+Binary files /dev/null and b/scripts/demo/main/public/logo.png differ
+diff --git a/scripts/demo/main/src/api/client.ts b/scripts/demo/main/src/api/client.ts
+new file mode 100644
+index 0000000..fca3af8
+--- /dev/null
++++ b/scripts/demo/main/src/api/client.ts
+@@ -0,0 +1,42 @@
++import { fromJSON, toJSON } from "../board/storage";
++import type { Board } from "../board/types";
++import { mockBoard } from "./mockBoards";
++
++const API_URL = "/api/boards";
++const useMocks =
++  location.hostname === "localhost" || new URLSearchParams(location.search).has("mocks");
++
++export class ApiError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++  ) {
++    super(message);
++    this.name = "ApiError";
++  }
++}
++
++export async function loadBoard(id: string): Promise<Board> {
++  if (useMocks) {
++    return mockBoard(id);
++  }
++  const response = await fetch(`${API_URL}/${encodeURIComponent(id)}`);
++  if (!response.ok) {
++    throw new ApiError(`Could not load board ${id}: ${response.statusText}`, response.status);
++  }
++  return fromJSON(await response.text());
++}
++
++export async function saveBoard(board: Board): Promise<void> {
++  if (useMocks) {
++    return;
++  }
++  const response = await fetch(`${API_URL}/${encodeURIComponent(board.id)}`, {
++    method: "PUT",
++    headers: { "Content-Type": "application/json" },
++    body: toJSON(board),
++  });
++  if (!response.ok) {
++    throw new ApiError(`Could not save board ${board.id}: ${response.statusText}`, response.status);
++  }
++}
+diff --git a/scripts/demo/main/src/api/mockBoards.ts b/scripts/demo/main/src/api/mockBoards.ts
+new file mode 100644
+index 0000000..c0acbb9
+--- /dev/null
++++ b/scripts/demo/main/src/api/mockBoards.ts
+@@ -0,0 +1,48 @@
++import { addCard, createBoard, setLimit } from "../board/board";
++import type { Board } from "../board/types";
++
++export function mockBoard(id: string): Board {
++  const board = createBoard(id === "default" ? "Website relaunch" : id);
++  const [todo, doing, review, done] = board.columns;
++  if (todo === undefined || doing === undefined || review === undefined || done === undefined) {
++    return board;
++  }
++  setLimit(board, doing.id, 3);
++
++  addCard(board, todo.id, {
++    title: "Write the pricing page copy",
++    assignee: "Maya Lindqvist",
++    dueDate: "2026-10-24",
++  });
++  addCard(board, todo.id, {
++    title: "Pick photos for the team page",
++    labels: [{ name: "design", color: "purple" }],
++  });
++  addCard(board, doing.id, {
++    title: "Move the blog to the new templates",
++    labels: [{ name: "frontend", color: "blue" }],
++    assignee: "Tomás Herrera",
++  });
++  addCard(board, doing.id, {
++    title: "Redirects for the old URLs",
++    assignee: "Tomás Herrera",
++    dueDate: "2026-10-20",
++  });
++  addCard(board, doing.id, {
++    title: "Newsletter sign-up form",
++    labels: [{ name: "frontend", color: "blue" }],
++    assignee: "Maya Lindqvist",
++  });
++  addCard(board, review.id, {
++    title: "Cookie banner",
++    labels: [{ name: "legal", color: "orange" }],
++    assignee: "Priya Nair",
++    dueDate: "2026-10-19",
++  });
++  addCard(board, done.id, {
++    title: "New logo",
++    labels: [{ name: "design", color: "purple" }],
++    assignee: "Priya Nair",
++  });
++  return board;
++}
+diff --git a/scripts/demo/main/src/board/board.ts b/scripts/demo/main/src/board/board.ts
+new file mode 100644
+index 0000000..db16e66
+--- /dev/null
++++ b/scripts/demo/main/src/board/board.ts
+@@ -0,0 +1,415 @@
++import { createCard, hasLabel, type NewCard } from "./card";
++import type { Board, Card, CardId, Column, ColumnId, Label } from "./types";
++
++export const DONE_COLUMN = "Done";
++
++const DEFAULT_COLUMNS = ["To do", "In progress", "Review", DONE_COLUMN];
++const MAX_ACTIVITY = 200;
++
++export class BoardError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "BoardError";
++  }
++}
++
++export type Activity =
++  | { kind: "added"; cardId: CardId; columnId: ColumnId; at: string }
++  | { kind: "moved"; cardId: CardId; from: ColumnId; to: ColumnId; at: string }
++  | { kind: "archived"; cardId: CardId; at: string }
++  | { kind: "restored"; cardId: CardId; at: string };
++
++const activity = new WeakMap<Board, Activity[]>();
++let nextColumnId = 1;
++
++function newColumnId(): ColumnId {
++  const id = `col-${nextColumnId}`;
++  nextColumnId += 1;
++  return id;
++}
++
++export function createBoard(name: string, columnNames: string[] = DEFAULT_COLUMNS): Board {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A board needs a name");
++  }
++  return {
++    id: crypto.randomUUID(),
++    name: trimmed,
++    columns: columnNames.map((columnName) => ({
++      id: newColumnId(),
++      name: columnName,
++      cardIds: [],
++    })),
++    cards: {},
++  };
++}
++
++// Columns
++
++export function addColumn(board: Board, name: string, position = board.columns.length): Column {
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((column) => column.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  const column: Column = { id: newColumnId(), name: trimmed, cardIds: [] };
++  board.columns.splice(position, 0, column);
++  return column;
++}
++
++export function renameColumn(board: Board, columnId: ColumnId, name: string): void {
++  const column = findColumn(board, columnId);
++  const trimmed = name.trim();
++  if (trimmed === "") {
++    throw new BoardError("A column needs a name");
++  }
++  if (board.columns.some((other) => other.id !== columnId && other.name === trimmed)) {
++    throw new BoardError(`There is already a column called "${trimmed}"`);
++  }
++  column.name = trimmed;
++}
++
++export function removeColumn(board: Board, columnId: ColumnId): Card[] {
++  const column = findColumn(board, columnId);
++  if (board.columns.length === 1) {
++    throw new BoardError("A board needs at least one column");
++  }
++  const removed = column.cardIds.map((id) => findCard(board, id));
++  for (const card of removed) {
++    delete board.cards[card.id];
++  }
++  board.columns = board.columns.filter((other) => other.id !== columnId);
++  return removed;
++}
++
++export function setLimit(board: Board, columnId: ColumnId, limit: number | undefined): void {
++  const column = findColumn(board, columnId);
++  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
++    throw new BoardError("A limit is a whole number of cards, at least 1");
++  }
++  column.limit = limit;
++}
++
++export function isFull(column: Column): boolean {
++  return column.limit !== undefined && column.cardIds.length >= column.limit;
++}
++
++// Lookups
++
++export function findColumn(board: Board, columnId: ColumnId): Column {
++  const column = board.columns.find((candidate) => candidate.id === columnId);
++  if (column === undefined) {
++    throw new BoardError(`No column with id ${columnId}`);
++  }
++  return column;
++}
++
++export function findCard(board: Board, cardId: CardId): Card {
++  const card = board.cards[cardId];
++  if (card === undefined) {
++    throw new BoardError(`No card with id ${cardId}`);
++  }
++  return card;
++}
++
++export function columnOf(board: Board, cardId: CardId): Column {
++  const column = board.columns.find((candidate) => candidate.cardIds.includes(cardId));
++  if (column === undefined) {
++    throw new BoardError(`Card ${cardId} is in no column`);
++  }
++  return column;
++}
++
++export function cardsIn(board: Board, columnId: ColumnId): Card[] {
++  return findColumn(board, columnId)
++    .cardIds.map((id) => findCard(board, id))
++    .filter((card) => !card.archived);
++}
++
++export const UNASSIGNED = "Unassigned";
++const NO_DUE_DATE = "9999-12-31";
++
++/** One lane per person, by name, and a last one for unassigned cards; the soonest due first. */
++export function lanesOf(board: Board, columnId: ColumnId): Map<string, Card[]> {
++  const lanes = new Map<string, Card[]>();
++  for (const person of [...people(board), UNASSIGNED]) {
++    lanes.set(person, []);
++  }
++  const byDue = cardsIn(board, columnId)
++    .map((card) => ({ card, due: card.dueDate ?? NO_DUE_DATE }))
++    .sort((a, b) => a.due.localeCompare(b.due));
++  for (const { card } of byDue) {
++    lanes.get(card.assignee ?? UNASSIGNED)?.push(card);
++  }
++  return lanes;
++}
++
++// Cards
++
++export function moveCard(
++  board: Board,
++  cardId: CardId,
++  toColumnId: ColumnId,
++  index?: number,
++  lane?: string,
++): void {
++  const from = columnOf(board, cardId);
++  const to = findColumn(board, toColumnId);
++  if (from.id !== to.id && isFull(to)) {
++    throw new BoardError(`"${to.name}" already holds ${to.limit} cards`);
++  }
++  from.cardIds = from.cardIds.filter((id) => id !== cardId);
++  to.cardIds.splice(index ?? to.cardIds.length, 0, cardId);
++  if (lane !== undefined) {
++    moveToLane(board, cardId, lane);
++  }
++  if (from.id !== to.id) {
++    record(board, { kind: "moved", cardId, from: from.id, to: to.id, at: now() });
++  }
++}
++
++export function moveToLane(board: Board, cardId: CardId, lane: string): void {
++  assign(board, cardId, lane === UNASSIGNED ? undefined : lane);
++}
++
++export function addCard(board: Board, columnId: ColumnId, input: NewCard): Card {
++  const column = findColumn(board, columnId);
++  if (isFull(column)) {
++    throw new BoardError(`"${column.name}" already holds ${column.limit} cards`);
++  }
++  const card = createCard(input, new Date());
++  board.cards[card.id] = card;
++  column.cardIds.push(card.id);
++  record(board, { kind: "added", cardId: card.id, columnId, at: card.createdAt });
++  return card;
++}
++
++export function reorderCard(board: Board, cardId: CardId, index: number): void {
++  moveCard(board, cardId, columnOf(board, cardId).id, index);
++}
++
++export function editCard(
++  board: Board,
++  cardId: CardId,
++  changes: Partial<Pick<Card, "title" | "description">>,
++): void {
++  const card = findCard(board, cardId);
++  if (changes.title !== undefined) {
++    const title = changes.title.trim();
++    if (title === "") {
++      throw new BoardError("A card needs a title");
++    }
++    card.title = title;
++  }
++  if (changes.description !== undefined) {
++    card.description = changes.description.trim();
++  }
++}
++
++export function archiveCard(board: Board, cardId: CardId): void {
++  findCard(board, cardId).archived = true;
++  record(board, { kind: "archived", cardId, at: now() });
++}
++
++export function restoreCard(board: Board, cardId: CardId): void {
++  const card = findCard(board, cardId);
++  if (!card.archived) {
++    return;
++  }
++  card.archived = false;
++  record(board, { kind: "restored", cardId, at: now() });
++}
++
++export function archivedCards(board: Board): Card[] {
++  return Object.values(board.cards).filter((card) => card.archived);
++}
++
++export function emptyArchive(board: Board): number {
++  const archived = archivedCards(board);
++  for (const card of archived) {
++    const column = columnOf(board, card.id);
++    column.cardIds = column.cardIds.filter((id) => id !== card.id);
++    delete board.cards[card.id];
++  }
++  return archived.length;
++}
++
++export function moveAll(board: Board, fromColumnId: ColumnId, toColumnId: ColumnId): number {
++  const from = findColumn(board, fromColumnId);
++  const to = findColumn(board, toColumnId);
++  const moving = from.cardIds.filter((id) => !findCard(board, id).archived);
++  if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {
++    throw new BoardError(`"${to.name}" has room for ${to.limit - to.cardIds.length} more cards`);
++  }
++  for (const cardId of moving) {
++    moveCard(board, cardId, toColumnId);
++  }
++  return moving.length;
++}
++
++export function archiveColumn(board: Board, columnId: ColumnId): number {
++  const cards = cardsIn(board, columnId);
++  for (const card of cards) {
++    archiveCard(board, card.id);
++  }
++  return cards.length;
++}
++
++export function duplicateBoard(board: Board, name: string): Board {
++  const copy = createBoard(
++    name,
++    board.columns.map((column) => column.name),
++  );
++  for (const [index, column] of board.columns.entries()) {
++    const target = copy.columns[index];
++    if (target === undefined) {
++      continue;
++    }
++    target.limit = column.limit;
++    for (const card of cardsIn(board, column.id)) {
++      addCard(copy, target.id, { ...card, labels: [...card.labels] });
++    }
++  }
++  return copy;
++}
++
++// Labels and people
++
++export function addLabel(board: Board, cardId: CardId, label: Label): void {
++  const card = findCard(board, cardId);
++  if (!hasLabel(card, label.name)) {
++    card.labels.push(label);
++  }
++}
++
++export function removeLabel(board: Board, cardId: CardId, name: string): void {
++  const card = findCard(board, cardId);
++  card.labels = card.labels.filter((label) => label.name !== name);
++}
++
++export function labelsInUse(board: Board): Label[] {
++  const byName = new Map<string, Label>();
++  for (const card of Object.values(board.cards)) {
++    for (const label of card.labels) {
++      byName.set(label.name, label);
++    }
++  }
++  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
++}
++
++export function assign(board: Board, cardId: CardId, person: string | undefined): void {
++  const card = findCard(board, cardId);
++  const name = person?.trim();
++  card.assignee = name === "" ? undefined : name;
++}
++
++export function people(board: Board): string[] {
++  const names = new Set<string>();
++  for (const card of Object.values(board.cards)) {
++    if (card.assignee !== undefined && !card.archived) {
++      names.add(card.assignee);
++    }
++  }
++  return [...names].sort((a, b) => a.localeCompare(b));
++}
++
++export function workload(board: Board): Map<string, number> {
++  const counts = new Map<string, number>();
++  for (const column of board.columns) {
++    if (column.name === DONE_COLUMN) {
++      continue;
++    }
++    for (const card of cardsIn(board, column.id)) {
++      if (card.assignee !== undefined) {
++        counts.set(card.assignee, (counts.get(card.assignee) ?? 0) + 1);
++      }
++    }
++  }
++  return counts;
++}
++
++// Statistics
++
++export type ColumnCount = { column: string; cards: number; limit?: number };
++
++export function columnCounts(board: Board): ColumnCount[] {
++  return board.columns.map((column) => ({
++    column: column.name,
++    cards: cardsIn(board, column.id).length,
++    limit: column.limit,
++  }));
++}
++
++export function overLimit(board: Board): Column[] {
++  return board.columns.filter(
++    (column) => column.limit !== undefined && cardsIn(board, column.id).length > column.limit,
++  );
++}
++
++export function progress(board: Board): number {
++  const cards = Object.values(board.cards).filter((card) => !card.archived);
++  if (cards.length === 0) {
++    return 0;
++  }
++  const done = board.columns.find((column) => column.name === DONE_COLUMN);
++  const finished = done === undefined ? 0 : cardsIn(board, done.id).length;
++  return Math.round((finished / cards.length) * 100);
++}
++
++// Search
++
++export function searchCards(board: Board, query: string): Card[] {
++  const needle = query.trim().toLowerCase();
++  const terms = needle.split(/\s+/);
++  if (needle === "") {
++    return [];
++  }
++  return Object.values(board.cards).filter(
++    (card) =>
++      !card.archived &&
++      (card.title.toLowerCase().includes(needle) ||
++        card.description.toLowerCase().includes(needle) ||
++        card.assignee?.toLowerCase() === needle ||
++        card.labels.some((label) => label.name.toLowerCase() === needle)),
++  );
++}
++
++// Activity
++
++function now(): string {
++  return new Date().toISOString();
++}
++
++function record(board: Board, entry: Activity): void {
++  const entries = activity.get(board) ?? [];
++  entries.push(entry);
++  if (entries.length > MAX_ACTIVITY) {
++    entries.splice(0, entries.length - MAX_ACTIVITY);
++  }
++  activity.set(board, entries);
++}
++
++export function recentActivity(board: Board, count = 20): Activity[] {
++  return (activity.get(board) ?? []).slice(-count).reverse();
++}
++
++export function describeActivity(board: Board, entry: Activity): string {
++  const title = board.cards[entry.cardId]?.title ?? "A deleted card";
++  switch (entry.kind) {
++    case "added":
++      return `${title} was added to ${columnName(board, entry.columnId)}`;
++    case "moved":
++      return `${title} moved from ${columnName(board, entry.from)} to ${columnName(board, entry.to)}`;
++    case "archived":
++      return `${title} was archived`;
++    case "restored":
++      return `${title} was restored`;
++  }
++}
++
++function columnName(board: Board, columnId: ColumnId): string {
++  return board.columns.find((column) => column.id === columnId)?.name ?? "a removed column";
++}
+diff --git a/scripts/demo/main/src/board/card.ts b/scripts/demo/main/src/board/card.ts
+new file mode 100644
+index 0000000..3205c4a
+--- /dev/null
++++ b/scripts/demo/main/src/board/card.ts
+@@ -0,0 +1,55 @@
++import type { Card, Label } from "./types";
++
++export type NewCard = {
++  title: string;
++  description?: string;
++  labels?: Label[];
++  assignee?: string;
++  dueDate?: string;
++};
++
++const MAX_TITLE_LENGTH = 200;
++
++export function createCard(input: NewCard, now = new Date()): Card {
++  const title = input.title.trim();
++  if (title === "") {
++    throw new Error("A card needs a title");
++  }
++  if (title.length > MAX_TITLE_LENGTH) {
++    throw new Error(`A card title has at most ${MAX_TITLE_LENGTH} characters`);
++  }
++  return {
++    id: crypto.randomUUID(),
++    title,
++    description: input.description?.trim() ?? "",
++    labels: input.labels ?? [],
++    assignee: input.assignee?.trim() || undefined,
++    dueDate: input.dueDate,
++    createdAt: now.toISOString(),
++    archived: false,
++  };
++}
++
++export function hasLabel(card: Card, name: string): boolean {
++  return card.labels.some((label) => label.name === name);
++}
++
++export function initials(name: string): string {
++  return name
++    .split(/\s+/)
++    .filter((part) => part !== "")
++    .map((part) => part.charAt(0).toUpperCase())
++    .join("")
++    .slice(0, 2);
++}
++
++export function cardSummary(card: Card): string {
++  const parts = [card.title];
++  if (card.assignee !== undefined) {
++    parts.push(`@${card.assignee}`);
++  }
++  if (card.dueDate !== undefined) {
++    parts.push(`due ${card.dueDate}`);
++  }
++  return parts.join(" · ");
++}
+diff --git a/scripts/demo/main/src/styles.css b/scripts/demo/main/src/styles.css
+new file mode 100644
+index 0000000..e9f0876
+--- /dev/null
++++ b/scripts/demo/main/src/styles.css
+@@ -0,0 +1,97 @@
++:root {
++  font-family: system-ui, sans-serif;
++  color: #1f2328;
++  background: #f6f8fa;
++}
++
++#app {
++  display: flex;
++  gap: 16px;
++  padding: 24px;
++  align-items: flex-start;
++}
++
++.column {
++  flex: 0 0 280px;
++  padding: 12px;
++  border-radius: 8px;
++  background: #ebeef1;
++}
++
++.lane {
++  margin-top: 12px;
++  padding-top: 8px;
++  border-top: 1px solid #d0d7de;
++}
++
++.lane h4 {
++  margin: 0;
++  font-size: 12px;
++  color: #57606a;
++}
++
++.avatar {
++  float: right;
++  width: 22px;
++  height: 22px;
++  border-radius: 50%;
++  background: #ddf4ff;
++  font-size: 11px;
++  line-height: 22px;
++  text-align: center;
++}
++
++.card {
++  margin-top: 8px;
++  padding: 10px 12px;
++  border-radius: 6px;
++  background: #fff;
++  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
++}
++
++.card h3 {
++  margin: 0;
++  font-size: 14px;
++  font-weight: 500;
++}
++
++.labels {
++  display: flex;
++  gap: 4px;
++  margin: 8px 0 0;
++  padding: 0;
++  list-style: none;
++}
++
++.label {
++  padding: 0 6px;
++  border-radius: 4px;
++  font-size: 12px;
++  color: #fff;
++}
++
++.label-grey {
++  background: #6e7781;
++}
++.label-red {
++  background: #cf222e;
++}
++.label-orange {
++  background: #bc4c00;
++}
++.label-green {
++  background: #1a7f37;
++}
++.label-blue {
++  background: #0969da;
++}
++.label-purple {
++  background: #8250df;
++}
++
++.badge {
++  display: inline-block;
++  margin-top: 8px;
++  font-size: 12px;
++  color: #57606a;
++}
+diff --git a/scripts/demo/main/src/ui/cardView.ts b/scripts/demo/main/src/ui/cardView.ts
+new file mode 100644
+index 0000000..cf26a66
+--- /dev/null
++++ b/scripts/demo/main/src/ui/cardView.ts
+@@ -0,0 +1,51 @@
++import { cardSummary, initials } from "../board/card";
++import type { Card, Label } from "../board/types";
++
++export function renderCard(card: Card): HTMLElement {
++  const element = document.createElement("article");
++  element.className = "card";
++  element.dataset.cardId = card.id;
++  element.title = cardSummary(card);
++
++  const title = document.createElement("h3");
++  title.textContent = card.title;
++  element.append(title);
++
++  if (card.labels.length > 0) {
++    element.append(renderLabels(card.labels));
++  }
++  if (card.assignee !== undefined) {
++    element.append(avatar(card.assignee));
++  }
++  if (card.dueDate !== undefined) {
++    element.append(badge(`Due ${card.dueDate}`, "due"));
++  }
++  return element;
++}
++
++function renderLabels(labels: Label[]): HTMLElement {
++  const list = document.createElement("ul");
++  list.className = "labels";
++  for (const label of labels) {
++    const item = document.createElement("li");
++    item.className = `label label-${label.color}`;
++    item.textContent = label.name;
++    list.append(item);
++  }
++  return list;
++}
++
++function avatar(person: string): HTMLElement {
++  const element = document.createElement("span");
++  element.className = "avatar";
++  element.title = person;
++  element.textContent = initials(person);
++  return element;
++}
++
++function badge(text: string, kind: string): HTMLElement {
++  const element = document.createElement("span");
++  element.className = `badge badge-${kind}`;
++  element.textContent = text;
++  return element;
++}
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+index 3679e6f..174f575 100644
+--- a/scripts/git-sandbox.sh
++++ b/scripts/git-sandbox.sh
+@@ -1,5 +1,5 @@
+-# Sourced by scripts/conflict-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: the shared prelude for building a
+-# scripted repository in "$dir" without any user or system git config (risk RK19).
++# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: the shared prelude
++# for building a scripted repository in "$dir" without any user or system git config (risk RK19).
+ # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
+ 
+ sandbox_name=$(basename "$0" .sh)
+diff --git a/scripts/lsp-servers.sh b/scripts/lsp-servers.sh
+index 5510caa..d133c76 100755
+--- a/scripts/lsp-servers.sh
++++ b/scripts/lsp-servers.sh
+@@ -12,7 +12,8 @@
+ # rust-analyzer is the release binary, not rustup's proxy (`rustup component add` changes the toolchain).
+ # PHP: static-php-cli's prebuilt CLI (https://dl.static-php.dev/static-php-cli/common/); Phpactor needs PHP 8.2
+ # (https://phpactor.readthedocs.io/en/master/usage/standalone.html). Sourced by scripts/lsp-repo.sh for its versions
+-# and folders; it calls install_servers with --servers.
++# and folders; it calls install_servers with --servers. Sourced by scripts/demo-repo.sh, which calls
++# install_typescript_server: typescript-language-server alone, linked into servers-path beside what is there.
+ set -euo pipefail
+ # shellcheck source=scripts/git-sandbox.sh
+ source "$(dirname "${BASH_SOURCE[0]}")/git-sandbox.sh"
+@@ -178,6 +179,14 @@ install_servers() {
+     echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
+ }
+ 
++install_typescript_server() {
++    install_npm "$tsls_home" typescript-language-server "$tsls_version"
++    mkdir -p "$servers_path"
++    ln -sfn "$tsls_home/node_modules/.bin/typescript-language-server" "$servers_path/typescript-language-server"
++    echo "lsp-servers: typescript-language-server $tsls_version"
++    echo "lsp-servers: launch yamt with PATH=$servers_path:\$PATH"
++}
++
+ # $1: the virtual environment's folder. Makes it with ruff, ty and basedpyright.
+ install_python_tools() {
+     uv venv --quiet "$1" || die "could not make a Python virtual environment in $1"

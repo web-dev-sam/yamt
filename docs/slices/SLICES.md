@@ -321,7 +321,7 @@ hidden Undo/Redo as the menu's starting state: Undo and Redo start hidden, the m
 
 ## Crisp code text — macOS, Linux, Windows (session 10)
 
-Intent (owner brief 2026-10-13, `Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md`; #779:
+Intent (owner brief 2026-10-13, `Agent brief Crisp code text rendering on macOS, Linux and Windows (Tauri).md`, removed by the owner in `4ae24d4`: `git show 7ac7468:'Agent brief …'`; #779:
 the orchestrator decides as product owner this session): code text as crisp as WebStorm's on Linux and macOS, and a
 Windows build that matches WebStorm's ClearType text, with CI. Fix where the platform allows, compensate where it does
 not; engine-level hacks behind a setting; scrolling no slower; what is impossible per platform written down
