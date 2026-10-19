@@ -1,50 +1,39 @@
 <script setup lang="ts">
-import { useElementSize, useWindowSize } from "@vueuse/core";
 import { computed, shallowRef, useTemplateRef } from "vue";
 import ChevronDown from "~icons/lucide/chevron-down";
 import Pin from "~icons/lucide/pin";
 
-import { menuPosition, type Point } from "./menuPosition";
+import type { Point } from "./menuPosition";
 import { DOT_CLASSES, type ServerButton } from "./serverButtons";
 import ServerMenu from "./ServerMenu.vue";
+import type { OpenMenu } from "./serverMenuToggle";
 import { LANGUAGE_SERVERS, pinLabel, pinTitle, SERVERS, type DotKind } from "./serverText";
 import { useAppStore } from "./store";
 import { useDropdownMenu } from "./useDropdownMenu";
-
-type RowMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
+import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
 
 defineProps<{ buttons: readonly ServerButton[]; dot: DotKind }>();
 
 const { togglePin } = useAppStore();
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const list = useTemplateRef<HTMLUListElement>("list");
-const size = useElementSize(list, undefined, { box: "border-box" });
-const viewport = useWindowSize();
 const at = shallowRef<Point>({ x: 0, y: 0 });
-const rowMenu = shallowRef<RowMenu | null>(null);
+const rowMenu = shallowRef<OpenMenu | null>(null);
 const { openFor, toggle, close, menuKey } = useDropdownMenu<"servers">({
   menu: () => list.value,
   opener: () => opener.value,
 });
+const placement = useMenuPlacement(list, at);
 
 const expanded = computed(() => openFor.value !== null || rowMenu.value !== null);
-const placement = computed(() => {
-  const { x, y } = menuPosition({
-    pointer: at.value,
-    menu: { width: size.width.value, height: size.height.value },
-    viewport: { width: viewport.width.value, height: viewport.height.value },
-  });
-  return { left: `${x}px`, top: `${y}px` };
-});
 
 async function groupClicked(): Promise<void> {
   if (rowMenu.value !== null) {
     rowMenu.value = null;
     return;
   }
-  const box = opener.value?.getBoundingClientRect();
-  if (box !== undefined) {
-    at.value = { x: box.left, y: box.bottom };
+  if (opener.value !== null) {
+    at.value = belowLeft(opener.value);
   }
   await toggle("servers");
 }

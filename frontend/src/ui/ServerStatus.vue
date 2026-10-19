@@ -3,16 +3,14 @@ import { computed, shallowRef } from "vue";
 import CircleX from "~icons/lucide/circle-x";
 import TriangleAlert from "~icons/lucide/triangle-alert";
 
-import type { Point } from "./menuPosition";
 import { serverButtons } from "./serverButtons";
 import ServerGroup from "./ServerGroup.vue";
 import ServerMenu from "./ServerMenu.vue";
-import { menuAfterClick } from "./serverMenuToggle";
+import { menuAfterClick, type OpenMenu } from "./serverMenuToggle";
 import { dotKind, formatNote, groupDot, problemsTitle } from "./serverText";
 import { useAppStore } from "./store";
+import { belowLeft } from "./useMenuPlacement";
 import type { ProblemCounts } from "./useMergeController";
-
-type OpenMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
 
 const props = defineProps<{
   path: string | null;
@@ -35,10 +33,9 @@ const note = computed(() =>
 
 function openMenu(name: string, event: MouseEvent): void {
   if (event.currentTarget instanceof HTMLElement) {
-    const { left, bottom } = event.currentTarget.getBoundingClientRect();
     menu.value = menuAfterClick(menu.value, {
       name,
-      at: { x: left, y: bottom },
+      at: belowLeft(event.currentTarget),
       opener: event.currentTarget,
     });
   }

@@ -1,4 +1,4 @@
-import { onClickOutside, useWindowFocus } from "@vueuse/core";
+import { onClickOutside, useEventListener, useWindowFocus } from "@vueuse/core";
 import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
 
 import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
@@ -46,6 +46,14 @@ async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
     return;
   }
   await close(dropdown);
+}
+
+function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {
+  const target = event.target;
+  const inside = target instanceof Node && dropdown.menu()?.contains(target) === true;
+  if (dropdown.openFor.value !== null && !inside) {
+    void closeAfterClick(dropdown);
+  }
 }
 
 async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
@@ -103,6 +111,14 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
         return opener === null ? [] : [opener];
       },
     },
+  );
+  useEventListener(
+    window,
+    "contextmenu",
+    (event) => {
+      contextMenuElsewhere(dropdown, event);
+    },
+    { capture: true },
   );
   watch(useWindowFocus(), (focused) => {
     if (!focused) {
