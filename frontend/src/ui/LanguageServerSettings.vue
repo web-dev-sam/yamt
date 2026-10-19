@@ -40,14 +40,6 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
   }
 }
 
-async function flip(spec: ServerSpec, event: Event): Promise<void> {
-  const input = event.target;
-  if (input instanceof HTMLInputElement) {
-    await switchServer(spec.key, input.checked);
-    input.checked = !off.value.has(spec.key);
-  }
-}
-
 function fill(choice: PresetChoice): void {
   const fields = addedServerFields(choice);
   commandText.value = fields.command;
@@ -89,7 +81,7 @@ async function add(): Promise<void> {
               role="switch"
               class="size-4 shrink-0 self-center accent-primary"
               :checked="!off.has(spec.key)"
-              @change="flip(spec, $event)"
+              @click.prevent="switchServer(spec.key, off.has(spec.key))"
             />
             {{ spec.name }}
           </label>
