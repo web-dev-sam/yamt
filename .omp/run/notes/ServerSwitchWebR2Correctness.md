@@ -1,0 +1,20 @@
+```json
+{
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "#1288 is fixed. LanguageServerSettings.vue:76-96: the native `<input type=checkbox>` and its `<label>` are gone. A `<button type=\"button\" role=\"switch\">` takes their place, and nothing in it changes state natively. So `:aria-checked=\"!off.has(spec.key)\"` is the switch's only writer, and how fast the reply comes no longer matters. The report's in-page probe shows the same state at every read: sync, after the task, the next frame, and +500 ms ({before:true, sync:false, afterTask:false, frame:false, after500:false}, then the reverse).",
+    "Click direction is right. `switchServer(spec.key, off.has(spec.key))` passes `on = true` only when the server is off now. serverSetup.ts:202 sends that through `setServerSwitch(key, on)` and `applyAfter`, and the patch does not change that path.",
+    "A failed write leaves the shown state alone. `off` is computed from `settings.value.languageServers` (offServers, serverSetup.ts:73-78), and a refused write does not change the settings. The report's real-app chmod a-w run shows `checked` \"true\" and the row unmuted before, right after, at +500 ms and at +2 s. It also shows the role=alert 'Permission denied' text and ruff still running. I looked at /tmp/yamt-q5r2/app-dark-readonly.png: the problem bar is shown and the switches are unchanged.",
+    "The accessible name and role still work for `app-session click \"<name>\" --role switch`. find.ts:136-138 `roleOf` returns the explicit role \"switch\". find.ts:28-46 `NAME_FROM_CONTENT` includes `switch`. The button's textContent is just the name, because the box span is aria-hidden and holds only the svg. The report's WebKit `{\"clicked\":{\"role\":\"switch\",\"name\":\"TypeScript\"}}` and the real-app 'ruff' clicks confirm this.",
+    "Space and Enter work as on any native button. Both were observed in WebKit and gave the same state right after and at +500 ms. Focus is shown by the global `:focus-visible` outline (style.css:168-171), which applies to buttons.",
+    "An off row is still muted: `text-fg-muted` on the button while off. The light-theme WebKit screenshot (/tmp/yamt-q5r2/webkit-light-ts-off.png) shows TypeScript with an empty box and a muted name, and the other three filled and checked.",
+    "The colour tokens exist in both themes: `--color-control-border`, `--color-primary` and `--color-on-primary` (style.css:16/30/31 dark, 82/96/97 light). `~icons/lucide/check` without `?raw` is allowed in ui/ (PM3 limits only editor/model/connectors/lsp).",
+    "Two quick clicks before the reply both read the same `off` and send the same value, so the result is the same as one click. Nothing in the window holds a second copy of the switch's state.",
+    "Growth: the change stays inside the one owned file. No new state, import edge or store change. architecture.md:864 already describes the switch as a `role=\"switch\"` button whose state comes only from the settings file's `off`.",
+    "Recorded, not a finding: docs/plan.md:115 (§2 #83) still says 'a native `role=\"switch\"` checkbox labelled by its name'. That file is outside the brief's Owned list ('Non-goals: any other change'), so it is the orchestrator's doc step and not a block under RV8.",
+    "Deviations accepted: the name is inside the button (the brief allows either form); the header list was read after pressing Back. Open risk (the focus outline is not shown in any screenshot) accepted: the global :focus-visible rule is unchanged and keyboard use was observed.",
+    "Tests: none added, and the brief names none. The acceptance evidence is the WebKit and real-app smoke, and the report has it for all three lines. No mutation survivor list came with this task, and this SFC has no node test to mutate. I ran no tests."
+  ]
+}
+```
