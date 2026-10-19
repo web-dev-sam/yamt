@@ -1,0 +1,1541 @@
+commit d989b9a7fe8c893ea32a3874901fe37a2200987e
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 19:15:15 +0200
+
+    feat(ui): three dots on every resize handle; pane dividers on the strips; the split on every view (issue 4, plan #84)
+    
+    ResizeDots.vue; MergeView/ChoiceView grids from paneColumns; FileList width remembered (FILE_LIST_BOUNDS, #1273);
+    bands take no pointer events; app-session drag, click --double, --home, label names.
+
+diff --git a/.omp/run/notes/PaneHandles.md b/.omp/run/notes/PaneHandles.md
+new file mode 100644
+index 0000000..d28d3d4
+--- /dev/null
++++ b/.omp/run/notes/PaneHandles.md
+@@ -0,0 +1,117 @@
++I've built the slice, but it isn't ready to merge: on this patch's build, scrolling is clearly slower than on the commit before it, and I haven't found the cause. Everything else in the brief works and was observed in WebKit and the real app.
++
++```
++summary
++  - ResizeDots.vue: three 3 px dots, pointer-events none. Colours: bg-handle at rest, bg-handle-active 300 ms after hover, at once while dragging.
++  - MergeView builds its grid from paneColumns(paneSplit, "strip"). The header cells above the strips are now separators with dots. The strip wrappers are col-resize and use the same usePaneDividers listeners. This covers the deleted-side view too.
++  - ChoiceView uses the same split with 1 px gutters at columns 1/3/5. Each gutter has a 5 px hit box at z-10 with dots.
++  - FileList uses useColumnDrag; its width comes from createFileListWidth and is remembered. A double-click resets it to 240 px.
++  - style.css: the two handle tokens in both themes and the :root.col-resizing rule. theme.css: bands take no pointer events. New strips.browser.test.ts.
++  - app-session: drag, click --double, start-app --home. CSS queries now reach elements inside aria-hidden. Label names (asked by Main).
++  - fileListWidth.ts: FILE_LIST_BOUNDS (#1273).
++
++files_changed
++  frontend/src/ui/ResizeDots.vue (new), frontend/src/ui/MergeView.vue, frontend/src/ui/ChoiceView.vue, frontend/src/ui/FileList.vue,
++  frontend/src/ui/fileListWidth.ts, frontend/src/ui/fileListWidth.test.ts, frontend/src/style.css, frontend/src/editor/theme.css,
++  frontend/src/editor/strips.browser.test.ts (new), frontend/scripts/app-session.ts, frontend/scripts/app-session/{args.ts,args.test.ts,argv.ts,drive.ts,start.ts,find.ts,find.test.ts}
++
++tests_added
++  strips.browser.test.ts (WebKit):
++    - "a press on a band below its icon row reaches the strip's svg". Hand mutation: band rule removed → "expected SVGPathElement{} to be SVGSVGElement{}".
++    - "a press on an icon's hit area, off its glyph, reaches the icon". Hand mutation: pointer-events none on `.chunk-action rect` → "expected null not to be null".
++    - "a press on a wave join reaches its fold run". Hand mutation: `.strip-wave-hit` set to pointer-events none → "expected null not to be null".
++    All three restored; restored run: 3 passed.
++  args.test.ts:
++    - start-app home null by default and --home read.
++    - "--home needs a folder": no value refused; start-fixture refuses --home.
++    - click --double parsed.
++    - drag: name or css, signed --dx, optional --dy, --nth. Refused: missing --dx, 1.5, "right", "-", no target, --double.
++  find.test.ts:
++    - a CSS match inside aria-hidden is picked when painted; a name never picks it.
++    - an input is named by its labels (wrapping or for=), after aria-label and before title.
++  fileListWidth.test.ts:
++    - "the CSS bounds are the clamp's: 160 px and half the window".
++
++smoke_evidence
++  1. Recipes, run in frontend/:
++     - fmt:check exit 0 "All matched files use the correct format."
++     - lint exit 0
++     - typecheck exit 0
++     - test exit 0 "Tests 1530 passed (1530)"
++     - unused exit 0
++     - sfc-order exit 0
++     - test:browser: strips.browser.test.ts "Tests 3 passed (3)". The whole project gives "Test Files 2 failed | 2 passed (4), Tests 4 failed | 8 passed (12)". The same 4 tests fail on a copy of HEAD b22bd67: problems/removals screenshot "Access denied to /tmp/yamt-…png (server.fs)", and the two removal tests that follow it.
++     - Playwright WebKit had never launched on this host. I ran it with PLAYWRIGHT_BROWSERS_PATH=/tmp/h-pw (a copy of webkit-2370 plus the Ubuntu noble libicu74, libxml2 2.9.14 and libflite1 .so files in minibrowser-wpe/sys/lib) and the same LD_LIBRARY_PATH. The repo and ~/.cache were not touched.
++  2. WebKit, MiniBrowser through `app-session start-fixture --name h-fx` (dev server and `just webdriver` on free ports, not 4448), 1600x964 inner:
++     W1 dots:
++       - dark tokens #565362/#aba9b6; all three dots rgb(86, 83, 98), 3x3, centre offset 0.0, cursor col-resize.
++       - hover on "Local and Result widths": delay 0.3s, first read still rgb(86, 83, 98), next read rgb(171, 169, 182).
++       - hover on an apply icon: all handles rest.
++       - light: rgb(174, 179, 194); the hovered one rgb(118, 122, 138), delay 0.3s.
++       - screenshots: /tmp/h-shots/dark-handles.png, light-handles.png.
++     W2 drag left header +120:
++       - hosts [254,418.984] [712.984,419.016] [1172,419] → [254,538.984] [832.984,299.016] [1172,418.984]. Remote changed by 1/64 px (one WebKit layout unit).
++       - strip 672.984 → 792.984, width 40.
++       - band d unchanged.
++       - fixed left scroll gives scrollTops [101,181,181] before and after.
++       - Result --fold-wave-x/period 3.9296875px/19.578125px → 3.8359375px/19.421875px.
++       - zoomed join: /tmp/h-shots/join-after-drag.png, the wave unbroken.
++     W3 strip as handle:
++       - drag from the right strip's background -60: Remote 418.984 → 479, Result 299.016 → 239.016, Local unchanged.
++       - drag ".chunk-action-apply rect" --dx 0: "3 changes · 1 conflict" → "2 changes · 1 conflict", split unchanged.
++       - same with --dy 330: covers 3, giving "1 conflict".
++       - drag on ".strip-wave-hit" --dx 0: centre lines 54 → 62.
++       - Ctrl+click in the left pane (raw W3C actions): icon rows 5 → 4. The Ctrl+Z after it did not bring the row back; not looked into.
++     W4 minimum: dx -680 gives Local 220 (Remote 419 kept); after a reset, +890 gives Result 220.
++     W5 double-click: on the divider the panes are 418.984/419.016/419; file list 340 → 240, key removed.
++     W6 keyboard and cursor:
++       - while held: root class col-resizing, cursor col-resize on body and on .cm-line, getSelection "" , activeElement still the left pane's cm-content, split follows the pointer.
++       - document.hasFocus() is false in this MiniBrowser, so focus outlines could not be compared.
++       - W3C "release actions" does not deliver pointerup in WebKitWebDriver (the class stayed until an explicit pointerUp).
++     W7 narrow windows:
++       - 1100: Result 220, Local:Remote 296.859:240.141 = the stored ratio.
++       - 1000: 219/219/219.
++       - 700: 119 x3.
++       - back to 1600: 518/320/419.
++       - the stored value was unchanged at every size.
++     W8 reload: split the same; vue-core-playground-app.vue shows the same hosts.
++     W9 garbage {"local":0.9,"remote":0.5}: 418.984/419.016/419.
++     W10 minimap and find bar:
++       - Alt held after a drag: minimap display block, right edge 1591 = right scroller's right edge.
++       - Ctrl+F in Result: the bar sits pane right −16 px and is capped at pane width −32 (287 of 319). At thirds it is 318 wide in a 419 pane.
++  3. Real app (target/debug/yamt, scripts/conflict-repo.sh /tmp/h-repo, sessions h-split / h-narrow / h-light):
++     - drag left divider +150 on docs/removed.md (deleted-side view): 418.984 → 568.984, Remote 419 kept.
++     - assets/logo.bin (choice view): columns 607.906/287.422/447.656 = 0.4527/0.3333, the same as the merge views.
++     - choice view gutter drag -50: Remote +50.03, Local unchanged. Deleted-side view and src/added.ts then show 568.969/222.219/465.813, the same split.
++     - click --double on each handle: file list back to 240; panes 418.984/419.016/419.
++     - restart with --home /tmp/h-home: before stop fileList 300, hosts [314,541.813] [895.813,256.188] [1192,399]; after a new start-app, identical.
++     - drag ".chunk-action-apply rect" --dx 0 on vOn.ts: "2 changes · 1 conflict" → "2 changes", split unchanged.
++     - --size 1000x800: panes 199 x3, stored split unchanged.
++     - h-light: dots rgb(174, 179, 194); screenshots /tmp/h-shots/app-light.png, app-light-choice.png.
++  4. Scroll timing (.omp/run/scroll-timing.py, private Xvfb :93, same HOME for both builds), frames over 20 ms of 200:
++     - before (b22bd67 build): 16/14/30/25/21/12/30/15; a second run 14/13/18/25/25/16/38/29.
++     - this patch after one drag: 90/100/97/104/124/100/128/98, mean 20–23 ms.
++     - this patch at equal thirds: 92/102/99/105/125/99/133/101.
++     - so it is slower, and the dragged width is not the cause. See open_risks.
++  5. All sessions stopped (h-fx, h-split, h-narrow, h-light, h-tdrag, the timing tauri-driver and Xvfb).
++
++deviations_from_brief
++  - #1273: FILE_LIST_BOUNDS {minWidth "160px", maxWidth "50vw"} exported from fileListWidth.ts and built from the same constants as the clamp. FileList binds it and drops min-w-40 max-w-[50vw]. createFileListWidth's signature is unchanged.
++  - app-session label names: find.ts collects `element.labels` text (wrapping <label> and <label for>). nameOf goes aria-label → labels → title → content (HTML-AAM).
++  - app-session find.ts: CSS queries pick painted elements even inside aria-hidden. The strip svg is aria-hidden, so `drag ".chunk-action-apply"` could not find anything before. Name queries still skip aria-hidden.
++  - No component was split out: oxlint max-lines counts only MergeView's script block, and lint passes (the file is 313 lines in total).
++  - FileList's press measures the list's width once and each move calls setWidth(width at press + dx, innerWidth).
++  - The fixture session used free ports from start-fixture instead of 4448.
++  - Lines wanted in ui/AGENTS.md (row 7 owns it):
++    "ResizeDots.vue: the three dots of every resize handle (DotsState from useColumnDrag). MergeView's header cells above the strips and the strip wrappers are the pane dividers (usePaneDividers); ChoiceView's 1 px gutters carry the same dividers with a 5 px hit box; FileList's handle uses useColumnDrag and FILE_LIST_BOUNDS."
++  - Also needed outside my files: the project map tree must name ui/ResizeDots.vue and editor strips.browser.test.ts (map-check); architecture and CHANGELOG.
++  - frontend/.vitest/attachments/ was left by test:browser; bash-guard refused to delete it, so it needs removing.
++
++open_risks
++  - Scroll timing regression, cause not found. Lab builds of b22bd67 with one piece added each:
++    - the col-resizing rule alone: 11/13 frames late;
++    - the inline paneColumns grid alone: 21/29 frames late.
++    Neither explains ~100 late frames. Untested suspects: the v-on pointer listeners and cursor-col-resize on the will-change strip wrappers (MergeView.vue strip wrappers) and the separator header cells. This needs to be bisected before merge.
++  - Remote keeps its width to within 1/64 px, not exactly (WebKit layout unit), in both WebKit and the app.
++  - WebKitWebDriver "release actions" sends no pointerup, so an automated drag that fails part-way leaves col-resizing set until the next real pointerup. A real mouse is unaffected.
++```
+\ No newline at end of file
+diff --git a/.omp/run/patches/ServerSwitchRustR1.patch b/.omp/run/patches/ServerSwitchRustR1.patch
+new file mode 100644
+index 0000000..22cf5ec
+--- /dev/null
++++ b/.omp/run/patches/ServerSwitchRustR1.patch
+@@ -0,0 +1,166 @@
++commit dfecdfb5849a99ba9068b8689a86d0f6386ce824
++Author: Samuel Braun <sam@webry.com>
++Date:   2026-10-19 18:59:27 +0200
++
++    refactor(app): one host-root rule for both server settings commands (#1267)
++
++diff --git a/.omp/run/notes/ServerSwitchRustR1.md b/.omp/run/notes/ServerSwitchRustR1.md
++new file mode 100644
++index 0000000..04d6cc5
++--- /dev/null
+++++ b/.omp/run/notes/ServerSwitchRustR1.md
++@@ -0,0 +1,68 @@
+++**summary**
+++Block #1267 is fixed. A new private helper, `at_host_root`, in `src-tauri/src/settings.rs` holds the lock, the root match (a root that is not UTF-8 only reads) and `show_theme`. It carries the rule's doc line, so the rule is written in one place. `set_server_answer` and `set_server_switch` now both call it and are 3 lines each. Their signatures and IPC names are unchanged. As you asked, each command has the same one-line doc, so `bindings.ts` documents `setServerAnswer` and `setServerSwitch` the same way.
+++
+++**files_changed**
+++- `src-tauri/src/settings.rs`
+++- `frontend/src/ipc/bindings.ts` — regenerated by `just bindings` in my copy only; see the deviations.
+++
+++**tests_added**
+++None. The brief asks for none, and the behaviour is unchanged.
+++
+++**smoke_evidence**
+++1. All four checks exited 0:
+++   - `cargo fmt --all --check && echo FMT_OK` → `FMT_OK`
+++   - `cargo clippy --workspace --all-targets --features yamt-app/bindings -- -D warnings` → `Finished \`dev\` profile [unoptimized + debuginfo] target(s) in 1.23s`
+++   - `cargo test -p yamt-app` → `test result: ok. 56 passed; 0 failed` / `ok. 0 passed` / `ok. 5 passed; 0 failed` / `ok. 0 passed`
+++   - `just bindings-check` → `diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts` with no output, `exit=0`. It ran after `just bindings` regenerated the file.
+++2. The rule is stated once, on the helper, and both commands call it:
+++   ```rust
+++   /// Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
+++   /// key the window could look up, so nothing is stored for it.
+++   fn at_host_root<R: Runtime>(
+++       window: &WebviewWindow<R>,
+++       host: &State<'_, HostState>,
+++       current: &StoredSettings,
+++       edit: impl FnOnce(&Places, &str) -> Result<SettingsRead, yamt_settings::Error>,
+++   ) -> Result<SettingsRead, IpcError> {
+++       let places = places(window.path())?;
+++       let root = servers::lock(host).context().root;
+++       let read = match root {
+++           Some(root) => edit(&places, &root)?,
+++           None => yamt_settings::read(&places, current)?,
+++       };
+++       show_theme(window, read.stored.theme);
+++       Ok(read)
+++   }
+++   ```
+++   `set_server_answer` body:
+++   ```rust
+++   at_host_root(&window, &host, &current, |places, root| {
+++       yamt_settings::set_repository_answer(places, &current, root, answer)
+++   })
+++   ```
+++   `set_server_switch` body:
+++   ```rust
+++   at_host_root(&window, &host, &current, |places, root| {
+++       yamt_settings::set_server_switch(places, &current, root, &server, on)
+++   })
+++   ```
+++3. No test in `src-tauri` covers the `None` root for either command. A search for `set_server_answer|set_server_switch|root: None` in `src-tauri` finds only their registration in `commands.rs:30-31` and the definitions themselves.
+++
+++**deviations_from_brief**
+++- The brief's contract says the generated bindings stay exactly the same, but its fix moves the doc line onto the helper, which changes them. You chose to move the doc and add a short line on each command. The `bindings.ts` diff, which you'll regenerate after applying:
+++  ```
+++  -	/**
+++  -	 *  Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
+++  -	 *  key the window could look up, so nothing is stored for it.
+++  -	 */
+++  +	/**  Keyed by the repository root as `servers_context` gives it. */
+++   	setServerAnswer: …
+++  +	/**  Keyed by the repository root as `servers_context` gives it. */
+++   	setServerSwitch: …
+++  ```
+++- I edited `frontend/src/ipc/bindings.ts` only by running `just bindings` in my copy, which is outside the files I own; no hand edits.
+++- The helper takes `window`, `host` and `current` by reference (`&WebviewWindow<R>`, `&State<'_, HostState>`, `&StoredSettings`), because the commands still use `current` inside the closure. That is the only difference from the brief's sketched signature.
+++- `git diff --stat` also shows changes to `.omp/run/slices.json`. I didn't make them, so I left them alone.
+++
+++**open_risks**
+++- No test covers the `None` branch at `src-tauri/src/settings.rs:109-110`. As the brief notes, the mock window probably can't produce a root that is not UTF-8 [INFERENCE].
++\ No newline at end of file
++diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
++index a1762c1..42c2ea5 100644
++--- a/frontend/src/ipc/bindings.ts
+++++ b/frontend/src/ipc/bindings.ts
++@@ -19,11 +19,9 @@ export const commands = {
++ 	setAntialiasing: (current: StoredSettings, antialiasing: Antialiasing) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_antialiasing", { current, antialiasing })),
++ 	setKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_keys", { current, changes })),
++ 	moveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("move_settings", { current, path })),
++-	/**
++-	 *  Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
++-	 *  key the window could look up, so nothing is stored for it.
++-	 */
+++	/**  Keyed by the repository root as `servers_context` gives it. */
++ 	setServerAnswer: (current: StoredSettings, answer: "start" | "dontStart" | null) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_answer", { current, answer })),
+++	/**  Keyed by the repository root as `servers_context` gives it. */
++ 	setServerSwitch: (current: StoredSettings, server: string, on: boolean) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_switch", { current, server, on })),
++ 	setAddedServers: (current: StoredSettings, added: AddedServer[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_added_servers", { current, added })),
++ 	serversContext: () => __TAURI_INVOKE<ServerContext>("servers_context"),
++diff --git a/src-tauri/src/settings.rs b/src-tauri/src/settings.rs
++index 79bfe02..5481703 100644
++--- a/src-tauri/src/settings.rs
+++++ b/src-tauri/src/settings.rs
++@@ -97,6 +97,23 @@ pub(crate) fn move_settings<R: Runtime>(
++ 
++ /// Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
++ /// key the window could look up, so nothing is stored for it.
+++fn at_host_root<R: Runtime>(
+++    window: &WebviewWindow<R>,
+++    host: &State<'_, HostState>,
+++    current: &StoredSettings,
+++    edit: impl FnOnce(&Places, &str) -> Result<SettingsRead, yamt_settings::Error>,
+++) -> Result<SettingsRead, IpcError> {
+++    let places = places(window.path())?;
+++    let root = servers::lock(host).context().root;
+++    let read = match root {
+++        Some(root) => edit(&places, &root)?,
+++        None => yamt_settings::read(&places, current)?,
+++    };
+++    show_theme(window, read.stored.theme);
+++    Ok(read)
+++}
+++
+++/// Keyed by the repository root as `servers_context` gives it.
++ #[tauri::command]
++ #[specta::specta]
++ #[expect(
++@@ -109,16 +126,12 @@ pub(crate) fn set_server_answer<R: Runtime>(
++     current: StoredSettings,
++     answer: Option<RepositoryAnswer>,
++ ) -> Result<SettingsRead, IpcError> {
++-    let places = places(window.path())?;
++-    let root = servers::lock(&host).context().root;
++-    let read = match root {
++-        Some(root) => yamt_settings::set_repository_answer(&places, &current, &root, answer)?,
++-        None => yamt_settings::read(&places, &current)?,
++-    };
++-    show_theme(&window, read.stored.theme);
++-    Ok(read)
+++    at_host_root(&window, &host, &current, |places, root| {
+++        yamt_settings::set_repository_answer(places, &current, root, answer)
+++    })
++ }
++ 
+++/// Keyed by the repository root as `servers_context` gives it.
++ #[tauri::command]
++ #[specta::specta]
++ #[expect(
++@@ -132,14 +145,9 @@ pub(crate) fn set_server_switch<R: Runtime>(
++     server: String,
++     on: bool,
++ ) -> Result<SettingsRead, IpcError> {
++-    let places = places(window.path())?;
++-    let root = servers::lock(&host).context().root;
++-    let read = match root {
++-        Some(root) => yamt_settings::set_server_switch(&places, &current, &root, &server, on)?,
++-        None => yamt_settings::read(&places, &current)?,
++-    };
++-    show_theme(&window, read.stored.theme);
++-    Ok(read)
+++    at_host_root(&window, &host, &current, |places, root| {
+++        yamt_settings::set_server_switch(places, &current, root, &server, on)
+++    })
++ }
++ 
++ #[tauri::command]
+diff --git a/.omp/run/patches/ServerSwitchWebR1.patch b/.omp/run/patches/ServerSwitchWebR1.patch
+new file mode 100644
+index 0000000..a4d27d3
+--- /dev/null
++++ b/.omp/run/patches/ServerSwitchWebR1.patch
+@@ -0,0 +1,98 @@
++commit 3bbb89bd80b364b392cb10987320f7cfbcef9112
++Author: Samuel Braun <sam@webry.com>
++Date:   2026-10-19 19:13:36 +0200
++
++    fix(ui): the server switch has one writer of its checked state (#1277)
++
++diff --git a/.omp/run/notes/ServerSwitchWebR1.md b/.omp/run/notes/ServerSwitchWebR1.md
++new file mode 100644
++index 0000000..8806aca
++--- /dev/null
+++++ b/.omp/run/notes/ServerSwitchWebR1.md
++@@ -0,0 +1,57 @@
+++The switch's checked state now has one writer, `:checked`, and every Acceptance line was checked in the real app. One exception: `pnpm -C frontend unused` exits 1, because of a type export in `ui/useColumnDrag.ts`, a file this slice did not touch.
+++
+++```
+++summary
+++  frontend/src/ui/LanguageServerSettings.vue: `flip` (the `instanceof HTMLInputElement` check plus the second
+++  `input.checked = …` write after the await) is removed. The switch is now
+++  `@click.prevent="switchServer(spec.key, off.has(spec.key))"`. Cancelling the click puts the native checkbox back, so
+++  `:checked="!off.has(spec.key)"` is the only thing that sets it: after a reply and after a failed write. A second click
+++  while a write is running now reads the `off` in force at that moment.
+++
+++files_changed
+++  frontend/src/ui/LanguageServerSettings.vue
+++
+++tests_added
+++  none (the brief names none; the behaviour is the native activation of a WebKit checkbox, checked in the real app below)
+++
+++smoke_evidence
+++  1. pnpm -C frontend lint      → "$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"", lint=0
+++     pnpm -C frontend typecheck → "$ vue-tsc -b", exit 0
+++     pnpm -C frontend test      → "Test Files  114 passed (114)", "Tests  1550 passed (1550)"
+++     pnpm -C frontend fmt:check → "All matched files use the correct format.", exit 0
+++     pnpm -C frontend unused    → "Unused exported types (1)  DotsState  type  src/ui/useColumnDrag.ts:4:13", exit 1
+++       This exit 1 comes from a file this slice never touched (commit b22bd67, issue 4 pane split). `git status` shows
+++       only LanguageServerSettings.vue changed under frontend/.
+++  2. cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt"
+++     scripts/lsp-repo.sh --servers /tmp/yamt-q5r1/lsp → mid-merge, 9 conflicted files listed
+++     PATH=~/.cache/yamt/servers-path:$PATH just app-session start-app --name q-r1 --repo /tmp/yamt-q5r1/lsp
+++       → {"session":…, "configDir":"/tmp/yamt-app-session-q-r1-xzRt0X/home/.config", …}
+++     click Start → {"clicked":{"role":"button","name":"Start"}}; click Settings → {"clicked":{"role":"button","name":"Settings"}}
+++     Switches at first: "Biome=true ; clangd=true ; gopls=true ; Phpactor=true ; ruff=true ; ty=true ; basedpyright=true ; …"
+++     `app-session click ruff --role switch` → recipe failed (the name lookup misses a wrapping <label>, as in round 1),
+++       so each click was `input.click()` through `read`:
+++     Off:  {"before":true,"rightAfterClick":true,"after500ms":false,"muted":true,"problem":null}
+++           (right after the click the cancelled activation has put the box back; the reply then sets it through :checked)
+++           +3 s: "… ruff=false …"; pgrep "ruff server" → none
+++     On:   {"before":false,"rightAfterClick":false,"after500ms":true,"muted":false}
+++     Read-only: settings path from the view "/tmp/yamt-app-session-q-r1-xzRt0X/home/.config/yamt/settings.json";
+++           folder 755 → chmod a-w → 555
+++           {"before":true,"rightAfterClick":true,"after500ms":true,"muted":false,
+++            "alerts":["Could not use the settings file: writing /tmp/yamt-app-session-q-r1-xzRt0X/home/.config/yamt/settings.json failed: Permission denied (os error 13)"]}
+++           +2 s: ruff checked → true; the file still has "off": {}
+++           Screenshot /tmp/yamt-q5r1/switch-readonly.png: the problem bar shows that message.
+++     Restore: chmod 755 → "755 …/yamt"; just app-session stop --name q-r1 → "session":"ended", folder removed
+++
+++deviations_from_brief
+++  - `pnpm -C frontend unused` exits 1 because of `DotsState` in frontend/src/ui/useColumnDrag.ts:4. It is outside my
+++    target and comes from an earlier commit, so I left it as it is.
+++  - The switch was clicked with `input.click()` through `app-session read`, which the brief allows, because
+++    `app-session click` cannot name a checkbox inside a label.
+++
+++open_risks
+++  - After switching ruff back on, `pgrep "ruff server"` found nothing 3 s later. No Python file was open in this session.
+++    In round 1 ruff came back with py/api/stats.py open. [INFERENCE] servers start when a file they serve is open. This is
+++    not part of the switch's checked state, and I did not check it further.
+++  - frontend/src/ui/LanguageServerSettings.vue:84: the template handler's promise is not awaited. That is normal for Vue
+++    template handlers: `switchServer` reports its failures through the store's problem bar, as seen above.
+++```
++\ No newline at end of file
++diff --git a/frontend/src/ui/LanguageServerSettings.vue b/frontend/src/ui/LanguageServerSettings.vue
++index 023f2ff..5347fa0 100644
++--- a/frontend/src/ui/LanguageServerSettings.vue
+++++ b/frontend/src/ui/LanguageServerSettings.vue
++@@ -40,14 +40,6 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
++   }
++ }
++ 
++-async function flip(spec: ServerSpec, event: Event): Promise<void> {
++-  const input = event.target;
++-  if (input instanceof HTMLInputElement) {
++-    await switchServer(spec.key, input.checked);
++-    input.checked = !off.value.has(spec.key);
++-  }
++-}
++-
++ function fill(choice: PresetChoice): void {
++   const fields = addedServerFields(choice);
++   commandText.value = fields.command;
++@@ -89,7 +81,7 @@ async function add(): Promise<void> {
++               role="switch"
++               class="size-4 shrink-0 self-center accent-primary"
++               :checked="!off.has(spec.key)"
++-              @change="flip(spec, $event)"
+++              @click.prevent="switchServer(spec.key, off.has(spec.key))"
++             />
++             {{ spec.name }}
++           </label>
+diff --git a/frontend/scripts/app-session.ts b/frontend/scripts/app-session.ts
+index e2a853c..586b1a3 100644
+--- a/frontend/scripts/app-session.ts
++++ b/frontend/scripts/app-session.ts
+@@ -1,5 +1,5 @@
+ import { parseCommand, type Command } from "./app-session/args";
+-import { click, hover, press, read, scroll, shot, typeText } from "./app-session/drive";
++import { click, drag, hover, press, read, scroll, shot, typeText } from "./app-session/drive";
+ import { startFixture } from "./app-session/fixture";
+ import { focusAway, focusBack } from "./app-session/focus";
+ import { sessionNamed, fromRoot } from "./app-session/session";
+@@ -19,6 +19,8 @@ async function run(command: Command): Promise<unknown> {
+       return colourTable(fromRoot(command.file), command.colours);
+     case "click":
+       return click(sessionNamed(command.name), command);
++    case "drag":
++      return drag(sessionNamed(command.name), command);
+     case "press":
+       return press(sessionNamed(command.name), command);
+     case "type":
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index f1fa80e..3ed0ac4 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -12,6 +12,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
+     settings: null,
+     size: { width: 1600, height: 1000 },
+     record: null,
++    home: null,
+   });
+ });
+ 
+@@ -32,6 +33,8 @@ test("start-app reads every option of the acceptance run", () => {
+     "5",
+     "--binary",
+     "target/release/yamt",
++    "--home",
++    "/tmp/h-home",
+   ];
+   expect(parseCommand(argv)).toEqual({
+     kind: "start-app",
+@@ -41,6 +44,7 @@ test("start-app reads every option of the acceptance run", () => {
+     settings: '{"theme":"light"}',
+     size: { width: 800, height: 600 },
+     record: { file: "/tmp/s.mkv", seconds: 5 },
++    home: "/tmp/h-home",
+   });
+ });
+ 
+@@ -72,6 +76,15 @@ test("--settings must be a JSON object, --size must be <width>x<height>", () =>
+   expect(() => parseCommand([...base, "--size", "0x10"])).toThrow(/<width>x<height>/);
+ });
+ 
++test("--home needs a folder", () => {
++  expect(() => parseCommand(["start-app", "--name", "a", "--fresh-repo", "--home"])).toThrow(
++    /--home needs a value/,
++  );
++  expect(() => parseCommand(["start-fixture", "--name", "a", "--home", "/tmp/h"])).toThrow(
++    /unknown option --home/,
++  );
++});
++
+ test("a session name is a plain file name, never a path", () => {
+   expect(() => parseCommand(["stop", "--name", "../x"])).toThrow(/letters, digits/);
+   expect(() => parseCommand(["stop", "--name", ""])).toThrow(/letters, digits/);
+@@ -87,12 +100,13 @@ test("start-fixture takes a name and a size", () => {
+   });
+ });
+ 
+-test("click takes one accessible name, an optional role, a 0-based --nth and --x11", () => {
++test("click takes one accessible name, an optional role, a 0-based --nth, --x11 and --double", () => {
+   expect(parseCommand(["click", "--name", "fx", "Next change"])).toEqual({
+     kind: "click",
+     name: "fx",
+     query: { name: "Next change", role: null, nth: null },
+     x11: false,
++    double: false,
+   });
+   expect(
+     parseCommand(["click", "--name", "fx", "Dark", "--role", "button", "--nth", "0", "--x11"]),
+@@ -101,6 +115,14 @@ test("click takes one accessible name, an optional role, a 0-based --nth and --x
+     name: "fx",
+     query: { name: "Dark", role: "button", nth: 0 },
+     x11: true,
++    double: false,
++  });
++  expect(parseCommand(["click", "--name", "fx", "File list width", "--double"])).toEqual({
++    kind: "click",
++    name: "fx",
++    query: { name: "File list width", role: null, nth: null },
++    x11: false,
++    double: true,
+   });
+   expect(() => parseCommand(["click", "--name", "fx", "Dark", "--nth", "-1"])).toThrow(/≥ 0/);
+   expect(() => parseCommand(["click", "--name", "fx", "Next", "change"])).toThrow(
+@@ -108,6 +130,48 @@ test("click takes one accessible name, an optional role, a 0-based --nth and --x
+   );
+ });
+ 
++test("drag takes one target by name or css, a signed --dx, an optional --dy, --role and --nth", () => {
++  expect(parseCommand(["drag", "--name", "a", "Local and Result widths", "--dx", "-120"])).toEqual({
++    kind: "drag",
++    name: "a",
++    query: { name: "Local and Result widths", role: null, nth: null },
++    dx: -120,
++    dy: 0,
++  });
++  expect(
++    parseCommand([
++      "drag",
++      "--name",
++      "a",
++      ".chunk-action-apply",
++      "--dx",
++      "0",
++      "--dy",
++      "60",
++      "--nth",
++      "1",
++    ]),
++  ).toEqual({
++    kind: "drag",
++    name: "a",
++    query: { name: ".chunk-action-apply", role: null, nth: 1 },
++    dx: 0,
++    dy: 60,
++  });
++  expect(() => parseCommand(["drag", "--name", "a", "x"])).toThrow(/drag needs --dx <px>/);
++  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "1.5"])).toThrow(/whole number/);
++  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "right"])).toThrow(/whole number/);
++  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "5", "--dy", "-"])).toThrow(
++    /--dy -: expected a whole number/,
++  );
++  expect(() => parseCommand(["drag", "--name", "a", "--dx", "5"])).toThrow(
++    /exactly one accessible name/,
++  );
++  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "5", "--double"])).toThrow(
++    /unknown option --double/,
++  );
++});
++
+ test("press parses every key, in order", () => {
+   expect(
+     parseCommand(["press", "--name", "a", "Ctrl+Z", "Shift+Tab", "Enter", "a", "--x11"]),
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index 85f5d12..43fa531 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -1,5 +1,6 @@
+ import {
+   noPositionals,
++  offsetPx,
+   onePositional,
+   sessionName,
+   splitArgs,
+@@ -20,8 +21,10 @@ const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo]
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
++                [--home <dir>]   (the app's home; created when missing; stop keeps it)
+   start-fixture --name <n> [--size 1600x1000]
+-  click         --name <n> <accessible name> [--role <role>] [--nth <i, from 0>] [--x11]
++  click         --name <n> <accessible name> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
++  drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+   type          --name <n> <text> [--x11]
+   scroll        --name <n> <accessible name or css> --to <bottom|top|px> [--role <role>] [--nth <i>]
+@@ -45,9 +48,23 @@ export type Command =
+       readonly settings: string | null;
+       readonly size: Size;
+       readonly record: Recording | null;
++      readonly home: string | null;
+     }
+   | { readonly kind: "start-fixture"; readonly name: string; readonly size: Size }
+-  | { readonly kind: "click"; readonly name: string; readonly query: Query; readonly x11: boolean }
++  | {
++      readonly kind: "click";
++      readonly name: string;
++      readonly query: Query;
++      readonly x11: boolean;
++      readonly double: boolean;
++    }
++  | {
++      readonly kind: "drag";
++      readonly name: string;
++      readonly query: Query;
++      readonly dx: number;
++      readonly dy: number;
++    }
+   | {
+       readonly kind: "press";
+       readonly name: string;
+@@ -76,11 +93,12 @@ type CommandKind = Command["kind"];
+ 
+ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+   "start-app": {
+-    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds"],
++    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds", "home"],
+     flags: ["fresh-repo"],
+   },
+   "start-fixture": { values: ["name", "size"], flags: [] },
+-  click: { values: ["name", "role", "nth"], flags: ["x11"] },
++  click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
++  drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
+   press: { values: ["name"], flags: ["x11"] },
+   type: { values: ["name"], flags: ["x11"] },
+   scroll: { values: ["name", "to", "role", "nth"], flags: [] },
+@@ -170,6 +188,21 @@ function query(parsed: Parsed): Query {
+   };
+ }
+ 
++function dragCommand(parsed: Parsed): Command {
++  const dx = parsed.values.get("dx");
++  if (dx === undefined) {
++    throw new Error("drag needs --dx <px>");
++  }
++  const dy = parsed.values.get("dy");
++  return {
++    kind: "drag",
++    name: sessionName(parsed),
++    query: query(parsed),
++    dx: offsetPx(dx, "--dx"),
++    dy: dy === undefined ? 0 : offsetPx(dy, "--dy"),
++  };
++}
++
+ function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Command {
+   noPositionals(parsed);
+   const name = sessionName(parsed);
+@@ -184,6 +217,7 @@ function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Comm
+     settings: settingsText(parsed),
+     size: size(parsed),
+     record: recording(parsed),
++    home: parsed.values.get("home") ?? null,
+   };
+ }
+ 
+@@ -192,7 +226,7 @@ function inputCommand(kind: "click" | "press" | "type", parsed: Parsed): Command
+   const x11 = parsed.flags.has("x11");
+   switch (kind) {
+     case "click":
+-      return { kind, name, query: query(parsed), x11 };
++      return { kind, name, query: query(parsed), x11, double: parsed.flags.has("double") };
+     case "press":
+       if (parsed.positionals.length === 0) {
+         throw new Error("press needs at least one key");
+@@ -224,6 +258,8 @@ function build(kind: CommandKind, parsed: Parsed): Command {
+       return { kind, name: sessionName(parsed), query: query(parsed), to: scrollTo(parsed) };
+     case "hover":
+       return { kind, name: sessionName(parsed), query: query(parsed) };
++    case "drag":
++      return dragCommand(parsed);
+     case "read":
+       return {
+         kind,
+diff --git a/frontend/scripts/app-session/argv.ts b/frontend/scripts/app-session/argv.ts
+index b5ab7d7..7483212 100644
+--- a/frontend/scripts/app-session/argv.ts
++++ b/frontend/scripts/app-session/argv.ts
+@@ -72,3 +72,10 @@ export function wholeNumber(text: string, what: string, least: number): number {
+   }
+   return value;
+ }
++
++export function offsetPx(text: string, what: string): number {
++  if (!WHOLE_NUMBER.test(text)) {
++    throw new Error(`${what} ${text}: expected a whole number of pixels, e.g. 120 or -120`);
++  }
++  return Number(text);
++}
+diff --git a/frontend/scripts/app-session/drive.ts b/frontend/scripts/app-session/drive.ts
+index 946a126..62f4070 100644
+--- a/frontend/scripts/app-session/drive.ts
++++ b/frontend/scripts/app-session/drive.ts
+@@ -34,6 +34,11 @@ type Output = Readonly<Record<string, unknown>>;
+ 
+ const SCROLL_SETTLE_MS = 2000;
+ const SCROLL_POLL_MS = 100;
++const DRAG_STEPS = 10;
++const CLICK = [
++  { type: "pointerDown", button: 0 },
++  { type: "pointerUp", button: 0 },
++] as const;
+ 
+ async function candidates(state: SessionState, selector: string): Promise<Candidate[]> {
+   return parseCandidates(await execute(state, COLLECT_SCRIPT, [selector]));
+@@ -52,25 +57,52 @@ export async function click(state: SessionState, command: Of<"click">): Promise<
+     const env = displayEnv(appSession(state, "click --x11").display);
+     await run(
+       "xdotool",
+-      ["mousemove", "--sync", String(point.x), String(point.y), "click", "1"],
++      ["mousemove", "--sync", String(point.x), String(point.y), "click"]
++        .concat(command.double ? ["--repeat", "2"] : [])
++        .concat(["1"]),
+       env,
+     );
+-    return { clicked: target, screen: point };
++    return { clicked: target, double: command.double, screen: point };
+   }
+   const point = viewportPoint(placement);
++  const presses = command.double ? [...CLICK, ...CLICK] : CLICK;
++  await perform(state, [
++    {
++      type: "pointer",
++      id: "mouse",
++      parameters: { pointerType: "mouse" },
++      actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
++    },
++  ]);
++  return { clicked: target, double: command.double, viewport: point };
++}
++
++export async function drag(state: SessionState, command: Of<"drag">): Promise<Output> {
++  const chosen = await namedOrCss(state, command.query);
++  const from = viewportPoint(await reveal(state, chosen));
++  const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
++    type: "pointerMove",
++    duration: 0,
++    origin: "viewport",
++    x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
++    y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
++  }));
++  const [down, up] = CLICK;
+   await perform(state, [
+     {
+       type: "pointer",
+       id: "mouse",
+       parameters: { pointerType: "mouse" },
+       actions: [
+-        { type: "pointerMove", duration: 0, origin: "viewport", ...point },
+-        { type: "pointerDown", button: 0 },
+-        { type: "pointerUp", button: 0 },
++        { type: "pointerMove", duration: 0, origin: "viewport", ...from },
++        down,
++        ...moves,
++        up,
+       ],
+     },
+   ]);
+-  return { clicked: target, viewport: point };
++  const to = { x: from.x + command.dx, y: from.y + command.dy };
++  return { dragged: { role: roleOf(chosen), name: nameOf(chosen) }, from, to };
+ }
+ 
+ export async function press(state: SessionState, command: Of<"press">): Promise<Output> {
+diff --git a/frontend/scripts/app-session/find.test.ts b/frontend/scripts/app-session/find.test.ts
+index fffe312..ac82fb6 100644
+--- a/frontend/scripts/app-session/find.test.ts
++++ b/frontend/scripts/app-session/find.test.ts
+@@ -22,6 +22,7 @@ function candidate(id: string, fields: Partial<Omit<Candidate, "element">>): Can
+     role: "",
+     ariaLabel: "",
+     title: "",
++    label: "",
+     text: "",
+     width: 20,
+     height: 10,
+@@ -155,6 +156,28 @@ test("CSS matches are picked by visibility and role, with the same errors", () =
+   );
+ });
+ 
++test("a CSS match inside aria-hidden is picked when painted; a name never picks it", () => {
++  const icons = [
++    candidate("unpainted", { hiddenAbove: true, width: 0 }),
++    candidate("icon", { hiddenAbove: true, ariaLabel: "Apply" }),
++  ];
++  expect(pickByCss(icons, query(".chunk-action-apply rect")).element[ELEMENT_KEY]).toBe("icon");
++  expect(() => pickByName(icons, query("Apply"))).toThrow(/no visible element named "Apply"/);
++});
++
++test("an input is named by its labels (wrapping or for=), after aria-label and before title", () => {
++  const toggle = candidate("ruff", {
++    tag: "input",
++    type: "checkbox",
++    role: "switch",
++    label: " ruff ",
++  });
++  expect(nameOf(toggle)).toBe("ruff");
++  expect(pickByName([toggle], query("ruff", "switch")).element[ELEMENT_KEY]).toBe("ruff");
++  expect(nameOf(candidate("2", { tag: "input", label: "ruff", title: "T" }))).toBe("ruff");
++  expect(nameOf(candidate("3", { tag: "input", label: "ruff", ariaLabel: "Lint" }))).toBe("Lint");
++});
++
+ test("parseCandidates reads the page's records and rejects a malformed one", () => {
+   const record = {
+     element: { [ELEMENT_KEY]: "e1" },
+@@ -164,6 +187,7 @@ test("parseCandidates reads the page's records and rejects a malformed one", ()
+     role: "",
+     ariaLabel: "Settings",
+     title: "Settings",
++    label: "",
+     text: "",
+     width: 28,
+     height: 28,
+diff --git a/frontend/scripts/app-session/find.ts b/frontend/scripts/app-session/find.ts
+index 8d311f2..994afc4 100644
+--- a/frontend/scripts/app-session/find.ts
++++ b/frontend/scripts/app-session/find.ts
+@@ -15,6 +15,7 @@ export type Candidate = {
+   readonly role: string;
+   readonly ariaLabel: string;
+   readonly title: string;
++  readonly label: string;
+   readonly text: string;
+   readonly width: number;
+   readonly height: number;
+@@ -95,6 +96,7 @@ for (const element of document.querySelectorAll(arguments[0])) {
+     role: element.getAttribute("role") ?? "",
+     ariaLabel: element.getAttribute("aria-label") ?? "",
+     title: element.getAttribute("title") ?? "",
++    label: [...(element.labels ?? [])].map((label) => label.textContent ?? "").join(" "),
+     text: (element.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, ${MAX_TEXT_CHARS}),
+     width: rect.width,
+     height: rect.height,
+@@ -115,6 +117,7 @@ function parseCandidate(value: unknown): Candidate {
+     role: stringField(record, "role"),
+     ariaLabel: stringField(record, "ariaLabel"),
+     title: stringField(record, "title"),
++    label: stringField(record, "label"),
+     text: stringField(record, "text"),
+     width: numberField(record, "width"),
+     height: numberField(record, "height"),
+@@ -152,6 +155,11 @@ export function nameOf(candidate: Candidate): string {
+   if (label !== "") {
+     return label;
+   }
++  // HTML-AAM: an input's name is aria-label, then its <label>s, then title (https://www.w3.org/TR/html-aam-1.0/#accessible-name-computations-by-html-element).
++  const labelled = normalised(candidate.label);
++  if (labelled !== "") {
++    return labelled;
++  }
+   const title = normalised(candidate.title);
+   if (title !== "") {
+     return title;
+@@ -159,13 +167,12 @@ export function nameOf(candidate: Candidate): string {
+   return NAME_FROM_CONTENT[roleOf(candidate)] === true ? normalised(candidate.text) : "";
+ }
+ 
++function isPainted(candidate: Candidate): boolean {
++  return candidate.width > 0 && candidate.height > 0 && candidate.visibility === "visible";
++}
++
+ export function isVisible(candidate: Candidate): boolean {
+-  return (
+-    candidate.width > 0 &&
+-    candidate.height > 0 &&
+-    candidate.visibility === "visible" &&
+-    !candidate.hiddenAbove
+-  );
++  return isPainted(candidate) && !candidate.hiddenAbove;
+ }
+ 
+ function listed(candidates: readonly Candidate[]): string {
+@@ -179,8 +186,12 @@ function listed(candidates: readonly Candidate[]): string {
+   return `${shown.join("; ")}${more}`;
+ }
+ 
+-function pickVisible(matches: readonly Candidate[], nth: number | null, what: string): Candidate {
+-  const visible = matches.filter(isVisible);
++function pickVisible(
++  matches: readonly Candidate[],
++  { nth, shown }: { readonly nth: number | null; readonly shown: (c: Candidate) => boolean },
++  what: string,
++): Candidate {
++  const visible = matches.filter(shown);
+   if (visible.length === 0) {
+     const hidden = matches.length === 0 ? "" : `; ${matches.length} hidden: ${listed(matches)}`;
+     throw new Error(`no visible element ${what}${hidden}`);
+@@ -232,14 +243,15 @@ export function pickByName(candidates: readonly Candidate[], query: Query): Cand
+     const near = similar.length === 0 ? "nothing similar" : `similar: ${listed(similar)}`;
+     throw new Error(`no element ${what}; ${near}`);
+   }
+-  return pickVisible(matches, query.nth, what);
++  return pickVisible(matches, { nth: query.nth, shown: isVisible }, what);
+ }
+ 
++/** A CSS query targets what is painted, also inside `aria-hidden` (the strips' icons and waves). */
+ export function pickByCss(matches: readonly Candidate[], query: Query): Candidate {
+   const what = described(`matching CSS "${query.name}"`, query.role);
+   return pickVisible(
+     matches.filter((candidate) => hasRole(candidate, query.role)),
+-    query.nth,
++    { nth: query.nth, shown: isPainted },
+     what,
+   );
+ }
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 9739fcb..53e956a 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -49,8 +49,7 @@ export function tempFolder(name: string): { folder: string; logDir: string } {
+   return { folder, logDir };
+ }
+ 
+-function privateConfig(folder: string): { home: string; configDir: string } {
+-  const home = join(folder, "home");
++function privateConfig(home: string): string {
+   const configDir = join(home, ".config");
+   mkdirSync(configDir, { recursive: true });
+   const owners = [join(userInfo().homedir, ".config"), process.env["XDG_CONFIG_HOME"] ?? ""]
+@@ -60,7 +59,7 @@ function privateConfig(folder: string): { home: string; configDir: string } {
+   if (clash !== null) {
+     throw new Error(clash);
+   }
+-  return { home, configDir };
++  return configDir;
+ }
+ 
+ function prepareApp(command: StartApp, folder: string): Prepared {
+@@ -68,9 +67,10 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+   if (!existsSync(binary)) {
+     throw new Error(`no app at ${binary}; build it with cargo tauri build --debug --no-bundle`);
+   }
+-  const { home, configDir } = privateConfig(folder);
++  const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
++  const configDir = privateConfig(home);
+   if (command.settings !== null) {
+-    mkdirSync(join(configDir, "yamt"));
++    mkdirSync(join(configDir, "yamt"), { recursive: true });
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   const repoDir = command.repo.kind === "dir" ? fromRoot(command.repo.dir) : join(folder, "repo");
+@@ -202,7 +202,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
+     rmSync(folder, { recursive: true, force: true });
+     throw error;
+   }
+-  const { configDir, repoDir } = prepared;
++  const { home, configDir, repoDir } = prepared;
+   const empty: AppState = {
+     kind: "app",
+     name: command.name,
+@@ -220,6 +220,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
+   );
+   const { display, driverPort, session } = state;
+   return {
++    home,
+     display: `:${display}`,
+     driverPort,
+     session,
+diff --git a/frontend/src/editor/strips.browser.test.ts b/frontend/src/editor/strips.browser.test.ts
+new file mode 100644
+index 0000000..c7b6583
+--- /dev/null
++++ b/frontend/src/editor/strips.browser.test.ts
+@@ -0,0 +1,120 @@
++import "../style.css";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { page } from "vitest/browser";
++
++import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
++import { MergeController, type MergeOptions } from "./index";
++import { found, mount, unmountAll } from "./paneHarness";
++
++const WIDTH = 1200;
++const HEIGHT = 700;
++const LINES = 40;
++const CHUNK_START = 30;
++const CHUNK_LINES = 6;
++const PAINT_WAIT_MS = 3000;
++const HALF = 0.5;
++const INSIDE_PX = 1;
++const OPTIONS: MergeOptions = {
++  readOnly: false,
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  collapsed: true,
++  minimap: false,
++  servers: null,
++};
++const controllers: MergeController[] = [];
++
++function text(changed: boolean): string {
++  const lines = Array.from({ length: LINES }, (_, line) => {
++    const inChunk = line >= CHUNK_START && line < CHUNK_START + CHUNK_LINES;
++    return changed && inChunk ? `const line${line} = ${line} * 2;` : `const line${line} = ${line};`;
++  });
++  return [...lines, ""].join("\n");
++}
++
++async function data(): Promise<FileMergeData> {
++  const lines = { start: CHUNK_START, len: CHUNK_LINES };
++  return loadFixture("src/strips.ts", {
++    "strips.json": {
++      path: "src/strips.ts",
++      deleted: null,
++      middle: { kind: "Stages", text: text(false) },
++      local: text(true),
++      remote: text(false),
++      eol: "Lf",
++      disk_version: 0,
++      chunks: [
++        {
++          chunk: { id: 0, kind: "LocalOnly", base: lines, local: lines, remote: lines },
++          middle: lines,
++          words: {
++            chunk: 0,
++            local: { changed: [], removals: [] },
++            remote: { changed: [], removals: [] },
++          },
++          waiting: { kind: "SideLines" },
++        },
++      ],
++    },
++  });
++}
++
++async function painted<T extends Element>(strip: SVGSVGElement, selector: string): Promise<T> {
++  return vi.waitFor(() => found(strip.querySelector<T>(selector), selector), {
++    timeout: PAINT_WAIT_MS,
++  });
++}
++
++function onScreen(path: SVGGeometryElement, x: number, y: number): DOMPoint {
++  const matrix = path.getScreenCTM();
++  if (matrix === null) {
++    throw new Error("no screen matrix");
++  }
++  return new DOMPoint(x, y).matrixTransform(matrix);
++}
++
++async function leftStrip(): Promise<SVGSVGElement> {
++  const hosts = mount();
++  const controller = new MergeController(await data(), hosts, OPTIONS);
++  controllers.push(controller);
++  return hosts.strips[0];
++}
++
++beforeEach(async () => {
++  await page.viewport(WIDTH, HEIGHT);
++});
++
++afterEach(() => {
++  controllers.splice(0).forEach((controller) => controller.destroy());
++  unmountAll();
++});
++
++test("a press on a band below its icon row reaches the strip's svg, so it can drag the divider", async () => {
++  const strip = await leftStrip();
++  const band = await painted<SVGPathElement>(strip, "path.chunk-band");
++  const icons = (await painted<SVGGElement>(strip, ".chunk-action")).getBoundingClientRect();
++  const box = band.getBoundingClientRect();
++  const point = new DOMPoint(box.left + box.width * HALF, (icons.bottom + box.bottom) * HALF);
++
++  expect(point.y).toBeGreaterThan(icons.bottom);
++  expect(point.y).toBeLessThan(box.bottom);
++  expect(document.elementFromPoint(point.x, point.y)).toBe(strip);
++});
++
++test("a press on an icon's hit area, off its glyph, reaches the icon", async () => {
++  const strip = await leftStrip();
++  const hit = await painted<SVGRectElement>(strip, ".chunk-action-apply rect");
++  const corner = onScreen(hit, INSIDE_PX, INSIDE_PX);
++
++  expect(
++    document.elementFromPoint(corner.x, corner.y)?.closest(".chunk-action-apply"),
++  ).not.toBeNull();
++});
++
++test("a press on a wave join reaches its fold run", async () => {
++  const strip = await leftStrip();
++  const join = await painted<SVGPathElement>(strip, ".strip-wave-hit");
++  const middle = join.getPointAtLength(join.getTotalLength() * HALF);
++  const point = onScreen(join, middle.x, middle.y);
++
++  expect(document.elementFromPoint(point.x, point.y)?.closest("[data-fold-run]")).not.toBeNull();
++});
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 8873d96..3d4b2e6 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -36,6 +36,7 @@
+ 
+ path.chunk-band {
+   fill: var(--chunk-tone);
++  pointer-events: none;
+ }
+ 
+ .cm-editor .chunk-word-modified {
+diff --git a/frontend/src/style.css b/frontend/src/style.css
+index 67bb867..47ec80f 100644
+--- a/frontend/src/style.css
++++ b/frontend/src/style.css
+@@ -19,6 +19,8 @@
+   --color-code: #c4c2ce;
+   --color-gutter: #565362;
+   --color-gutter-active: #aba9b6;
++  --color-handle: #565362;
++  --color-handle-active: #aba9b6;
+   --color-active-line: #1c1b21;
+   --color-selection: #774cd573;
+   --color-caret: #e5e3eb;
+@@ -83,6 +85,8 @@
+   --color-code: #080808;
+   --color-gutter: #aeb3c2;
+   --color-gutter-active: #767a8a;
++  --color-handle: #aeb3c2;
++  --color-handle-active: #767a8a;
+   --color-active-line: #f5f8fe;
+   --color-selection: #a6d2ff;
+   --color-caret: #000000;
+@@ -165,4 +169,11 @@
+     outline: 2px solid var(--color-primary);
+     outline-offset: 1px;
+   }
++
++  /* VS Code `Sash.onPointerStart` holds the cursor over the whole window while dragging (microsoft/vscode#21675). */
++  :root.col-resizing * {
++    cursor: col-resize !important;
++    -webkit-user-select: none !important;
++    user-select: none !important;
++  }
+ }
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 7b6c693..08c1d54 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -1,13 +1,16 @@
+ <script setup lang="ts">
+-import { computed } from "vue";
++import { computed, useTemplateRef } from "vue";
+ 
+ import type { FileSides, Side } from "../ipc";
+ import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import { paneColumns, type PaneWidths } from "./paneSplit";
++import ResizeDots from "./ResizeDots.vue";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
++import { usePaneDividers } from "./usePaneDividers";
+ 
+ type Column = {
+   readonly side: Side;
+@@ -21,10 +24,16 @@ type Column = {
+ 
+ const props = defineProps<{ sides: FileSides; shown: boolean }>();
+ 
+-const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
++const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
+ 
+-const { takeSide, reset, sideNames, taken } = useAppStore();
++const section = useTemplateRef<HTMLElement>("section");
++const localGutter = useTemplateRef<HTMLDivElement>("localGutter");
++const remoteGutter = useTemplateRef<HTMLDivElement>("remoteGutter");
++const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit } =
++  useAppStore();
++const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+ 
++const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "gap"));
+ const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
+ const columns = computed(() =>
+   SIDES.map((side): Column => {
+@@ -41,6 +50,20 @@ const columns = computed(() =>
+   }),
+ );
+ const result = computed(() => resultLine(props.sides, sideTaken.value));
++
++function paneWidths(): PaneWidths | null {
++  if (section.value === null || localGutter.value === null || remoteGutter.value === null) {
++    return null;
++  }
++  const whole = section.value.getBoundingClientRect();
++  const localEdge = localGutter.value.getBoundingClientRect();
++  const remoteEdge = remoteGutter.value.getBoundingClientRect();
++  return {
++    local: localEdge.left - whole.left,
++    center: remoteEdge.left - localEdge.right,
++    remote: whole.right - remoteEdge.right,
++  };
++}
+ </script>
+ 
+ <template>
+@@ -53,7 +76,9 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+       <SettingsButton />
+     </header>
+     <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
++      ref="section"
++      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-island bg-separator"
++      :style="{ gridTemplateColumns }"
+     >
+       <template v-for="column in columns" :key="column.side">
+         <div
+@@ -80,7 +105,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+         </div>
+       </template>
+       <div
+-        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
++        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
+       >
+         <h2 class="text-fg-muted">Result</h2>
+         <button
+@@ -92,9 +117,31 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
+           Reset
+         </button>
+       </div>
+-      <p class="col-start-2 row-start-2 bg-panel p-3 wrap-break-word" role="status">
++      <p class="col-start-3 row-start-2 bg-panel p-3 wrap-break-word" role="status">
+         {{ result }}
+       </p>
++      <div ref="localGutter" class="relative col-start-2 row-span-2 row-start-1">
++        <div
++          role="separator"
++          aria-orientation="vertical"
++          aria-label="Local and Result widths"
++          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
++          v-on="dividers.local.listeners"
++        >
++          <ResizeDots :state="dividers.local.dots.value" />
++        </div>
++      </div>
++      <div ref="remoteGutter" class="relative col-start-4 row-span-2 row-start-1">
++        <div
++          role="separator"
++          aria-orientation="vertical"
++          aria-label="Result and Remote widths"
++          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
++          v-on="dividers.remote.listeners"
++        >
++          <ResizeDots :state="dividers.remote.dots.value" />
++        </div>
++      </div>
+     </section>
+   </div>
+ </template>
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index 8c0ec80..b35abdc 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -7,20 +7,28 @@ import ListTree from "~icons/lucide/list-tree";
+ import type { FileEntry } from "../ipc";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
++import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
++import ResizeDots from "./ResizeDots.vue";
++import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
+ 
+ const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+ const emit = defineEmits<{ select: [path: string] }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+-const handle = useTemplateRef<HTMLDivElement>("handle");
+-const width = shallowRef<number | null>(null);
+ const { mode, toggle } = createFileListMode();
++const { width, setWidth, resetWidth } = createFileListWidth();
++const resize = useColumnDrag({
++  accepts: (event) => event.target === event.currentTarget,
++  press: startResize,
++  reset: resetWidth,
++});
+ const closed = shallowRef<ReadonlySet<string>>(new Set());
+-let grabOffset = 0;
+ 
+-const widthStyle = computed(() => (width.value === null ? {} : { width: `${width.value}px` }));
++const widthStyle = computed(() =>
++  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
++);
+ const rows = computed(() => treeRows(props.files, closed.value));
+ const viewButton = computed(() =>
+   mode.value === "list"
+@@ -38,18 +46,16 @@ watch(
+   },
+ );
+ 
+-function startResize(event: PointerEvent): void {
+-  event.preventDefault();
+-  if (list.value !== null) {
+-    grabOffset = event.clientX - list.value.getBoundingClientRect().right;
+-  }
+-  handle.value?.setPointerCapture(event.pointerId);
+-}
+-
+-function resize(event: PointerEvent): void {
+-  if (list.value !== null && handle.value?.hasPointerCapture(event.pointerId) === true) {
+-    width.value = event.clientX - grabOffset - list.value.getBoundingClientRect().left;
++function startResize(): ColumnDrag | null {
++  if (list.value === null) {
++    return null;
+   }
++  const pressWidth = list.value.getBoundingClientRect().width;
++  return {
++    moveBy: (dx) => {
++      setWidth(pressWidth + dx, window.innerWidth);
++    },
++  };
+ }
+ 
+ function toggleFolder(path: string): void {
+@@ -64,7 +70,7 @@ function toggleFolder(path: string): void {
+ <template>
+   <aside
+     ref="list"
+-    class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col rounded-island bg-panel pb-1"
++    class="relative flex w-60 shrink-0 flex-col rounded-island bg-panel pb-1"
+     :style="widthStyle"
+   >
+     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
+@@ -115,13 +121,13 @@ function toggleFolder(path: string): void {
+       </li>
+     </ul>
+     <div
+-      ref="handle"
+       role="separator"
+       aria-orientation="vertical"
+       aria-label="File list width"
+-      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
+-      @pointerdown="startResize"
+-      @pointermove="resize"
+-    />
++      class="absolute inset-y-0 -right-island z-10 flex w-island cursor-col-resize items-center justify-center"
++      v-on="resize.listeners"
++    >
++      <ResizeDots :state="resize.dots.value" />
++    </div>
+   </aside>
+ </template>
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 84d6f59..b6f060b 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -7,12 +7,15 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
+ import type { FileWork } from "./closeGuard";
+ import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
++import { paneColumns, type PaneWidths } from "./paneSplit";
++import ResizeDots from "./ResizeDots.vue";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { useMergeController } from "./useMergeController";
++import { usePaneDividers } from "./usePaneDividers";
+ import { isEditable } from "./views";
+ 
+ type Column = {
+@@ -48,6 +51,9 @@ const {
+   settings,
+   collapsing,
+   servers,
++  paneSplit,
++  setPaneSplit,
++  resetPaneSplit,
+ } = useAppStore();
+ const handle = useMergeController(
+   () => props.data,
+@@ -77,7 +83,9 @@ if (props.data.deleted === null) {
+ }
+ useEventListener(window, "keydown", historyKeyInShownFile);
+ useEventListener(window, "keydown", saveKeyInShownFile);
++const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+ 
++const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
+ const deletedView = computed(deletedViewNow);
+ const columns = computed(() =>
+   SIDES.map((side): Column => ({
+@@ -125,6 +133,17 @@ function resultLine(view: DeletedSideView | null): string | null {
+   return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
+ }
+ 
++function paneWidths(): PaneWidths | null {
++  if (left.value === null || center.value === null || right.value === null) {
++    return null;
++  }
++  return {
++    local: left.value.getBoundingClientRect().width,
++    center: center.value.getBoundingClientRect().width,
++    remote: right.value.getBoundingClientRect().width,
++  };
++}
++
+ function showsMinimap(): boolean {
+   return props.shown && props.minimap && resultLine(deletedViewNow()) === null;
+ }
+@@ -185,7 +204,8 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+     </header>
+     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
+     <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
++      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
++      :style="{ gridTemplateColumns }"
+     >
+       <div
+         v-for="column in columns"
+@@ -203,7 +223,15 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+           {{ KEEP }}
+         </button>
+       </div>
+-      <div class="col-start-2 row-start-1 border-b border-separator" />
++      <div
++        role="separator"
++        aria-orientation="vertical"
++        aria-label="Local and Result widths"
++        class="col-start-2 row-start-1 flex cursor-col-resize items-center justify-center border-b border-separator"
++        v-on="dividers.local.listeners"
++      >
++        <ResizeDots :state="dividers.local.dots.value" />
++      </div>
+       <div
+         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
+       >
+@@ -224,7 +252,15 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+           class="ml-auto size-2 shrink-0 rounded-full bg-fg"
+         />
+       </div>
+-      <div class="col-start-4 row-start-1 border-b border-separator" />
++      <div
++        role="separator"
++        aria-orientation="vertical"
++        aria-label="Result and Remote widths"
++        class="col-start-4 row-start-1 flex cursor-col-resize items-center justify-center border-b border-separator"
++        v-on="dividers.remote.listeners"
++      >
++        <ResizeDots :state="dividers.remote.dots.value" />
++      </div>
+ 
+       <div
+         ref="left"
+@@ -232,7 +268,10 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+         :class="{ invisible: data.deleted === 'local' }"
+       />
+       <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
+-      <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
++      <div
++        class="col-start-2 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
++        v-on="dividers.local.listeners"
++      >
+         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
+       </div>
+       <div
+@@ -241,7 +280,10 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+         :class="{ invisible: centerLine !== null }"
+       />
+       <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
+-      <div class="col-start-4 row-start-2 min-h-0 border-x border-separator will-change-transform">
++      <div
++        class="col-start-4 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
++        v-on="dividers.remote.listeners"
++      >
+         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
+       </div>
+       <div
+diff --git a/frontend/src/ui/ResizeDots.vue b/frontend/src/ui/ResizeDots.vue
+new file mode 100644
+index 0000000..139e54a
+--- /dev/null
++++ b/frontend/src/ui/ResizeDots.vue
+@@ -0,0 +1,23 @@
++<script setup lang="ts">
++import type { DotsState } from "./useColumnDrag";
++
++defineProps<{ state: DotsState }>();
++
++// VS Code `Sash`: `hover` comes 300 ms after the pointer rests (`globalHoverDelay`) and goes at once.
++const TONE: Readonly<Record<DotsState, string>> = {
++  rest: "bg-handle delay-0",
++  hover: "bg-handle-active delay-300",
++  drag: "bg-handle-active delay-0",
++};
++</script>
++
++<template>
++  <span aria-hidden="true" class="pointer-events-none flex flex-col gap-[3px]">
++    <span
++      v-for="dot in 3"
++      :key="dot"
++      class="size-[3px] rounded-full transition-colors"
++      :class="TONE[state]"
++    />
++  </span>
++</template>
+diff --git a/frontend/src/ui/fileListWidth.test.ts b/frontend/src/ui/fileListWidth.test.ts
+index 1fb0469..bc33000 100644
+--- a/frontend/src/ui/fileListWidth.test.ts
++++ b/frontend/src/ui/fileListWidth.test.ts
+@@ -1,7 +1,7 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { createFileListWidth } from "./fileListWidth";
++import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+ 
+ const KEY = "yamt.files.width";
+ 
+@@ -84,6 +84,16 @@ test("a width is clamped to 160 px at the narrow end and half the window at the
+   expect(list.width.value).toBe(700);
+ });
+ 
++test("the CSS bounds are the clamp's: 160 px and half the window", () => {
++  const list = createFileListWidth(memoryStorage());
++
++  expect(FILE_LIST_BOUNDS).toEqual({ minWidth: "160px", maxWidth: "50vw" });
++  list.setWidth(0, 1000);
++  expect(`${list.width.value}px`).toBe(FILE_LIST_BOUNDS.minWidth);
++  list.setWidth(5000, 1000);
++  expect(`${((list.width.value ?? 0) / 1000) * 100}vw`).toBe(FILE_LIST_BOUNDS.maxWidth);
++});
++
+ test("in a window narrower than two minimums the width is the minimum", () => {
+   const list = createFileListWidth(memoryStorage());
+ 
+diff --git a/frontend/src/ui/fileListWidth.ts b/frontend/src/ui/fileListWidth.ts
+index df6ccb5..0f5a2f6 100644
+--- a/frontend/src/ui/fileListWidth.ts
++++ b/frontend/src/ui/fileListWidth.ts
+@@ -5,7 +5,13 @@ import { storedValue } from "./windowStorage";
+ 
+ const STORAGE_KEY = "yamt.files.width";
+ const MIN_WIDTH_PX = 160;
+-const HALF = 0.5;
++const MAX_WINDOW_SHARE = 0.5;
++const PERCENT = 100;
++
++export const FILE_LIST_BOUNDS = {
++  minWidth: `${MIN_WIDTH_PX}px`,
++  maxWidth: `${MAX_WINDOW_SHARE * PERCENT}vw`,
++} as const;
+ 
+ export function createFileListWidth(storage?: StorageLike): {
+   readonly width: Readonly<Ref<number | null>>;
+@@ -28,7 +34,7 @@ export function createFileListWidth(storage?: StorageLike): {
+   return {
+     width,
+     setWidth: (px, windowWidth) => {
+-      width.value = Math.max(MIN_WIDTH_PX, Math.min(px, windowWidth * HALF));
++      width.value = Math.max(MIN_WIDTH_PX, Math.min(px, windowWidth * MAX_WINDOW_SHARE));
+     },
+     resetWidth: () => {
+       width.value = null;

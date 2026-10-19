@@ -1,0 +1,286 @@
+[Survived] StringLiteral scripts/app-session/args.ts:201:22
+-       dx: offsetPx(dx, "--dx"),
++       dx: offsetPx(dx, ""),
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:60:7
+-         ["mousemove", "--sync", String(point.x), String(point.y), "click"]
++         []
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:60:8
+-         ["mousemove", "--sync", String(point.x), String(point.y), "click"]
++         ["", "--sync", String(point.x), String(point.y), "click"]
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:60:21
+-         ["mousemove", "--sync", String(point.x), String(point.y), "click"]
++         ["mousemove", "", String(point.x), String(point.y), "click"]
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:60:65
+-         ["mousemove", "--sync", String(point.x), String(point.y), "click"]
++         ["mousemove", "--sync", String(point.x), String(point.y), ""]
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:61:34
+-           .concat(command.double ? ["--repeat", "2"] : [])
++           .concat(command.double ? [] : [])
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:61:35
+-           .concat(command.double ? ["--repeat", "2"] : [])
++           .concat(command.double ? ["", "2"] : [])
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:61:47
+-           .concat(command.double ? ["--repeat", "2"] : [])
++           .concat(command.double ? ["--repeat", ""] : [])
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:61:54
+-           .concat(command.double ? ["--repeat", "2"] : [])
++           .concat(command.double ? ["--repeat", "2"] : ["Stryker was here"])
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:62:17
+-           .concat(["1"]),
++           .concat([]),
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:62:18
+-           .concat(["1"]),
++           .concat([""]),
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:65:12
+-       return { clicked: target, double: command.double, screen: point };
++       return {};
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:68:36
+-     const presses = command.double ? [...CLICK, ...CLICK] : CLICK;
++     const presses = command.double ? [] : CLICK;
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:69:24
+-     await perform(state, [
+-       {
+-         type: "pointer",
+-         id: "mouse",
+-         parameters: { pointerType: "mouse" },
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
+-       },
+-     ]);
++     await perform(state, []);
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:70:5
+-       {
+-         type: "pointer",
+-         id: "mouse",
+-         parameters: { pointerType: "mouse" },
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
+-       },
++       {},
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:71:13
+-         type: "pointer",
++         type: "",
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:72:11
+-         id: "mouse",
++         id: "",
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:73:19
+-         parameters: { pointerType: "mouse" },
++         parameters: {},
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:73:34
+-         parameters: { pointerType: "mouse" },
++         parameters: { pointerType: "" },
+
+[NoCoverage] ArrayDeclaration scripts/app-session/drive.ts:74:16
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
++         actions: [],
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:74:17
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
++         actions: [{}, ...presses],
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:74:25
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
++         actions: [{ type: "", duration: 0, origin: "viewport", ...point }, ...presses],
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:74:61
+-         actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
++         actions: [{ type: "pointerMove", duration: 0, origin: "", ...point }, ...presses],
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:77:10
+-     return { clicked: target, double: command.double, viewport: point };
++     return {};
+
+[NoCoverage] BlockStatement scripts/app-session/drive.ts:80:87
+-   export async function drag(state: SessionState, command: Of<"drag">): Promise<Output> {
+-     const chosen = await namedOrCss(state, command.query);
+-     const from = viewportPoint(await reveal(state, chosen));
+-     const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
+-       type: "pointerMove",
+-       duration: 0,
+-       origin: "viewport",
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
+-     }));
+-     const [down, up] = CLICK;
+-     await perform(state, [
+-       {
+-         type: "pointer",
+-         id: "mouse",
+-         parameters: { pointerType: "mouse" },
+-         actions: [
+-           { type: "pointerMove", duration: 0, origin: "viewport", ...from },
+-           down,
+-           ...moves,
+-           up,
+-         ],
+-       },
+-     ]);
+-     const to = { x: from.x + command.dx, y: from.y + command.dy };
+-     return { dragged: { role: roleOf(chosen), name: nameOf(chosen) }, from, to };
+-   }
++   export async function drag(state: SessionState, command: Of<"drag">): Promise<Output> {}
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:83:28
+-     const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
++     const moves = Array.from({}, (_, step) => ({
+
+[NoCoverage] ArrowFunction scripts/app-session/drive.ts:83:52
+-     const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
+-       type: "pointerMove",
+-       duration: 0,
+-       origin: "viewport",
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
+-     }));
++     const moves = Array.from({ length: DRAG_STEPS }, () => undefined);
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:83:66
+-     const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
+-       type: "pointerMove",
+-       duration: 0,
+-       origin: "viewport",
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
+-     }));
++     const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({}));
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:84:11
+-       type: "pointerMove",
++       type: "",
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:86:13
+-       origin: "viewport",
++       origin: "",
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:87:19
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
++       x: Math.round(from.x - command.dx * (step + 1) / DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:87:28
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
++       x: Math.round(from.x + command.dx * (step + 1) * DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:87:29
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
++       x: Math.round(from.x + (command.dx / (step + 1)) / DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:87:43
+-       x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
++       x: Math.round(from.x + (command.dx * (step - 1)) / DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:88:19
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
++       y: Math.round(from.y - command.dy * (step + 1) / DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:88:28
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
++       y: Math.round(from.y + command.dy * (step + 1) * DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:88:29
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
++       y: Math.round(from.y + (command.dy / (step + 1)) / DRAG_STEPS),
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:88:43
+-       y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
++       y: Math.round(from.y + (command.dy * (step - 1)) / DRAG_STEPS),
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:97:9
+-           { type: "pointerMove", duration: 0, origin: "viewport", ...from },
++           {},
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:97:17
+-           { type: "pointerMove", duration: 0, origin: "viewport", ...from },
++           { type: "", duration: 0, origin: "viewport", ...from },
+
+[NoCoverage] StringLiteral scripts/app-session/drive.ts:97:53
+-           { type: "pointerMove", duration: 0, origin: "viewport", ...from },
++           { type: "pointerMove", duration: 0, origin: "", ...from },
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:104:14
+-     const to = { x: from.x + command.dx, y: from.y + command.dy };
++     const to = {};
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:104:19
+-     const to = { x: from.x + command.dx, y: from.y + command.dy };
++     const to = { x: from.x - command.dx, y: from.y + command.dy };
+
+[NoCoverage] ArithmeticOperator scripts/app-session/drive.ts:104:43
+-     const to = { x: from.x + command.dx, y: from.y + command.dy };
++     const to = { x: from.x + command.dx, y: from.y - command.dy };
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:105:10
+-     return { dragged: { role: roleOf(chosen), name: nameOf(chosen) }, from, to };
++     return {};
+
+[NoCoverage] ObjectLiteral scripts/app-session/drive.ts:105:21
+-     return { dragged: { role: roleOf(chosen), name: nameOf(chosen) }, from, to };
++     return { dragged: {}, from, to };
+
+[NoCoverage] BlockStatement scripts/app-session/start.ts:52:46
+-   function privateConfig(home: string): string {
+-     const configDir = join(home, ".config");
+-     mkdirSync(configDir, { recursive: true });
+-     const owners = [join(userInfo().homedir, ".config"), process.env["XDG_CONFIG_HOME"] ?? ""]
+-       .filter((path) => path !== "" && existsSync(path))
+-       .map((path) => realpathSync(path));
+-     const clash = ownerConfigClash(realpathSync(configDir), owners);
+-     if (clash !== null) {
+-       throw new Error(clash);
+-     }
+-     return configDir;
+-   }
++   function privateConfig(home: string): string {}
+
+[NoCoverage] ConditionalExpression scripts/app-session/start.ts:70:16
+-     const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
++     const home = true ? join(folder, "home") : fromRoot(command.home);
+
+[NoCoverage] ConditionalExpression scripts/app-session/start.ts:70:16
+-     const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
++     const home = false ? join(folder, "home") : fromRoot(command.home);
+
+[NoCoverage] EqualityOperator scripts/app-session/start.ts:70:16
+-     const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
++     const home = command.home !== null ? join(folder, "home") : fromRoot(command.home);
+
+[NoCoverage] StringLiteral scripts/app-session/start.ts:70:53
+-     const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
++     const home = command.home === null ? join(folder, "") : fromRoot(command.home);
+
+[NoCoverage] StringLiteral scripts/app-session/start.ts:73:31
+-       mkdirSync(join(configDir, "yamt"), { recursive: true });
++       mkdirSync(join(configDir, ""), { recursive: true });
+
+[NoCoverage] ObjectLiteral scripts/app-session/start.ts:73:40
+-       mkdirSync(join(configDir, "yamt"), { recursive: true });
++       mkdirSync(join(configDir, "yamt"), {});
+
+[NoCoverage] BooleanLiteral scripts/app-session/start.ts:73:53
+-       mkdirSync(join(configDir, "yamt"), { recursive: true });
++       mkdirSync(join(configDir, "yamt"), { recursive: false });
+
+[NoCoverage] ConditionalExpression scripts/app-session.ts:22:5
+-       case "drag":
+-         return drag(sessionNamed(command.name), command);
++       case "drag":
+
+[NoCoverage] StringLiteral scripts/app-session.ts:22:10
+-       case "drag":
++       case "":
+
