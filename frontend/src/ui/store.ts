@@ -20,6 +20,7 @@ import { fileListKey, type KeyPress } from "./fileListKey";
 import { loadSideNames, refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import type { Notice } from "./noticeText";
+import { createPaneSplit, type PaneSplitState } from "./paneSplit";
 import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import { afterWrite, createSaving, finish, whileWriting } from "./saving";
@@ -86,6 +87,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
 } & Actions &
   Aborting &
   Collapsing &
+  PaneSplitState &
   Saving &
   Servers &
   ServerSetup;
@@ -139,6 +141,7 @@ export function createAppStore(
     hiddenButtons: buttons.hidden,
     ...acts,
     ...createCollapsing(),
+    ...createPaneSplit(),
     ...createAborting(state),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
