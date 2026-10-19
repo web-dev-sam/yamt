@@ -27,6 +27,18 @@ export const FROM_THE_LIST = "From the list";
 
 export const FROM_THE_LIST_HINT = `"${FROM_THE_LIST}" fills both fields with a known server.`;
 
+export const LANGUAGE_SERVERS = "Language servers";
+
+export const SERVERS = "Servers";
+
+export function pinTitle(pinned: boolean): string {
+  return pinned ? "Unpin from the header" : "Pin to the header";
+}
+
+export function pinLabel(name: string): string {
+  return `Pin ${name} to the header`;
+}
+
 export function projectLabel(folder: string): string {
   return folder === "" ? "the repository root" : `${folder}/`;
 }
@@ -101,6 +113,12 @@ export function dotKind(state: ServerState): DotKind {
       return _exhaustive;
     }
   }
+}
+
+const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
+
+export function groupDot(kinds: readonly DotKind[]): DotKind {
+  return GROUP_URGENCY.find((kind) => kinds.includes(kind)) ?? "stopped";
 }
 
 export function serverActions(state: ServerState): readonly ServerAction[] {

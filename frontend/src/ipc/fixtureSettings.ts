@@ -13,7 +13,7 @@ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
 const DEFAULT_PATH = "/fixture/settings.json";
 const HOME = "/fixture/home/";
 const HOME_PREFIX = "~/";
-const REPOSITORY = "/fixture/repository";
+export const REPOSITORY = "/fixture/repository";
 
 function copiedServers(added: readonly AddedServer[]): AddedServer[] {
   return added.map(({ command, fileTypes }) => ({

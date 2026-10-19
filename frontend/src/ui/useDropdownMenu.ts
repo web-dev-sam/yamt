@@ -1,7 +1,7 @@
-import { onClickOutside } from "@vueuse/core";
-import { nextTick, shallowRef, type ShallowRef } from "vue";
+import { onClickOutside, useWindowFocus } from "@vueuse/core";
+import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
 
-import { stepMenuItem } from "./menuKeys";
+import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 
 type DropdownParts<T> = {
   readonly menu: () => HTMLElement | null;
@@ -62,11 +62,11 @@ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
   }
   dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
   await nextTick();
-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 }
 
 function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
-  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
   const step = stepMenuItem(
     { count: items.length, focused: items.findIndex((item) => item === event.target) },
     event,
@@ -104,6 +104,11 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
       },
     },
   );
+  watch(useWindowFocus(), (focused) => {
+    if (!focused) {
+      void close(dropdown);
+    }
+  });
   return {
     openFor: dropdown.openFor,
     above: dropdown.above,

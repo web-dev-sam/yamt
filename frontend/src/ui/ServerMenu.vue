@@ -3,7 +3,7 @@ import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from 
 import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 
 import { failureHelp, installText } from "./installText";
-import { stepMenuItem } from "./menuKeys";
+import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 import { menuPosition, type Point } from "./menuPosition";
 import {
   ACTION_LABELS,
@@ -62,11 +62,11 @@ watch(view, (now) => {
 });
 
 onMounted(() => {
-  panel.value?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  panel.value?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 });
 
 function menuItems(): HTMLElement[] {
-  return [...(panel.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+  return [...(panel.value?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
 }
 
 function keyPressed(event: KeyboardEvent): void {
@@ -79,6 +79,7 @@ function keyPressed(event: KeyboardEvent): void {
     case "close":
       event.preventDefault();
       event.stopPropagation();
+      props.opener.focus();
       emit("close");
       return;
     case "focus":
