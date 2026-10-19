@@ -29,6 +29,8 @@ const ROOT = "/home/me/yamt";
 const NO_SERVERS: LanguageServerSettings = { repositories: {}, added: [] };
 const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
 const SERVERS: LanguageServerSettings = { repositories: { [ROOT]: "start" }, added: [OXLINT] };
+const OXFMT_KEY = "oxfmt (repository root)";
+const OFF: LanguageServerSettings = { ...SERVERS, off: { [ROOT]: [OXFMT_KEY] } };
 const BROKEN: SourceFailure = { kind: "SettingsBroken", path: PATH, message: "x at line 3" };
 
 afterEach(() => {
@@ -57,6 +59,7 @@ function settingsTarget(loads: StoredSettings[]): {
     setAntialiasing: async () => read(startStored()),
     setKeys: async () => read(startStored()),
     moveSettings: async () => read(startStored()),
+    setServerSwitch: async () => read(startStored()),
     setServerAnswer: async (current, answer) => {
       sent.push(["setServerAnswer", current, answer]);
       return answer === "dontStart"
@@ -178,6 +181,24 @@ test.each<[string, LanguageServerSettings]>([
   expect(target.settings.value.languageServers).toEqual(changed);
 });
 
+test.each<[string, LanguageServerSettings]>([
+  ["no server switched off", SERVERS],
+  ["another server switched off", { ...OFF, off: { [ROOT]: ["oxlint (repository root)"] } }],
+  ["one more server switched off", { ...OFF, off: { [ROOT]: [OXFMT_KEY, "oxlint (web)"] } }],
+  ["a server switched off under another root", { ...OFF, off: { "/other": [OXFMT_KEY] } }],
+  ["one more root with servers switched off", { ...OFF, off: { ...OFF.off, "/other": [] } }],
+])("a load that differs only in off (%s) is adopted", async (_difference, changed) => {
+  const { actions, target } = settingsTarget([
+    { ...startStored(), languageServers: OFF },
+    { ...startStored(), languageServers: changed },
+  ]);
+  await actions.loadSettings();
+
+  await actions.loadSettings();
+
+  expect(target.settings.value.languageServers).toEqual(changed);
+});
+
 test("a load whose only difference is the action a key belongs to is adopted", async () => {
   const { actions, target } = settingsTarget([
     { ...startStored(), keys: { undo: ["Alt-U"] } },
@@ -192,8 +213,8 @@ test("a load whose only difference is the action a key belongs to is adopted", a
 
 test("a load of the same servers entry keeps the settings in use", async () => {
   const { actions, target } = settingsTarget([
-    { ...startStored(), languageServers: structuredClone(SERVERS) },
-    { ...startStored(), languageServers: structuredClone(SERVERS) },
+    { ...startStored(), languageServers: structuredClone(OFF) },
+    { ...startStored(), languageServers: structuredClone(OFF) },
   ]);
   await actions.loadSettings();
   const inUse = target.settings.value;

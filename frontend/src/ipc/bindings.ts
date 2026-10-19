@@ -24,6 +24,7 @@ export const commands = {
 	 *  key the window could look up, so nothing is stored for it.
 	 */
 	setServerAnswer: (current: StoredSettings, answer: "start" | "dontStart" | null) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_answer", { current, answer })),
+	setServerSwitch: (current: StoredSettings, server: string, on: boolean) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_switch", { current, server, on })),
 	setAddedServers: (current: StoredSettings, added: AddedServer[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_added_servers", { current, added })),
 	serversContext: () => __TAURI_INVOKE<ServerContext>("servers_context"),
 	startServer: (command: ServerCommand, events: Channel<HostEvent>) => __TAURI_INVOKE<StartReply>("start_server", { command, events }),
@@ -173,6 +174,8 @@ export type KeysChange = {
  */
 export type LanguageServerSettings = {
 	repositories: { [key in string]: RepositoryAnswer },
+	/**  Repository root → the keys of the found servers switched off there (the window's text, opaque here). */
+	off?: { [key in string]: string[] },
 	added: AddedServer[],
 };
 

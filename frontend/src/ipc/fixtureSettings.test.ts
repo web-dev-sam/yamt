@@ -4,7 +4,7 @@ import type { StoredSettings } from "./domain";
 import { createFixtureSettings } from "./fixtureSettings";
 
 const DEFAULT_PATH = "/fixture/settings.json";
-const NO_SERVERS = { repositories: {}, added: [] };
+const NO_SERVERS = { repositories: {}, off: {}, added: [] };
 const IN_USE: StoredSettings = {
   theme: "dark",
   antialiasing: "subpixel",
@@ -175,7 +175,7 @@ test("an answer is stored under the repository, replaced by the next, forgotten 
       defaultPath: DEFAULT_PATH,
       stored: {
         ...IN_USE,
-        languageServers: { repositories: { [REPOSITORY]: "start" }, added: [] },
+        languageServers: { repositories: { [REPOSITORY]: "start" }, off: {}, added: [] },
       },
     },
   });
@@ -197,6 +197,7 @@ test("an answer keeps the other repositories' answers and the added servers", as
 
   expect(read.ok && read.value.stored.languageServers).toEqual({
     repositories: { "/elsewhere": "dontStart", [REPOSITORY]: "start" },
+    off: {},
     added: [OXLINT],
   });
 });
@@ -213,7 +214,7 @@ test("added servers replace the list and keep the answers", async () => {
 
   expect(read.ok && read.value.stored).toEqual({
     ...IN_USE,
-    languageServers: { repositories: { [REPOSITORY]: "start" }, added: [TAPLO] },
+    languageServers: { repositories: { [REPOSITORY]: "start" }, off: {}, added: [TAPLO] },
   });
   expect(load).toEqual(read);
 });
@@ -234,6 +235,62 @@ test("a reply and the sent list are copies: changing them changes no stored serv
 
   expect(again.ok && again.value.stored.languageServers).toEqual({
     repositories: {},
+    off: {},
     added: [{ command: ["oxlint", "--lsp"], fileTypes: ["ts"] }],
+  });
+});
+
+test("a switch is stored under the repository; on removes it and an emptied repository goes", async () => {
+  const settings = createFixtureSettings();
+  await settings.loadSettings({
+    ...IN_USE,
+    languageServers: {
+      repositories: { [REPOSITORY]: "start" },
+      off: { "/elsewhere": ["oxlint (web)"] },
+      added: [OXLINT],
+    },
+  });
+
+  await settings.setServerSwitch(IN_USE, "oxlint (repository root)", false);
+  await settings.setServerSwitch(IN_USE, "oxfmt (repository root)", false);
+  const twice = await settings.setServerSwitch(IN_USE, "oxfmt (repository root)", false);
+  const onAgain = await settings.setServerSwitch(IN_USE, "oxlint (repository root)", true);
+  const emptied = await settings.setServerSwitch(IN_USE, "oxfmt (repository root)", true);
+  const load = await settings.loadSettings(LIGHT);
+
+  expect(twice.ok && twice.value.stored.languageServers).toEqual({
+    repositories: { [REPOSITORY]: "start" },
+    off: {
+      "/elsewhere": ["oxlint (web)"],
+      [REPOSITORY]: ["oxfmt (repository root)", "oxlint (repository root)"],
+    },
+    added: [OXLINT],
+  });
+  expect(onAgain.ok && onAgain.value.stored.languageServers.off).toEqual({
+    "/elsewhere": ["oxlint (web)"],
+    [REPOSITORY]: ["oxfmt (repository root)"],
+  });
+  expect(emptied.ok && emptied.value.stored).toEqual({
+    ...IN_USE,
+    languageServers: {
+      repositories: { [REPOSITORY]: "start" },
+      off: { "/elsewhere": ["oxlint (web)"] },
+      added: [OXLINT],
+    },
+  });
+  expect(load).toEqual(emptied);
+});
+
+test("an off list in a reply is a copy: changing it changes nothing stored", async () => {
+  const settings = createFixtureSettings();
+  const first = await settings.setServerSwitch(IN_USE, "oxlint (repository root)", false);
+  if (first.ok) {
+    first.value.stored.languageServers.off?.[REPOSITORY]?.push("--reply");
+  }
+
+  const again = await settings.loadSettings(IN_USE);
+
+  expect(again.ok && again.value.stored.languageServers.off).toEqual({
+    [REPOSITORY]: ["oxlint (repository root)"],
   });
 });

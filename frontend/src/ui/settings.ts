@@ -99,12 +99,19 @@ function sameAdded(a: AddedServer, b: AddedServer): boolean {
 }
 
 function sameServers(a: LanguageServerSettings, b: LanguageServerSettings): boolean {
-  const { repositories, added, ...rest } = a;
+  const { repositories, off = {}, added, ...rest } = a;
   rest satisfies Record<string, never>;
   const answers = Object.entries(repositories);
+  const offRoots = Object.entries(off);
+  const otherOff = b.off ?? {};
   return (
     answers.length === Object.keys(b.repositories).length &&
     answers.every(([root, answer]) => b.repositories[root] === answer) &&
+    offRoots.length === Object.keys(otherOff).length &&
+    offRoots.every(([root, keys]) => {
+      const other = otherOff[root];
+      return other !== undefined && sameTexts(keys, other);
+    }) &&
     added.length === b.added.length &&
     added.every((server, index) => {
       const other = b.added[index];

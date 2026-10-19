@@ -29,6 +29,9 @@ function copied({ theme, antialiasing, keys, languageServers }: StoredSettings):
     keys: Object.fromEntries(Object.entries(keys).map(([action, texts]) => [action, [...texts]])),
     languageServers: {
       repositories: { ...languageServers.repositories },
+      off: Object.fromEntries(
+        Object.entries(languageServers.off ?? {}).map(([root, servers]) => [root, [...servers]]),
+      ),
       added: copiedServers(languageServers.added),
     },
   };
@@ -69,6 +72,18 @@ function withAnswer(stored: StoredSettings, answer: RepositoryAnswer | null): St
   return { ...stored, languageServers: { ...stored.languageServers, repositories } };
 }
 
+function withSwitch(stored: StoredSettings, server: string, on: boolean): StoredSettings {
+  const off = { ...stored.languageServers.off };
+  const others = (off[REPOSITORY] ?? []).filter((key) => key !== server);
+  const keys = on ? others : [...others, server].toSorted();
+  if (keys.length === 0) {
+    delete off[REPOSITORY];
+  } else {
+    off[REPOSITORY] = keys;
+  }
+  return { ...stored, languageServers: { ...stored.languageServers, off } };
+}
+
 function change(
   files: Files,
   current: StoredSettings,
@@ -86,9 +101,29 @@ function expanded(path: string): string | null {
   return path.startsWith("/") ? path : null;
 }
 
+function serverSettings(
+  files: Files,
+): Pick<SettingsSource, "setServerAnswer" | "setServerSwitch" | "setAddedServers"> {
+  return {
+    async setServerAnswer(current, answer) {
+      return change(files, current, (stored) => withAnswer(stored, answer));
+    },
+    async setServerSwitch(current, server, on) {
+      return change(files, current, (stored) => withSwitch(stored, server, on));
+    },
+    async setAddedServers(current, added) {
+      return change(files, current, (stored) => ({
+        ...stored,
+        languageServers: { ...stored.languageServers, added: copiedServers(added) },
+      }));
+    },
+  };
+}
+
 export function createFixtureSettings(): SettingsSource {
   const files: Files = { stored: new Map(), inUse: DEFAULT_PATH };
   return {
+    ...serverSettings(files),
     async loadSettings(current) {
       return replied(files.inUse, readOrCreate(files, files.inUse, current));
     },
@@ -112,15 +147,6 @@ export function createFixtureSettings(): SettingsSource {
       const stored = readOrCreate(files, target, current);
       files.inUse = target;
       return replied(target, stored);
-    },
-    async setServerAnswer(current, answer) {
-      return change(files, current, (stored) => withAnswer(stored, answer));
-    },
-    async setAddedServers(current, added) {
-      return change(files, current, (stored) => ({
-        ...stored,
-        languageServers: { ...stored.languageServers, added: copiedServers(added) },
-      }));
     },
   };
 }

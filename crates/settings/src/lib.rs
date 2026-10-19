@@ -4,7 +4,7 @@
 mod file;
 mod places;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -67,6 +67,9 @@ pub struct StoredSettings {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct LanguageServerSettings {
     pub repositories: BTreeMap<String, RepositoryAnswer>,
+    /// Repository root → the keys of the found servers switched off there (the window's text, opaque here).
+    #[serde(default)]
+    pub off: BTreeMap<String, BTreeSet<String>>,
     pub added: Vec<AddedServer>,
 }
 
@@ -188,6 +191,31 @@ pub fn set_repository_answer(
     })
 }
 
+/// `on: false` adds `server` to `root`'s set, `on: true` removes it; a root left with none is removed.
+pub fn set_server_switch(
+    places: &Places,
+    current: &StoredSettings,
+    root: &str,
+    server: &str,
+    on: bool,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| {
+        let off = &mut stored.language_servers.off;
+        if on {
+            if let Some(servers) = off.get_mut(root) {
+                servers.remove(server);
+                if servers.is_empty() {
+                    off.remove(root);
+                }
+            }
+        } else {
+            off.entry(root.to_owned())
+                .or_default()
+                .insert(server.to_owned());
+        }
+    })
+}
+
 pub fn set_added_servers(
     places: &Places,
     current: &StoredSettings,
@@ -267,8 +295,12 @@ mod tests {
             command: vec!["pylsp".to_owned()],
             file_types: vec!["py".to_owned()],
         });
+        servers
+            .off
+            .insert("/r".to_owned(), BTreeSet::from(["oxlint".to_owned()]));
         let expected = serde_json::json!({
             "repositories": { "/r": "dontStart" },
+            "off": { "/r": ["oxlint"] },
             "added": [{ "command": ["pylsp"], "fileTypes": ["py"] }],
         });
         assert_eq!(

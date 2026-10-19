@@ -28,6 +28,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         settings::set_keys::<tauri::Wry>,
         settings::move_settings::<tauri::Wry>,
         settings::set_server_answer::<tauri::Wry>,
+        settings::set_server_switch::<tauri::Wry>,
         settings::set_added_servers::<tauri::Wry>,
         servers::servers_context,
         servers::start_server,

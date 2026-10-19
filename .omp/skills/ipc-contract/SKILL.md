@@ -52,6 +52,7 @@ set_antialiasing(current, antialiasing: Antialiasing) -> SettingsRead   re-reads
 set_keys(current, changes: Vec<KeysChange>)     -> SettingsRead   re-reads, sets (`Some`) or removes (`None`) each action's entry, writes
 move_settings(current, path)                   -> SettingsRead   absolute or `~/`; an existing file is used, a missing one created from `current`
 set_server_answer(current, answer: RepositoryAnswer | null) -> SettingsRead   keyed by the host's repository root (`servers_context().root`); null forgets it, #67/#70
+set_server_switch(current, server: String, on: bool)        -> SettingsRead   the same root; `on: false` adds the server's key to `off[root]`, `true` removes it, an emptied root goes; keys opaque to Rust, #83
 set_added_servers(current, added: Vec<AddedServer>)         -> SettingsRead   replaces the servers added by hand (`{ command, fileTypes }`)
 servers_context()                 -> ServerContext { root: Option<String>, process_id }   language servers (crate yamt-lsp-host, #70): root None when not UTF-8
 start_server(command: ServerCommand, events: Channel<HostEvent>) -> StartReply   Started{run} | NotFound{program, searched} | SpawnFailed | OutsideRepository; events Message{text} | Log{line} | Exited{code}, Exited once and last

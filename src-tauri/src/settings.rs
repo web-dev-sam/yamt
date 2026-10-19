@@ -125,6 +125,29 @@ pub(crate) fn set_server_answer<R: Runtime>(
     clippy::needless_pass_by_value,
     reason = "tauri passes arguments by value"
 )]
+pub(crate) fn set_server_switch<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, HostState>,
+    current: StoredSettings,
+    server: String,
+    on: bool,
+) -> Result<SettingsRead, IpcError> {
+    let places = places(window.path())?;
+    let root = servers::lock(&host).context().root;
+    let read = match root {
+        Some(root) => yamt_settings::set_server_switch(&places, &current, &root, &server, on)?,
+        None => yamt_settings::read(&places, &current)?,
+    };
+    show_theme(&window, read.stored.theme);
+    Ok(read)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
 pub(crate) fn set_added_servers<R: Runtime>(
     window: WebviewWindow<R>,
     current: StoredSettings,

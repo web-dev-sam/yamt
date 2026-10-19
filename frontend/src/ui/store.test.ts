@@ -52,6 +52,7 @@ const NO_SETTINGS: SettingsSource = {
   setKeys: () => Promise.reject(new Error("not used")),
   moveSettings: () => Promise.reject(new Error("not used")),
   setServerAnswer: () => Promise.reject(new Error("not used")),
+  setServerSwitch: () => Promise.reject(new Error("not used")),
   setAddedServers: () => Promise.reject(new Error("not used")),
 };
 const NO_SERVERS = { repositories: {}, added: [] };

@@ -21,6 +21,7 @@ const commands = vi.hoisted(() => ({
   setKeys: vi.fn(),
   moveSettings: vi.fn(),
   setServerAnswer: vi.fn(),
+  setServerSwitch: vi.fn(),
   setAddedServers: vi.fn(),
   serversContext: vi.fn(),
   startServer: vi.fn(),
@@ -455,6 +456,44 @@ test("setServerAnswer and setAddedServers return the app's error", async () => {
 
   expect(await source.setServerAnswer(STORED, "start")).toEqual({ ok: false, failure: broken });
   expect(await source.setAddedServers(STORED, [])).toEqual({ ok: false, failure: broken });
+});
+
+test("setServerSwitch sends the settings in use, the server and on, and returns the read", async () => {
+  const switched: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: {
+      ...STORED,
+      languageServers: {
+        ...STORED.languageServers,
+        off: { "/home/me/yamt": ["oxlint (repository root)"] },
+      },
+    },
+  };
+  commands.setServerSwitch.mockResolvedValue({ status: "ok", data: switched });
+  const source = createTauriSource();
+
+  expect(await source.setServerSwitch(STORED, "oxlint (repository root)", false)).toEqual({
+    ok: true,
+    value: { ...SETTINGS_READ, stored: switched.stored },
+  });
+  expect(await source.setServerSwitch(STORED, "oxfmt (repository root)", true)).toEqual({
+    ok: true,
+    value: { ...SETTINGS_READ, stored: switched.stored },
+  });
+  expect(commands.setServerSwitch.mock.calls).toEqual([
+    [STORED, "oxlint (repository root)", false],
+    [STORED, "oxfmt (repository root)", true],
+  ]);
+});
+
+test("setServerSwitch returns the app's error", async () => {
+  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
+  commands.setServerSwitch.mockResolvedValue({ status: "error", error: broken });
+
+  expect(await createTauriSource().setServerSwitch(STORED, "oxlint", false)).toEqual({
+    ok: false,
+    failure: broken,
+  });
 });
 
 type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };

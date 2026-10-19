@@ -365,10 +365,12 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   initialization script that sets `<html data-theme>` before the first frame, and on Linux
   `font_rendering::apply(antialiasing)` on GTK's own settings (`gtk-xft-antialias`, `gtk-xft-rgba`)
   before the webview exists (WebKitGTK fixes its subpixel layout at start, #60); a changed
-  antialiasing takes effect at the next start. Two more answer `SettingsRead` for the language servers (plan §2 #67,
-  #70): `set_server_answer(current, answer: "start" | "dontStart" | null)` (keyed by the host's repository root, the
-  string `servers_context().root` gives; `null` forgets it) and `set_added_servers(current, added)`; the file's entry
-  is `languageServers { repositories, added: [{ command, fileTypes }] }`.
+  antialiasing takes effect at the next start. Three more answer `SettingsRead` for the language servers (plan §2 #67,
+  #70, #83): `set_server_answer(current, answer: "start" | "dontStart" | null)` (keyed by the host's repository root, the
+  string `servers_context().root` gives; `null` forgets it), `set_server_switch(current, server, on)` (the same root;
+  `on: false` adds the server's key to that root's set, `true` removes it, an emptied root goes) and
+  `set_added_servers(current, added)`; the file's entry is `languageServers { repositories, off: { <root>: [keys] },
+  added: [{ command, fileTypes }] }` (`off` defaults to empty, so a 0.4.0 file reads with nothing off).
 - Language-server commands (`servers.rs`, crate `yamt-lsp-host`, plan §2 #70; Rust never parses a server message):
   `servers_context() -> ServerContext { root, process_id }`, `start_server(command: ServerCommand { program, args,
   project, folders }, events: Channel<HostEvent>) -> StartReply` (`Started{run}` | `NotFound{program, searched}` |
@@ -498,11 +500,16 @@ export interface ChunkSource {
     changes: readonly KeysChange[],
   ): Promise<SourceResult<SettingsRead>>;
   moveSettings(current: StoredSettings, path: string): Promise<SourceResult<SettingsRead>>;
-  // language servers (plan §2 #67/#70): the answer keyed by the host's repository root (null forgets it; the
-  // fixture keys it by /fixture/repository) and the servers added by hand
+  // language servers (plan §2 #67/#70/#83): the answer and the switched-off found servers keyed by the host's
+  // repository root (null forgets the answer; the fixture keys both by /fixture/repository) and the servers added by hand
   setServerAnswer(
     current: StoredSettings,
     answer: RepositoryAnswer | null,
+  ): Promise<SourceResult<SettingsRead>>;
+  setServerSwitch(
+    current: StoredSettings,
+    server: string,
+    on: boolean,
   ): Promise<SourceResult<SettingsRead>>;
   setAddedServers(
     current: StoredSettings,

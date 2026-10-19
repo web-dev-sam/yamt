@@ -18,6 +18,7 @@
       "frontend/src/ipc/index.ts",
       "frontend/src/ui/saving.test.ts",
       "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/settings.ts",
       "frontend/src/ui/settings.test.ts",
       "frontend/src/ui/serverSetup.test.ts"
     ]
