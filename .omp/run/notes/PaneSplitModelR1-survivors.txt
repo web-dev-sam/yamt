@@ -1,0 +1,24 @@
+[Survived] ConditionalExpression src/ui/serverPins.ts:18:10
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return true && stored !== null && !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:18:10
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return true
+
+[Survived] LogicalOperator src/ui/serverPins.ts:18:10
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return typeof stored === "object" && stored !== null || !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:18:10
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return true && !Array.isArray(stored)
+
+[Survived] LogicalOperator src/ui/serverPins.ts:18:10
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return typeof stored === "object" || stored !== null && !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:18:40
+-     return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++     return typeof stored === "object" && true && !Array.isArray(stored)
+

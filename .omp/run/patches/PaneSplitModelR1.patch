@@ -1,0 +1,431 @@
+commit 659fc8dc98133087831cea0663500f210e0f48a0
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 19:19:22 +0200
+
+    refactor(ui): one parseStored for stored JSON; drag tests with Local != Remote (#1274, #1275, #1279, #1280)
+
+diff --git a/.omp/run/notes/PaneSplitModelR1.md b/.omp/run/notes/PaneSplitModelR1.md
+new file mode 100644
+index 0000000..69d60f7
+--- /dev/null
++++ b/.omp/run/notes/PaneSplitModelR1.md
+@@ -0,0 +1,95 @@
++All four findings are fixed. Every hand mutant fails the new tests, and all five frontend recipes exit 0. One assertion from the brief, `dragged(w,'local',0) = {0.2, 0.3}`, is not met: the committed code gives a different result for it, so I tested the same thing with other widths (see `deviations_from_brief`).
++
++```
++summary
++  - ui/windowStorage.ts exports parseStored(raw): unknown (JSON.parse, or null on a parse error). It is the only JSON.parse left in
++    non-test ui/*.ts. paneSplit.ts, toolbarButtons.ts and serverPins.ts all use it; their local copies (parsed, parseJson, readPins' try/catch) are deleted.
++  - useColumnDrag's output type ColumnDragHandle is renamed to ColumnDragBinding (also in usePaneDividers.ts). ColumnHandle is no longer exported (it has no importer).
++  - The remote-boundary tests now use widths where Local and Remote differ: {200,500,300} in paneSplit.test.ts and usePaneDividers.test.ts.
++  - A new usePaneDividers test runs in an effectScope with stubbed globals and sends pointerdown + pointermove (dx 100) through each divider's own listeners.
++
++files_changed
++  frontend/src/ui/windowStorage.ts
++  frontend/src/ui/windowStorage.test.ts
++  frontend/src/ui/paneSplit.ts
++  frontend/src/ui/paneSplit.test.ts
++  frontend/src/ui/toolbarButtons.ts
++  frontend/src/ui/serverPins.ts
++  frontend/src/ui/useColumnDrag.ts
++  frontend/src/ui/usePaneDividers.ts
++  frontend/src/ui/usePaneDividers.test.ts
++
++tests_added
++  - windowStorage.test.ts "stored JSON is parsed; text that is not JSON gives null": an object and an array are parsed;
++    "{not json" and "" give null. This is the fallback all three callers rely on.
++  - paneSplit.test.ts "the remote divider mirrors the local one and keeps Local's pixels" (replaces "the remote divider mirrors the local one"),
++    widths {200,500,300}:
++    - remote -100 gives {0.2, 0.4}, with local*1000 === 200
++    - remote 50 gives {0.2, 0.25}
++    - remote -400 clamps at remote*1000 580, local 200
++    - remote 400 clamps at remote*1000 220, local 200
++    This kills the survivors at paneSplit.ts:44:17 and :45:16.
++  - paneSplit.test.ts "a press without a move gives the measured shares" (now asymmetric):
++    {250,450,300} gives {0.25, 0.3} at dx 0 for both boundaries; {200,500,300} remote 0 gives {0.2, 0.3}.
++  - usePaneDividers.test.ts "each divider's listeners drag its own boundary": pointerdown at x 0, then pointermove at x 100, through
++    .local.listeners and then .remote.listeners, records [{0.3,0.3}, {0.2,0.22}]. This kills the swapped-keys mutant at :43–44.
++    The '' mutant also fails it: '' is handled as remote.
++  - usePaneDividers.test.ts: WIDTHS is now {200,500,300}; the expected values in "a press measures once…" are updated to
++    {0.3,0.3}, {0.22,0.3}, {0.2,0.4}.
++
++smoke_evidence
++  1. pnpm -C frontend fmt:check && lint && typecheck && unused && test  → exit 0
++       $ oxfmt --check … All matched files use the correct format. Finished in 922ms on 337 files
++       $ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"   (no findings)
++       $ vue-tsc -b                                                     (no output)
++       $ knip --include exports,types                                    (no output)
++       $ vitest run --project node
++        Test Files  114 passed (114)
++             Tests  1557 passed (1557)
++  2. Hand mutants. Each was applied with the edit tool, run with
++     `pnpm -C frontend exec vitest run --project node <files>`, then restored.
++     a) Both survivors at once (moved → widths.local, kept → widths.remote for the remote boundary):
++        × the remote divider mirrors the local one and keeps Local's pixels
++          AssertionError: expected { local: 0.3, remote: 0.3 } to deeply equal { local: 0.2, remote: 0.4 }   paneSplit.test.ts:169
++        × a press without a move gives the measured shares
++          expected { local: 0.3, remote: 0.25 } to deeply equal { local: 0.25, remote: 0.3 }                  paneSplit.test.ts:184
++        × (usePaneDividers) a press measures once… : -"local": 0.2,"remote": 0.4  +"local": 0.3,"remote": 0.3
++        × (usePaneDividers) each divider's listeners drag its own boundary : -"local": 0.2 +"local": 0.3
++        Test Files  2 failed (2)   Tests  4 failed | 36 passed (40)
++     b) moved only (44:17): expected { local: 0.2, remote: 0.3 } to deeply equal { local: 0.2, remote: 0.4 }
++        and expected { local: 0.25, remote: 0.25 } to deeply equal { local: 0.25, remote: 0.3 }   Tests 2 failed | 31 passed
++     c) kept only (45:16): expected { local: 0.3, remote: 0.4 } to deeply equal { local: 0.2, remote: 0.4 }
++        and expected { local: 0.3, remote: 0.3 } to deeply equal { local: 0.25, remote: 0.3 }      Tests 2 failed | 31 passed
++     d) usePaneDividers local/remote keys swapped (:43–44):
++        × each divider's listeners drag its own boundary
++          AssertionError: expected [ { local: 0.2, remote: 0.22 }, …(1) ] to deeply equal [ { local: 0.3, remote: 0.3 }, …(1) ]
++          usePaneDividers.test.ts:137
++        Tests  1 failed | 6 passed (7)
++     After restoring: the targeted run passes 93/93, and the full run passes 1557/1557.
++  3. grep "JSON.parse" in frontend/src/ui/*.ts: outside *.test.ts the only hit is
++       windowStorage.ts:9      return JSON.parse(raw);
++     The other hits are serverPins.test.ts:36, serverSetup.test.ts:93, servers.test.ts:33, toolbarButtons.test.ts:49 (all tests).
++
++deviations_from_brief
++  - #1279: the brief asks for dragged({200,500,300},'local',0) = {0.2, 0.3}. The committed code gives {0.22, 0.3}, because a press
++    snaps a Local narrower than the 220 px minimum up to 220. Making the assertion pass would change behaviour, which is a non-goal.
++    Instead, "press without a move" uses {250,450,300} for both boundaries, giving {0.25, 0.3}, and keeps the brief's
++    remote-0 case on {200,500,300}, giving {0.2, 0.3}.
++  - #1279: the brief's remote -250 clamp case (480) needed new numbers with the new widths. It became remote -400 → 580
++    (pair 800 − 220), with Local kept at 200.
++  - #1275: the new name is ColumnDragBinding. No row 6 file imports ColumnHandle or ColumnDragHandle (grep over frontend/src),
++    so no file outside the owned set changed.
++  - #1280: the new test stubs PointerEvent, MouseEvent, Element and also document (documentElement.classList). It has to,
++    because usePaneDividers passes no class root to useColumnDrag, which then falls back to document.documentElement.
++  - serverPins.ts: readPins now calls parseStored, so a parse error gives null, which then gives {}. Every stored form reads as
++    before (the serverPins tests pass unchanged).
++  - Docs not updated (read-only for this slice): the project map's windowStorage.ts entry ("`storedValue`: …") does not list parseStored.
++
++open_risks
++  - frontend/src/ui/usePaneDividers.test.ts:115: this test passes two hand-written fake objects (a fake pointer event and a fake
++    element) where the real code expects a PointerEvent and an Element, so it relies on how useColumnDrag uses them (only
++    `instanceof`, button, pointerId, clientX, currentTarget, setPointerCapture). If useColumnDrag starts using another event
++    field, these fakes need it too.
++```
++
++The orchestrator should run `just check` on the merged tree and `just mutants` on paneSplit.ts and usePaneDividers.ts to confirm the earlier survivors and NoCoverage mutants are gone.
+\ No newline at end of file
+diff --git a/frontend/src/ui/paneSplit.test.ts b/frontend/src/ui/paneSplit.test.ts
+index 0db663a..20898ce 100644
+--- a/frontend/src/ui/paneSplit.test.ts
++++ b/frontend/src/ui/paneSplit.test.ts
+@@ -162,22 +162,30 @@ test("a pair narrower than two minimums splits evenly and stays total", () => {
+   }
+ });
+ 
+-test("the remote divider mirrors the local one", () => {
+-  const widths = { local: 300, center: 400, remote: 300 };
++test("the remote divider mirrors the local one and keeps Local's pixels", () => {
++  const widths = { local: 200, center: 500, remote: 300 };
+ 
+-  expect(dragged(widths, "remote", -100)).toEqual({ local: 0.3, remote: 0.4 });
+-  expect(dragged(widths, "remote", 50)).toEqual({ local: 0.3, remote: 0.25 });
+-  const left = dragged(widths, "remote", -250);
+-  expect(left.remote * 1000).toBe(480);
+-  expect(left.local * 1000).toBe(300);
+-  expect(dragged(widths, "remote", 200).remote * 1000).toBe(220);
++  const wider = dragged(widths, "remote", -100);
++  expect(wider).toEqual({ local: 0.2, remote: 0.4 });
++  expect(wider.local * 1000).toBe(200);
++  expect(dragged(widths, "remote", 50)).toEqual({ local: 0.2, remote: 0.25 });
++  const left = dragged(widths, "remote", -400);
++  expect(left.remote * 1000).toBe(580);
++  expect(left.local * 1000).toBe(200);
++  const right = dragged(widths, "remote", 400);
++  expect(right.remote * 1000).toBe(220);
++  expect(right.local * 1000).toBe(200);
+ });
+ 
+ test("a press without a move gives the measured shares", () => {
+-  const widths = { local: 250, center: 500, remote: 250 };
++  const widths = { local: 250, center: 450, remote: 300 };
+ 
+-  expect(dragged(widths, "local", 0)).toEqual({ local: 0.25, remote: 0.25 });
+-  expect(dragged(widths, "remote", 0)).toEqual({ local: 0.25, remote: 0.25 });
++  expect(dragged(widths, "local", 0)).toEqual({ local: 0.25, remote: 0.3 });
++  expect(dragged(widths, "remote", 0)).toEqual({ local: 0.25, remote: 0.3 });
++  expect(dragged({ local: 200, center: 500, remote: 300 }, "remote", 0)).toEqual({
++    local: 0.2,
++    remote: 0.3,
++  });
+ });
+ 
+ test("the strip grid has five tracks with the strips' 2.5rem in each pane's minimum", () => {
+diff --git a/frontend/src/ui/paneSplit.ts b/frontend/src/ui/paneSplit.ts
+index 1b7d519..d55f910 100644
+--- a/frontend/src/ui/paneSplit.ts
++++ b/frontend/src/ui/paneSplit.ts
+@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import type { Ref } from "vue";
+ 
+ import type { Side } from "../ipc";
+-import { storedValue } from "./windowStorage";
++import { parseStored, storedValue } from "./windowStorage";
+ 
+ export type PaneSplit = { readonly local: number; readonly remote: number };
+ export type PaneWidths = {
+@@ -52,16 +52,8 @@ export function dragged(widths: PaneWidths, boundary: Side, dx: number): PaneSpl
+     : { local: kept / total, remote: width / total };
+ }
+ 
+-function parsed(raw: string): unknown {
+-  try {
+-    return JSON.parse(raw);
+-  } catch {
+-    return null;
+-  }
+-}
+-
+ function readSplit(raw: string): PaneSplit {
+-  const value = parsed(raw);
++  const value = parseStored(raw);
+   if (typeof value !== "object" || value === null || !("local" in value) || !("remote" in value)) {
+     return EQUAL_SPLIT;
+   }
+diff --git a/frontend/src/ui/serverPins.ts b/frontend/src/ui/serverPins.ts
+index 0dfd9c7..d7c7583 100644
+--- a/frontend/src/ui/serverPins.ts
++++ b/frontend/src/ui/serverPins.ts
+@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { ServerKey } from "../lsp";
+-import { storedValue } from "./windowStorage";
++import { parseStored, storedValue } from "./windowStorage";
+ 
+ export type ServerPins = {
+   readonly pinnedServers: Readonly<Ref<ReadonlySet<string>>>;
+@@ -14,14 +14,10 @@ type PinsByRoot = Readonly<Record<string, unknown>>;
+ const STORAGE_KEY = "yamt.servers.pinned";
+ 
+ function readPins(raw: string): PinsByRoot {
+-  try {
+-    const stored: unknown = JSON.parse(raw);
+-    return typeof stored === "object" && stored !== null && !Array.isArray(stored)
+-      ? { ...stored }
+-      : {};
+-  } catch {
+-    return {};
+-  }
++  const stored = parseStored(raw);
++  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++    ? { ...stored }
++    : {};
+ }
+ 
+ function pinsOf(byRoot: PinsByRoot, root: string): readonly string[] {
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index 06b3b64..e790c6a 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { AbortState } from "./aborting";
+-import { storedValue } from "./windowStorage";
++import { parseStored, storedValue } from "./windowStorage";
+ 
+ export const TOOLBAR_BUTTONS = [
+   "abortMerge",
+@@ -60,14 +60,6 @@ export function shownButtons(
+   return listedButtons(abort).filter((id) => !hidden.has(id));
+ }
+ 
+-function parseJson(raw: string): unknown {
+-  try {
+-    return JSON.parse(raw);
+-  } catch {
+-    return null;
+-  }
+-}
+-
+ function readHiddenList(names: readonly unknown[]): Decisions {
+   if (!names.every((name) => typeof name === "string")) {
+     return {};
+@@ -91,7 +83,7 @@ function readDecided(stored: object): Decisions {
+ }
+ 
+ function readDecisions(raw: string): Decisions {
+-  const stored = parseJson(raw);
++  const stored = parseStored(raw);
+   if (Array.isArray(stored)) {
+     return readHiddenList(stored);
+   }
+diff --git a/frontend/src/ui/useColumnDrag.ts b/frontend/src/ui/useColumnDrag.ts
+index 16a8b87..e1edd98 100644
+--- a/frontend/src/ui/useColumnDrag.ts
++++ b/frontend/src/ui/useColumnDrag.ts
+@@ -4,7 +4,7 @@ import { shallowRef, type Ref, type ShallowRef } from "vue";
+ export type DotsState = "rest" | "hover" | "drag";
+ export type ColumnDrag = { moveBy(dx: number): void };
+ 
+-export type ColumnHandle = {
++type ColumnHandle = {
+   accepts(event: PointerEvent | MouseEvent): boolean;
+   press(event: PointerEvent): ColumnDrag | null;
+   reset(): void;
+@@ -23,7 +23,7 @@ type ListenedEvent =
+   | "mousedown"
+   | "dblclick";
+ 
+-export type ColumnDragHandle = {
++export type ColumnDragBinding = {
+   readonly listeners: Readonly<Record<ListenedEvent, (event: Event) => void>>;
+   readonly dots: Readonly<Ref<DotsState>>;
+ };
+@@ -117,7 +117,7 @@ function doubleClicked(state: DragState, event: Event): void {
+   }
+ }
+ 
+-export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragHandle {
++export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragBinding {
+   const state: DragState = { handle, root, dots: shallowRef<DotsState>("rest"), dragging: null };
+   tryOnScopeDispose(() => {
+     stop(state, "rest");
+diff --git a/frontend/src/ui/usePaneDividers.test.ts b/frontend/src/ui/usePaneDividers.test.ts
+index c1d31a6..e2408b4 100644
+--- a/frontend/src/ui/usePaneDividers.test.ts
++++ b/frontend/src/ui/usePaneDividers.test.ts
+@@ -1,7 +1,8 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope } from "vue";
+ 
+ import type { PaneSplit } from "./paneSplit";
+-import { dividerHandle } from "./usePaneDividers";
++import { dividerHandle, usePaneDividers } from "./usePaneDividers";
+ 
+ class FakeSvg extends EventTarget {
+   constructor(readonly parentNode: EventTarget) {
+@@ -9,7 +10,22 @@ class FakeSvg extends EventTarget {
+   }
+ }
+ 
+-const WIDTHS = { local: 300, center: 400, remote: 300 };
++class FakePointerEvent extends Event {
++  readonly button = 0;
++  readonly pointerId = 1;
++  constructor(
++    type: string,
++    readonly clientX: number,
++  ) {
++    super(type, { cancelable: true });
++  }
++}
++
++class FakeElement extends EventTarget {
++  readonly setPointerCapture = vi.fn();
++}
++
++const WIDTHS = { local: 200, center: 500, remote: 300 };
+ 
+ beforeEach(() => {
+   vi.stubGlobal("SVGSVGElement", FakeSvg);
+@@ -77,9 +93,9 @@ test("a press measures once and each move sets the dragged split of its boundary
+ 
+   expect(measure).toHaveBeenCalledTimes(2);
+   expect(splits).toEqual([
+-    { local: 0.4, remote: 0.3 },
++    { local: 0.3, remote: 0.3 },
+     { local: 0.22, remote: 0.3 },
+-    { local: 0.3, remote: 0.4 },
++    { local: 0.2, remote: 0.4 },
+   ]);
+ });
+ 
+@@ -95,3 +111,31 @@ test("reset resets the split", () => {
+   expect(resets.count).toBe(1);
+   expect(splits).toEqual([]);
+ });
++
++test("each divider's listeners drag its own boundary", () => {
++  vi.stubGlobal("PointerEvent", FakePointerEvent);
++  vi.stubGlobal("MouseEvent", FakePointerEvent);
++  vi.stubGlobal("Element", FakeElement);
++  vi.stubGlobal("document", { documentElement: { classList: { add: vi.fn(), remove: vi.fn() } } });
++  const { splits, split } = recorder();
++  const scope = effectScope();
++  const dividers = scope.run(() => usePaneDividers(() => WIDTHS, split));
++  if (dividers === undefined) {
++    throw new Error("no scope");
++  }
++
++  for (const divider of [dividers.local, dividers.remote]) {
++    const element = new FakeElement();
++    for (const [type, listener] of Object.entries(divider.listeners)) {
++      element.addEventListener(type, listener);
++    }
++    element.dispatchEvent(new FakePointerEvent("pointerdown", 0));
++    element.dispatchEvent(new FakePointerEvent("pointermove", 100));
++  }
++  scope.stop();
++
++  expect(splits).toEqual([
++    { local: 0.3, remote: 0.3 },
++    { local: 0.2, remote: 0.22 },
++  ]);
++});
+diff --git a/frontend/src/ui/usePaneDividers.ts b/frontend/src/ui/usePaneDividers.ts
+index c469b83..4d0b2c8 100644
+--- a/frontend/src/ui/usePaneDividers.ts
++++ b/frontend/src/ui/usePaneDividers.ts
+@@ -1,6 +1,6 @@
+ import type { Side } from "../ipc";
+ import { dragged, type PaneSplitState, type PaneWidths } from "./paneSplit";
+-import { useColumnDrag, type ColumnDrag, type ColumnDragHandle } from "./useColumnDrag";
++import { useColumnDrag, type ColumnDrag, type ColumnDragBinding } from "./useColumnDrag";
+ 
+ type SplitWriter = Pick<PaneSplitState, "setPaneSplit" | "resetPaneSplit">;
+ 
+@@ -38,7 +38,7 @@ export function dividerHandle(
+ export function usePaneDividers(
+   measure: () => PaneWidths | null,
+   split: SplitWriter,
+-): Readonly<Record<Side, ColumnDragHandle>> {
++): Readonly<Record<Side, ColumnDragBinding>> {
+   return {
+     local: useColumnDrag(dividerHandle("local", measure, split)),
+     remote: useColumnDrag(dividerHandle("remote", measure, split)),
+diff --git a/frontend/src/ui/windowStorage.test.ts b/frontend/src/ui/windowStorage.test.ts
+index 8db46e1..ef70591 100644
+--- a/frontend/src/ui/windowStorage.test.ts
++++ b/frontend/src/ui/windowStorage.test.ts
+@@ -1,7 +1,7 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { storedValue } from "./windowStorage";
++import { parseStored, storedValue } from "./windowStorage";
+ 
+ const KEY = "yamt.test.value";
+ const EVENT = "test.storage_failed";
+@@ -89,3 +89,10 @@ test("a storage that throws gives the fallback and logs under the caller's event
+     '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
+   ]);
+ });
++
++test("stored JSON is parsed; text that is not JSON gives null", () => {
++  expect(parseStored('{"local":0.2,"hidden":[true]}')).toEqual({ local: 0.2, hidden: [true] });
++  expect(parseStored("[1]")).toEqual([1]);
++  expect(parseStored("{not json")).toBeNull();
++  expect(parseStored("")).toBeNull();
++});
+diff --git a/frontend/src/ui/windowStorage.ts b/frontend/src/ui/windowStorage.ts
+index 0c68d5c..b7f865e 100644
+--- a/frontend/src/ui/windowStorage.ts
++++ b/frontend/src/ui/windowStorage.ts
+@@ -4,6 +4,14 @@ import type { Ref } from "vue";
+ import { log } from "../ipc";
+ import { unexpected } from "./problem";
+ 
++export function parseStored(raw: string): unknown {
++  try {
++    return JSON.parse(raw);
++  } catch {
++    return null;
++  }
++}
++
+ export function storedValue<T>(
+   key: string,
+   fallback: T,
