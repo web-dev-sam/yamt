@@ -831,17 +831,21 @@ export function presetChoices(): readonly PresetChoice[]; // Settings' "From the
 
 ### 5.4 `ui/` — Vue 3
 
-Components: `App.vue`, `FileList.vue` (the file list panel: its width, the "View as tree/list" button,
+Components: `App.vue`, `FileList.vue` (the file list panel: its width — dragged on its handle, remembered through
+`fileListWidth.ts`, a double-click back to 240 px, plan §2 #84 — the "View as tree/list" button,
 the flat list — paths, resolved mark, vscode-icons — or `FileTree.vue`'s rows built by the pure
 `fileTree.ts` (`treeRows`: folders first, natural order, compact folder chains; `revealed`: the closed
 set without the shown file's folders, the same set when nothing opens), folder icons from
 `folderIcon.ts` (`folderIcon(path, open)`), both icon tables over `iconTable.ts` (rows of an icon and
 its space-separated names; `nameKey`: a path's last segment in lower case), plan §2 #61), `MergeView.vue`
 (toolbar + three `<div>` hosts + two `<svg>`, each in a bordered wrapper on its own compositing layer;
+its grid from the window's one split (`paneColumns`), the header cell above each strip a `PaneDivider.vue` and the strip
+wrapper the same divider (`usePaneDividers`), plan §2 #84;
 one per opened file, inactive ones `invisible` plus `content-visibility: hidden` — no layout or
 paint, editors, scroll positions and work kept, plan §2 #51;
 creates its `MergeController` through `useMergeController`, which recreates it when the file's
-data object changes and destroys it with the component), `MergeToolbar.vue` (Abort merge right after "Mark
+data object changes and destroys it with the component), `PaneDivider.vue` (one pane divider: separator role, its name
+per side, `ResizeDots.vue`'s three dots; MergeView's header cells and ChoiceView's gutters), `MergeToolbar.vue` (Abort merge right after "Mark
 resolved" — hidden at first, shown from the right-click menu, only while git has a merge to abort, disabled while it
 runs; the store's `abortMerge` asks once, then `source.abortMerge()`, #74 —, previous/next change
 arrows that keep the side's keyboard on a pointer press, the "Collapse unchanged fragments" toggle —
@@ -855,8 +859,13 @@ Keymap and the settings file field with Use/Default; keyboard to "Back" on open 
 opener on "Back", plan §2 #56, #57), `ChoiceButtons.vue` (one pressed-choice button group: Theme and
 Antialiasing), `KeymapList.vue` (the actions' rows by group with their key
 labels, WebStorm's Keymap edit menu per row), `PresetPicker.vue` (Settings → Language servers → "From the list":
-`presetChoices()` fills Command and File types through `addedServerFields`, plan §2 #72; its drop-down and the key
-list's row menus share `useDropdownMenu.ts`) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
+`presetChoices()` fills Command and File types through `addedServerFields`, plan §2 #72; its drop-down, the key
+list's row menus and the "Servers" drop-down share `useDropdownMenu.ts`, which also closes on window blur),
+`LanguageServerSettings.vue` (this repository's answer; a `role="switch"` button per found server, its state only from
+the settings file's `off`, plan §2 #83; the servers added by hand), `ServerStatus.vue` and `ServerGroup.vue` (left of
+the gear in all three header rows: the counts, the format note, the pinned servers' own buttons, then one "Servers"
+button with the most urgent dot whose drop-down holds a row and a pin per shown server; a row opens that server's
+`ServerMenu.vue` in the list's place, plan §2 #71, #83) and `KeyRecorder.vue` (WebStorm's Keyboard Shortcut
 dialog: records a key, a "+" menu for Enter/Escape/Tab/Shift+Tab, a live "Already used by" line),
 `ToolbarMenu.vue` (the toolbar's right-click menu: one check per icon button of `listedButtons` — `TOOLBAR_BUTTONS`
 order, Abort merge only while git has a merge to abort —, toggles through the store, teleported to the body and placed by
@@ -866,7 +875,8 @@ the pure `heldAfter` rule, plan §2 #80, #81),
 `ProblemBar.vue` (failures, words from `problemText.ts`; the `Problem` vocabulary, `attempt` and
 `report` — log it and show it — in `problem.ts`), `QuestionDialog.vue` ("Unprocessed Changes" / "Cancel File Merge", words and
 decisions in `question.ts`), `ChoiceView.vue` (two-button choice for a file the editor cannot show,
-one sentence per side from `choiceText.ts`, plan §2 #36). Names are multi-word (the Vue linter's
+one sentence per side from `choiceText.ts`, plan §2 #36; its three columns on the same split, its 1 px gutters the
+dividers, #84). Names are multi-word (the Vue linter's
 `multi-word-component-names`; `App` exempt).
 
 `store.ts` — one module-level singleton, reached through a composable, never provide/inject:
