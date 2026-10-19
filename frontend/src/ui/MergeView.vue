@@ -7,8 +7,8 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
+import PaneDivider from "./PaneDivider.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
-import ResizeDots from "./ResizeDots.vue";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
@@ -223,15 +223,11 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           {{ KEEP }}
         </button>
       </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Local and Result widths"
-        class="col-start-2 row-start-1 flex cursor-col-resize items-center justify-center border-b border-separator"
-        v-on="dividers.local.listeners"
-      >
-        <ResizeDots :state="dividers.local.dots.value" />
-      </div>
+      <PaneDivider
+        side="local"
+        :handle="dividers.local"
+        class="col-start-2 row-start-1 border-b border-separator"
+      />
       <div
         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
       >
@@ -252,15 +248,11 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           class="ml-auto size-2 shrink-0 rounded-full bg-fg"
         />
       </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Result and Remote widths"
-        class="col-start-4 row-start-1 flex cursor-col-resize items-center justify-center border-b border-separator"
-        v-on="dividers.remote.listeners"
-      >
-        <ResizeDots :state="dividers.remote.dots.value" />
-      </div>
+      <PaneDivider
+        side="remote"
+        :handle="dividers.remote"
+        class="col-start-4 row-start-1 border-b border-separator"
+      />
 
       <div
         ref="left"

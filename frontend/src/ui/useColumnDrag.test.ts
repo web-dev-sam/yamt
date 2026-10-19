@@ -3,14 +3,16 @@ import { effectScope, type EffectScope } from "vue";
 
 import { COLUMN_RESIZING_CLASS, useColumnDrag, type ColumnDrag } from "./useColumnDrag";
 
-type PointerFields = { button?: number; pointerId?: number; clientX?: number };
+type PointerFields = { button?: number; buttons?: number; pointerId?: number; clientX?: number };
 
 class FakeMouseEvent extends Event {
   readonly button: number;
+  readonly buttons: number;
   readonly clientX: number;
   constructor(type: string, fields: PointerFields = {}) {
     super(type, { cancelable: true });
     this.button = fields.button ?? 0;
+    this.buttons = fields.buttons ?? 0;
     this.clientX = fields.clientX ?? 0;
   }
 }
@@ -251,15 +253,42 @@ test("a press that gives no drag does not capture or mark the window", () => {
   expect(r.moves).toEqual([]);
 });
 
-test("a double-click on an accepted target resets; on a rejected one nothing", () => {
+function clickWith(r: Rig, accepting: boolean): void {
+  r.accepting = accepting;
+  send(r.target, pointer("pointerdown"));
+  send(r.target, pointer("pointerup"));
+}
+
+test("a double-click resets only when both of its presses were accepted", () => {
   const r = rig();
 
   send(r.target, new FakeMouseEvent("dblclick"));
-  expect(r.resets.count).toBe(1);
+  expect(r.resets.count).toBe(0);
 
-  r.accepting = false;
+  clickWith(r, false);
+  clickWith(r, true);
+  send(r.target, new FakeMouseEvent("dblclick"));
+  expect(r.resets.count).toBe(0);
+
+  clickWith(r, true);
+  clickWith(r, false);
+  send(r.target, new FakeMouseEvent("dblclick"));
+  expect(r.resets.count).toBe(0);
+
+  clickWith(r, true);
+  clickWith(r, true);
   send(r.target, new FakeMouseEvent("dblclick"));
   expect(r.resets.count).toBe(1);
+});
+
+test("a press with another button counts as a rejected one for the double-click", () => {
+  const r = rig();
+
+  send(r.target, pointer("pointerdown", { button: 2 }));
+  clickWith(r, true);
+  send(r.target, new FakeMouseEvent("dblclick"));
+
+  expect(r.resets.count).toBe(0);
 });
 
 test("hover: an accepted target brightens, a rejected one rests, leaving rests", () => {
@@ -275,6 +304,15 @@ test("hover: an accepted target brightens, a rejected one rests, leaving rests",
   r.accepting = true;
   send(r.target, pointer("pointerover"));
   send(r.target, pointer("pointerleave"));
+  expect(r.dots.value).toBe("rest");
+});
+
+test("hover with a button held rests, even over an accepted target", () => {
+  const r = rig();
+  send(r.target, pointer("pointerover"));
+
+  send(r.target, pointer("pointerover", { buttons: 1 }));
+
   expect(r.dots.value).toBe("rest");
 });
 

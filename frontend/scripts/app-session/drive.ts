@@ -49,7 +49,7 @@ async function reveal(state: SessionState, candidate: Candidate): Promise<Placem
 }
 
 export async function click(state: SessionState, command: Of<"click">): Promise<Output> {
-  const chosen = pickByName(await candidates(state, NAMED_SELECTOR), command.query);
+  const chosen = await namedOrCss(state, command.query);
   const placement = await reveal(state, chosen);
   const target = { role: roleOf(chosen), name: nameOf(chosen) };
   if (command.x11) {

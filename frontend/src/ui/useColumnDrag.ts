@@ -40,6 +40,7 @@ type DragState = {
   readonly root: ClassRoot | undefined;
   readonly dots: ShallowRef<DotsState>;
   dragging: Dragging | null;
+  lastTwoPressesAccepted: readonly [earlier: boolean, latest: boolean];
 };
 
 export const COLUMN_RESIZING_CLASS = "col-resizing";
@@ -50,7 +51,12 @@ function isMainPress(state: DragState, event: MouseEvent): boolean {
 }
 
 function pressed(state: DragState, event: Event): void {
-  if (state.dragging !== null || !(event instanceof PointerEvent) || !isMainPress(state, event)) {
+  if (!(event instanceof PointerEvent)) {
+    return;
+  }
+  const accepted = isMainPress(state, event);
+  state.lastTwoPressesAccepted = [state.lastTwoPressesAccepted[1], accepted];
+  if (state.dragging !== null || !accepted) {
     return;
   }
   event.preventDefault();
@@ -95,7 +101,7 @@ function ended(state: DragState, event: Event): void {
 
 function hovered(state: DragState, event: Event): void {
   if (state.dragging === null && event instanceof MouseEvent) {
-    state.dots.value = state.handle.accepts(event) ? "hover" : "rest";
+    state.dots.value = event.buttons === 0 && state.handle.accepts(event) ? "hover" : "rest";
   }
 }
 
@@ -111,14 +117,25 @@ function mousePressed(state: DragState, event: Event): void {
   }
 }
 
-function doubleClicked(state: DragState, event: Event): void {
-  if (event instanceof MouseEvent && state.handle.accepts(event)) {
+function doubleClicked(state: DragState): void {
+  const [earlier, latest] = state.lastTwoPressesAccepted;
+  if (earlier && latest) {
     state.handle.reset();
   }
 }
 
+function idleState(handle: ColumnHandle, root: ClassRoot | undefined): DragState {
+  return {
+    handle,
+    root,
+    dots: shallowRef<DotsState>("rest"),
+    dragging: null,
+    lastTwoPressesAccepted: [false, false],
+  };
+}
+
 export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragBinding {
-  const state: DragState = { handle, root, dots: shallowRef<DotsState>("rest"), dragging: null };
+  const state = idleState(handle, root);
   tryOnScopeDispose(() => {
     stop(state, "rest");
   });
@@ -145,8 +162,8 @@ export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDra
       mousedown: (event) => {
         mousePressed(state, event);
       },
-      dblclick: (event) => {
-        doubleClicked(state, event);
+      dblclick: () => {
+        doubleClicked(state);
       },
     },
     dots: state.dots,

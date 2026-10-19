@@ -3,8 +3,8 @@ import { computed, useTemplateRef } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import PaneDivider from "./PaneDivider.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
-import ResizeDots from "./ResizeDots.vue";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
@@ -121,26 +121,18 @@ function paneWidths(): PaneWidths | null {
         {{ result }}
       </p>
       <div ref="localGutter" class="relative col-start-2 row-span-2 row-start-1">
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Local and Result widths"
-          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
-          v-on="dividers.local.listeners"
-        >
-          <ResizeDots :state="dividers.local.dots.value" />
-        </div>
+        <PaneDivider
+          side="local"
+          :handle="dividers.local"
+          class="absolute -inset-x-[2px] inset-y-0 z-10"
+        />
       </div>
       <div ref="remoteGutter" class="relative col-start-4 row-span-2 row-start-1">
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Result and Remote widths"
-          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
-          v-on="dividers.remote.listeners"
-        >
-          <ResizeDots :state="dividers.remote.dots.value" />
-        </div>
+        <PaneDivider
+          side="remote"
+          :handle="dividers.remote"
+          class="absolute -inset-x-[2px] inset-y-0 z-10"
+        />
       </div>
     </section>
   </div>

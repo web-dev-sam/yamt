@@ -23,7 +23,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
   start-fixture --name <n> [--size 1600x1000]
-  click         --name <n> <accessible name> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+  click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
   type          --name <n> <text> [--x11]

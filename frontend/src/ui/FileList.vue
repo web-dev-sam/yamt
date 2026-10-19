@@ -120,14 +120,15 @@ function toggleFolder(path: string): void {
         </span>
       </li>
     </ul>
+    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="File list width"
-      class="absolute inset-y-0 -right-island z-10 flex w-island cursor-col-resize items-center justify-center"
+      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
       v-on="resize.listeners"
     >
-      <ResizeDots :state="resize.dots.value" />
+      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
     </div>
   </aside>
 </template>
