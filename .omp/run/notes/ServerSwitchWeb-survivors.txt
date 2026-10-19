@@ -1,0 +1,44 @@
+[Survived] StringLiteral src/lsp/internal/spec.ts:52:26
+-       throw new RangeError("a server key is never empty");
++       throw new RangeError("");
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:19:12
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return true
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:19:12
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return true && !Array.isArray(stored)
+
+[Survived] LogicalOperator src/ui/serverPins.ts:19:12
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return typeof stored === "object" || stored !== null && !Array.isArray(stored)
+
+[Survived] LogicalOperator src/ui/serverPins.ts:19:12
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return typeof stored === "object" && stored !== null || !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:19:12
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return true && stored !== null && !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:19:42
+-       return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++       return typeof stored === "object" && true && !Array.isArray(stored)
+
+[Survived] ConditionalExpression src/ui/serverPins.ts:48:40
+-       (): ReadonlySet<string> => new Set(root.value === null ? [] : pinsOf(byRoot.value, root.value)),
++       (): ReadonlySet<string> => new Set(false ? [] : pinsOf(byRoot.value, root.value)),
+
+[Survived] StringLiteral src/ui/serverPins.ts:44:5
+-       "servers.pins_storage_failed",
++       "",
+
+[Survived] StringLiteral src/ui/serverPins.ts:14:21
+-   const STORAGE_KEY = "yamt.servers.pinned";
++   const STORAGE_KEY = "";
+
+[Survived] ConditionalExpression src/ui/serverSetup.ts:77:18
+-     return new Set(root === null ? [] : (settings.off[root] ?? []));
++     return new Set(false ? [] : (settings.off[root] ?? []));
+

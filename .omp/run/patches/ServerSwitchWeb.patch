@@ -1,0 +1,1610 @@
+commit e62d468d4532e79319ef60ed755483d619b90037
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 18:54:45 +0200
+
+    feat(servers): switch found servers off in Settings; a key per server; pins per repository (issue 3, plan #83)
+    
+    ServerKey built once in lsp/; off filter in serverSetup apply; serverPins.ts; off required in the window's types (#1268).
+
+diff --git a/.omp/run/notes/ServerSwitchWeb.md b/.omp/run/notes/ServerSwitchWeb.md
+new file mode 100644
+index 0000000..cdd3d33
+--- /dev/null
++++ b/.omp/run/notes/ServerSwitchWeb.md
+@@ -0,0 +1,110 @@
++Every server spec and view now carries a `ServerKey`, Settings has an on/off switch for each found server, and pins are stored per repository. The frontend recipes all exit 0, and Acceptance 2–4 were checked in the real app, with one gap described under smoke_evidence (the switch click was not done by app-session). Nothing is committed.
++
++```
++summary
++  Every ServerSpec and ServerView carries a `ServerKey` (brand, `lsp/internal/spec.ts` `serverKey`). Found servers get it in
++  detect's last step: tool name plus project, always written out. Hand-added servers get "added: <command words>".
++  `ui/serverSetup.ts`: `offServers`, and `apply` drops found servers that are off before `setSpecs`; the start question lists
++  only shown servers. New `switchServer(key, on)` and `ServerPins` fields. `ui/settings.ts` has the `setServerSwitch` action.
++  New `ui/serverPins.ts` (storage key `yamt.servers.pinned`, per root). Settings → "Found in this repository" has one
++  `role="switch"` checkbox per server; an off row's name is muted. #1268: `off` is required in the window's types.
++
++files_changed
++  frontend/src/lsp/internal/spec.ts, detect.ts, vue.ts, added.ts, state.ts; frontend/src/lsp/index.ts; frontend/src/lsp/AGENTS.md
++  frontend/src/lsp/index.test.ts, internal/spec.test.ts, internal/added.test.ts, internal/detect.test.ts
++  frontend/src/ui/serverPins.ts (new), serverPins.test.ts (new), serverSetup.ts, serverSetup.test.ts, settings.ts, settings.test.ts,
++    LanguageServerSettings.vue
++  frontend/src/ui/store.test.ts, servers.test.ts, question.test.ts (literals only), serverText.test.ts (one `key` plus its import, granted by Main)
++  frontend/src/ipc/domain.ts, fixtureSettings.ts, fixtureSettings.test.ts, tauri.test.ts (#1268, granted by Main)
++
++tests_added
++  lsp/internal/detect.test.ts:
++    "the key stays when a second project brings the suffix": oxlint alone → name "oxlint", key "oxlint (frontend)"; with a
++      root project → names get the suffix, keys unchanged.
++    "keys are unique; Vue's is not TypeScript's": root and web oxlint, TypeScript, Vue → 4 distinct keys, Vue's is "Vue (web)".
++    "TypeScript's key stays whichever program runs it, installed or not": tsc, tsgo, typescript-language-server not
++      installed and installed all give "TypeScript (web)".
++  lsp/internal/added.test.ts "an added server's key is its command, not its numbered name": name "oxlint (2)", key "added: oxlint --lsp".
++  lsp/internal/spec.test.ts "a server key is any text but the empty one": `serverKey("")` throws RangeError.
++  lsp/index.test.ts: the two view-equality tests now include `key`, which differs from the name, so a view built from the name fails them.
++  ui/settings.test.ts "setServerSwitch sends the settings in use, the key and on, and adopts the reply": both directions.
++  ui/serverSetup.test.ts (real `LanguageServers` with FakeHost):
++    "switch: off stops a running server at once, clears its problems and logs its exit; it stays found": a published
++      problem is cleared (shown count 1 → 0), the host stops oxlint, its log ends with "Exited with code 0", foundServers is unchanged.
++    "switch: an off server is never asked about nor started: not by Start, not on focus, not at the next start".
++    "start: with every found server off and none added there is no question and no server".
++    "switch: on again starts the server only under Start": Don't start leaves it stopped; Start starts it.
++    "switch: a failed write changes nothing": `off` unchanged, nothing stopped.
++    "switch: a server keeps its switch when a second project brings the suffix".
++    "switch: another repository's switches do not count".
++    "offServers: the keys switched off under this root; none without a root or an entry".
++  ui/serverPins.test.ts: none pinned at first, pin and unpin; per root with other roots kept as written (a malformed one too);
++    a root left empty is removed; a null root pins nothing and toggling does nothing; six unreadable or wrongly typed
++    stored values read as no pins.
++  ipc/tauri.test.ts "a read without off has nothing switched off; one with off keeps it" (#1268).
++
++smoke_evidence
++  1. pnpm -C frontend lint → oxlint and eslint print nothing, exit 0 ("lint=0")
++     pnpm -C frontend typecheck → "$ vue-tsc -b", "typecheck=0"
++     pnpm -C frontend test → "Test Files  110 passed (110)", "Tests  1479 passed (1479)"
++     pnpm -C frontend unused → "$ knip --include exports,types", "unused=0"
++     pnpm -C frontend fmt:check → "All matched files use the correct format.", "fmt=0"
++  2. cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt"
++     scripts/lsp-repo.sh --servers /tmp/yamt-q5/lsp → mid-merge, 9 conflicted files
++     PATH=~/.cache/yamt/servers-path:$PATH just app-session start-app --name q-switch-a --repo /tmp/yamt-q5/lsp
++     → the question was shown ("Start this project's language servers? … ruff, ty, basedpyright — py/ …"); clicked Start;
++       opened py/api/stats.py.
++     Before, with "Collapse unchanged fragments" turned off so line 1 shows:
++       .cm-lintRange: "cm-lintRange-warning os | cm-lintRange-error "three""; counts "2 errors, 1 warning"; header "… ruff=Running …";
++       pgrep -af "ruff server" → "224098 /tmp/yamt-q5/lsp/py/.venv/bin/ruff server".
++     How the switch was clicked: `app-session click "ruff" --role switch` answered "no element named "ruff" with role switch".
++       Its name lookup reads only aria-label, title or the text content of a few roles, so it misses a label wrapping a
++       checkbox. I clicked the input with `read` running `input.click()`, which fires the real click and change events.
++       app-session itself did not do the click.
++     After switching off: pgrep → "pgrep: none"; rows "… ruff=false(muted) …";
++       header "Biome=Running ; clangd=Stopped ; gopls=Stopped ; Phpactor=Stopped ; ty=Running ; basedpyright=Running ; …" (no ruff);
++       counts "2 errors, 0 warnings"; .cm-lintRange: "cm-lintRange-hint os | cm-lintRange-error "three"".
++       The count of `.cm-lintRange` stays 2: ruff's warning on `os` is gone, and a hint on the same word stays.
++       [INFERENCE] the hint is basedpyright's unused-import hint, which is not counted.
++       Screenshot: /tmp/yamt-q5/settings-ruff-off-dark.png (dark; the ruff row is muted with its switch off, the other 10 are on).
++     After switching on: pgrep → "232148 /tmp/yamt-q5/lsp/py/.venv/bin/ruff server"; header "… ruff=Running …";
++       the `os` warning is back. ruff → Show log → "18:52:27 // yamt // Exited with code 0 // 18:53:00 // yamt // Starting ruff server in py".
++       So the exit line was the last line while ruff was off; I could only read the log after switching it on, because an off
++       server has no button to open its log from.
++  3. just app-session stop --name q-switch-a → "session":"ended"; pgrep → none.
++     start-app --name q-switch-b --repo /tmp/yamt-q5/lsp --settings
++       '{"theme":"dark","languageServers":{"repositories":{"/tmp/yamt-q5/lsp":"start"},"off":{"/tmp/yamt-q5/lsp":["ruff (py)"]},"added":[]}}'
++     → "no dialog", "no question"; header "Biome=Running ; … ty=Running ; basedpyright=Running ; …" (no ruff);
++       after opening py/api/stats.py and waiting 13 s: "pgrep after 13 s: none" (ty and basedpyright processes are running).
++  4. just app-session stop --name q-switch-b → "session":"ended"; pgrep for ty, basedpyright and biome → "no servers left".
++
++deviations_from_brief
++  - #1268 (Main's added item): in `ipc/domain.ts`, `LanguageServerSettings` is `Required<Generated.LanguageServerSettings>`, and
++    `StoredSettings` uses it, so `SettingsRead` does too. `off ?? {}` is filled once, in `toSettingsRead`, the conversion
++    `tauri.ts` `toSettingsResult` calls; it has no other caller. Main asked for it in `toSettingsResult`, so this is one
++    level down. The test is in tauri.test.ts. Removed the defaults from `ui/settings.ts` `sameServers` and
++    `ipc/fixtureSettings.ts` `copied`; `startSettings` now writes `off: {}`. Test literals gained `off: {}`.
++  - serverText.test.ts was outside my list; Main allowed it. Only the literal's `key` and the `serverKey` import changed.
++  - Irregular key: Phpactor and Intelephense come from one preset, so the key follows the tool that is actually used:
++    "Phpactor (php)" or "Intelephense (php)". Installing Intelephense where Phpactor is missing therefore gives a different
++    key; that is a different tool with a different shown name. Documented in lsp/AGENTS.md. TypeScript (tsc/tsgo/not
++    installed) and Vue keep one key; a test checks both.
++  - Hand-added servers are still numbered against all found servers, including off ones. This keeps an added server's
++    name, and so its run, from changing when a found server is switched.
++  - The checkbox is set from the settings after each write. Otherwise, when a write fails, the native checkbox would show
++    the new state while the setting stayed the same.
++  - The question's wording did not change. It now lists only shown servers, as the brief says.
++  - New export `serverKey` from `lsp/index.ts`, used to build keys in tests outside `lsp/`.
++  - For the orchestrator: ui/AGENTS.md (row 7 owns it), docs/architecture.md and the project-map still need `ui/serverPins.ts`,
++    `offServers` and `switchServer` (PM6 map-check will name `serverPins.ts`).
++  - Acceptance 2: the switch was clicked through `read` (`input.click()`), not app-session `click`, because app-session's
++    name lookup ignores a wrapping `<label>`. The fix belongs in frontend/scripts/app-session/find.ts, which I do not own.
++
++open_risks
++  - frontend/src/ui/LanguageServerSettings.vue:43-49: a second click while the first write is still running reads the old
++    `off`. The value is set again after each write, so this is harmless, but it was not tested in WebKit.
++  - frontend/src/ui/serverPins.ts:58: when a repository is pinned again, its entry moves to the end of the stored object.
++    The order is never read.
++  - The fixture page still has no servers (row 7 adds `?servers`), so the Settings switch was checked only in the real app
++    (WebKitGTK), not in MiniBrowser.
++```
+\ No newline at end of file
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 613d5fd..e00fdf5 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -46,12 +46,14 @@ export type Theme = Generated.Theme;
+ 
+ export type Antialiasing = Generated.Antialiasing;
+ 
+-export type StoredSettings = Generated.StoredSettings;
++export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
++
++export type StoredSettings = Omit<Generated.StoredSettings, "languageServers"> & {
++  languageServers: LanguageServerSettings;
++};
+ 
+ export type KeysChange = Generated.KeysChange;
+ 
+-export type LanguageServerSettings = Generated.LanguageServerSettings;
+-
+ export type RepositoryAnswer = Generated.RepositoryAnswer;
+ 
+ export type AddedServer = Generated.AddedServer;
+@@ -214,7 +216,12 @@ export function toFileList(dto: Generated.FileList): FileList {
+ }
+ 
+ export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
+-  return { path: dto.path, defaultPath: dto.default_path, stored: dto.stored };
++  const { languageServers } = dto.stored;
++  const stored = {
++    ...dto.stored,
++    languageServers: { ...languageServers, off: languageServers.off ?? {} },
++  };
++  return { path: dto.path, defaultPath: dto.default_path, stored };
+ }
+ 
+ export function toStartReply(dto: Generated.StartReply): StartReply {
+diff --git a/frontend/src/ipc/fixtureSettings.test.ts b/frontend/src/ipc/fixtureSettings.test.ts
+index 0e65294..85938ba 100644
+--- a/frontend/src/ipc/fixtureSettings.test.ts
++++ b/frontend/src/ipc/fixtureSettings.test.ts
+@@ -190,7 +190,7 @@ test("an answer keeps the other repositories' answers and the added servers", as
+   const settings = createFixtureSettings();
+   await settings.loadSettings({
+     ...IN_USE,
+-    languageServers: { repositories: { "/elsewhere": "dontStart" }, added: [OXLINT] },
++    languageServers: { repositories: { "/elsewhere": "dontStart" }, off: {}, added: [OXLINT] },
+   });
+ 
+   const read = await settings.setServerAnswer(IN_USE, "start");
+@@ -206,7 +206,7 @@ test("added servers replace the list and keep the answers", async () => {
+   const settings = createFixtureSettings();
+   await settings.loadSettings({
+     ...IN_USE,
+-    languageServers: { repositories: { [REPOSITORY]: "start" }, added: [OXLINT] },
++    languageServers: { repositories: { [REPOSITORY]: "start" }, off: {}, added: [OXLINT] },
+   });
+ 
+   const read = await settings.setAddedServers(IN_USE, [TAPLO]);
+@@ -285,7 +285,7 @@ test("an off list in a reply is a copy: changing it changes nothing stored", asy
+   const settings = createFixtureSettings();
+   const first = await settings.setServerSwitch(IN_USE, "oxlint (repository root)", false);
+   if (first.ok) {
+-    first.value.stored.languageServers.off?.[REPOSITORY]?.push("--reply");
++    first.value.stored.languageServers.off[REPOSITORY]?.push("--reply");
+   }
+ 
+   const again = await settings.loadSettings(IN_USE);
+diff --git a/frontend/src/ipc/fixtureSettings.ts b/frontend/src/ipc/fixtureSettings.ts
+index bf475c2..22ef8a4 100644
+--- a/frontend/src/ipc/fixtureSettings.ts
++++ b/frontend/src/ipc/fixtureSettings.ts
+@@ -30,7 +30,7 @@ function copied({ theme, antialiasing, keys, languageServers }: StoredSettings):
+     languageServers: {
+       repositories: { ...languageServers.repositories },
+       off: Object.fromEntries(
+-        Object.entries(languageServers.off ?? {}).map(([root, servers]) => [root, [...servers]]),
++        Object.entries(languageServers.off).map(([root, servers]) => [root, [...servers]]),
+       ),
+       added: copiedServers(languageServers.added),
+     },
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index d1e4a10..7c4dfaa 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -1,7 +1,7 @@
+ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import type { DiskVersion } from "./domain";
++import type { DiskVersion, StoredSettings } from "./domain";
+ import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
+ 
+ const commands = vi.hoisted(() => ({
+@@ -373,11 +373,11 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
+   });
+ });
+ 
+-const STORED: Generated.StoredSettings = {
++const STORED: StoredSettings = {
+   theme: "light",
+   antialiasing: "subpixel",
+   keys: { undo: ["Alt-Backspace"] },
+-  languageServers: { repositories: { "/home/me/yamt": "start" }, added: [] },
++  languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
+ };
+ const SETTINGS_DTO: Generated.SettingsRead = {
+   path: "/home/me/.config/yamt/settings.json",
+@@ -429,6 +429,27 @@ test("a settings failure comes back as the app's error", async () => {
+   expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
+ });
+ 
++test("a read without off has nothing switched off; one with off keeps it", async () => {
++  const old: Generated.SettingsRead = {
++    ...SETTINGS_DTO,
++    stored: { ...STORED, languageServers: { repositories: {}, added: [] } },
++  };
++  const off = { "/home/me/yamt": ["oxlint (repository root)"] };
++  const switched: Generated.SettingsRead = {
++    ...SETTINGS_DTO,
++    stored: { ...STORED, languageServers: { ...STORED.languageServers, off } },
++  };
++  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: old });
++  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: switched });
++  const source = createTauriSource();
++
++  const first = await source.loadSettings(STORED);
++  const second = await source.loadSettings(STORED);
++
++  expect(first.ok && first.value.stored.languageServers.off).toEqual({});
++  expect(second.ok && second.value.stored.languageServers.off).toEqual(off);
++});
++
+ test("setServerAnswer and setAddedServers send their arguments and return the read", async () => {
+   commands.setServerAnswer.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
+   commands.setAddedServers.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
+diff --git a/frontend/src/lsp/AGENTS.md b/frontend/src/lsp/AGENTS.md
+index ec5a75c..d4baeaf 100644
+--- a/frontend/src/lsp/AGENTS.md
++++ b/frontend/src/lsp/AGENTS.md
+@@ -1,7 +1,9 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own language-server client (plan §2 #67, #70): speaks the protocol to programs an `ipc/ServerHost` starts; owns each server's lifecycle and state, the documents open on it, its problems (pushed and pulled into one slot per server: `DocProblems` never shows an answer older than the last one it showed), formatting, and its log. Framework-free: no `vue`, `@vueuse`, `@tauri-apps`, and never imports `editor/`, `ui/`, `model/`, `connectors/` (oxlint + `scripts/fences.ts`); only `ipc/index.ts` types. Public surface is `index.ts` (`LanguageServers`, `isDocVersion`, `detect`, `addedSpecs`, `presetChoices` and the types); everything else in `internal/`. Every message from a server is external data, parsed once with valibot (`messages.ts` envelope, `protocol.ts` payloads); a malformed one is logged and dropped.
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own language-server client (plan §2 #67, #70): speaks the protocol to programs an `ipc/ServerHost` starts; owns each server's lifecycle and state, the documents open on it, its problems (pushed and pulled into one slot per server: `DocProblems` never shows an answer older than the last one it showed), formatting, and its log. Framework-free: no `vue`, `@vueuse`, `@tauri-apps`, and never imports `editor/`, `ui/`, `model/`, `connectors/` (oxlint + `scripts/fences.ts`); only `ipc/index.ts` types. Public surface is `index.ts` (`LanguageServers`, `isDocVersion`, `serverKey`, `detect`, `addedSpecs`, `presetChoices` and the types); everything else in `internal/`. Every message from a server is external data, parsed once with valibot (`messages.ts` envelope, `protocol.ts` payloads); a malformed one is logged and dropped.
+ 
+ A server's run is one sum type, `Run` in `internal/run.ts` (idle, launching, starting, running, halting), held by `internal/server.ts` (the lifecycle); its `state` and `running` (the documents, the capabilities, the attempt) are derived from it. `internal/attempt.ts` is one process run: it starts and stops the process and routes its messages.
+ 
+ Which specs exist (plan §2 #70 "Detection", "Not installed", #72): `internal/detect.ts` `detect(paths, lookups, root)` is a pure function over the host's two generic lookups (`findProgram`, `projectFiles`; Rust never learns a server's name or an ecosystem). `internal/ecosystems.ts` is the one table of ecosystems (node, python, rust, go, php, clang): each one's project rule (manifests tried in order, nearest folder up to the repository root; rust prefers the nearest `Cargo.toml` with a `[workspace]` table, go `go.work` over `go.mod`, clang's `build/compile_commands.json` makes the folder holding `build/` the project) and its `ProgramFolders` (project folders such as `node_modules/.bin`, `.venv/bin`, `vendor/bin`; home folders such as `go/bin`, `.cargo/bin`, `.local/bin`); the folder walking lives there once, as do the TOML table-header rule (`tomlTable`) and its check (`fileHolds`). A path joins an ecosystem only when some detected preset of that ecosystem serves its file type. Each project folder is read in one `projectFiles` batch — the names come from `internal/candidates.ts` (each preset's signs and configs, Phpactor's integration files, the Vue packages, and the files the install hints read, `install.ts` `HINT_FILES`) — and run through the one preset table `internal/presets.ts` (vocabulary in `internal/tool.ts`; formatters first: oxfmt, Biome, oxlint, TypeScript, eslint, rust-analyzer, gopls, ruff, ty, basedpyright, pyright, Phpactor else Intelephense, clangd, then Deno and bash-language-server, which have `ecosystem: null`: Settings list only, never detected; `DETECTED_PRESETS` is the rest). A `used` look counts a config file, a `pyproject.toml` section or the ecosystem's manifest wherever `findProgram` finds the server (`Project`, `Path`, `Home`), else its spec carries an `InstallHint` (`internal/install.ts`: node's manager from `internal/packageManager.ts` — the `packageManager` field, else the nearest lock file; python's from the nearest `uv.lock`/`poetry.lock`/`pdm.lock`); a found preset server carries that same hint as `help` (null for oxfmt, Biome, oxlint, tsc/tsgo and Intelephense, which have none); a `used` or eslint server's hint is `install.ts` `serverHint`, for detection and the Settings list alike. A program-only sign (oxfmt, Biome, oxlint; ruff, ty, basedpyright without their config) counts only `place: "Project"`, so detected and can start agree. A tool's `fromProject` adds what only the project knows: Phpactor's integrations (`internal/integrations.ts`: PHPStan, Psalm, PHP-CS-Fixer, phpcs, each on with `vendor/bin/<tool>` and its config in the project folder; Phpactor's own formats rule is "never", so it formats only with an integration on whose own `formats` flag is set; `tool.ts` `mayFormat` is the same rule without a project, for servers added by hand), pyright's `python.pythonPath` (the project venv's `python`, `place: "Project"`). `internal/vue.ts`: in a TypeScript 5/6 project (typescript-language-server) with `vue` up the chain, `@vue/typescript-plugin` up the chain makes the TypeScript spec serve `vue` with the plugin loaded from the project folder (`uri.ts` `absolutePath`: `fileUri`'s root handling in the root's own separators); without it a never-started "Vue" spec carries the plugin's hint; TypeScript 7 or tsgo with `vue` gets the `vueNeedsTypeScript6` note naming the program that runs (`tsc` or `tsgo`). A changed spec (the plugin installed) is a new spec to `setSpecs`: the old run stops, the new one starts; `help` and `notes` are display only, so a spec that differs in nothing else keeps its run (`Server.runsAs`) and shows the new ones. `internal/project.ts` holds what one (ecosystem, folder) project reads: its files, its program lookups with the ecosystem's folders, the nearest of a set of files. A project's workspace URI is `handshake.ts` `projectUri`, the one the handshake sends. A rejecting lookup means "not found"; nothing throws. `internal/choices.ts` lists each preset's own server (`presetChoices` for Settings, in table order, PHP as Phpactor then Intelephense). `internal/added.ts` `addedSpecs(added, taken, root)` turns the settings file's added servers into specs served at the repository root; an entry whose program has no file name is skipped; one whose program file name (folder and `.exe`/`.cmd`/`.bat` dropped) and arguments equal a preset server's gets its name, settings, start options for the root, formats when the tool may (`mayFormat`), and help. Every detected spec carries its ecosystem's folders as `ServerSpec.folders`; added specs carry `ecosystems.ts` `EVERY_ECOSYSTEM_FOLDERS`; the start command sends `spec.folders`.
+ 
++A server's identity (plan §2 #83): every `ServerSpec` and `ServerView` carries a `ServerKey` (brand, `internal/spec.ts` `serverKey`) that does not change with its shown name. Detection builds its specs without a key (`FoundSpec`) and gives each one in its last step, beside the shown name: the tool's name with its project always written out (`oxlint (frontend)`, `TypeScript (repository root)`; the shown name is that text only when two projects use the tool), so a suffix coming or going, tsc ↔ tsgo or installed ↔ not installed keep the key, and Vue's spread copy of TypeScript's spec gets its own (`Vue (web)`). `addedSpecs` keys a hand-added server `added: ` plus its command words, never its numbered name. Phpactor and Intelephense are two tools of one preset: their keys differ (`Phpactor (php)`, `Intelephense (php)`). Start, Stop, Restart and the logs still go by the shown name; the key is what the window's off switches and pins hold.
++
+ Reading path of one message from a server: `ServerHost` event → `internal/attempt.ts` `#onEvent` → `connection.ts` `receive` (parse) → a response settles its request; a request goes to `answers.ts` (pure table) and back through `send`; a notification goes to `attempt.ts` `#notified` → `problems.ts` `pushProblems` → `DocProblems` → `ResultDocument.showProblems`. Outward: `index.ts` `open` → `documents.ts` (`DocEntry`: version, 300 ms sync) → `serverDocs.ts` (`didOpen`/`didChange`/`didClose`) → `connection.ts` → `ServerHost.send`; pulls go from `problems.ts` `DocProblems.pull`, the formatting request from `formatting.ts`.
+diff --git a/frontend/src/lsp/index.test.ts b/frontend/src/lsp/index.test.ts
+index 00613dd..30076d4 100644
+--- a/frontend/src/lsp/index.test.ts
++++ b/frontend/src/lsp/index.test.ts
+@@ -15,6 +15,7 @@ import {
+   addedSpecs,
+   isDocVersion,
+   presetChoices,
++  serverKey,
+   type PresetChoice,
+   type SpecNote,
+   type DocVersion,
+@@ -268,6 +269,7 @@ const TIMERS: Timers = {
+ 
+ function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
+   return {
++    key: serverKey(`${name} (repository root)`),
+     name,
+     command: { program: name, args: ["--lsp"] },
+     project: "",
+@@ -652,8 +654,22 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
+   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint", "tsserver"]);
+   expect(host.stopped).toEqual([]);
+   expect(languageServers.views()).toEqual([
+-    { name: "oxlint", project: "", state: { kind: "running" }, help: null, notes: [] },
+-    { name: "tsserver", project: "", state: { kind: "running" }, help, notes },
++    {
++      key: "oxlint (repository root)",
++      name: "oxlint",
++      project: "",
++      state: { kind: "running" },
++      help: null,
++      notes: [],
++    },
++    {
++      key: "tsserver (repository root)",
++      name: "tsserver",
++      project: "",
++      state: { kind: "running" },
++      help,
++      notes,
++    },
+   ]);
+ });
+ 
+@@ -734,7 +750,14 @@ test("rule 3: a help-only or notes-only change keeps the run and shows the new w
+   expect(host.stopped).toEqual([]);
+   expect(host.only("TypeScript")).toBe(before);
+   expect(languageServers.views()).toEqual([
+-    { name: "TypeScript", project: "", state: { kind: "running" }, help, notes: [note] },
++    {
++      key: "TypeScript (repository root)",
++      name: "TypeScript",
++      project: "",
++      state: { kind: "running" },
++      help,
++      notes: [note],
++    },
+   ]);
+ 
+   const command = { program: "tsgo", args: ["--lsp", "--stdio"] };
+diff --git a/frontend/src/lsp/index.ts b/frontend/src/lsp/index.ts
+index 8a5db73..da65c86 100644
+--- a/frontend/src/lsp/index.ts
++++ b/frontend/src/lsp/index.ts
+@@ -17,12 +17,14 @@ export type { ResultDocument } from "./internal/documents";
+ export type { FormatRefusal, FormatReply, FormattingOptions } from "./internal/formatting";
+ export type { LogLine } from "./internal/log";
+ export type { LinePosition, ProblemSeverity, ServerProblem } from "./internal/problems";
+-export type {
+-  InstallHint,
+-  PackageManager,
+-  PythonManager,
+-  ServerSpec,
+-  SpecNote,
++export {
++  serverKey,
++  type InstallHint,
++  type PackageManager,
++  type PythonManager,
++  type ServerKey,
++  type ServerSpec,
++  type SpecNote,
+ } from "./internal/spec";
+ export type { FailReason, ServerState, ServerView } from "./internal/state";
+ export type { Timers } from "./internal/timers";
+@@ -98,6 +100,7 @@ export class LanguageServers {
+ 
+   views(): readonly ServerView[] {
+     return this.#servers.map(({ spec, state }) => ({
++      key: spec.key,
+       name: spec.name,
+       project: spec.project,
+       state,
+diff --git a/frontend/src/lsp/internal/added.test.ts b/frontend/src/lsp/internal/added.test.ts
+index c022a79..1caed80 100644
+--- a/frontend/src/lsp/internal/added.test.ts
++++ b/frontend/src/lsp/internal/added.test.ts
+@@ -17,6 +17,7 @@ test("addedSpecs: an unmatched program keeps its file name, served at the reposi
+ 
+   expect(specs).toEqual([
+     {
++      key: "added: /opt/bin/pylsp --check",
+       name: "pylsp",
+       command: { program: "/opt/bin/pylsp", args: ["--check"] },
+       project: "",
+@@ -30,6 +31,7 @@ test("addedSpecs: an unmatched program keeps its file name, served at the reposi
+       notes: [],
+     },
+     {
++      key: "added: C:\\tools\\taplo.exe lsp stdio",
+       name: "taplo.exe",
+       command: { program: "C:\\tools\\taplo.exe", args: ["lsp", "stdio"] },
+       project: "",
+@@ -71,6 +73,7 @@ test("addedSpecs: `ruff server` matches ruff: its name, rules and help; the type
+   );
+ 
+   expect(ruff).toEqual({
++    key: "added: /home/u/.venv/bin/ruff server",
+     name: "ruff (2)",
+     command: { program: "/home/u/.venv/bin/ruff", args: ["server"] },
+     project: "",
+@@ -85,6 +88,17 @@ test("addedSpecs: `ruff server` matches ruff: its name, rules and help; the type
+   });
+ });
+ 
++test("an added server's key is its command, not its numbered name", () => {
++  const command = ["oxlint", "--lsp"];
++  const alone = addedSpecs([{ command, fileTypes: ["ts"] }], [], ROOT);
++  const numbered = addedSpecs([{ command, fileTypes: ["ts"] }], ["oxlint"], ROOT);
++
++  expect(numbered.map(({ name, key }) => [name, key])).toEqual([
++    ["oxlint (2)", "added: oxlint --lsp"],
++  ]);
++  expect(alone.map(({ key }) => key)).toEqual(["added: oxlint --lsp"]);
++});
++
+ test("addedSpecs: `intelephense.cmd --stdio` in a folder matches Intelephense and never formats", () => {
+   const [intelephense] = addedSpecs(
+     [{ command: ["/opt/x/intelephense.cmd", "--stdio"], fileTypes: ["php"] }],
+diff --git a/frontend/src/lsp/internal/added.ts b/frontend/src/lsp/internal/added.ts
+index 5d1857d..76488a6 100644
+--- a/frontend/src/lsp/internal/added.ts
++++ b/frontend/src/lsp/internal/added.ts
+@@ -3,7 +3,7 @@ import { PRESET_SERVERS, type PresetServer } from "./choices";
+ import { EVERY_ECOSYSTEM_FOLDERS } from "./ecosystems";
+ import { projectUri } from "./handshake";
+ import { sameValue } from "./json";
+-import type { ServerSpec } from "./spec";
++import { serverKey, type ServerSpec } from "./spec";
+ import { mayFormat } from "./tool";
+ 
+ const FIRST_REPEAT = 2;
+@@ -52,7 +52,8 @@ export function addedSpecs(
+     }
+     names.add(name);
+     const command = { program, args };
+-    const spec = { name, command, project: "", folders: EVERY_ECOSYSTEM_FOLDERS, fileTypes };
++    const key = serverKey(`added: ${[program, ...args].join(" ")}`);
++    const spec = { key, name, command, project: "", folders: EVERY_ECOSYSTEM_FOLDERS, fileTypes };
+     return [{ ...spec, ...presetPart(preset, root), install: null, notes: [] }];
+   });
+ }
+diff --git a/frontend/src/lsp/internal/detect.test.ts b/frontend/src/lsp/internal/detect.test.ts
+index fc51dc8..ce663d2 100644
+--- a/frontend/src/lsp/internal/detect.test.ts
++++ b/frontend/src/lsp/internal/detect.test.ts
+@@ -139,6 +139,19 @@ test("project folders: a file at the root belongs to the root project", async ()
+   ]);
+ });
+ 
++test("the key stays when a second project brings the suffix", async () => {
++  const fake = lookups({ ...NO_SERVERS, "frontend/package.json": "{}", ...bins("", "oxlint") });
++
++  const alone = await detect(["frontend/a.ts"], fake, ROOT);
++  const both = await detect(["frontend/a.ts", "c.ts"], fake, ROOT);
++
++  expect(alone.map(({ name, key }) => [name, key])).toEqual([["oxlint", "oxlint (frontend)"]]);
++  expect(both.map(({ name, key }) => [name, key])).toEqual([
++    ["oxlint (repository root)", "oxlint (repository root)"],
++    ["oxlint (frontend)", "oxlint (frontend)"],
++  ]);
++});
++
+ test("project folders: files with no package.json above them are served by no preset; a Cargo.toml brings no node project", async () => {
+   const fake = lookups({ "crates/session/Cargo.toml": "[workspace]", ...bins("", "oxlint") });
+ 
+@@ -175,6 +188,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
+ 
+   expect(specs).toEqual([
+     {
++      key: "oxfmt (web)",
+       name: "oxfmt",
+       command: { program: "oxfmt", args: ["--lsp"] },
+       project: "web",
+@@ -188,6 +202,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
+       notes: [],
+     },
+     {
++      key: "oxlint (web)",
+       name: "oxlint",
+       command: { program: "oxlint", args: ["--lsp"] },
+       project: "web",
+@@ -216,6 +231,7 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
+ 
+   expect(specs).toEqual([
+     {
++      key: "TypeScript (repository root)",
+       name: "TypeScript",
+       command: { program: "tsc", args: ["--lsp", "--stdio"] },
+       project: "",
+@@ -359,6 +375,7 @@ test("eslint: config, package and its server found on PATH or in the project", a
+ 
+   expect(onPath).toEqual([
+     {
++      key: "eslint (repository root)",
+       name: "eslint",
+       command: { program: "vscode-eslint-language-server", args: ["--stdio"] },
+       project: "",
+@@ -563,6 +580,7 @@ test("rust-analyzer: the workspace's manifest counts, found on PATH, without car
+ 
+   expect(specs).toEqual([
+     {
++      key: "rust-analyzer (rs)",
+       name: "rust-analyzer",
+       command: { program: "rust-analyzer", args: [] },
+       project: "rs",
+@@ -611,6 +629,7 @@ test("gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install
+ 
+   expect(onPath).toEqual([
+     {
++      key: "gopls (go)",
+       name: "gopls",
+       command: { program: "gopls", args: [] },
+       project: "go",
+@@ -638,6 +657,7 @@ test("ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec", a
+ 
+   expect(specs).toEqual([
+     {
++      key: "ruff (py)",
+       name: "ruff",
+       command: { program: "ruff", args: ["server"] },
+       project: "py",
+@@ -766,6 +786,7 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
+ 
+   expect(both).toEqual([
+     {
++      key: "Phpactor (php)",
+       name: "Phpactor",
+       command: { program: "phpactor", args: ["language-server"] },
+       project: "php",
+@@ -781,6 +802,7 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
+   ]);
+   expect(intelephense).toEqual([
+     {
++      key: "Intelephense (php)",
+       name: "Intelephense",
+       command: { program: "intelephense", args: ["--stdio"] },
+       project: "php",
+@@ -820,6 +842,7 @@ test("clangd: formats only with a .clang-format or _clang-format up to the root"
+ 
+   expect(plain).toEqual([
+     {
++      key: "clangd (c)",
+       name: "clangd",
+       command: { program: "clangd", args: [] },
+       project: "c",
+@@ -860,6 +883,7 @@ test("Biome: the project's copy counts and formats; a copy on PATH does not", as
+ 
+   expect(local).toEqual([
+     {
++      key: "Biome (biome)",
+       name: "Biome",
+       command: { program: "biome", args: ["lsp-proxy"] },
+       project: "biome",
+@@ -916,6 +940,7 @@ test("Vue with the plugin up the chain: the TypeScript server also serves vue an
+ 
+   expect(specs).toEqual([
+     {
++      key: "TypeScript (web)",
+       name: "TypeScript",
+       command: { program: "typescript-language-server", args: ["--stdio"] },
+       project: "web",
+@@ -981,6 +1006,7 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
+       notes: [],
+     }),
+     {
++      key: "Vue (web)",
+       name: "Vue",
+       command: { program: "typescript-language-server", args: ["--stdio"] },
+       project: "web",
+@@ -1003,6 +1029,57 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
+   ]);
+ });
+ 
++test("keys are unique; Vue's is not TypeScript's", async () => {
++  const tree = {
++    ...NO_SERVERS,
++    ...bins("", "oxlint"),
++    ...vueProject("5.9.3"),
++    ...VUE_PACKAGE,
++    ...bins("web/", "oxlint"),
++  };
++
++  const specs = await detect(
++    ["web/src/App.vue", "web/a.ts", "b.ts"],
++    lookups(tree, ["typescript-language-server"]),
++    ROOT,
++  );
++
++  expect(specs.map(({ name, key }) => [name, key])).toEqual([
++    ["oxlint (repository root)", "oxlint (repository root)"],
++    ["oxlint (web)", "oxlint (web)"],
++    ["TypeScript", "TypeScript (web)"],
++    ["Vue", "Vue (web)"],
++  ]);
++});
++
++test("TypeScript's key stays whichever program runs it, installed or not", async () => {
++  const seven = vueProject("7.0.0");
++  const preview = { ...vueProject("5.9.3"), ...bins("web/", "tsgo") };
++  const server = vueProject("5.9.3");
++
++  const keys = await Promise.all(
++    [
++      lookups(seven),
++      lookups(preview),
++      lookups(server),
++      lookups(server, ["typescript-language-server"]),
++    ].map(async (fake) =>
++      (await detect(["web/a.ts"], fake, ROOT)).map(({ command, install, key }) => [
++        command.program,
++        install === null,
++        key,
++      ]),
++    ),
++  );
++
++  expect(keys).toEqual([
++    [["tsc", true, "TypeScript (web)"]],
++    [["tsgo", true, "TypeScript (web)"]],
++    [["typescript-language-server", false, "TypeScript (web)"]],
++    [["typescript-language-server", true, "TypeScript (web)"]],
++  ]);
++});
++
+ test("Vue in a TypeScript 7 or native-preview project: the TypeScript spec carries the note with the program that runs and the project's version", async () => {
+   const seven = { ...vueProject("7.0.0"), ...VUE_PACKAGE, ...VUE_PLUGIN };
+   const preview = { ...vueProject("5.9.3"), ...VUE_PACKAGE, ...bins("web/", "tsgo") };
+diff --git a/frontend/src/lsp/internal/detect.ts b/frontend/src/lsp/internal/detect.ts
+index 3ebdcc6..bcddad5 100644
+--- a/frontend/src/lsp/internal/detect.ts
++++ b/frontend/src/lsp/internal/detect.ts
+@@ -25,7 +25,7 @@ import {
+   type Project,
+   type ProjectLookups,
+ } from "./project";
+-import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
++import { extensionOf, serverKey, type FoundSpec, type InstallHint, type ServerSpec } from "./spec";
+ import type { Command, Formats, Look, Sign, Tool } from "./tool";
+ import { withVue, type TypeScriptRun } from "./vue";
+ 
+@@ -172,7 +172,7 @@ function formatsIn(project: Project, formats: Formats): boolean {
+   }
+ }
+ 
+-async function fromProject(project: Project, tool: Tool, spec: ServerSpec): Promise<ServerSpec> {
++async function fromProject(project: Project, tool: Tool, spec: FoundSpec): Promise<FoundSpec> {
+   const from = tool.fromProject;
+   switch (from.kind) {
+     case "nothing":
+@@ -196,7 +196,7 @@ async function specsOf(
+   preset: DetectedPreset,
+   detected: Detected,
+   root: string,
+-): Promise<readonly ServerSpec[]> {
++): Promise<readonly FoundSpec[]> {
+   const { tool } = detected;
+   const workspaceUri = projectUri({ folder: project.folder, root });
+   const spec = await fromProject(project, tool, {
+@@ -219,7 +219,7 @@ async function detectIn(
+   lookups: ProjectLookups,
+   { folder, root }: ProjectAt,
+   ecosystems: ReadonlySet<Ecosystem>,
+-): Promise<readonly ServerSpec[]> {
++): Promise<readonly FoundSpec[]> {
+   const files = await readFiles(lookups, candidates(folder, ecosystems));
+   const presets = DETECTED_PRESETS.filter((preset) => ecosystems.has(preset.ecosystem));
+   const specs = await Promise.all(
+@@ -245,7 +245,7 @@ export async function detect(
+   ).flat();
+   return found.map((spec) => {
+     const shared = found.filter((other) => other.name === spec.name).length > 1;
+-    const label = spec.project === "" ? ROOT_LABEL : spec.project;
+-    return shared ? { ...spec, name: `${spec.name} (${label})` } : spec;
++    const labelled = `${spec.name} (${spec.project === "" ? ROOT_LABEL : spec.project})`;
++    return { ...spec, key: serverKey(labelled), name: shared ? labelled : spec.name };
+   });
+ }
+diff --git a/frontend/src/lsp/internal/spec.test.ts b/frontend/src/lsp/internal/spec.test.ts
+index 5a23134..4c757b2 100644
+--- a/frontend/src/lsp/internal/spec.test.ts
++++ b/frontend/src/lsp/internal/spec.test.ts
+@@ -1,9 +1,10 @@
+ import { expect, test } from "vitest";
+ 
+ import { languageId } from "./languageIds";
+-import { extensionOf, serves, type ServerSpec } from "./spec";
++import { extensionOf, serverKey, serves, type ServerSpec } from "./spec";
+ 
+ const SPEC: ServerSpec = {
++  key: serverKey("oxlint (frontend)"),
+   name: "oxlint",
+   command: { program: "oxlint", args: [] },
+   project: "frontend",
+@@ -33,6 +34,11 @@ test("a spec serves files with its extensions under its project folder only", ()
+   expect(serves({ ...SPEC, project: "" }, "deep/down/a.ts")).toBe(true);
+ });
+ 
++test("a server key is any text but the empty one", () => {
++  expect(serverKey("oxlint (frontend)")).toBe("oxlint (frontend)");
++  expect(() => serverKey("")).toThrow(RangeError);
++});
++
+ test("language ids come from the table; an unknown extension is its own id", () => {
+   expect(languageId("a.ts")).toBe("typescript");
+   expect(languageId("a.tsx")).toBe("typescriptreact");
+diff --git a/frontend/src/lsp/internal/spec.ts b/frontend/src/lsp/internal/spec.ts
+index 8cb874f..a45722b 100644
+--- a/frontend/src/lsp/internal/spec.ts
++++ b/frontend/src/lsp/internal/spec.ts
+@@ -41,7 +41,21 @@ export type InstallHint =
+     }
+   | { readonly kind: "system"; readonly program: string };
+ 
++export type ServerKey = string & { readonly __brand: "ServerKey" };
++
++function isServerKey(text: string): text is ServerKey {
++  return text !== "";
++}
++
++export function serverKey(text: string): ServerKey {
++  if (!isServerKey(text)) {
++    throw new RangeError("a server key is never empty");
++  }
++  return text;
++}
++
+ export type ServerSpec = {
++  readonly key: ServerKey;
+   readonly name: string;
+   readonly command: { readonly program: string; readonly args: readonly string[] };
+   readonly project: string;
+@@ -55,6 +69,8 @@ export type ServerSpec = {
+   readonly notes: readonly SpecNote[];
+ };
+ 
++export type FoundSpec = Omit<ServerSpec, "key">;
++
+ export function extensionOf(path: string): string {
+   const name = path.slice(path.lastIndexOf("/") + 1);
+   const dot = name.lastIndexOf(".");
+diff --git a/frontend/src/lsp/internal/state.ts b/frontend/src/lsp/internal/state.ts
+index 8f0a90b..bd500d3 100644
+--- a/frontend/src/lsp/internal/state.ts
++++ b/frontend/src/lsp/internal/state.ts
+@@ -1,5 +1,5 @@
+ import type { StartReply } from "../../ipc";
+-import type { InstallHint, ServerSpec, SpecNote } from "./spec";
++import type { InstallHint, ServerKey, ServerSpec, SpecNote } from "./spec";
+ 
+ export type FailReason =
+   | { readonly kind: "notFound"; readonly program: string; readonly searched: readonly string[] }
+@@ -20,6 +20,7 @@ export type ServerState =
+   | { readonly kind: "notInstalled"; readonly hint: InstallHint };
+ 
+ export type ServerView = {
++  readonly key: ServerKey;
+   readonly name: string;
+   readonly project: string;
+   readonly state: ServerState;
+diff --git a/frontend/src/lsp/internal/vue.ts b/frontend/src/lsp/internal/vue.ts
+index a59f4a6..9f2b5c8 100644
+--- a/frontend/src/lsp/internal/vue.ts
++++ b/frontend/src/lsp/internal/vue.ts
+@@ -1,6 +1,6 @@
+ import { nodeHint } from "./install";
+ import { modulePackage, nearestPackage, type Place } from "./project";
+-import type { ServerSpec, TypeScriptProgram } from "./spec";
++import type { FoundSpec, TypeScriptProgram } from "./spec";
+ import { absolutePath } from "./uri";
+ 
+ export type TypeScriptRun =
+@@ -14,10 +14,10 @@ export const VUE_FILES: readonly string[] = [modulePackage(VUE), modulePackage(P
+ 
+ export function withVue(
+   project: Place,
+-  typescript: ServerSpec,
++  typescript: FoundSpec,
+   run: TypeScriptRun,
+   root: string,
+-): readonly ServerSpec[] {
++): readonly FoundSpec[] {
+   if (nearestPackage(project, VUE) === undefined) {
+     return [typescript];
+   }
+diff --git a/frontend/src/ui/LanguageServerSettings.vue b/frontend/src/ui/LanguageServerSettings.vue
+index 0c1ca6b..023f2ff 100644
+--- a/frontend/src/ui/LanguageServerSettings.vue
++++ b/frontend/src/ui/LanguageServerSettings.vue
+@@ -5,7 +5,7 @@ import type { RepositoryAnswer } from "../ipc";
+ import type { PresetChoice, ServerSpec } from "../lsp";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import PresetPicker from "./PresetPicker.vue";
+-import { addedServerFields, parseAddedServer } from "./serverSetup";
++import { addedServerFields, offServers, parseAddedServer } from "./serverSetup";
+ import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
+ import { useAppStore } from "./store";
+ 
+@@ -14,7 +14,7 @@ const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: stri
+   { value: "dontStart", label: "Don't start" },
+ ];
+ 
+-const { settings, serverRoot, foundServers, answerServers, addServer, removeServer } =
++const { settings, serverRoot, foundServers, answerServers, addServer, removeServer, switchServer } =
+   useAppStore();
+ const commandText = shallowRef("");
+ const fileTypesText = shallowRef("");
+@@ -26,6 +26,7 @@ const answer = computed(() =>
+ );
+ const added = computed(() => settings.value.languageServers.added.map(addedServerFields));
+ const newServer = computed(() => parseAddedServer(commandText.value, fileTypesText.value));
++const off = computed(() => offServers(settings.value.languageServers, serverRoot.value));
+ 
+ function commandOf(spec: ServerSpec): string {
+   return spec.install === null
+@@ -39,6 +40,14 @@ async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
+   }
+ }
+ 
++async function flip(spec: ServerSpec, event: Event): Promise<void> {
++  const input = event.target;
++  if (input instanceof HTMLInputElement) {
++    await switchServer(spec.key, input.checked);
++    input.checked = !off.value.has(spec.key);
++  }
++}
++
+ function fill(choice: PresetChoice): void {
+   const fields = addedServerFields(choice);
+   commandText.value = fields.command;
+@@ -68,10 +77,22 @@ async function add(): Promise<void> {
+       <ul v-if="foundServers.length > 0" class="flex flex-col">
+         <li
+           v-for="spec in foundServers"
+-          :key="spec.name"
++          :key="spec.key"
+           class="flex flex-wrap gap-x-3 gap-y-1 px-2 py-1"
+         >
+-          <span class="w-40 shrink-0 wrap-break-word">{{ spec.name }}</span>
++          <label
++            class="flex w-40 shrink-0 items-baseline gap-2 wrap-break-word"
++            :class="{ 'text-fg-muted': off.has(spec.key) }"
++          >
++            <input
++              type="checkbox"
++              role="switch"
++              class="size-4 shrink-0 self-center accent-primary"
++              :checked="!off.has(spec.key)"
++              @change="flip(spec, $event)"
++            />
++            {{ spec.name }}
++          </label>
+           <span class="w-32 shrink-0 wrap-break-word text-fg-muted">{{
+             projectLabel(spec.project)
+           }}</span>
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index deb3393..3337f1e 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import { parseKey } from "../ipc";
+-import type { ServerSpec } from "../lsp";
++import { serverKey, type ServerSpec } from "../lsp";
+ import { exitMustAsk, finishMustAsk, questionText } from "./question";
+ 
+ const LINUX = "Linux x86_64";
+@@ -81,6 +81,7 @@ test("the clash question names the key in the platform's words, its owner and th
+ 
+ function spec(name: string, project: string, installed = true): ServerSpec {
+   return {
++    key: serverKey(`${name} (${project})`),
+     name,
+     command: { program: name, args: [] },
+     project,
+diff --git a/frontend/src/ui/serverPins.test.ts b/frontend/src/ui/serverPins.test.ts
+new file mode 100644
+index 0000000..1fe43b2
+--- /dev/null
++++ b/frontend/src/ui/serverPins.test.ts
+@@ -0,0 +1,104 @@
++import type { StorageLike } from "@vueuse/core";
++import { expect, test } from "vitest";
++import { shallowRef } from "vue";
++
++import { serverKey } from "../lsp";
++import { createServerPins, type ServerPins } from "./serverPins";
++
++const KEY = "yamt.servers.pinned";
++const ROOT = "/repo";
++const OTHER_ROOT = "/elsewhere";
++const OXLINT = serverKey("oxlint (frontend)");
++const TYPESCRIPT = serverKey("TypeScript (frontend)");
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function pinned(pins: ServerPins): string[] {
++  return [...pins.pinnedServers.value];
++}
++
++function stored(storage: { readonly items: Map<string, string> }): unknown {
++  const raw = storage.items.get(KEY);
++  return raw === undefined ? undefined : JSON.parse(raw);
++}
++
++test("nothing is pinned at first; a toggle pins, a second one unpins", () => {
++  const storage = memoryStorage();
++  const pins = createServerPins(shallowRef(ROOT), storage);
++  expect(pinned(pins)).toEqual([]);
++  expect(storage.items.get(KEY)).toBeUndefined();
++
++  pins.togglePin(OXLINT);
++  pins.togglePin(TYPESCRIPT);
++  expect(pinned(pins)).toEqual([OXLINT, TYPESCRIPT]);
++  expect(stored(storage)).toEqual({ [ROOT]: [OXLINT, TYPESCRIPT] });
++
++  pins.togglePin(OXLINT);
++  expect(pinned(pins)).toEqual([TYPESCRIPT]);
++  expect(stored(storage)).toEqual({ [ROOT]: [TYPESCRIPT] });
++});
++
++test("pins are per repository; the other repositories' entries stay as written", () => {
++  const others = { [OTHER_ROOT]: [OXLINT], "/odd": "not a list" };
++  const storage = memoryStorage({ [KEY]: JSON.stringify(others) });
++  const root = shallowRef<string | null>(ROOT);
++  const pins = createServerPins(root, storage);
++  expect(pinned(pins)).toEqual([]);
++
++  pins.togglePin(TYPESCRIPT);
++  expect(stored(storage)).toEqual({ ...others, [ROOT]: [TYPESCRIPT] });
++
++  root.value = OTHER_ROOT;
++  expect(pinned(pins)).toEqual([OXLINT]);
++});
++
++test("a repository left with no pins is removed", () => {
++  const storage = memoryStorage({ [KEY]: JSON.stringify({ [OTHER_ROOT]: [OXLINT] }) });
++  const pins = createServerPins(shallowRef(ROOT), storage);
++
++  pins.togglePin(OXLINT);
++  pins.togglePin(OXLINT);
++
++  expect(stored(storage)).toEqual({ [OTHER_ROOT]: [OXLINT] });
++});
++
++test("with no repository root nothing is pinned and a toggle does nothing", () => {
++  const storage = memoryStorage({ [KEY]: JSON.stringify({ [ROOT]: [OXLINT] }) });
++  const pins = createServerPins(shallowRef(null), storage);
++
++  pins.togglePin(TYPESCRIPT);
++
++  expect(pinned(pins)).toEqual([]);
++  expect(stored(storage)).toEqual({ [ROOT]: [OXLINT] });
++});
++
++test.each([
++  ["not JSON", "{"],
++  ["a list", JSON.stringify([OXLINT])],
++  ["null", "null"],
++  ["a text", JSON.stringify("oxlint")],
++  ["keys that are not a list", JSON.stringify({ [ROOT]: OXLINT })],
++  ["a list with a number", JSON.stringify({ [ROOT]: [OXLINT, 1] })],
++])("storage holding %s reads as no pins, and a toggle starts afresh", (_kind, raw) => {
++  const storage = memoryStorage({ [KEY]: raw });
++  const pins = createServerPins(shallowRef(ROOT), storage);
++  expect(pinned(pins)).toEqual([]);
++
++  pins.togglePin(OXLINT);
++
++  expect(pinned(pins)).toEqual([OXLINT]);
++});
+diff --git a/frontend/src/ui/serverPins.ts b/frontend/src/ui/serverPins.ts
+new file mode 100644
+index 0000000..0dfd9c7
+--- /dev/null
++++ b/frontend/src/ui/serverPins.ts
+@@ -0,0 +1,65 @@
++import type { StorageLike } from "@vueuse/core";
++import { computed, type Ref } from "vue";
++
++import type { ServerKey } from "../lsp";
++import { storedValue } from "./windowStorage";
++
++export type ServerPins = {
++  readonly pinnedServers: Readonly<Ref<ReadonlySet<string>>>;
++  togglePin(key: ServerKey): void;
++};
++
++type PinsByRoot = Readonly<Record<string, unknown>>;
++
++const STORAGE_KEY = "yamt.servers.pinned";
++
++function readPins(raw: string): PinsByRoot {
++  try {
++    const stored: unknown = JSON.parse(raw);
++    return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++      ? { ...stored }
++      : {};
++  } catch {
++    return {};
++  }
++}
++
++function pinsOf(byRoot: PinsByRoot, root: string): readonly string[] {
++  const keys = byRoot[root];
++  if (!Array.isArray(keys)) {
++    return [];
++  }
++  const items: readonly unknown[] = keys;
++  return items.every((key): key is string => typeof key === "string") ? items : [];
++}
++
++export function createServerPins(
++  root: Readonly<Ref<string | null>>,
++  storage?: StorageLike,
++): ServerPins {
++  const byRoot = storedValue<PinsByRoot>(
++    STORAGE_KEY,
++    {},
++    { read: readPins, write: (value) => JSON.stringify(value) },
++    "servers.pins_storage_failed",
++    storage,
++  );
++  const pinnedServers = computed(
++    (): ReadonlySet<string> => new Set(root.value === null ? [] : pinsOf(byRoot.value, root.value)),
++  );
++  return {
++    pinnedServers,
++    togglePin: (key) => {
++      const at = root.value;
++      if (at === null) {
++        return;
++      }
++      const before = pinsOf(byRoot.value, at);
++      const after = before.includes(key) ? before.filter((pin) => pin !== key) : [...before, key];
++      const others = Object.fromEntries(
++        Object.entries(byRoot.value).filter(([other]) => other !== at),
++      );
++      byRoot.value = after.length === 0 ? others : { ...others, [at]: after };
++    },
++  };
++}
+diff --git a/frontend/src/ui/serverSetup.test.ts b/frontend/src/ui/serverSetup.test.ts
+index 18185cc..2867bf7 100644
+--- a/frontend/src/ui/serverSetup.test.ts
++++ b/frontend/src/ui/serverSetup.test.ts
+@@ -16,9 +16,15 @@ import {
+   type ServerHost,
+   type StartReply,
+ } from "../ipc";
+-import { LanguageServers, presetChoices, type ResultDocument, type ServerState } from "../lsp";
++import {
++  LanguageServers,
++  presetChoices,
++  serverKey,
++  type ResultDocument,
++  type ServerState,
++} from "../lsp";
+ import { createAsking } from "./asking";
+-import { addedServerFields, createServerSetup, parseAddedServer } from "./serverSetup";
++import { addedServerFields, createServerSetup, offServers, parseAddedServer } from "./serverSetup";
+ import { startSettings } from "./settings";
+ 
+ type Tree = Record<string, string>;
+@@ -154,18 +160,21 @@ function setUpWith(options: {
+   readonly answer?: RepositoryAnswer;
+   readonly answerRoot?: string;
+   readonly added?: readonly AddedServer[];
++  readonly off?: LanguageServerSettings["off"];
+   readonly files?: readonly string[];
+ }) {
+-  const { added = [], answer, answerRoot = ROOT } = options;
++  const { added = [], answer, answerRoot = ROOT, off = {} } = options;
+   const disk: { listed: readonly string[]; stored: LanguageServerSettings; writesFail: boolean } = {
+     listed: options.files ?? [FILE],
+     stored: {
+       repositories: answer === undefined ? {} : { [answerRoot]: answer },
++      off,
+       added: [...added],
+     },
+     writesFail: false,
+   };
+   const settings = shallowRef({ ...startSettings("dark"), languageServers: disk.stored });
++  const shown: [server: string, problems: number][] = [];
+   const files = shallowRef<readonly FileEntry[]>([]);
+   const calls: unknown[][] = [];
+   const events = options.host?.events ?? [];
+@@ -181,7 +190,12 @@ function setUpWith(options: {
+     events.push(name);
+   }
+   const servers = new LanguageServers(options.host);
+-  servers.open(DOC);
++  servers.open({
++    ...DOC,
++    showProblems: (server, _version, problems) => {
++      shown.push([server, problems.length]);
++    },
++  });
+   const asking = createAsking();
+   const setup = createServerSetup({
+     host: options.host,
+@@ -210,8 +224,14 @@ function setUpWith(options: {
+       calls.push(["setAddedServers", list]);
+       write({ ...disk.stored, added: [...list] });
+     },
++    setServerSwitch: async (server, on) => {
++      calls.push(["setServerSwitch", server, on]);
++      const others = (disk.stored.off[ROOT] ?? []).filter((key) => key !== server);
++      const keys = on ? others : [...others, server];
++      write({ ...disk.stored, off: { ...disk.stored.off, [ROOT]: keys } });
++    },
+   });
+-  return { setup, servers, asking, calls, settings, files, disk, events };
++  return { setup, servers, asking, calls, settings, files, disk, events, shown };
+ }
+ 
+ function states(servers: LanguageServers): Record<string, ServerState["kind"]> {
+@@ -777,6 +797,172 @@ test("settings: Remove drops only the server at its index", async () => {
+   expect(calls).toEqual([["setAddedServers", [first, third]]]);
+ });
+ 
++const OXLINT_KEY = serverKey("oxlint (frontend)");
++const OXLINT_OFF = { [ROOT]: [OXLINT_KEY] };
++const WITHOUT_OXLINT = { oxfmt: "running", TypeScript: "notInstalled" };
++
++function publishOne(host: FakeHost, program: string): void {
++  const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
++  const params = { uri: `file://${ROOT}/${FILE}`, diagnostics: [{ range, message: "lint" }] };
++  const text = JSON.stringify({
++    jsonrpc: "2.0",
++    method: "textDocument/publishDiagnostics",
++    params,
++  });
++  host.runs.find((run) => run.program === program)?.emit({ kind: "Message", text });
++}
++
++test("switch: off stops a running server at once, clears its problems and logs its exit; it stays found", async () => {
++  const host = new FakeHost(PROJECT);
++  const { setup, servers, shown, calls } = setUpWith({ host, answer: "start" });
++  await setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(FOUND_RUNNING);
++  });
++  publishOne(host, "oxlint");
++  await vi.waitFor(() => {
++    expect(shown).toContainEqual(["oxlint", 1]);
++  });
++
++  await setup.switchServer(OXLINT_KEY, false);
++
++  expect(calls).toEqual([["setServerSwitch", OXLINT_KEY, false]]);
++  expect(states(servers)).toEqual(WITHOUT_OXLINT);
++  await vi.waitFor(() => {
++    expect(servers.log("oxlint").at(-1)?.text).toBe("Exited with code 0");
++  });
++  expect(host.stopped).toEqual(["oxlint"]);
++  expect(shown.at(-1)).toEqual(["oxlint", 0]);
++  expect(setup.foundServers.value.map((spec) => spec.name)).toEqual([
++    "oxfmt",
++    "oxlint",
++    "TypeScript",
++  ]);
++});
++
++test("switch: an off server is never asked about nor started: not by Start, not on focus, not at the next start", async () => {
++  const host = new FakeHost(PROJECT);
++  const { setup, servers, asking, done } = await asked({ host, off: OXLINT_OFF });
++  const question = asking.question.value;
++  expect(question?.kind === "servers" && question.found.map((spec) => spec.name)).toEqual([
++    "oxfmt",
++    "TypeScript",
++  ]);
++
++  asking.answer(true);
++  await done;
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(WITHOUT_OXLINT);
++  });
++  await setup.refocus();
++  const next = setUpWith({ host, answer: "start", off: OXLINT_OFF });
++  await next.setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(next.servers)).toEqual(WITHOUT_OXLINT);
++  });
++
++  expect(states(servers)).toEqual(WITHOUT_OXLINT);
++  expect(host.started()).toEqual(["oxfmt", "oxfmt"]);
++});
++
++test("start: with every found server off and none added there is no question and no server", async () => {
++  const host = new FakeHost(PROJECT);
++  const keys = ["oxfmt (frontend)", "oxlint (frontend)", "TypeScript (frontend)"];
++  const { setup, servers, asking, calls } = setUpWith({ host, off: { [ROOT]: keys } });
++
++  await setup.startUp();
++
++  expect(asking.question.value).toBeNull();
++  expect(servers.views()).toEqual([]);
++  expect(calls).toEqual([]);
++  expect(setup.foundServers.value).toHaveLength(keys.length);
++});
++
++test("switch: on again starts the server only under Start", async () => {
++  const host = new FakeHost(PROJECT);
++  const stopped = setUpWith({ host, answer: "dontStart", off: OXLINT_OFF });
++  await stopped.setup.startUp();
++
++  await stopped.setup.switchServer(OXLINT_KEY, true);
++
++  expect(states(stopped.servers)).toEqual(FOUND_STOPPED);
++  expect(host.started()).toEqual([]);
++
++  const started = setUpWith({ host, answer: "start", off: OXLINT_OFF });
++  await started.setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(started.servers)).toEqual(WITHOUT_OXLINT);
++  });
++
++  await started.setup.switchServer(OXLINT_KEY, true);
++
++  await vi.waitFor(() => {
++    expect(states(started.servers)).toEqual(FOUND_RUNNING);
++  });
++  expect(host.started()).toEqual(["oxfmt", "oxlint"]);
++});
++
++test("switch: a failed write changes nothing", async () => {
++  const host = new FakeHost(PROJECT);
++  const { setup, servers, disk, settings } = setUpWith({ host, answer: "start" });
++  await setup.startUp();
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(FOUND_RUNNING);
++  });
++  disk.writesFail = true;
++
++  await setup.switchServer(OXLINT_KEY, false);
++  await setup.refocus();
++
++  expect(settings.value.languageServers.off).toEqual({});
++  expect(states(servers)).toEqual(FOUND_RUNNING);
++  expect(host.stopped).toEqual([]);
++});
++
++test("switch: a server keeps its switch when a second project brings the suffix", async () => {
++  const host = new FakeHost({ ...PROJECT, "package.json": "{}", "node_modules/.bin/oxlint": "" });
++  const { setup, servers, disk } = setUpWith({ host, answer: "dontStart", off: OXLINT_OFF });
++  await setup.startUp();
++  expect(servers.views().map((view) => view.name)).toEqual(["oxfmt", "TypeScript"]);
++  disk.listed = [FILE, "b.ts"];
++
++  await setup.refocus();
++
++  expect(setup.foundServers.value.map((spec) => spec.name)).toContain("oxlint (frontend)");
++  expect(servers.views().map((view) => view.name)).toEqual([
++    "oxlint (repository root)",
++    "oxfmt",
++    "TypeScript",
++  ]);
++});
++
++test("switch: another repository's switches do not count", async () => {
++  const host = new FakeHost(PROJECT);
++  const { setup, servers } = setUpWith({
++    host,
++    answer: "start",
++    off: { [OTHER_ROOT]: [OXLINT_KEY] },
++  });
++
++  await setup.startUp();
++
++  await vi.waitFor(() => {
++    expect(states(servers)).toEqual(FOUND_RUNNING);
++  });
++});
++
++test("offServers: the keys switched off under this root; none without a root or an entry", () => {
++  const settings: LanguageServerSettings = {
++    repositories: {},
++    off: { [ROOT]: ["a (x)", "b (y)"], [OTHER_ROOT]: ["c (z)"] },
++    added: [],
++  };
++
++  expect([...offServers(settings, ROOT)]).toEqual(["a (x)", "b (y)"]);
++  expect([...offServers(settings, "/third")]).toEqual([]);
++  expect([...offServers(settings, null)]).toEqual([]);
++});
++
+ test("the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped", () => {
+   expect(parseAddedServer("pylsp", "py")).toEqual({ command: ["pylsp"], fileTypes: ["py"] });
+   expect(parseAddedServer("  ruff  server --preview ", "..py,pyi ,  .PYW")).toEqual({
+diff --git a/frontend/src/ui/serverSetup.ts b/frontend/src/ui/serverSetup.ts
+index 67496ae..3c8c4cd 100644
+--- a/frontend/src/ui/serverSetup.ts
++++ b/frontend/src/ui/serverSetup.ts
+@@ -4,15 +4,20 @@ import {
+   log,
+   type AddedServer,
+   type FileEntry,
++  type LanguageServerSettings,
+   type RepositoryAnswer,
+   type ServerHost,
+ } from "../ipc";
+-import { addedSpecs, detect, type LanguageServers, type ServerSpec } from "../lsp";
++import { addedSpecs, detect, type LanguageServers, type ServerKey, type ServerSpec } from "../lsp";
+ import type { Asking, Reply } from "./asking";
+ import { unexpected } from "./problem";
++import { createServerPins, type ServerPins } from "./serverPins";
+ import type { SettingsActions, SettingsInUse } from "./settings";
+ 
+-type SetupTarget = Pick<SettingsActions, "loadSettings" | "setServerAnswer" | "setAddedServers"> & {
++type SetupTarget = Pick<
++  SettingsActions,
++  "loadSettings" | "setServerAnswer" | "setAddedServers" | "setServerSwitch"
++> & {
+   readonly host: ServerHost | null;
+   readonly servers: Pick<LanguageServers, "setSpecs" | "haltAll">;
+   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
+@@ -29,7 +34,7 @@ type Setup = SetupTarget & {
+   latestLook: number;
+ };
+ 
+-export type ServerSetup = {
++export type ServerSetup = ServerPins & {
+   readonly serverRoot: Readonly<ShallowRef<string | null>>;
+   readonly foundServers: Readonly<ShallowRef<readonly ServerSpec[]>>;
+   startUp(): Promise<void>;
+@@ -37,6 +42,7 @@ export type ServerSetup = {
+   answerServers(answer: RepositoryAnswer): Promise<void>;
+   addServer(server: AddedServer): Promise<void>;
+   removeServer(index: number): Promise<void>;
++  switchServer(key: ServerKey, on: boolean): Promise<void>;
+ };
+ 
+ type AddedServerFields = { readonly command: string; readonly fileTypes: string };
+@@ -64,6 +70,13 @@ export function addedServerFields(server: {
+   return { command: server.command.join(" "), fileTypes: server.fileTypes.join(", ") };
+ }
+ 
++export function offServers(
++  settings: LanguageServerSettings,
++  root: string | null,
++): ReadonlySet<string> {
++  return new Set(root === null ? [] : (settings.off[root] ?? []));
++}
++
+ async function look(setup: Setup, host: ServerHost): Promise<string | null> {
+   setup.latestLook += 1;
+   const ticket = setup.latestLook;
+@@ -95,20 +108,25 @@ function storedAnswer(setup: Setup, root: string): RepositoryAnswer | null {
+   return setup.settings.value.languageServers.repositories[root] ?? null;
+ }
+ 
++function shownFound(setup: Setup, root: string): readonly ServerSpec[] {
++  const off = offServers(setup.settings.value.languageServers, root);
++  return setup.found.value.filter((spec) => !off.has(spec.key));
++}
++
+ function apply(setup: Setup, root: string, answer: RepositoryAnswer | null): void {
+-  const specs = [...setup.found.value, ...addedOf(setup, root)];
++  const specs = [...shownFound(setup, root), ...addedOf(setup, root)];
+   setup.servers.setSpecs(specs, { startOnOpen: answer === "start" });
+ }
+ 
+ async function setUp(setup: Setup, host: ServerHost): Promise<void> {
+   const root = await look(setup, host);
+-  if (root === null || setup.found.value.length + addedOf(setup, root).length === 0) {
++  if (root === null || shownFound(setup, root).length + addedOf(setup, root).length === 0) {
+     return;
+   }
+   if (storedAnswer(setup, root) === null) {
+     const reply = await setup.asking.ask({
+       kind: "servers",
+-      found: setup.found.value,
++      found: shownFound(setup, root),
+       added: addedOf(setup, root),
+     });
+     const given = STORED_REPLIES[reply];
+@@ -152,8 +170,8 @@ async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
+   apply(setup, root, now);
+ }
+ 
+-async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise<void> {
+-  await setup.setAddedServers(added);
++async function applyAfter(setup: Setup, write: Promise<void>): Promise<void> {
++  await write;
+   const root = setup.root.value;
+   if (root !== null) {
+     apply(setup, root, storedAnswer(setup, root));
+@@ -172,16 +190,15 @@ export function createServerSetup(target: SetupTarget): ServerSetup {
+     return setup.settings.value.languageServers.added;
+   }
+   return {
++    ...createServerPins(setup.root),
+     serverRoot: setup.root,
+     foundServers: setup.found,
+     startUp: () => startUp(setup),
+     refocus: () => refocus(setup),
+     answerServers: (given) => answer(setup, given),
+-    addServer: (server) => changeAdded(setup, [...added(), server]),
++    addServer: (server) => applyAfter(setup, setup.setAddedServers([...added(), server])),
+     removeServer: (index) =>
+-      changeAdded(
+-        setup,
+-        added().filter((_, at) => at !== index),
+-      ),
++      applyAfter(setup, setup.setAddedServers(added().filter((_, at) => at !== index))),
++    switchServer: (key, on) => applyAfter(setup, setup.setServerSwitch(key, on)),
+   };
+ }
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index ba14aeb..a0623d3 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import type { InstallHint, ServerSpec, ServerState } from "../lsp";
++import { serverKey, type InstallHint, type ServerSpec, type ServerState } from "../lsp";
+ import {
+   dotKind,
+   formatNote,
+@@ -113,6 +113,7 @@ test("a project folder reads as the folder with a slash, the root as the reposit
+ 
+ test("a server reads as its name, marked when it is not installed", () => {
+   const installed: ServerSpec = {
++    key: serverKey("TypeScript (frontend)"),
+     name: "TypeScript",
+     project: "frontend",
+     folders: { project: ["node_modules/.bin"], home: [] },
+diff --git a/frontend/src/ui/servers.test.ts b/frontend/src/ui/servers.test.ts
+index 6c21919..3dd77fa 100644
+--- a/frontend/src/ui/servers.test.ts
++++ b/frontend/src/ui/servers.test.ts
+@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
+ import { computed, shallowRef, type ShallowRef } from "vue";
+ 
+ import type { HostEvent, RunId, ServerHost, StartReply } from "../ipc";
+-import { LanguageServers, type ServerSpec } from "../lsp";
++import { LanguageServers, serverKey, type ServerSpec } from "../lsp";
+ import type { Screen } from "./screen";
+ import { createServers, type Servers } from "./servers";
+ 
+@@ -54,6 +54,7 @@ function answeringHost(): ServerHost {
+ 
+ function spec(name: string, project: string): ServerSpec {
+   return {
++    key: serverKey(`${name} (${project === "" ? "repository root" : project})`),
+     name,
+     command: { program: name, args: ["--lsp"] },
+     project,
+@@ -86,6 +87,7 @@ test("serverViews follow LanguageServers.onChange", () => {
+ 
+   expect(slice.serverViews.value).toEqual([
+     {
++      key: "oxlint (repository root)",
+       name: "oxlint",
+       project: "",
+       state: { kind: "failed", reason: { kind: "noHost" } },
+diff --git a/frontend/src/ui/settings.test.ts b/frontend/src/ui/settings.test.ts
+index a53d9ec..658e247 100644
+--- a/frontend/src/ui/settings.test.ts
++++ b/frontend/src/ui/settings.test.ts
+@@ -26,9 +26,13 @@ type Target = {
+ 
+ const PATH = "/home/me/.config/yamt/settings.json";
+ const ROOT = "/home/me/yamt";
+-const NO_SERVERS: LanguageServerSettings = { repositories: {}, added: [] };
++const NO_SERVERS: LanguageServerSettings = { repositories: {}, off: {}, added: [] };
+ const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
+-const SERVERS: LanguageServerSettings = { repositories: { [ROOT]: "start" }, added: [OXLINT] };
++const SERVERS: LanguageServerSettings = {
++  repositories: { [ROOT]: "start" },
++  off: {},
++  added: [OXLINT],
++};
+ const OXFMT_KEY = "oxfmt (repository root)";
+ const OFF: LanguageServerSettings = { ...SERVERS, off: { [ROOT]: [OXFMT_KEY] } };
+ const BROKEN: SourceFailure = { kind: "SettingsBroken", path: PATH, message: "x at line 3" };
+@@ -59,7 +63,11 @@ function settingsTarget(loads: StoredSettings[]): {
+     setAntialiasing: async () => read(startStored()),
+     setKeys: async () => read(startStored()),
+     moveSettings: async () => read(startStored()),
+-    setServerSwitch: async () => read(startStored()),
++    setServerSwitch: async (current, server, on) => {
++      sent.push(["setServerSwitch", current, server, on]);
++      const off = on ? {} : { [ROOT]: [server] };
++      return read({ ...current, languageServers: { ...current.languageServers, off } });
++    },
+     setServerAnswer: async (current, answer) => {
+       sent.push(["setServerAnswer", current, answer]);
+       return answer === "dontStart"
+@@ -133,17 +141,42 @@ test("setServerAnswer and setAddedServers send the settings in use and adopt the
+     { ...startStored(), languageServers: SERVERS },
+     null,
+   ]);
+-  expect(target.settings.value.languageServers).toEqual({ repositories: {}, added: [OXLINT] });
++  expect(target.settings.value.languageServers).toEqual({ ...SERVERS, repositories: {} });
+ 
+   await actions.setAddedServers([]);
+   expect(sent[2]).toEqual([
+     "setAddedServers",
+-    { ...startStored(), languageServers: { repositories: {}, added: [OXLINT] } },
++    { ...startStored(), languageServers: { ...SERVERS, repositories: {} } },
+     [],
+   ]);
+   expect(target.settings.value.languageServers).toEqual(NO_SERVERS);
+ });
+ 
++test("setServerSwitch sends the settings in use, the key and on, and adopts the reply", async () => {
++  const { actions, target, sent } = settingsTarget([
++    { ...startStored(), languageServers: SERVERS },
++  ]);
++  await actions.loadSettings();
++
++  await actions.setServerSwitch(OXFMT_KEY, false);
++  expect(sent[1]).toEqual([
++    "setServerSwitch",
++    { ...startStored(), languageServers: SERVERS },
++    OXFMT_KEY,
++    false,
++  ]);
++  expect(target.settings.value.languageServers).toEqual(OFF);
++
++  await actions.setServerSwitch(OXFMT_KEY, true);
++  expect(sent[2]).toEqual([
++    "setServerSwitch",
++    { ...startStored(), languageServers: OFF },
++    OXFMT_KEY,
++    true,
++  ]);
++  expect(target.settings.value.languageServers).toEqual({ ...SERVERS, off: {} });
++});
++
+ test("a failed server answer is reported as a settings problem and keeps the settings", async () => {
+   vi.spyOn(console, "error").mockReturnValue();
+   vi.spyOn(console, "warn").mockReturnValue();
+diff --git a/frontend/src/ui/settings.ts b/frontend/src/ui/settings.ts
+index d042b27..d8758a6 100644
+--- a/frontend/src/ui/settings.ts
++++ b/frontend/src/ui/settings.ts
+@@ -51,6 +51,7 @@ export type SettingsActions = {
+   moveSettings(path: string): Promise<void>;
+   setServerAnswer(answer: RepositoryAnswer | null): Promise<void>;
+   setAddedServers(added: readonly AddedServer[]): Promise<void>;
++  setServerSwitch(server: string, on: boolean): Promise<void>;
+ };
+ 
+ type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
+@@ -61,7 +62,7 @@ export function startSettings(theme: Theme): SettingsInUse {
+     theme,
+     antialiasing: "subpixel",
+     keys: bindingsOf({}),
+-    languageServers: { repositories: {}, added: [] },
++    languageServers: { repositories: {}, off: {}, added: [] },
+   };
+ }
+ 
+@@ -99,17 +100,16 @@ function sameAdded(a: AddedServer, b: AddedServer): boolean {
+ }
+ 
+ function sameServers(a: LanguageServerSettings, b: LanguageServerSettings): boolean {
+-  const { repositories, off = {}, added, ...rest } = a;
++  const { repositories, off, added, ...rest } = a;
+   rest satisfies Record<string, never>;
+   const answers = Object.entries(repositories);
+   const offRoots = Object.entries(off);
+-  const otherOff = b.off ?? {};
+   return (
+     answers.length === Object.keys(b.repositories).length &&
+     answers.every(([root, answer]) => b.repositories[root] === answer) &&
+-    offRoots.length === Object.keys(otherOff).length &&
++    offRoots.length === Object.keys(b.off).length &&
+     offRoots.every(([root, keys]) => {
+-      const other = otherOff[root];
++      const other = b.off[root];
+       return other !== undefined && sameTexts(keys, other);
+     }) &&
+     added.length === b.added.length &&
+@@ -232,5 +232,7 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
+     moveSettings: (path) => send(target, (current) => source.moveSettings(current, path)),
+     setServerAnswer: (answer) => send(target, (current) => source.setServerAnswer(current, answer)),
+     setAddedServers: (added) => send(target, (current) => source.setAddedServers(current, added)),
++    setServerSwitch: (server, on) =>
++      send(target, (current) => source.setServerSwitch(current, server, on)),
+   };
+ }
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 1a7e019..2f7c3a8 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -55,7 +55,7 @@ const NO_SETTINGS: SettingsSource = {
+   setServerSwitch: () => Promise.reject(new Error("not used")),
+   setAddedServers: () => Promise.reject(new Error("not used")),
+ };
+-const NO_SERVERS = { repositories: {}, added: [] };
++const NO_SERVERS = { repositories: {}, off: {}, added: [] };
+ const DARK = {
+   theme: "dark",
+   antialiasing: "subpixel",
