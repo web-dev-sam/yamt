@@ -49,8 +49,7 @@ export function tempFolder(name: string): { folder: string; logDir: string } {
   return { folder, logDir };
 }
 
-function privateConfig(folder: string): { home: string; configDir: string } {
-  const home = join(folder, "home");
+function privateConfig(home: string): string {
   const configDir = join(home, ".config");
   mkdirSync(configDir, { recursive: true });
   const owners = [join(userInfo().homedir, ".config"), process.env["XDG_CONFIG_HOME"] ?? ""]
@@ -60,7 +59,7 @@ function privateConfig(folder: string): { home: string; configDir: string } {
   if (clash !== null) {
     throw new Error(clash);
   }
-  return { home, configDir };
+  return configDir;
 }
 
 function prepareApp(command: StartApp, folder: string): Prepared {
@@ -68,9 +67,10 @@ function prepareApp(command: StartApp, folder: string): Prepared {
   if (!existsSync(binary)) {
     throw new Error(`no app at ${binary}; build it with cargo tauri build --debug --no-bundle`);
   }
-  const { home, configDir } = privateConfig(folder);
+  const home = command.home === null ? join(folder, "home") : fromRoot(command.home);
+  const configDir = privateConfig(home);
   if (command.settings !== null) {
-    mkdirSync(join(configDir, "yamt"));
+    mkdirSync(join(configDir, "yamt"), { recursive: true });
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = command.repo.kind === "dir" ? fromRoot(command.repo.dir) : join(folder, "repo");
@@ -202,7 +202,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     rmSync(folder, { recursive: true, force: true });
     throw error;
   }
-  const { configDir, repoDir } = prepared;
+  const { home, configDir, repoDir } = prepared;
   const empty: AppState = {
     kind: "app",
     name: command.name,
@@ -220,6 +220,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
   );
   const { display, driverPort, session } = state;
   return {
+    home,
     display: `:${display}`,
     driverPort,
     session,

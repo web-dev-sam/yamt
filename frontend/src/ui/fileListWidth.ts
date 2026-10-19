@@ -5,7 +5,13 @@ import { storedValue } from "./windowStorage";
 
 const STORAGE_KEY = "yamt.files.width";
 const MIN_WIDTH_PX = 160;
-const HALF = 0.5;
+const MAX_WINDOW_SHARE = 0.5;
+const PERCENT = 100;
+
+export const FILE_LIST_BOUNDS = {
+  minWidth: `${MIN_WIDTH_PX}px`,
+  maxWidth: `${MAX_WINDOW_SHARE * PERCENT}vw`,
+} as const;
 
 export function createFileListWidth(storage?: StorageLike): {
   readonly width: Readonly<Ref<number | null>>;
@@ -28,7 +34,7 @@ export function createFileListWidth(storage?: StorageLike): {
   return {
     width,
     setWidth: (px, windowWidth) => {
-      width.value = Math.max(MIN_WIDTH_PX, Math.min(px, windowWidth * HALF));
+      width.value = Math.max(MIN_WIDTH_PX, Math.min(px, windowWidth * MAX_WINDOW_SHARE));
     },
     resetWidth: () => {
       width.value = null;

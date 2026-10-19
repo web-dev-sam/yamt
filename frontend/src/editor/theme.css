@@ -36,6 +36,7 @@
 
 path.chunk-band {
   fill: var(--chunk-tone);
+  pointer-events: none;
 }
 
 .cm-editor .chunk-word-modified {

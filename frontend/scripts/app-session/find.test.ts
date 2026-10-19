@@ -22,6 +22,7 @@ function candidate(id: string, fields: Partial<Omit<Candidate, "element">>): Can
     role: "",
     ariaLabel: "",
     title: "",
+    label: "",
     text: "",
     width: 20,
     height: 10,
@@ -155,6 +156,28 @@ test("CSS matches are picked by visibility and role, with the same errors", () =
   );
 });
 
+test("a CSS match inside aria-hidden is picked when painted; a name never picks it", () => {
+  const icons = [
+    candidate("unpainted", { hiddenAbove: true, width: 0 }),
+    candidate("icon", { hiddenAbove: true, ariaLabel: "Apply" }),
+  ];
+  expect(pickByCss(icons, query(".chunk-action-apply rect")).element[ELEMENT_KEY]).toBe("icon");
+  expect(() => pickByName(icons, query("Apply"))).toThrow(/no visible element named "Apply"/);
+});
+
+test("an input is named by its labels (wrapping or for=), after aria-label and before title", () => {
+  const toggle = candidate("ruff", {
+    tag: "input",
+    type: "checkbox",
+    role: "switch",
+    label: " ruff ",
+  });
+  expect(nameOf(toggle)).toBe("ruff");
+  expect(pickByName([toggle], query("ruff", "switch")).element[ELEMENT_KEY]).toBe("ruff");
+  expect(nameOf(candidate("2", { tag: "input", label: "ruff", title: "T" }))).toBe("ruff");
+  expect(nameOf(candidate("3", { tag: "input", label: "ruff", ariaLabel: "Lint" }))).toBe("Lint");
+});
+
 test("parseCandidates reads the page's records and rejects a malformed one", () => {
   const record = {
     element: { [ELEMENT_KEY]: "e1" },
@@ -164,6 +187,7 @@ test("parseCandidates reads the page's records and rejects a malformed one", () 
     role: "",
     ariaLabel: "Settings",
     title: "Settings",
+    label: "",
     text: "",
     width: 28,
     height: 28,

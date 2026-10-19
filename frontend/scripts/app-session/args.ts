@@ -1,5 +1,6 @@
 import {
   noPositionals,
+  offsetPx,
   onePositional,
   sessionName,
   splitArgs,
@@ -20,8 +21,10 @@ const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo]
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                [--home <dir>]   (the app's home; created when missing; stop keeps it)
   start-fixture --name <n> [--size 1600x1000]
-  click         --name <n> <accessible name> [--role <role>] [--nth <i, from 0>] [--x11]
+  click         --name <n> <accessible name> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+  drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
   type          --name <n> <text> [--x11]
   scroll        --name <n> <accessible name or css> --to <bottom|top|px> [--role <role>] [--nth <i>]
@@ -45,9 +48,23 @@ export type Command =
       readonly settings: string | null;
       readonly size: Size;
       readonly record: Recording | null;
+      readonly home: string | null;
     }
   | { readonly kind: "start-fixture"; readonly name: string; readonly size: Size }
-  | { readonly kind: "click"; readonly name: string; readonly query: Query; readonly x11: boolean }
+  | {
+      readonly kind: "click";
+      readonly name: string;
+      readonly query: Query;
+      readonly x11: boolean;
+      readonly double: boolean;
+    }
+  | {
+      readonly kind: "drag";
+      readonly name: string;
+      readonly query: Query;
+      readonly dx: number;
+      readonly dy: number;
+    }
   | {
       readonly kind: "press";
       readonly name: string;
@@ -76,11 +93,12 @@ type CommandKind = Command["kind"];
 
 const SPECS: Readonly<Record<CommandKind, Spec>> = {
   "start-app": {
-    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds"],
+    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds", "home"],
     flags: ["fresh-repo"],
   },
   "start-fixture": { values: ["name", "size"], flags: [] },
-  click: { values: ["name", "role", "nth"], flags: ["x11"] },
+  click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+  drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
   press: { values: ["name"], flags: ["x11"] },
   type: { values: ["name"], flags: ["x11"] },
   scroll: { values: ["name", "to", "role", "nth"], flags: [] },
@@ -170,6 +188,21 @@ function query(parsed: Parsed): Query {
   };
 }
 
+function dragCommand(parsed: Parsed): Command {
+  const dx = parsed.values.get("dx");
+  if (dx === undefined) {
+    throw new Error("drag needs --dx <px>");
+  }
+  const dy = parsed.values.get("dy");
+  return {
+    kind: "drag",
+    name: sessionName(parsed),
+    query: query(parsed),
+    dx: offsetPx(dx, "--dx"),
+    dy: dy === undefined ? 0 : offsetPx(dy, "--dy"),
+  };
+}
+
 function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Command {
   noPositionals(parsed);
   const name = sessionName(parsed);
@@ -184,6 +217,7 @@ function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Comm
     settings: settingsText(parsed),
     size: size(parsed),
     record: recording(parsed),
+    home: parsed.values.get("home") ?? null,
   };
 }
 
@@ -192,7 +226,7 @@ function inputCommand(kind: "click" | "press" | "type", parsed: Parsed): Command
   const x11 = parsed.flags.has("x11");
   switch (kind) {
     case "click":
-      return { kind, name, query: query(parsed), x11 };
+      return { kind, name, query: query(parsed), x11, double: parsed.flags.has("double") };
     case "press":
       if (parsed.positionals.length === 0) {
         throw new Error("press needs at least one key");
@@ -224,6 +258,8 @@ function build(kind: CommandKind, parsed: Parsed): Command {
       return { kind, name: sessionName(parsed), query: query(parsed), to: scrollTo(parsed) };
     case "hover":
       return { kind, name: sessionName(parsed), query: query(parsed) };
+    case "drag":
+      return dragCommand(parsed);
     case "read":
       return {
         kind,

@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useTemplateRef } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import { paneColumns, type PaneWidths } from "./paneSplit";
+import ResizeDots from "./ResizeDots.vue";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
+import { usePaneDividers } from "./usePaneDividers";
 
 type Column = {
   readonly side: Side;
@@ -21,10 +24,16 @@ type Column = {
 
 const props = defineProps<{ sides: FileSides; shown: boolean }>();
 
-const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-3" };
+const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remote: "col-start-5" };
 
-const { takeSide, reset, sideNames, taken } = useAppStore();
+const section = useTemplateRef<HTMLElement>("section");
+const localGutter = useTemplateRef<HTMLDivElement>("localGutter");
+const remoteGutter = useTemplateRef<HTMLDivElement>("remoteGutter");
+const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit } =
+  useAppStore();
+const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
 
+const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "gap"));
 const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
 const columns = computed(() =>
   SIDES.map((side): Column => {
@@ -41,6 +50,20 @@ const columns = computed(() =>
   }),
 );
 const result = computed(() => resultLine(props.sides, sideTaken.value));
+
+function paneWidths(): PaneWidths | null {
+  if (section.value === null || localGutter.value === null || remoteGutter.value === null) {
+    return null;
+  }
+  const whole = section.value.getBoundingClientRect();
+  const localEdge = localGutter.value.getBoundingClientRect();
+  const remoteEdge = remoteGutter.value.getBoundingClientRect();
+  return {
+    local: localEdge.left - whole.left,
+    center: remoteEdge.left - localEdge.right,
+    remote: whole.right - remoteEdge.right,
+  };
+}
 </script>
 
 <template>
@@ -53,7 +76,9 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
       <SettingsButton />
     </header>
     <section
-      class="grid min-h-0 min-w-0 flex-1 grid-cols-3 grid-rows-[auto_minmax(0,1fr)] gap-x-px overflow-hidden rounded-island bg-separator"
+      ref="section"
+      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-island bg-separator"
+      :style="{ gridTemplateColumns }"
     >
       <template v-for="column in columns" :key="column.side">
         <div
@@ -80,7 +105,7 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
         </div>
       </template>
       <div
-        class="col-start-2 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
+        class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
       >
         <h2 class="text-fg-muted">Result</h2>
         <button
@@ -92,9 +117,31 @@ const result = computed(() => resultLine(props.sides, sideTaken.value));
           Reset
         </button>
       </div>
-      <p class="col-start-2 row-start-2 bg-panel p-3 wrap-break-word" role="status">
+      <p class="col-start-3 row-start-2 bg-panel p-3 wrap-break-word" role="status">
         {{ result }}
       </p>
+      <div ref="localGutter" class="relative col-start-2 row-span-2 row-start-1">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Local and Result widths"
+          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
+          v-on="dividers.local.listeners"
+        >
+          <ResizeDots :state="dividers.local.dots.value" />
+        </div>
+      </div>
+      <div ref="remoteGutter" class="relative col-start-4 row-span-2 row-start-1">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Result and Remote widths"
+          class="absolute -inset-x-[2px] inset-y-0 z-10 flex cursor-col-resize items-center justify-center"
+          v-on="dividers.remote.listeners"
+        >
+          <ResizeDots :state="dividers.remote.dots.value" />
+        </div>
+      </div>
     </section>
   </div>
 </template>

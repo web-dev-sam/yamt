@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { createFileListWidth } from "./fileListWidth";
+import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
 
 const KEY = "yamt.files.width";
 
@@ -82,6 +82,16 @@ test("a width is clamped to 160 px at the narrow end and half the window at the 
   expect(list.width.value).toBe(800);
   list.setWidth(700, 1600);
   expect(list.width.value).toBe(700);
+});
+
+test("the CSS bounds are the clamp's: 160 px and half the window", () => {
+  const list = createFileListWidth(memoryStorage());
+
+  expect(FILE_LIST_BOUNDS).toEqual({ minWidth: "160px", maxWidth: "50vw" });
+  list.setWidth(0, 1000);
+  expect(`${list.width.value}px`).toBe(FILE_LIST_BOUNDS.minWidth);
+  list.setWidth(5000, 1000);
+  expect(`${((list.width.value ?? 0) / 1000) * 100}vw`).toBe(FILE_LIST_BOUNDS.maxWidth);
 });
 
 test("in a window narrower than two minimums the width is the minimum", () => {

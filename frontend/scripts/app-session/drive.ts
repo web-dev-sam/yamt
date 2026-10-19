@@ -34,6 +34,11 @@ type Output = Readonly<Record<string, unknown>>;
 
 const SCROLL_SETTLE_MS = 2000;
 const SCROLL_POLL_MS = 100;
+const DRAG_STEPS = 10;
+const CLICK = [
+  { type: "pointerDown", button: 0 },
+  { type: "pointerUp", button: 0 },
+] as const;
 
 async function candidates(state: SessionState, selector: string): Promise<Candidate[]> {
   return parseCandidates(await execute(state, COLLECT_SCRIPT, [selector]));
@@ -52,25 +57,52 @@ export async function click(state: SessionState, command: Of<"click">): Promise<
     const env = displayEnv(appSession(state, "click --x11").display);
     await run(
       "xdotool",
-      ["mousemove", "--sync", String(point.x), String(point.y), "click", "1"],
+      ["mousemove", "--sync", String(point.x), String(point.y), "click"]
+        .concat(command.double ? ["--repeat", "2"] : [])
+        .concat(["1"]),
       env,
     );
-    return { clicked: target, screen: point };
+    return { clicked: target, double: command.double, screen: point };
   }
   const point = viewportPoint(placement);
+  const presses = command.double ? [...CLICK, ...CLICK] : CLICK;
+  await perform(state, [
+    {
+      type: "pointer",
+      id: "mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [{ type: "pointerMove", duration: 0, origin: "viewport", ...point }, ...presses],
+    },
+  ]);
+  return { clicked: target, double: command.double, viewport: point };
+}
+
+export async function drag(state: SessionState, command: Of<"drag">): Promise<Output> {
+  const chosen = await namedOrCss(state, command.query);
+  const from = viewportPoint(await reveal(state, chosen));
+  const moves = Array.from({ length: DRAG_STEPS }, (_, step) => ({
+    type: "pointerMove",
+    duration: 0,
+    origin: "viewport",
+    x: Math.round(from.x + (command.dx * (step + 1)) / DRAG_STEPS),
+    y: Math.round(from.y + (command.dy * (step + 1)) / DRAG_STEPS),
+  }));
+  const [down, up] = CLICK;
   await perform(state, [
     {
       type: "pointer",
       id: "mouse",
       parameters: { pointerType: "mouse" },
       actions: [
-        { type: "pointerMove", duration: 0, origin: "viewport", ...point },
-        { type: "pointerDown", button: 0 },
-        { type: "pointerUp", button: 0 },
+        { type: "pointerMove", duration: 0, origin: "viewport", ...from },
+        down,
+        ...moves,
+        up,
       ],
     },
   ]);
-  return { clicked: target, viewport: point };
+  const to = { x: from.x + command.dx, y: from.y + command.dy };
+  return { dragged: { role: roleOf(chosen), name: nameOf(chosen) }, from, to };
 }
 
 export async function press(state: SessionState, command: Of<"press">): Promise<Output> {

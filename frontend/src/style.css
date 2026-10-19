@@ -19,6 +19,8 @@
   --color-code: #c4c2ce;
   --color-gutter: #565362;
   --color-gutter-active: #aba9b6;
+  --color-handle: #565362;
+  --color-handle-active: #aba9b6;
   --color-active-line: #1c1b21;
   --color-selection: #774cd573;
   --color-caret: #e5e3eb;
@@ -83,6 +85,8 @@
   --color-code: #080808;
   --color-gutter: #aeb3c2;
   --color-gutter-active: #767a8a;
+  --color-handle: #aeb3c2;
+  --color-handle-active: #767a8a;
   --color-active-line: #f5f8fe;
   --color-selection: #a6d2ff;
   --color-caret: #000000;
@@ -164,5 +168,12 @@
   :focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 1px;
+  }
+
+  /* VS Code `Sash.onPointerStart` holds the cursor over the whole window while dragging (microsoft/vscode#21675). */
+  :root.col-resizing * {
+    cursor: col-resize !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
   }
 }
