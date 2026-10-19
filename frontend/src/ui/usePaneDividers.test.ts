@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { effectScope } from "vue";
 
 import type { PaneSplit } from "./paneSplit";
-import { dividerHandle } from "./usePaneDividers";
+import { dividerHandle, usePaneDividers } from "./usePaneDividers";
 
 class FakeSvg extends EventTarget {
   constructor(readonly parentNode: EventTarget) {
@@ -9,7 +10,22 @@ class FakeSvg extends EventTarget {
   }
 }
 
-const WIDTHS = { local: 300, center: 400, remote: 300 };
+class FakePointerEvent extends Event {
+  readonly button = 0;
+  readonly pointerId = 1;
+  constructor(
+    type: string,
+    readonly clientX: number,
+  ) {
+    super(type, { cancelable: true });
+  }
+}
+
+class FakeElement extends EventTarget {
+  readonly setPointerCapture = vi.fn();
+}
+
+const WIDTHS = { local: 200, center: 500, remote: 300 };
 
 beforeEach(() => {
   vi.stubGlobal("SVGSVGElement", FakeSvg);
@@ -77,9 +93,9 @@ test("a press measures once and each move sets the dragged split of its boundary
 
   expect(measure).toHaveBeenCalledTimes(2);
   expect(splits).toEqual([
-    { local: 0.4, remote: 0.3 },
+    { local: 0.3, remote: 0.3 },
     { local: 0.22, remote: 0.3 },
-    { local: 0.3, remote: 0.4 },
+    { local: 0.2, remote: 0.4 },
   ]);
 });
 
@@ -94,4 +110,32 @@ test("reset resets the split", () => {
 
   expect(resets.count).toBe(1);
   expect(splits).toEqual([]);
+});
+
+test("each divider's listeners drag its own boundary", () => {
+  vi.stubGlobal("PointerEvent", FakePointerEvent);
+  vi.stubGlobal("MouseEvent", FakePointerEvent);
+  vi.stubGlobal("Element", FakeElement);
+  vi.stubGlobal("document", { documentElement: { classList: { add: vi.fn(), remove: vi.fn() } } });
+  const { splits, split } = recorder();
+  const scope = effectScope();
+  const dividers = scope.run(() => usePaneDividers(() => WIDTHS, split));
+  if (dividers === undefined) {
+    throw new Error("no scope");
+  }
+
+  for (const divider of [dividers.local, dividers.remote]) {
+    const element = new FakeElement();
+    for (const [type, listener] of Object.entries(divider.listeners)) {
+      element.addEventListener(type, listener);
+    }
+    element.dispatchEvent(new FakePointerEvent("pointerdown", 0));
+    element.dispatchEvent(new FakePointerEvent("pointermove", 100));
+  }
+  scope.stop();
+
+  expect(splits).toEqual([
+    { local: 0.3, remote: 0.3 },
+    { local: 0.2, remote: 0.22 },
+  ]);
 });

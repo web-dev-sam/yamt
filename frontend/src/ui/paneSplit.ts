@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import type { Ref } from "vue";
 
 import type { Side } from "../ipc";
-import { storedValue } from "./windowStorage";
+import { parseStored, storedValue } from "./windowStorage";
 
 export type PaneSplit = { readonly local: number; readonly remote: number };
 export type PaneWidths = {
@@ -52,16 +52,8 @@ export function dragged(widths: PaneWidths, boundary: Side, dx: number): PaneSpl
     : { local: kept / total, remote: width / total };
 }
 
-function parsed(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function readSplit(raw: string): PaneSplit {
-  const value = parsed(raw);
+  const value = parseStored(raw);
   if (typeof value !== "object" || value === null || !("local" in value) || !("remote" in value)) {
     return EQUAL_SPLIT;
   }

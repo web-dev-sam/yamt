@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
 import type { AbortState } from "./aborting";
-import { storedValue } from "./windowStorage";
+import { parseStored, storedValue } from "./windowStorage";
 
 export const TOOLBAR_BUTTONS = [
   "abortMerge",
@@ -60,14 +60,6 @@ export function shownButtons(
   return listedButtons(abort).filter((id) => !hidden.has(id));
 }
 
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function readHiddenList(names: readonly unknown[]): Decisions {
   if (!names.every((name) => typeof name === "string")) {
     return {};
@@ -91,7 +83,7 @@ function readDecided(stored: object): Decisions {
 }
 
 function readDecisions(raw: string): Decisions {
-  const stored = parseJson(raw);
+  const stored = parseStored(raw);
   if (Array.isArray(stored)) {
     return readHiddenList(stored);
   }

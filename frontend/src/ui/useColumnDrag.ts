@@ -4,7 +4,7 @@ import { shallowRef, type Ref, type ShallowRef } from "vue";
 export type DotsState = "rest" | "hover" | "drag";
 export type ColumnDrag = { moveBy(dx: number): void };
 
-export type ColumnHandle = {
+type ColumnHandle = {
   accepts(event: PointerEvent | MouseEvent): boolean;
   press(event: PointerEvent): ColumnDrag | null;
   reset(): void;
@@ -23,7 +23,7 @@ type ListenedEvent =
   | "mousedown"
   | "dblclick";
 
-export type ColumnDragHandle = {
+export type ColumnDragBinding = {
   readonly listeners: Readonly<Record<ListenedEvent, (event: Event) => void>>;
   readonly dots: Readonly<Ref<DotsState>>;
 };
@@ -117,7 +117,7 @@ function doubleClicked(state: DragState, event: Event): void {
   }
 }
 
-export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragHandle {
+export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragBinding {
   const state: DragState = { handle, root, dots: shallowRef<DotsState>("rest"), dragging: null };
   tryOnScopeDispose(() => {
     stop(state, "rest");

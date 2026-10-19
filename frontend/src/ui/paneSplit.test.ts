@@ -162,22 +162,30 @@ test("a pair narrower than two minimums splits evenly and stays total", () => {
   }
 });
 
-test("the remote divider mirrors the local one", () => {
-  const widths = { local: 300, center: 400, remote: 300 };
+test("the remote divider mirrors the local one and keeps Local's pixels", () => {
+  const widths = { local: 200, center: 500, remote: 300 };
 
-  expect(dragged(widths, "remote", -100)).toEqual({ local: 0.3, remote: 0.4 });
-  expect(dragged(widths, "remote", 50)).toEqual({ local: 0.3, remote: 0.25 });
-  const left = dragged(widths, "remote", -250);
-  expect(left.remote * 1000).toBe(480);
-  expect(left.local * 1000).toBe(300);
-  expect(dragged(widths, "remote", 200).remote * 1000).toBe(220);
+  const wider = dragged(widths, "remote", -100);
+  expect(wider).toEqual({ local: 0.2, remote: 0.4 });
+  expect(wider.local * 1000).toBe(200);
+  expect(dragged(widths, "remote", 50)).toEqual({ local: 0.2, remote: 0.25 });
+  const left = dragged(widths, "remote", -400);
+  expect(left.remote * 1000).toBe(580);
+  expect(left.local * 1000).toBe(200);
+  const right = dragged(widths, "remote", 400);
+  expect(right.remote * 1000).toBe(220);
+  expect(right.local * 1000).toBe(200);
 });
 
 test("a press without a move gives the measured shares", () => {
-  const widths = { local: 250, center: 500, remote: 250 };
+  const widths = { local: 250, center: 450, remote: 300 };
 
-  expect(dragged(widths, "local", 0)).toEqual({ local: 0.25, remote: 0.25 });
-  expect(dragged(widths, "remote", 0)).toEqual({ local: 0.25, remote: 0.25 });
+  expect(dragged(widths, "local", 0)).toEqual({ local: 0.25, remote: 0.3 });
+  expect(dragged(widths, "remote", 0)).toEqual({ local: 0.25, remote: 0.3 });
+  expect(dragged({ local: 200, center: 500, remote: 300 }, "remote", 0)).toEqual({
+    local: 0.2,
+    remote: 0.3,
+  });
 });
 
 test("the strip grid has five tracks with the strips' 2.5rem in each pane's minimum", () => {

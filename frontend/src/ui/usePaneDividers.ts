@@ -1,6 +1,6 @@
 import type { Side } from "../ipc";
 import { dragged, type PaneSplitState, type PaneWidths } from "./paneSplit";
-import { useColumnDrag, type ColumnDrag, type ColumnDragHandle } from "./useColumnDrag";
+import { useColumnDrag, type ColumnDrag, type ColumnDragBinding } from "./useColumnDrag";
 
 type SplitWriter = Pick<PaneSplitState, "setPaneSplit" | "resetPaneSplit">;
 
@@ -38,7 +38,7 @@ export function dividerHandle(
 export function usePaneDividers(
   measure: () => PaneWidths | null,
   split: SplitWriter,
-): Readonly<Record<Side, ColumnDragHandle>> {
+): Readonly<Record<Side, ColumnDragBinding>> {
   return {
     local: useColumnDrag(dividerHandle("local", measure, split)),
     remote: useColumnDrag(dividerHandle("remote", measure, split)),

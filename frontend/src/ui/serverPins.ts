@@ -2,7 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
 import type { ServerKey } from "../lsp";
-import { storedValue } from "./windowStorage";
+import { parseStored, storedValue } from "./windowStorage";
 
 export type ServerPins = {
   readonly pinnedServers: Readonly<Ref<ReadonlySet<string>>>;
@@ -14,14 +14,10 @@ type PinsByRoot = Readonly<Record<string, unknown>>;
 const STORAGE_KEY = "yamt.servers.pinned";
 
 function readPins(raw: string): PinsByRoot {
-  try {
-    const stored: unknown = JSON.parse(raw);
-    return typeof stored === "object" && stored !== null && !Array.isArray(stored)
-      ? { ...stored }
-      : {};
-  } catch {
-    return {};
-  }
+  const stored = parseStored(raw);
+  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
+    ? { ...stored }
+    : {};
 }
 
 function pinsOf(byRoot: PinsByRoot, root: string): readonly string[] {
