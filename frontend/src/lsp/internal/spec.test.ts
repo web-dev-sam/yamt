@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 
 import { languageId } from "./languageIds";
-import { extensionOf, serves, type ServerSpec } from "./spec";
+import { extensionOf, serverKey, serves, type ServerSpec } from "./spec";
 
 const SPEC: ServerSpec = {
+  key: serverKey("oxlint (frontend)"),
   name: "oxlint",
   command: { program: "oxlint", args: [] },
   project: "frontend",
@@ -31,6 +32,11 @@ test("a spec serves files with its extensions under its project folder only", ()
   expect(serves(SPEC, "frontendish/a.ts")).toBe(false);
   expect(serves(SPEC, "a.ts")).toBe(false);
   expect(serves({ ...SPEC, project: "" }, "deep/down/a.ts")).toBe(true);
+});
+
+test("a server key is any text but the empty one", () => {
+  expect(serverKey("oxlint (frontend)")).toBe("oxlint (frontend)");
+  expect(() => serverKey("")).toThrow(RangeError);
 });
 
 test("language ids come from the table; an unknown extension is its own id", () => {

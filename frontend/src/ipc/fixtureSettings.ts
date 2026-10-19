@@ -30,7 +30,7 @@ function copied({ theme, antialiasing, keys, languageServers }: StoredSettings):
     languageServers: {
       repositories: { ...languageServers.repositories },
       off: Object.fromEntries(
-        Object.entries(languageServers.off ?? {}).map(([root, servers]) => [root, [...servers]]),
+        Object.entries(languageServers.off).map(([root, servers]) => [root, [...servers]]),
       ),
       added: copiedServers(languageServers.added),
     },

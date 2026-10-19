@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
-import type { DiskVersion } from "./domain";
+import type { DiskVersion, StoredSettings } from "./domain";
 import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
 
 const commands = vi.hoisted(() => ({
@@ -373,11 +373,11 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
   });
 });
 
-const STORED: Generated.StoredSettings = {
+const STORED: StoredSettings = {
   theme: "light",
   antialiasing: "subpixel",
   keys: { undo: ["Alt-Backspace"] },
-  languageServers: { repositories: { "/home/me/yamt": "start" }, added: [] },
+  languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
 };
 const SETTINGS_DTO: Generated.SettingsRead = {
   path: "/home/me/.config/yamt/settings.json",
@@ -427,6 +427,27 @@ test("a settings failure comes back as the app's error", async () => {
   commands.loadSettings.mockResolvedValue({ status: "error", error: broken });
 
   expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
+});
+
+test("a read without off has nothing switched off; one with off keeps it", async () => {
+  const old: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: { ...STORED, languageServers: { repositories: {}, added: [] } },
+  };
+  const off = { "/home/me/yamt": ["oxlint (repository root)"] };
+  const switched: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: { ...STORED, languageServers: { ...STORED.languageServers, off } },
+  };
+  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: old });
+  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: switched });
+  const source = createTauriSource();
+
+  const first = await source.loadSettings(STORED);
+  const second = await source.loadSettings(STORED);
+
+  expect(first.ok && first.value.stored.languageServers.off).toEqual({});
+  expect(second.ok && second.value.stored.languageServers.off).toEqual(off);
 });
 
 test("setServerAnswer and setAddedServers send their arguments and return the read", async () => {

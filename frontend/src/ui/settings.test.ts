@@ -26,9 +26,13 @@ type Target = {
 
 const PATH = "/home/me/.config/yamt/settings.json";
 const ROOT = "/home/me/yamt";
-const NO_SERVERS: LanguageServerSettings = { repositories: {}, added: [] };
+const NO_SERVERS: LanguageServerSettings = { repositories: {}, off: {}, added: [] };
 const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
-const SERVERS: LanguageServerSettings = { repositories: { [ROOT]: "start" }, added: [OXLINT] };
+const SERVERS: LanguageServerSettings = {
+  repositories: { [ROOT]: "start" },
+  off: {},
+  added: [OXLINT],
+};
 const OXFMT_KEY = "oxfmt (repository root)";
 const OFF: LanguageServerSettings = { ...SERVERS, off: { [ROOT]: [OXFMT_KEY] } };
 const BROKEN: SourceFailure = { kind: "SettingsBroken", path: PATH, message: "x at line 3" };
@@ -59,7 +63,11 @@ function settingsTarget(loads: StoredSettings[]): {
     setAntialiasing: async () => read(startStored()),
     setKeys: async () => read(startStored()),
     moveSettings: async () => read(startStored()),
-    setServerSwitch: async () => read(startStored()),
+    setServerSwitch: async (current, server, on) => {
+      sent.push(["setServerSwitch", current, server, on]);
+      const off = on ? {} : { [ROOT]: [server] };
+      return read({ ...current, languageServers: { ...current.languageServers, off } });
+    },
     setServerAnswer: async (current, answer) => {
       sent.push(["setServerAnswer", current, answer]);
       return answer === "dontStart"
@@ -133,15 +141,40 @@ test("setServerAnswer and setAddedServers send the settings in use and adopt the
     { ...startStored(), languageServers: SERVERS },
     null,
   ]);
-  expect(target.settings.value.languageServers).toEqual({ repositories: {}, added: [OXLINT] });
+  expect(target.settings.value.languageServers).toEqual({ ...SERVERS, repositories: {} });
 
   await actions.setAddedServers([]);
   expect(sent[2]).toEqual([
     "setAddedServers",
-    { ...startStored(), languageServers: { repositories: {}, added: [OXLINT] } },
+    { ...startStored(), languageServers: { ...SERVERS, repositories: {} } },
     [],
   ]);
   expect(target.settings.value.languageServers).toEqual(NO_SERVERS);
+});
+
+test("setServerSwitch sends the settings in use, the key and on, and adopts the reply", async () => {
+  const { actions, target, sent } = settingsTarget([
+    { ...startStored(), languageServers: SERVERS },
+  ]);
+  await actions.loadSettings();
+
+  await actions.setServerSwitch(OXFMT_KEY, false);
+  expect(sent[1]).toEqual([
+    "setServerSwitch",
+    { ...startStored(), languageServers: SERVERS },
+    OXFMT_KEY,
+    false,
+  ]);
+  expect(target.settings.value.languageServers).toEqual(OFF);
+
+  await actions.setServerSwitch(OXFMT_KEY, true);
+  expect(sent[2]).toEqual([
+    "setServerSwitch",
+    { ...startStored(), languageServers: OFF },
+    OXFMT_KEY,
+    true,
+  ]);
+  expect(target.settings.value.languageServers).toEqual({ ...SERVERS, off: {} });
 });
 
 test("a failed server answer is reported as a settings problem and keeps the settings", async () => {

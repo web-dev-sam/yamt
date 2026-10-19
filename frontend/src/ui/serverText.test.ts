@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { InstallHint, ServerSpec, ServerState } from "../lsp";
+import { serverKey, type InstallHint, type ServerSpec, type ServerState } from "../lsp";
 import {
   dotKind,
   formatNote,
@@ -113,6 +113,7 @@ test("a project folder reads as the folder with a slash, the root as the reposit
 
 test("a server reads as its name, marked when it is not installed", () => {
   const installed: ServerSpec = {
+    key: serverKey("TypeScript (frontend)"),
     name: "TypeScript",
     project: "frontend",
     folders: { project: ["node_modules/.bin"], home: [] },

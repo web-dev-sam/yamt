@@ -17,6 +17,7 @@ test("addedSpecs: an unmatched program keeps its file name, served at the reposi
 
   expect(specs).toEqual([
     {
+      key: "added: /opt/bin/pylsp --check",
       name: "pylsp",
       command: { program: "/opt/bin/pylsp", args: ["--check"] },
       project: "",
@@ -30,6 +31,7 @@ test("addedSpecs: an unmatched program keeps its file name, served at the reposi
       notes: [],
     },
     {
+      key: "added: C:\\tools\\taplo.exe lsp stdio",
       name: "taplo.exe",
       command: { program: "C:\\tools\\taplo.exe", args: ["lsp", "stdio"] },
       project: "",
@@ -71,6 +73,7 @@ test("addedSpecs: `ruff server` matches ruff: its name, rules and help; the type
   );
 
   expect(ruff).toEqual({
+    key: "added: /home/u/.venv/bin/ruff server",
     name: "ruff (2)",
     command: { program: "/home/u/.venv/bin/ruff", args: ["server"] },
     project: "",
@@ -83,6 +86,17 @@ test("addedSpecs: `ruff server` matches ruff: its name, rules and help; the type
     help: { kind: "python", package: "ruff", program: "ruff", folder: "", manager: null },
     notes: [],
   });
+});
+
+test("an added server's key is its command, not its numbered name", () => {
+  const command = ["oxlint", "--lsp"];
+  const alone = addedSpecs([{ command, fileTypes: ["ts"] }], [], ROOT);
+  const numbered = addedSpecs([{ command, fileTypes: ["ts"] }], ["oxlint"], ROOT);
+
+  expect(numbered.map(({ name, key }) => [name, key])).toEqual([
+    ["oxlint (2)", "added: oxlint --lsp"],
+  ]);
+  expect(alone.map(({ key }) => key)).toEqual(["added: oxlint --lsp"]);
 });
 
 test("addedSpecs: `intelephense.cmd --stdio` in a folder matches Intelephense and never formats", () => {

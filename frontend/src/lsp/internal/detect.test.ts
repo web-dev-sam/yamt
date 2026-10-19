@@ -139,6 +139,19 @@ test("project folders: a file at the root belongs to the root project", async ()
   ]);
 });
 
+test("the key stays when a second project brings the suffix", async () => {
+  const fake = lookups({ ...NO_SERVERS, "frontend/package.json": "{}", ...bins("", "oxlint") });
+
+  const alone = await detect(["frontend/a.ts"], fake, ROOT);
+  const both = await detect(["frontend/a.ts", "c.ts"], fake, ROOT);
+
+  expect(alone.map(({ name, key }) => [name, key])).toEqual([["oxlint", "oxlint (frontend)"]]);
+  expect(both.map(({ name, key }) => [name, key])).toEqual([
+    ["oxlint (repository root)", "oxlint (repository root)"],
+    ["oxlint (frontend)", "oxlint (frontend)"],
+  ]);
+});
+
 test("project folders: files with no package.json above them are served by no preset; a Cargo.toml brings no node project", async () => {
   const fake = lookups({ "crates/session/Cargo.toml": "[workspace]", ...bins("", "oxlint") });
 
@@ -175,6 +188,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
 
   expect(specs).toEqual([
     {
+      key: "oxfmt (web)",
       name: "oxfmt",
       command: { program: "oxfmt", args: ["--lsp"] },
       project: "web",
@@ -188,6 +202,7 @@ test("oxlint and oxfmt: found in the project (or above it), formatter first, wit
       notes: [],
     },
     {
+      key: "oxlint (web)",
       name: "oxlint",
       command: { program: "oxlint", args: ["--lsp"] },
       project: "web",
@@ -216,6 +231,7 @@ test("TypeScript 7 or later: the project's own tsc in language-server mode", asy
 
   expect(specs).toEqual([
     {
+      key: "TypeScript (repository root)",
       name: "TypeScript",
       command: { program: "tsc", args: ["--lsp", "--stdio"] },
       project: "",
@@ -359,6 +375,7 @@ test("eslint: config, package and its server found on PATH or in the project", a
 
   expect(onPath).toEqual([
     {
+      key: "eslint (repository root)",
       name: "eslint",
       command: { program: "vscode-eslint-language-server", args: ["--stdio"] },
       project: "",
@@ -563,6 +580,7 @@ test("rust-analyzer: the workspace's manifest counts, found on PATH, without car
 
   expect(specs).toEqual([
     {
+      key: "rust-analyzer (rs)",
       name: "rust-analyzer",
       command: { program: "rust-analyzer", args: [] },
       project: "rs",
@@ -611,6 +629,7 @@ test("gopls: go.mod counts, found on PATH or in ~/go/bin, missing → go install
 
   expect(onPath).toEqual([
     {
+      key: "gopls (go)",
       name: "gopls",
       command: { program: "gopls", args: [] },
       project: "go",
@@ -638,6 +657,7 @@ test("ruff: a [tool.ruff] section counts wherever ruff is; formats; its spec", a
 
   expect(specs).toEqual([
     {
+      key: "ruff (py)",
       name: "ruff",
       command: { program: "ruff", args: ["server"] },
       project: "py",
@@ -766,6 +786,7 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
 
   expect(both).toEqual([
     {
+      key: "Phpactor (php)",
       name: "Phpactor",
       command: { program: "phpactor", args: ["language-server"] },
       project: "php",
@@ -781,6 +802,7 @@ test("PHP: Phpactor first, else Intelephense, each with its own options and fold
   ]);
   expect(intelephense).toEqual([
     {
+      key: "Intelephense (php)",
       name: "Intelephense",
       command: { program: "intelephense", args: ["--stdio"] },
       project: "php",
@@ -820,6 +842,7 @@ test("clangd: formats only with a .clang-format or _clang-format up to the root"
 
   expect(plain).toEqual([
     {
+      key: "clangd (c)",
       name: "clangd",
       command: { program: "clangd", args: [] },
       project: "c",
@@ -860,6 +883,7 @@ test("Biome: the project's copy counts and formats; a copy on PATH does not", as
 
   expect(local).toEqual([
     {
+      key: "Biome (biome)",
       name: "Biome",
       command: { program: "biome", args: ["lsp-proxy"] },
       project: "biome",
@@ -916,6 +940,7 @@ test("Vue with the plugin up the chain: the TypeScript server also serves vue an
 
   expect(specs).toEqual([
     {
+      key: "TypeScript (web)",
       name: "TypeScript",
       command: { program: "typescript-language-server", args: ["--stdio"] },
       project: "web",
@@ -981,6 +1006,7 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
       notes: [],
     }),
     {
+      key: "Vue (web)",
       name: "Vue",
       command: { program: "typescript-language-server", args: ["--stdio"] },
       project: "web",
@@ -1000,6 +1026,57 @@ test("Vue without the plugin: TypeScript unchanged, plus a never-started Vue spe
       help: null,
       notes: [],
     },
+  ]);
+});
+
+test("keys are unique; Vue's is not TypeScript's", async () => {
+  const tree = {
+    ...NO_SERVERS,
+    ...bins("", "oxlint"),
+    ...vueProject("5.9.3"),
+    ...VUE_PACKAGE,
+    ...bins("web/", "oxlint"),
+  };
+
+  const specs = await detect(
+    ["web/src/App.vue", "web/a.ts", "b.ts"],
+    lookups(tree, ["typescript-language-server"]),
+    ROOT,
+  );
+
+  expect(specs.map(({ name, key }) => [name, key])).toEqual([
+    ["oxlint (repository root)", "oxlint (repository root)"],
+    ["oxlint (web)", "oxlint (web)"],
+    ["TypeScript", "TypeScript (web)"],
+    ["Vue", "Vue (web)"],
+  ]);
+});
+
+test("TypeScript's key stays whichever program runs it, installed or not", async () => {
+  const seven = vueProject("7.0.0");
+  const preview = { ...vueProject("5.9.3"), ...bins("web/", "tsgo") };
+  const server = vueProject("5.9.3");
+
+  const keys = await Promise.all(
+    [
+      lookups(seven),
+      lookups(preview),
+      lookups(server),
+      lookups(server, ["typescript-language-server"]),
+    ].map(async (fake) =>
+      (await detect(["web/a.ts"], fake, ROOT)).map(({ command, install, key }) => [
+        command.program,
+        install === null,
+        key,
+      ]),
+    ),
+  );
+
+  expect(keys).toEqual([
+    [["tsc", true, "TypeScript (web)"]],
+    [["tsgo", true, "TypeScript (web)"]],
+    [["typescript-language-server", false, "TypeScript (web)"]],
+    [["typescript-language-server", true, "TypeScript (web)"]],
   ]);
 });
 

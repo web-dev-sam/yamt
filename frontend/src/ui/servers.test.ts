@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { computed, shallowRef, type ShallowRef } from "vue";
 
 import type { HostEvent, RunId, ServerHost, StartReply } from "../ipc";
-import { LanguageServers, type ServerSpec } from "../lsp";
+import { LanguageServers, serverKey, type ServerSpec } from "../lsp";
 import type { Screen } from "./screen";
 import { createServers, type Servers } from "./servers";
 
@@ -54,6 +54,7 @@ function answeringHost(): ServerHost {
 
 function spec(name: string, project: string): ServerSpec {
   return {
+    key: serverKey(`${name} (${project === "" ? "repository root" : project})`),
     name,
     command: { program: name, args: ["--lsp"] },
     project,
@@ -86,6 +87,7 @@ test("serverViews follow LanguageServers.onChange", () => {
 
   expect(slice.serverViews.value).toEqual([
     {
+      key: "oxlint (repository root)",
       name: "oxlint",
       project: "",
       state: { kind: "failed", reason: { kind: "noHost" } },

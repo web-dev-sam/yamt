@@ -3,7 +3,7 @@ import { PRESET_SERVERS, type PresetServer } from "./choices";
 import { EVERY_ECOSYSTEM_FOLDERS } from "./ecosystems";
 import { projectUri } from "./handshake";
 import { sameValue } from "./json";
-import type { ServerSpec } from "./spec";
+import { serverKey, type ServerSpec } from "./spec";
 import { mayFormat } from "./tool";
 
 const FIRST_REPEAT = 2;
@@ -52,7 +52,8 @@ export function addedSpecs(
     }
     names.add(name);
     const command = { program, args };
-    const spec = { name, command, project: "", folders: EVERY_ECOSYSTEM_FOLDERS, fileTypes };
+    const key = serverKey(`added: ${[program, ...args].join(" ")}`);
+    const spec = { key, name, command, project: "", folders: EVERY_ECOSYSTEM_FOLDERS, fileTypes };
     return [{ ...spec, ...presetPart(preset, root), install: null, notes: [] }];
   });
 }

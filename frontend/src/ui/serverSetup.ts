@@ -4,15 +4,20 @@ import {
   log,
   type AddedServer,
   type FileEntry,
+  type LanguageServerSettings,
   type RepositoryAnswer,
   type ServerHost,
 } from "../ipc";
-import { addedSpecs, detect, type LanguageServers, type ServerSpec } from "../lsp";
+import { addedSpecs, detect, type LanguageServers, type ServerKey, type ServerSpec } from "../lsp";
 import type { Asking, Reply } from "./asking";
 import { unexpected } from "./problem";
+import { createServerPins, type ServerPins } from "./serverPins";
 import type { SettingsActions, SettingsInUse } from "./settings";
 
-type SetupTarget = Pick<SettingsActions, "loadSettings" | "setServerAnswer" | "setAddedServers"> & {
+type SetupTarget = Pick<
+  SettingsActions,
+  "loadSettings" | "setServerAnswer" | "setAddedServers" | "setServerSwitch"
+> & {
   readonly host: ServerHost | null;
   readonly servers: Pick<LanguageServers, "setSpecs" | "haltAll">;
   readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
@@ -29,7 +34,7 @@ type Setup = SetupTarget & {
   latestLook: number;
 };
 
-export type ServerSetup = {
+export type ServerSetup = ServerPins & {
   readonly serverRoot: Readonly<ShallowRef<string | null>>;
   readonly foundServers: Readonly<ShallowRef<readonly ServerSpec[]>>;
   startUp(): Promise<void>;
@@ -37,6 +42,7 @@ export type ServerSetup = {
   answerServers(answer: RepositoryAnswer): Promise<void>;
   addServer(server: AddedServer): Promise<void>;
   removeServer(index: number): Promise<void>;
+  switchServer(key: ServerKey, on: boolean): Promise<void>;
 };
 
 type AddedServerFields = { readonly command: string; readonly fileTypes: string };
@@ -62,6 +68,13 @@ export function addedServerFields(server: {
   readonly fileTypes: readonly string[];
 }): AddedServerFields {
   return { command: server.command.join(" "), fileTypes: server.fileTypes.join(", ") };
+}
+
+export function offServers(
+  settings: LanguageServerSettings,
+  root: string | null,
+): ReadonlySet<string> {
+  return new Set(root === null ? [] : (settings.off[root] ?? []));
 }
 
 async function look(setup: Setup, host: ServerHost): Promise<string | null> {
@@ -95,20 +108,25 @@ function storedAnswer(setup: Setup, root: string): RepositoryAnswer | null {
   return setup.settings.value.languageServers.repositories[root] ?? null;
 }
 
+function shownFound(setup: Setup, root: string): readonly ServerSpec[] {
+  const off = offServers(setup.settings.value.languageServers, root);
+  return setup.found.value.filter((spec) => !off.has(spec.key));
+}
+
 function apply(setup: Setup, root: string, answer: RepositoryAnswer | null): void {
-  const specs = [...setup.found.value, ...addedOf(setup, root)];
+  const specs = [...shownFound(setup, root), ...addedOf(setup, root)];
   setup.servers.setSpecs(specs, { startOnOpen: answer === "start" });
 }
 
 async function setUp(setup: Setup, host: ServerHost): Promise<void> {
   const root = await look(setup, host);
-  if (root === null || setup.found.value.length + addedOf(setup, root).length === 0) {
+  if (root === null || shownFound(setup, root).length + addedOf(setup, root).length === 0) {
     return;
   }
   if (storedAnswer(setup, root) === null) {
     const reply = await setup.asking.ask({
       kind: "servers",
-      found: setup.found.value,
+      found: shownFound(setup, root),
       added: addedOf(setup, root),
     });
     const given = STORED_REPLIES[reply];
@@ -152,8 +170,8 @@ async function answer(setup: Setup, given: RepositoryAnswer): Promise<void> {
   apply(setup, root, now);
 }
 
-async function changeAdded(setup: Setup, added: readonly AddedServer[]): Promise<void> {
-  await setup.setAddedServers(added);
+async function applyAfter(setup: Setup, write: Promise<void>): Promise<void> {
+  await write;
   const root = setup.root.value;
   if (root !== null) {
     apply(setup, root, storedAnswer(setup, root));
@@ -172,16 +190,15 @@ export function createServerSetup(target: SetupTarget): ServerSetup {
     return setup.settings.value.languageServers.added;
   }
   return {
+    ...createServerPins(setup.root),
     serverRoot: setup.root,
     foundServers: setup.found,
     startUp: () => startUp(setup),
     refocus: () => refocus(setup),
     answerServers: (given) => answer(setup, given),
-    addServer: (server) => changeAdded(setup, [...added(), server]),
+    addServer: (server) => applyAfter(setup, setup.setAddedServers([...added(), server])),
     removeServer: (index) =>
-      changeAdded(
-        setup,
-        added().filter((_, at) => at !== index),
-      ),
+      applyAfter(setup, setup.setAddedServers(added().filter((_, at) => at !== index))),
+    switchServer: (key, on) => applyAfter(setup, setup.setServerSwitch(key, on)),
   };
 }

@@ -5,7 +5,7 @@ import type { RepositoryAnswer } from "../ipc";
 import type { PresetChoice, ServerSpec } from "../lsp";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import PresetPicker from "./PresetPicker.vue";
-import { addedServerFields, parseAddedServer } from "./serverSetup";
+import { addedServerFields, offServers, parseAddedServer } from "./serverSetup";
 import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
 import { useAppStore } from "./store";
 
@@ -14,7 +14,7 @@ const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: stri
   { value: "dontStart", label: "Don't start" },
 ];
 
-const { settings, serverRoot, foundServers, answerServers, addServer, removeServer } =
+const { settings, serverRoot, foundServers, answerServers, addServer, removeServer, switchServer } =
   useAppStore();
 const commandText = shallowRef("");
 const fileTypesText = shallowRef("");
@@ -26,6 +26,7 @@ const answer = computed(() =>
 );
 const added = computed(() => settings.value.languageServers.added.map(addedServerFields));
 const newServer = computed(() => parseAddedServer(commandText.value, fileTypesText.value));
+const off = computed(() => offServers(settings.value.languageServers, serverRoot.value));
 
 function commandOf(spec: ServerSpec): string {
   return spec.install === null
@@ -36,6 +37,14 @@ function commandOf(spec: ServerSpec): string {
 async function pick(value: RepositoryAnswer | "notAsked"): Promise<void> {
   if (value !== "notAsked") {
     await answerServers(value);
+  }
+}
+
+async function flip(spec: ServerSpec, event: Event): Promise<void> {
+  const input = event.target;
+  if (input instanceof HTMLInputElement) {
+    await switchServer(spec.key, input.checked);
+    input.checked = !off.value.has(spec.key);
   }
 }
 
@@ -68,10 +77,22 @@ async function add(): Promise<void> {
       <ul v-if="foundServers.length > 0" class="flex flex-col">
         <li
           v-for="spec in foundServers"
-          :key="spec.name"
+          :key="spec.key"
           class="flex flex-wrap gap-x-3 gap-y-1 px-2 py-1"
         >
-          <span class="w-40 shrink-0 wrap-break-word">{{ spec.name }}</span>
+          <label
+            class="flex w-40 shrink-0 items-baseline gap-2 wrap-break-word"
+            :class="{ 'text-fg-muted': off.has(spec.key) }"
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              class="size-4 shrink-0 self-center accent-primary"
+              :checked="!off.has(spec.key)"
+              @change="flip(spec, $event)"
+            />
+            {{ spec.name }}
+          </label>
           <span class="w-32 shrink-0 wrap-break-word text-fg-muted">{{
             projectLabel(spec.project)
           }}</span>

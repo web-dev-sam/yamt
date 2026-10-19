@@ -41,7 +41,21 @@ export type InstallHint =
     }
   | { readonly kind: "system"; readonly program: string };
 
+export type ServerKey = string & { readonly __brand: "ServerKey" };
+
+function isServerKey(text: string): text is ServerKey {
+  return text !== "";
+}
+
+export function serverKey(text: string): ServerKey {
+  if (!isServerKey(text)) {
+    throw new RangeError("a server key is never empty");
+  }
+  return text;
+}
+
 export type ServerSpec = {
+  readonly key: ServerKey;
   readonly name: string;
   readonly command: { readonly program: string; readonly args: readonly string[] };
   readonly project: string;
@@ -54,6 +68,8 @@ export type ServerSpec = {
   readonly help: InstallHint | null;
   readonly notes: readonly SpecNote[];
 };
+
+export type FoundSpec = Omit<ServerSpec, "key">;
 
 export function extensionOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);

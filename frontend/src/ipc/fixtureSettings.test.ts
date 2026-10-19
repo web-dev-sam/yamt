@@ -190,7 +190,7 @@ test("an answer keeps the other repositories' answers and the added servers", as
   const settings = createFixtureSettings();
   await settings.loadSettings({
     ...IN_USE,
-    languageServers: { repositories: { "/elsewhere": "dontStart" }, added: [OXLINT] },
+    languageServers: { repositories: { "/elsewhere": "dontStart" }, off: {}, added: [OXLINT] },
   });
 
   const read = await settings.setServerAnswer(IN_USE, "start");
@@ -206,7 +206,7 @@ test("added servers replace the list and keep the answers", async () => {
   const settings = createFixtureSettings();
   await settings.loadSettings({
     ...IN_USE,
-    languageServers: { repositories: { [REPOSITORY]: "start" }, added: [OXLINT] },
+    languageServers: { repositories: { [REPOSITORY]: "start" }, off: {}, added: [OXLINT] },
   });
 
   const read = await settings.setAddedServers(IN_USE, [TAPLO]);
@@ -285,7 +285,7 @@ test("an off list in a reply is a copy: changing it changes nothing stored", asy
   const settings = createFixtureSettings();
   const first = await settings.setServerSwitch(IN_USE, "oxlint (repository root)", false);
   if (first.ok) {
-    first.value.stored.languageServers.off?.[REPOSITORY]?.push("--reply");
+    first.value.stored.languageServers.off[REPOSITORY]?.push("--reply");
   }
 
   const again = await settings.loadSettings(IN_USE);

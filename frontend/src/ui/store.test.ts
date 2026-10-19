@@ -55,7 +55,7 @@ const NO_SETTINGS: SettingsSource = {
   setServerSwitch: () => Promise.reject(new Error("not used")),
   setAddedServers: () => Promise.reject(new Error("not used")),
 };
-const NO_SERVERS = { repositories: {}, added: [] };
+const NO_SERVERS = { repositories: {}, off: {}, added: [] };
 const DARK = {
   theme: "dark",
   antialiasing: "subpixel",
