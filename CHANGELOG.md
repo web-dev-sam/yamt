@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Language servers found in a repository can be switched off in Settings → Language servers, each with its own
+  switch. A server switched off stops at once, its problems leave the Result, and it is not started again in that
+  repository, also after a restart, until it is switched back on.
+- One "Servers" button in the header holds every language server: its drop-down lists each one with its state, and
+  choosing one opens its menu as before. A pin icon next to each puts that server's own button in the header; nothing
+  is pinned at first, and pins are remembered per repository.
+- The three panes can be resized: drag the strip between Local and Result, or between Result and Remote (or the line
+  above it). Only the two panes next to it change; no pane gets narrower than 220 px. A double-click makes the three
+  panes equal. The split is the same for every file, the binary and deleted-file views included, and is remembered
+  across restarts.
+- Three dots on the file list's edge and between the panes show where to drag.
+
+### Changed
+
+- The file list keeps the width you dragged it to across restarts; a double-click on its edge gives the starting width
+  again.
+- The header no longer shows one button per language server; they sit in the "Servers" drop-down unless pinned.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added
