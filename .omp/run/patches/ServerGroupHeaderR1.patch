@@ -1,0 +1,386 @@
+commit 84ec8fa7a5520ff127a9aea0c30fd2d4e159ee5e
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 21:20:00 +0200
+
+    fix(ui): drop-downs close on a right-press outside; one menu placement and OpenMenu (#1289-#1293)
+
+diff --git a/.omp/run/notes/ServerGroupHeaderR1.md b/.omp/run/notes/ServerGroupHeaderR1.md
+new file mode 100644
+index 0000000..b8aa678
+--- /dev/null
++++ b/.omp/run/notes/ServerGroupHeaderR1.md
+@@ -0,0 +1,97 @@
++All five findings are fixed. The recipes exit 0, and the right-click checks were run with real X11 right-clicks in the app's WebKitGTK webview as well as on the `?servers` fixture page. One thing to know first: the WebDriver right-click can't serve as evidence for #1292. WebKitGTK's driver ends a button-2 press with `mouseup:0` + `click:0`, so that `click` would close the list even without the fix. On the fixture page I used a bare `contextmenu` event instead, and a real `xdotool click 3` in the app.
++
++```
++summary
++  New ui/useMenuPlacement.ts: `useMenuPlacement(menu, at)` measures the menu and the window and places it with
++  `menuPosition`; `belowLeft(opener)` is the shared "under its opener" anchor. ServerGroup and ServerMenu now use it.
++  serverMenuToggle.ts exports `OpenMenu`. ServerStatus and ServerGroup hold it, and ServerMenu's props are `OpenMenu`.
++  useDropdownMenu also closes on a `contextmenu` press outside the menu (the opener counts as outside), through
++  `closeAfterClick`. ui/AGENTS.md reworded (#1291); the count test is deleted (#1293).
++
++files_changed
++  frontend/src/ui/useMenuPlacement.ts (new)
++  frontend/src/ui/useDropdownMenu.ts
++  frontend/src/ui/ServerGroup.vue
++  frontend/src/ui/ServerMenu.vue
++  frontend/src/ui/ServerStatus.vue
++  frontend/src/ui/serverMenuToggle.ts
++  frontend/src/ui/menuKeys.test.ts
++  frontend/src/ui/AGENTS.md
++
++tests_added
++  none. "rows and pins are one list …" is removed from menuKeys.test.ts (#1293). The contextmenu close is a window
++  listener and needs a DOM, so its evidence is the WebKit and real-app runs below.
++
++smoke_evidence
++  1. Recipes (each exit code read on its own):
++     lint=0 ("oxlint --type-aware && eslint --max-warnings 0"), typecheck=0 (vue-tsc -b), sfc=0,
++     fmt=0 ("All matched files use the correct format. … 344 files"), unused=0 (knip --include exports,types)
++     test=0: "Test Files 116 passed (116)", "Tests 1573 passed (1573)"
++  2a. WebKit fixture (app-session start-fixture q1r 1600x1000, location.href="/?servers", Don't start):
++     - List open; a bare contextmenu (button 2) on <header> at 800,20:
++       {"before":true,"ev":["contextmenu:2:HEADER"],"menus":["ToolbarMenu"],"expanded":"false","active":"Language servers"}
++       Screenshot /tmp/yamt-q1r/toolbar-rightclick.png: only ToolbarMenu is visible.
++     - List open; contextmenu on the group button:
++       {"ev":["contextmenu:2:Language servers"],"menus":["ToolbarMenu"],"expanded":"false","before":true}
++     - contextmenu on a row inside the list → menus ["Language servers"] (the list stays open).
++     - PresetPicker (Settings → "From the list", 16 items, opener 563,930): contextmenu at 900,200 →
++       {"menu":false,"expanded":"false","active":"From the list"}. A contextmenu inside it → menu stays; Escape →
++       closed, active "From the list".
++     - The driver quirk: WebDriver pointerDown/Up with button 2 logs
++       ["mousedown:2:SPAN","contextmenu:2:SPAN","mouseup:0:SPAN","click:0:SPAN"]. That bogus click chose an "oxlint" row.
++     - Round 1 steps:
++       2. Rows oxlint=Stopped, TypeScript=Stopped, Vue=Not installed, eslint=Not installed; 4 pins "false/Pin to the
++          header"; list at [1462,39] = the group button's bottom-left; active "oxlint"; expanded "true".
++       3. Header ["oxlint@1304","TypeScript@1368","Language servers@1462"]; pins true/true/false/false, "Unpin from the
++          header"; bg "rgba(119, 76, 213, 0.35)";
++          stored {"/fixture/repository":["oxlint (repository root)","TypeScript (repository root)"]}
++       4. Escape → {"open":false,"active":"Language servers","expanded":"false"}
++       5. Pinned oxlint → menu "oxlint" at [1304,39] (opener bottom-left 1304,39), items [Start, Show log], keyboard on
++          Start → Down → "Show log" → Enter → ["oxlint log","Nothing logged yet."] → Back → file list shown (11 visible
++          rows). Row menu TypeScript at [1462,39]. A group click while it is open → 0 menus, expanded "false".
++          The Vue row menu (480 px wide) is pushed left to left 1120 / right 1600 (innerWidth 1600).
++       6. Unpin TypeScript → header ["oxlint@1398","Language servers@1462"], list still open.
++       8. Keyboard from the group button:
++          Enter → menuitem:oxlint; Down → Pin oxlint (checked=true); Down Down → Pin TypeScript (false);
++          Space → checked=true, list=true; Up → menuitem:TypeScript;
++          Enter → "menuitem:Start | list=false | expanded=true";
++          Escape → "Language servers | list=false | expanded=false".
++          Pinned oxlint: Escape in its menu → active "oxlint".
++  2b. Real app, WebKitGTK (cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt";
++      scripts/lsp-repo.sh /tmp/yamt-q1r/lsp; start-app q1a on :2; Don't start). Right-clicks are xdotool click 3:
++     - List open, right-click toolbar 800,20:
++       ev ["pointerdown:2:HEADER","mousedown:2:HEADER","contextmenu:2:HEADER","pointerup:2:HEADER","mouseup:2:HEADER",
++       "auxclick:2:HEADER"] (no click event, as the finding expected); menus ["ToolbarMenu:8 items"];
++       expanded "false". Screenshot /tmp/yamt-q1r/app-toolbar-rightclick.png.
++     - List open, right-click group button 1507,25 → contextmenu:2:Language servers; menus ["ToolbarMenu"];
++       expanded "false".
++     - PresetPicker open (16 items), right-click at 900,200 → {"menu":false,"expanded":"false"}.
++  3. grep "useElementSize" frontend/src/ui/*.vue → No matches found.
++  4. Stopped q1r ("session":"ended": webdriver, vite) and q1a ("session":"ended": tauri-driver, xvfb).
++     pgrep MiniBrowser|WebKitWebDriver|tauri-driver|Xvfb :2|target/debug/yamt → "no sessions left".
++
++deviations_from_brief
++  - #1292: the fix text says to close only for a target "outside the menu and the opener". Acceptance 2 wants a
++    right-click on the group button to close the list. A secondary press on the opener has no toggle to handle it,
++    so it would leave the list under ToolbarMenu. Only a target inside the menu is ignored. Left clicks still go
++    through onClickOutside with the opener ignored.
++  - I used `contextmenu` rather than `pointerdown` with button !== 0, so macOS Ctrl+click is covered too.
++  - #1290: beyond the brief's `useMenuPlacement`, `belowLeft(opener)` is in the same file, for the bottom-left anchor
++    the finding also names. ServerStatus uses it as well.
++  - #1289: ServerMenu's props are `defineProps<OpenMenu>()` so the shape lives in one place. `menuAfterClick` stays
++    generic, because its node test uses plain objects without an HTMLElement.
++  - ui/AGENTS.md paragraph 7 also names OpenMenu, useMenuPlacement/belowLeft and the right-press close, and drops
++    "placed by `menuPosition`".
++  - WebKit evidence for the fixture page used dispatched `contextmenu` events because of the driver quirk above.
++    Real right-clicks were done in the app on a private display. The fixture MiniBrowser runs on the owner's desktop,
++    so xdotool was not used there.
++  - For the orchestrator: the project map must name ui/useMenuPlacement.ts (map-check).
++
++open_risks
++  - frontend/src/ui/useDropdownMenu.ts:51-57: on a right-press, WebKitGTK moves focus to a focusable target before
++    `contextmenu`. `closeAfterClick` then leaves focus there (PresetPicker case: active became a keymap row). This is
++    the same rule as a left click.
++  - frontend/src/ui/ServerGroup.vue:35-37: the list's anchor is still taken at click time (round 1's risk, unchanged).
++```
++
++Still to run on your side: `just check` (map-check needs `ui/useMenuPlacement.ts` in the project map) and `just mutants` on `ui/useDropdownMenu.ts` and `ui/useMenuPlacement.ts`.
+\ No newline at end of file
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 560c275..badc305 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -2,9 +2,9 @@ Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome on
+ 
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+-Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
++Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. With no host (fixture mode without `?servers`) it only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+ 
+-Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and the format note, then the pinned servers' buttons (`serverButtons.ts`: one `ServerButton` per view in view order, `pinned` by `ServerKey` from `pinnedServers`, `DOT_CLASSES`), then `ServerGroup.vue`: the "Servers" button (dot = `groupDot` over every view's `dotKind`), its teleported list (`useDropdownMenu`, placed by `menuPosition`; per server a `menuitem` row and a `menuitemcheckbox` pin calling `togglePin(key)`), and a chosen row's `ServerMenu` in the list's place with the group button as opener; a click on the group button while that menu is open only closes it. Menus step over `MENU_ITEMS` (`menuKeys.ts`); every `useDropdownMenu` drop-down also closes on window blur; `ServerMenu` gives the keyboard back to its opener on Escape/Tab. Fixture mode builds a server host only with `?servers` (`ipc/fixtureServers.ts`, `main.ts`): four servers that never start.
++Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and the format note, then the pinned servers' buttons (`serverButtons.ts`: one `ServerButton` per view in view order, `pinned` by `ServerKey` from `pinnedServers`, `DOT_CLASSES`), then `ServerGroup.vue`: the "Servers" button (dot = `groupDot` over every view's `dotKind`), its teleported list (`useDropdownMenu`; per server a `menuitem` row and a `menuitemcheckbox` pin calling `togglePin(key)`), and a chosen row's `ServerMenu` in the list's place with the group button as opener; a click on the group button while that menu is open only closes it. The open menu's shape is `OpenMenu` (`serverMenuToggle.ts`, also `ServerMenu`'s props); the list and `ServerMenu` are placed by `useMenuPlacement` (measured size, window size, `menuPosition`), anchored `belowLeft` of their opener. Menus step over `MENU_ITEMS` (`menuKeys.ts`); every `useDropdownMenu` drop-down also closes on window blur and on a right-press (`contextmenu`) outside it, the opener included; `ServerMenu` closes on any press outside it and gives the keyboard back to its opener on Escape/Tab. Fixture mode builds a server host only with `?servers` (`ipc/fixtureServers.ts`, `main.ts`): four servers that never start.
+ 
+ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box; `FileList`'s handle uses `useColumnDrag` and `FILE_LIST_BOUNDS`, its dots centred as an absolute box (flex-centred dots there cost WebKitGTK scroll frames).
+ 
+diff --git a/frontend/src/ui/ServerGroup.vue b/frontend/src/ui/ServerGroup.vue
+index 4274167..c0518b0 100644
+--- a/frontend/src/ui/ServerGroup.vue
++++ b/frontend/src/ui/ServerGroup.vue
+@@ -1,50 +1,39 @@
+ <script setup lang="ts">
+-import { useElementSize, useWindowSize } from "@vueuse/core";
+ import { computed, shallowRef, useTemplateRef } from "vue";
+ import ChevronDown from "~icons/lucide/chevron-down";
+ import Pin from "~icons/lucide/pin";
+ 
+-import { menuPosition, type Point } from "./menuPosition";
++import type { Point } from "./menuPosition";
+ import { DOT_CLASSES, type ServerButton } from "./serverButtons";
+ import ServerMenu from "./ServerMenu.vue";
++import type { OpenMenu } from "./serverMenuToggle";
+ import { LANGUAGE_SERVERS, pinLabel, pinTitle, SERVERS, type DotKind } from "./serverText";
+ import { useAppStore } from "./store";
+ import { useDropdownMenu } from "./useDropdownMenu";
+-
+-type RowMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
++import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+ 
+ defineProps<{ buttons: readonly ServerButton[]; dot: DotKind }>();
+ 
+ const { togglePin } = useAppStore();
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const list = useTemplateRef<HTMLUListElement>("list");
+-const size = useElementSize(list, undefined, { box: "border-box" });
+-const viewport = useWindowSize();
+ const at = shallowRef<Point>({ x: 0, y: 0 });
+-const rowMenu = shallowRef<RowMenu | null>(null);
++const rowMenu = shallowRef<OpenMenu | null>(null);
+ const { openFor, toggle, close, menuKey } = useDropdownMenu<"servers">({
+   menu: () => list.value,
+   opener: () => opener.value,
+ });
++const placement = useMenuPlacement(list, at);
+ 
+ const expanded = computed(() => openFor.value !== null || rowMenu.value !== null);
+-const placement = computed(() => {
+-  const { x, y } = menuPosition({
+-    pointer: at.value,
+-    menu: { width: size.width.value, height: size.height.value },
+-    viewport: { width: viewport.width.value, height: viewport.height.value },
+-  });
+-  return { left: `${x}px`, top: `${y}px` };
+-});
+ 
+ async function groupClicked(): Promise<void> {
+   if (rowMenu.value !== null) {
+     rowMenu.value = null;
+     return;
+   }
+-  const box = opener.value?.getBoundingClientRect();
+-  if (box !== undefined) {
+-    at.value = { x: box.left, y: box.bottom };
++  if (opener.value !== null) {
++    at.value = belowLeft(opener.value);
+   }
+   await toggle("servers");
+ }
+diff --git a/frontend/src/ui/ServerMenu.vue b/frontend/src/ui/ServerMenu.vue
+index c189808..84d2b09 100644
+--- a/frontend/src/ui/ServerMenu.vue
++++ b/frontend/src/ui/ServerMenu.vue
+@@ -1,10 +1,10 @@
+ <script setup lang="ts">
+-import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from "@vueuse/core";
++import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ 
+ import { failureHelp, installText } from "./installText";
+ import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+-import { menuPosition, type Point } from "./menuPosition";
++import type { OpenMenu } from "./serverMenuToggle";
+ import {
+   ACTION_LABELS,
+   COPIED,
+@@ -16,14 +16,14 @@ import {
+   type ServerAction,
+ } from "./serverText";
+ import { useAppStore } from "./store";
++import { useMenuPlacement } from "./useMenuPlacement";
+ 
+-const props = defineProps<{ name: string; at: Point; opener: HTMLElement }>();
++const props = defineProps<OpenMenu>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+ const { serverViews, startServer, stopServer, restartServer, showServerLog } = useAppStore();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+-const size = useElementSize(panel, undefined, { box: "border-box" });
+-const viewport = useWindowSize();
++const placement = useMenuPlacement(panel, () => props.at);
+ const windowFocused = useWindowFocus();
+ const copied = shallowRef<string | null>(null);
+ useEventListener(window, "keydown", keyPressed, { capture: true });
+@@ -41,14 +41,6 @@ const hint = computed(() =>
+     : (failure.value?.install ?? null),
+ );
+ const notes = computed(() => view.value?.notes.map(noteLine) ?? []);
+-const placement = computed(() => {
+-  const { x, y } = menuPosition({
+-    pointer: props.at,
+-    menu: { width: size.width.value, height: size.height.value },
+-    viewport: { width: viewport.width.value, height: viewport.height.value },
+-  });
+-  return { left: `${x}px`, top: `${y}px` };
+-});
+ 
+ watch(windowFocused, (focused) => {
+   if (!focused) {
+diff --git a/frontend/src/ui/ServerStatus.vue b/frontend/src/ui/ServerStatus.vue
+index 8f6b253..d952bbc 100644
+--- a/frontend/src/ui/ServerStatus.vue
++++ b/frontend/src/ui/ServerStatus.vue
+@@ -3,17 +3,15 @@ import { computed, shallowRef } from "vue";
+ import CircleX from "~icons/lucide/circle-x";
+ import TriangleAlert from "~icons/lucide/triangle-alert";
+ 
+-import type { Point } from "./menuPosition";
+ import { serverButtons } from "./serverButtons";
+ import ServerGroup from "./ServerGroup.vue";
+ import ServerMenu from "./ServerMenu.vue";
+-import { menuAfterClick } from "./serverMenuToggle";
++import { menuAfterClick, type OpenMenu } from "./serverMenuToggle";
+ import { dotKind, formatNote, groupDot, problemsTitle } from "./serverText";
+ import { useAppStore } from "./store";
++import { belowLeft } from "./useMenuPlacement";
+ import type { ProblemCounts } from "./useMergeController";
+ 
+-type OpenMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
+-
+ const props = defineProps<{
+   path: string | null;
+   problems: ProblemCounts | null;
+@@ -35,10 +33,9 @@ const note = computed(() =>
+ 
+ function openMenu(name: string, event: MouseEvent): void {
+   if (event.currentTarget instanceof HTMLElement) {
+-    const { left, bottom } = event.currentTarget.getBoundingClientRect();
+     menu.value = menuAfterClick(menu.value, {
+       name,
+-      at: { x: left, y: bottom },
++      at: belowLeft(event.currentTarget),
+       opener: event.currentTarget,
+     });
+   }
+diff --git a/frontend/src/ui/menuKeys.test.ts b/frontend/src/ui/menuKeys.test.ts
+index 9d5deda..6e4ca11 100644
+--- a/frontend/src/ui/menuKeys.test.ts
++++ b/frontend/src/ui/menuKeys.test.ts
+@@ -29,22 +29,6 @@ test("Down on the last item wraps to the first, Up on the first to the last", ()
+   });
+ });
+ 
+-test("rows and pins are one list: Down goes row 1, pin 1, row 2; Up from row 2 to pin 1", () => {
+-  const rowsAndPins = { count: 4 };
+-  expect(stepMenuItem({ ...rowsAndPins, focused: 0 }, { key: "ArrowDown" })).toEqual({
+-    kind: "focus",
+-    index: 1,
+-  });
+-  expect(stepMenuItem({ ...rowsAndPins, focused: 1 }, { key: "ArrowDown" })).toEqual({
+-    kind: "focus",
+-    index: 2,
+-  });
+-  expect(stepMenuItem({ ...rowsAndPins, focused: 2 }, { key: "ArrowUp" })).toEqual({
+-    kind: "focus",
+-    index: 1,
+-  });
+-});
+-
+ test("other keys, and arrows in an empty menu, are left alone", () => {
+   expect(stepMenuItem({ count: 3, focused: 0 }, { key: "Enter" })).toEqual({ kind: "ignore" });
+   expect(stepMenuItem({ count: 0, focused: -1 }, { key: "ArrowDown" })).toEqual({
+diff --git a/frontend/src/ui/serverMenuToggle.ts b/frontend/src/ui/serverMenuToggle.ts
+index 45d288d..c540ef2 100644
+--- a/frontend/src/ui/serverMenuToggle.ts
++++ b/frontend/src/ui/serverMenuToggle.ts
+@@ -1,3 +1,7 @@
++import type { Point } from "./menuPosition";
++
++export type OpenMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
++
+ export function menuAfterClick<Menu extends { readonly name: string }>(
+   open: Menu | null,
+   clicked: Menu,
+diff --git a/frontend/src/ui/useDropdownMenu.ts b/frontend/src/ui/useDropdownMenu.ts
+index 024b612..70156e8 100644
+--- a/frontend/src/ui/useDropdownMenu.ts
++++ b/frontend/src/ui/useDropdownMenu.ts
+@@ -1,4 +1,4 @@
+-import { onClickOutside, useWindowFocus } from "@vueuse/core";
++import { onClickOutside, useEventListener, useWindowFocus } from "@vueuse/core";
+ import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
+ 
+ import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+@@ -48,6 +48,14 @@ async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
+   await close(dropdown);
+ }
+ 
++function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {
++  const target = event.target;
++  const inside = target instanceof Node && dropdown.menu()?.contains(target) === true;
++  if (dropdown.openFor.value !== null && !inside) {
++    void closeAfterClick(dropdown);
++  }
++}
++
+ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+   if (dropdown.openFor.value === which) {
+     await close(dropdown);
+@@ -104,6 +112,14 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+       },
+     },
+   );
++  useEventListener(
++    window,
++    "contextmenu",
++    (event) => {
++      contextMenuElsewhere(dropdown, event);
++    },
++    { capture: true },
++  );
+   watch(useWindowFocus(), (focused) => {
+     if (!focused) {
+       void close(dropdown);
+diff --git a/frontend/src/ui/useMenuPlacement.ts b/frontend/src/ui/useMenuPlacement.ts
+new file mode 100644
+index 0000000..043ac2b
+--- /dev/null
++++ b/frontend/src/ui/useMenuPlacement.ts
+@@ -0,0 +1,27 @@
++import { useElementSize, useWindowSize } from "@vueuse/core";
++import { computed, toValue, type ComputedRef, type MaybeRefOrGetter } from "vue";
++
++import { menuPosition, type Point } from "./menuPosition";
++
++type MenuPlacement = { readonly left: string; readonly top: string };
++
++export function belowLeft(opener: HTMLElement): Point {
++  const { left, bottom } = opener.getBoundingClientRect();
++  return { x: left, y: bottom };
++}
++
++export function useMenuPlacement(
++  menu: MaybeRefOrGetter<HTMLElement | null>,
++  at: MaybeRefOrGetter<Point>,
++): ComputedRef<MenuPlacement> {
++  const size = useElementSize(menu, undefined, { box: "border-box" });
++  const viewport = useWindowSize();
++  return computed(() => {
++    const { x, y } = menuPosition({
++      pointer: toValue(at),
++      menu: { width: size.width.value, height: size.height.value },
++      viewport: { width: viewport.width.value, height: viewport.height.value },
++    });
++    return { left: `${x}px`, top: `${y}px` };
++  });
++}
