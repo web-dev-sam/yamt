@@ -1,0 +1,55 @@
+commit 81fbc1c1349cedf39ee4771cec16d78fdae63a86
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 21:08:01 +0200
+
+    fix(ui): the server switch is a role=switch button, its state only from the settings (#1288)
+
+diff --git a/frontend/src/ui/LanguageServerSettings.vue b/frontend/src/ui/LanguageServerSettings.vue
+index 5347fa0..cc6677b 100644
+--- a/frontend/src/ui/LanguageServerSettings.vue
++++ b/frontend/src/ui/LanguageServerSettings.vue
+@@ -1,5 +1,6 @@
+ <script setup lang="ts">
+ import { computed, shallowRef } from "vue";
++import Check from "~icons/lucide/check";
+ 
+ import type { RepositoryAnswer } from "../ipc";
+ import type { PresetChoice, ServerSpec } from "../lsp";
+@@ -72,19 +73,27 @@ async function add(): Promise<void> {
+           :key="spec.key"
+           class="flex flex-wrap gap-x-3 gap-y-1 px-2 py-1"
+         >
+-          <label
+-            class="flex w-40 shrink-0 items-baseline gap-2 wrap-break-word"
++          <button
++            type="button"
++            role="switch"
++            :aria-checked="!off.has(spec.key)"
++            class="flex w-40 shrink-0 items-baseline gap-2 text-left wrap-break-word"
+             :class="{ 'text-fg-muted': off.has(spec.key) }"
++            @click="switchServer(spec.key, off.has(spec.key))"
+           >
+-            <input
+-              type="checkbox"
+-              role="switch"
+-              class="size-4 shrink-0 self-center accent-primary"
+-              :checked="!off.has(spec.key)"
+-              @click.prevent="switchServer(spec.key, off.has(spec.key))"
+-            />
++            <span
++              class="flex size-4 shrink-0 items-center justify-center self-center rounded-sm border"
++              :class="
++                off.has(spec.key)
++                  ? 'border-control-border'
++                  : 'border-primary bg-primary text-on-primary'
++              "
++              aria-hidden="true"
++            >
++              <Check v-if="!off.has(spec.key)" class="size-3.5" />
++            </span>
+             {{ spec.name }}
+-          </label>
++          </button>
+           <span class="w-32 shrink-0 wrap-break-word text-fg-muted">{{
+             projectLabel(spec.project)
+           }}</span>
