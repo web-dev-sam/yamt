@@ -291,6 +291,26 @@ test("a press with another button counts as a rejected one for the double-click"
   expect(r.resets.count).toBe(0);
 });
 
+test("one accepted press on a fresh handle, then a double-click, does not reset", () => {
+  const r = rig();
+
+  clickWith(r, true);
+  send(r.target, new FakeMouseEvent("dblclick"));
+
+  expect(r.resets.count).toBe(0);
+});
+
+test("leaving the handle forgets its presses, so a double-click begun outside it does not reset", () => {
+  const r = rig();
+
+  clickWith(r, true);
+  send(r.target, pointer("pointerleave"));
+  clickWith(r, true);
+  send(r.target, new FakeMouseEvent("dblclick"));
+
+  expect(r.resets.count).toBe(0);
+});
+
 test("hover: an accepted target brightens, a rejected one rests, leaving rests", () => {
   const r = rig();
 

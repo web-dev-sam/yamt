@@ -108,6 +108,7 @@ function hovered(state: DragState, event: Event): void {
 function left(state: DragState): void {
   if (state.dragging === null) {
     state.dots.value = "rest";
+    state.lastTwoPressesAccepted = [false, false];
   }
 }
 
