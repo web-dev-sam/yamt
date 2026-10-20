@@ -1,1 +1,3 @@
-{}
+{
+  "QHVerify": { "agent": "verifier", "brief": "docs/slices/briefs/3.QH-verify.md", "owned": [] }
+}

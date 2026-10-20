@@ -7,12 +7,15 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
+import PaneDivider from "./PaneDivider.vue";
+import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { useMergeController } from "./useMergeController";
+import { usePaneDividers } from "./usePaneDividers";
 import { isEditable } from "./views";
 
 type Column = {
@@ -48,6 +51,9 @@ const {
   settings,
   collapsing,
   servers,
+  paneSplit,
+  setPaneSplit,
+  resetPaneSplit,
 } = useAppStore();
 const handle = useMergeController(
   () => props.data,
@@ -77,7 +83,9 @@ if (props.data.deleted === null) {
 }
 useEventListener(window, "keydown", historyKeyInShownFile);
 useEventListener(window, "keydown", saveKeyInShownFile);
+const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
 
+const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
 const deletedView = computed(deletedViewNow);
 const columns = computed(() =>
   SIDES.map((side): Column => ({
@@ -123,6 +131,17 @@ function resultLine(view: DeletedSideView | null): string | null {
     return DELETED_LINE;
   }
   return middle.kind === "DiskNotText" ? notTextLine(middle.found) : null;
+}
+
+function paneWidths(): PaneWidths | null {
+  if (left.value === null || center.value === null || right.value === null) {
+    return null;
+  }
+  return {
+    local: left.value.getBoundingClientRect().width,
+    center: center.value.getBoundingClientRect().width,
+    remote: right.value.getBoundingClientRect().width,
+  };
 }
 
 function showsMinimap(): boolean {
@@ -185,7 +204,8 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
     </header>
     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
     <section
-      class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+      :style="{ gridTemplateColumns }"
     >
       <div
         v-for="column in columns"
@@ -203,7 +223,11 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           {{ KEEP }}
         </button>
       </div>
-      <div class="col-start-2 row-start-1 border-b border-separator" />
+      <PaneDivider
+        side="local"
+        :handle="dividers.local"
+        class="col-start-2 row-start-1 border-b border-separator"
+      />
       <div
         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
       >
@@ -224,7 +248,11 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           class="ml-auto size-2 shrink-0 rounded-full bg-fg"
         />
       </div>
-      <div class="col-start-4 row-start-1 border-b border-separator" />
+      <PaneDivider
+        side="remote"
+        :handle="dividers.remote"
+        class="col-start-4 row-start-1 border-b border-separator"
+      />
 
       <div
         ref="left"
@@ -232,7 +260,10 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
         :class="{ invisible: data.deleted === 'local' }"
       />
       <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
-      <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
+      <div
+        class="col-start-2 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
+        v-on="dividers.local.listeners"
+      >
         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
       </div>
       <div
@@ -241,7 +272,10 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
         :class="{ invisible: centerLine !== null }"
       />
       <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
-      <div class="col-start-4 row-start-2 min-h-0 border-x border-separator will-change-transform">
+      <div
+        class="col-start-4 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
+        v-on="dividers.remote.listeners"
+      >
         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
       </div>
       <div

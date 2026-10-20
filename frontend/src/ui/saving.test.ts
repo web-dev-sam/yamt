@@ -119,6 +119,7 @@ function writeTarget(
     setKeys: notUsed,
     moveSettings: notUsed,
     setServerAnswer: notUsed,
+    setServerSwitch: notUsed,
     setAddedServers: notUsed,
   };
   return {

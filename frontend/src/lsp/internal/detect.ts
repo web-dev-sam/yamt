@@ -25,7 +25,7 @@ import {
   type Project,
   type ProjectLookups,
 } from "./project";
-import { extensionOf, type InstallHint, type ServerSpec } from "./spec";
+import { extensionOf, serverKey, type FoundSpec, type InstallHint, type ServerSpec } from "./spec";
 import type { Command, Formats, Look, Sign, Tool } from "./tool";
 import { withVue, type TypeScriptRun } from "./vue";
 
@@ -172,7 +172,7 @@ function formatsIn(project: Project, formats: Formats): boolean {
   }
 }
 
-async function fromProject(project: Project, tool: Tool, spec: ServerSpec): Promise<ServerSpec> {
+async function fromProject(project: Project, tool: Tool, spec: FoundSpec): Promise<FoundSpec> {
   const from = tool.fromProject;
   switch (from.kind) {
     case "nothing":
@@ -196,7 +196,7 @@ async function specsOf(
   preset: DetectedPreset,
   detected: Detected,
   root: string,
-): Promise<readonly ServerSpec[]> {
+): Promise<readonly FoundSpec[]> {
   const { tool } = detected;
   const workspaceUri = projectUri({ folder: project.folder, root });
   const spec = await fromProject(project, tool, {
@@ -219,7 +219,7 @@ async function detectIn(
   lookups: ProjectLookups,
   { folder, root }: ProjectAt,
   ecosystems: ReadonlySet<Ecosystem>,
-): Promise<readonly ServerSpec[]> {
+): Promise<readonly FoundSpec[]> {
   const files = await readFiles(lookups, candidates(folder, ecosystems));
   const presets = DETECTED_PRESETS.filter((preset) => ecosystems.has(preset.ecosystem));
   const specs = await Promise.all(
@@ -245,7 +245,7 @@ export async function detect(
   ).flat();
   return found.map((spec) => {
     const shared = found.filter((other) => other.name === spec.name).length > 1;
-    const label = spec.project === "" ? ROOT_LABEL : spec.project;
-    return shared ? { ...spec, name: `${spec.name} (${label})` } : spec;
+    const labelled = `${spec.name} (${spec.project === "" ? ROOT_LABEL : spec.project})`;
+    return { ...spec, key: serverKey(labelled), name: shared ? labelled : spec.name };
   });
 }

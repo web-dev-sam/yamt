@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
+import Check from "~icons/lucide/check";
 
 import type { RepositoryAnswer } from "../ipc";
 import type { PresetChoice, ServerSpec } from "../lsp";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import PresetPicker from "./PresetPicker.vue";
-import { addedServerFields, parseAddedServer } from "./serverSetup";
+import { addedServerFields, offServers, parseAddedServer } from "./serverSetup";
 import { FROM_THE_LIST_HINT, NOT_INSTALLED, projectLabel } from "./serverText";
 import { useAppStore } from "./store";
 
@@ -14,7 +15,7 @@ const ANSWERS: readonly { readonly value: RepositoryAnswer; readonly label: stri
   { value: "dontStart", label: "Don't start" },
 ];
 
-const { settings, serverRoot, foundServers, answerServers, addServer, removeServer } =
+const { settings, serverRoot, foundServers, answerServers, addServer, removeServer, switchServer } =
   useAppStore();
 const commandText = shallowRef("");
 const fileTypesText = shallowRef("");
@@ -26,6 +27,7 @@ const answer = computed(() =>
 );
 const added = computed(() => settings.value.languageServers.added.map(addedServerFields));
 const newServer = computed(() => parseAddedServer(commandText.value, fileTypesText.value));
+const off = computed(() => offServers(settings.value.languageServers, serverRoot.value));
 
 function commandOf(spec: ServerSpec): string {
   return spec.install === null
@@ -68,10 +70,30 @@ async function add(): Promise<void> {
       <ul v-if="foundServers.length > 0" class="flex flex-col">
         <li
           v-for="spec in foundServers"
-          :key="spec.name"
+          :key="spec.key"
           class="flex flex-wrap gap-x-3 gap-y-1 px-2 py-1"
         >
-          <span class="w-40 shrink-0 wrap-break-word">{{ spec.name }}</span>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="!off.has(spec.key)"
+            class="flex w-40 shrink-0 items-baseline gap-2 text-left wrap-break-word"
+            :class="{ 'text-fg-muted': off.has(spec.key) }"
+            @click="switchServer(spec.key, off.has(spec.key))"
+          >
+            <span
+              class="flex size-4 shrink-0 items-center justify-center self-center rounded-sm border"
+              :class="
+                off.has(spec.key)
+                  ? 'border-control-border'
+                  : 'border-primary bg-primary text-on-primary'
+              "
+              aria-hidden="true"
+            >
+              <Check v-if="!off.has(spec.key)" class="size-3.5" />
+            </span>
+            {{ spec.name }}
+          </button>
           <span class="w-32 shrink-0 wrap-break-word text-fg-muted">{{
             projectLabel(spec.project)
           }}</span>

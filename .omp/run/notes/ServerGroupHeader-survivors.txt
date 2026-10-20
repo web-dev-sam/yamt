@@ -1,0 +1,195 @@
+[Survived] StringLiteral src/ipc/fixtureServers.ts:13:50
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++       devDependencies: { eslint: "9.39.1", oxlint: "", typescript: "5.9.3", vue: "3.5.43" },
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:11:11
+-       name: "fixture",
++       name: "",
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:13:22
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++       devDependencies: {},
+
+[Survived] BooleanLiteral src/ipc/fixtureServers.ts:12:14
+-       private: true,
++       private: false,
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:10:34
+-     "package.json": JSON.stringify({
+-       name: "fixture",
+-       private: true,
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
+-     }),
++     "package.json": JSON.stringify({}),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:16:23
+-     "eslint.config.js": "export default [];\n",
++     "eslint.config.js": "",
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:17:81
+-     "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "9.39.1" }),
++     "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "" }),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:13:72
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "", vue: "3.5.43" },
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:17:54
+-     "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "9.39.1" }),
++     "node_modules/eslint/package.json": JSON.stringify({}),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:13:32
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++       devDependencies: { eslint: "", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:9:48
+-   const TREE: Readonly<Record<string, string>> = {
+-     "package.json": JSON.stringify({
+-       name: "fixture",
+-       private: true,
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
+-     }),
+-     "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+-     "eslint.config.js": "export default [];\n",
+-     "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "9.39.1" }),
+-     "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "5.9.3" }),
+-     "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "3.5.43" }),
+-     "node_modules/.bin/oxlint": "",
+-     "node_modules/.bin/typescript-language-server": "",
+-   };
++   const TREE: Readonly<Record<string, string>> = {};
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:18:66
+-     "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "5.9.3" }),
++     "node_modules/typescript/package.json": JSON.stringify({ name: "", version: "5.9.3" }),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:17:62
+-     "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "9.39.1" }),
++     "node_modules/eslint/package.json": JSON.stringify({ name: "", version: "9.39.1" }),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:5:32
+-   export const ONLY_IN_THE_APP = "language servers run only in the app";
++   export const ONLY_IN_THE_APP = "";
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:18:58
+-     "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "5.9.3" }),
++     "node_modules/typescript/package.json": JSON.stringify({}),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:19:59
+-     "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "3.5.43" }),
++     "node_modules/vue/package.json": JSON.stringify({ name: "", version: "3.5.43" }),
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:15:54
+-     "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
++     "tsconfig.json": JSON.stringify({ compilerOptions: {} }),
+
+[Survived] BooleanLiteral src/ipc/fixtureServers.ts:15:64
+-     "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
++     "tsconfig.json": JSON.stringify({ compilerOptions: { strict: false } }),
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:19:51
+-     "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "3.5.43" }),
++     "node_modules/vue/package.json": JSON.stringify({}),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:18:89
+-     "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "5.9.3" }),
++     "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "" }),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:21:51
+-     "node_modules/.bin/typescript-language-server": "",
++     "node_modules/.bin/typescript-language-server": "Stryker was here!",
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:19:75
+-     "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "3.5.43" }),
++     "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "" }),
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:13:86
+-       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++       devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "" },
+
+[Survived] StringLiteral src/ipc/fixtureServers.ts:20:31
+-     "node_modules/.bin/oxlint": "",
++     "node_modules/.bin/oxlint": "Stryker was here!",
+
+[Survived] ObjectLiteral src/ipc/fixtureServers.ts:15:35
+-     "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
++     "tsconfig.json": JSON.stringify({}),
+
+[Survived] StringLiteral src/ipc/fixtureSettings.ts:16:27
+-   export const REPOSITORY = "/fixture/repository";
++   export const REPOSITORY = "";
+
+[Survived] StringLiteral src/ui/serverText.ts:32:24
+-   export const SERVERS = "Servers";
++   export const SERVERS = "";
+
+[Survived] StringLiteral src/ui/serverText.ts:30:33
+-   export const LANGUAGE_SERVERS = "Language servers";
++   export const LANGUAGE_SERVERS = "";
+
+[Survived] ArrayDeclaration src/ui/serverText.ts:118:43
+-   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++   const GROUP_URGENCY: readonly DotKind[] = [];
+
+[Survived] StringLiteral src/ui/serverText.ts:118:44
+-   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++   const GROUP_URGENCY: readonly DotKind[] = ["", "warning", "busy", "running"];
+
+[Survived] StringLiteral src/ui/serverText.ts:118:66
+-   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "", "running"];
+
+[Survived] StringLiteral src/ui/serverText.ts:118:55
+-   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++   const GROUP_URGENCY: readonly DotKind[] = ["problem", "", "busy", "running"];
+
+[Survived] StringLiteral src/ui/serverText.ts:118:74
+-   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++   const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", ""];
+
+[NoCoverage] OptionalChaining src/ui/useDropdownMenu.ts:65:3
+-     opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
++     opened.querySelector<HTMLElement>(MENU_ITEMS).focus();
+
+[NoCoverage] ArrayDeclaration src/ui/useDropdownMenu.ts:69:17
+-     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
++     const items = [];
+
+[NoCoverage] LogicalOperator src/ui/useDropdownMenu.ts:69:22
+-     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
++     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) && [])];
+
+[NoCoverage] OptionalChaining src/ui/useDropdownMenu.ts:69:22
+-     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
++     const items = [...(dropdown.menu().querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
+
+[NoCoverage] ArrayDeclaration src/ui/useDropdownMenu.ts:69:84
+-     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
++     const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? ["Stryker was here"])];
+
+[NoCoverage] BlockStatement src/ui/useDropdownMenu.ts:107:40
+-     watch(useWindowFocus(), (focused) => {
+-       if (!focused) {
+-         void close(dropdown);
+-       }
+-     });
++     watch(useWindowFocus(), (focused) => {});
+
+[NoCoverage] BooleanLiteral src/ui/useDropdownMenu.ts:108:9
+-       if (!focused) {
++       if (focused) {
+
+[NoCoverage] ConditionalExpression src/ui/useDropdownMenu.ts:108:9
+-       if (!focused) {
++       if (true) {
+
+[NoCoverage] ConditionalExpression src/ui/useDropdownMenu.ts:108:9
+-       if (!focused) {
++       if (false) {
+
+[NoCoverage] BlockStatement src/ui/useDropdownMenu.ts:108:19
+-       if (!focused) {
+-         void close(dropdown);
+-       }
++       if (!focused) {}
+

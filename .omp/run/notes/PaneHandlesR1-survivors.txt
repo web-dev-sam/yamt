@@ -1,0 +1,22 @@
+[NoCoverage] BlockStatement src/ui/useColumnDrag.ts:54:41
+-     if (!(event instanceof PointerEvent)) {
+-       return;
+-     }
++     if (!(event instanceof PointerEvent)) {}
+
+[Survived] ConditionalExpression src/ui/useColumnDrag.ts:54:7
+-     if (!(event instanceof PointerEvent)) {
++     if (false) {
+
+[Survived] ArrayDeclaration src/ui/useColumnDrag.ts:133:29
+-       lastTwoPressesAccepted: [false, false],
++       lastTwoPressesAccepted: [],
+
+[Survived] BooleanLiteral src/ui/useColumnDrag.ts:133:37
+-       lastTwoPressesAccepted: [false, false],
++       lastTwoPressesAccepted: [false, true],
+
+[Survived] BooleanLiteral src/ui/useColumnDrag.ts:133:30
+-       lastTwoPressesAccepted: [false, false],
++       lastTwoPressesAccepted: [true, false],
+

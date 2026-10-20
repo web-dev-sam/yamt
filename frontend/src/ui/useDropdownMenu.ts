@@ -1,7 +1,7 @@
-import { onClickOutside } from "@vueuse/core";
-import { nextTick, shallowRef, type ShallowRef } from "vue";
+import { onClickOutside, useEventListener, useWindowFocus } from "@vueuse/core";
+import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
 
-import { stepMenuItem } from "./menuKeys";
+import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 
 type DropdownParts<T> = {
   readonly menu: () => HTMLElement | null;
@@ -48,6 +48,14 @@ async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
   await close(dropdown);
 }
 
+function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {
+  const target = event.target;
+  const inside = target instanceof Node && dropdown.menu()?.contains(target) === true;
+  if (dropdown.openFor.value !== null && !inside) {
+    void closeAfterClick(dropdown);
+  }
+}
+
 async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
   if (dropdown.openFor.value === which) {
     await close(dropdown);
@@ -62,11 +70,11 @@ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
   }
   dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
   await nextTick();
-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 }
 
 function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
-  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
   const step = stepMenuItem(
     { count: items.length, focused: items.findIndex((item) => item === event.target) },
     event,
@@ -104,6 +112,19 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
       },
     },
   );
+  useEventListener(
+    window,
+    "contextmenu",
+    (event) => {
+      contextMenuElsewhere(dropdown, event);
+    },
+    { capture: true },
+  );
+  watch(useWindowFocus(), (focused) => {
+    if (!focused) {
+      void close(dropdown);
+    }
+  });
   return {
     openFor: dropdown.openFor,
     above: dropdown.above,

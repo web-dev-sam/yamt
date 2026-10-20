@@ -1,0 +1,1230 @@
+commit b22bd67030ec31e74f8d6ba23d77c2f2f8346962
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 18:41:27 +0200
+
+    feat(ui): one remembered pane split, file list width, column drag rules (issue 4, plan #84)
+    
+    paneSplit.ts, useColumnDrag.ts, usePaneDividers.ts, fileListWidth.ts; store holds the split. No chrome yet.
+
+diff --git a/.omp/run/notes/PaneSplitModel.md b/.omp/run/notes/PaneSplitModel.md
+new file mode 100644
+index 0000000..a0028c3
+--- /dev/null
++++ b/.omp/run/notes/PaneSplitModel.md
+@@ -0,0 +1,79 @@
++The split model, the drag composable, the divider rules, the remembered file-list width and the store's three lines are in place. Lint, typecheck, test and fmt:check exit 0. `pnpm unused` exits 1 because it names `usePaneDividers` and `DotsState`, which row 6 will be the first to import. As the brief says, I left both exported.
++
++```
++summary
++  ui/paneSplit.ts: PaneSplit/PaneWidths/Gutter/EQUAL_SPLIT, paneColumns (five tracks), dragged (WebStorm proportions, 220 px / a-third minimum, the other pane kept to the pixel), createPaneSplit over storedValue ("yamt.panes.split").
++  ui/useColumnDrag.ts: one listener object (pointerdown/move/up/cancel, lostpointercapture, pointerover/leave, mousedown, dblclick), DotsState rest/hover/drag, COLUMN_RESIZING_CLASS = "col-resizing" on <html> while dragging, cleared on scope dispose.
++  ui/usePaneDividers.ts: dividerHandle (the accept rule, press measures once, each move → setPaneSplit(dragged(…)), reset → resetPaneSplit) and usePaneDividers → { local, remote }.
++  ui/fileListWidth.ts: createFileListWidth ("yamt.files.width", px, valid if finite and ≥ 160, setWidth clamped to [160, windowWidth/2], reset removes the key).
++  ui/store.ts: AppStore & PaneSplitState, ...createPaneSplit() (290 → 293 lines).
++
++files_changed
++  frontend/src/ui/paneSplit.ts (new), frontend/src/ui/paneSplit.test.ts (new)
++  frontend/src/ui/useColumnDrag.ts (new), frontend/src/ui/useColumnDrag.test.ts (new)
++  frontend/src/ui/usePaneDividers.ts (new), frontend/src/ui/usePaneDividers.test.ts (new)
++  frontend/src/ui/fileListWidth.ts (new), frontend/src/ui/fileListWidth.test.ts (new)
++  frontend/src/ui/store.ts (+3 lines: import, `PaneSplitState &`, `...createPaneSplit()`)
++
++tests_added
++  paneSplit.test.ts:
++    - equal thirds are the starting split; a missing key gives thirds and writes nothing; a stored split is read back.
++    - 18 invalid stored values give thirds without a warning: "", not JSON, null, a number, [], {}, string numbers, local or remote a string, no remote, no local, a zero Result, a Result under 1 %, a negative share on either side, under 1 % on either side, 1e400.
++    - the edges 0.01/0.98 and 0.98/0.01 are kept.
++    - set → written → a second instance reads it; reset gives thirds.
++    - a throwing storage gives thirds, still sets the split in memory, and warns.
++    - dragged: {300,400,300} +100 → {0.4, 0.3} with remote·T === 300; +250 → Result 220; −200 → Local exactly 220; T = 600 (minimum 200) changes nothing; {300,100,600} stays total; the remote boundary mirrors the local one; dx 0 gives the measured shares.
++    - exact paneColumns strings for strip and gap; every fr factor ≥ 1 at the edges of the valid range.
++  useColumnDrag.test.ts (fake MouseEvent/PointerEvent/Element globals, events dispatched through a real EventTarget):
++    - an accepted press cancels, captures, adds the class, sets drag and calls press; the matching mousedown is cancelled.
++    - moves get dx from the press.
++    - pointerup, pointercancel and lostpointercapture each end the drag and clear the class; scope dispose clears it too.
++    - a second pointer's press, moves and release are ignored; moves without a press do nothing.
++    - a rejected target, and buttons 1 and 2, do nothing and cancel nothing.
++    - a press that returns null neither captures nor adds the class.
++    - dblclick resets on an accepted target and does nothing on a rejected one.
++    - hover: accepted → hover, rejected → rest, leave → rest; during a drag, hover and leave keep drag.
++  usePaneDividers.test.ts:
++    - the handle and the strip's svg root are accepted; an icon target, an svg nested in an icon group, and a wave join are rejected; a null handle accepts nothing.
++    - a press measures once, and each move sets dragged() for its own boundary.
++    - a press that cannot measure gives no drag; reset calls resetPaneSplit only.
++  fileListWidth.test.ts:
++    - a missing key gives null and writes nothing; 160 and 612.5 are read back.
++    - invalid values ("", a word, {}, 159.5, 0, −300, Infinity) give null without a warning.
++    - set → written → read again by a second instance.
++    - the clamp: 100 → 160, 900 → 800, 700 kept; in a 300 px window the width is 160.
++    - reset gives null and removes the key.
++    - a throwing storage keeps the width in memory and warns.
++
++smoke_evidence
++  1. pnpm -C frontend fmt:check → "All matched files use the correct format." fmt exit 0
++     pnpm -C frontend lint → "$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"" lint exit 0
++     pnpm -C frontend typecheck → "$ vue-tsc -b" typecheck exit 0
++     pnpm -C frontend test → "Test Files  113 passed (113)  Tests  1516 passed (1516)" test exit 0
++     pnpm -C frontend unused → "Unused exports (1) usePaneDividers function src/ui/usePaneDividers.ts:38:17 / Unused exported types (1) DotsState type src/ui/useColumnDrag.ts:4:13" exit 1.
++       These are only the new exports row 6 will import. Per the brief they stay exported.
++  2. `just mutants` belongs to the orchestrator; the lines I expect to survive are under open_risks.
++  3. Throwaway inline script, not committed: `pnpm exec tsx -e '…'` in frontend/. `ipc/index.ts` was stubbed in require.cache because import.meta.glob is not available under tsx. Output:
++     minmax(min(220px, calc((100% - 2 * 2.5rem) / 3)), 33.33333333333333fr) 2.5rem minmax(min(220px, calc((100% - 2 * 2.5rem) / 3)), 33.33333333333334fr) 2.5rem minmax(min(220px, calc((100% - 2 * 2.5rem) / 3)), 33.33333333333333fr)
++     minmax(min(220px, calc((100% - 2 * 1px) / 3)), 20fr) 1px minmax(min(220px, calc((100% - 2 * 1px) / 3)), 50fr) 1px minmax(min(220px, calc((100% - 2 * 1px) / 3)), 30fr)
++     { local: 0.4, remote: 0.3 }
++
++deviations_from_brief
++  - The accept rule is stricter than the design's `target instanceof SVGSVGElement`: the svg must also be a direct child of the handle (`target.parentNode === currentTarget`). Reason: stripIcons.ts puts a Lucide <svg> inside every `.chunk-action` group, so any SVGSVGElement would also accept a nested icon svg. In MergeView.vue:235-236 the strip svg is a direct child of the wrapper. A null currentTarget is rejected.
++  - Added export `dividerHandle(boundary, measure, split)` to usePaneDividers.ts. It is the testable rule. Its `accepts` takes `Pick<Event, "target" | "currentTarget">` and its `press()` takes no arguments; it is still assignable to useColumnDrag's handle type. usePaneDividers wraps two of them.
++  - Added exported types ColumnHandle (the contract's handle parameter, named) and ColumnDragHandle. The `listeners` type is `Readonly<Record<ListenedEvent, (event: Event) => void>>`. Handlers narrow with `instanceof PointerEvent` / `MouseEvent` / `Element` before reading any field, so the node tests can use real Events and stubbed globals with no casts.
++  - Order on pointerdown: preventDefault → press(); only a non-null drag captures, adds the class and sets dots to drag. The design says a null press does not capture.
++  - When a drag ends (up, cancel, lost capture), dots become "hover", not "rest": while captured the pointer counts as over the handle (Pointer Events), and VS Code keeps hover after the drag. Scope dispose leaves "rest".
++  - resetPaneSplit writes the thirds as JSON. resetWidth removes "yamt.files.width" (null → useStorage removeItem), as behaviour 6 asked me to say.
++  - No explicit Number.isFinite check on the stored split: JSON gives no NaN, and 1e400 (Infinity) already fails the ≥/≤ checks, so the check would be an equivalent mutant. fileListWidth does check isFinite, because Number("Infinity") is accepted otherwise; a test covers it.
++  - Needed outside my files, for PM6 `just map-check`, which I did not run: `.omp/skills/project-map/SKILL.md` must name ui/paneSplit.ts, ui/useColumnDrag.ts, ui/usePaneDividers.ts and ui/fileListWidth.ts, plus a state row for the split. Row 6 or the docs step owns this.
++  - `frontend/node_modules` was missing in the worktree; I ran `pnpm -C frontend install --frozen-lockfile --offline` (lockfile unchanged).
++
++open_risks
++  - Mutants I expect to survive (equivalent):
++    - useColumnDrag.ts: the `instanceof PointerEvent` / `MouseEvent` / `Element` guards in pressed, moved, ended, hovered, mousePressed and doubleClicked replaced by `true`. Every test event and target already passes them.
++    - paneSplit.ts readSplit: `typeof local === "number"` / `typeof remote === "number"` replaced by `true`. A non-number that coerces past `>= 0.01` makes `local + remote` a string or NaN, which fails `<= 0.99`.
++  - paneSplit.ts dragged: when a measured pane pair is smaller than 2 % of T, a share can fall under MIN_SHARE, and its fr factor under 1. This needs a layout that CSS minmax does not produce (T over about 22,000 px or a broken measure). The stored value then reads back as thirds. I followed the brief's formula unchanged.
++  - useColumnDrag.ts ended → "hover": this relies on WebKit sending pointerleave after capture is released over somewhere else. It is unverified, and row 6's WebKit steps should check it.
++  - fr factors print as long floats (`33.33333333333334fr`). That is valid CSS; whether WebKitGTK accepts `min()` with a percentage inside a grid track minimum is still unverified (design risk, row 6).
++```
+\ No newline at end of file
+diff --git a/frontend/src/ui/fileListWidth.test.ts b/frontend/src/ui/fileListWidth.test.ts
+new file mode 100644
+index 0000000..1fb0469
+--- /dev/null
++++ b/frontend/src/ui/fileListWidth.test.ts
+@@ -0,0 +1,130 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { createFileListWidth } from "./fileListWidth";
++
++const KEY = "yamt.files.width";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function spyWarnings(): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  return lines;
++}
++
++test("a missing key gives the starting width and writes nothing", () => {
++  const storage = memoryStorage({ other: "x" });
++
++  expect(createFileListWidth(storage).width.value).toBeNull();
++  expect([...storage.items.entries()]).toEqual([["other", "x"]]);
++});
++
++test.each([
++  ["the minimum", "160", 160],
++  ["a wide list", "612.5", 612.5],
++])("a stored width that is %s is read back", (_name, raw, px) => {
++  expect(createFileListWidth(memoryStorage({ [KEY]: raw })).width.value).toBe(px);
++});
++
++test.each([
++  ["empty", ""],
++  ["a word", "wide"],
++  ["JSON", "{}"],
++  ["under the minimum", "159.5"],
++  ["zero", "0"],
++  ["negative", "-300"],
++  ["infinite", "Infinity"],
++])("a stored width that is %s gives the starting width without a warning", (_name, raw) => {
++  const warnings = spyWarnings();
++
++  expect(createFileListWidth(memoryStorage({ [KEY]: raw })).width.value).toBeNull();
++  expect(warnings).toEqual([]);
++});
++
++test("a set width is written and a second start reads it", () => {
++  const storage = memoryStorage();
++  const first = createFileListWidth(storage);
++
++  first.setWidth(300, 1600);
++
++  expect(first.width.value).toBe(300);
++  expect(storage.items.get(KEY)).toBe("300");
++  expect(createFileListWidth(storage).width.value).toBe(300);
++});
++
++test("a width is clamped to 160 px at the narrow end and half the window at the wide end", () => {
++  const list = createFileListWidth(memoryStorage());
++
++  list.setWidth(100, 1600);
++  expect(list.width.value).toBe(160);
++  list.setWidth(900, 1600);
++  expect(list.width.value).toBe(800);
++  list.setWidth(700, 1600);
++  expect(list.width.value).toBe(700);
++});
++
++test("in a window narrower than two minimums the width is the minimum", () => {
++  const list = createFileListWidth(memoryStorage());
++
++  list.setWidth(250, 300);
++
++  expect(list.width.value).toBe(160);
++});
++
++test("reset goes back to the starting width and removes the key", () => {
++  const storage = memoryStorage();
++  const list = createFileListWidth(storage);
++  list.setWidth(400, 1600);
++
++  list.resetWidth();
++
++  expect(list.width.value).toBeNull();
++  expect(storage.items.has(KEY)).toBe(false);
++  expect(createFileListWidth(storage).width.value).toBeNull();
++});
++
++test("a storage that throws gives the starting width, still sets it in memory, and warns", () => {
++  const warnings = spyWarnings();
++  const failing: StorageLike = {
++    getItem: () => {
++      throw new Error("storage disabled");
++    },
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++    removeItem: () => {
++      throw new Error("storage disabled");
++    },
++  };
++
++  const list = createFileListWidth(failing);
++  expect(list.width.value).toBeNull();
++  expect(warnings).toEqual([
++    '[warn] files.width_storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++
++  list.setWidth(320, 1600);
++  expect(list.width.value).toBe(320);
++  expect(warnings).toHaveLength(2);
++});
+diff --git a/frontend/src/ui/fileListWidth.ts b/frontend/src/ui/fileListWidth.ts
+new file mode 100644
+index 0000000..df6ccb5
+--- /dev/null
++++ b/frontend/src/ui/fileListWidth.ts
+@@ -0,0 +1,37 @@
++import type { StorageLike } from "@vueuse/core";
++import type { Ref } from "vue";
++
++import { storedValue } from "./windowStorage";
++
++const STORAGE_KEY = "yamt.files.width";
++const MIN_WIDTH_PX = 160;
++const HALF = 0.5;
++
++export function createFileListWidth(storage?: StorageLike): {
++  readonly width: Readonly<Ref<number | null>>;
++  setWidth(px: number, windowWidth: number): void;
++  resetWidth(): void;
++} {
++  const width = storedValue<number | null>(
++    STORAGE_KEY,
++    null,
++    {
++      read: (raw) => {
++        const px = Number(raw);
++        return Number.isFinite(px) && px >= MIN_WIDTH_PX ? px : null;
++      },
++      write: (px) => String(px),
++    },
++    "files.width_storage_failed",
++    storage,
++  );
++  return {
++    width,
++    setWidth: (px, windowWidth) => {
++      width.value = Math.max(MIN_WIDTH_PX, Math.min(px, windowWidth * HALF));
++    },
++    resetWidth: () => {
++      width.value = null;
++    },
++  };
++}
+diff --git a/frontend/src/ui/paneSplit.test.ts b/frontend/src/ui/paneSplit.test.ts
+new file mode 100644
+index 0000000..0db663a
+--- /dev/null
++++ b/frontend/src/ui/paneSplit.test.ts
+@@ -0,0 +1,211 @@
++import type { StorageLike } from "@vueuse/core";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { createPaneSplit, dragged, EQUAL_SPLIT, paneColumns } from "./paneSplit";
++
++const KEY = "yamt.panes.split";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function spyWarnings(): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  return lines;
++}
++
++test("equal thirds are the starting split", () => {
++  expect(EQUAL_SPLIT).toEqual({ local: 1 / 3, remote: 1 / 3 });
++});
++
++test("a missing key gives thirds and writes nothing", () => {
++  const storage = memoryStorage({ other: "x" });
++
++  expect(createPaneSplit(storage).paneSplit.value).toEqual(EQUAL_SPLIT);
++  expect([...storage.items.entries()]).toEqual([["other", "x"]]);
++});
++
++test("a stored split is read back", () => {
++  const storage = memoryStorage({ [KEY]: '{"local":0.3,"remote":0.25}' });
++
++  expect(createPaneSplit(storage).paneSplit.value).toEqual({ local: 0.3, remote: 0.25 });
++});
++
++test.each([
++  ["empty", ""],
++  ["not JSON", "x"],
++  ["null", "null"],
++  ["a number", "0.3"],
++  ["an array", "[]"],
++  ["an empty object", "{}"],
++  ["string numbers", '{"local":"0.3","remote":"0.3"}'],
++  ["local a string", '{"local":"0.3","remote":0.3}'],
++  ["remote a string", '{"local":0.3,"remote":"0.3"}'],
++  ["no remote", '{"local":0.3}'],
++  ["no local", '{"remote":0.3}'],
++  ["a zero Result", '{"local":0.5,"remote":0.5}'],
++  ["a Result under 1 %", '{"local":0.5,"remote":0.495}'],
++  ["a negative local", '{"local":-0.1,"remote":0.3}'],
++  ["a negative remote", '{"local":0.3,"remote":-0.1}'],
++  ["local under 1 %", '{"local":0.005,"remote":0.3}'],
++  ["remote under 1 %", '{"local":0.3,"remote":0.005}'],
++  ["an infinite share", '{"local":1e400,"remote":0.3}'],
++])("a stored value that is %s gives thirds without a warning", (_name, raw) => {
++  const warnings = spyWarnings();
++
++  expect(createPaneSplit(memoryStorage({ [KEY]: raw })).paneSplit.value).toEqual(EQUAL_SPLIT);
++  expect(warnings).toEqual([]);
++});
++
++test("the edges of the valid range are kept", () => {
++  expect(
++    createPaneSplit(memoryStorage({ [KEY]: '{"local":0.01,"remote":0.98}' })).paneSplit.value,
++  ).toEqual({ local: 0.01, remote: 0.98 });
++  expect(
++    createPaneSplit(memoryStorage({ [KEY]: '{"local":0.98,"remote":0.01}' })).paneSplit.value,
++  ).toEqual({ local: 0.98, remote: 0.01 });
++});
++
++test("a set split is written and a second start reads it; reset gives thirds", () => {
++  const storage = memoryStorage();
++  const first = createPaneSplit(storage);
++
++  first.setPaneSplit({ local: 0.4, remote: 0.25 });
++  expect(first.paneSplit.value).toEqual({ local: 0.4, remote: 0.25 });
++  expect(storage.items.get(KEY)).toBe('{"local":0.4,"remote":0.25}');
++  expect(createPaneSplit(storage).paneSplit.value).toEqual({ local: 0.4, remote: 0.25 });
++
++  first.resetPaneSplit();
++  expect(first.paneSplit.value).toEqual(EQUAL_SPLIT);
++  expect(createPaneSplit(storage).paneSplit.value).toEqual(EQUAL_SPLIT);
++});
++
++test("a storage that throws gives thirds, still sets the split in memory, and warns", () => {
++  const warnings = spyWarnings();
++  const failing: StorageLike = {
++    getItem: () => {
++      throw new Error("storage disabled");
++    },
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++    removeItem: () => {
++      throw new Error("storage disabled");
++    },
++  };
++
++  const split = createPaneSplit(failing);
++  expect(split.paneSplit.value).toEqual(EQUAL_SPLIT);
++  expect(warnings).toEqual([
++    '[warn] panes.storage_failed {kind: "Unexpected", message: "storage disabled"}',
++  ]);
++
++  split.setPaneSplit({ local: 0.2, remote: 0.3 });
++  expect(split.paneSplit.value).toEqual({ local: 0.2, remote: 0.3 });
++  expect(warnings).toHaveLength(2);
++});
++
++test("a drag of the local divider moves Local and Result and keeps Remote's pixels", () => {
++  const split = dragged({ local: 300, center: 400, remote: 300 }, "local", 100);
++
++  expect(split).toEqual({ local: 0.4, remote: 0.3 });
++  expect(split.remote * 1000).toBe(300);
++});
++
++test("the local divider stops at 220 px for Result and for Local", () => {
++  const widths = { local: 300, center: 400, remote: 300 };
++
++  const right = dragged(widths, "local", 250);
++  expect(right.local * 1000).toBe(480);
++  expect((1 - right.local - right.remote) * 1000).toBeCloseTo(220, 9);
++  expect(right.remote * 1000).toBe(300);
++
++  const left = dragged(widths, "local", -200);
++  expect(left.local * 1000).toBe(220);
++  expect(left.remote * 1000).toBe(300);
++});
++
++test("on a narrow row the minimum is a third, so a drag from thirds changes nothing", () => {
++  const widths = { local: 200, center: 200, remote: 200 };
++
++  expect(dragged(widths, "local", 50)).toEqual({ local: 1 / 3, remote: 1 / 3 });
++  expect(dragged(widths, "local", -50)).toEqual({ local: 1 / 3, remote: 1 / 3 });
++  expect(dragged(widths, "remote", 50)).toEqual({ local: 1 / 3, remote: 1 / 3 });
++});
++
++test("a pair narrower than two minimums splits evenly and stays total", () => {
++  const widths = { local: 300, center: 100, remote: 600 };
++
++  for (const dx of [-500, 0, 500]) {
++    const split = dragged(widths, "local", dx);
++    expect(split).toEqual({ local: 0.2, remote: 0.6 });
++    expect(1 - split.local - split.remote).toBeGreaterThanOrEqual(0.01);
++  }
++});
++
++test("the remote divider mirrors the local one", () => {
++  const widths = { local: 300, center: 400, remote: 300 };
++
++  expect(dragged(widths, "remote", -100)).toEqual({ local: 0.3, remote: 0.4 });
++  expect(dragged(widths, "remote", 50)).toEqual({ local: 0.3, remote: 0.25 });
++  const left = dragged(widths, "remote", -250);
++  expect(left.remote * 1000).toBe(480);
++  expect(left.local * 1000).toBe(300);
++  expect(dragged(widths, "remote", 200).remote * 1000).toBe(220);
++});
++
++test("a press without a move gives the measured shares", () => {
++  const widths = { local: 250, center: 500, remote: 250 };
++
++  expect(dragged(widths, "local", 0)).toEqual({ local: 0.25, remote: 0.25 });
++  expect(dragged(widths, "remote", 0)).toEqual({ local: 0.25, remote: 0.25 });
++});
++
++test("the strip grid has five tracks with the strips' 2.5rem in each pane's minimum", () => {
++  const least = "min(220px, calc((100% - 2 * 2.5rem) / 3))";
++
++  expect(paneColumns({ local: 0.2, remote: 0.3 }, "strip")).toBe(
++    `minmax(${least}, 20fr) 2.5rem minmax(${least}, 50fr) 2.5rem minmax(${least}, 30fr)`,
++  );
++});
++
++test("the choice grid has five tracks with 1px gaps in each pane's minimum", () => {
++  const least = "min(220px, calc((100% - 2 * 1px) / 3))";
++
++  expect(paneColumns({ local: 0.25, remote: 0.5 }, "gap")).toBe(
++    `minmax(${least}, 25fr) 1px minmax(${least}, 25fr) 1px minmax(${least}, 50fr)`,
++  );
++});
++
++test("every fr factor is at least 1 at the edges of the valid range", () => {
++  for (const split of [
++    { local: 0.01, remote: 0.98 },
++    { local: 0.98, remote: 0.01 },
++    { local: 0.495, remote: 0.495 },
++  ]) {
++    const factors = [...paneColumns(split, "strip").matchAll(/([\d.]+)fr/gu)].map((match) =>
++      Number(match[1]),
++    );
++    expect(factors).toHaveLength(3);
++    expect(Math.min(...factors)).toBeGreaterThanOrEqual(1);
++  }
++});
+diff --git a/frontend/src/ui/paneSplit.ts b/frontend/src/ui/paneSplit.ts
+new file mode 100644
+index 0000000..1b7d519
+--- /dev/null
++++ b/frontend/src/ui/paneSplit.ts
+@@ -0,0 +1,95 @@
++import type { StorageLike } from "@vueuse/core";
++import type { Ref } from "vue";
++
++import type { Side } from "../ipc";
++import { storedValue } from "./windowStorage";
++
++export type PaneSplit = { readonly local: number; readonly remote: number };
++export type PaneWidths = {
++  readonly local: number;
++  readonly center: number;
++  readonly remote: number;
++};
++export type Gutter = "strip" | "gap";
++
++export type PaneSplitState = {
++  readonly paneSplit: Readonly<Ref<PaneSplit>>;
++  setPaneSplit(split: PaneSplit): void;
++  resetPaneSplit(): void;
++};
++
++const STORAGE_KEY = "yamt.panes.split";
++const PANES = 3;
++const HALF = 0.5;
++const MIN_PANE_PX = 220;
++const MIN_SHARE = 0.01;
++const FR_PER_SHARE = 100;
++const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "2.5rem", gap: "1px" };
++
++export const EQUAL_SPLIT: PaneSplit = { local: 1 / PANES, remote: 1 / PANES };
++
++export function paneColumns(split: PaneSplit, gutter: Gutter): string {
++  const width = GUTTER_WIDTH[gutter];
++  const least = `min(${MIN_PANE_PX}px, calc((100% - 2 * ${width}) / ${PANES}))`;
++  function track(share: number): string {
++    return `minmax(${least}, ${share * FR_PER_SHARE}fr)`;
++  }
++  const center = 1 - split.local - split.remote;
++  return [track(split.local), width, track(center), width, track(split.remote)].join(" ");
++}
++
++export function dragged(widths: PaneWidths, boundary: Side, dx: number): PaneSplit {
++  const total = widths.local + widths.center + widths.remote;
++  const least = Math.min(MIN_PANE_PX, total / PANES);
++  const moved = boundary === "local" ? widths.local : widths.remote;
++  const kept = boundary === "local" ? widths.remote : widths.local;
++  const pair = moved + widths.center;
++  const floor = Math.min(least, pair * HALF);
++  const toward = boundary === "local" ? dx : -dx;
++  const width = Math.min(Math.max(moved + toward, floor), pair - floor);
++  return boundary === "local"
++    ? { local: width / total, remote: kept / total }
++    : { local: kept / total, remote: width / total };
++}
++
++function parsed(raw: string): unknown {
++  try {
++    return JSON.parse(raw);
++  } catch {
++    return null;
++  }
++}
++
++function readSplit(raw: string): PaneSplit {
++  const value = parsed(raw);
++  if (typeof value !== "object" || value === null || !("local" in value) || !("remote" in value)) {
++    return EQUAL_SPLIT;
++  }
++  const { local, remote } = value;
++  const valid =
++    typeof local === "number" &&
++    typeof remote === "number" &&
++    local >= MIN_SHARE &&
++    remote >= MIN_SHARE &&
++    local + remote <= 1 - MIN_SHARE;
++  return valid ? { local, remote } : EQUAL_SPLIT;
++}
++
++export function createPaneSplit(storage?: StorageLike): PaneSplitState {
++  const paneSplit = storedValue<PaneSplit>(
++    STORAGE_KEY,
++    EQUAL_SPLIT,
++    { read: readSplit, write: ({ local, remote }) => JSON.stringify({ local, remote }) },
++    "panes.storage_failed",
++    storage,
++  );
++  return {
++    paneSplit,
++    setPaneSplit: (split) => {
++      paneSplit.value = split;
++    },
++    resetPaneSplit: () => {
++      paneSplit.value = EQUAL_SPLIT;
++    },
++  };
++}
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index be5f330..44f25d5 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -20,6 +20,7 @@ import { fileListKey, type KeyPress } from "./fileListKey";
+ import { loadSideNames, refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+ import type { Notice } from "./noticeText";
++import { createPaneSplit, type PaneSplitState } from "./paneSplit";
+ import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
+ import type { Question } from "./question";
+ import { afterWrite, createSaving, finish, whileWriting } from "./saving";
+@@ -86,6 +87,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+ } & Actions &
+   Aborting &
+   Collapsing &
++  PaneSplitState &
+   Saving &
+   Servers &
+   ServerSetup;
+@@ -139,6 +141,7 @@ export function createAppStore(
+     hiddenButtons: buttons.hidden,
+     ...acts,
+     ...createCollapsing(),
++    ...createPaneSplit(),
+     ...createAborting(state),
+     ...createSaving(state),
+     ...createServers(refs.screen, servers),
+diff --git a/frontend/src/ui/useColumnDrag.test.ts b/frontend/src/ui/useColumnDrag.test.ts
+new file mode 100644
+index 0000000..a45eccd
+--- /dev/null
++++ b/frontend/src/ui/useColumnDrag.test.ts
+@@ -0,0 +1,290 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, type EffectScope } from "vue";
++
++import { COLUMN_RESIZING_CLASS, useColumnDrag, type ColumnDrag } from "./useColumnDrag";
++
++type PointerFields = { button?: number; pointerId?: number; clientX?: number };
++
++class FakeMouseEvent extends Event {
++  readonly button: number;
++  readonly clientX: number;
++  constructor(type: string, fields: PointerFields = {}) {
++    super(type, { cancelable: true });
++    this.button = fields.button ?? 0;
++    this.clientX = fields.clientX ?? 0;
++  }
++}
++
++class FakePointerEvent extends FakeMouseEvent {
++  readonly pointerId: number;
++  constructor(type: string, fields: PointerFields = {}) {
++    super(type, fields);
++    this.pointerId = fields.pointerId ?? 1;
++  }
++}
++
++class FakeElement extends EventTarget {
++  readonly captured: number[] = [];
++  setPointerCapture(pointerId: number): void {
++    this.captured.push(pointerId);
++  }
++}
++
++type Rig = {
++  readonly target: FakeElement;
++  readonly classes: Set<string>;
++  readonly moves: number[];
++  readonly presses: Event[];
++  readonly accepted: Event[];
++  readonly resets: { count: number };
++  readonly dots: { readonly value: string };
++  accepting: boolean;
++  dragging: boolean;
++};
++
++let scope: EffectScope;
++
++beforeEach(() => {
++  vi.stubGlobal("MouseEvent", FakeMouseEvent);
++  vi.stubGlobal("PointerEvent", FakePointerEvent);
++  vi.stubGlobal("Element", FakeElement);
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.unstubAllGlobals();
++});
++
++function rig(): Rig {
++  const target = new FakeElement();
++  const classes = new Set<string>();
++  const moves: number[] = [];
++  const presses: Event[] = [];
++  const accepted: Event[] = [];
++  const resets = { count: 0 };
++  const drag: ColumnDrag = {
++    moveBy: (dx) => {
++      moves.push(dx);
++    },
++  };
++  const state = { accepting: true, dragging: true };
++  const root = {
++    classList: {
++      add: (name: string) => {
++        classes.add(name);
++      },
++      remove: (name: string) => {
++        classes.delete(name);
++      },
++    },
++  };
++  const column = scope.run(() =>
++    useColumnDrag(
++      {
++        accepts: (event) => {
++          accepted.push(event);
++          return state.accepting;
++        },
++        press: (event) => {
++          presses.push(event);
++          return state.dragging ? drag : null;
++        },
++        reset: () => {
++          resets.count += 1;
++        },
++      },
++      root,
++    ),
++  );
++  if (column === undefined) {
++    throw new Error("no scope");
++  }
++  for (const [type, listener] of Object.entries(column.listeners)) {
++    target.addEventListener(type, listener);
++  }
++  return Object.assign(state, {
++    target,
++    classes,
++    moves,
++    presses,
++    accepted,
++    resets,
++    dots: column.dots,
++  });
++}
++
++function send(target: EventTarget, event: Event): Event {
++  target.dispatchEvent(event);
++  return event;
++}
++
++function pointer(type: string, fields: PointerFields = {}): FakePointerEvent {
++  return new FakePointerEvent(type, fields);
++}
++
++test("an accepted main-button press cancels it, captures, marks the window and drags", () => {
++  const r = rig();
++
++  const down = send(r.target, pointer("pointerdown", { pointerId: 7, clientX: 50 }));
++
++  expect(down.defaultPrevented).toBe(true);
++  expect(r.accepted).toEqual([down]);
++  expect(r.presses).toEqual([down]);
++  expect(r.target.captured).toEqual([7]);
++  expect([...r.classes]).toEqual([COLUMN_RESIZING_CLASS]);
++  expect(r.dots.value).toBe("drag");
++});
++
++test("the window's class is the one row 6 styles", () => {
++  expect(COLUMN_RESIZING_CLASS).toBe("col-resizing");
++});
++
++test("an accepted main-button mousedown is cancelled, so the keyboard stays", () => {
++  const r = rig();
++
++  expect(send(r.target, new FakeMouseEvent("mousedown")).defaultPrevented).toBe(true);
++});
++
++test("each move gets dx from the press", () => {
++  const r = rig();
++  send(r.target, pointer("pointerdown", { clientX: 50 }));
++
++  send(r.target, pointer("pointermove", { clientX: 80 }));
++  send(r.target, pointer("pointermove", { clientX: 20 }));
++
++  expect(r.moves).toEqual([30, -30]);
++});
++
++test.each(["pointerup", "pointercancel", "lostpointercapture"])(
++  "%s ends the drag and clears the window's class",
++  (type) => {
++    const r = rig();
++    send(r.target, pointer("pointerdown", { pointerId: 3, clientX: 10 }));
++
++    send(r.target, pointer(type, { pointerId: 3 }));
++    send(r.target, pointer("pointermove", { pointerId: 3, clientX: 40 }));
++
++    expect(r.classes.size).toBe(0);
++    expect(r.dots.value).toBe("hover");
++    expect(r.moves).toEqual([]);
++  },
++);
++
++test("disposing the scope mid-drag clears the window's class", () => {
++  const r = rig();
++  send(r.target, pointer("pointerdown"));
++
++  scope.stop();
++
++  expect(r.classes.size).toBe(0);
++  expect(r.dots.value).toBe("rest");
++});
++
++test("a second pointer's press, moves and release are ignored", () => {
++  const r = rig();
++  send(r.target, pointer("pointerdown", { pointerId: 1, clientX: 10 }));
++
++  const second = send(r.target, pointer("pointerdown", { pointerId: 2, clientX: 90 }));
++  send(r.target, pointer("pointermove", { pointerId: 2, clientX: 200 }));
++  send(r.target, pointer("pointerup", { pointerId: 2 }));
++  send(r.target, pointer("pointermove", { pointerId: 1, clientX: 15 }));
++
++  expect(second.defaultPrevented).toBe(false);
++  expect(r.presses).toHaveLength(1);
++  expect(r.target.captured).toEqual([1]);
++  expect(r.moves).toEqual([5]);
++  expect(r.dots.value).toBe("drag");
++});
++
++test("moves without a press do nothing", () => {
++  const r = rig();
++
++  send(r.target, pointer("pointermove", { clientX: 40 }));
++  send(r.target, pointer("pointerup"));
++
++  expect(r.moves).toEqual([]);
++  expect(r.dots.value).toBe("rest");
++});
++
++test("a rejected target does nothing and cancels nothing", () => {
++  const r = rig();
++  r.accepting = false;
++
++  const down = send(r.target, pointer("pointerdown"));
++  const mouse = send(r.target, new FakeMouseEvent("mousedown"));
++  send(r.target, pointer("pointermove", { clientX: 40 }));
++
++  expect(down.defaultPrevented).toBe(false);
++  expect(mouse.defaultPrevented).toBe(false);
++  expect(r.presses).toEqual([]);
++  expect(r.target.captured).toEqual([]);
++  expect(r.classes.size).toBe(0);
++  expect(r.moves).toEqual([]);
++  expect(r.dots.value).toBe("rest");
++});
++
++test.each([1, 2])("button %i does nothing and cancels nothing", (button) => {
++  const r = rig();
++
++  const down = send(r.target, pointer("pointerdown", { button }));
++  const mouse = send(r.target, new FakeMouseEvent("mousedown", { button }));
++
++  expect(down.defaultPrevented).toBe(false);
++  expect(mouse.defaultPrevented).toBe(false);
++  expect(r.presses).toEqual([]);
++  expect(r.classes.size).toBe(0);
++  expect(r.dots.value).toBe("rest");
++});
++
++test("a press that gives no drag does not capture or mark the window", () => {
++  const r = rig();
++  r.dragging = false;
++
++  send(r.target, pointer("pointerdown"));
++  send(r.target, pointer("pointermove", { clientX: 40 }));
++
++  expect(r.presses).toHaveLength(1);
++  expect(r.target.captured).toEqual([]);
++  expect(r.classes.size).toBe(0);
++  expect(r.dots.value).toBe("rest");
++  expect(r.moves).toEqual([]);
++});
++
++test("a double-click on an accepted target resets; on a rejected one nothing", () => {
++  const r = rig();
++
++  send(r.target, new FakeMouseEvent("dblclick"));
++  expect(r.resets.count).toBe(1);
++
++  r.accepting = false;
++  send(r.target, new FakeMouseEvent("dblclick"));
++  expect(r.resets.count).toBe(1);
++});
++
++test("hover: an accepted target brightens, a rejected one rests, leaving rests", () => {
++  const r = rig();
++
++  send(r.target, pointer("pointerover"));
++  expect(r.dots.value).toBe("hover");
++
++  r.accepting = false;
++  send(r.target, pointer("pointerover"));
++  expect(r.dots.value).toBe("rest");
++
++  r.accepting = true;
++  send(r.target, pointer("pointerover"));
++  send(r.target, pointer("pointerleave"));
++  expect(r.dots.value).toBe("rest");
++});
++
++test("hovering and leaving during a drag keep the drag's dots", () => {
++  const r = rig();
++  send(r.target, pointer("pointerdown"));
++
++  r.accepting = false;
++  send(r.target, pointer("pointerover"));
++  send(r.target, pointer("pointerleave"));
++
++  expect(r.dots.value).toBe("drag");
++});
+diff --git a/frontend/src/ui/useColumnDrag.ts b/frontend/src/ui/useColumnDrag.ts
+new file mode 100644
+index 0000000..16a8b87
+--- /dev/null
++++ b/frontend/src/ui/useColumnDrag.ts
+@@ -0,0 +1,154 @@
++import { tryOnScopeDispose } from "@vueuse/core";
++import { shallowRef, type Ref, type ShallowRef } from "vue";
++
++export type DotsState = "rest" | "hover" | "drag";
++export type ColumnDrag = { moveBy(dx: number): void };
++
++export type ColumnHandle = {
++  accepts(event: PointerEvent | MouseEvent): boolean;
++  press(event: PointerEvent): ColumnDrag | null;
++  reset(): void;
++};
++
++type ClassRoot = { readonly classList: Pick<DOMTokenList, "add" | "remove"> };
++
++type ListenedEvent =
++  | "pointerdown"
++  | "pointermove"
++  | "pointerup"
++  | "pointercancel"
++  | "lostpointercapture"
++  | "pointerover"
++  | "pointerleave"
++  | "mousedown"
++  | "dblclick";
++
++export type ColumnDragHandle = {
++  readonly listeners: Readonly<Record<ListenedEvent, (event: Event) => void>>;
++  readonly dots: Readonly<Ref<DotsState>>;
++};
++
++type Dragging = {
++  readonly pointerId: number;
++  readonly pressX: number;
++  readonly drag: ColumnDrag;
++  readonly root: ClassRoot;
++};
++
++type DragState = {
++  readonly handle: ColumnHandle;
++  readonly root: ClassRoot | undefined;
++  readonly dots: ShallowRef<DotsState>;
++  dragging: Dragging | null;
++};
++
++export const COLUMN_RESIZING_CLASS = "col-resizing";
++const MAIN_BUTTON = 0;
++
++function isMainPress(state: DragState, event: MouseEvent): boolean {
++  return event.button === MAIN_BUTTON && state.handle.accepts(event);
++}
++
++function pressed(state: DragState, event: Event): void {
++  if (state.dragging !== null || !(event instanceof PointerEvent) || !isMainPress(state, event)) {
++    return;
++  }
++  event.preventDefault();
++  const drag = state.handle.press(event);
++  if (drag === null) {
++    return;
++  }
++  if (event.currentTarget instanceof Element) {
++    event.currentTarget.setPointerCapture(event.pointerId);
++  }
++  const root = state.root ?? document.documentElement;
++  root.classList.add(COLUMN_RESIZING_CLASS);
++  state.dragging = { pointerId: event.pointerId, pressX: event.clientX, drag, root };
++  state.dots.value = "drag";
++}
++
++function moved(state: DragState, event: Event): void {
++  const { dragging } = state;
++  if (
++    dragging !== null &&
++    event instanceof PointerEvent &&
++    event.pointerId === dragging.pointerId
++  ) {
++    dragging.drag.moveBy(event.clientX - dragging.pressX);
++  }
++}
++
++function stop(state: DragState, dots: DotsState): void {
++  if (state.dragging === null) {
++    return;
++  }
++  state.dragging.root.classList.remove(COLUMN_RESIZING_CLASS);
++  state.dragging = null;
++  state.dots.value = dots;
++}
++
++function ended(state: DragState, event: Event): void {
++  if (event instanceof PointerEvent && event.pointerId === state.dragging?.pointerId) {
++    stop(state, "hover");
++  }
++}
++
++function hovered(state: DragState, event: Event): void {
++  if (state.dragging === null && event instanceof MouseEvent) {
++    state.dots.value = state.handle.accepts(event) ? "hover" : "rest";
++  }
++}
++
++function left(state: DragState): void {
++  if (state.dragging === null) {
++    state.dots.value = "rest";
++  }
++}
++
++function mousePressed(state: DragState, event: Event): void {
++  if (event instanceof MouseEvent && isMainPress(state, event)) {
++    event.preventDefault();
++  }
++}
++
++function doubleClicked(state: DragState, event: Event): void {
++  if (event instanceof MouseEvent && state.handle.accepts(event)) {
++    state.handle.reset();
++  }
++}
++
++export function useColumnDrag(handle: ColumnHandle, root?: ClassRoot): ColumnDragHandle {
++  const state: DragState = { handle, root, dots: shallowRef<DotsState>("rest"), dragging: null };
++  tryOnScopeDispose(() => {
++    stop(state, "rest");
++  });
++  function end(event: Event): void {
++    ended(state, event);
++  }
++  return {
++    listeners: {
++      pointerdown: (event) => {
++        pressed(state, event);
++      },
++      pointermove: (event) => {
++        moved(state, event);
++      },
++      pointerup: end,
++      pointercancel: end,
++      lostpointercapture: end,
++      pointerover: (event) => {
++        hovered(state, event);
++      },
++      pointerleave: () => {
++        left(state);
++      },
++      mousedown: (event) => {
++        mousePressed(state, event);
++      },
++      dblclick: (event) => {
++        doubleClicked(state, event);
++      },
++    },
++    dots: state.dots,
++  };
++}
+diff --git a/frontend/src/ui/usePaneDividers.test.ts b/frontend/src/ui/usePaneDividers.test.ts
+new file mode 100644
+index 0000000..c1d31a6
+--- /dev/null
++++ b/frontend/src/ui/usePaneDividers.test.ts
+@@ -0,0 +1,97 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import type { PaneSplit } from "./paneSplit";
++import { dividerHandle } from "./usePaneDividers";
++
++class FakeSvg extends EventTarget {
++  constructor(readonly parentNode: EventTarget) {
++    super();
++  }
++}
++
++const WIDTHS = { local: 300, center: 400, remote: 300 };
++
++beforeEach(() => {
++  vi.stubGlobal("SVGSVGElement", FakeSvg);
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function recorder(): {
++  readonly splits: PaneSplit[];
++  readonly resets: { count: number };
++  readonly split: { setPaneSplit(split: PaneSplit): void; resetPaneSplit(): void };
++} {
++  const splits: PaneSplit[] = [];
++  const resets = { count: 0 };
++  return {
++    splits,
++    resets,
++    split: {
++      setPaneSplit: (split) => {
++        splits.push(split);
++      },
++      resetPaneSplit: () => {
++        resets.count += 1;
++      },
++    },
++  };
++}
++
++test("a press on the handle itself or on the strip's svg root is a divider press", () => {
++  const handle = new EventTarget();
++  const divider = dividerHandle("local", () => WIDTHS, recorder().split);
++
++  expect(divider.accepts({ target: handle, currentTarget: handle })).toBe(true);
++  expect(divider.accepts({ target: new FakeSvg(handle), currentTarget: handle })).toBe(true);
++});
++
++test("an icon, its nested svg or a wave join keeps its press for the editor", () => {
++  const handle = new EventTarget();
++  const svg = new FakeSvg(handle);
++  const group = new EventTarget();
++  const divider = dividerHandle("local", () => WIDTHS, recorder().split);
++
++  expect(divider.accepts({ target: new EventTarget(), currentTarget: handle })).toBe(false);
++  expect(divider.accepts({ target: new FakeSvg(group), currentTarget: handle })).toBe(false);
++  expect(divider.accepts({ target: new FakeSvg(svg), currentTarget: handle })).toBe(false);
++});
++
++test("no handle accepts nothing", () => {
++  const divider = dividerHandle("local", () => WIDTHS, recorder().split);
++
++  expect(divider.accepts({ target: null, currentTarget: null })).toBe(false);
++});
++
++test("a press measures once and each move sets the dragged split of its boundary", () => {
++  const { splits, split } = recorder();
++  const measure = vi.fn(() => WIDTHS);
++
++  const local = dividerHandle("local", measure, split).press();
++  local?.moveBy(100);
++  local?.moveBy(-200);
++  const remote = dividerHandle("remote", measure, split).press();
++  remote?.moveBy(-100);
++
++  expect(measure).toHaveBeenCalledTimes(2);
++  expect(splits).toEqual([
++    { local: 0.4, remote: 0.3 },
++    { local: 0.22, remote: 0.3 },
++    { local: 0.3, remote: 0.4 },
++  ]);
++});
++
++test("a press that cannot measure gives no drag", () => {
++  expect(dividerHandle("local", () => null, recorder().split).press()).toBeNull();
++});
++
++test("reset resets the split", () => {
++  const { resets, split, splits } = recorder();
++
++  dividerHandle("remote", () => WIDTHS, split).reset();
++
++  expect(resets.count).toBe(1);
++  expect(splits).toEqual([]);
++});
+diff --git a/frontend/src/ui/usePaneDividers.ts b/frontend/src/ui/usePaneDividers.ts
+new file mode 100644
+index 0000000..c469b83
+--- /dev/null
++++ b/frontend/src/ui/usePaneDividers.ts
+@@ -0,0 +1,46 @@
++import type { Side } from "../ipc";
++import { dragged, type PaneSplitState, type PaneWidths } from "./paneSplit";
++import { useColumnDrag, type ColumnDrag, type ColumnDragHandle } from "./useColumnDrag";
++
++type SplitWriter = Pick<PaneSplitState, "setPaneSplit" | "resetPaneSplit">;
++
++export function dividerHandle(
++  boundary: Side,
++  measure: () => PaneWidths | null,
++  split: SplitWriter,
++): {
++  accepts(event: Pick<Event, "target" | "currentTarget">): boolean;
++  press(): ColumnDrag | null;
++  reset(): void;
++} {
++  return {
++    accepts: ({ target, currentTarget }) =>
++      currentTarget !== null &&
++      (target === currentTarget ||
++        (target instanceof SVGSVGElement && target.parentNode === currentTarget)),
++    press: () => {
++      const widths = measure();
++      if (widths === null) {
++        return null;
++      }
++      return {
++        moveBy: (dx) => {
++          split.setPaneSplit(dragged(widths, boundary, dx));
++        },
++      };
++    },
++    reset: () => {
++      split.resetPaneSplit();
++    },
++  };
++}
++
++export function usePaneDividers(
++  measure: () => PaneWidths | null,
++  split: SplitWriter,
++): Readonly<Record<Side, ColumnDragHandle>> {
++  return {
++    local: useColumnDrag(dividerHandle("local", measure, split)),
++    remote: useColumnDrag(dividerHandle("remote", measure, split)),
++  };
++}

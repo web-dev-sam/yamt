@@ -38,6 +38,7 @@ export type {
   WriteReply,
 } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
+export { createFixtureServerHost } from "./fixtureServers";
 export {
   bindingsOf,
   DEFAULT_KEYS,

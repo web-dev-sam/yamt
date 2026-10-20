@@ -97,6 +97,23 @@ pub(crate) fn move_settings<R: Runtime>(
 
 /// Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
 /// key the window could look up, so nothing is stored for it.
+fn at_host_root<R: Runtime>(
+    window: &WebviewWindow<R>,
+    host: &State<'_, HostState>,
+    current: &StoredSettings,
+    edit: impl FnOnce(&Places, &str) -> Result<SettingsRead, yamt_settings::Error>,
+) -> Result<SettingsRead, IpcError> {
+    let places = places(window.path())?;
+    let root = servers::lock(host).context().root;
+    let read = match root {
+        Some(root) => edit(&places, &root)?,
+        None => yamt_settings::read(&places, current)?,
+    };
+    show_theme(window, read.stored.theme);
+    Ok(read)
+}
+
+/// Keyed by the repository root as `servers_context` gives it.
 #[tauri::command]
 #[specta::specta]
 #[expect(
@@ -109,14 +126,28 @@ pub(crate) fn set_server_answer<R: Runtime>(
     current: StoredSettings,
     answer: Option<RepositoryAnswer>,
 ) -> Result<SettingsRead, IpcError> {
-    let places = places(window.path())?;
-    let root = servers::lock(&host).context().root;
-    let read = match root {
-        Some(root) => yamt_settings::set_repository_answer(&places, &current, &root, answer)?,
-        None => yamt_settings::read(&places, &current)?,
-    };
-    show_theme(&window, read.stored.theme);
-    Ok(read)
+    at_host_root(&window, &host, &current, |places, root| {
+        yamt_settings::set_repository_answer(places, &current, root, answer)
+    })
+}
+
+/// Keyed by the repository root as `servers_context` gives it.
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
+pub(crate) fn set_server_switch<R: Runtime>(
+    window: WebviewWindow<R>,
+    host: State<'_, HostState>,
+    current: StoredSettings,
+    server: String,
+    on: bool,
+) -> Result<SettingsRead, IpcError> {
+    at_host_root(&window, &host, &current, |places, root| {
+        yamt_settings::set_server_switch(places, &current, root, &server, on)
+    })
 }
 
 #[tauri::command]

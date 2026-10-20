@@ -1,0 +1,92 @@
+[Survived] ArithmeticOperator src/ui/paneSplit.ts:43:39
+-     const least = Math.min(MIN_PANE_PX, total / PANES);
++     const least = Math.min(MIN_PANE_PX, total * PANES);
+
+[Survived] ConditionalExpression src/ui/paneSplit.ts:44:17
+-     const moved = boundary === "local" ? widths.local : widths.remote;
++     const moved = true ? widths.local : widths.remote;
+
+[Survived] ConditionalExpression src/ui/paneSplit.ts:45:16
+-     const kept = boundary === "local" ? widths.remote : widths.local;
++     const kept = true ? widths.remote : widths.local;
+
+[Survived] BlockStatement src/ui/paneSplit.ts:58:11
+-     } catch {
+-       return null;
+-     }
++     } catch {}
+
+[Survived] ConditionalExpression src/ui/paneSplit.ts:71:5
+-       typeof remote === "number" &&
++       true &&
+
+[Survived] ConditionalExpression src/ui/paneSplit.ts:70:5
+-       typeof local === "number" &&
++       true &&
+
+[Survived] LogicalOperator src/ui/paneSplit.ts:70:5
+-       typeof local === "number" &&
+-       typeof remote === "number" &&
++       typeof local === "number" || typeof remote === "number" &&
+
+[Survived] ConditionalExpression src/ui/paneSplit.ts:70:5
+-       typeof local === "number" &&
+-       typeof remote === "number" &&
++       true &&
+
+[Survived] ObjectLiteral src/ui/paneSplit.ts:27:56
+-   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "2.5rem", gap: "1px" };
++   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = {};
+
+[Survived] StringLiteral src/ui/paneSplit.ts:21:21
+-   const STORAGE_KEY = "yamt.panes.split";
++   const STORAGE_KEY = "";
+
+[Survived] StringLiteral src/ui/paneSplit.ts:27:80
+-   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "2.5rem", gap: "1px" };
++   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "2.5rem", gap: "" };
+
+[Survived] StringLiteral src/ui/paneSplit.ts:27:65
+-   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "2.5rem", gap: "1px" };
++   const GUTTER_WIDTH: Readonly<Record<Gutter, string>> = { strip: "", gap: "1px" };
+
+[Survived] ObjectLiteral src/ui/paneSplit.ts:29:39
+-   export const EQUAL_SPLIT: PaneSplit = { local: 1 / PANES, remote: 1 / PANES };
++   export const EQUAL_SPLIT: PaneSplit = {};
+
+[Survived] ArithmeticOperator src/ui/paneSplit.ts:29:48
+-   export const EQUAL_SPLIT: PaneSplit = { local: 1 / PANES, remote: 1 / PANES };
++   export const EQUAL_SPLIT: PaneSplit = { local: 1 * PANES, remote: 1 / PANES };
+
+[Survived] ArithmeticOperator src/ui/paneSplit.ts:29:67
+-   export const EQUAL_SPLIT: PaneSplit = { local: 1 / PANES, remote: 1 / PANES };
++   export const EQUAL_SPLIT: PaneSplit = { local: 1 / PANES, remote: 1 * PANES };
+
+[Survived] ConditionalExpression src/ui/useColumnDrag.ts:61:7
+-     if (event.currentTarget instanceof Element) {
++     if (true) {
+
+[NoCoverage] BlockStatement src/ui/usePaneDividers.ts:41:45
+-   ): Readonly<Record<Side, ColumnDragHandle>> {
+-     return {
+-       local: useColumnDrag(dividerHandle("local", measure, split)),
+-       remote: useColumnDrag(dividerHandle("remote", measure, split)),
+-     };
+-   }
++   ): Readonly<Record<Side, ColumnDragHandle>> {}
+
+[NoCoverage] ObjectLiteral src/ui/usePaneDividers.ts:42:10
+-     return {
+-       local: useColumnDrag(dividerHandle("local", measure, split)),
+-       remote: useColumnDrag(dividerHandle("remote", measure, split)),
+-     };
++     return {};
+
+[NoCoverage] StringLiteral src/ui/usePaneDividers.ts:43:40
+-       local: useColumnDrag(dividerHandle("local", measure, split)),
++       local: useColumnDrag(dividerHandle("", measure, split)),
+
+[NoCoverage] StringLiteral src/ui/usePaneDividers.ts:44:41
+-       remote: useColumnDrag(dividerHandle("remote", measure, split)),
++       remote: useColumnDrag(dividerHandle("", measure, split)),
+

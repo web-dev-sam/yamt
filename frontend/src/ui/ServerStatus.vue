@@ -3,38 +3,26 @@ import { computed, shallowRef } from "vue";
 import CircleX from "~icons/lucide/circle-x";
 import TriangleAlert from "~icons/lucide/triangle-alert";
 
-import type { Point } from "./menuPosition";
+import { serverButtons } from "./serverButtons";
+import ServerGroup from "./ServerGroup.vue";
 import ServerMenu from "./ServerMenu.vue";
-import { menuAfterClick } from "./serverMenuToggle";
-import { dotKind, formatNote, problemsTitle, stateLine, type DotKind } from "./serverText";
+import { menuAfterClick, type OpenMenu } from "./serverMenuToggle";
+import { dotKind, formatNote, groupDot, problemsTitle } from "./serverText";
 import { useAppStore } from "./store";
+import { belowLeft } from "./useMenuPlacement";
 import type { ProblemCounts } from "./useMergeController";
-
-type OpenMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
 
 const props = defineProps<{
   path: string | null;
   problems: ProblemCounts | null;
 }>();
 
-const DOT_CLASSES: Readonly<Record<DotKind, string>> = {
-  running: "bg-success-signal",
-  busy: "bg-fg-muted",
-  stopped: "border border-fg-muted",
-  problem: "bg-problem-error",
-  warning: "bg-problem-warning",
-};
-
-const { serverViews, serving, formatOutcomes } = useAppStore();
+const { serverViews, serving, formatOutcomes, pinnedServers } = useAppStore();
 const menu = shallowRef<OpenMenu | null>(null);
 
-const buttons = computed(() =>
-  serverViews.value.map((view) => ({
-    name: view.name,
-    title: stateLine(view.state),
-    dot: DOT_CLASSES[dotKind(view.state)],
-  })),
-);
+const buttons = computed(() => serverButtons(serverViews.value, pinnedServers.value));
+const pinned = computed(() => buttons.value.filter((button) => button.pinned));
+const dot = computed(() => groupDot(serverViews.value.map((view) => dotKind(view.state))));
 const counts = computed(() =>
   props.path === null || props.problems === null || !serving(props.path) ? null : props.problems,
 );
@@ -45,10 +33,9 @@ const note = computed(() =>
 
 function openMenu(name: string, event: MouseEvent): void {
   if (event.currentTarget instanceof HTMLElement) {
-    const { left, bottom } = event.currentTarget.getBoundingClientRect();
     menu.value = menuAfterClick(menu.value, {
       name,
-      at: { x: left, y: bottom },
+      at: belowLeft(event.currentTarget),
       opener: event.currentTarget,
     });
   }
@@ -79,8 +66,8 @@ function closeMenu(): void {
         {{ counts.warnings }}
       </span>
       <button
-        v-for="button in buttons"
-        :key="button.name"
+        v-for="button in pinned"
+        :key="button.key"
         type="button"
         :title="button.title"
         :aria-label="button.name"
@@ -93,6 +80,7 @@ function closeMenu(): void {
         <span class="size-2 shrink-0 rounded-full" :class="button.dot" aria-hidden="true" />
         {{ button.name }}
       </button>
+      <ServerGroup :buttons="buttons" :dot="dot" />
       <ServerMenu
         v-if="menu !== null"
         :name="menu.name"

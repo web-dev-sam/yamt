@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from "@vueuse/core";
+import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 
 import { failureHelp, installText } from "./installText";
-import { stepMenuItem } from "./menuKeys";
-import { menuPosition, type Point } from "./menuPosition";
+import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+import type { OpenMenu } from "./serverMenuToggle";
 import {
   ACTION_LABELS,
   COPIED,
@@ -16,14 +16,14 @@ import {
   type ServerAction,
 } from "./serverText";
 import { useAppStore } from "./store";
+import { useMenuPlacement } from "./useMenuPlacement";
 
-const props = defineProps<{ name: string; at: Point; opener: HTMLElement }>();
+const props = defineProps<OpenMenu>();
 const emit = defineEmits<{ close: [] }>();
 
 const { serverViews, startServer, stopServer, restartServer, showServerLog } = useAppStore();
 const panel = useTemplateRef<HTMLDivElement>("panel");
-const size = useElementSize(panel, undefined, { box: "border-box" });
-const viewport = useWindowSize();
+const placement = useMenuPlacement(panel, () => props.at);
 const windowFocused = useWindowFocus();
 const copied = shallowRef<string | null>(null);
 useEventListener(window, "keydown", keyPressed, { capture: true });
@@ -41,14 +41,6 @@ const hint = computed(() =>
     : (failure.value?.install ?? null),
 );
 const notes = computed(() => view.value?.notes.map(noteLine) ?? []);
-const placement = computed(() => {
-  const { x, y } = menuPosition({
-    pointer: props.at,
-    menu: { width: size.width.value, height: size.height.value },
-    viewport: { width: viewport.width.value, height: viewport.height.value },
-  });
-  return { left: `${x}px`, top: `${y}px` };
-});
 
 watch(windowFocused, (focused) => {
   if (!focused) {
@@ -62,11 +54,11 @@ watch(view, (now) => {
 });
 
 onMounted(() => {
-  panel.value?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  panel.value?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 });
 
 function menuItems(): HTMLElement[] {
-  return [...(panel.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+  return [...(panel.value?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
 }
 
 function keyPressed(event: KeyboardEvent): void {
@@ -79,6 +71,7 @@ function keyPressed(event: KeyboardEvent): void {
     case "close":
       event.preventDefault();
       event.stopPropagation();
+      props.opener.focus();
       emit("close");
       return;
     case "focus":

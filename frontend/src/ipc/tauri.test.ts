@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
-import type { DiskVersion } from "./domain";
+import type { DiskVersion, StoredSettings } from "./domain";
 import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
 
 const commands = vi.hoisted(() => ({
@@ -21,6 +21,7 @@ const commands = vi.hoisted(() => ({
   setKeys: vi.fn(),
   moveSettings: vi.fn(),
   setServerAnswer: vi.fn(),
+  setServerSwitch: vi.fn(),
   setAddedServers: vi.fn(),
   serversContext: vi.fn(),
   startServer: vi.fn(),
@@ -372,11 +373,11 @@ test("the forward stringifies non-finite numbers and keeps every other value", a
   });
 });
 
-const STORED: Generated.StoredSettings = {
+const STORED: StoredSettings = {
   theme: "light",
   antialiasing: "subpixel",
   keys: { undo: ["Alt-Backspace"] },
-  languageServers: { repositories: { "/home/me/yamt": "start" }, added: [] },
+  languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
 };
 const SETTINGS_DTO: Generated.SettingsRead = {
   path: "/home/me/.config/yamt/settings.json",
@@ -428,6 +429,27 @@ test("a settings failure comes back as the app's error", async () => {
   expect(await createTauriSource().loadSettings(STORED)).toEqual({ ok: false, failure: broken });
 });
 
+test("a read without off has nothing switched off; one with off keeps it", async () => {
+  const old: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: { ...STORED, languageServers: { repositories: {}, added: [] } },
+  };
+  const off = { "/home/me/yamt": ["oxlint (repository root)"] };
+  const switched: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: { ...STORED, languageServers: { ...STORED.languageServers, off } },
+  };
+  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: old });
+  commands.loadSettings.mockResolvedValueOnce({ status: "ok", data: switched });
+  const source = createTauriSource();
+
+  const first = await source.loadSettings(STORED);
+  const second = await source.loadSettings(STORED);
+
+  expect(first.ok && first.value.stored.languageServers.off).toEqual({});
+  expect(second.ok && second.value.stored.languageServers.off).toEqual(off);
+});
+
 test("setServerAnswer and setAddedServers send their arguments and return the read", async () => {
   commands.setServerAnswer.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
   commands.setAddedServers.mockResolvedValue({ status: "ok", data: SETTINGS_DTO });
@@ -455,6 +477,44 @@ test("setServerAnswer and setAddedServers return the app's error", async () => {
 
   expect(await source.setServerAnswer(STORED, "start")).toEqual({ ok: false, failure: broken });
   expect(await source.setAddedServers(STORED, [])).toEqual({ ok: false, failure: broken });
+});
+
+test("setServerSwitch sends the settings in use, the server and on, and returns the read", async () => {
+  const switched: Generated.SettingsRead = {
+    ...SETTINGS_DTO,
+    stored: {
+      ...STORED,
+      languageServers: {
+        ...STORED.languageServers,
+        off: { "/home/me/yamt": ["oxlint (repository root)"] },
+      },
+    },
+  };
+  commands.setServerSwitch.mockResolvedValue({ status: "ok", data: switched });
+  const source = createTauriSource();
+
+  expect(await source.setServerSwitch(STORED, "oxlint (repository root)", false)).toEqual({
+    ok: true,
+    value: { ...SETTINGS_READ, stored: switched.stored },
+  });
+  expect(await source.setServerSwitch(STORED, "oxfmt (repository root)", true)).toEqual({
+    ok: true,
+    value: { ...SETTINGS_READ, stored: switched.stored },
+  });
+  expect(commands.setServerSwitch.mock.calls).toEqual([
+    [STORED, "oxlint (repository root)", false],
+    [STORED, "oxfmt (repository root)", true],
+  ]);
+});
+
+test("setServerSwitch returns the app's error", async () => {
+  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
+  commands.setServerSwitch.mockResolvedValue({ status: "error", error: broken });
+
+  expect(await createTauriSource().setServerSwitch(STORED, "oxlint", false)).toEqual({
+    ok: false,
+    failure: broken,
+  });
 });
 
 type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };

@@ -1,6 +1,6 @@
 import { nodeHint } from "./install";
 import { modulePackage, nearestPackage, type Place } from "./project";
-import type { ServerSpec, TypeScriptProgram } from "./spec";
+import type { FoundSpec, TypeScriptProgram } from "./spec";
 import { absolutePath } from "./uri";
 
 export type TypeScriptRun =
@@ -14,10 +14,10 @@ export const VUE_FILES: readonly string[] = [modulePackage(VUE), modulePackage(P
 
 export function withVue(
   project: Place,
-  typescript: ServerSpec,
+  typescript: FoundSpec,
   run: TypeScriptRun,
   root: string,
-): readonly ServerSpec[] {
+): readonly FoundSpec[] {
   if (nearestPackage(project, VUE) === undefined) {
     return [typescript];
   }

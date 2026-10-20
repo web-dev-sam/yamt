@@ -15,6 +15,7 @@ import {
   addedSpecs,
   isDocVersion,
   presetChoices,
+  serverKey,
   type PresetChoice,
   type SpecNote,
   type DocVersion,
@@ -268,6 +269,7 @@ const TIMERS: Timers = {
 
 function spec(name: string, overrides: Partial<ServerSpec> = {}): ServerSpec {
   return {
+    key: serverKey(`${name} (repository root)`),
     name,
     command: { program: name, args: ["--lsp"] },
     project: "",
@@ -652,8 +654,22 @@ test("rule 3: setSpecs keeps an unchanged spec's run and starts a newly installe
   expect(host.servers.map((server) => server.command.program)).toEqual(["oxlint", "tsserver"]);
   expect(host.stopped).toEqual([]);
   expect(languageServers.views()).toEqual([
-    { name: "oxlint", project: "", state: { kind: "running" }, help: null, notes: [] },
-    { name: "tsserver", project: "", state: { kind: "running" }, help, notes },
+    {
+      key: "oxlint (repository root)",
+      name: "oxlint",
+      project: "",
+      state: { kind: "running" },
+      help: null,
+      notes: [],
+    },
+    {
+      key: "tsserver (repository root)",
+      name: "tsserver",
+      project: "",
+      state: { kind: "running" },
+      help,
+      notes,
+    },
   ]);
 });
 
@@ -734,7 +750,14 @@ test("rule 3: a help-only or notes-only change keeps the run and shows the new w
   expect(host.stopped).toEqual([]);
   expect(host.only("TypeScript")).toBe(before);
   expect(languageServers.views()).toEqual([
-    { name: "TypeScript", project: "", state: { kind: "running" }, help, notes: [note] },
+    {
+      key: "TypeScript (repository root)",
+      name: "TypeScript",
+      project: "",
+      state: { kind: "running" },
+      help,
+      notes: [note],
+    },
   ]);
 
   const command = { program: "tsgo", args: ["--lsp", "--stdio"] };

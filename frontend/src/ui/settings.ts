@@ -51,6 +51,7 @@ export type SettingsActions = {
   moveSettings(path: string): Promise<void>;
   setServerAnswer(answer: RepositoryAnswer | null): Promise<void>;
   setAddedServers(added: readonly AddedServer[]): Promise<void>;
+  setServerSwitch(server: string, on: boolean): Promise<void>;
 };
 
 type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
@@ -61,7 +62,7 @@ export function startSettings(theme: Theme): SettingsInUse {
     theme,
     antialiasing: "subpixel",
     keys: bindingsOf({}),
-    languageServers: { repositories: {}, added: [] },
+    languageServers: { repositories: {}, off: {}, added: [] },
   };
 }
 
@@ -99,12 +100,18 @@ function sameAdded(a: AddedServer, b: AddedServer): boolean {
 }
 
 function sameServers(a: LanguageServerSettings, b: LanguageServerSettings): boolean {
-  const { repositories, added, ...rest } = a;
+  const { repositories, off, added, ...rest } = a;
   rest satisfies Record<string, never>;
   const answers = Object.entries(repositories);
+  const offRoots = Object.entries(off);
   return (
     answers.length === Object.keys(b.repositories).length &&
     answers.every(([root, answer]) => b.repositories[root] === answer) &&
+    offRoots.length === Object.keys(b.off).length &&
+    offRoots.every(([root, keys]) => {
+      const other = b.off[root];
+      return other !== undefined && sameTexts(keys, other);
+    }) &&
     added.length === b.added.length &&
     added.every((server, index) => {
       const other = b.added[index];
@@ -225,5 +232,7 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
     moveSettings: (path) => send(target, (current) => source.moveSettings(current, path)),
     setServerAnswer: (answer) => send(target, (current) => source.setServerAnswer(current, answer)),
     setAddedServers: (added) => send(target, (current) => source.setAddedServers(current, added)),
+    setServerSwitch: (server, on) =>
+      send(target, (current) => source.setServerSwitch(current, server, on)),
   };
 }

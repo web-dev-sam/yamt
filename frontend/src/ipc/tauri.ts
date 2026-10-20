@@ -64,6 +64,9 @@ function createTauriSettings(): SettingsSource {
     async setServerAnswer(current, answer) {
       return toSettingsResult(await commands.setServerAnswer(current, answer));
     },
+    async setServerSwitch(current, server, on) {
+      return toSettingsResult(await commands.setServerSwitch(current, server, on));
+    },
     async setAddedServers(current, added) {
       return toSettingsResult(await commands.setAddedServers(current, [...added]));
     },

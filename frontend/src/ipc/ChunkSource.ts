@@ -47,6 +47,11 @@ export interface ChunkSource {
     current: StoredSettings,
     answer: RepositoryAnswer | null,
   ): Promise<SourceResult<SettingsRead>>;
+  setServerSwitch(
+    current: StoredSettings,
+    server: string,
+    on: boolean,
+  ): Promise<SourceResult<SettingsRead>>;
   setAddedServers(
     current: StoredSettings,
     added: readonly AddedServer[],
@@ -61,5 +66,6 @@ export type SettingsSource = Pick<
   | "setKeys"
   | "moveSettings"
   | "setServerAnswer"
+  | "setServerSwitch"
   | "setAddedServers"
 >;

@@ -46,11 +46,13 @@ export type Theme = Generated.Theme;
 
 export type Antialiasing = Generated.Antialiasing;
 
-export type StoredSettings = Generated.StoredSettings;
+export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
+
+export type StoredSettings = Omit<Generated.StoredSettings, "languageServers"> & {
+  languageServers: LanguageServerSettings;
+};
 
 export type KeysChange = Generated.KeysChange;
-
-export type LanguageServerSettings = Generated.LanguageServerSettings;
 
 export type RepositoryAnswer = Generated.RepositoryAnswer;
 
@@ -214,7 +216,12 @@ export function toFileList(dto: Generated.FileList): FileList {
 }
 
 export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
-  return { path: dto.path, defaultPath: dto.default_path, stored: dto.stored };
+  const { languageServers } = dto.stored;
+  const stored = {
+    ...dto.stored,
+    languageServers: { ...languageServers, off: languageServers.off ?? {} },
+  };
+  return { path: dto.path, defaultPath: dto.default_path, stored };
 }
 
 export function toStartReply(dto: Generated.StartReply): StartReply {

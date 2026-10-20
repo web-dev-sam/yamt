@@ -7,20 +7,28 @@ import ListTree from "~icons/lucide/list-tree";
 import type { FileEntry } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
+import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
 import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
+import ResizeDots from "./ResizeDots.vue";
+import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
 
 const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
 const emit = defineEmits<{ select: [path: string] }>();
 
 const list = useTemplateRef<HTMLElement>("list");
-const handle = useTemplateRef<HTMLDivElement>("handle");
-const width = shallowRef<number | null>(null);
 const { mode, toggle } = createFileListMode();
+const { width, setWidth, resetWidth } = createFileListWidth();
+const resize = useColumnDrag({
+  accepts: (event) => event.target === event.currentTarget,
+  press: startResize,
+  reset: resetWidth,
+});
 const closed = shallowRef<ReadonlySet<string>>(new Set());
-let grabOffset = 0;
 
-const widthStyle = computed(() => (width.value === null ? {} : { width: `${width.value}px` }));
+const widthStyle = computed(() =>
+  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
+);
 const rows = computed(() => treeRows(props.files, closed.value));
 const viewButton = computed(() =>
   mode.value === "list"
@@ -38,18 +46,16 @@ watch(
   },
 );
 
-function startResize(event: PointerEvent): void {
-  event.preventDefault();
-  if (list.value !== null) {
-    grabOffset = event.clientX - list.value.getBoundingClientRect().right;
+function startResize(): ColumnDrag | null {
+  if (list.value === null) {
+    return null;
   }
-  handle.value?.setPointerCapture(event.pointerId);
-}
-
-function resize(event: PointerEvent): void {
-  if (list.value !== null && handle.value?.hasPointerCapture(event.pointerId) === true) {
-    width.value = event.clientX - grabOffset - list.value.getBoundingClientRect().left;
-  }
+  const pressWidth = list.value.getBoundingClientRect().width;
+  return {
+    moveBy: (dx) => {
+      setWidth(pressWidth + dx, window.innerWidth);
+    },
+  };
 }
 
 function toggleFolder(path: string): void {
@@ -64,7 +70,7 @@ function toggleFolder(path: string): void {
 <template>
   <aside
     ref="list"
-    class="relative flex w-60 max-w-[50vw] min-w-40 shrink-0 flex-col rounded-island bg-panel pb-1"
+    class="relative flex w-60 shrink-0 flex-col rounded-island bg-panel pb-1"
     :style="widthStyle"
   >
     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
@@ -114,14 +120,15 @@ function toggleFolder(path: string): void {
         </span>
       </li>
     </ul>
+    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
     <div
-      ref="handle"
       role="separator"
       aria-orientation="vertical"
       aria-label="File list width"
       class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
-      @pointerdown="startResize"
-      @pointermove="resize"
-    />
+      v-on="resize.listeners"
+    >
+      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
+    </div>
   </aside>
 </template>

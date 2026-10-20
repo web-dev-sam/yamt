@@ -72,3 +72,10 @@ export function wholeNumber(text: string, what: string, least: number): number {
   }
   return value;
 }
+
+export function offsetPx(text: string, what: string): number {
+  if (!WHOLE_NUMBER.test(text)) {
+    throw new Error(`${what} ${text}: expected a whole number of pixels, e.g. 120 or -120`);
+  }
+  return Number(text);
+}

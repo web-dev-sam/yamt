@@ -17,12 +17,14 @@ export type { ResultDocument } from "./internal/documents";
 export type { FormatRefusal, FormatReply, FormattingOptions } from "./internal/formatting";
 export type { LogLine } from "./internal/log";
 export type { LinePosition, ProblemSeverity, ServerProblem } from "./internal/problems";
-export type {
-  InstallHint,
-  PackageManager,
-  PythonManager,
-  ServerSpec,
-  SpecNote,
+export {
+  serverKey,
+  type InstallHint,
+  type PackageManager,
+  type PythonManager,
+  type ServerKey,
+  type ServerSpec,
+  type SpecNote,
 } from "./internal/spec";
 export type { FailReason, ServerState, ServerView } from "./internal/state";
 export type { Timers } from "./internal/timers";
@@ -98,6 +100,7 @@ export class LanguageServers {
 
   views(): readonly ServerView[] {
     return this.#servers.map(({ spec, state }) => ({
+      key: spec.key,
       name: spec.name,
       project: spec.project,
       state,

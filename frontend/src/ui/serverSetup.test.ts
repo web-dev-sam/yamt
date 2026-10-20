@@ -16,9 +16,15 @@ import {
   type ServerHost,
   type StartReply,
 } from "../ipc";
-import { LanguageServers, presetChoices, type ResultDocument, type ServerState } from "../lsp";
+import {
+  LanguageServers,
+  presetChoices,
+  serverKey,
+  type ResultDocument,
+  type ServerState,
+} from "../lsp";
 import { createAsking } from "./asking";
-import { addedServerFields, createServerSetup, parseAddedServer } from "./serverSetup";
+import { addedServerFields, createServerSetup, offServers, parseAddedServer } from "./serverSetup";
 import { startSettings } from "./settings";
 
 type Tree = Record<string, string>;
@@ -154,18 +160,21 @@ function setUpWith(options: {
   readonly answer?: RepositoryAnswer;
   readonly answerRoot?: string;
   readonly added?: readonly AddedServer[];
+  readonly off?: LanguageServerSettings["off"];
   readonly files?: readonly string[];
 }) {
-  const { added = [], answer, answerRoot = ROOT } = options;
+  const { added = [], answer, answerRoot = ROOT, off = {} } = options;
   const disk: { listed: readonly string[]; stored: LanguageServerSettings; writesFail: boolean } = {
     listed: options.files ?? [FILE],
     stored: {
       repositories: answer === undefined ? {} : { [answerRoot]: answer },
+      off,
       added: [...added],
     },
     writesFail: false,
   };
   const settings = shallowRef({ ...startSettings("dark"), languageServers: disk.stored });
+  const shown: [server: string, problems: number][] = [];
   const files = shallowRef<readonly FileEntry[]>([]);
   const calls: unknown[][] = [];
   const events = options.host?.events ?? [];
@@ -181,7 +190,12 @@ function setUpWith(options: {
     events.push(name);
   }
   const servers = new LanguageServers(options.host);
-  servers.open(DOC);
+  servers.open({
+    ...DOC,
+    showProblems: (server, _version, problems) => {
+      shown.push([server, problems.length]);
+    },
+  });
   const asking = createAsking();
   const setup = createServerSetup({
     host: options.host,
@@ -210,8 +224,14 @@ function setUpWith(options: {
       calls.push(["setAddedServers", list]);
       write({ ...disk.stored, added: [...list] });
     },
+    setServerSwitch: async (server, on) => {
+      calls.push(["setServerSwitch", server, on]);
+      const others = (disk.stored.off[ROOT] ?? []).filter((key) => key !== server);
+      const keys = on ? others : [...others, server];
+      write({ ...disk.stored, off: { ...disk.stored.off, [ROOT]: keys } });
+    },
   });
-  return { setup, servers, asking, calls, settings, files, disk, events };
+  return { setup, servers, asking, calls, settings, files, disk, events, shown };
 }
 
 function states(servers: LanguageServers): Record<string, ServerState["kind"]> {
@@ -775,6 +795,172 @@ test("settings: Remove drops only the server at its index", async () => {
   await setup.removeServer(1);
 
   expect(calls).toEqual([["setAddedServers", [first, third]]]);
+});
+
+const OXLINT_KEY = serverKey("oxlint (frontend)");
+const OXLINT_OFF = { [ROOT]: [OXLINT_KEY] };
+const WITHOUT_OXLINT = { oxfmt: "running", TypeScript: "notInstalled" };
+
+function publishOne(host: FakeHost, program: string): void {
+  const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
+  const params = { uri: `file://${ROOT}/${FILE}`, diagnostics: [{ range, message: "lint" }] };
+  const text = JSON.stringify({
+    jsonrpc: "2.0",
+    method: "textDocument/publishDiagnostics",
+    params,
+  });
+  host.runs.find((run) => run.program === program)?.emit({ kind: "Message", text });
+}
+
+test("switch: off stops a running server at once, clears its problems and logs its exit; it stays found", async () => {
+  const host = new FakeHost(PROJECT);
+  const { setup, servers, shown, calls } = setUpWith({ host, answer: "start" });
+  await setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(FOUND_RUNNING);
+  });
+  publishOne(host, "oxlint");
+  await vi.waitFor(() => {
+    expect(shown).toContainEqual(["oxlint", 1]);
+  });
+
+  await setup.switchServer(OXLINT_KEY, false);
+
+  expect(calls).toEqual([["setServerSwitch", OXLINT_KEY, false]]);
+  expect(states(servers)).toEqual(WITHOUT_OXLINT);
+  await vi.waitFor(() => {
+    expect(servers.log("oxlint").at(-1)?.text).toBe("Exited with code 0");
+  });
+  expect(host.stopped).toEqual(["oxlint"]);
+  expect(shown.at(-1)).toEqual(["oxlint", 0]);
+  expect(setup.foundServers.value.map((spec) => spec.name)).toEqual([
+    "oxfmt",
+    "oxlint",
+    "TypeScript",
+  ]);
+});
+
+test("switch: an off server is never asked about nor started: not by Start, not on focus, not at the next start", async () => {
+  const host = new FakeHost(PROJECT);
+  const { setup, servers, asking, done } = await asked({ host, off: OXLINT_OFF });
+  const question = asking.question.value;
+  expect(question?.kind === "servers" && question.found.map((spec) => spec.name)).toEqual([
+    "oxfmt",
+    "TypeScript",
+  ]);
+
+  asking.answer(true);
+  await done;
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(WITHOUT_OXLINT);
+  });
+  await setup.refocus();
+  const next = setUpWith({ host, answer: "start", off: OXLINT_OFF });
+  await next.setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(next.servers)).toEqual(WITHOUT_OXLINT);
+  });
+
+  expect(states(servers)).toEqual(WITHOUT_OXLINT);
+  expect(host.started()).toEqual(["oxfmt", "oxfmt"]);
+});
+
+test("start: with every found server off and none added there is no question and no server", async () => {
+  const host = new FakeHost(PROJECT);
+  const keys = ["oxfmt (frontend)", "oxlint (frontend)", "TypeScript (frontend)"];
+  const { setup, servers, asking, calls } = setUpWith({ host, off: { [ROOT]: keys } });
+
+  await setup.startUp();
+
+  expect(asking.question.value).toBeNull();
+  expect(servers.views()).toEqual([]);
+  expect(calls).toEqual([]);
+  expect(setup.foundServers.value).toHaveLength(keys.length);
+});
+
+test("switch: on again starts the server only under Start", async () => {
+  const host = new FakeHost(PROJECT);
+  const stopped = setUpWith({ host, answer: "dontStart", off: OXLINT_OFF });
+  await stopped.setup.startUp();
+
+  await stopped.setup.switchServer(OXLINT_KEY, true);
+
+  expect(states(stopped.servers)).toEqual(FOUND_STOPPED);
+  expect(host.started()).toEqual([]);
+
+  const started = setUpWith({ host, answer: "start", off: OXLINT_OFF });
+  await started.setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(started.servers)).toEqual(WITHOUT_OXLINT);
+  });
+
+  await started.setup.switchServer(OXLINT_KEY, true);
+
+  await vi.waitFor(() => {
+    expect(states(started.servers)).toEqual(FOUND_RUNNING);
+  });
+  expect(host.started()).toEqual(["oxfmt", "oxlint"]);
+});
+
+test("switch: a failed write changes nothing", async () => {
+  const host = new FakeHost(PROJECT);
+  const { setup, servers, disk, settings } = setUpWith({ host, answer: "start" });
+  await setup.startUp();
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(FOUND_RUNNING);
+  });
+  disk.writesFail = true;
+
+  await setup.switchServer(OXLINT_KEY, false);
+  await setup.refocus();
+
+  expect(settings.value.languageServers.off).toEqual({});
+  expect(states(servers)).toEqual(FOUND_RUNNING);
+  expect(host.stopped).toEqual([]);
+});
+
+test("switch: a server keeps its switch when a second project brings the suffix", async () => {
+  const host = new FakeHost({ ...PROJECT, "package.json": "{}", "node_modules/.bin/oxlint": "" });
+  const { setup, servers, disk } = setUpWith({ host, answer: "dontStart", off: OXLINT_OFF });
+  await setup.startUp();
+  expect(servers.views().map((view) => view.name)).toEqual(["oxfmt", "TypeScript"]);
+  disk.listed = [FILE, "b.ts"];
+
+  await setup.refocus();
+
+  expect(setup.foundServers.value.map((spec) => spec.name)).toContain("oxlint (frontend)");
+  expect(servers.views().map((view) => view.name)).toEqual([
+    "oxlint (repository root)",
+    "oxfmt",
+    "TypeScript",
+  ]);
+});
+
+test("switch: another repository's switches do not count", async () => {
+  const host = new FakeHost(PROJECT);
+  const { setup, servers } = setUpWith({
+    host,
+    answer: "start",
+    off: { [OTHER_ROOT]: [OXLINT_KEY] },
+  });
+
+  await setup.startUp();
+
+  await vi.waitFor(() => {
+    expect(states(servers)).toEqual(FOUND_RUNNING);
+  });
+});
+
+test("offServers: the keys switched off under this root; none without a root or an entry", () => {
+  const settings: LanguageServerSettings = {
+    repositories: {},
+    off: { [ROOT]: ["a (x)", "b (y)"], [OTHER_ROOT]: ["c (z)"] },
+    added: [],
+  };
+
+  expect([...offServers(settings, ROOT)]).toEqual(["a (x)", "b (y)"]);
+  expect([...offServers(settings, "/third")]).toEqual([]);
+  expect([...offServers(settings, null)]).toEqual([]);
 });
 
 test("the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped", () => {

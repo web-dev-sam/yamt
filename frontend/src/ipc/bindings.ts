@@ -19,11 +19,10 @@ export const commands = {
 	setAntialiasing: (current: StoredSettings, antialiasing: Antialiasing) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_antialiasing", { current, antialiasing })),
 	setKeys: (current: StoredSettings, changes: KeysChange[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_keys", { current, changes })),
 	moveSettings: (current: StoredSettings, path: string) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("move_settings", { current, path })),
-	/**
-	 *  Keyed by the repository root as `servers_context` gives it; a root that is not UTF-8 has no
-	 *  key the window could look up, so nothing is stored for it.
-	 */
+	/**  Keyed by the repository root as `servers_context` gives it. */
 	setServerAnswer: (current: StoredSettings, answer: "start" | "dontStart" | null) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_answer", { current, answer })),
+	/**  Keyed by the repository root as `servers_context` gives it. */
+	setServerSwitch: (current: StoredSettings, server: string, on: boolean) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_switch", { current, server, on })),
 	setAddedServers: (current: StoredSettings, added: AddedServer[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_added_servers", { current, added })),
 	serversContext: () => __TAURI_INVOKE<ServerContext>("servers_context"),
 	startServer: (command: ServerCommand, events: Channel<HostEvent>) => __TAURI_INVOKE<StartReply>("start_server", { command, events }),
@@ -173,6 +172,8 @@ export type KeysChange = {
  */
 export type LanguageServerSettings = {
 	repositories: { [key in string]: RepositoryAnswer },
+	/**  Repository root → the keys of the found servers switched off there (the window's text, opaque here). */
+	off?: { [key in string]: string[] },
 	added: AddedServer[],
 };
 

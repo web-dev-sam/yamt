@@ -1,0 +1,896 @@
+commit 832a9889d9d008cb55057dc7a7cbd7d3c54086bf
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-19 21:02:04 +0200
+
+    feat(ui): one Servers button with a drop-down; pinned servers in the header; ?servers fixture host (issue 3, plan #83)
+    
+    ServerGroup.vue, serverButtons.ts, groupDot; MENU_ITEMS rows and pins; drop-downs close on blur; ServerMenu gives the keyboard back.
+
+diff --git a/.omp/run/notes/ServerGroupHeader.md b/.omp/run/notes/ServerGroupHeader.md
+new file mode 100644
+index 0000000..06b7f33
+--- /dev/null
++++ b/.omp/run/notes/ServerGroupHeader.md
+@@ -0,0 +1,151 @@
++I built the header group, the pins, the `?servers` fixture host and the keyboard and blur rules. All five frontend recipes exit 0. WebKit steps 1–12 and real-app steps 1–6 were run and observed, with two caveats noted below: in WebKit, step 9 was checked with synthetic window events, and the Settings switch showed the wrong tick. Every session I started is stopped, and nothing is committed.
++
++The Settings problem (open_risks 1) belongs to row 5, not this slice. On the `?servers` page, switching a server off works: Settings mutes its row, and the server leaves the header and the list. But the checkbox stays ticked, because the in-memory settings reply arrives before WebKit undoes the cancelled click. The real app was not affected.
++
++```
++summary
++  New ui/ServerGroup.vue: the "Servers" button (groupDot dot, chevron-down, "Language servers", aria-expanded), a
++  teleported menu with a row and a pin per server, and a chosen row's ServerMenu in the list's place.
++  ServerStatus.vue: counts, note, the pinned buttons in view order, then ServerGroup. New ui/serverButtons.ts
++  (DOT_CLASSES moved here); serverText.ts gains groupDot and the group/pin words.
++  menuKeys.ts MENU_ITEMS; useDropdownMenu queries it and closes on window blur; ServerMenu focuses its opener on
++  Escape/Tab. New ipc/fixtureServers.ts; main.ts builds it only with ?servers.
++
++files_changed
++  frontend/src/ui/ServerGroup.vue (new), frontend/src/ui/serverButtons.ts (new), frontend/src/ui/serverButtons.test.ts (new)
++  frontend/src/ui/ServerStatus.vue, ServerMenu.vue, useDropdownMenu.ts, menuKeys.ts, menuKeys.test.ts, serverText.ts,
++  serverText.test.ts, AGENTS.md
++  frontend/src/ipc/fixtureServers.ts (new), frontend/src/ipc/fixtureServers.test.ts (new), frontend/src/ipc/index.ts,
++  frontend/src/ipc/fixtureSettings.ts (only `export` on REPOSITORY, granted by Main), frontend/src/main.ts
++
++tests_added
++  serverText.test.ts
++    - "rule 4: the group's dot is the more urgent of any two kinds, in either order": all 15 pairs over
++      problem > warning > busy > running > stopped, both orders.
++    - "rule 4: no servers read as stopped; one running beside stopped ones reads as running".
++    - "rule 5: the pin's title says what a press does; its name names the server".
++  serverButtons.test.ts
++    - "one button per view, in view order, named by the shown name and keyed by the key".
++    - "a button is pinned when its key is pinned, never by its shown name".
++    - "a button's title is its state line and its dot the state's dot class".
++  menuKeys.test.ts
++    - "rows and pins are one list: Down goes row 1, pin 1, row 2; Up from row 2 to pin 1".
++  fixtureServers.test.ts
++    - "the context is fixture mode's repository".
++    - "findProgram walks .bin from the project up to the root".
++    - "a program in no .bin is not found, and the answer names every folder tried".
++    - "projectFiles answers each path: a file's text, a folder, or missing".
++    - "the package.json lists eslint, so the eslint rule finds its package".
++    - "a start answers SpawnFailed: language servers run only in the app".
++  The blur close in useDropdownMenu has no node test: it is a watch on vueuse useWindowFocus, which needs a window.
++  It is observed in WebKit and the real app below.
++
++smoke_evidence
++  1. Recipes (exit codes read separately)
++     lint=0, typecheck=0, unused=0, fmt=0 ("All matched files use the correct format."), sfc-order exit 0
++     pnpm -C frontend test → "Test Files 116 passed (116)", "Tests 1572 passed (1572)"
++
++  2. WebKit (MiniBrowser, app-session start-fixture q7-fx, 1600x1000, then location.href="/?servers")
++     1. Question: "oxlint, TypeScript, Vue (not installed), eslint (not installed) — the repository root" → Don't start.
++        Visible [aria-haspopup=menu] = [["Language servers","Language servers","Servers"]]; dot "bg-problem-warning".
++     2. Rows: oxlint=Stopped, TypeScript=Stopped, Vue=Not installed, eslint=Not installed.
++        4 pins aria-checked "false", title "Pin to the header". Keyboard on "oxlint"; aria-expanded "true".
++     3. Header: oxlint@1304, TypeScript@1368, "Language servers"@1462. List open.
++        Pins true/true/false/false; titles "Unpin from the header"; pressed bg rgba(119, 76, 213, 0.35).
++        Stored: {"/fixture/repository":["oxlint (repository root)","TypeScript (repository root)"]}
++     4. Escape → {"open":false,"active":"Language servers","expanded":"false"}
++     5. Pinned oxlint → menu "oxlint" [Start, Show log], keyboard on Start → Show log → "oxlint log / Nothing logged
++        yet." → Back → file list shown.
++     6. Unpin TypeScript → header ["oxlint","Language servers"], list still open.
++     7. Reload → Don't start → header ["oxlint","Language servers"]; stored {"/fixture/repository":["oxlint (repository root)"]}
++     8. Keyboard, focus on the group button:
++        - Enter → menuitem:oxlint
++        - Down → menuitemcheckbox:Pin oxlint
++        - Down, Down → Pin TypeScript
++        - Space → aria-checked true, list open
++        - Up → menuitem:TypeScript
++        - Enter → "menuitem:Start | TypeScript | false | true" (ServerMenu has the keyboard, list closed, group expanded)
++        - Escape → active "Language servers", expanded "false"
++        Pinned button: Escape in its menu → active "oxlint".
++     9. `focus-away` refuses fixture sessions ("needs the private display of a start-app session").
++        This MiniBrowser's document.hasFocus() is false, so synthetic window focus then blur → list closed, active
++        "Language servers". The real focus-away is in 3 below.
++     10. Start from oxlint's menu → title "Could not start: language servers run only in the app"; dot "bg-problem-error".
++     11. Settings, Found:
++         - 4 switches: oxlint/TypeScript/Vue/eslint all true.
++         - TypeScript off → header ["oxlint","Language servers"]; list [oxlint, Vue, eslint].
++         - On again → header ["oxlint","TypeScript","Language servers"]; pins stored unchanged.
++         - All four off → 0 group buttons, all rows muted; screenshot /tmp/yamt-q7/webkit-all-off.png shows no status area.
++     Also checked:
++       - A group click while eslint's row menu is open → ServerMenu false, list false, expanded false.
++       - Without ?servers ("/"): no dialog, 0 group buttons.
++     12. Screenshots: /tmp/yamt-q7/webkit-dark-pins-list.png, /tmp/yamt-q7/webkit-light-pins-list.png
++
++  3. Real app (cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt";
++     scripts/lsp-repo.sh --servers /tmp/yamt-q7/lsp; --home /tmp/yamt-q7/home on every start)
++     q-a:
++       - Start → header ["Language servers"], status ["1 error, 0 warnings"].
++       - List: Biome=Running, clangd, gopls, Phpactor, ruff, ty, basedpyright, rust-analyzer, oxfmt, oxlint,
++         TypeScript (=Stopped).
++       - Pin Biome and oxlint → "Biome:Running ; oxlint:Stopped ; Language servers"; Escape → keyboard on the group.
++       - Biome menu: Stop → Stopped, pgrep empty; Start → Running, pgrep "…biome lsp-proxy".
++         Show log → "Starting biome lsp-proxy … Exited with code 0 … Starting biome lsp-proxy".
++       - Unpinned Biome, pinned ruff. Opened py/api/stats.py: counts "2 errors, 1 warning";
++         pgrep "/tmp/yamt-q7/lsp/py/.venv/bin/ruff server".
++       - Settings, click ruff --role switch → "ruff=false"; pgrep none.
++         Header "oxlint:Stopped ; Language servers"; counts "2 errors, 0 warnings"; list without ruff.
++       - focus-away with the list open → closed, hasFocus false; focus-back → active "Language servers".
++       - Screenshot /tmp/yamt-q7/app-dark-pins-list.png.
++     q-b (restart, same repo and home):
++       - "no question"; header "oxlint:Stopped ; Language servers"; pins {"…/lsp":["oxlint (web)","ruff (py)"]}.
++       - py file opened, 12 s → "pgrep after 12 s: none"; ty and basedpyright running.
++       - ruff on → pgrep "…ruff server"; header "ruff:Running ; oxlint:Stopped ; …" (pin back).
++       - Off then on in this run → log "Starting ruff server in py / Exited with code 0 / Starting ruff server in py".
++       - oxfmt switched off; file shows "off": {"/tmp/yamt-q7/lsp": ["oxfmt (web)"]}.
++     Suffix:
++       - git merge --abort, web/ copied to web2/ on local and remote, merged again → 12 conflicted files.
++       - q-d: no question; header "ruff ; oxlint (web) ; Language servers".
++       - List: … ruff (pinned), …, oxlint (web) (pinned), TypeScript (web), oxfmt (web2), oxlint (web2), TypeScript (web2).
++       - Switches: oxfmt (web)=false, all others true.
++       - Light screenshot /tmp/yamt-q7/app-light-pins-list.png.
++     q-c (conflict-repo /tmp/yamt-q7/plain, two hand-added servers in --settings):
++       - Question "oxlint, taplo — added by you" → Start.
++       - Pin oxlint → deleted-side view (docs/removed.md): ["oxlint@1400,11","Language servers@1463,11"].
++       - Choice view (assets/logo.bin): same two buttons; list "oxlint=Stopped, taplo=Stopped".
++       - Row taplo → menu "taplo / Stopped / Start / Show log"; Escape → active "Language servers".
++       - Screenshots: app-dark-deleted-side.png, app-dark-choice.png, app-light-choice.png, app-light-deleted-side.png (in /tmp/yamt-q7).
++
++  4. Stopped: q7-fx (webdriver, vite), q-a, q-b, q-d, q-c (each "session":"ended").
++     pgrep for tauri-driver, Xvfb :2, target/debug/yamt, MiniBrowser → "no sessions left".
++
++deviations_from_brief
++  - frontend/src/ipc/fixtureSettings.ts: `export` added on REPOSITORY (line 16) so fixtureServers.ts imports it; Main granted this.
++  - The fixture tree also holds node_modules/vue/package.json. Without it Vue is never found, and design step 1 expects
++    "Vue (not installed)".
++  - The fixture host's `send` and `stop` do nothing: `start` never gives a RunId, so no run can reach them.
++  - ServerGroup rows also carry aria-label = name and aria-description = state line, like the pinned buttons. Without
++    them app-session (and its name order) named a row by its title ("Stopped").
++  - The ServerMenu's first-item focus and item query use MENU_ITEMS too. It has only menuitems, so this is the same behaviour.
++  - WebKit used `app-session start-fixture` (its own dev server and webdriver on free ports), not ports 5277/4447;
++    ?servers was opened with location.href.
++  - VU15, one line for the new component: ServerGroup.vue owns one popup group (button, list, a row's ServerMenu),
++    which keeps ServerStatus small (design §8).
++  - ui/AGENTS.md: row 6's lines (ResizeDots, dividers, FileList handle) plus PaneDivider.vue added, with my own paragraph.
++  - Needed outside my files (orchestrator): project map / map-check must name ui/ServerGroup.vue, ui/serverButtons.ts
++    and ipc/fixtureServers.ts; architecture and CHANGELOG are not updated.
++  - .omp/run/slices.json (modified) and .omp/run/patches/PaneHandlesR1.patch (untracked) were already in the tree; I did not touch them.
++
++open_risks
++  - frontend/src/ui/LanguageServerSettings.vue (row 5, not mine): in fixture mode a switch click leaves the native
++    checkbox ticked although the server is off (row muted, server gone from header and list).
++    [INFERENCE] The in-memory reply resolves before WebKit restores the cancelled click. In the real app the IPC reply
++    is slower and the switch shows correctly ("ruff=false").
++  - frontend/src/ui/ServerGroup.vue:44-52: the list's anchor is taken at click time. A pin added while the list is open
++    moves the group button left, and the list stays where it opened.
++  - frontend/src/ui/useDropdownMenu.ts:107: vueuse useWindowFocus starts from document.hasFocus(). A window that never
++    had focus (this MiniBrowser) sees no change on blur. In the real app the close was observed.
++  - frontend/src/ui/ServerStatus.vue: if a pinned server's menu is open and that server is unpinned, the menu keeps a
++    detached opener until it closes. Not seen in use.
++```
++
++Still to run on your side: `just check` (including map-check once the three files are in the project map) and `just mutants` on `ui/serverButtons.ts`, `ui/serverText.ts`, `ui/useDropdownMenu.ts`, `ui/menuKeys.ts` and `ipc/fixtureServers.ts`.
+\ No newline at end of file
+diff --git a/frontend/src/ipc/fixtureServers.test.ts b/frontend/src/ipc/fixtureServers.test.ts
+new file mode 100644
+index 0000000..8b613c3
+--- /dev/null
++++ b/frontend/src/ipc/fixtureServers.test.ts
+@@ -0,0 +1,88 @@
++import { expect, test } from "vitest";
++
++import { createFixtureServerHost, ONLY_IN_THE_APP } from "./fixtureServers";
++import { REPOSITORY } from "./fixtureSettings";
++
++const NODE = { project: ["node_modules/.bin"], home: [] };
++
++test("the context is fixture mode's repository", async () => {
++  expect((await createFixtureServerHost().context()).root).toBe(REPOSITORY);
++});
++
++test("findProgram walks .bin from the project up to the root", async () => {
++  const host = createFixtureServerHost();
++  expect(await host.findProgram("oxlint", "", NODE)).toEqual({
++    kind: "Found",
++    path: `${REPOSITORY}/node_modules/.bin/oxlint`,
++    place: "Project",
++  });
++  expect(await host.findProgram("typescript-language-server", "web/app", NODE)).toEqual({
++    kind: "Found",
++    path: `${REPOSITORY}/node_modules/.bin/typescript-language-server`,
++    place: "Project",
++  });
++});
++
++test("a program in no .bin is not found, and the answer names every folder tried", async () => {
++  const host = createFixtureServerHost();
++  expect(await host.findProgram("tsgo", "web", NODE)).toEqual({
++    kind: "NotFound",
++    searched: [`${REPOSITORY}/web/node_modules/.bin`, `${REPOSITORY}/node_modules/.bin`],
++  });
++  expect(await host.findProgram("oxlint", "", { project: [], home: [] })).toEqual({
++    kind: "NotFound",
++    searched: [],
++  });
++});
++
++test("projectFiles answers each path: a file's text, a folder, or missing", async () => {
++  const answers = await createFixtureServerHost().projectFiles([
++    "node_modules/typescript/package.json",
++    "node_modules",
++    "node_modules/.bin",
++    "",
++    "tsconfig.json",
++    "eslint.config.js",
++    "node_modules/vue/package.json",
++    "node_modules/@vue/typescript-plugin/package.json",
++    "node_modules/typ",
++    "jsconfig.json",
++  ]);
++  const [typescript, ...rest] = answers;
++  expect(typescript?.kind === "Text" && JSON.parse(typescript.text)).toEqual({
++    name: "typescript",
++    version: "5.9.3",
++  });
++  expect(rest.map((answer) => answer.kind)).toEqual([
++    "Folder",
++    "Folder",
++    "Folder",
++    "Text",
++    "Text",
++    "Text",
++    "Missing",
++    "Missing",
++    "Missing",
++  ]);
++});
++
++test("the package.json lists eslint, so the eslint rule finds its package", async () => {
++  const [manifest, eslint] = await createFixtureServerHost().projectFiles([
++    "package.json",
++    "node_modules/eslint/package.json",
++  ]);
++  expect(manifest?.kind === "Text" && JSON.parse(manifest.text).devDependencies).toHaveProperty(
++    "eslint",
++  );
++  expect(eslint?.kind).toBe("Text");
++});
++
++test("a start answers SpawnFailed: language servers run only in the app", async () => {
++  const command = { program: "oxlint", args: ["--lsp"], project: "", folders: NODE };
++  expect(await createFixtureServerHost().start(command, () => undefined)).toEqual({
++    kind: "SpawnFailed",
++    program: "oxlint",
++    message: ONLY_IN_THE_APP,
++  });
++  expect(ONLY_IN_THE_APP).toBe("language servers run only in the app");
++});
+diff --git a/frontend/src/ipc/fixtureServers.ts b/frontend/src/ipc/fixtureServers.ts
+new file mode 100644
+index 0000000..a2eb846
+--- /dev/null
++++ b/frontend/src/ipc/fixtureServers.ts
+@@ -0,0 +1,66 @@
++import type { ProgramFolders, ProgramFound, ProjectFile, StartReply } from "./domain";
++import { REPOSITORY } from "./fixtureSettings";
++import type { ServerHost } from "./ServerHost";
++
++export const ONLY_IN_THE_APP = "language servers run only in the app";
++
++const PROCESS_ID = 1;
++
++const TREE: Readonly<Record<string, string>> = {
++  "package.json": JSON.stringify({
++    name: "fixture",
++    private: true,
++    devDependencies: { eslint: "9.39.1", oxlint: "1.87.0", typescript: "5.9.3", vue: "3.5.43" },
++  }),
++  "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
++  "eslint.config.js": "export default [];\n",
++  "node_modules/eslint/package.json": JSON.stringify({ name: "eslint", version: "9.39.1" }),
++  "node_modules/typescript/package.json": JSON.stringify({ name: "typescript", version: "5.9.3" }),
++  "node_modules/vue/package.json": JSON.stringify({ name: "vue", version: "3.5.43" }),
++  "node_modules/.bin/oxlint": "",
++  "node_modules/.bin/typescript-language-server": "",
++};
++
++function joined(folder: string, name: string): string {
++  return folder === "" ? name : `${folder}/${name}`;
++}
++
++function foldersUp(folder: string): readonly string[] {
++  return folder === ""
++    ? [""]
++    : [folder, ...foldersUp(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)))];
++}
++
++function projectFile(path: string): ProjectFile {
++  const text = TREE[path];
++  if (text !== undefined) {
++    return { kind: "Text", text };
++  }
++  const isFolder = path === "" || Object.keys(TREE).some((file) => file.startsWith(`${path}/`));
++  return isFolder ? { kind: "Folder" } : { kind: "Missing" };
++}
++
++function findProgram(program: string, project: string, folders: ProgramFolders): ProgramFound {
++  const places = foldersUp(project).flatMap((at) =>
++    folders.project.map((entry) => joined(at, entry)),
++  );
++  const found = places.find((place) => TREE[joined(place, program)] !== undefined);
++  return found === undefined
++    ? { kind: "NotFound", searched: places.map((place) => `${REPOSITORY}/${place}`) }
++    : { kind: "Found", path: `${REPOSITORY}/${joined(found, program)}`, place: "Project" };
++}
++
++export function createFixtureServerHost(): ServerHost {
++  return {
++    context: async () => ({ root: REPOSITORY, process_id: PROCESS_ID }),
++    start: async ({ program }): Promise<StartReply> => ({
++      kind: "SpawnFailed",
++      program,
++      message: ONLY_IN_THE_APP,
++    }),
++    send: () => undefined,
++    stop: async () => undefined,
++    findProgram: async (program, project, folders) => findProgram(program, project, folders),
++    projectFiles: async (paths) => paths.map(projectFile),
++  };
++}
+diff --git a/frontend/src/ipc/fixtureSettings.ts b/frontend/src/ipc/fixtureSettings.ts
+index 22ef8a4..1a40301 100644
+--- a/frontend/src/ipc/fixtureSettings.ts
++++ b/frontend/src/ipc/fixtureSettings.ts
+@@ -13,7 +13,7 @@ type Files = { readonly stored: Map<string, StoredSettings>; inUse: string };
+ const DEFAULT_PATH = "/fixture/settings.json";
+ const HOME = "/fixture/home/";
+ const HOME_PREFIX = "~/";
+-const REPOSITORY = "/fixture/repository";
++export const REPOSITORY = "/fixture/repository";
+ 
+ function copiedServers(added: readonly AddedServer[]): AddedServer[] {
+   return added.map(({ command, fileTypes }) => ({
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index c8f478f..6266419 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -38,6 +38,7 @@ export type {
+   WriteReply,
+ } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
++export { createFixtureServerHost } from "./fixtureServers";
+ export {
+   bindingsOf,
+   DEFAULT_KEYS,
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 0db8a53..e34d6c1 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -1,6 +1,13 @@
+ import { createApp } from "vue";
+ 
+-import { createFixtureSource, createTauriServerHost, createTauriSource, log } from "./ipc";
++import {
++  createFixtureServerHost,
++  createFixtureSource,
++  createTauriServerHost,
++  createTauriSource,
++  log,
++  type ServerHost,
++} from "./ipc";
+ import { LanguageServers } from "./lsp";
+ import App from "./ui/App.vue";
+ import { createAppStore } from "./ui/store";
+@@ -8,8 +15,18 @@ import { createAppStore } from "./ui/store";
+ import "./style.css";
+ 
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++
++function serverHost(): ServerHost | null {
++  if (IN_APP) {
++    return createTauriServerHost();
++  }
++  return new URLSearchParams(window.location.search).has("servers")
++    ? createFixtureServerHost()
++    : null;
++}
++
+ const source = IN_APP ? createTauriSource() : createFixtureSource(log);
+-const host = IN_APP ? createTauriServerHost() : null;
++const host = serverHost();
+ const servers = new LanguageServers(host);
+ const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
+ const store = createAppStore(source, startTheme, servers, host);
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index d2da1fb..560c275 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -4,6 +4,10 @@ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageSer
+ 
+ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. Fixture mode (no host) only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+ 
++Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and the format note, then the pinned servers' buttons (`serverButtons.ts`: one `ServerButton` per view in view order, `pinned` by `ServerKey` from `pinnedServers`, `DOT_CLASSES`), then `ServerGroup.vue`: the "Servers" button (dot = `groupDot` over every view's `dotKind`), its teleported list (`useDropdownMenu`, placed by `menuPosition`; per server a `menuitem` row and a `menuitemcheckbox` pin calling `togglePin(key)`), and a chosen row's `ServerMenu` in the list's place with the group button as opener; a click on the group button while that menu is open only closes it. Menus step over `MENU_ITEMS` (`menuKeys.ts`); every `useDropdownMenu` drop-down also closes on window blur; `ServerMenu` gives the keyboard back to its opener on Escape/Tab. Fixture mode builds a server host only with `?servers` (`ipc/fixtureServers.ts`, `main.ts`): four servers that never start.
++
++Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box; `FileList`'s handle uses `useColumnDrag` and `FILE_LIST_BOUNDS`, its dots centred as an absolute box (flex-centred dots there cost WebKitGTK scroll frames).
++
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
+ 
+ Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `AbortState` is `noMerge` / `ready` / `running`; `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path. The button is the toolbar's first icon button (#58): `toolbarButtons.ts` `listedButtons` leaves it out of the menu and the toolbar while git has `noMerge`; whether the user hid it is a separate fact, `hiddenButtons`, which starts it hidden.
+diff --git a/frontend/src/ui/ServerGroup.vue b/frontend/src/ui/ServerGroup.vue
+new file mode 100644
+index 0000000..4274167
+--- /dev/null
++++ b/frontend/src/ui/ServerGroup.vue
+@@ -0,0 +1,127 @@
++<script setup lang="ts">
++import { useElementSize, useWindowSize } from "@vueuse/core";
++import { computed, shallowRef, useTemplateRef } from "vue";
++import ChevronDown from "~icons/lucide/chevron-down";
++import Pin from "~icons/lucide/pin";
++
++import { menuPosition, type Point } from "./menuPosition";
++import { DOT_CLASSES, type ServerButton } from "./serverButtons";
++import ServerMenu from "./ServerMenu.vue";
++import { LANGUAGE_SERVERS, pinLabel, pinTitle, SERVERS, type DotKind } from "./serverText";
++import { useAppStore } from "./store";
++import { useDropdownMenu } from "./useDropdownMenu";
++
++type RowMenu = { readonly name: string; readonly at: Point; readonly opener: HTMLElement };
++
++defineProps<{ buttons: readonly ServerButton[]; dot: DotKind }>();
++
++const { togglePin } = useAppStore();
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const list = useTemplateRef<HTMLUListElement>("list");
++const size = useElementSize(list, undefined, { box: "border-box" });
++const viewport = useWindowSize();
++const at = shallowRef<Point>({ x: 0, y: 0 });
++const rowMenu = shallowRef<RowMenu | null>(null);
++const { openFor, toggle, close, menuKey } = useDropdownMenu<"servers">({
++  menu: () => list.value,
++  opener: () => opener.value,
++});
++
++const expanded = computed(() => openFor.value !== null || rowMenu.value !== null);
++const placement = computed(() => {
++  const { x, y } = menuPosition({
++    pointer: at.value,
++    menu: { width: size.width.value, height: size.height.value },
++    viewport: { width: viewport.width.value, height: viewport.height.value },
++  });
++  return { left: `${x}px`, top: `${y}px` };
++});
++
++async function groupClicked(): Promise<void> {
++  if (rowMenu.value !== null) {
++    rowMenu.value = null;
++    return;
++  }
++  const box = opener.value?.getBoundingClientRect();
++  if (box !== undefined) {
++    at.value = { x: box.left, y: box.bottom };
++  }
++  await toggle("servers");
++}
++
++async function chooseRow(name: string): Promise<void> {
++  await close();
++  if (opener.value !== null) {
++    rowMenu.value = { name, at: at.value, opener: opener.value };
++  }
++}
++
++function closeRowMenu(): void {
++  rowMenu.value = null;
++}
++</script>
++
++<template>
++  <button
++    ref="opener"
++    type="button"
++    :title="LANGUAGE_SERVERS"
++    :aria-label="LANGUAGE_SERVERS"
++    aria-haspopup="menu"
++    :aria-expanded="expanded"
++    class="flex items-center gap-1.5 rounded px-1.5 py-1 hover:bg-hover aria-expanded:bg-row-selected"
++    @click="groupClicked"
++  >
++    <span class="size-2 shrink-0 rounded-full" :class="DOT_CLASSES[dot]" aria-hidden="true" />
++    {{ SERVERS }}
++    <ChevronDown class="size-4" aria-hidden="true" />
++  </button>
++  <Teleport to="body">
++    <ul
++      v-if="openFor !== null"
++      ref="list"
++      role="menu"
++      :aria-label="LANGUAGE_SERVERS"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg"
++      :style="placement"
++      @keydown="menuKey"
++      @contextmenu.prevent
++    >
++      <li v-for="button in buttons" :key="button.key" role="none" class="flex gap-1">
++        <button
++          type="button"
++          role="menuitem"
++          tabindex="-1"
++          aria-haspopup="menu"
++          :title="button.title"
++          :aria-label="button.name"
++          :aria-description="button.title"
++          class="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected"
++          @click="chooseRow(button.name)"
++        >
++          <span class="size-2 shrink-0 rounded-full" :class="button.dot" aria-hidden="true" />
++          <span class="truncate">{{ button.name }}</span>
++        </button>
++        <button
++          type="button"
++          role="menuitemcheckbox"
++          tabindex="-1"
++          :aria-checked="button.pinned"
++          :aria-label="pinLabel(button.name)"
++          :title="pinTitle(button.pinned)"
++          class="rounded p-1 text-fg-muted outline-none hover:bg-hover focus:ring-1 focus:ring-primary aria-checked:bg-row-selected aria-checked:text-fg"
++          @click="togglePin(button.key)"
++        >
++          <Pin class="size-4" aria-hidden="true" />
++        </button>
++      </li>
++    </ul>
++  </Teleport>
++  <ServerMenu
++    v-if="rowMenu !== null"
++    :name="rowMenu.name"
++    :at="rowMenu.at"
++    :opener="rowMenu.opener"
++    @close="closeRowMenu"
++  />
++</template>
+diff --git a/frontend/src/ui/ServerMenu.vue b/frontend/src/ui/ServerMenu.vue
+index dfde7f6..c189808 100644
+--- a/frontend/src/ui/ServerMenu.vue
++++ b/frontend/src/ui/ServerMenu.vue
+@@ -3,7 +3,7 @@ import { useElementSize, useEventListener, useWindowFocus, useWindowSize } from
+ import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ 
+ import { failureHelp, installText } from "./installText";
+-import { stepMenuItem } from "./menuKeys";
++import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+ import { menuPosition, type Point } from "./menuPosition";
+ import {
+   ACTION_LABELS,
+@@ -62,11 +62,11 @@ watch(view, (now) => {
+ });
+ 
+ onMounted(() => {
+-  panel.value?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++  panel.value?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+ });
+ 
+ function menuItems(): HTMLElement[] {
+-  return [...(panel.value?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  return [...(panel.value?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
+ }
+ 
+ function keyPressed(event: KeyboardEvent): void {
+@@ -79,6 +79,7 @@ function keyPressed(event: KeyboardEvent): void {
+     case "close":
+       event.preventDefault();
+       event.stopPropagation();
++      props.opener.focus();
+       emit("close");
+       return;
+     case "focus":
+diff --git a/frontend/src/ui/ServerStatus.vue b/frontend/src/ui/ServerStatus.vue
+index c209d39..8f6b253 100644
+--- a/frontend/src/ui/ServerStatus.vue
++++ b/frontend/src/ui/ServerStatus.vue
+@@ -4,9 +4,11 @@ import CircleX from "~icons/lucide/circle-x";
+ import TriangleAlert from "~icons/lucide/triangle-alert";
+ 
+ import type { Point } from "./menuPosition";
++import { serverButtons } from "./serverButtons";
++import ServerGroup from "./ServerGroup.vue";
+ import ServerMenu from "./ServerMenu.vue";
+ import { menuAfterClick } from "./serverMenuToggle";
+-import { dotKind, formatNote, problemsTitle, stateLine, type DotKind } from "./serverText";
++import { dotKind, formatNote, groupDot, problemsTitle } from "./serverText";
+ import { useAppStore } from "./store";
+ import type { ProblemCounts } from "./useMergeController";
+ 
+@@ -17,24 +19,12 @@ const props = defineProps<{
+   problems: ProblemCounts | null;
+ }>();
+ 
+-const DOT_CLASSES: Readonly<Record<DotKind, string>> = {
+-  running: "bg-success-signal",
+-  busy: "bg-fg-muted",
+-  stopped: "border border-fg-muted",
+-  problem: "bg-problem-error",
+-  warning: "bg-problem-warning",
+-};
+-
+-const { serverViews, serving, formatOutcomes } = useAppStore();
++const { serverViews, serving, formatOutcomes, pinnedServers } = useAppStore();
+ const menu = shallowRef<OpenMenu | null>(null);
+ 
+-const buttons = computed(() =>
+-  serverViews.value.map((view) => ({
+-    name: view.name,
+-    title: stateLine(view.state),
+-    dot: DOT_CLASSES[dotKind(view.state)],
+-  })),
+-);
++const buttons = computed(() => serverButtons(serverViews.value, pinnedServers.value));
++const pinned = computed(() => buttons.value.filter((button) => button.pinned));
++const dot = computed(() => groupDot(serverViews.value.map((view) => dotKind(view.state))));
+ const counts = computed(() =>
+   props.path === null || props.problems === null || !serving(props.path) ? null : props.problems,
+ );
+@@ -79,8 +69,8 @@ function closeMenu(): void {
+         {{ counts.warnings }}
+       </span>
+       <button
+-        v-for="button in buttons"
+-        :key="button.name"
++        v-for="button in pinned"
++        :key="button.key"
+         type="button"
+         :title="button.title"
+         :aria-label="button.name"
+@@ -93,6 +83,7 @@ function closeMenu(): void {
+         <span class="size-2 shrink-0 rounded-full" :class="button.dot" aria-hidden="true" />
+         {{ button.name }}
+       </button>
++      <ServerGroup :buttons="buttons" :dot="dot" />
+       <ServerMenu
+         v-if="menu !== null"
+         :name="menu.name"
+diff --git a/frontend/src/ui/menuKeys.test.ts b/frontend/src/ui/menuKeys.test.ts
+index 6e4ca11..9d5deda 100644
+--- a/frontend/src/ui/menuKeys.test.ts
++++ b/frontend/src/ui/menuKeys.test.ts
+@@ -29,6 +29,22 @@ test("Down on the last item wraps to the first, Up on the first to the last", ()
+   });
+ });
+ 
++test("rows and pins are one list: Down goes row 1, pin 1, row 2; Up from row 2 to pin 1", () => {
++  const rowsAndPins = { count: 4 };
++  expect(stepMenuItem({ ...rowsAndPins, focused: 0 }, { key: "ArrowDown" })).toEqual({
++    kind: "focus",
++    index: 1,
++  });
++  expect(stepMenuItem({ ...rowsAndPins, focused: 1 }, { key: "ArrowDown" })).toEqual({
++    kind: "focus",
++    index: 2,
++  });
++  expect(stepMenuItem({ ...rowsAndPins, focused: 2 }, { key: "ArrowUp" })).toEqual({
++    kind: "focus",
++    index: 1,
++  });
++});
++
+ test("other keys, and arrows in an empty menu, are left alone", () => {
+   expect(stepMenuItem({ count: 3, focused: 0 }, { key: "Enter" })).toEqual({ kind: "ignore" });
+   expect(stepMenuItem({ count: 0, focused: -1 }, { key: "ArrowDown" })).toEqual({
+diff --git a/frontend/src/ui/menuKeys.ts b/frontend/src/ui/menuKeys.ts
+index c64e249..ef0228e 100644
+--- a/frontend/src/ui/menuKeys.ts
++++ b/frontend/src/ui/menuKeys.ts
+@@ -1,3 +1,5 @@
++export const MENU_ITEMS = "[role=menuitem], [role=menuitemcheckbox]";
++
+ export const ARROW_STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
+ 
+ type MenuStep =
+diff --git a/frontend/src/ui/serverButtons.test.ts b/frontend/src/ui/serverButtons.test.ts
+new file mode 100644
+index 0000000..cd3df11
+--- /dev/null
++++ b/frontend/src/ui/serverButtons.test.ts
+@@ -0,0 +1,46 @@
++import { expect, test } from "vitest";
++
++import { serverKey, type ServerState, type ServerView } from "../lsp";
++import { DOT_CLASSES, serverButtons } from "./serverButtons";
++import { stateLine } from "./serverText";
++
++function view(name: string, key: string, state: ServerState): ServerView {
++  return {
++    key: serverKey(key),
++    name,
++    project: "",
++    state,
++    help: null,
++    notes: [],
++  };
++}
++
++const VIEWS = [
++  view("oxlint", "oxlint (repository root)", { kind: "running" }),
++  view("TypeScript", "TypeScript (repository root)", { kind: "stopped" }),
++  view("eslint", "eslint (repository root)", { kind: "crashed", code: 3 }),
++];
++
++test("one button per view, in view order, named by the shown name and keyed by the key", () => {
++  const buttons = serverButtons(VIEWS, new Set());
++  expect(buttons.map(({ name, key }) => [name, key])).toEqual([
++    ["oxlint", "oxlint (repository root)"],
++    ["TypeScript", "TypeScript (repository root)"],
++    ["eslint", "eslint (repository root)"],
++  ]);
++});
++
++test("a button is pinned when its key is pinned, never by its shown name", () => {
++  const buttons = serverButtons(VIEWS, new Set(["eslint (repository root)", "TypeScript"]));
++  expect(buttons.map(({ pinned }) => pinned)).toEqual([false, false, true]);
++});
++
++test("a button's title is its state line and its dot the state's dot class", () => {
++  const buttons = serverButtons(VIEWS, new Set());
++  expect(buttons.map(({ title }) => title)).toEqual(VIEWS.map((each) => stateLine(each.state)));
++  expect(buttons.map(({ dot }) => dot)).toEqual([
++    DOT_CLASSES.running,
++    DOT_CLASSES.stopped,
++    DOT_CLASSES.problem,
++  ]);
++});
+diff --git a/frontend/src/ui/serverButtons.ts b/frontend/src/ui/serverButtons.ts
+new file mode 100644
+index 0000000..c39c7b4
+--- /dev/null
++++ b/frontend/src/ui/serverButtons.ts
+@@ -0,0 +1,31 @@
++import type { ServerKey, ServerView } from "../lsp";
++import { dotKind, stateLine, type DotKind } from "./serverText";
++
++export type ServerButton = {
++  readonly key: ServerKey;
++  readonly name: string;
++  readonly title: string;
++  readonly dot: string;
++  readonly pinned: boolean;
++};
++
++export const DOT_CLASSES: Readonly<Record<DotKind, string>> = {
++  running: "bg-success-signal",
++  busy: "bg-fg-muted",
++  stopped: "border border-fg-muted",
++  problem: "bg-problem-error",
++  warning: "bg-problem-warning",
++};
++
++export function serverButtons(
++  views: readonly ServerView[],
++  pinned: ReadonlySet<string>,
++): readonly ServerButton[] {
++  return views.map((view) => ({
++    key: view.key,
++    name: view.name,
++    title: stateLine(view.state),
++    dot: DOT_CLASSES[dotKind(view.state)],
++    pinned: pinned.has(view.key),
++  }));
++}
+diff --git a/frontend/src/ui/serverText.test.ts b/frontend/src/ui/serverText.test.ts
+index a0623d3..96d2ad6 100644
+--- a/frontend/src/ui/serverText.test.ts
++++ b/frontend/src/ui/serverText.test.ts
+@@ -4,13 +4,17 @@ import { serverKey, type InstallHint, type ServerSpec, type ServerState } from "
+ import {
+   dotKind,
+   formatNote,
++  groupDot,
+   logTime,
+   noteLine,
++  pinLabel,
++  pinTitle,
+   problemsTitle,
+   projectLabel,
+   serverActions,
+   serverLabel,
+   stateLine,
++  type DotKind,
+ } from "./serverText";
+ 
+ type Row = { readonly state: ServerState; readonly line: string; readonly dot: string };
+@@ -159,3 +163,26 @@ test("rule 5: a log line's time is HH:MM:SS", () => {
+   expect(logTime(new Date(2026, 9, 14, 9, 5, 7).getTime())).toBe("09:05:07");
+   expect(logTime(new Date(2026, 9, 14, 23, 59, 0).getTime())).toBe("23:59:00");
+ });
++
++const URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running", "stopped"];
++
++test("rule 4: the group's dot is the more urgent of any two kinds, in either order", () => {
++  for (const [rank, first] of URGENCY.entries()) {
++    for (const second of URGENCY.slice(rank)) {
++      expect(groupDot([first, second]), `${first} beside ${second}`).toBe(first);
++      expect(groupDot([second, first]), `${second} beside ${first}`).toBe(first);
++    }
++  }
++});
++
++test("rule 4: no servers read as stopped; one running beside stopped ones reads as running", () => {
++  expect(groupDot([])).toBe("stopped");
++  expect(groupDot(["stopped", "stopped"])).toBe("stopped");
++  expect(groupDot(["stopped", "running", "stopped"])).toBe("running");
++});
++
++test("rule 5: the pin's title says what a press does; its name names the server", () => {
++  expect(pinTitle(false)).toBe("Pin to the header");
++  expect(pinTitle(true)).toBe("Unpin from the header");
++  expect(pinLabel("oxlint (web)")).toBe("Pin oxlint (web) to the header");
++});
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index c8730f1..5af76e0 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -27,6 +27,18 @@ export const FROM_THE_LIST = "From the list";
+ 
+ export const FROM_THE_LIST_HINT = `"${FROM_THE_LIST}" fills both fields with a known server.`;
+ 
++export const LANGUAGE_SERVERS = "Language servers";
++
++export const SERVERS = "Servers";
++
++export function pinTitle(pinned: boolean): string {
++  return pinned ? "Unpin from the header" : "Pin to the header";
++}
++
++export function pinLabel(name: string): string {
++  return `Pin ${name} to the header`;
++}
++
+ export function projectLabel(folder: string): string {
+   return folder === "" ? "the repository root" : `${folder}/`;
+ }
+@@ -103,6 +115,12 @@ export function dotKind(state: ServerState): DotKind {
+   }
+ }
+ 
++const GROUP_URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running"];
++
++export function groupDot(kinds: readonly DotKind[]): DotKind {
++  return GROUP_URGENCY.find((kind) => kinds.includes(kind)) ?? "stopped";
++}
++
+ export function serverActions(state: ServerState): readonly ServerAction[] {
+   switch (state.kind) {
+     case "stopped":
+diff --git a/frontend/src/ui/useDropdownMenu.ts b/frontend/src/ui/useDropdownMenu.ts
+index 7cdaad0..024b612 100644
+--- a/frontend/src/ui/useDropdownMenu.ts
++++ b/frontend/src/ui/useDropdownMenu.ts
+@@ -1,7 +1,7 @@
+-import { onClickOutside } from "@vueuse/core";
+-import { nextTick, shallowRef, type ShallowRef } from "vue";
++import { onClickOutside, useWindowFocus } from "@vueuse/core";
++import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
+ 
+-import { stepMenuItem } from "./menuKeys";
++import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+ 
+ type DropdownParts<T> = {
+   readonly menu: () => HTMLElement | null;
+@@ -62,11 +62,11 @@ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+   }
+   dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+   await nextTick();
+-  opened.querySelector<HTMLElement>("[role=menuitem]")?.focus();
++  opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+ }
+ 
+ function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
+-  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
++  const items = [...(dropdown.menu()?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
+   const step = stepMenuItem(
+     { count: items.length, focused: items.findIndex((item) => item === event.target) },
+     event,
+@@ -104,6 +104,11 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+       },
+     },
+   );
++  watch(useWindowFocus(), (focused) => {
++    if (!focused) {
++      void close(dropdown);
++    }
++  });
+   return {
+     openFor: dropdown.openFor,
+     above: dropdown.above,

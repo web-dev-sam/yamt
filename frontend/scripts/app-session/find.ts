@@ -15,6 +15,7 @@ export type Candidate = {
   readonly role: string;
   readonly ariaLabel: string;
   readonly title: string;
+  readonly label: string;
   readonly text: string;
   readonly width: number;
   readonly height: number;
@@ -95,6 +96,7 @@ for (const element of document.querySelectorAll(arguments[0])) {
     role: element.getAttribute("role") ?? "",
     ariaLabel: element.getAttribute("aria-label") ?? "",
     title: element.getAttribute("title") ?? "",
+    label: [...(element.labels ?? [])].map((label) => label.textContent ?? "").join(" "),
     text: (element.textContent ?? "").replace(/\\s+/g, " ").trim().slice(0, ${MAX_TEXT_CHARS}),
     width: rect.width,
     height: rect.height,
@@ -115,6 +117,7 @@ function parseCandidate(value: unknown): Candidate {
     role: stringField(record, "role"),
     ariaLabel: stringField(record, "ariaLabel"),
     title: stringField(record, "title"),
+    label: stringField(record, "label"),
     text: stringField(record, "text"),
     width: numberField(record, "width"),
     height: numberField(record, "height"),
@@ -152,6 +155,11 @@ export function nameOf(candidate: Candidate): string {
   if (label !== "") {
     return label;
   }
+  // HTML-AAM: an input's name is aria-label, then its <label>s, then title (https://www.w3.org/TR/html-aam-1.0/#accessible-name-computations-by-html-element).
+  const labelled = normalised(candidate.label);
+  if (labelled !== "") {
+    return labelled;
+  }
   const title = normalised(candidate.title);
   if (title !== "") {
     return title;
@@ -159,13 +167,12 @@ export function nameOf(candidate: Candidate): string {
   return NAME_FROM_CONTENT[roleOf(candidate)] === true ? normalised(candidate.text) : "";
 }
 
+function isPainted(candidate: Candidate): boolean {
+  return candidate.width > 0 && candidate.height > 0 && candidate.visibility === "visible";
+}
+
 export function isVisible(candidate: Candidate): boolean {
-  return (
-    candidate.width > 0 &&
-    candidate.height > 0 &&
-    candidate.visibility === "visible" &&
-    !candidate.hiddenAbove
-  );
+  return isPainted(candidate) && !candidate.hiddenAbove;
 }
 
 function listed(candidates: readonly Candidate[]): string {
@@ -179,8 +186,12 @@ function listed(candidates: readonly Candidate[]): string {
   return `${shown.join("; ")}${more}`;
 }
 
-function pickVisible(matches: readonly Candidate[], nth: number | null, what: string): Candidate {
-  const visible = matches.filter(isVisible);
+function pickVisible(
+  matches: readonly Candidate[],
+  { nth, shown }: { readonly nth: number | null; readonly shown: (c: Candidate) => boolean },
+  what: string,
+): Candidate {
+  const visible = matches.filter(shown);
   if (visible.length === 0) {
     const hidden = matches.length === 0 ? "" : `; ${matches.length} hidden: ${listed(matches)}`;
     throw new Error(`no visible element ${what}${hidden}`);
@@ -232,14 +243,15 @@ export function pickByName(candidates: readonly Candidate[], query: Query): Cand
     const near = similar.length === 0 ? "nothing similar" : `similar: ${listed(similar)}`;
     throw new Error(`no element ${what}; ${near}`);
   }
-  return pickVisible(matches, query.nth, what);
+  return pickVisible(matches, { nth: query.nth, shown: isVisible }, what);
 }
 
+/** A CSS query targets what is painted, also inside `aria-hidden` (the strips' icons and waves). */
 export function pickByCss(matches: readonly Candidate[], query: Query): Candidate {
   const what = described(`matching CSS "${query.name}"`, query.role);
   return pickVisible(
     matches.filter((candidate) => hasRole(candidate, query.role)),
-    query.nth,
+    { nth: query.nth, shown: isPainted },
     what,
   );
 }

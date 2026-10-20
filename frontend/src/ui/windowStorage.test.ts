@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { storedValue } from "./windowStorage";
+import { parseStored, storedValue } from "./windowStorage";
 
 const KEY = "yamt.test.value";
 const EVENT = "test.storage_failed";
@@ -88,4 +88,11 @@ test("a storage that throws gives the fallback and logs under the caller's event
     '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
     '[warn] test.storage_failed {kind: "Unexpected", message: "storage disabled"}',
   ]);
+});
+
+test("stored JSON is parsed; text that is not JSON gives null", () => {
+  expect(parseStored('{"local":0.2,"hidden":[true]}')).toEqual({ local: 0.2, hidden: [true] });
+  expect(parseStored("[1]")).toEqual([1]);
+  expect(parseStored("{not json")).toBeNull();
+  expect(parseStored("")).toBeNull();
 });

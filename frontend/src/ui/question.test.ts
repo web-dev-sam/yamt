@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { parseKey } from "../ipc";
-import type { ServerSpec } from "../lsp";
+import { serverKey, type ServerSpec } from "../lsp";
 import { exitMustAsk, finishMustAsk, questionText } from "./question";
 
 const LINUX = "Linux x86_64";
@@ -81,6 +81,7 @@ test("the clash question names the key in the platform's words, its owner and th
 
 function spec(name: string, project: string, installed = true): ServerSpec {
   return {
+    key: serverKey(`${name} (${project})`),
     name,
     command: { program: name, args: [] },
     project,

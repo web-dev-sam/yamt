@@ -1,16 +1,20 @@
 import { expect, test } from "vitest";
 
-import type { InstallHint, ServerSpec, ServerState } from "../lsp";
+import { serverKey, type InstallHint, type ServerSpec, type ServerState } from "../lsp";
 import {
   dotKind,
   formatNote,
+  groupDot,
   logTime,
   noteLine,
+  pinLabel,
+  pinTitle,
   problemsTitle,
   projectLabel,
   serverActions,
   serverLabel,
   stateLine,
+  type DotKind,
 } from "./serverText";
 
 type Row = { readonly state: ServerState; readonly line: string; readonly dot: string };
@@ -113,6 +117,7 @@ test("a project folder reads as the folder with a slash, the root as the reposit
 
 test("a server reads as its name, marked when it is not installed", () => {
   const installed: ServerSpec = {
+    key: serverKey("TypeScript (frontend)"),
     name: "TypeScript",
     project: "frontend",
     folders: { project: ["node_modules/.bin"], home: [] },
@@ -157,4 +162,27 @@ test("rule 2: the counts' title counts errors and warnings in words", () => {
 test("rule 5: a log line's time is HH:MM:SS", () => {
   expect(logTime(new Date(2026, 9, 14, 9, 5, 7).getTime())).toBe("09:05:07");
   expect(logTime(new Date(2026, 9, 14, 23, 59, 0).getTime())).toBe("23:59:00");
+});
+
+const URGENCY: readonly DotKind[] = ["problem", "warning", "busy", "running", "stopped"];
+
+test("rule 4: the group's dot is the more urgent of any two kinds, in either order", () => {
+  for (const [rank, first] of URGENCY.entries()) {
+    for (const second of URGENCY.slice(rank)) {
+      expect(groupDot([first, second]), `${first} beside ${second}`).toBe(first);
+      expect(groupDot([second, first]), `${second} beside ${first}`).toBe(first);
+    }
+  }
+});
+
+test("rule 4: no servers read as stopped; one running beside stopped ones reads as running", () => {
+  expect(groupDot([])).toBe("stopped");
+  expect(groupDot(["stopped", "stopped"])).toBe("stopped");
+  expect(groupDot(["stopped", "running", "stopped"])).toBe("running");
+});
+
+test("rule 5: the pin's title says what a press does; its name names the server", () => {
+  expect(pinTitle(false)).toBe("Pin to the header");
+  expect(pinTitle(true)).toBe("Unpin from the header");
+  expect(pinLabel("oxlint (web)")).toBe("Pin oxlint (web) to the header");
 });

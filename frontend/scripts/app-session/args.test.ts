@@ -12,6 +12,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
     settings: null,
     size: { width: 1600, height: 1000 },
     record: null,
+    home: null,
   });
 });
 
@@ -32,6 +33,8 @@ test("start-app reads every option of the acceptance run", () => {
     "5",
     "--binary",
     "target/release/yamt",
+    "--home",
+    "/tmp/h-home",
   ];
   expect(parseCommand(argv)).toEqual({
     kind: "start-app",
@@ -41,6 +44,7 @@ test("start-app reads every option of the acceptance run", () => {
     settings: '{"theme":"light"}',
     size: { width: 800, height: 600 },
     record: { file: "/tmp/s.mkv", seconds: 5 },
+    home: "/tmp/h-home",
   });
 });
 
@@ -72,6 +76,15 @@ test("--settings must be a JSON object, --size must be <width>x<height>", () => 
   expect(() => parseCommand([...base, "--size", "0x10"])).toThrow(/<width>x<height>/);
 });
 
+test("--home needs a folder", () => {
+  expect(() => parseCommand(["start-app", "--name", "a", "--fresh-repo", "--home"])).toThrow(
+    /--home needs a value/,
+  );
+  expect(() => parseCommand(["start-fixture", "--name", "a", "--home", "/tmp/h"])).toThrow(
+    /unknown option --home/,
+  );
+});
+
 test("a session name is a plain file name, never a path", () => {
   expect(() => parseCommand(["stop", "--name", "../x"])).toThrow(/letters, digits/);
   expect(() => parseCommand(["stop", "--name", ""])).toThrow(/letters, digits/);
@@ -87,12 +100,13 @@ test("start-fixture takes a name and a size", () => {
   });
 });
 
-test("click takes one accessible name, an optional role, a 0-based --nth and --x11", () => {
+test("click takes one accessible name, an optional role, a 0-based --nth, --x11 and --double", () => {
   expect(parseCommand(["click", "--name", "fx", "Next change"])).toEqual({
     kind: "click",
     name: "fx",
     query: { name: "Next change", role: null, nth: null },
     x11: false,
+    double: false,
   });
   expect(
     parseCommand(["click", "--name", "fx", "Dark", "--role", "button", "--nth", "0", "--x11"]),
@@ -101,10 +115,60 @@ test("click takes one accessible name, an optional role, a 0-based --nth and --x
     name: "fx",
     query: { name: "Dark", role: "button", nth: 0 },
     x11: true,
+    double: false,
+  });
+  expect(parseCommand(["click", "--name", "fx", "File list width", "--double"])).toEqual({
+    kind: "click",
+    name: "fx",
+    query: { name: "File list width", role: null, nth: null },
+    x11: false,
+    double: true,
   });
   expect(() => parseCommand(["click", "--name", "fx", "Dark", "--nth", "-1"])).toThrow(/≥ 0/);
   expect(() => parseCommand(["click", "--name", "fx", "Next", "change"])).toThrow(
     /exactly one accessible name/,
+  );
+});
+
+test("drag takes one target by name or css, a signed --dx, an optional --dy, --role and --nth", () => {
+  expect(parseCommand(["drag", "--name", "a", "Local and Result widths", "--dx", "-120"])).toEqual({
+    kind: "drag",
+    name: "a",
+    query: { name: "Local and Result widths", role: null, nth: null },
+    dx: -120,
+    dy: 0,
+  });
+  expect(
+    parseCommand([
+      "drag",
+      "--name",
+      "a",
+      ".chunk-action-apply",
+      "--dx",
+      "0",
+      "--dy",
+      "60",
+      "--nth",
+      "1",
+    ]),
+  ).toEqual({
+    kind: "drag",
+    name: "a",
+    query: { name: ".chunk-action-apply", role: null, nth: 1 },
+    dx: 0,
+    dy: 60,
+  });
+  expect(() => parseCommand(["drag", "--name", "a", "x"])).toThrow(/drag needs --dx <px>/);
+  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "1.5"])).toThrow(/whole number/);
+  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "right"])).toThrow(/whole number/);
+  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "5", "--dy", "-"])).toThrow(
+    /--dy -: expected a whole number/,
+  );
+  expect(() => parseCommand(["drag", "--name", "a", "--dx", "5"])).toThrow(
+    /exactly one accessible name/,
+  );
+  expect(() => parseCommand(["drag", "--name", "a", "x", "--dx", "5", "--double"])).toThrow(
+    /unknown option --double/,
   );
 });
 

@@ -1,0 +1,57 @@
+The switch's checked state now has one writer, `:checked`, and every Acceptance line was checked in the real app. One exception: `pnpm -C frontend unused` exits 1, because of a type export in `ui/useColumnDrag.ts`, a file this slice did not touch.
+
+```
+summary
+  frontend/src/ui/LanguageServerSettings.vue: `flip` (the `instanceof HTMLInputElement` check plus the second
+  `input.checked = …` write after the await) is removed. The switch is now
+  `@click.prevent="switchServer(spec.key, off.has(spec.key))"`. Cancelling the click puts the native checkbox back, so
+  `:checked="!off.has(spec.key)"` is the only thing that sets it: after a reply and after a failed write. A second click
+  while a write is running now reads the `off` in force at that moment.
+
+files_changed
+  frontend/src/ui/LanguageServerSettings.vue
+
+tests_added
+  none (the brief names none; the behaviour is the native activation of a WebKit checkbox, checked in the real app below)
+
+smoke_evidence
+  1. pnpm -C frontend lint      → "$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"", lint=0
+     pnpm -C frontend typecheck → "$ vue-tsc -b", exit 0
+     pnpm -C frontend test      → "Test Files  114 passed (114)", "Tests  1550 passed (1550)"
+     pnpm -C frontend fmt:check → "All matched files use the correct format.", exit 0
+     pnpm -C frontend unused    → "Unused exported types (1)  DotsState  type  src/ui/useColumnDrag.ts:4:13", exit 1
+       This exit 1 comes from a file this slice never touched (commit b22bd67, issue 4 pane split). `git status` shows
+       only LanguageServerSettings.vue changed under frontend/.
+  2. cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt"
+     scripts/lsp-repo.sh --servers /tmp/yamt-q5r1/lsp → mid-merge, 9 conflicted files listed
+     PATH=~/.cache/yamt/servers-path:$PATH just app-session start-app --name q-r1 --repo /tmp/yamt-q5r1/lsp
+       → {"session":…, "configDir":"/tmp/yamt-app-session-q-r1-xzRt0X/home/.config", …}
+     click Start → {"clicked":{"role":"button","name":"Start"}}; click Settings → {"clicked":{"role":"button","name":"Settings"}}
+     Switches at first: "Biome=true ; clangd=true ; gopls=true ; Phpactor=true ; ruff=true ; ty=true ; basedpyright=true ; …"
+     `app-session click ruff --role switch` → recipe failed (the name lookup misses a wrapping <label>, as in round 1),
+       so each click was `input.click()` through `read`:
+     Off:  {"before":true,"rightAfterClick":true,"after500ms":false,"muted":true,"problem":null}
+           (right after the click the cancelled activation has put the box back; the reply then sets it through :checked)
+           +3 s: "… ruff=false …"; pgrep "ruff server" → none
+     On:   {"before":false,"rightAfterClick":false,"after500ms":true,"muted":false}
+     Read-only: settings path from the view "/tmp/yamt-app-session-q-r1-xzRt0X/home/.config/yamt/settings.json";
+           folder 755 → chmod a-w → 555
+           {"before":true,"rightAfterClick":true,"after500ms":true,"muted":false,
+            "alerts":["Could not use the settings file: writing /tmp/yamt-app-session-q-r1-xzRt0X/home/.config/yamt/settings.json failed: Permission denied (os error 13)"]}
+           +2 s: ruff checked → true; the file still has "off": {}
+           Screenshot /tmp/yamt-q5r1/switch-readonly.png: the problem bar shows that message.
+     Restore: chmod 755 → "755 …/yamt"; just app-session stop --name q-r1 → "session":"ended", folder removed
+
+deviations_from_brief
+  - `pnpm -C frontend unused` exits 1 because of `DotsState` in frontend/src/ui/useColumnDrag.ts:4. It is outside my
+    target and comes from an earlier commit, so I left it as it is.
+  - The switch was clicked with `input.click()` through `app-session read`, which the brief allows, because
+    `app-session click` cannot name a checkbox inside a label.
+
+open_risks
+  - After switching ruff back on, `pgrep "ruff server"` found nothing 3 s later. No Python file was open in this session.
+    In round 1 ruff came back with py/api/stats.py open. [INFERENCE] servers start when a file they serve is open. This is
+    not part of the switch's checked state, and I did not check it further.
+  - frontend/src/ui/LanguageServerSettings.vue:84: the template handler's promise is not awaited. That is normal for Vue
+    template handlers: `switchServer` reports its failures through the store's problem bar, as seen above.
+```
