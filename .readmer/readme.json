@@ -17,13 +17,13 @@
       "body": [
         "Download from the [releases page](../../releases):",
         "",
-        "- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.4.0_amd64.deb`)",
+        "- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.4.1_amd64.deb`)",
         "  puts `yamt` on your PATH. For the AppImage, put it there yourself.",
         "",
         "  Without AppImageLauncher:",
         "",
         "  ```sh",
-        "  install -Dm755 yamt_0.4.0_amd64.AppImage ~/.local/bin/yamt",
+        "  install -Dm755 yamt_0.4.1_amd64.AppImage ~/.local/bin/yamt",
         "  ```",
         "",
         "  With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the",
@@ -31,8 +31,8 @@
         "  file:",
         "",
         "  ```sh",
-        "  ail-cli integrate yamt_0.4.0_amd64.AppImage",
-        "  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.4.0_amd64_*.AppImage ~/.local/bin/yamt",
+        "  ail-cli integrate yamt_0.4.1_amd64.AppImage",
+        "  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.4.1_amd64_*.AppImage ~/.local/bin/yamt",
         "  ```",
         "",
         "  If `yamt` is then not found, `~/.local/bin` is not on your PATH: add",
@@ -68,8 +68,9 @@
         ""
       ],
       "bullets": [
-        "The file list on the left shows every conflicted file with git's view of it (resolved or not, also when you run `git add` elsewhere); click one to open it. Drag its edge to make it wider. The button at the right of its \"Files\" header shows it as a tree, folders first with VS Code's folder icons, and back as a list (remembered after a restart). Ctrl+B (Cmd+B on macOS) hides and shows the list.",
+        "The file list on the left shows every conflicted file with git's view of it (resolved or not, also when you run `git add` elsewhere); click one to open it. Drag its edge to make it wider (remembered after a restart; a double-click on the edge gives the starting width again). The button at the right of its \"Files\" header shows it as a tree, folders first with VS Code's folder icons, and back as a list (remembered after a restart). Ctrl+B (Cmd+B on macOS) hides and shows the list.",
         "The left pane's header names what is checked out: the branch, or the commit and its subject when no branch is (during a rebase). The right pane's header names what you are merging in: the branch, or the commit and its subject.",
+        "Drag the strip between Local and Result, or between Result and Remote (or the line above it), to resize the panes: only the two panes next to it change, none gets narrower than 220 px, and a double-click makes the three equal. The split is the same for every file and is remembered after a restart. Three dots on the file list's edge and between the panes show where to drag.",
         "Lines that no change touches are collapsed behind a wavy line across all three panes, keeping 4 lines next to each change, so every change of a file is in view with little scrolling. Click the wave (in any pane or between them) to show 4 more lines next to each change, again for 8 more, a third time for the rest. Searching for text in hidden lines shows them. The toolbar's \"Collapse unchanged fragments\" button turns collapsing off and on again for every open file.",
         "Each change has an arrow that applies it to the result and a × that ignores it; press one and drag up or down to apply or ignore several at once (one undo step). On a conflict, Ctrl+click (Cmd+click on macOS) on the arrow also ignores the other side, and on the × also takes the other side; holding Ctrl (Cmd) when releasing a drag does the same for every conflict it covers. Ctrl+click (Cmd+click) a highlighted change applies it, Ctrl+right-click (Cmd+right-click) ignores it. The toolbar applies all non-conflicting changes from the left or from the right in one click.",
         "From the keyboard: click a side or one of its changes (an outline shows which), then Enter or Space applies the change, Backspace, Delete or x ignores it, Up and Down move between the changes still waiting on that side, and Left and Right switch sides. The toolbar's up and down arrows do the same as Up and Down (on the left side when no side has the keyboard). Ctrl+scroll (Cmd+scroll on macOS) over a side steps through its changes. Ctrl+Z / Ctrl+Shift+Z (Cmd on macOS) undo and redo from anywhere in the window. These are the default keys; settings can change them.",
@@ -87,14 +88,14 @@
     {
       "title": "Language servers",
       "body": [
-        "yamt runs the language servers your project already has, so the result pane shows their problems as you type: an underline, with the message on hover. It finds these in the repository's projects and asks once per repository whether to start them; settings can change the answer:",
+        "yamt runs the language servers your project already has, so the result pane shows their problems as you type: an underline, with the message on hover. It finds these in the repository's projects and asks once per repository whether to start them; settings can change the answer and switch off any server it found, each on its own, for that repository:",
         "",
         "- JavaScript and TypeScript: oxlint, oxfmt, Biome, TypeScript, eslint; `.vue` files through TypeScript when the project has `@vue/typescript-plugin`",
         "- Rust: rust-analyzer · Go: gopls · C and C++: clangd, with a compile database",
         "- Python: ruff, ty, basedpyright, pyright",
         "- PHP: Phpactor, with the project's own PHPStan, Psalm, PHP-CS-Fixer and phpcs; else Intelephense",
         "",
-        "Left of the gear, each server shows its state; click one to start, stop or restart it or to read its log. A server the project uses but that is not installed shows \"Not installed\" with the install command for that language's installer (your package manager, uv, Poetry or PDM, rustup, `go install`); yamt starts it when you come back to the window. With a formatter running (oxfmt, Biome, rustfmt, gofmt, ruff, clang-format with a `.clang-format`, PHP-CS-Fixer or phpcbf, or an added server that formats), Ctrl+S formats the result before saving and leaves changes that still wait as they are. yamt ships no language server.",
+        "Left of the gear, one **Servers** button holds every server: its drop-down lists each with its state; choose one to start, stop or restart it or to read its log. The pin next to a server puts that server's own button in the header (none at first, remembered per repository). A server the project uses but that is not installed shows \"Not installed\" with the install command for that language's installer (your package manager, uv, Poetry or PDM, rustup, `go install`); yamt starts it when you come back to the window. With a formatter running (oxfmt, Biome, rustfmt, gofmt, ruff, clang-format with a `.clang-format`, PHP-CS-Fixer or phpcbf, or an added server that formats), Ctrl+S formats the result before saving and leaves changes that still wait as they are. yamt ships no language server.",
         "",
         "Other servers are added in settings under **Language servers → Added by you**: pick one **From the list** (Deno and bash-language-server are there too) or type a command and the file types it serves. yamt looks for a program in the project's `node_modules/.bin`, `.venv/bin` and `vendor/bin` up to the repository root, then on the PATH of the terminal it was started from, then in `~/go/bin`, `~/.cargo/bin`, `~/.local/bin` and Composer's global folder; a command with a `/` is read from the repository root. An added server is offered in every repository and runs where the repository's answer is Start; press **Start** under \"This repository\" if it is not."
       ]

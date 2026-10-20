@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-20
+
 ### Added
 
 - Language servers found in a repository can be switched off in Settings → Language servers, each with its own
@@ -229,7 +231,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.4.0...HEAD
+[Unreleased]: ../../compare/v0.4.1...HEAD
+[0.4.1]: ../../compare/v0.4.0...v0.4.1
 [0.4.0]: ../../compare/v0.3.2...v0.4.0
 [0.3.2]: ../../compare/v0.3.1...v0.3.2
 [0.3.1]: ../../compare/v0.3.0...v0.3.1
