@@ -1,0 +1,175 @@
+From 90361dbbbd50f3b210354a0b19e0a1a02d721490 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 18:53:08 +0200
+Subject: [PATCH] fix(test): portable sed -i.orig sequence editor for macOS CI
+
+---
+ crates/conflict-repo/AGENTS.md        |  2 +-
+ crates/conflict-repo/src/lib.rs       |  3 ++-
+ crates/conflict-repo/src/operation.rs | 22 ++++++++++++++++------
+ crates/gitio/tests/edit_stop.rs       | 13 +++++++------
+ crates/gitio/tests/operations.rs      |  6 +++---
+ scripts/operations-repo.sh            |  2 +-
+ 6 files changed, 30 insertions(+), 18 deletions(-)
+
+diff --git a/crates/conflict-repo/AGENTS.md b/crates/conflict-repo/AGENTS.md
+index e20d7e8..5ff3dbd 100644
+--- a/crates/conflict-repo/AGENTS.md
++++ b/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `REPOSITORY_CONFIG` (`core.autocrlf=false`, the committer and `commit.gpgsign=false`), so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too; the sandboxed `git` passes the same values as `-c`. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is `STEP_ONE_MESSAGE` ("step 1" with a body). `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `rerere_repo(remembered, fresh, replay)` (`src/rerere.rs`, plan §2 #90) stops a second merge on `local` after a first merge of `remote` with `rerere.enabled`, in which each `Remembered { file, resolution }` was resolved and committed; `Replay` decides the rest: `Review`/`Stage` (`rerere.autoUpdate` false/true) undo that merge and merge `remote` again, so rerere replays each resolution; `Off` keeps the merge commit, switches `rerere.enabled` off and merges branch `later`, leaving the empty `MERGE_RR` that commit wrote (no checkout after it: a checkout drops `MERGE_RR`), so only `fresh` files conflict. Each `fresh` file conflicts only in the second merge and needs sides no remembered file has (rerere identifies a conflict by its text). `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `run_ignored_in_child(tests, configure)` reruns ignored tests of the running test binary in a child process `configure` sets up (an environment the test process cannot change for itself), `Error::ChildTestsFailed` with the child's output unless all passed. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `REPOSITORY_CONFIG` (`core.autocrlf=false`, the committer and `commit.gpgsign=false`), so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too; the sandboxed `git` passes the same values as `-c`. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is `STEP_ONE_MESSAGE` ("step 1" with a body). `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `sed_sequence_editor(scripts)` is the one way fixtures and tests build a `git -c sequence.editor=…` value: `sed -i.orig -e '<script>' …`, the backup suffix attached because BSD sed (macOS) takes the argument after a bare `-i` as the suffix. `rerere_repo(remembered, fresh, replay)` (`src/rerere.rs`, plan §2 #90) stops a second merge on `local` after a first merge of `remote` with `rerere.enabled`, in which each `Remembered { file, resolution }` was resolved and committed; `Replay` decides the rest: `Review`/`Stage` (`rerere.autoUpdate` false/true) undo that merge and merge `remote` again, so rerere replays each resolution; `Off` keeps the merge commit, switches `rerere.enabled` off and merges branch `later`, leaving the empty `MERGE_RR` that commit wrote (no checkout after it: a checkout drops `MERGE_RR`), so only `fresh` files conflict. Each `fresh` file conflicts only in the second merge and needs sides no remembered file has (rerere identifies a conflict by its text). `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `run_ignored_in_child(tests, configure)` reruns ignored tests of the running test binary in a child process `configure` sets up (an environment the test process cannot change for itself), `Error::ChildTestsFailed` with the child's output unless all passed. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index 882330d..72cb679 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -10,7 +10,8 @@ use std::path::Path;
+ use std::process::{Command, Output, Stdio};
+ 
+ pub use operation::{
+-    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start,
++    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo,
++    sed_sequence_editor, start,
+ };
+ pub use rerere::{Remembered, Replay, rerere_repo};
+ pub use tempfile::TempDir;
+diff --git a/crates/conflict-repo/src/operation.rs b/crates/conflict-repo/src/operation.rs
+index f7a5667..c495a45 100644
+--- a/crates/conflict-repo/src/operation.rs
++++ b/crates/conflict-repo/src/operation.rs
+@@ -11,9 +11,6 @@ pub const STEP_TWO_FILE: &str = "steps.txt";
+ const STEP_THREE_FILE: &str = "step-three.txt";
+ /// Step 1's message in every sequence: a subject and a body.
+ pub const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+-const REWORD_STEP_THREE: &str = "sequence.editor=sed -i -e 3s/^pick/reword/";
+-const SQUASH_STEP_TWO: &str = "sequence.editor=sed -i -e 2s/^pick/squash/";
+-const EDIT_STEP_ONE: &str = "sequence.editor=sed -i -e 1s/^pick/edit/";
+ 
+ /// What stopped on the scripted conflicts. Sequences (every rebase but `RebaseMerges`, the
+ /// ranges, `Am`) run three steps: step 1 conflicts in the caller's files, step 2 in
+@@ -71,8 +68,10 @@ pub fn start(run: Run, root: &Path) -> Result<()> {
+         Run::SquashMerge => stopped(run, root, &["merge", "--squash", "remote"], None),
+         Run::Rebase => stopped(run, root, &["rebase", "local", "remote"], None),
+         Run::RebaseApply => stopped(run, root, &["rebase", "--apply", "local", "remote"], None),
+-        Run::RebaseInteractive => interactive(run, root, REWORD_STEP_THREE),
+-        Run::RebaseSquash => interactive(run, root, SQUASH_STEP_TWO),
++        Run::RebaseInteractive => {
++            interactive(run, root, &sed_sequence_editor(&["3s/^pick/reword/"]))
++        }
++        Run::RebaseSquash => interactive(run, root, &sed_sequence_editor(&["2s/^pick/squash/"])),
+         Run::RebaseMerges => {
+             let args = [
+                 "rebase", "--quiet", "-r", "--onto", "local", "HEAD^", "merged",
+@@ -96,12 +95,23 @@ fn interactive(run: Run, root: &Path, sequence_editor: &str) -> Result<()> {
+     stopped(run, root, &args, None)
+ }
+ 
++/// The `git -c` value that edits the todo in place with `scripts`, each in single quotes. BSD sed (macOS) reads the
++/// argument after a bare `-i` as the backup suffix, so the suffix is attached: `-i.orig` works with GNU sed too.
++pub fn sed_sequence_editor(scripts: &[&str]) -> String {
++    let mut value = String::from("sequence.editor=sed -i.orig");
++    for script in scripts {
++        value.push_str(&format!(" -e '{script}'"));
++    }
++    value
++}
++
+ /// A rebase of branch `remote` onto `main` stopped, without a conflict, at an `edit` of step 1: HEAD is step 1.
+ pub fn edit_stop_repo(files: &[ConflictFile]) -> Result<TempDir> {
+     let dir = sequence_repo(files)?;
++    let edit_step_one = sed_sequence_editor(&["1s/^pick/edit/"]);
+     git_ok(
+         dir.path(),
+-        &["-c", EDIT_STEP_ONE, "rebase", "-i", "main", "remote"],
++        &["-c", &edit_step_one, "rebase", "-i", "main", "remote"],
+     )?;
+     Ok(dir)
+ }
+diff --git a/crates/gitio/tests/edit_stop.rs b/crates/gitio/tests/edit_stop.rs
+index b62788d..88d0bf4 100644
+--- a/crates/gitio/tests/edit_stop.rs
++++ b/crates/gitio/tests/edit_stop.rs
+@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
+ 
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, edit_stop_repo, git, git_ok,
+-    operation_repo, ready_repo,
++    operation_repo, ready_repo, sed_sequence_editor,
+ };
+ use yamt_gitio::{Oid, Operation, Rebase, Repo};
+ 
+@@ -17,15 +17,15 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     local: Some(b"local\n"),
+     remote: Some(b"remote\n"),
+ }];
+-const REWORD_STEP_TWO_DROP_THREE: &str = "sequence.editor=sed -i -e 2s/^pick/reword/ -e 3d";
+ 
+ /// Step 2 joins step 1's chain as `chain_step`, and step 3 becomes a `fixup` of `local`, which conflicts.
+ fn chain_sequence_editor(chain_step: &str, root: &Path) -> String {
+     let local = oid(root, "local");
+     let local = local.as_str();
+-    format!(
+-        "sequence.editor=sed -i -e 2s/^pick/{chain_step}/ -e '3s/^pick [0-9a-f]*/fixup {local}/'"
+-    )
++    sed_sequence_editor(&[
++        &format!("2s/^pick/{chain_step}/"),
++        &format!("3s/^pick [0-9a-f]*/fixup {local}/"),
++    ])
+ }
+ 
+ fn oid(root: &Path, revision: &str) -> Oid {
+@@ -149,9 +149,10 @@ fn a_conflicted_squash_step_replays_its_commit_and_is_an_editor_step() {
+ fn a_conflicted_reword_stop_with_an_empty_todo_has_an_editor_step_ahead() {
+     let dir = ready_repo(Run::Rebase, &FILES).unwrap();
+     let root = dir.path();
++    let reword_step_two_drop_three = sed_sequence_editor(&["2s/^pick/reword/", "3d"]);
+     let args = [
+         "-c",
+-        REWORD_STEP_TWO_DROP_THREE,
++        reword_step_two_drop_three.as_str(),
+         "rebase",
+         "-i",
+         "local",
+diff --git a/crates/gitio/tests/operations.rs b/crates/gitio/tests/operations.rs
+index 92a1ddc..461ac97 100644
+--- a/crates/gitio/tests/operations.rs
++++ b/crates/gitio/tests/operations.rs
+@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
+ 
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, diverged_repo, git, git_ok,
+-    operation_repo,
++    operation_repo, sed_sequence_editor,
+ };
+ use yamt_gitio::{Error, Oid, Operation, Progress, Rebase, Repo, Stop};
+ 
+@@ -418,11 +418,11 @@ fn a_refused_continue_keeps_the_id() {
+ fn edit_todo_dropping_a_later_step_keeps_the_id() {
+     let (dir, repo) = stopped(Run::RebaseInteractive);
+     let first = repo.stop().unwrap();
+-    let drop_the_reword = "sequence.editor=sed -i -e /^reword/d";
++    let drop_the_reword = sed_sequence_editor(&["/^reword/d"]);
+ 
+     git_ok(
+         dir.path(),
+-        &["-c", drop_the_reword, "rebase", "--edit-todo"],
++        &["-c", &drop_the_reword, "rebase", "--edit-todo"],
+     )
+     .unwrap();
+ 
+diff --git a/scripts/operations-repo.sh b/scripts/operations-repo.sh
+index b2cd6d4..5c9d747 100755
+--- a/scripts/operations-repo.sh
++++ b/scripts/operations-repo.sh
+@@ -115,7 +115,7 @@ rebase-apply)
+     ;;
+ rebase-interactive)
+     sequence_repo
+-    stops -c "sequence.editor=sed -i -e 3s/^pick/reword/" rebase -i main feature
++    stops -c "sequence.editor=sed -i.orig -e 3s/^pick/reword/" rebase -i main feature
+     expected=3
+     ;;
+ cherry-pick)
+-- 
+2.56.0
+

@@ -1,0 +1,33 @@
+From 61160264dd6de02ed400758e03ed423c5024dd41 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 18:57:35 +0200
+Subject: [PATCH] fix(test): sed_sequence_editor must_use, no push_str(format!)
+
+---
+ crates/conflict-repo/src/operation.rs | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/crates/conflict-repo/src/operation.rs b/crates/conflict-repo/src/operation.rs
+index c495a45..a7f7923 100644
+--- a/crates/conflict-repo/src/operation.rs
++++ b/crates/conflict-repo/src/operation.rs
+@@ -97,12 +97,11 @@ fn interactive(run: Run, root: &Path, sequence_editor: &str) -> Result<()> {
+ 
+ /// The `git -c` value that edits the todo in place with `scripts`, each in single quotes. BSD sed (macOS) reads the
+ /// argument after a bare `-i` as the backup suffix, so the suffix is attached: `-i.orig` works with GNU sed too.
++#[must_use]
+ pub fn sed_sequence_editor(scripts: &[&str]) -> String {
+-    let mut value = String::from("sequence.editor=sed -i.orig");
+-    for script in scripts {
+-        value.push_str(&format!(" -e '{script}'"));
+-    }
+-    value
++    let mut command = vec![String::from("sed -i.orig")];
++    command.extend(scripts.iter().map(|script| format!("-e '{script}'")));
++    format!("sequence.editor={}", command.join(" "))
+ }
+ 
+ /// A rebase of branch `remote` onto `main` stopped, without a conflict, at an `edit` of step 1: HEAD is step 1.
+-- 
+2.56.0
+
