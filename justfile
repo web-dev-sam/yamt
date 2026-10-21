@@ -35,8 +35,7 @@ fixtures-check: (fixtures-into "target/fixtures-check")
     diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
     diff -ru frontend/fixtures/compare target/fixtures-check/compare
 
-# Window fixtures: the 10 goldens, hand-written demo cases in tests/showcase/ (not goldens), and the compare
-# window's cases in tests/compare/ (plan §2 #95).
+# Window fixtures: goldens, tests/showcase/ demo cases, tests/compare/ pairs (plan §2 #95).
 [private]
 fixtures-into dir:
     rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare
