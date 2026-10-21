@@ -1,1 +1,7 @@
-{}
+{
+  "GitOpsDesign": {
+    "agent": "designer",
+    "brief": "docs/slices/briefs/3.J-git-operations-design.md",
+    "owned": []
+  }
+}

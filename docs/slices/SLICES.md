@@ -831,6 +831,21 @@ release commits are not pushed yet.
 | 2   | final run before tagging (`briefs/release-0.4.1-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict project (Mark resolved, pane dividers and the file list's width across a restart) and the language-server project (Servers drop-down, pins, the off switch across a restart) | verifier     | done        | `Release041Verify` at `22ce491`, gate **pass** (notes `.omp/run/notes/Release041Verify.md`): `just check` 0 (479 Rust, 1573 web, hooks 16/16); licences unchanged; `yamt_0.4.1_amd64.deb` 4.99 MiB, `yamt 0.4.1`; release binary: Mark resolved → next file; +150 px drag Remote kept 419, double-click → equal, split + file list width same after restart; 11 servers, 2 pins left of Servers, hovers, Ctrl+S ruff; ruff off → stopped, gone, still off after restart, on → running (a file was opened too) |
 | 3   | release build and publishing (`docs/slices/handoff-release-0.4.1.md`)                                                                                                                                                                                                                                                          | human        | handed over |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
+## Git operations — own work on the left, the operation at the top, Abort and Continue for each (session 25, branch `feat/git-operations` off main `71fc4ce`)
+
+Owner request (2026-10-21, #1305–#1310), after the orchestrator's check of rebases, cherry-picks and reverts: own work
+always on the left (a rebase's replayed commit), the revert's right side named, Abort for every operation git records,
+a Continue button that follows a multi-stop operation (also when it moved on in a terminal), the operation shown at the
+top; rerere's replayed resolution left for review (decided as owner, #1308). Intent, rules, acceptance, non-goals:
+`docs/slices/request-git-operations.md` (settled as owner, OR13).
+
+Slice graph: row 1 (design) first; builds follow its chosen option. No product question asked (OR13): the commit
+message stays git's, a finished operation closes yamt with status 0, unrecorded operations (stash pop) get no buttons.
+
+| row | slice                                                                                                                        | owner    | status  | evidence |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: operations, orientation, names, top line, Abort, Continue, next stop, rerere (`briefs/3.J-git-operations-design.md`) | designer | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
