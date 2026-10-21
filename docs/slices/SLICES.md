@@ -883,6 +883,19 @@ the feature's final run and the tag's checks (gate at `e0e1721`); the release co
 | 4   | fix: CI `rust (macos-14)` red on `v0.4.2`/`main` — two `gitio::edit_stop` tests; BSD sed reads `-i -e A -e B` as suffix `-e` (#1458) (`briefs/release-0.4.2-macos-sed.md`); test code only, binaries unaffected                              | rust-impl    | done        | `90361db` `sed_sequence_editor` (`sed -i.orig`), every caller + `operations-repo.sh`; review pass (`MacSedFixReview.md`); R1 `6116026` clippy `must_use`/`format_push_string` (#1459). Notes `MacSedFix*.md`                                                   |
 | 5   | final run after row 4 (`just check`); macOS proof = CI after the owner's push                                                                                                                                                                | verifier     | done        | `MacSedFixVerifyR1` at `6116026`: gate pass (595 Rust, 1756 web tests); 6/6 `edit_stop`; `operations-repo.sh rebase-interactive` stops with the reword. R0 run failed at clippy (`MacSedFixVerify.md`). macOS: pending CI                                      |
 
+## Raw compare — `yamt --raw`: two columns, any two texts, tabs that survive a restart (session 26, branch `feat/raw-compare` off main `8db7609`)
+
+Owner request (2026-10-21, #1461): `yamt --raw` opens a two-column compare (left the base, right compared against it),
+both editable, differences shown with the merge window's visuals; a Format button for JSON and other standard formats;
+a language drop-down with auto-detect; tabs in the file list's place, "+" for a new one; everything persists across
+restarts. Reopens plan §2 #5 (3-way only) as the owner's changed requirement (DR4). Intent, rules 1–8, defaults,
+acceptance, non-goals: `docs/slices/request-raw-compare.md`. Three product questions asked (Format's scope, sorting JSON
+keys, arrows in the strip); the design starts before the answers (OR13).
+
+| row | slice                                                                                                                                                               | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | design: mode, the diff's home, two-column controller, tabs and storage, Format and detection, IPC, builds (`briefs/3.C-raw-compare-design.md`) (`RawCompareDesign`) | designer | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
