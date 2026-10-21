@@ -124,6 +124,8 @@ Added 2026-10-08 (architecture session). Each cites a core vision from `docs/arc
 
 Names in older rows (orchestrator 2026-10-22, the git-operations cutover, #1431): `list_files`/`FileList` (#41, #49, #53, #74) is now `list_stop`/`Listing` and `MergeSession::refresh()` is `refresh_stop()` (#89); `side_names()` (#62) is the `sides` of every `Listing` (#87); `abort_merge`/`FileList.merging` (#74) are `abort_operation` and the listed `operation` (#88). The rules those rows state are unchanged.
 
+`StopMovedOn` means the stop the window shows is gone (orchestrator 2026-10-22, refines #89 after reviews #1435/#1440): whenever Rust answers it, the next `list_stop` lists git's current stop — a write from an older stop is refused by the new stop's own session (its versions start above the old ones, #1383); an Abort or Continue that finds another stop, and a worker panic, leave the state `MovedOn`, so the list opens git's stop. The window sends every `StopMovedOn` through `reportFailure` to one `nextStop({ kind: "outside" })`, never to a list that would answer `MovedOn` again. Rejected: a stop identity in every `Listing` (an IPC change where one state rule suffices).
+
 ### Prior art surveyed — nobody has built this
 
 | project             | what it is                                                 | state                                                     |
