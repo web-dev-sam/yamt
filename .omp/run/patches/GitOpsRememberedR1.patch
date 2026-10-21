@@ -1,0 +1,1672 @@
+From e6e5570ad5530254e2bb7d03ff1f1adeee2b84d6 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:12:30 +0200
+Subject: [PATCH] fix(session): remembered detection follows git's rerere
+ switch; placement on CRLF and edited gaps
+
+rerere must be enabled as rerere.c decides; an unreadable MERGE_RR
+keeps files for review; lines match without CR; overlapping blocks
+join; one placement walk shared with the disk view.
+
+Refs #1392-#1406
+---
+ crates/cli/AGENTS.md                |   2 +
+ crates/cli/src/fixture.rs           |  56 ++---
+ crates/cli/tests/commands.rs        |  24 +++
+ crates/conflict-repo/AGENTS.md      |   2 +-
+ crates/conflict-repo/src/rerere.rs  |  76 +++++--
+ crates/gitio/AGENTS.md              |   2 +-
+ crates/gitio/src/rerere.rs          |  38 +++-
+ crates/gitio/tests/rerere.rs        |  54 ++++-
+ crates/session/AGENTS.md            |   2 +-
+ crates/session/src/disk.rs          |  48 +++--
+ crates/session/src/lib.rs           |   3 +-
+ crates/session/src/locate.rs        |  92 ++++++--
+ crates/session/src/remembered.rs    | 316 ++++++++++++++++++++--------
+ crates/session/src/scratch.rs       |  74 +++++++
+ crates/session/src/seed.rs          |  44 ++--
+ crates/session/src/session.rs       |  19 +-
+ crates/session/src/start.rs         | 114 +++++-----
+ crates/session/src/waiting.rs       |  19 +-
+ crates/session/src/writes.rs        |   4 +-
+ crates/session/tests/remembered.rs  |  57 +++++
+ tests/showcase/remembered/README.md |   7 +-
+ 21 files changed, 770 insertions(+), 283 deletions(-)
+ create mode 100644 crates/session/src/scratch.rs
+
+diff --git a/crates/cli/AGENTS.md b/crates/cli/AGENTS.md
+index c5db854..594bc8d 100644
+--- a/crates/cli/AGENTS.md
++++ b/crates/cli/AGENTS.md
+@@ -1 +1,3 @@
+ Owner skill: `skill://rust-conventions`. Headless binary over `session`: classify / scan / golden / fixture. Hosts the `git merge-file` cross-check (RK13) and golden snapshots (`tests/golden/`).
++
++`fixture <case-dir>` prints a case's `FileMergeData` (`just fixtures`): the stages view of `base`/`local`/`remote.<ext>`, or, when the case has `remembered.<ext>` and `git-output.<ext>` (`tests/showcase/remembered/`, plan §2 #90), the remembered view through `yamt_session::remembered_data` — the resolution rerere replayed as the Result, each block of git's merge output a conflict. A `git-output.<ext>` with a block not found unchanged in the sides is refused (`MalformedCase`), so a stale one fails `just fixtures`.
+diff --git a/crates/cli/src/fixture.rs b/crates/cli/src/fixture.rs
+index 0c95434..ca38193 100644
+--- a/crates/cli/src/fixture.rs
++++ b/crates/cli/src/fixture.rs
+@@ -1,51 +1,59 @@
+ use std::path::Path;
+ 
+ use yamt_session::{
+-    DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, Orientation, merge_data, remembered_data,
++    DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, Orientation, Replayed, merge_data,
++    remembered_data,
+ };
+ 
+ use crate::case::Case;
+-use crate::{Result, print, read_text};
+-
+-/// A showcase case of a file git rerere filled in: its `remembered.<ext>` and `git-output.<ext>`.
+-struct Remembered {
+-    text: String,
+-    git_output: String,
+-}
++use crate::{Error, Result, print, read_text};
+ 
+ pub(crate) fn fixture(case_dir: &Path) -> Result<()> {
+     let case = Case::load(case_dir)?;
+     let path = format!("{}.{}", case.name, case.extension);
+-    let data = match remembered(&case)? {
+-        Some(remembered) => remembered_data(
+-            &path,
+-            &case.base,
+-            &case.local,
+-            &case.remote,
+-            &remembered.text,
+-            &remembered.git_output,
+-        ),
++    let style = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Orientation::NO_OPERATION);
++    let version = DiskVersion(0);
++    let data = match replayed(&case)? {
++        Some(replayed) => {
++            let data = remembered_data(
++                &path,
++                &case.base,
++                &case.local,
++                &case.remote,
++                &replayed,
++                &style,
++                version,
++            );
++            data.ok_or_else(|| Error::MalformedCase {
++                case: case.name.clone(),
++                problem: format!(
++                    "git-output.{} was not made from these sides",
++                    case.extension
++                ),
++            })?
++        }
+         None => merge_data(
+             &path,
+             &case.base,
+             &case.local,
+             &case.remote,
+             None,
+-            &MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Orientation::NO_OPERATION),
+-            DiskVersion(0),
++            &style,
++            version,
+         ),
+     };
+     print(&(serde_json::to_string_pretty(&data)? + "\n"))
+ }
+ 
+-fn remembered(case: &Case) -> Result<Option<Remembered>> {
+-    let text = case.dir.join(format!("remembered.{}", case.extension));
+-    if !text.is_file() {
++/// A case of a file git rerere filled in: its `remembered.<ext>` and `git-output.<ext>`.
++fn replayed(case: &Case) -> Result<Option<Replayed>> {
++    let resolution = case.dir.join(format!("remembered.{}", case.extension));
++    if !resolution.is_file() {
+         return Ok(None);
+     }
+     let git_output = case.dir.join(format!("git-output.{}", case.extension));
+-    Ok(Some(Remembered {
+-        text: read_text(&text)?,
++    Ok(Some(Replayed {
+         git_output: read_text(&git_output)?,
++        resolution: read_text(&resolution)?,
+     }))
+ }
+diff --git a/crates/cli/tests/commands.rs b/crates/cli/tests/commands.rs
+index 2ef9923..9710dc8 100644
+--- a/crates/cli/tests/commands.rs
++++ b/crates/cli/tests/commands.rs
+@@ -300,6 +300,30 @@ fn fixture_of_a_case_with_a_remembered_text_prints_the_remembered_view() {
+     assert_eq!(chunks[0]["chunk"]["base"], json!({ "start": 7, "len": 1 }));
+ }
+ 
++// Catches a `git-output.<ext>` left stale after a side changed, which `just fixtures` would turn into
++// conflicts placed by guesswork.
++#[test]
++fn fixture_refuses_a_git_output_not_made_from_the_case_s_sides() {
++    const STALE: &str =
++        "a\nB\nc\nd\nE\nf\ng\n<<<<<<< ours\nL, before\n=======\nR\n>>>>>>> theirs\ni\n";
++    let root = TempDir::new().unwrap();
++    let case = write_case(root.path(), "cart", "ts");
++    fs::write(
++        case.join("remembered.ts"),
++        "a\nB\nc\nd\nE\nf\ng\nL and R\ni\n",
++    )
++    .unwrap();
++    fs::write(case.join("git-output.ts"), STALE).unwrap();
++
++    let output = yamt_cli(&["fixture", path(&case)]);
++
++    assert_eq!(output.code, 1);
++    assert_eq!(
++        output.stderr,
++        "yamt-cli: cart is not a golden case: git-output.ts was not made from these sides\n"
++    );
++}
++
+ #[test]
+ fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
+     let repo = conflict_repo(&[
+diff --git a/crates/conflict-repo/AGENTS.md b/crates/conflict-repo/AGENTS.md
+index b1418a8..e20d7e8 100644
+--- a/crates/conflict-repo/AGENTS.md
++++ b/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `REPOSITORY_CONFIG` (`core.autocrlf=false`, the committer and `commit.gpgsign=false`), so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too; the sandboxed `git` passes the same values as `-c`. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is `STEP_ONE_MESSAGE` ("step 1" with a body). `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `rerere_repo(remembered, fresh, replay)` (`src/rerere.rs`, plan §2 #90) merges `remote` into `local` a second time with `rerere.enabled` and `rerere.autoUpdate` from `Replay` (`Review` = false, `Stage` = true): each `Remembered { file, resolution }` was resolved and committed in a first merge that was then undone, so rerere replays it; each `fresh` file conflicts only in the second merge and needs sides no remembered file has (rerere identifies a conflict by its text). `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `run_ignored_in_child(tests, configure)` reruns ignored tests of the running test binary in a child process `configure` sets up (an environment the test process cannot change for itself), `Error::ChildTestsFailed` with the child's output unless all passed. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `REPOSITORY_CONFIG` (`core.autocrlf=false`, the committer and `commit.gpgsign=false`), so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too; the sandboxed `git` passes the same values as `-c`. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is `STEP_ONE_MESSAGE` ("step 1" with a body). `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `rerere_repo(remembered, fresh, replay)` (`src/rerere.rs`, plan §2 #90) stops a second merge on `local` after a first merge of `remote` with `rerere.enabled`, in which each `Remembered { file, resolution }` was resolved and committed; `Replay` decides the rest: `Review`/`Stage` (`rerere.autoUpdate` false/true) undo that merge and merge `remote` again, so rerere replays each resolution; `Off` keeps the merge commit, switches `rerere.enabled` off and merges branch `later`, leaving the empty `MERGE_RR` that commit wrote (no checkout after it: a checkout drops `MERGE_RR`), so only `fresh` files conflict. Each `fresh` file conflicts only in the second merge and needs sides no remembered file has (rerere identifies a conflict by its text). `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `run_ignored_in_child(tests, configure)` reruns ignored tests of the running test binary in a child process `configure` sets up (an environment the test process cannot change for itself), `Error::ChildTestsFailed` with the child's output unless all passed. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git a/crates/conflict-repo/src/rerere.rs b/crates/conflict-repo/src/rerere.rs
+index b214be5..bec5c24 100644
+--- a/crates/conflict-repo/src/rerere.rs
++++ b/crates/conflict-repo/src/rerere.rs
+@@ -1,8 +1,10 @@
+ use std::fs;
++use std::path::Path;
+ 
+ use crate::{ConflictFile, Result, Run, TempDir, commit_side, diverged_repo, git_ok, stopped};
+ 
+ const MERGE: [&str; 3] = ["merge", "--quiet", "remote"];
++const MERGE_LATER: [&str; 3] = ["merge", "--quiet", "later"];
+ 
+ /// A file whose conflict was resolved to `resolution` in an earlier merge, so rerere remembers it.
+ #[derive(Clone, Copy, Debug)]
+@@ -11,35 +13,71 @@ pub struct Remembered<'a> {
+     pub resolution: &'a [u8],
+ }
+ 
+-/// `rerere.autoUpdate`: git leaves a replayed resolution unstaged for review, or stages it.
++/// What rerere does in the second merge.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum Replay {
++    /// `rerere.autoUpdate` false: git replays a resolution and leaves it unstaged for review.
+     Review,
++    /// `rerere.autoUpdate` true: git replays a resolution and stages it.
+     Stage,
++    /// `rerere.enabled` false after the first merge was committed and kept: nothing is replayed, and
++    /// the empty `MERGE_RR` that commit left stays. Only the `fresh` files conflict, merged from
++    /// branch `later`.
++    Off,
+ }
+ 
+-/// A repo where `git merge remote` on branch `local` stopped a second time with rerere on: each
+-/// `remembered` file's conflict was resolved and committed in a first merge that was then undone,
+-/// so rerere replays its resolution; each `fresh` file conflicts only in the second merge, and needs
+-/// sides no remembered file has (rerere.c identifies a conflict by its text, not its path).
++/// A repo where `git merge` on branch `local` stopped a second time: each `remembered` file's
++/// conflict was resolved and committed in a first merge of `remote` with rerere on, which `Review`
++/// and `Stage` then undo, so rerere replays its resolution; each `fresh` file conflicts only in the
++/// second merge, and needs sides no remembered file has (rerere.c identifies a conflict by its text,
++/// not its path).
+ pub fn rerere_repo(
+     remembered: &[Remembered],
+     fresh: &[ConflictFile],
+     replay: Replay,
+ ) -> Result<TempDir> {
+-    let fresh_as_local = fresh.iter().map(|file| ConflictFile {
+-        remote: file.local,
+-        ..*file
++    let fresh_in_first = fresh.iter().map(|file| match replay {
++        Replay::Review | Replay::Stage => ConflictFile {
++            remote: file.local,
++            ..*file
++        },
++        Replay::Off => ConflictFile {
++            local: file.base,
++            remote: file.base,
++            ..*file
++        },
+     });
+     let first: Vec<ConflictFile> = remembered
+         .iter()
+         .map(|resolved| resolved.file)
+-        .chain(fresh_as_local)
++        .chain(fresh_in_first)
+         .collect();
+     let dir = diverged_repo(&first)?;
+     let root = dir.path();
++    if replay == Replay::Off {
++        commit_remote_again(root, fresh, "later")?;
++    }
++    first_merge_committed(root, remembered, replay)?;
++    match replay {
++        Replay::Review | Replay::Stage => {
++            git_ok(root, &["reset", "--quiet", "--hard", "HEAD^"])?;
++            if !fresh.is_empty() {
++                commit_remote_again(root, fresh, "remote")?;
++            }
++            stopped(Run::Merge, root, &MERGE, None)?;
++        }
++        Replay::Off => {
++            git_ok(root, &["config", "rerere.enabled", "false"])?;
++            commit_side(root, fresh, |file| file.local, "local again")?;
++            stopped(Run::Merge, root, &MERGE_LATER, None)?;
++        }
++    }
++    Ok(dir)
++}
++
++fn first_merge_committed(root: &Path, remembered: &[Remembered], replay: Replay) -> Result<()> {
+     let auto_update = match replay {
+-        Replay::Review => "false",
++        Replay::Review | Replay::Off => "false",
+         Replay::Stage => "true",
+     };
+     git_ok(root, &["config", "rerere.enabled", "true"])?;
+@@ -50,12 +88,14 @@ pub fn rerere_repo(
+         git_ok(root, &["add", "--", resolved.file.path])?;
+     }
+     git_ok(root, &["commit", "--quiet", "--no-edit"])?;
+-    git_ok(root, &["reset", "--quiet", "--hard", "HEAD^"])?;
+-    if !fresh.is_empty() {
+-        git_ok(root, &["checkout", "--quiet", "remote"])?;
+-        commit_side(root, fresh, |file| file.remote, "remote again")?;
+-        git_ok(root, &["checkout", "--quiet", "local"])?;
+-    }
+-    stopped(Run::Merge, root, &MERGE, None)?;
+-    Ok(dir)
++    Ok(())
++}
++
++/// Commits each `fresh` file's remote side on `branch`, made or moved to `remote` first; a checkout
++/// drops `MERGE_RR` (branch.c `remove_merge_branch_state`), so it runs before any merge that needs it kept.
++fn commit_remote_again(root: &Path, fresh: &[ConflictFile], branch: &str) -> Result<()> {
++    git_ok(root, &["checkout", "--quiet", "-B", branch, "remote"])?;
++    commit_side(root, fresh, |file| file.remote, "remote again")?;
++    git_ok(root, &["checkout", "--quiet", "local"])?;
++    Ok(())
+ }
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index d979921..9e1d912 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -1,5 +1,5 @@
+ Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subprocess layer only: explicit argv, bytes in/out, never depends on `yamt-merge-core`. Tests are integration tests against real temp repositories in `tests/`.
+ 
+-What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`), in `rebase-merge/current-fixups` (the squash chain this stop is in: git opens the editor at the end of a chain with a squash) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `src/rerere.rs` (plan §2 #90): `Repo::rerere_tracked()` reads `MERGE_RR` (`<id>[.<n>]\t<path>\0` records; a replayed path is dropped by rerere.c `write_rr`), `None` without the file, a record without a tab `UnexpectedOutput`; `tests/rerere.rs` on `yamt_conflict_repo::rerere_repo`. `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo, a conflicted `fixup` ending a chain with and without a squash).
++What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`), in `rebase-merge/current-fixups` (the squash chain this stop is in: git opens the editor at the end of a chain with a squash) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `src/rerere.rs` (plan §2 #90): `Repo::rerere_tracked()` reads `MERGE_RR` (`<id>[.<n>]\t<path>\0` records; a replayed path is dropped by rerere.c `write_rr`) only while rerere is enabled as rerere.c `is_rerere_enabled` decides (`config --type=bool rerere.enabled`; unset → whether `rr-cache` is a directory), so the empty `MERGE_RR` a commit leaves is not read once rerere is off; `None` when rerere is off or without the file, a record without a tab or another `rerere.enabled` answer `UnexpectedOutput`; `tests/rerere.rs` on `yamt_conflict_repo::rerere_repo` (the unset case in a child without the user's and system config). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo, a conflicted `fixup` ending a chain with and without a squash).
+ 
+ Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
+diff --git a/crates/gitio/src/rerere.rs b/crates/gitio/src/rerere.rs
+index 0d8acfb..0899e01 100644
+--- a/crates/gitio/src/rerere.rs
++++ b/crates/gitio/src/rerere.rs
+@@ -1,20 +1,54 @@
+ use std::path::PathBuf;
++use std::process::ExitStatus;
+ 
+ use crate::entry::path_from_git;
+ use crate::repo::{Repo, read_if_present};
++use crate::run::{Access, GIT_TIMEOUT, run_accepting};
+ use crate::{Error, Result};
+ 
+ const MERGE_RR: &str = "MERGE_RR";
++const RR_CACHE: &str = "rr-cache";
++const ENABLED_ARGS: [&str; 4] = ["config", "--type=bool", "--get", "rerere.enabled"];
++// git-config(1): `--get` exits with 1 when the key is not set.
++const UNSET_STATUS: i32 = 1;
+ 
+ impl Repo {
+     /// The paths rerere still tracks (`MERGE_RR` through `--git-path`, records `<id>[.<n>]\t<path>\0`); None when
+-    /// there is no `MERGE_RR` (rerere off, or nothing recorded at this stop).
++    /// rerere is not enabled, or there is no `MERGE_RR` (nothing recorded at this stop).
+     pub fn rerere_tracked(&self) -> Result<Option<Vec<PathBuf>>> {
+-        match read_if_present(&self.git_path(MERGE_RR)?)? {
++        let [merge_rr, rr_cache] = self.git_paths([MERGE_RR, RR_CACHE])?;
++        // rerere.c `is_rerere_enabled`: `rerere.enabled`, or when unset whether `rr-cache` is a directory.
++        let enabled = match self.rerere_enabled()? {
++            Some(enabled) => enabled,
++            None => rr_cache.is_dir(),
++        };
++        if !enabled {
++            return Ok(None);
++        }
++        match read_if_present(&merge_rr)? {
+             Some(records) => tracked_paths(&records).map(Some),
+             None => Ok(None),
+         }
+     }
++
++    /// `rerere.enabled` as git reads a boolean; None when it is not set.
++    fn rerere_enabled(&self) -> Result<Option<bool>> {
++        let command = self.command(Access::Read, &ENABLED_ARGS);
++        let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_unset)?;
++        match output.as_slice() {
++            b"" => Ok(None),
++            b"true\n" => Ok(Some(true)),
++            b"false\n" => Ok(Some(false)),
++            _ => Err(Error::UnexpectedOutput {
++                command: "config rerere.enabled",
++                output: String::from_utf8_lossy(&output).into_owned(),
++            }),
++        }
++    }
++}
++
++fn is_found_or_unset(status: ExitStatus) -> bool {
++    status.success() || status.code() == Some(UNSET_STATUS)
+ }
+ 
+ // rerere.c `write_rr`: a path whose resolution was replayed is dropped from the list; every other
+diff --git a/crates/gitio/tests/rerere.rs b/crates/gitio/tests/rerere.rs
+index 0c99e85..dfecd90 100644
+--- a/crates/gitio/tests/rerere.rs
++++ b/crates/gitio/tests/rerere.rs
+@@ -2,7 +2,10 @@
+ 
+ use std::path::PathBuf;
+ 
+-use yamt_conflict_repo::{ConflictFile, FileKind, Remembered, Replay, conflict_repo, rerere_repo};
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Remembered, Replay, conflict_repo, git_ok, rerere_repo,
++    run_ignored_in_child,
++};
+ use yamt_gitio::Repo;
+ 
+ const REPLAYED: &str = "replayed.txt";
+@@ -50,3 +53,52 @@ fn rerere_tracked_is_none_when_rerere_is_off() {
+ 
+     assert_eq!(repo.rerere_tracked().unwrap(), None);
+ }
++
++fn switched_off_repo() -> yamt_conflict_repo::TempDir {
++    let remembered = [Remembered {
++        file: conflict(REPLAYED, b"local\n", b"remote\n"),
++        resolution: b"resolved\n",
++    }];
++    let fresh = conflict(FRESH, b"mine\n", b"theirs\n");
++    rerere_repo(&remembered, &[fresh], Replay::Off).unwrap()
++}
++
++// Catches the empty `MERGE_RR` a commit made with rerere on leaves behind, read once rerere is off as
++// "rerere replayed every path".
++#[test]
++fn rerere_tracked_is_none_when_rerere_was_switched_off_after_a_committed_rerere_merge() {
++    let dir = switched_off_repo();
++    let repo = Repo::discover(dir.path()).unwrap();
++
++    assert!(dir.path().join(".git/MERGE_RR").is_file());
++    assert_eq!(repo.rerere_tracked().unwrap(), None);
++}
++
++const UNSET_IN_CHILD: [&str; 1] =
++    ["with_rerere_enabled_unset_rerere_tracked_reads_merge_rr_only_while_rr_cache_exists"];
++
++// Without the user's and the system's config, so that `rerere.enabled` is unset for yamt's git too.
++#[test]
++fn rerere_enabled_unset_without_user_config() {
++    let ran = run_ignored_in_child(&UNSET_IN_CHILD, |child| {
++        child
++            .env("GIT_CONFIG_GLOBAL", "/dev/null")
++            .env("GIT_CONFIG_NOSYSTEM", "1");
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++// Catches `rerere.enabled` unset read as off, or as on without `rr-cache` (rerere.c
++// `is_rerere_enabled`).
++#[test]
++#[ignore = "run by rerere_enabled_unset_without_user_config"]
++fn with_rerere_enabled_unset_rerere_tracked_reads_merge_rr_only_while_rr_cache_exists() {
++    let dir = switched_off_repo();
++    git_ok(dir.path(), &["config", "--unset", "rerere.enabled"]).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++
++    assert_eq!(repo.rerere_tracked().unwrap(), Some(Vec::new()));
++    std::fs::remove_dir_all(dir.path().join(".git/rr-cache")).unwrap();
++    assert_eq!(repo.rerere_tracked().unwrap(), None);
++}
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index aecb9e0..782251c 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`, also a conflicted `squash`/`fixup` step, plan §2 #91), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`, `ViewRemembered`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Remembered`, `Unread`; set once in `open.rs`, never written again). A resolution git rerere replayed is reviewed, never staged at open (plan §2 #90, `remembered.rs`): `MERGE_RR` exists (`Repo::rerere_tracked`, read at most once per open through `RerereTracked`), the path is not in it, git's re-run output has blocks and the disk file no marker line (`looks_resolved`) → `AtOpen::Remembered { remembered, git_output }` and `Seen::ViewRemembered`, equal to the disk, so nothing settles it; a later disk change follows #52. `FileStatus::Remembered` while git lists the path unmerged and the file is in that view (`FileState::unmerged_status`, at open, in `refresh_statuses` and after Reset); `remaining()` and the exit status count it. Its view (`remembered_merge_data`) is the file as the Result (`Middle::Disk`) with one `Conflict` per block of git's output, located in the stages as the disk view locates a block, its Result lines `line_map(git output, text).covering(block)`, waiting as `Waiting::Remembered` (Save writes the Result as shown); one-sided changes are already in the text and are no chunks; `remembered_data` builds it for `yamt-cli fixture`'s showcase case `tests/showcase/remembered`. Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view, `Remembered` the remembered view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region, `Remembered` for a block rerere resolved). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in the panes showing ours and theirs and in base (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s; `StartCheck::found` gives each path's `Found`). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation (`applied`) — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; `applied` and the name builders are the only ones (`operation.rs`'s view names what a merge, squash merge, pick or revert applies through `applied`), `message_text` is the one rule for a commit's or patch's message, and one `name_or_warn(label, read)` drops only that name on a git failure with a `side_name_unread` warning naming it (plan §2 #50, #62). `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else `refresh`'s settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); git's continue output and an abort's refusal (`GitFailed.stderr`) leave the session through `shown_text` only: per line, what follows its last `\r`, as a terminal shows git's progress lines. `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; a conflicted squash step's own commit on the left, both sides named; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs through `yamt_conflict_repo::run_ignored_in_child` with the user's locale set) run on `conflict-repo`'s `operation_repo`; `remembered.rs` (listed, loaded, saved, finished, reset, changed later; `autoUpdate`, a first-time path, hand fixes with rerere on and off) on `rerere_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`, also a conflicted `squash`/`fixup` step, plan §2 #91), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`, `ViewRemembered { shown, git_output }`); finish and save record the bytes they wrote (`Seen::note_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Remembered { remembered, git_output }`, `Unread`; set once in `open.rs`, never written again; a remembered file's bytes are copied into its `Seen` once at open and at each Reset). A resolution git rerere replayed is reviewed, never staged at open (plan §2 #90); detection is in `start.rs` beside `compare_merged`: git's re-run output has blocks and the disk file no marker line (`looks_resolved`), and rerere replayed the path (`RerereTracked`, read at most once per open: `Repo::rerere_tracked` gives the paths only while rerere is enabled as rerere.c decides, so a stale empty `MERGE_RR` with rerere off counts as off; the path not in it → replayed; an unreadable `MERGE_RR` → `Unknown`, a `rerere_unread` warning, and every file that looks resolved counts as replayed) → `AtOpen::Remembered` and `Seen::ViewRemembered`, equal to the disk, so nothing settles it; a later disk change follows #52. `FileStatus::Remembered` while git lists the path unmerged and the file is in that view (`FileState::unmerged_status`, at open, in `refresh_statuses` and after Reset); `remaining()` and the exit status count it. Its view (`remembered.rs`, `remembered_merge_data`) is the file as the Result (`Middle::Disk`) with one `Conflict` per block of git's output, placed in the stages by the same walk as the disk view (`locate::place_pieces`), its Result lines `line_map(git output, text).covering(block)` with both texts' lines read without `\r` (a CRLF worktree over LF blobs, `core.autocrlf`); blocks whose Result lines overlap join into one conflict over both blocks' spans; waiting as `Waiting::Remembered` (Save writes the Result as shown); one-sided changes are already in the text and are no chunks. `remembered_data(path, base, local, remote, &Replayed, &MarkerStyle, DiskVersion)` is the same view from texts (`yamt-cli fixture`'s `tests/showcase/remembered`), `None` when a block of git's output is not found unchanged in the sides. Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view, `Remembered` the remembered view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style, with the marker size it was read with; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region, `Remembered` for a block rerere resolved). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` walks the pieces once (`place_pieces`): each open block or raw region located in the panes showing ours and theirs and in base, its base lines starting where the previous one's end (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker); `seed.rs` builds the middle text and one conflict per open block from the disk over that walk, `start.rs` compares each file with what git wrote at `open` (`git merge-file` in a `scratch.rs` temp directory, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s; `StartCheck::found` gives each path's `Found`). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation (`applied`) — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; `applied` and the name builders are the only ones (`operation.rs`'s view names what a merge, squash merge, pick or revert applies through `applied`), `message_text` is the one rule for a commit's or patch's message, and one `name_or_warn(label, read)` drops only that name on a git failure with a `side_name_unread` warning naming it (plan §2 #50, #62). `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else `refresh`'s settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); git's continue output and an abort's refusal (`GitFailed.stderr`) leave the session through `shown_text` only: per line, what follows its last `\r`, as a terminal shows git's progress lines. `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; a conflicted squash step's own commit on the left, both sides named; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs through `yamt_conflict_repo::run_ignored_in_child` with the user's locale set) run on `conflict-repo`'s `operation_repo`; `remembered.rs` (listed, loaded, saved, finished, reset, changed later; `autoUpdate`, a first-time path, hand fixes with rerere on, off, and switched off over a stale `MERGE_RR`; an unreadable `MERGE_RR`; a replayed path checked out again with markers) on `rerere_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
+diff --git a/crates/session/src/disk.rs b/crates/session/src/disk.rs
+index 1750f5f..fa2003e 100644
+--- a/crates/session/src/disk.rs
++++ b/crates/session/src/disk.rs
+@@ -53,8 +53,12 @@ pub(crate) enum Seen {
+     GitOutput,
+     ViewFromStages(OnDisk),
+     ViewFromDisk(OnDisk),
+-    /// The regular file rerere filled in at open, or yamt's own write over it, shown for review (plan §2 #90).
+-    ViewRemembered(Vec<u8>),
++    /// The regular file rerere filled in at open, or yamt's own write over it, shown for review with
++    /// each block of what git's merge wrote (plan §2 #90).
++    ViewRemembered {
++        shown: Vec<u8>,
++        git_output: Vec<u8>,
++    },
+ }
+ 
+ /// The file as this run of yamt found it at open: what Reset puts back (plan §2 #66).
+@@ -101,17 +105,19 @@ impl Seen {
+         match self {
+             Seen::GitOutput => false,
+             Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
+-            Seen::ViewRemembered(seen) => matches!(disk, OnDisk::File(bytes) if bytes == seen),
++            Seen::ViewRemembered { shown, .. } => {
++                matches!(disk, OnDisk::File(bytes) if bytes == shown)
++            }
+         }
+     }
+ 
+-    /// What yamt has seen once it wrote the file `written` itself; the view stays.
+-    pub(crate) fn after_own_write(&self, written: Vec<u8>) -> Seen {
++    /// Notes that yamt wrote the file `written` itself; the view stays.
++    pub(crate) fn note_own_write(&mut self, written: Vec<u8>) {
+         match self {
+-            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(OnDisk::File(written)),
+-            Seen::ViewRemembered(_) => Seen::ViewRemembered(written),
++            Seen::ViewFromDisk(disk) => *disk = OnDisk::File(written),
++            Seen::ViewRemembered { shown, .. } => *shown = written,
+             Seen::ViewFromStages(_) | Seen::GitOutput => {
+-                Seen::ViewFromStages(OnDisk::File(written))
++                *self = Seen::ViewFromStages(OnDisk::File(written));
+             }
+         }
+     }
+@@ -129,7 +135,13 @@ impl AtOpen {
+     pub(crate) fn first_seen(&self) -> Seen {
+         match self {
+             AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
+-            AtOpen::Remembered { remembered, .. } => Seen::ViewRemembered(remembered.clone()),
++            AtOpen::Remembered {
++                remembered,
++                git_output,
++            } => Seen::ViewRemembered {
++                shown: remembered.clone(),
++                git_output: git_output.clone(),
++            },
+             AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
+         }
+     }
+@@ -141,10 +153,16 @@ impl AtOpen {
+         let (disk, seen) = match self {
+             AtOpen::Untouched(disk) => (disk, Seen::ViewFromStages(disk.clone())),
+             AtOpen::Changed(disk) => (disk, Seen::ViewFromDisk(disk.clone())),
+-            AtOpen::Remembered { remembered, .. } => {
++            AtOpen::Remembered {
++                remembered,
++                git_output,
++            } => {
+                 return Some(ResetTo {
+                     bytes: Some(remembered.clone()),
+-                    seen: Seen::ViewRemembered(remembered.clone()),
++                    seen: Seen::ViewRemembered {
++                        shown: remembered.clone(),
++                        git_output: git_output.clone(),
++                    },
+                 });
+             }
+             AtOpen::Unread => return None,
+@@ -156,14 +174,6 @@ impl AtOpen {
+         };
+         Some(ResetTo { bytes, seen })
+     }
+-
+-    /// What git's merge wrote at open, kept only for a remembered resolution.
+-    pub(crate) fn git_output(&self) -> Option<&[u8]> {
+-        match self {
+-            AtOpen::Remembered { git_output, .. } => Some(git_output),
+-            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => None,
+-        }
+-    }
+ }
+ 
+ pub(crate) fn warn_unread(path: &str, error: &Error) {
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index f2a2510..1d610ed 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -11,6 +11,7 @@ mod open;
+ mod operation;
+ mod orientation;
+ mod remembered;
++mod scratch;
+ mod seed;
+ mod session;
+ mod side_names;
+@@ -26,7 +27,7 @@ pub use markers::DEFAULT_MARKER_SIZE;
+ pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, merge_data};
+ pub use operation::{Continued, OperationKind, OperationView, ProgressView, Refreshed, StopList};
+ pub use orientation::{GitSide, Orientation};
+-pub use remembered::remembered_data;
++pub use remembered::{Replayed, remembered_data};
+ pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
+ pub use side_names::{SideName, SideNames};
+ pub use sides::{FileSides, Side, SideContent};
+diff --git a/crates/session/src/locate.rs b/crates/session/src/locate.rs
+index f513c5b..897db59 100644
+--- a/crates/session/src/locate.rs
++++ b/crates/session/src/locate.rs
+@@ -8,9 +8,25 @@ use crate::orientation::{GitSide, Orientation};
+ 
+ /// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`, every line
+ /// ended), and the line where each piece starts in it.
+-pub(crate) struct SideView {
+-    pub(crate) text: String,
+-    pub(crate) piece_starts: Vec<u32>,
++struct SideView {
++    text: String,
++    piece_starts: Vec<u32>,
++}
++
++/// A piece of a text holding git's markers, placed in the panes. A block or raw region is located,
++/// and its base lines start where the previous one's end, so chunks stay disjoint in base.
++pub(crate) enum Placed<'p> {
++    Settled(&'p Range<usize>),
++    Block {
++        block: &'p Block,
++        located: Located,
++        base: LineRange<BaseLine>,
++    },
++    Raw {
++        lines: &'p Range<usize>,
++        located: Located,
++        base: LineRange<BaseLine>,
++    },
+ }
+ 
+ /// Where an open block or raw region sits in local and remote; `exact` when every line of both
+@@ -23,7 +39,7 @@ pub(crate) struct Located {
+ 
+ /// Line maps from the ours and theirs views of the disk to the panes showing ours and theirs
+ /// (untyped git-order lines until `located` orients them), and from local and remote to base.
+-pub(crate) struct Maps {
++struct Maps {
+     orientation: Orientation,
+     ours_to_pane: LineMap,
+     theirs_to_pane: LineMap,
+@@ -31,11 +47,58 @@ pub(crate) struct Maps {
+     remote_to_base: LineMap,
+ }
+ 
+-pub(crate) fn side_view(
++/// Each of `pieces`, parsed from `lines`, placed in the panes of `texts`.
++pub(crate) fn place_pieces<'p>(
+     lines: &[&str],
+-    pieces: &[Piece],
+-    section: fn(&Block) -> &Range<usize>,
+-) -> SideView {
++    pieces: &'p [Piece],
++    texts: &Texts,
++    orientation: Orientation,
++) -> Vec<Placed<'p>> {
++    let ours = side_view(lines, pieces, |block| &block.ours);
++    let theirs = side_view(lines, pieces, |block| &block.theirs);
++    let maps = Maps::new(&ours, &theirs, texts, orientation);
++    let mut base_end = 0;
++    let mut placed = Vec::with_capacity(pieces.len());
++    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
++    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
++        placed.push(match piece {
++            Piece::Settled(lines) => Placed::Settled(lines),
++            Piece::Block(block) => {
++                let located = maps.block(block, ours_start, theirs_start);
++                let base = after_previous(maps.base(&located), &mut base_end);
++                Placed::Block {
++                    block,
++                    located,
++                    base,
++                }
++            }
++            Piece::Raw(lines) => {
++                let located = maps.raw(ours_start, theirs_start);
++                let base = after_previous(maps.base(&located), &mut base_end);
++                Placed::Raw {
++                    lines,
++                    located,
++                    base,
++                }
++            }
++        });
++    }
++    placed
++}
++
++/// `base` without the lines before `end`, where the previous chunk's base lines end; `end` moves to
++/// its end.
++fn after_previous(base: LineRange<BaseLine>, end: &mut u32) -> LineRange<BaseLine> {
++    let start = base.start.0.max(*end);
++    let after = LineRange {
++        start: BaseLine(start),
++        len: base.end().0.saturating_sub(start),
++    };
++    *end = after.end().0;
++    after
++}
++
++fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usize>) -> SideView {
+     let mut view = SideView {
+         text: String::new(),
+         piece_starts: Vec::with_capacity(pieces.len()),
+@@ -64,12 +127,7 @@ pub(crate) fn side_view(
+ }
+ 
+ impl Maps {
+-    pub(crate) fn new(
+-        ours: &SideView,
+-        theirs: &SideView,
+-        texts: &Texts,
+-        orientation: Orientation,
+-    ) -> Maps {
++    fn new(ours: &SideView, theirs: &SideView, texts: &Texts, orientation: Orientation) -> Maps {
+         let pane_of = |side| side_text(texts.pane(orientation.pane(side)));
+         Maps {
+             orientation,
+@@ -80,7 +138,7 @@ impl Maps {
+         }
+     }
+ 
+-    pub(crate) fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
++    fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
+         let ours = ours_start..ours_start + line_number(block.ours.len());
+         let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
+         match (
+@@ -96,7 +154,7 @@ impl Maps {
+         }
+     }
+ 
+-    pub(crate) fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
++    fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
+         self.located(
+             self.ours_to_pane.covering(ours_start..ours_start),
+             self.theirs_to_pane.covering(theirs_start..theirs_start),
+@@ -114,7 +172,7 @@ impl Maps {
+     }
+ 
+     /// The base lines that the located local and remote lines cover.
+-    pub(crate) fn base(&self, located: &Located) -> LineRange<BaseLine> {
++    fn base(&self, located: &Located) -> LineRange<BaseLine> {
+         let local = located.local.start.0..located.local.end().0;
+         let remote = located.remote.start.0..located.remote.end().0;
+         let from_local = self.local_to_base.covering(local);
+diff --git a/crates/session/src/remembered.rs b/crates/session/src/remembered.rs
+index c6c89d0..c13352a 100644
+--- a/crates/session/src/remembered.rs
++++ b/crates/session/src/remembered.rs
+@@ -1,85 +1,80 @@
+ use std::ops::Range;
+-use std::path::{Path, PathBuf};
+ 
+-use yamt_gitio::Repo;
+ use yamt_merge_core::{
+-    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, WordChanges, line_map, word_changes,
++    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, RemoteLine, line_map, word_changes,
+ };
+ 
+ use crate::decode::detect_eol;
+ use crate::disk::DiskVersion;
+-use crate::locate::{Maps, line_number, side_view};
+-use crate::markers::{DEFAULT_MARKER_SIZE, Piece, open_regions, parse, split_lines};
++use crate::locate::{Placed, line_number, place_pieces};
++use crate::markers::{parse, split_lines};
+ use crate::merge_data::{
+     FileMergeData, MergeChunk, MiddleLine, Texts, disk_text, shown_merge_data,
+ };
+ use crate::orientation::Orientation;
+ use crate::seed::Seeded;
+-use crate::session::LOG_TARGET;
+-use crate::waiting::Waiting;
++use crate::waiting::{MarkerStyle, Waiting};
+ 
+-/// The paths rerere tracks at this stop, read once, when the first file looks resolved at open.
+-pub(crate) enum RerereTracked {
+-    Unread,
+-    /// No `MERGE_RR`, or it could not be read.
+-    Off,
+-    Paths(Vec<PathBuf>),
++/// What git rerere left in a file: git's merge output with its conflict blocks, and the resolution
++/// rerere replayed over it.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct Replayed {
++    pub git_output: String,
++    pub resolution: String,
+ }
+ 
+-impl RerereTracked {
+-    /// rerere replayed a resolution into `path`: `MERGE_RR` exists and no longer lists it.
+-    pub(crate) fn has_replayed(&mut self, repo: &Repo, path: &Path) -> bool {
+-        if let RerereTracked::Unread = self {
+-            *self = match repo.rerere_tracked() {
+-                Ok(Some(paths)) => RerereTracked::Paths(paths),
+-                Ok(None) => RerereTracked::Off,
+-                Err(error) => {
+-                    tracing::warn!(target: LOG_TARGET, event = "rerere_unread", %error, "no file counts as remembered");
+-                    RerereTracked::Off
+-                }
+-            };
+-        }
+-        match self {
+-            RerereTracked::Paths(paths) => !paths.iter().any(|tracked| tracked == path),
+-            RerereTracked::Unread | RerereTracked::Off => false,
+-        }
+-    }
++/// The remembered view's conflicts, and whether every block of git's output was found unchanged in
++/// the sides.
++struct RememberedChunks {
++    chunks: Vec<MergeChunk>,
++    exact: bool,
+ }
+ 
+-/// git's merge output has conflict blocks and the disk file has no marker line left.
+-pub(crate) fn looks_resolved(git_output: &[u8], disk: &[u8], marker_size: usize) -> bool {
+-    let has_block = parse(&split_lines(git_output), marker_size)
+-        .iter()
+-        .any(|piece| matches!(piece, Piece::Block(_)));
+-    has_block && open_regions(&parse(&split_lines(disk), marker_size)) == 0
++/// One conflict in plain line numbers: its base, local and remote lines, and its lines in the
++/// shown text.
++struct Spans {
++    base: Range<u32>,
++    local: Range<u32>,
++    remote: Range<u32>,
++    middle: Range<u32>,
+ }
+ 
+-/// The remembered view of a showcase case (`yamt-cli fixture`, plan §2 #90), ours on the left and
+-/// git's default marker size: `remembered` as the Result, each block of `git_output` a conflict.
++/// The remembered view (plan §2 #90) of a file from its three sides: the resolution as the Result,
++/// each block of git's output a conflict; `None` when a block is not found unchanged in the sides,
++/// so the output was made from other sides.
+ #[must_use]
+ pub fn remembered_data(
+     path: &str,
+     base: &str,
+     local: &str,
+     remote: &str,
+-    remembered: &str,
+-    git_output: &str,
+-) -> FileMergeData {
++    replayed: &Replayed,
++    style: &MarkerStyle,
++    disk_version: DiskVersion,
++) -> Option<FileMergeData> {
+     let texts = Texts {
+         base: base.to_owned(),
+         local: local.to_owned(),
+         remote: remote.to_owned(),
+         deleted: None,
+     };
+-    remembered_merge_data(
+-        path,
++    let resolution = &replayed.resolution;
++    let found = remembered_chunks(
++        resolution,
++        replayed.git_output.as_bytes(),
++        style.marker_size,
+         &texts,
+-        remembered.as_bytes(),
+-        git_output.as_bytes(),
+-        DEFAULT_MARKER_SIZE,
+-        Orientation::NO_OPERATION,
+-        DiskVersion(0),
+-    )
++        style.orientation,
++    );
++    if !found.exact {
++        return None;
++    }
++    let seeded = Seeded {
++        middle: resolution.clone(),
++        eol: detect_eol(resolution),
++        chunks: found.chunks,
++    };
++    Some(shown_merge_data(path, &texts, Ok(seeded), disk_version))
+ }
+ 
+ /// The remembered view (plan §2 #90): the file `shown` as the Result, and each block of
+@@ -96,80 +91,217 @@ pub(crate) fn remembered_merge_data(
+     let seeded = disk_text(shown).map(|text| Seeded {
+         middle: text.to_owned(),
+         eol: detect_eol(text),
+-        chunks: remembered_chunks(text, git_output, marker_size, texts, orientation),
++        chunks: remembered_chunks(text, git_output, marker_size, texts, orientation).chunks,
+     });
+     shown_merge_data(path, texts, seeded, disk_version)
+ }
+ 
+-/// Each block git wrote, located in the stages as the disk view locates one, and its lines in
+-/// `shown` found by a line map from git's output.
++/// Each block git wrote, placed in the stages as the disk view places one, and its lines in `shown`
++/// found by a line map from git's output; blocks whose lines in `shown` overlap are one conflict.
+ fn remembered_chunks(
+     shown: &str,
+     git_output: &[u8],
+     marker_size: usize,
+     texts: &Texts,
+     orientation: Orientation,
+-) -> Vec<MergeChunk> {
++) -> RememberedChunks {
+     let Ok(output) = std::str::from_utf8(git_output) else {
+-        return Vec::new();
++        return RememberedChunks {
++            chunks: Vec::new(),
++            exact: false,
++        };
+     };
+     let output_lines: Vec<&str> = output.split_inclusive('\n').collect();
+     let pieces = parse(&split_lines(git_output), marker_size);
+-    let ours = side_view(&output_lines, &pieces, |block| &block.ours);
+-    let theirs = side_view(&output_lines, &pieces, |block| &block.theirs);
+-    let maps = Maps::new(&ours, &theirs, texts, orientation);
+-    let to_shown = line_map(output, shown);
+-    let (mut chunks, mut middles) = (Vec::new(), Vec::new());
+-    let (mut base_end, mut middle_end) = (0, 0);
+-    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
+-    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
+-        let Piece::Block(block) = piece else {
++    // git-config(1) `core.autocrlf`: the worktree file can end its lines with CRLF over git's LF.
++    let to_shown = line_map(&output.replace("\r\n", "\n"), &shown.replace("\r\n", "\n"));
++    let mut conflicts: Vec<Spans> = Vec::new();
++    let mut exact = true;
++    for piece in place_pieces(&output_lines, &pieces, texts, orientation) {
++        let Placed::Block {
++            block,
++            located,
++            base,
++        } = piece
++        else {
+             continue;
+         };
+-        let located = maps.block(block, ours_start, theirs_start);
+-        let base = maps.base(&located);
+-        let base = after_previous(base.start.0..base.end().0, &mut base_end);
++        exact &= located.exact;
+         let whole = line_number(block.whole.start)..line_number(block.whole.end);
+-        middles.push(after_previous(to_shown.covering(whole), &mut middle_end));
++        let spans = Spans {
++            base: base.start.0..base.end().0,
++            local: located.local.start.0..located.local.end().0,
++            remote: located.remote.start.0..located.remote.end().0,
++            middle: to_shown.covering(whole),
++        };
++        match conflicts.last_mut() {
++            Some(previous) if spans.middle.start < previous.middle.end => previous.join(&spans),
++            Some(_) | None => conflicts.push(spans),
++        }
++    }
++    RememberedChunks {
++        chunks: waiting_chunks(conflicts, texts),
++        exact,
++    }
++}
++
++impl Spans {
++    /// Grows every span to cover `next`'s too.
++    fn join(&mut self, next: &Spans) {
++        for (span, other) in [
++            (&mut self.base, &next.base),
++            (&mut self.local, &next.local),
++            (&mut self.remote, &next.remote),
++            (&mut self.middle, &next.middle),
++        ] {
++            *span = span.start.min(other.start)..span.end.max(other.end);
++        }
++    }
++}
++
++fn waiting_chunks(conflicts: Vec<Spans>, texts: &Texts) -> Vec<MergeChunk> {
++    let mut chunks = Vec::with_capacity(conflicts.len());
++    let mut middles = Vec::with_capacity(conflicts.len());
++    for spans in conflicts {
+         chunks.push(Chunk {
+             id: ChunkId(line_number(chunks.len())),
+             kind: ChunkKind::Conflict,
+             base: LineRange {
+-                start: BaseLine(base.start),
+-                len: base.end - base.start,
++                start: BaseLine(spans.base.start),
++                len: spans.base.end - spans.base.start,
+             },
+-            local: located.local,
+-            remote: located.remote,
++            local: LineRange {
++                start: LocalLine(spans.local.start),
++                len: spans.local.end - spans.local.start,
++            },
++            remote: LineRange {
++                start: RemoteLine(spans.remote.start),
++                len: spans.remote.end - spans.remote.start,
++            },
++        });
++        middles.push(LineRange {
++            start: MiddleLine(spans.middle.start),
++            len: spans.middle.end - spans.middle.start,
+         });
+     }
+     let words = word_changes(&texts.base, &texts.local, &texts.remote, &chunks);
+-    waiting_chunks(chunks, middles, words)
+-}
+-
+-/// `lines` without those before `end`, where the previous chunk's lines end; `end` moves to theirs.
+-fn after_previous(lines: Range<u32>, end: &mut u32) -> Range<u32> {
+-    let start = lines.start.max(*end);
+-    let after = start..lines.end.max(start);
+-    *end = after.end;
+-    after
+-}
+-
+-fn waiting_chunks(
+-    chunks: Vec<Chunk>,
+-    middles: Vec<Range<u32>>,
+-    words: Vec<WordChanges>,
+-) -> Vec<MergeChunk> {
+     let mut waiting = Vec::with_capacity(chunks.len());
+     for ((chunk, middle), words) in chunks.into_iter().zip(middles).zip(words) {
+         waiting.push(MergeChunk {
+             chunk,
+-            middle: LineRange {
+-                start: MiddleLine(middle.start),
+-                len: middle.end - middle.start,
+-            },
++            middle,
+             words,
+             waiting: Waiting::Remembered,
+         });
+     }
+     waiting
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::markers::DEFAULT_MARKER_SIZE;
++    use crate::orientation::OURS_LEFT;
++
++    fn texts(base: &str, local: &str, remote: &str) -> Texts {
++        Texts {
++            base: base.to_owned(),
++            local: local.to_owned(),
++            remote: remote.to_owned(),
++            deleted: None,
++        }
++    }
++
++    fn middles(data: &FileMergeData) -> Vec<(u32, u32)> {
++        let middles = data.chunks.iter().map(|chunk| chunk.middle);
++        middles.map(|middle| (middle.start.0, middle.len)).collect()
++    }
++
++    fn remembered_view(texts: &Texts, shown: &str, git_output: &str) -> FileMergeData {
++        remembered_merge_data(
++            "board.ts",
++            texts,
++            shown.as_bytes(),
++            git_output.as_bytes(),
++            DEFAULT_MARKER_SIZE,
++            OURS_LEFT,
++            DiskVersion(0),
++        )
++    }
++
++    // Catches git's LF output mapped onto rerere's CRLF text (core.autocrlf): no line matches, and the
++    // conflict covers the whole file (#1400).
++    #[test]
++    fn a_crlf_resolution_over_lf_stages_places_the_conflict_on_the_resolution_s_line() {
++        let texts = texts(
++            "top\none\nbottom\n",
++            "top\nlocal\nbottom\n",
++            "top\nremote\nbottom\n",
++        );
++        let git_output = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
++
++        let data = remembered_view(&texts, "top\r\nlocal and remote\r\nbottom\r\n", git_output);
++
++        assert_eq!(middles(&data), [(1, 1)]);
++        let chunk = &data.chunks[0].chunk;
++        assert_eq!((chunk.local.start.0, chunk.local.len), (1, 1));
++        assert_eq!((chunk.base.start.0, chunk.base.len), (1, 1));
++    }
++
++    // Catches two blocks whose resolutions and the line between them were edited together: the first
++    // conflict took every changed line and the second became an empty point (#1401).
++    #[test]
++    fn blocks_whose_lines_in_the_resolution_overlap_join_into_one_conflict() {
++        let texts = texts(
++            "a\nb1\nm\nb2\nz\n",
++            "a\nL1\nm\nL2\nz\n",
++            "a\nR1\nm\nR2\nz\n",
++        );
++        let block = |ours: &str, theirs: &str| {
++            format!("<<<<<<< ours\n{ours}\n=======\n{theirs}\n>>>>>>> theirs\n")
++        };
++        let git_output = format!("a\n{}m\n{}z\n", block("L1", "R1"), block("L2", "R2"));
++
++        let data = remembered_view(&texts, "a\nfirst\nm edited\nsecond\nz\n", &git_output);
++
++        assert_eq!(middles(&data), [(1, 3)]);
++        let chunk = &data.chunks[0].chunk;
++        assert_eq!((chunk.base.start.0, chunk.base.len), (1, 3));
++        assert_eq!((chunk.local.start.0, chunk.local.len), (1, 3));
++        assert_eq!((chunk.remote.start.0, chunk.remote.len), (1, 3));
++        assert_eq!(data.chunks[0].waiting, Waiting::Remembered);
++    }
++
++    // Catches a stale `git-output` of a showcase case passing `just fixtures` (#1396).
++    #[test]
++    fn remembered_data_refuses_git_output_not_made_from_these_sides() {
++        let marker_style = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, OURS_LEFT);
++        let from_output = |git_output: &str| {
++            let replayed = Replayed {
++                git_output: git_output.to_owned(),
++                resolution: "top\nlocal and remote\nbottom\n".to_owned(),
++            };
++            let (base, local, remote) = (
++                "top\none\nbottom\n",
++                "top\nlocal\nbottom\n",
++                "top\nremote\nbottom\n",
++            );
++            remembered_data(
++                "board.ts",
++                base,
++                local,
++                remote,
++                &replayed,
++                &marker_style,
++                DiskVersion(0),
++            )
++        };
++        let made = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
++        let outdated = made.replace("remote\n>", "remote, before\n>");
++
++        let made_view = from_output(made).map(|data| middles(&data));
++
++        assert_eq!(made_view, Some(vec![(1, 1)]));
++        assert_eq!(from_output(&outdated), None);
++    }
++}
+diff --git a/crates/session/src/scratch.rs b/crates/session/src/scratch.rs
+new file mode 100644
+index 0000000..eb89b67
+--- /dev/null
++++ b/crates/session/src/scratch.rs
+@@ -0,0 +1,74 @@
++use std::fs;
++use std::io;
++use std::path::{Path, PathBuf};
++
++use crate::session::LOG_TARGET;
++
++const SCRATCH_ATTEMPTS: u32 = 1000;
++#[cfg(unix)]
++const SCRATCH_MODE: u32 = 0o700;
++
++/// A directory under the system temp directory, removed when dropped.
++pub(crate) struct ScratchDir(pub(crate) PathBuf);
++
++impl ScratchDir {
++    pub(crate) fn create() -> io::Result<ScratchDir> {
++        let temp = std::env::temp_dir();
++        let process = std::process::id();
++        for attempt in 0..SCRATCH_ATTEMPTS {
++            let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
++            match create_private_dir(&dir) {
++                Ok(()) => return Ok(ScratchDir(dir)),
++                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
++                Err(error) => return Err(error),
++            }
++        }
++        Err(io::Error::from(io::ErrorKind::AlreadyExists))
++    }
++}
++
++#[cfg(unix)]
++fn create_private_dir(dir: &Path) -> io::Result<()> {
++    use std::os::unix::fs::DirBuilderExt;
++    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
++}
++
++// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
++// system and administrators) may read.
++#[cfg(not(unix))]
++fn create_private_dir(dir: &Path) -> io::Result<()> {
++    fs::create_dir(dir)
++}
++
++impl Drop for ScratchDir {
++    fn drop(&mut self) {
++        if let Err(error) = fs::remove_dir_all(&self.0) {
++            let dir = self.0.display();
++            tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_scratch_dir_is_removed_when_dropped() {
++        let scratch = ScratchDir::create().unwrap();
++        let dir = scratch.0.clone();
++        assert!(dir.is_dir());
++        drop(scratch);
++        assert!(!dir.exists());
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn the_scratch_dir_is_readable_by_its_owner_only() {
++        use std::os::unix::fs::PermissionsExt;
++        const PERMISSION_BITS: u32 = 0o777;
++        let scratch = ScratchDir::create().unwrap();
++        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
++        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
++    }
++}
+diff --git a/crates/session/src/seed.rs b/crates/session/src/seed.rs
+index ed21e63..30977b5 100644
+--- a/crates/session/src/seed.rs
++++ b/crates/session/src/seed.rs
+@@ -3,8 +3,8 @@ use std::ops::Range;
+ use yamt_merge_core::{BaseLine, Chunk, ChunkId, ChunkKind, LineRange, word_changes};
+ 
+ use crate::decode::{Eol, detect_eol};
+-use crate::locate::{Located, Maps, line_number, side_view};
+-use crate::markers::{Block, Piece, parse, split_lines};
++use crate::locate::{Located, Placed, line_number, place_pieces};
++use crate::markers::{Block, parse, split_lines};
+ use crate::merge_data::{MergeChunk, MiddleLine, Texts};
+ use crate::orientation::Orientation;
+ use crate::waiting::{Waiting, block_markers};
+@@ -24,7 +24,6 @@ struct MiddleText<'a> {
+     orientation: Orientation,
+     text: String,
+     line_count: u32,
+-    previous_base_end: u32,
+     chunks: Vec<Chunk>,
+     /// Each chunk's lines in the middle and what Save writes while it waits, in `chunks` order.
+     placed: Vec<(LineRange<MiddleLine>, Waiting)>,
+@@ -38,9 +37,6 @@ pub(crate) fn seed(
+ ) -> Seeded {
+     let disk_lines: Vec<&str> = disk.split_inclusive('\n').collect();
+     let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
+-    let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
+-    let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
+-    let maps = Maps::new(&ours, &theirs, texts, orientation);
+     let mut middle = MiddleText {
+         disk_lines: &disk_lines,
+         base_lines: texts.base.split_inclusive('\n').collect(),
+@@ -48,22 +44,22 @@ pub(crate) fn seed(
+         orientation,
+         text: String::with_capacity(disk.len()),
+         line_count: 0,
+-        previous_base_end: 0,
+         chunks: Vec::new(),
+         placed: Vec::new(),
+     };
+-    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
+-    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
++    for piece in place_pieces(&disk_lines, &pieces, texts, orientation) {
+         match piece {
+-            Piece::Settled(lines) => middle.push_disk_lines(lines),
+-            Piece::Block(block) => {
+-                let located = maps.block(block, ours_start, theirs_start);
+-                middle.push_conflict(&located, maps.base(&located), &block.whole, Some(block));
+-            }
+-            Piece::Raw(lines) => {
+-                let located = maps.raw(ours_start, theirs_start);
+-                middle.push_conflict(&located, maps.base(&located), lines, None);
+-            }
++            Placed::Settled(lines) => middle.push_disk_lines(lines),
++            Placed::Block {
++                block,
++                located,
++                base,
++            } => middle.push_conflict(&located, base, &block.whole, Some(block)),
++            Placed::Raw {
++                lines,
++                located,
++                base,
++            } => middle.push_conflict(&located, base, lines, None),
+         }
+     }
+     middle.seeded(texts)
+@@ -104,7 +100,6 @@ impl MiddleText<'_> {
+         disk_lines: &Range<usize>,
+         block: Option<&Block>,
+     ) {
+-        let base = self.after_previous_base(base);
+         let start = self.line_count;
+         let waiting = match block {
+             Some(block) if located.exact => {
+@@ -130,17 +125,6 @@ impl MiddleText<'_> {
+         });
+     }
+ 
+-    /// `base` without the lines an earlier chunk already holds, so chunks stay disjoint in base.
+-    fn after_previous_base(&mut self, base: LineRange<BaseLine>) -> LineRange<BaseLine> {
+-        let start = base.start.0.max(self.previous_base_end);
+-        let after = LineRange {
+-            start: BaseLine(start),
+-            len: base.end().0.saturating_sub(start),
+-        };
+-        self.previous_base_end = after.end().0;
+-        after
+-    }
+-
+     fn seeded(self, texts: &Texts) -> Seeded {
+         let words = word_changes(&texts.base, &texts.local, &texts.remote, &self.chunks);
+         let mut chunks = Vec::with_capacity(self.chunks.len());
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 122d0bd..9bb8504 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -210,11 +210,11 @@ impl MergeSession {
+                 orientation,
+                 version,
+             )),
+-            Seen::ViewRemembered(shown) => Ok(remembered_merge_data(
++            Seen::ViewRemembered { shown, git_output } => Ok(remembered_merge_data(
+                 &path,
+                 texts,
+                 shown,
+-                file.at_open.git_output().unwrap_or_default(),
++                git_output,
+                 file.marker_size,
+                 orientation,
+                 version,
+@@ -306,21 +306,20 @@ impl FileState {
+     /// The marker lines git wrote into this file, as found at open.
+     fn marker_style(&self, orientation: Orientation) -> MarkerStyle {
+         match &self.at_open {
+-            AtOpen::Untouched(OnDisk::File(bytes))
+-            | AtOpen::Changed(OnDisk::File(bytes))
+-            | AtOpen::Remembered {
+-                git_output: bytes, ..
+-            } => MarkerStyle::found_in(bytes, self.marker_size, orientation),
+-            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
+-                MarkerStyle::fallback(self.marker_size, orientation)
++            AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
++                MarkerStyle::found_in(bytes, self.marker_size, orientation)
+             }
++            AtOpen::Untouched(_)
++            | AtOpen::Changed(_)
++            | AtOpen::Remembered { .. }
++            | AtOpen::Unread => MarkerStyle::fallback(self.marker_size, orientation),
+         }
+     }
+ 
+     /// The status of a file git lists unmerged: `Remembered` while it shows rerere's resolution.
+     pub(crate) fn unmerged_status(&self) -> FileStatus {
+         match self.seen {
+-            Seen::ViewRemembered(_) => FileStatus::Remembered,
++            Seen::ViewRemembered { .. } => FileStatus::Remembered,
+             Seen::GitOutput | Seen::ViewFromStages(_) | Seen::ViewFromDisk(_) => {
+                 FileStatus::Unresolved
+             }
+diff --git a/crates/session/src/start.rs b/crates/session/src/start.rs
+index cb8839b..a7a4444 100644
+--- a/crates/session/src/start.rs
++++ b/crates/session/src/start.rs
+@@ -1,5 +1,3 @@
+-use std::fs;
+-use std::io;
+ use std::path::{Path, PathBuf};
+ use std::time::Instant;
+ 
+@@ -11,8 +9,8 @@ use yamt_gitio::{
+ use crate::Result;
+ use crate::decode::is_binary;
+ use crate::disk::OnDisk;
+-use crate::markers::{DEFAULT_MARKER_SIZE, views};
+-use crate::remembered::{RerereTracked, looks_resolved};
++use crate::markers::{DEFAULT_MARKER_SIZE, Piece, open_regions, parse, split_lines, views};
++use crate::scratch::ScratchDir;
+ use crate::session::LOG_TARGET;
+ use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE};
+ use crate::stages::CapturedStages;
+@@ -23,9 +21,6 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
+     major: 2,
+     minor: 44,
+ };
+-const SCRATCH_ATTEMPTS: u32 = 1000;
+-#[cfg(unix)]
+-const SCRATCH_MODE: u32 = 0o700;
+ 
+ /// The gitattributes that decide what git wrote to a conflicted path.
+ pub(crate) struct Attributes {
+@@ -96,8 +91,15 @@ pub(crate) struct StartCheck<'r> {
+     started: Instant,
+ }
+ 
+-/// A directory under the system temp directory, removed when dropped.
+-struct ScratchDir(PathBuf);
++/// The paths rerere tracks at this stop, read once, when the first file looks resolved at open.
++enum RerereTracked {
++    NotRead,
++    /// rerere is not enabled, or recorded nothing at this stop.
++    Off,
++    Paths(Vec<PathBuf>),
++    /// rerere may be enabled, but what it tracks could not be read: any path may have been replayed.
++    Unknown,
++}
+ 
+ impl Attributes {
+     pub(crate) fn from_git(found: &MergeAttributes, config: &MergeConfig) -> Attributes {
+@@ -181,7 +183,7 @@ impl<'r> StartCheck<'r> {
+             repo,
+             scratch: None,
+             histogram: None,
+-            rerere: RerereTracked::Unread,
++            rerere: RerereTracked::NotRead,
+             merge_file_runs: 0,
+             started: Instant::now(),
+         }
+@@ -209,7 +211,7 @@ impl<'r> StartCheck<'r> {
+             }
+             Ok(output)
+                 if looks_resolved(&output, disk, marker_size)
+-                    && self.rerere.has_replayed(self.repo, file.path) =>
++                    && has_replayed(&mut self.rerere, self.repo, file.path) =>
+             {
+                 StartLook::Remembered { git_output: output }
+             }
+@@ -330,64 +332,64 @@ fn same(expected: &[u8], found: &[u8]) -> StartLook {
+     }
+ }
+ 
+-impl ScratchDir {
+-    fn create() -> io::Result<ScratchDir> {
+-        let temp = std::env::temp_dir();
+-        let process = std::process::id();
+-        for attempt in 0..SCRATCH_ATTEMPTS {
+-            let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
+-            match create_private_dir(&dir) {
+-                Ok(()) => return Ok(ScratchDir(dir)),
+-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+-                Err(error) => return Err(error),
++/// rerere replayed a resolution into `path`: rerere is enabled and `MERGE_RR` no longer lists it.
++fn has_replayed(rerere: &mut RerereTracked, repo: &Repo, path: &Path) -> bool {
++    if let RerereTracked::NotRead = rerere {
++        *rerere = match repo.rerere_tracked() {
++            Ok(Some(paths)) => RerereTracked::Paths(paths),
++            Ok(None) => RerereTracked::Off,
++            Err(error) => {
++                tracing::warn!(target: LOG_TARGET, event = "rerere_unread", %error, "every file that looks resolved counts as remembered");
++                RerereTracked::Unknown
+             }
+-        }
+-        Err(io::Error::from(io::ErrorKind::AlreadyExists))
++        };
++    }
++    match rerere {
++        RerereTracked::Paths(paths) => !paths.iter().any(|tracked| tracked == path),
++        RerereTracked::Unknown => true,
++        RerereTracked::NotRead | RerereTracked::Off => false,
+     }
+ }
+ 
+-#[cfg(unix)]
+-fn create_private_dir(dir: &Path) -> io::Result<()> {
+-    use std::os::unix::fs::DirBuilderExt;
+-    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
+-}
+-
+-// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
+-// system and administrators) may read.
+-#[cfg(not(unix))]
+-fn create_private_dir(dir: &Path) -> io::Result<()> {
+-    fs::create_dir(dir)
+-}
+-
+-impl Drop for ScratchDir {
+-    fn drop(&mut self) {
+-        if let Err(error) = fs::remove_dir_all(&self.0) {
+-            let dir = self.0.display();
+-            tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
+-        }
+-    }
++/// git's merge output has conflict blocks and the disk file has no marker line left.
++fn looks_resolved(git_output: &[u8], disk: &[u8], marker_size: usize) -> bool {
++    let has_block = parse(&split_lines(git_output), marker_size)
++        .iter()
++        .any(|piece| matches!(piece, Piece::Block(_)));
++    has_block && open_regions(&parse(&split_lines(disk), marker_size)) == 0
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
++    const GIT_OUTPUT: &[u8] =
++        b"top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
++
+     #[test]
+-    fn the_scratch_dir_is_removed_when_dropped() {
+-        let scratch = ScratchDir::create().unwrap();
+-        let dir = scratch.0.clone();
+-        assert!(dir.is_dir());
+-        drop(scratch);
+-        assert!(!dir.exists());
++    fn a_file_without_markers_over_git_output_with_a_block_looks_resolved() {
++        let resolved = b"top\nlocal and remote\nbottom\n";
++
++        assert!(looks_resolved(GIT_OUTPUT, resolved, DEFAULT_MARKER_SIZE));
+     }
+ 
+-    #[cfg(unix)]
++    // Catches a file still holding git's markers taken for a replayed resolution.
+     #[test]
+-    fn the_scratch_dir_is_readable_by_its_owner_only() {
+-        use std::os::unix::fs::PermissionsExt;
+-        const PERMISSION_BITS: u32 = 0o777;
+-        let scratch = ScratchDir::create().unwrap();
+-        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
+-        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
++    fn a_file_with_markers_left_does_not_look_resolved() {
++        let edited = b"top, edited\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
++
++        assert!(!looks_resolved(GIT_OUTPUT, edited, DEFAULT_MARKER_SIZE));
++    }
++
++    // Catches a file git merged without a conflict block taken for a replayed resolution.
++    #[test]
++    fn without_a_block_in_git_output_nothing_looks_resolved() {
++        let merged = b"top\nlocal\nbottom\n";
++
++        assert!(!looks_resolved(
++            merged,
++            b"top\nedited\nbottom\n",
++            DEFAULT_MARKER_SIZE
++        ));
+     }
+ }
+diff --git a/crates/session/src/waiting.rs b/crates/session/src/waiting.rs
+index 73e051a..ce25556 100644
+--- a/crates/session/src/waiting.rs
++++ b/crates/session/src/waiting.rs
+@@ -29,8 +29,8 @@ pub enum Waiting {
+     Remembered,
+ }
+ 
+-/// The marker lines git writes around a conflict in one file, without line breaks, and which pane
+-/// shows git's ours, whose section git writes first.
++/// The marker lines git writes around a conflict in one file, without line breaks, the marker size
++/// they were read with, and which pane shows git's ours, whose section git writes first.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct MarkerStyle {
+     open: String,
+@@ -38,7 +38,8 @@ pub struct MarkerStyle {
+     base: Option<String>,
+     separator: String,
+     close: String,
+-    orientation: Orientation,
++    pub(crate) marker_size: usize,
++    pub(crate) orientation: Orientation,
+ }
+ 
+ impl MarkerStyle {
+@@ -55,7 +56,7 @@ impl MarkerStyle {
+             Piece::Settled(_) | Piece::Raw(_) => None,
+         });
+         match first_block {
+-            Some(block) => style_of(&lines, block, orientation),
++            Some(block) => style_of(&lines, block, marker_size, orientation),
+             None => MarkerStyle::fallback(marker_size, orientation),
+         }
+     }
+@@ -69,6 +70,7 @@ impl MarkerStyle {
+             base: None,
+             separator: "=".repeat(marker_size),
+             close: format!("{} {THEIRS_LABEL}", ">".repeat(marker_size)),
++            marker_size,
+             orientation,
+         }
+     }
+@@ -111,13 +113,19 @@ pub(crate) fn block_markers(lines: &[&str], block: &Block, orientation: Orientat
+     }
+ }
+ 
+-fn style_of(lines: &[&str], block: &Block, orientation: Orientation) -> MarkerStyle {
++fn style_of(
++    lines: &[&str],
++    block: &Block,
++    marker_size: usize,
++    orientation: Orientation,
++) -> MarkerStyle {
+     let has_base = block.ours.end + 1 < block.theirs.start;
+     MarkerStyle {
+         open: line_text(lines, block.whole.start),
+         base: has_base.then(|| line_text(lines, block.ours.end)),
+         separator: line_text(lines, block.theirs.start - 1),
+         close: line_text(lines, block.whole.end - 1),
++        marker_size,
+         orientation,
+     }
+ }
+@@ -163,6 +171,7 @@ mod tests {
+             base: base.map(str::to_owned),
+             separator: separator.to_owned(),
+             close: close.to_owned(),
++            marker_size: separator.len(),
+             orientation: OURS_LEFT,
+         }
+     }
+diff --git a/crates/session/src/writes.rs b/crates/session/src/writes.rs
+index a5e5b47..042a49f 100644
+--- a/crates/session/src/writes.rs
++++ b/crates/session/src/writes.rs
+@@ -40,7 +40,7 @@ impl MergeSession {
+             return Err(error.into());
+         }
+         file.status = FileStatus::Resolved;
+-        file.seen = file.seen.after_own_write(result.as_bytes().to_vec());
++        file.seen.note_own_write(result.as_bytes().to_vec());
+         Ok(self.written_reply())
+     }
+ 
+@@ -58,7 +58,7 @@ impl MergeSession {
+         }
+         let file = find_file(&mut self.files, path)?;
+         write_text(&self.repo, file, text)?;
+-        file.seen = file.seen.after_own_write(text.as_bytes().to_vec());
++        file.seen.note_own_write(text.as_bytes().to_vec());
+         Ok(self.written_reply())
+     }
+ 
+diff --git a/crates/session/tests/remembered.rs b/crates/session/tests/remembered.rs
+index 6eb2091..0af4655 100644
+--- a/crates/session/tests/remembered.rs
++++ b/crates/session/tests/remembered.rs
+@@ -237,3 +237,60 @@ fn with_rerere_off_markers_removed_by_hand_before_open_are_staged_at_the_first_l
+     assert_eq!(list.disk_changes, [staged(TEXT)]);
+     assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
+ }
++
++// Catches the empty `MERGE_RR` a commit made with rerere on leaves behind, read once rerere is off as
++// "rerere replayed this path": the hand fix would stay unmerged as Remembered (#1402).
++#[test]
++fn with_rerere_switched_off_after_a_committed_rerere_merge_a_hand_fix_before_open_is_staged_at_the_first_list()
++ {
++    let dir = rerere_repo(&REMEMBERED, &[CARD], Replay::Off).unwrap();
++    assert!(dir.path().join(".git/MERGE_RR").is_file());
++    write(&dir, FRESH, HAND_FIX);
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let list = listed(&mut session);
++
++    assert_eq!(list.disk_changes, [staged(FRESH)]);
++    assert_eq!(status_of(&session, FRESH), FileStatus::Resolved);
++}
++
++// Catches an unreadable `MERGE_RR` read as "rerere off", which stages a replayed resolution unseen
++// at the first list (#1404).
++#[test]
++fn with_a_merge_rr_record_without_a_tab_a_replayed_resolution_stays_remembered() {
++    let dir = rerere_repo(&REMEMBERED, &[], Replay::Review).unwrap();
++    fs::write(dir.path().join(".git/MERGE_RR"), "0a1b src/card.ts\0").unwrap();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let list = listed(&mut session);
++
++    assert_eq!(list.disk_changes, []);
++    assert_eq!(status_of(&session, TEXT), FileStatus::Remembered);
++    assert!(unmerged(&dir).contains(TEXT), "{}", unmerged(&dir));
++}
++
++// Catches a file whose disk still has git's markers taken for a replayed resolution (#1403).
++#[test]
++fn a_replayed_path_checked_out_again_with_markers_and_edited_opens_unresolved_in_the_disk_view() {
++    let dir = rerere_repo(&REMEMBERED, &[], Replay::Review).unwrap();
++    git_ok(dir.path(), &["checkout", "-m", "--", TEXT]).unwrap();
++    let markers = read(&dir, TEXT);
++    assert!(markers.contains("<<<<<<<"), "{markers}");
++    write(&dir, TEXT, &markers.replace("top\n", "top, edited\n"));
++    let mut session = MergeSession::open(dir.path()).unwrap();
++    assert_eq!(status_of(&session, TEXT), FileStatus::Unresolved);
++
++    let list = listed(&mut session);
++
++    assert_eq!(status_of(&session, TEXT), FileStatus::Unresolved);
++    assert!(unmerged(&dir).contains(TEXT), "{list:?}");
++    let data = session.load(TEXT).unwrap();
++    assert!(matches!(data.middle, Middle::Disk { .. }), "{data:?}");
++    let [chunk] = data.chunks.as_slice() else {
++        panic!("{:?}", data.chunks);
++    };
++    assert!(
++        matches!(chunk.waiting, Waiting::Markers { .. }),
++        "{chunk:?}"
++    );
++}
+diff --git a/tests/showcase/remembered/README.md b/tests/showcase/remembered/README.md
+index 0129095..083e6e1 100644
+--- a/tests/showcase/remembered/README.md
++++ b/tests/showcase/remembered/README.md
+@@ -2,6 +2,7 @@
+ 
+ A file git rerere filled in (plan §2 #90): `main` added a `backlog` column, `feature` a `doing` column and a new
+ `title`. `remembered.ts` is the resolution rerere replayed; `git-output.ts` is what git's merge wrote before it,
+-made with `git merge-file -p -L HEAD -L base -L feature local.ts base.ts remote.ts` (diff3 style). `yamt-cli
+-fixture` turns the case into the remembered view: `remembered.ts` as the Result, one conflict per block of
+-`git-output.ts`. Regenerate `git-output.ts` after changing a side.
++made with `git merge-file -p --diff3 -L HEAD -L base -L feature local.ts base.ts remote.ts`. `yamt-cli fixture`
++turns the case into the remembered view: `remembered.ts` as the Result, one conflict per block of `git-output.ts`.
++Regenerate `git-output.ts` after changing a side: `just fixtures` fails while a block of it is not found unchanged
++in the sides.
+-- 
+2.56.0
+
