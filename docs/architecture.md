@@ -1084,6 +1084,19 @@ export function useMergeController(
 It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data), readOnly)`, pipes
 `onSummaryChange` into a `shallowRef`, and is the only place `editor/` is imported from `ui/`.
 
+**The compare window's root** (`yamt --raw`, plan §2 #94; fence PM7: these files never import `store.ts`, `App.vue` or
+`lsp/`): `main.ts` mounts `CompareApp.vue` instead of `App.vue` when `<html data-window="compare">` (app) or `?raw`
+(fixture), with `ui/compareStore.ts` (`createCompareStore(source, startTheme)`, `useCompareStore()`; tabs and the shown
+tab mirrored from Rust's replies, column sends with `track`/`flushAll`, the close question, `fileListKey`, notices
+through `ui/compareNotices.ts`, words in `ui/compareText.ts`) and no `LanguageServers`. `CompareApp.vue`: `TabList.vue`
+in the file list's place (the file list's width key and dots; "+", rows with the name and `languageLabel`, × with the
+close question, rename by double-click), one `CompareView.vue` per visited tab (hidden when not shown, unmounted on
+close: Format, `LanguagePicker.vue`, the change arrows and the gear; "Left"/"Right"; two hosts and the strip from
+`compareColumns()`), `NoticeBar`, `ProblemBar`, `QuestionDialog`, and `SettingsView` without the language-server
+section (the settings seam `ui/settingsStore.ts`, which both stores register); `onWindowClose` sends every unsent
+column first. `ui/useCompareController.ts` is the compare root's only `editor/` importer (settle → `saveColumn` →
+`showComparison`, Format failures → `reportFormat`, `track`).
+
 ### 5.5 Frontend file and component conventions (house rules)
 
 File structure is Rust-typical: `editor/index.ts` is the `lib.rs` (sole public surface),
