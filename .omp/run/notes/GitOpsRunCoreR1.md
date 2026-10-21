@@ -93,3 +93,7 @@ Checks for you to run on the merged tree: `just check`, `just map-check` (for `n
 ## Mutants (`just mutants 7436a2b`)
 
 82 — 42 caught, 33 unviable, 7 missed: conflict-repo lib.rs:218 `run_ignored_in_child` → Ok(()), lib.rs:226 `&&`→`||`; gitio run.rs:91 `+`→`-` in run_to_end; run.rs:194 Interrupted guard → true/false, `==`→`!=`; run.rs:198 `||`→`&&` in read_on_thread.
+
+## Re-checks
+
+Boundary: pass (#1365 dropped). Correctness: fail — blocks #1366 (squash chain's final fixup, inference) and #1367 (child-run helper's failure path); #1368 dropped. → fix round 2.

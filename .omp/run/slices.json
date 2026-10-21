@@ -1,9 +1,4 @@
 {
-  "GitOpsRunCoreR1Correctness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
-    "owned": []
-  },
   "GitOpsRunAppR1": {
     "agent": "rust-impl",
     "brief": "docs/slices/briefs/3.J-run-app-rework-1.md",
@@ -18,12 +13,22 @@
       "frontend/src/ipc/fixtureOperations.test.ts",
       "scripts/operations-repo.sh",
       "scripts/conflict-repo.sh",
-      "scripts/git-sandbox.sh"
+      "scripts/git-sandbox.sh",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts"
     ]
   },
   "GitOpsStopsBoundary": {
     "agent": "boundary-reviewer",
     "brief": "docs/slices/briefs/3.J-stops.md",
     "owned": []
+  },
+  "GitOpsRunCoreR2": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-run-core-rework-2.md",
+    "owned": [
+      "crates/gitio/**",
+      "crates/conflict-repo/**"
+    ]
   }
 }

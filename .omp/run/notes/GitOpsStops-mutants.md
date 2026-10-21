@@ -1,0 +1,86 @@
+# Row 6 mutation survivors on changed lines (`f096e58` vs `2b2ae2f`, stryker --mutate on changed ranges)
+
+Word tables (operationText NAMES/TITLES/DONE_STEPS/MERGE_VERBS, toolbarButtons LABELS) and log calls are listed by the orchestrator as dropped (words/logs); the rest are for the correctness reviewer.
+
+- Survived ConditionalExpression `src/ui/diskChanges.ts:42:48`: `...target.notices.value.filter((notice) => notice.kind !== "disk" || !byPath.has(notice.path)),` → `...target.notices.value.filter((notice) => false || !byPath.has(notice.path)),`
+- NoCoverage ConditionalExpression `src/ui/noticeText.ts:75:5`: `default: {` → `default:`
+- NoCoverage BlockStatement `src/ui/noticeText.ts:75:14`: `default: {` → `default: {}`
+- NoCoverage ConditionalExpression `src/ui/operationText.ts:51:5`: `case "Patch":` → `case "Patch":`
+- NoCoverage StringLiteral `src/ui/operationText.ts:51:10`: `case "Patch":` → `case "":`
+- NoCoverage ConditionalExpression `src/ui/operationText.ts:53:5`: `default: {` → `default:`
+- NoCoverage BlockStatement `src/ui/operationText.ts:53:14`: `default: {` → `default: {}`
+- NoCoverage ConditionalExpression `src/ui/operationText.ts:106:5`: `default: {` → `default:`
+- NoCoverage BlockStatement `src/ui/operationText.ts:106:14`: `default: {` → `default: {}`
+- NoCoverage ConditionalExpression `src/ui/operationText.ts:126:5`: `default: {` → `default:`
+- NoCoverage BlockStatement `src/ui/operationText.ts:126:14`: `default: {` → `default: {}`
+- NoCoverage ConditionalExpression `src/ui/operationText.ts:157:5`: `default: {` → `default:`
+- NoCoverage BlockStatement `src/ui/operationText.ts:157:14`: `default: {` → `default: {}`
+- Survived StringLiteral `src/ui/operationText.ts:71:59`: `return parts.filter((part) => part !== null && part !== "").join(" ");` → `return parts.filter((part) => part !== null && part !== "Stryker was here!").join(" ");`
+- Survived ConditionalExpression `src/ui/operationText.ts:71:50`: `return parts.filter((part) => part !== null && part !== "").join(" ");` → `return parts.filter((part) => part !== null && true).join(" ");`
+- Survived ConditionalExpression `src/ui/operationText.ts:81:5`: `progress === null || progress.total === 1 ? "" : ` ${progress.step} of ${progress.total}`;` → `false || progress.total === 1 ? "" : ` ${progress.step} of ${progress.total}`;`
+- Survived MethodExpression `src/ui/operationText.ts:125:15`: `return [operation.message.trim()];` → `return [operation.message];`
+- Survived MethodExpression `src/ui/operationText.ts:135:19`: `const tooltip = [text, ...messages(operation)].filter((part) => part !== "").join("\n\n");` → `const tooltip = [text, ...messages(operation)].join("\n\n");`
+- Survived ConditionalExpression `src/ui/operationText.ts:135:67`: `const tooltip = [text, ...messages(operation)].filter((part) => part !== "").join("\n\n");` → `const tooltip = [text, ...messages(operation)].filter((part) => true).join("\n\n");`
+- Survived ArrayDeclaration `src/ui/operationText.ts:125:14`: `return [operation.message.trim()];` → `return [];`
+- Survived StringLiteral `src/ui/operationText.ts:135:76`: `const tooltip = [text, ...messages(operation)].filter((part) => part !== "").join("\n\n");` → `const tooltip = [text, ...messages(operation)].filter((part) => part !== "Stryker was here!").join("\n\n");`
+- Survived StringLiteral `src/ui/operationText.ts:149:10`: `case "Merge":` → `case "":`
+- Survived StringLiteral `src/ui/operationText.ts:150:10`: `case "SquashMerge":` → `case "":`
+- Survived ConditionalExpression `src/ui/operationText.ts:167:21`: `if (done === 0 || words === null) {` → `if (done === 0 || false) {`
+- Survived ObjectLiteral `src/ui/operationText.ts:5:56`: `const NAMES: Readonly<Record<OperationKind, string>> = {` → `const NAMES: Readonly<Record<OperationKind, string>> = {};`
+- Survived StringLiteral `src/ui/operationText.ts:6:10`: `Merge: "merge",` → `Merge: "",`
+- Survived StringLiteral `src/ui/operationText.ts:7:16`: `SquashMerge: "squash merge",` → `SquashMerge: "",`
+- Survived StringLiteral `src/ui/operationText.ts:8:11`: `Rebase: "rebase",` → `Rebase: "",`
+- Survived StringLiteral `src/ui/operationText.ts:9:15`: `CherryPick: "cherry-pick",` → `CherryPick: "",`
+- Survived StringLiteral `src/ui/operationText.ts:11:7`: `Am: "patch application",` → `Am: "",`
+- Survived StringLiteral `src/ui/operationText.ts:10:11`: `Revert: "revert",` → `Revert: "",`
+- Survived ObjectLiteral `src/ui/operationText.ts:14:57`: `const TITLES: Readonly<Record<OperationKind, string>> = {` → `const TITLES: Readonly<Record<OperationKind, string>> = {};`
+- Survived StringLiteral `src/ui/operationText.ts:15:10`: `Merge: "Merge",` → `Merge: "",`
+- Survived StringLiteral `src/ui/operationText.ts:17:11`: `Rebase: "Rebase",` → `Rebase: "",`
+- Survived StringLiteral `src/ui/operationText.ts:16:16`: `SquashMerge: "Squash Merge",` → `SquashMerge: "",`
+- Survived StringLiteral `src/ui/operationText.ts:18:15`: `CherryPick: "Cherry-Pick",` → `CherryPick: "",`
+- Survived StringLiteral `src/ui/operationText.ts:19:11`: `Revert: "Revert",` → `Revert: "",`
+- Survived StringLiteral `src/ui/operationText.ts:20:7`: `Am: "Patch Application",` → `Am: "",`
+- Survived ArrayDeclaration `src/ui/operationText.ts:26:11`: `Rebase: ["commit already replayed is", "commits already replayed are"],` → `Rebase: [],`
+- Survived ObjectLiteral `src/ui/operationText.ts:23:87`: `const DONE_STEPS: Readonly<Record<OperationKind, readonly [string, string] | null>> = {` → `const DONE_STEPS: Readonly<Record<OperationKind, readonly [string, string] | null>> = {};`
+- Survived StringLiteral `src/ui/operationText.ts:26:12`: `Rebase: ["commit already replayed is", "commits already replayed are"],` → `Rebase: ["", "commits already replayed are"],`
+- Survived StringLiteral `src/ui/operationText.ts:26:42`: `Rebase: ["commit already replayed is", "commits already replayed are"],` → `Rebase: ["commit already replayed is", ""],`
+- Survived ArrayDeclaration `src/ui/operationText.ts:27:15`: `CherryPick: ["commit already picked is", "commits already picked are"],` → `CherryPick: [],`
+- Survived ArrayDeclaration `src/ui/operationText.ts:28:11`: `Revert: ["commit already reverted is", "commits already reverted are"],` → `Revert: [],`
+- Survived StringLiteral `src/ui/operationText.ts:27:44`: `CherryPick: ["commit already picked is", "commits already picked are"],` → `CherryPick: ["commit already picked is", ""],`
+- Survived StringLiteral `src/ui/operationText.ts:27:16`: `CherryPick: ["commit already picked is", "commits already picked are"],` → `CherryPick: ["", "commits already picked are"],`
+- Survived StringLiteral `src/ui/operationText.ts:28:42`: `Revert: ["commit already reverted is", "commits already reverted are"],` → `Revert: ["commit already reverted is", ""],`
+- Survived ArrayDeclaration `src/ui/operationText.ts:29:7`: `Am: ["patch already applied is", "patches already applied are"],` → `Am: [],`
+- Survived StringLiteral `src/ui/operationText.ts:28:12`: `Revert: ["commit already reverted is", "commits already reverted are"],` → `Revert: ["", "commits already reverted are"],`
+- Survived StringLiteral `src/ui/operationText.ts:29:8`: `Am: ["patch already applied is", "patches already applied are"],` → `Am: ["", "patches already applied are"],`
+- Survived StringLiteral `src/ui/operationText.ts:29:36`: `Am: ["patch already applied is", "patches already applied are"],` → `Am: ["patch already applied is", ""],`
+- Survived ObjectLiteral `src/ui/operationText.ts:32:72`: `const MERGE_VERBS: Readonly<Record<"Merge" | "SquashMerge", string>> = {` → `const MERGE_VERBS: Readonly<Record<"Merge" | "SquashMerge", string>> = {};`
+- Survived StringLiteral `src/ui/operationText.ts:33:10`: `Merge: "Merging",` → `Merge: "",`
+- Survived StringLiteral `src/ui/operationText.ts:34:16`: `SquashMerge: "Squash-merging",` → `SquashMerge: "",`
+- NoCoverage StringLiteral `src/ui/problem.ts:70:41`: `operation: problem.operation ?? "none",` → `operation: problem.operation ?? "",`
+- Survived StringLiteral `src/ui/problem.ts:69:16`: `log.info("store.stopped", {` → `log.info("", {`
+- Survived LogicalOperator `src/ui/problem.ts:70:20`: `operation: problem.operation ?? "none",` → `operation: problem.operation && "none",`
+- Survived ObjectLiteral `src/ui/problem.ts:69:33`: `log.info("store.stopped", {` → `log.info("store.stopped", {});`
+- Survived StringLiteral `src/ui/problem.ts:105:24`: `problem.action === "stopped" ||` → `problem.action === "" ||`
+- Survived ConditionalExpression `src/ui/problem.ts:105:5`: `problem.action === "stopped" ||` → `false ||`
+- Survived StringLiteral `src/ui/problem.ts:68:10`: `case "stopped":` → `case "":`
+- NoCoverage BlockStatement `src/ui/saving.ts:144:24`: `if (claim.dropped) {` → `if (claim.dropped) {}`
+- Survived ConditionalExpression `src/ui/saving.ts:144:9`: `if (claim.dropped) {` → `if (false) {`
+- NoCoverage StringLiteral `src/ui/stops.ts:43:63`: `log.info("stop.next", { end: end.kind, operation: before ?? "none", dropped: dropped.length });` → `log.info("stop.next", { end: end.kind, operation: before ?? "", dropped: dropped.length });`
+- Survived OptionalChaining `src/ui/stops.ts:42:18`: `const before = target.operation.value?.kind ?? null;` → `const before = target.operation.value.kind ?? null;`
+- Survived StringLiteral `src/ui/stops.ts:43:12`: `log.info("stop.next", { end: end.kind, operation: before ?? "none", dropped: dropped.length });` → `log.info("", { end: end.kind, operation: before ?? "none", dropped: dropped.length });`
+- Survived ObjectLiteral `src/ui/stops.ts:43:25`: `log.info("stop.next", { end: end.kind, operation: before ?? "none", dropped: dropped.length });` → `log.info("stop.next", {});`
+- Survived LogicalOperator `src/ui/stops.ts:43:53`: `log.info("stop.next", { end: end.kind, operation: before ?? "none", dropped: dropped.length });` → `log.info("stop.next", { end: end.kind, operation: before && "none", dropped: dropped.length });`
+- Survived OptionalChaining `src/ui/stops.ts:52:18`: `operation: target.operation.value?.kind ?? null,` → `operation: target.operation.value.kind ?? null,`
+- Survived CallExpression `src/ui/stops.ts:55:5`: `logProblem(stopped);` → `;`
+- Survived ConditionalExpression `src/ui/stops.ts:49:7`: `if (end.kind === "continued" && listed !== null && listed.length === 0) {` → `if (true && listed !== null && listed.length === 0) {`
+- NoCoverage BlockStatement `src/ui/store.ts:267:25`: `if (outcome === null) {` → `if (outcome === null) {}`
+- Survived ConditionalExpression `src/ui/store.ts:267:7`: `if (outcome === null) {` → `if (false) {`
+- Survived ArrowFunction `src/ui/store.ts:167:15`: `nextStop: (end) => state.nextStop(end),` → `nextStop: () => undefined,`
+- Survived ObjectLiteral `src/ui/toolbarButtons.ts:42:82`: `const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {` → `const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {};`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:43:13`: `previous: "Previous change",` → `previous: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:45:13`: `collapse: "Collapse unchanged fragments",` → `collapse: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:44:9`: `next: "Next change",` → `next: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:47:15`: `applyRight: "Apply non-conflicting changes from the right",` → `applyRight: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:46:14`: `applyLeft: "Apply non-conflicting changes from the left",` → `applyLeft: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:49:9`: `redo: "Redo",` → `redo: "",`
+- Survived StringLiteral `src/ui/toolbarButtons.ts:48:9`: `undo: "Undo",` → `undo: "",`
