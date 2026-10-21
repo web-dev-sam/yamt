@@ -41,7 +41,7 @@ test.each<[OperationKind, string]>([
   ["Rebase", "REBASE"],
   ["CherryPick", "CHERRY-PICK"],
   ["Revert", "REVERT"],
-  ["Am", "AM"],
+  ["Am", "PATCHES"],
 ])("the tag of %s reads %s, as plan #92 words it", (kind, tag) => {
   expect(operationTag(kind)).toBe(tag);
 });

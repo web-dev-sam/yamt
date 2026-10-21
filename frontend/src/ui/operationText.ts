@@ -34,7 +34,7 @@ const TAGS: Readonly<Record<OperationKind, string>> = {
   Rebase: "REBASE",
   CherryPick: "CHERRY-PICK",
   Revert: "REVERT",
-  Am: "AM",
+  Am: "PATCHES",
 };
 
 type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
