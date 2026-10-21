@@ -1,28 +1,4 @@
 {
-  "GitOpsRunAppR1": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-run-app-rework-1.md",
-    "owned": [
-      "src-tauri/src/merge.rs",
-      "src-tauri/src/merge/tests.rs",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/outcome.rs",
-      "src-tauri/src/mock_window.rs",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ipc/fixtureOperations.ts",
-      "frontend/src/ipc/fixtureOperations.test.ts",
-      "scripts/operations-repo.sh",
-      "scripts/conflict-repo.sh",
-      "scripts/git-sandbox.sh",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts"
-    ]
-  },
-  "GitOpsRunCoreR2Correctness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-core-rework-2.md",
-    "owned": []
-  },
   "GitOpsStopsR1": {
     "agent": "web-impl",
     "brief": "docs/slices/briefs/3.J-stops-rework-1.md",
@@ -61,5 +37,29 @@
       "frontend/src/ui/ServerStatus.vue",
       "frontend/src/ui/AGENTS.md"
     ]
+  },
+  "GitOpsRemembered": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-remembered.md",
+    "owned": [
+      "crates/session/**",
+      "crates/gitio/**",
+      "crates/conflict-repo/**",
+      "crates/cli/**",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/editor/internal/fileText.ts",
+      "frontend/src/editor/internal/fileText.test.ts",
+      "frontend/src/ui/nextFile.ts",
+      "frontend/src/ui/nextFile.test.ts",
+      "frontend/fixtures/**",
+      "tests/showcase/**"
+    ]
+  },
+  "GitOpsRunAppR1Boundary": {
+    "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-run-app-rework-1.md",
+    "owned": []
   }
 }
