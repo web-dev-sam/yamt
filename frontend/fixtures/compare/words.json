@@ -1,0 +1,149 @@
+{
+  "differences": [
+    {
+      "left": {
+        "len": 1,
+        "start": 0
+      },
+      "right": {
+        "len": 1,
+        "start": 0
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 4,
+              "line": 0,
+              "start": 22
+            }
+          ],
+          "removals": []
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 3,
+              "line": 0,
+              "start": 22
+            }
+          ],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 2
+      },
+      "right": {
+        "len": 1,
+        "start": 2
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 8,
+              "line": 2,
+              "start": 10
+            }
+          ],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": [
+            {
+              "at": {
+                "column": 10,
+                "line": 2
+              },
+              "text": "printed "
+            }
+          ]
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 0,
+        "start": 5
+      },
+      "right": {
+        "len": 1,
+        "start": 5
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 6
+      },
+      "right": {
+        "len": 0,
+        "start": 7
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 8
+      },
+      "right": {
+        "len": 2,
+        "start": 8
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 36,
+              "line": 8,
+              "start": 0
+            }
+          ],
+          "removals": []
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 36,
+              "line": 8,
+              "start": 0
+            },
+            {
+              "len": 40,
+              "line": 9,
+              "start": 0
+            }
+          ],
+          "removals": []
+        }
+      }
+    }
+  ],
+  "left": "The meeting starts at nine in the small room.\nLunch is served after the second session.\nBring the printed agenda and your laptop.\n\nParking is free in the north lot.\nQuestions go to the front desk.\nThe east entrance stays closed all week.\nBadges are handed out at the door.\nVisitors sign the book at reception.\nCoffee is in the kitchen on floor two.\nTea is in the same cupboard.\n\nPlease leave the room tidy when you go.\n",
+  "right": "The meeting starts at ten in the small room.\nLunch is served after the second session.\nBring the agenda and your laptop.\n\nParking is free in the north lot.\nDinner is at seven in the hall.\nQuestions go to the front desk.\nBadges are handed out at the door.\nGuests wait in the lobby until noon.\nAll rooms are booked through the portal.\nCoffee is in the kitchen on floor two.\nTea is in the same cupboard.\n\nPlease leave the room tidy when you go.\n"
+}

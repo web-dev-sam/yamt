@@ -63,7 +63,7 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> 
         .collect()
 }
 
-fn side_word_changes<L: Copy + PartialEq>(
+pub(crate) fn side_word_changes<L: Copy + PartialEq>(
     base: &[&str],
     all_side_lines: &[&str],
     side_range: Range<u32>,

@@ -1,0 +1,85 @@
+{
+  "differences": [
+    {
+      "left": {
+        "len": 1,
+        "start": 13
+      },
+      "right": {
+        "len": 1,
+        "start": 13
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": [
+            {
+              "at": {
+                "column": 22,
+                "line": 13
+              },
+              "text": " || trimmed.startsWith(\"#\")"
+            }
+          ]
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 27,
+              "line": 13,
+              "start": 22
+            }
+          ],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 32
+      },
+      "right": {
+        "len": 2,
+        "start": 32
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 5,
+              "line": 32,
+              "start": 37
+            }
+          ],
+          "removals": [
+            {
+              "at": {
+                "column": 0,
+                "line": 32
+              },
+              "text": "  const word = open === 1 ? \"task\" : \"tasks\";\n"
+            }
+          ]
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 45,
+              "line": 32,
+              "start": 0
+            },
+            {
+              "len": 7,
+              "line": 33,
+              "start": 37
+            }
+          ],
+          "removals": []
+        }
+      }
+    }
+  ],
+  "left": "import { readFile } from \"node:fs/promises\";\n\nexport interface Task {\n  id: number;\n  title: string;\n  done: boolean;\n  due?: Date;\n}\n\nexport function parseTasks(text: string): Task[] {\n  const tasks: Task[] = [];\n  for (const line of text.split(\"\\n\")) {\n    const trimmed = line.trim();\n    if (trimmed === \"\") {\n      continue;\n    }\n    const [id, title, done] = trimmed.split(\";\");\n    tasks.push({\n      id: Number(id),\n      title: title ?? \"\",\n      done: done === \"x\",\n    });\n  }\n  return tasks;\n}\n\nexport function openTasks(tasks: Task[]): Task[] {\n  return tasks.filter((task) => !task.done);\n}\n\nexport function summary(tasks: Task[]): string {\n  const open = openTasks(tasks).length;\n  return `${open} of ${tasks.length} tasks open`;\n}\n\nexport async function loadTasks(path: string): Promise<Task[]> {\n  const text = await readFile(path, \"utf8\");\n  return parseTasks(text);\n}\n",
+  "right": "import { readFile } from \"node:fs/promises\";\n\nexport interface Task {\n  id: number;\n  title: string;\n  done: boolean;\n  due?: Date;\n}\n\nexport function parseTasks(text: string): Task[] {\n  const tasks: Task[] = [];\n  for (const line of text.split(\"\\n\")) {\n    const trimmed = line.trim();\n    if (trimmed === \"\" || trimmed.startsWith(\"#\")) {\n      continue;\n    }\n    const [id, title, done] = trimmed.split(\";\");\n    tasks.push({\n      id: Number(id),\n      title: title ?? \"\",\n      done: done === \"x\",\n    });\n  }\n  return tasks;\n}\n\nexport function openTasks(tasks: Task[]): Task[] {\n  return tasks.filter((task) => !task.done);\n}\n\nexport function summary(tasks: Task[]): string {\n  const open = openTasks(tasks).length;\n  const word = open === 1 ? \"task\" : \"tasks\";\n  return `${open} of ${tasks.length} ${word} open`;\n}\n\nexport async function loadTasks(path: string): Promise<Task[]> {\n  const text = await readFile(path, \"utf8\");\n  return parseTasks(text);\n}\n"
+}

@@ -15,6 +15,14 @@ pub struct LocalLine(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
 pub struct RemoteLine(pub u32);
 
+/// 0-based line index in the left text of a 2-way compare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
+pub struct LeftLine(pub u32);
+
+/// 0-based line index in the right text of a 2-way compare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
+pub struct RightLine(pub u32);
+
 /// The lines `start .. start + len` of one text; built from a length, so it cannot be inverted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct LineRange<L> {
@@ -53,6 +61,22 @@ impl LineRange<RemoteLine> {
     #[must_use]
     pub fn end(&self) -> RemoteLine {
         RemoteLine(self.start.0 + self.len)
+    }
+}
+
+impl LineRange<LeftLine> {
+    /// First line after the range.
+    #[must_use]
+    pub fn end(&self) -> LeftLine {
+        LeftLine(self.start.0 + self.len)
+    }
+}
+
+impl LineRange<RightLine> {
+    /// First line after the range.
+    #[must_use]
+    pub fn end(&self) -> RightLine {
+        RightLine(self.start.0 + self.len)
     }
 }
 

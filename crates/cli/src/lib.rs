@@ -1,9 +1,10 @@
-//! Headless command line front end: classify, scan, golden and fixture tooling.
+//! Headless command line front end: classify, scan, golden, fixture and compare tooling.
 #![forbid(unsafe_code)]
 
 mod args;
 mod case;
 mod classify;
+mod compare;
 mod fixture;
 mod golden;
 mod scan;
@@ -20,7 +21,8 @@ const USAGE: &str = "usage:
   yamt-cli classify <base> <local> <remote> [--gap N] [--json]
   yamt-cli scan [<repo>]
   yamt-cli golden run|update [<dir>]
-  yamt-cli fixture <case-dir>";
+  yamt-cli fixture <case-dir>
+  yamt-cli compare <case-dir>";
 const USAGE_EXIT_CODE: u8 = 2;
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +85,7 @@ pub fn run(args: &[OsString]) -> Result<()> {
         Command::GoldenRun { dir } => golden::run(&dir),
         Command::GoldenUpdate { dir } => golden::update(&dir),
         Command::Fixture { case_dir } => fixture::fixture(&case_dir),
+        Command::Compare { case_dir } => compare::compare(&case_dir),
     }
 }
 

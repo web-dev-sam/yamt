@@ -33,14 +33,17 @@ fixtures: (fixtures-into "frontend/fixtures")
 fixtures-check: (fixtures-into "target/fixtures-check")
     diff -ru frontend/fixtures/golden target/fixtures-check/golden
     diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
+    diff -ru frontend/fixtures/compare target/fixtures-check/compare
 
-# Window fixtures: the 10 goldens, plus hand-written demo cases in tests/showcase/ (not goldens).
+# Window fixtures: the 10 goldens, hand-written demo cases in tests/showcase/ (not goldens), and the compare
+# window's cases in tests/compare/ (plan §2 #95).
 [private]
 fixtures-into dir:
-    rm -rf {{ dir }}/golden {{ dir }}/showcase && mkdir -p {{ dir }}/golden {{ dir }}/showcase
+    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare
     cargo build --quiet -p yamt-cli
     for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/golden/$(basename "$case").json"; done
     for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
+    for case in tests/compare/*/; do target/debug/yamt-cli compare "$case" > "{{ dir }}/compare/$(basename "$case").json"; done
 
 web-lint: (frontend "lint")
 

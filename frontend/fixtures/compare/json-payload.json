@@ -1,0 +1,110 @@
+{
+  "differences": [
+    {
+      "left": {
+        "len": 1,
+        "start": 2
+      },
+      "right": {
+        "len": 1,
+        "start": 2
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 7,
+              "line": 2,
+              "start": 13
+            }
+          ],
+          "removals": []
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 7,
+              "line": 2,
+              "start": 13
+            }
+          ],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 5
+      },
+      "right": {
+        "len": 0,
+        "start": 5
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 1,
+        "start": 11
+      },
+      "right": {
+        "len": 1,
+        "start": 10
+      },
+      "words": {
+        "left": {
+          "changed": [
+            {
+              "len": 8,
+              "line": 11,
+              "start": 16
+            }
+          ],
+          "removals": []
+        },
+        "right": {
+          "changed": [
+            {
+              "len": 9,
+              "line": 10,
+              "start": 16
+            }
+          ],
+          "removals": []
+        }
+      }
+    },
+    {
+      "left": {
+        "len": 0,
+        "start": 23
+      },
+      "right": {
+        "len": 1,
+        "start": 22
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": []
+        }
+      }
+    }
+  ],
+  "left": "{\n  \"id\": \"order-1042\",\n  \"status\": \"pending\",\n  \"customer\": {\n    \"name\": \"Ada Lovelace\",\n    \"email\": \"ada@example.com\",\n    \"phone\": \"+44 20 7946 0958\"\n  },\n  \"items\": [\n    {\n      \"sku\": \"BOOK-17\",\n      \"title\": \"Notes on the analytical engine\",\n      \"quantity\": 1,\n      \"price\": 24.5\n    },\n    {\n      \"sku\": \"PEN-03\",\n      \"title\": \"Fountain pen\",\n      \"quantity\": 2,\n      \"price\": 8\n    }\n  ],\n  \"note\": \"leave the parcel at the front door\",\n  \"total\": 40.5\n}\n",
+  "right": "{\n  \"id\": \"order-1042\",\n  \"status\": \"shipped\",\n  \"customer\": {\n    \"name\": \"Ada Lovelace\",\n    \"phone\": \"+44 20 7946 0958\"\n  },\n  \"items\": [\n    {\n      \"sku\": \"BOOK-17\",\n      \"title\": \"Sketch of the analytical engine\",\n      \"quantity\": 1,\n      \"price\": 24.5\n    },\n    {\n      \"sku\": \"PEN-03\",\n      \"title\": \"Fountain pen\",\n      \"quantity\": 2,\n      \"price\": 8\n    }\n  ],\n  \"note\": \"leave the parcel at the front door\",\n  \"tracking\": \"RX-2291-UK\",\n  \"total\": 40.5\n}\n"
+}
