@@ -1,0 +1,56 @@
+From 4ffd4fcbd5eda37f8897f41014b99795881d6200 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 16:33:43 +0200
+Subject: [PATCH] test(ui): a revert's Abort question is checked whole
+
+Refs #1443
+---
+ frontend/src/ui/operationText.test.ts | 25 +++++++++++++++++++------
+ 1 file changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index ce63218..729de4b 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -187,6 +187,10 @@ test.each<[OperationView, string]>([
+     { kind: "CherryPick", picking: FIX_LOGIN, progress: { step: 3, total: 3 } },
+     " The 2 commits already picked are undone too. ",
+   ],
++  [
++    { kind: "Revert", reverting: ADD_CACHE, progress: { step: 2, total: 3 } },
++    " The 1 commit already reverted is undone too. ",
++  ],
+   [
+     { kind: "Am", subject: "", message: "", progress: { step: 3, total: 4 } },
+     " The 2 patches already applied are undone too. ",
+@@ -195,12 +199,21 @@ test.each<[OperationView, string]>([
+   expect(abortMessage(operation)).toContain(sentence);
+ });
+ 
+-test.each<OperationView>([
+-  { ...REBASE, progress: { step: 1, total: 5 } },
+-  { ...REBASE, progress: null },
+-  { kind: "Revert", reverting: ADD_CACHE, progress: { step: 1, total: 2 } },
+-])("the first step has nothing done to name: %j", (operation) => {
+-  expect(abortMessage(operation)).not.toContain("undone too");
++test.each<[OperationView, string]>([
++  [
++    { ...REBASE, progress: { step: 1, total: 5 } },
++    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The repository goes back to how it was before the rebase, and yamt closes.",
++  ],
++  [
++    { ...REBASE, progress: null },
++    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The repository goes back to how it was before the rebase, and yamt closes.",
++  ],
++  [
++    { kind: "Revert", reverting: ADD_CACHE, progress: { step: 1, total: 2 } },
++    "Every resolution and every save in this revert will be lost, and so will unsaved edits. The repository goes back to how it was before the revert, and yamt closes.",
++  ],
++])("the first step has nothing done to name: %j", (operation, message) => {
++  expect(abortMessage(operation)).toBe(message);
+ });
+ 
+ test.each<[OperationView, string]>([
+-- 
+2.56.0
+
