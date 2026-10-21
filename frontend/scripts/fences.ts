@@ -7,7 +7,7 @@ import ts from "typescript";
 export type SourceFile = { readonly path: string; readonly text: string };
 
 export type FenceViolation = {
-  readonly rule: "PM2" | "PM3" | "PM5";
+  readonly rule: "PM2" | "PM3" | "PM5" | "PM7";
   readonly file: string;
   readonly specifier: string;
   readonly reason: string;
@@ -31,6 +31,14 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
+const COMPARE_FILE =
+  /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|TabList\.vue|LanguagePicker\.vue|useCompareController(?:\.test)?\.ts)$/;
+const MERGE_ROOT_FILES: Record<string, true> = {
+  "src/ui/store": true,
+  "src/ui/store.ts": true,
+  "src/ui/App": true,
+  "src/ui/App.vue": true,
+};
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -97,6 +105,19 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
     target.split("/").includes("internal")
   ) {
     return { rule: "PM5", reason: "no module imports another module's internal/" };
+  }
+  return undefined;
+}
+
+function compareFinding(file: string, target: string): Finding | undefined {
+  if (!COMPARE_FILE.test(file)) {
+    return undefined;
+  }
+  if (Object.hasOwn(MERGE_ROOT_FILES, target)) {
+    return { rule: "PM7", reason: "the compare window never imports the merge window's root" };
+  }
+  if (isInside(target, "src/lsp")) {
+    return { rule: "PM7", reason: "the compare window never imports lsp/" };
   }
   return undefined;
 }
@@ -184,7 +205,9 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
       const bare = specifier.replace(QUERY_SUFFIX, "");
       const target = relativeTarget(file.path, bare);
       const finding =
-        target === undefined ? packageFinding(module, specifier) : pathFinding(module, target);
+        target === undefined
+          ? packageFinding(module, specifier)
+          : (pathFinding(module, target) ?? compareFinding(file.path, target));
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }

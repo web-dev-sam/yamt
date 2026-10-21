@@ -1,15 +1,20 @@
 import { createApp } from "vue";
 
 import {
+  createFixtureCompareSource,
   createFixtureServerHost,
   createFixtureSource,
+  createTauriCompareSource,
   createTauriServerHost,
   createTauriSource,
   log,
   type ServerHost,
+  type Theme,
 } from "./ipc";
 import { LanguageServers } from "./lsp";
 import App from "./ui/App.vue";
+import CompareApp from "./ui/CompareApp.vue";
+import { createCompareStore } from "./ui/compareStore";
 import { createAppStore } from "./ui/store";
 
 import "./style.css";
@@ -24,10 +29,27 @@ function serverHost(): ServerHost | null {
   return new URLSearchParams(SEARCH).has("servers") ? createFixtureServerHost() : null;
 }
 
-const source = IN_APP ? createTauriSource() : createFixtureSource(log, SEARCH);
-const host = serverHost();
-const servers = new LanguageServers(host);
-const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
-const store = createAppStore(source, startTheme, servers, host);
-void store.startUp();
-createApp(App).mount("#app");
+function startCompare(startTheme: Theme): void {
+  const source = IN_APP ? createTauriCompareSource() : createFixtureCompareSource(log, SEARCH);
+  const store = createCompareStore(source, startTheme);
+  void store.startUp();
+  createApp(CompareApp).mount("#app");
+}
+
+function startMerge(startTheme: Theme): void {
+  const source = IN_APP ? createTauriSource() : createFixtureSource(log, SEARCH);
+  const host = serverHost();
+  const servers = new LanguageServers(host);
+  const store = createAppStore(source, startTheme, servers, host);
+  void store.startUp();
+  createApp(App).mount("#app");
+}
+
+const { dataset } = document.documentElement;
+const startTheme = dataset["theme"] === "light" ? "light" : "dark";
+const comparing = IN_APP ? dataset["window"] === "compare" : new URLSearchParams(SEARCH).has("raw");
+if (comparing) {
+  startCompare(startTheme);
+} else {
+  startMerge(startTheme);
+}

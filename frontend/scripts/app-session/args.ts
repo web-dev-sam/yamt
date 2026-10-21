@@ -19,10 +19,10 @@ const DEFAULT_BINARY = "target/debug/yamt";
 const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
 
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
-  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo]
+  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --raw]
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
-  start-fixture --name <n> [--size 1600x1000]
+  start-fixture --name <n> [--size 1600x1000] [--raw | --raw-case <compare fixture>]
   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
@@ -36,7 +36,7 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   colours       <file.mkv> <hex> [<hex> …]
   stop          --name <n>`;
 
-type RepoChoice = { readonly kind: "dir"; readonly dir: string } | { readonly kind: "fresh" };
+type Opening = { readonly kind: "dir"; readonly dir: string } | { readonly kind: "fresh" | "raw" };
 export type Recording = { readonly file: string; readonly seconds: number };
 
 export type Command =
@@ -44,13 +44,18 @@ export type Command =
       readonly kind: "start-app";
       readonly name: string;
       readonly binary: string;
-      readonly repo: RepoChoice;
+      readonly opens: Opening;
       readonly settings: string | null;
       readonly size: Size;
       readonly record: Recording | null;
       readonly home: string | null;
     }
-  | { readonly kind: "start-fixture"; readonly name: string; readonly size: Size }
+  | {
+      readonly kind: "start-fixture";
+      readonly name: string;
+      readonly size: Size;
+      readonly search: string;
+    }
   | {
       readonly kind: "click";
       readonly name: string;
@@ -94,9 +99,9 @@ type CommandKind = Command["kind"];
 const SPECS: Readonly<Record<CommandKind, Spec>> = {
   "start-app": {
     values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds", "home"],
-    flags: ["fresh-repo"],
+    flags: ["fresh-repo", "raw"],
   },
-  "start-fixture": { values: ["name", "size"], flags: [] },
+  "start-fixture": { values: ["name", "size", "raw-case"], flags: ["raw"] },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
   press: { values: ["name"], flags: ["x11"] },
@@ -123,19 +128,19 @@ function size(parsed: Parsed): Size {
   return { width: Number(width), height: Number(height) };
 }
 
-function repoChoice(parsed: Parsed): RepoChoice {
+function opening(parsed: Parsed): Opening {
   const dir = parsed.values.get("repo");
-  const fresh = parsed.flags.has("fresh-repo");
-  if (dir !== undefined && fresh) {
-    throw new Error("--repo and --fresh-repo exclude each other");
+  const raw = parsed.flags.has("raw");
+  if ([dir !== undefined, parsed.flags.has("fresh-repo"), raw].filter(Boolean).length !== 1) {
+    throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --raw");
   }
-  if (dir !== undefined) {
-    return { kind: "dir", dir };
-  }
-  if (!fresh) {
-    throw new Error("start-app needs --repo <dir> or --fresh-repo");
-  }
-  return { kind: "fresh" };
+  return dir === undefined ? { kind: raw ? "raw" : "fresh" } : { kind: "dir", dir };
+}
+
+function fixtureSearch(parsed: Parsed): string {
+  const fixture = parsed.values.get("raw-case");
+  const raw = parsed.flags.has("raw") ? "?raw" : "";
+  return fixture === undefined ? raw : `?raw=${encodeURIComponent(fixture)}`;
 }
 
 function recording(parsed: Parsed): Recording | null {
@@ -207,13 +212,13 @@ function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Comm
   noPositionals(parsed);
   const name = sessionName(parsed);
   if (kind === "start-fixture") {
-    return { kind, name, size: size(parsed) };
+    return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
   }
   return {
     kind,
     name,
     binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
-    repo: repoChoice(parsed),
+    opens: opening(parsed),
     settings: settingsText(parsed),
     size: size(parsed),
     record: recording(parsed),

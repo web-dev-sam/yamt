@@ -262,3 +262,46 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
 
   expect(violationsOf(files)).toEqual([]);
 });
+
+test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
+  const files = [
+    { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/CompareApp.vue",
+      text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/TabList.vue",
+      text: `<script setup lang="ts">\nimport "./store.ts";\n</script>`,
+    },
+    {
+      path: "src/ui/LanguagePicker.vue",
+      text: `<script setup lang="ts">\nimport "../lsp";\n</script>`,
+    },
+    { path: "src/ui/useCompareController.ts", text: `import type { X } from "../lsp/index.ts";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM7", file: "src/ui/compareStore.ts", specifier: "./store" },
+    { rule: "PM7", file: "src/ui/CompareApp.vue", specifier: "./App.vue" },
+    { rule: "PM7", file: "src/ui/TabList.vue", specifier: "./store.ts" },
+    { rule: "PM7", file: "src/ui/LanguagePicker.vue", specifier: "../lsp" },
+    { rule: "PM7", file: "src/ui/useCompareController.ts", specifier: "../lsp/index.ts" },
+  ]);
+});
+
+test("merge files importing the store and compare files importing their own neighbours violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/MergeView.vue",
+      text: `<script setup lang="ts">\nimport "./store";\n</script>`,
+    },
+    { path: "src/ui/compareStore.ts", text: `import "./settingsStore";\nimport "./storeless";` },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
