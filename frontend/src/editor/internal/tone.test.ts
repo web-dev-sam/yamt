@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { loadFixture, type Chunk } from "../../ipc";
 import { PENDING } from "./status";
-import { chunkTone, paneTone } from "./tone";
+import { changeTone, chunkTone, paneTone } from "./tone";
 
 async function chunkWith(
   kind: Chunk["kind"],
@@ -111,4 +111,10 @@ test("paneTone: the Result tints a change while any side still waits, in the Res
   expect(paneTone(remoteOnly, { local: "pending", remote: "ignored" }, "center")).toBeNull();
   expect(paneTone(conflict, { local: "applied", remote: "pending" }, "center")).toBe("conflict");
   expect(paneTone(conflict, { local: "applied", remote: "ignored" }, "center")).toBeNull();
+});
+
+test("changeTone: lines only on the changed side are inserted, only on the base side deleted, on both modified", () => {
+  expect(changeTone(0, 2)).toBe("inserted");
+  expect(changeTone(3, 0)).toBe("deleted");
+  expect(changeTone(1, 4)).toBe("modified");
 });

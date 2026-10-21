@@ -18,13 +18,13 @@ import type { ChunkState } from "./status";
 import { paneTone, type Tone } from "./tone";
 import { sideWordDecorations } from "./words";
 
-type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+export type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
 
 function pointEdge(line: Line, from: number): "above" | "below" {
   return line.from === from ? "above" : "below";
 }
 
-function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
+export function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to, tone } of bands) {
     let line = doc.lineAt(from);

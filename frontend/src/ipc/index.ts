@@ -84,6 +84,7 @@ export {
 export { createTauriServerHost, createTauriSource } from "./tauri";
 export { createTauriCompareSource } from "./tauriCompare";
 export type { ServerHost } from "./ServerHost";
+export type { SideWords } from "./words";
 
 const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
 
