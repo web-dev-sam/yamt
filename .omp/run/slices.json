@@ -33,7 +33,14 @@
       "frontend/src/ui/problemText.test.ts",
       "frontend/src/ui/*.test.ts",
       "scripts/operations-repo.sh",
-      "src-tauri/src/frontend_log.rs"
+      "src-tauri/src/frontend_log.rs",
+      "crates/session/src/operation.rs",
+      "crates/session/tests/operations.rs"
     ]
+  },
+  "GitOpsRunCoreCorrectness": {
+    "agent": "correctness-reviewer",
+    "brief": "docs/slices/briefs/3.J-run-core.md",
+    "owned": []
   }
 }

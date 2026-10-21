@@ -125,3 +125,11 @@ Abort and Continue now work for every operation git records (merge, squash merge
 - `crates/session/src/operation.rs` `continue_operation`: git's output contains `\r` progress lines (`Rebasing (2/3)\r` in the smoke). The window (row 5/8) may want to clean them before showing the message.
 - The locale test uses `C.UTF-8` (`session/tests/operations.rs`). If that locale is missing, git still runs and the hook still echoes the variables, so the test should still hold; I have not tried it on macOS or Windows.
 - The squash-merge abort passed here with no autostash in play. Design fact 7 (an autostash goes to the stash list) is not exercised.
+
+## Boundary review (GitOpsRunCoreBoundary): fail
+
+Blocks #1336–#1338; shoulds #1339–#1345 (all but #1345 promoted). Mutants `just mutants 334d6c6`: 74 — 32 caught, 39 unviable, 3 fixture-helper survivors dropped (#1335).
+
+## Correctness review (GitOpsRunCoreCorrectness): fail
+
+Blocks #1346–#1348; shoulds #1349 (partly to row 8, rest Gate D), #1350. Survivors: none matter.
