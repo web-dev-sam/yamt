@@ -68,3 +68,5 @@ open_risks
 ```
 
 Main should run `just check`, `just map-check` (after the map lines) and `just mutants` on `ui/{gitRun,emptyStop,continuing,aborting,operationText,toolbarButtons}.ts`.
+
+## Boundary re-check: fail — #1407–#1416 fixed; new block #1420 (stop message held twice). Mutants on changed lines: 2 word-constant survivors (#1421 dropped).

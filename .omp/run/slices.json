@@ -51,12 +51,8 @@
       "frontend/src/ui/useMergeController.ts",
       "frontend/src/ui/useMergeController.test.ts",
       "frontend/src/ui/fileMark.ts",
-      "frontend/src/ui/fileMark.test.ts"
+      "frontend/src/ui/fileMark.test.ts",
+      "frontend/src/ui/deletedSide.test.ts"
     ]
-  },
-  "GitOpsContinueR1Boundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-continue-rework-1.md",
-    "owned": []
   }
 }
