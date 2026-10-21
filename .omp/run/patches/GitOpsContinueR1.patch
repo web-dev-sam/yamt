@@ -1,0 +1,1263 @@
+From 47a70761eeccad7fd98fb9193f995d956246ef6f Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:30:20 +0200
+Subject: [PATCH] fix(ui): one owner for git running; empty-stop rule out of
+ App.vue
+
+createGitRun owns the running flag for Abort and Continue; emptyStop
+decides where git's stop message shows and keeps it across problems.
+
+Refs #1407-#1416
+---
+ frontend/src/ipc/fixtureOperations.test.ts | 21 +++++
+ frontend/src/ipc/fixtureOperations.ts      | 44 ++++++++--
+ frontend/src/ui/AGENTS.md                  |  8 +-
+ frontend/src/ui/App.vue                    | 17 ++--
+ frontend/src/ui/MergeToolbar.vue           |  5 +-
+ frontend/src/ui/StopView.vue               |  4 +-
+ frontend/src/ui/ToolbarMenu.vue            |  4 +-
+ frontend/src/ui/aborting.test.ts           |  3 +-
+ frontend/src/ui/aborting.ts                | 37 +++++----
+ frontend/src/ui/continuing.test.ts         | 14 ++--
+ frontend/src/ui/continuing.ts              | 48 +++++------
+ frontend/src/ui/emptyStop.test.ts          | 92 +++++++++++++++++++++
+ frontend/src/ui/emptyStop.ts               | 43 ++++++++++
+ frontend/src/ui/gitRun.test.ts             | 81 ++++++++++++++++++
+ frontend/src/ui/gitRun.ts                  | 34 ++++++++
+ frontend/src/ui/operationText.ts           | 46 +++++++----
+ frontend/src/ui/saving.ts                  |  4 +-
+ frontend/src/ui/stops.test.ts              |  3 +-
+ frontend/src/ui/store.test.ts              | 95 ++++++++++++++++++++++
+ frontend/src/ui/store.ts                   | 24 ++++--
+ frontend/src/ui/toolbarButtons.test.ts     | 30 +++----
+ frontend/src/ui/toolbarButtons.ts          | 11 ++-
+ 22 files changed, 551 insertions(+), 117 deletions(-)
+ create mode 100644 frontend/src/ui/emptyStop.test.ts
+ create mode 100644 frontend/src/ui/emptyStop.ts
+ create mode 100644 frontend/src/ui/gitRun.test.ts
+ create mode 100644 frontend/src/ui/gitRun.ts
+
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+index 3b93b9d..8016ab9 100644
+--- a/frontend/src/ipc/fixtureOperations.test.ts
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -149,6 +149,27 @@ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each tim
+   expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
+ });
+ 
++test("?empty makes the second step a stop without files, with git's edit message, and the third lists them again", async () => {
++  const source = sourceAt("?operation=rebase&empty");
++
++  const stopped = valueOf(await source.continueOperation());
++  const empty = await filesListed(source);
++  const files = valueOf(await source.listFiles()).files;
++  const third = valueOf(await source.continueOperation());
++
++  expect(stopped).toEqual({
++    kind: "Stopped",
++    message:
++      "Stopped at 8b4e7d0...  Show reminders on the board\nYou can amend the commit now, with\n\n  git commit --amend\n\nOnce you are satisfied with your changes, run\n\n  git rebase --continue\n",
++  });
++  expect([empty.files, empty.operation?.kind, files]).toEqual([[], "Rebase", []]);
++  expect(third).toEqual({
++    kind: "Stopped",
++    message: "CONFLICT (content): Merge conflict at step 3 of 3",
++  });
++  expect((await filesListed(source)).files.map((file) => file.path)).toEqual(["a.ts"]);
++});
++
+ test.each(["", "?operation=squash"])("%j finishes at the first Continue", async (search) => {
+   const source = sourceAt(search);
+ 
+diff --git a/frontend/src/ipc/fixtureOperations.ts b/frontend/src/ipc/fixtureOperations.ts
+index dc688a3..28a3ef2 100644
+--- a/frontend/src/ipc/fixtureOperations.ts
++++ b/frontend/src/ipc/fixtureOperations.ts
+@@ -51,10 +51,13 @@ type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
+ type Sequence = {
+   readonly operation: FixtureOperation;
+   readonly rewords: boolean;
++  readonly empty: boolean;
+   step: number;
+   ended: Ended | null;
+ };
+ 
++const EMPTY_STEP = 2;
++
+ function refused<T>(failure: SourceFailure): SourceResult<T> {
+   return { ok: false, failure };
+ }
+@@ -98,12 +101,42 @@ function stepView(
+   }
+ }
+ 
+-/** `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`. */
++/**
++ * `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`;
++ * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`.
++ */
+ function sequenceOf(search: string): Sequence {
+   const params = new URLSearchParams(search);
+   const chosen = params.get("operation");
+   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
+-  return { operation, rewords: params.has("rewords"), step: 1, ended: null };
++  const empty = params.has("empty");
++  return { operation, rewords: params.has("rewords"), empty, step: 1, ended: null };
++}
++
++function atEmptyStop(at: Sequence): boolean {
++  return at.empty && at.step === EMPTY_STEP;
++}
++
++function listedAt(at: Sequence, files: StopFiles): FileEntry[] {
++  return atEmptyStop(at) ? [] : files.listed();
++}
++
++function stoppedMessage(at: Sequence): string {
++  if (!atEmptyStop(at)) {
++    return `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
++  }
++  const commit = COMMITS[at.step - 1] ?? COMMITS[0];
++  return [
++    `Stopped at ${commit.short_id}...  ${commit.subject}`,
++    "You can amend the commit now, with",
++    "",
++    "  git commit --amend",
++    "",
++    "Once you are satisfied with your changes, run",
++    "",
++    "  git rebase --continue",
++    "",
++  ].join("\n");
+ }
+ 
+ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
+@@ -113,7 +146,7 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFi
+         return refused(at.ended);
+       }
+       const merging = at.operation === "merge";
+-      return { ok: true, value: { files: files.listed(), diskChanges: [], merging } };
++      return { ok: true, value: { files: listedAt(at, files), diskChanges: [], merging } };
+     },
+     async listStop() {
+       if (at.ended !== null) {
+@@ -121,7 +154,7 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFi
+       }
+       const view = stepView(at.operation, at.step, at.rewords);
+       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
+-      const value = { files: files.listed(), diskChanges: [], operation: view, sides };
++      const value = { files: listedAt(at, files), diskChanges: [], operation: view, sides };
+       return { ok: true, value: { kind: "Files", ...value } };
+     },
+   };
+@@ -149,8 +182,7 @@ function stopActions(
+       }
+       at.step += 1;
+       files.unresolveAll();
+-      const message = `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
+-      return { ok: true, value: { kind: "Stopped", message } };
++      return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
+     },
+     async abortOperation() {
+       if (at.ended !== null) {
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 9deda02..654e869 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -10,6 +10,10 @@ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize h
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem. "A reply after the stop was dropped changes nothing" is written once, `saving.ts` `landed(stop, call)` (null once dropped): every write, the format step, Abort, and every reload (`saving.ts` `reload`, also for disk changes) capture `target.stop` before they call. A failure answered `StopMovedOn` is reported through `problem.ts` `reportFailure`, which lists again. `operationText.ts` holds every operation word (the top line and its tooltip, Abort's label, title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem. The store reaches `nextStop` only through `emptyStop.ts` `keepStopMessage`, which keeps that problem's message (`stopMessage`) for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. A failure answered `StopMovedOn` is reported through `problem.ts` `reportFailure`, which lists again. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
+ 
+-Abort (plan §2 #74, #88): `aborting.ts` holds the action and whether an abort runs; `AbortState` is `none` / `ready` / `running` with the listed `operation`; `running` stays after a success, since the app is ending. A refusal is the `abort` problem, naming the operation, never cleared by a path. The button is the toolbar's first icon button (#58), labelled per operation: `toolbarButtons.ts` `listedButtons` leaves it out of the menu and the toolbar while git records no operation; whether the user hid it is a separate fact, `hiddenButtons`, which starts it hidden.
++Git running (plan §2 #74, #89): `gitRun.ts` `createGitRun` is the one owner of "git is running": `run(stop, { call, endsApp, landing })` sets `running`, calls through `landed`, lands the reply while still running, and clears it unless the reply is a success that ends the app (`endsApp`: every Abort success, Continue's `Finished`). Abort, Continue and `closeGuard.ts` only read `running`; while it is set `mayClose` refuses with the `close` problem and asks nothing.
++
++Abort (plan §2 #74, #88): `aborting.ts` holds the action; `AbortState` is `none` / `ready` / `running` with the listed `operation`. A refusal is the `abort` problem, naming the operation, never cleared by a path. The button is the toolbar's first icon button (#58), labelled per operation: `toolbarButtons.ts` `listedButtons(operation)` leaves it and Continue out of the menu and the toolbar while git records no operation; whether the user hid one is a separate fact, `hiddenButtons`, which starts Abort hidden.
++
++Continue (plan §2 #89): `continuing.ts` holds `ContinueState` (`noOperation` / `filesLeft` — any file not `Resolved`, a `Remembered` one too — / `writing` / `ready` / `running`), the questions (unsaved files, rewords) and the action: `Stopped` goes to `nextStop`, `StopMovedOn` to `nextStop({ outside })`, a `Git` refusal is the `continue` problem and lists again. `operationText.ts` `continueAction` is the one exhaustive rule for its verb (a merge commits), object and label. `OperationButtons.vue` (Continue, and Abort where there is no toolbar) sits in the choice view's, the deleted-side view's and the stop view's header rows and in the toolbar. `StopView.vue` is the merge area of an empty stop: `emptyStop.ts` `emptyStop` (pure) decides it from the operation, the list, the screen, the problem and `stopMessage` — shown on the files screen with git's message, which never goes to the bar while the stop is empty; the store exposes it as `emptyStop`, App only binds it.
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index dea3569..883b1d8 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -23,7 +23,7 @@ const {
+   active,
+   screen,
+   fileListShown,
+-  problem,
++  emptyStop,
+   notices,
+   operation,
+   question,
+@@ -45,13 +45,6 @@ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+ 
+-const stopShown = computed(
+-  () => operation.value !== null && files.value.length === 0 && screen.value.kind === "files",
+-);
+-const stopped = computed(() =>
+-  stopShown.value && problem.value?.action === "stopped" ? problem.value.message.trim() : null,
+-);
+-const barProblem = computed(() => (stopped.value === null ? problem.value : null));
+ const resolvedLine = computed(() => allResolvedText(operation.value));
+ 
+ watch(focused, (now) => {
+@@ -78,7 +71,11 @@ onMounted(() => {
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <OperationBar v-if="operation !== null" :operation="operation" />
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+-      <ProblemBar v-if="barProblem !== null" :problem="barProblem" @close="dismissProblem" />
++      <ProblemBar
++        v-if="emptyStop.barProblem !== null"
++        :problem="emptyStop.barProblem"
++        @close="dismissProblem"
++      />
+       <p
+         v-else-if="allResolved"
+         role="status"
+@@ -100,7 +97,7 @@ onMounted(() => {
+           :sides="sides"
+           :shown="sides.path === active && screen.kind === 'files'"
+         />
+-        <StopView v-if="stopShown" :message="stopped" />
++        <StopView v-if="emptyStop.stopView !== null" :message="emptyStop.stopView.message" />
+         <SettingsView v-if="screen.kind === 'settings'" />
+         <ServerLogView
+           v-else-if="screen.kind === 'serverLog'"
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index 49239aa..0642205 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -44,7 +44,8 @@ const emit = defineEmits<{
+ 
+ const SECONDARY_BUTTON = 2;
+ 
+-const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortOperation } = useAppStore();
++const { hiddenButtons, collapsing, toggleCollapsing, operation, abortState, abortOperation } =
++  useAppStore();
+ 
+ const menuAt = shallowRef<Point | null>(null);
+ 
+@@ -124,7 +125,7 @@ const ICON_BUTTONS: Readonly<Record<IconButtonId, IconButton>> = {
+   },
+ };
+ 
+-const listed = computed(() => shownButtons(abortState.value, hiddenButtons.value));
++const listed = computed(() => shownButtons(operation.value, hiddenButtons.value));
+ const continueShown = computed(() => listed.value.some((button) => button.id === "continue"));
+ const shown = computed(() =>
+   listed.value.flatMap((button) =>
+diff --git a/frontend/src/ui/StopView.vue b/frontend/src/ui/StopView.vue
+index 9505686..6cd3ba0 100644
+--- a/frontend/src/ui/StopView.vue
++++ b/frontend/src/ui/StopView.vue
+@@ -9,16 +9,16 @@ defineProps<{ message: string | null }>();
+ <template>
+   <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island">
+     <header class="flex h-10 shrink-0 items-center justify-end px-2">
++      <OperationButtons :abort="true" />
+       <ServerStatus class="ml-auto" :path="null" :problems="null" />
+       <SettingsButton />
+     </header>
+     <section class="flex min-h-0 flex-1 flex-col items-start gap-3 rounded-island bg-panel p-3">
+       <p>Git stopped without conflicts.</p>
+       <pre
+-        v-if="message !== null && message !== ''"
++        v-if="message !== null"
+         class="max-w-full overflow-auto opaque-scroller font-mono whitespace-pre-wrap"
+         >{{ message }}</pre>
+-      <OperationButtons :abort="true" />
+     </section>
+   </div>
+ </template>
+diff --git a/frontend/src/ui/ToolbarMenu.vue b/frontend/src/ui/ToolbarMenu.vue
+index 6125f40..0bff467 100644
+--- a/frontend/src/ui/ToolbarMenu.vue
++++ b/frontend/src/ui/ToolbarMenu.vue
+@@ -12,7 +12,7 @@ type Item = ListedButton & { readonly shown: boolean };
+ const props = defineProps<{ at: Point }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+-const { hiddenButtons, toggleButton, abortState } = useAppStore();
++const { hiddenButtons, toggleButton, operation } = useAppStore();
+ const panel = useTemplateRef<HTMLDivElement>("panel");
+ const size = shallowRef<Size>({ width: 0, height: 0 });
+ const viewport = useWindowSize();
+@@ -22,7 +22,7 @@ useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
+ useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
+ 
+ const items = computed(() =>
+-  listedButtons(abortState.value).map(({ id, label }): Item => ({
++  listedButtons(operation.value).map(({ id, label }): Item => ({
+     id,
+     label,
+     shown: !hiddenButtons.value.has(id),
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index 4ea1294..9202474 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -5,6 +5,7 @@ import type { OperationView, SourceFailure, SourceResult } from "../ipc";
+ import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
+ import type { Stop } from "./currentStop";
++import { createGitRun } from "./gitRun";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+ 
+@@ -44,7 +45,7 @@ function aborting(
+     problem: shallowRef<Problem | null>(null),
+     lists,
+     stop: { dropped: false },
+-    running: shallowRef(false),
++    gitRun: createGitRun(),
+     refreshFiles: () => {
+       lists.push("list");
+       return Promise.resolve();
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index 6ef46b5..ae95868 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -2,10 +2,11 @@ import { computed, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type { ChunkSource, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+-import { landed, type Stop } from "./currentStop";
+-import { attempt, reportFailure, type Problem, type Relist } from "./problem";
++import type { Stop } from "./currentStop";
++import type { GitRun } from "./gitRun";
++import { reportFailure, type Problem, type Relist } from "./problem";
+ 
+-export type AbortState =
++type AbortState =
+   | { readonly kind: "none" }
+   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
+ 
+@@ -15,7 +16,7 @@ type AbortTarget = Relist & {
+   readonly asking: Pick<Asking, "ask">;
+   readonly operation: Readonly<ShallowRef<OperationView | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+-  readonly running: ShallowRef<boolean>;
++  readonly gitRun: GitRun;
+ };
+ 
+ export type Aborting = {
+@@ -24,7 +25,7 @@ export type Aborting = {
+ };
+ 
+ export function createAborting(target: AbortTarget): Aborting {
+-  const { running } = target;
++  const { running } = target.gitRun;
+   const abortState = computed((): AbortState => {
+     const operation = target.operation.value;
+     if (operation === null) {
+@@ -43,19 +44,19 @@ export function createAborting(target: AbortTarget): Aborting {
+     if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
+       return;
+     }
+-    running.value = true;
+-    const outcome = await landed(stop, () => attempt(() => target.source.abortOperation()));
+-    if (outcome?.ok === true) {
+-      return;
+-    }
+-    running.value = false;
+-    if (outcome !== null) {
+-      await reportFailure(target, {
+-        action: "abort",
+-        operation: operation.kind,
+-        cause: outcome.cause,
+-      });
+-    }
++    await target.gitRun.run(stop, {
++      call: () => target.source.abortOperation(),
++      endsApp: () => true,
++      landing: async (outcome) => {
++        if (!outcome.ok) {
++          await reportFailure(target, {
++            action: "abort",
++            operation: operation.kind,
++            cause: outcome.cause,
++          });
++        }
++      },
++    });
+   }
+ 
+   return { abortState, abortOperation };
+diff --git a/frontend/src/ui/continuing.test.ts b/frontend/src/ui/continuing.test.ts
+index 70fbb22..81c7ad3 100644
+--- a/frontend/src/ui/continuing.test.ts
++++ b/frontend/src/ui/continuing.test.ts
+@@ -1,10 +1,11 @@
+ import { afterEach, expect, test, vi } from "vitest";
+-import { shallowReactive, shallowRef, type ShallowRef } from "vue";
++import { shallowReactive, shallowRef, type ShallowReactive, type ShallowRef } from "vue";
+ 
+ import type { ContinueReply, FileEntry, OperationView, SourceFailure, SourceResult } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+ import { createContinuing, type ContinueState, type Continuing } from "./continuing";
+ import type { Stop } from "./currentStop";
++import { createGitRun } from "./gitRun";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+ import { claimWrite } from "./saving";
+@@ -25,6 +26,7 @@ const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
+ 
+ const RESOLVED: FileEntry = { path: "a.ts", status: "Resolved", unsupported: null };
+ const LEFT: FileEntry = { path: "b.ts", status: "Unresolved", unsupported: null };
++const REMEMBERED: FileEntry = { path: "r.ts", status: "Remembered", unsupported: null };
+ 
+ type Reply = SourceResult<ContinueReply>;
+ 
+@@ -33,8 +35,7 @@ type Pressed = Continuing & {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly operation: ShallowRef<OperationView | null>;
+   readonly problem: ShallowRef<Problem | null>;
+-  readonly running: ShallowRef<boolean>;
+-  readonly writing: Map<string, { writes: number; overtaken: boolean }>;
++  readonly writing: ShallowReactive<Map<string, { writes: number; overtaken: boolean }>>;
+   readonly calls: number[];
+   readonly ends: StopEnd[];
+   readonly lists: string[];
+@@ -71,7 +72,7 @@ function continuing(
+     files: shallowRef(files),
+     operation: shallowRef(operation),
+     problem: shallowRef<Problem | null>(null),
+-    running: shallowRef(false),
++    gitRun: createGitRun(),
+     writing: shallowReactive(new Map<string, { writes: number; overtaken: boolean }>()),
+     calls,
+     ends,
+@@ -120,13 +121,16 @@ test("no recorded operation is noOperation, and a press calls nothing", async ()
+   expect([press.calls, press.asking.question.value]).toEqual([[], null]);
+ });
+ 
+-test("files git lists as not resolved make it filesLeft, counted in the hover, and a press calls nothing", async () => {
++test("files git lists as not resolved, a remembered one too, make it filesLeft, counted in the hover, and a press calls nothing", async () => {
+   const press = continuing(REBASE, [RESOLVED, LEFT, { ...LEFT, path: "c.ts" }]);
+ 
+   expect(press.continueState.value).toBe("filesLeft");
+   expect(press.continueHover.value).toBe("2 files are not resolved yet");
+   press.files.value = [RESOLVED, LEFT];
+   expect(press.continueHover.value).toBe("1 file is not resolved yet");
++  press.files.value = [RESOLVED, REMEMBERED];
++  expect(press.continueState.value).toBe("filesLeft");
++  expect(press.continueHover.value).toBe("1 file is not resolved yet");
+   await press.continueOperation();
+   expect(press.calls).toEqual([]);
+ });
+diff --git a/frontend/src/ui/continuing.ts b/frontend/src/ui/continuing.ts
+index dfe2527..0390ad0 100644
+--- a/frontend/src/ui/continuing.ts
++++ b/frontend/src/ui/continuing.ts
+@@ -1,10 +1,18 @@
+-import { computed, type ComputedRef, type ShallowRef } from "vue";
++import { computed, type ComputedRef, type ShallowReactive, type ShallowRef } from "vue";
+ 
+-import { log, type ChunkSource, type FileEntry, type OperationView } from "../ipc";
++import {
++  log,
++  type ChunkSource,
++  type ContinueReply,
++  type FileEntry,
++  type OperationView,
++} from "../ipc";
+ import type { Asking } from "./asking";
+ import type { CloseGuard } from "./closeGuard";
+-import { landed, type Stop } from "./currentStop";
+-import { attempt, report, type Problem, type ProblemCause, type Relist } from "./problem";
++import type { Stop } from "./currentStop";
++import type { GitRun } from "./gitRun";
++import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
++import { report, type Outcome, type Problem, type ProblemCause, type Relist } from "./problem";
+ import type { Question } from "./question";
+ import type { StopEnd } from "./stops";
+ 
+@@ -12,8 +20,8 @@ export type ContinueState = "noOperation" | "filesLeft" | "writing" | "ready" |
+ 
+ type ContinueTarget = Relist & {
+   readonly stop: Stop;
+-  readonly writing: ReadonlyMap<string, unknown>;
+-  readonly running: ShallowRef<boolean>;
++  readonly writing: ShallowReactive<ReadonlyMap<string, unknown>>;
++  readonly gitRun: GitRun;
+   readonly source: Pick<ChunkSource, "continueOperation">;
+   readonly asking: Pick<Asking, "ask">;
+   readonly guard: Pick<CloseGuard, "unsavedFiles">;
+@@ -35,13 +43,11 @@ function hoverText(state: ContinueState, filesLeft: number): string | null {
+     case "ready":
+       return null;
+     case "filesLeft":
+-      return filesLeft === 1
+-        ? "1 file is not resolved yet"
+-        : `${filesLeft} files are not resolved yet`;
++      return filesLeftText(filesLeft);
+     case "writing":
+-      return "Saving…";
++      return SAVING_TEXT;
+     case "running":
+-      return "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)";
++      return CONTINUING_TEXT;
+     default: {
+       const _exhaustive: never = state;
+       return _exhaustive;
+@@ -74,26 +80,18 @@ async function refused(
+   }
+ }
+ 
+-async function continued(
++async function landing(
+   target: ContinueTarget,
+   operation: OperationView,
+-  stop: Readonly<Stop>,
++  outcome: Outcome<ContinueReply>,
+ ): Promise<void> {
+-  target.running.value = true;
+-  const outcome = await landed(stop, () => attempt(() => target.source.continueOperation()));
+-  if (outcome === null) {
+-    target.running.value = false;
+-    return;
+-  }
+   if (!outcome.ok) {
+     await refused(target, operation, outcome.cause);
+   } else if (outcome.value.kind === "Stopped") {
+     await target.nextStop({ kind: "continued", message: outcome.value.message });
+   } else {
+     log.info("continue.finished", { operation: operation.kind });
+-    return;
+   }
+-  target.running.value = false;
+ }
+ 
+ export function createContinuing(target: ContinueTarget): Continuing {
+@@ -104,7 +102,7 @@ export function createContinuing(target: ContinueTarget): Continuing {
+     if (target.operation.value === null) {
+       return "noOperation";
+     }
+-    if (target.running.value) {
++    if (target.gitRun.running.value) {
+       return "running";
+     }
+     if (filesLeft.value > 0) {
+@@ -122,7 +120,11 @@ export function createContinuing(target: ContinueTarget): Continuing {
+     if (!(await confirmed(target, operation))) {
+       return;
+     }
+-    await continued(target, operation, stop);
++    await target.gitRun.run(stop, {
++      call: () => target.source.continueOperation(),
++      endsApp: (reply) => reply.kind === "Finished",
++      landing: (outcome) => landing(target, operation, outcome),
++    });
+   }
+ 
+   return {
+diff --git a/frontend/src/ui/emptyStop.test.ts b/frontend/src/ui/emptyStop.test.ts
+new file mode 100644
+index 0000000..46cc706
+--- /dev/null
++++ b/frontend/src/ui/emptyStop.test.ts
+@@ -0,0 +1,92 @@
++import { expect, test } from "vitest";
++import { shallowRef } from "vue";
++
++import type { FileEntry, OperationView } from "../ipc";
++import { emptyStop, keepStopMessage, type StopFacts } from "./emptyStop";
++import type { Problem } from "./problem";
++
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: null,
++  replaying: null,
++  progress: { step: 2, total: 3 },
++  editor_steps_ahead: false,
++};
++const MESSAGE = "Could not apply 1a2b3c4... add c";
++const STOPPED: Problem = { action: "stopped", operation: "Rebase", message: `${MESSAGE}\n` };
++const CLOSE: Problem = { action: "close" };
++const A: FileEntry = { path: "a.ts", status: "Unresolved", unsupported: null };
++
++const EMPTY_STOP: StopFacts = {
++  operation: REBASE,
++  files: [],
++  screen: { kind: "files" },
++  problem: STOPPED,
++  stopMessage: `${MESSAGE}\n`,
++};
++
++test("an empty stop shows git's message, trimmed, in the stop view and keeps it out of the bar", () => {
++  expect(emptyStop(EMPTY_STOP)).toEqual({ stopView: { message: MESSAGE }, barProblem: null });
++});
++
++test.each([null, "", " \n"])(
++  "an empty stop without a message (%j) shows the stop view without one",
++  (stopMessage) => {
++    expect(emptyStop({ ...EMPTY_STOP, problem: null, stopMessage })).toEqual({
++      stopView: { message: null },
++      barProblem: null,
++    });
++  },
++);
++
++test("a stop with files shows no stop view, and its problems stay in the bar", () => {
++  expect(emptyStop({ ...EMPTY_STOP, files: [A] })).toEqual({ stopView: null, barProblem: STOPPED });
++  expect(emptyStop({ ...EMPTY_STOP, files: [A], problem: CLOSE }).barProblem).toBe(CLOSE);
++});
++
++test("without a recorded operation there is no stop view, and git's stop goes to the bar", () => {
++  expect(emptyStop({ ...EMPTY_STOP, operation: null })).toEqual({
++    stopView: null,
++    barProblem: STOPPED,
++  });
++});
++
++test.each([{ kind: "settings" }, { kind: "serverLog", name: "oxlint" }] as const)(
++  "on another screen ($kind) the stop view is hidden and the bar still leaves git's message out",
++  (screen) => {
++    expect(emptyStop({ ...EMPTY_STOP, screen })).toEqual({ stopView: null, barProblem: null });
++  },
++);
++
++test("a later close or continue problem goes to the bar and leaves git's message in the stop view", () => {
++  const refused: Problem = {
++    action: "continue",
++    operation: "Rebase",
++    cause: { kind: "Git", message: "hook says no" },
++  };
++  for (const problem of [CLOSE, refused]) {
++    expect(emptyStop({ ...EMPTY_STOP, problem })).toEqual({
++      stopView: { message: MESSAGE },
++      barProblem: problem,
++    });
++  }
++});
++
++test("the next stop keeps git's message only when it ends at a stopped problem, and forgets the old one meanwhile", async () => {
++  const target = { problem: shallowRef<Problem | null>(null), stopMessage: shallowRef("old") };
++  const during: (string | null)[] = [];
++
++  await keepStopMessage(target, () => {
++    during.push(target.stopMessage.value);
++    target.problem.value = STOPPED;
++    return Promise.resolve();
++  });
++  expect([during, target.stopMessage.value]).toEqual([[null], `${MESSAGE}\n`]);
++
++  await keepStopMessage(target, () => {
++    target.problem.value = CLOSE;
++    return Promise.resolve();
++  });
++  expect(target.stopMessage.value).toBeNull();
++});
+diff --git a/frontend/src/ui/emptyStop.ts b/frontend/src/ui/emptyStop.ts
+new file mode 100644
+index 0000000..60bc0ef
+--- /dev/null
++++ b/frontend/src/ui/emptyStop.ts
+@@ -0,0 +1,43 @@
++import type { ShallowRef } from "vue";
++
++import type { FileEntry, OperationView } from "../ipc";
++import type { Problem } from "./problem";
++import type { Screen } from "./screen";
++
++export type StopFacts = {
++  readonly operation: OperationView | null;
++  readonly files: readonly FileEntry[];
++  readonly screen: Screen;
++  readonly problem: Problem | null;
++  readonly stopMessage: string | null;
++};
++
++export type EmptyStop = {
++  readonly stopView: { readonly message: string | null } | null;
++  readonly barProblem: Problem | null;
++};
++
++type MessageTarget = {
++  readonly problem: Readonly<ShallowRef<Problem | null>>;
++  readonly stopMessage: ShallowRef<string | null>;
++};
++
++export async function keepStopMessage(
++  target: MessageTarget,
++  nextStop: () => Promise<void>,
++): Promise<void> {
++  target.stopMessage.value = null;
++  await nextStop();
++  const problem = target.problem.value;
++  target.stopMessage.value = problem?.action === "stopped" ? problem.message : null;
++}
++
++export function emptyStop(facts: StopFacts): EmptyStop {
++  const empty = facts.operation !== null && facts.files.length === 0;
++  const message = facts.stopMessage?.trim() ?? "";
++  return {
++    stopView:
++      empty && facts.screen.kind === "files" ? { message: message === "" ? null : message } : null,
++    barProblem: empty && facts.problem?.action === "stopped" ? null : facts.problem,
++  };
++}
+diff --git a/frontend/src/ui/gitRun.test.ts b/frontend/src/ui/gitRun.test.ts
+new file mode 100644
+index 0000000..769f132
+--- /dev/null
++++ b/frontend/src/ui/gitRun.test.ts
+@@ -0,0 +1,81 @@
++import { expect, test, vi } from "vitest";
++
++import type { SourceResult } from "../ipc";
++import { createGitRun } from "./gitRun";
++import type { Outcome } from "./problem";
++
++type Ending = "ends" | "goesOn";
++
++function held(): {
++  readonly call: () => Promise<SourceResult<Ending>>;
++  readonly answers: ((reply: SourceResult<Ending>) => void)[];
++} {
++  const answers: ((reply: SourceResult<Ending>) => void)[] = [];
++  return {
++    call: () =>
++      new Promise((resolve) => {
++        answers.push(resolve);
++      }),
++    answers,
++  };
++}
++
++async function ran(
++  reply: SourceResult<Ending>,
++  dropped = false,
++): Promise<{ running: boolean; landed: Outcome<Ending>[]; runningAtLanding: boolean[] }> {
++  const git = createGitRun();
++  const { call, answers } = held();
++  const stop = { dropped: false };
++  const landed: Outcome<Ending>[] = [];
++  const runningAtLanding: boolean[] = [];
++  const running = git.run(stop, {
++    call,
++    endsApp: (value) => value === "ends",
++    landing: (outcome) => {
++      landed.push(outcome);
++      runningAtLanding.push(git.running.value);
++      return Promise.resolve();
++    },
++  });
++  await vi.waitFor(() => {
++    expect(answers).toHaveLength(1);
++  });
++  expect(git.running.value).toBe(true);
++  stop.dropped = dropped;
++  answers[0]?.(reply);
++  await running;
++  return { running: git.running.value, landed, runningAtLanding };
++}
++
++test("a success that ends the app keeps git running after its landing", async () => {
++  expect(await ran({ ok: true, value: "ends" })).toEqual({
++    running: true,
++    landed: [{ ok: true, value: "ends" }],
++    runningAtLanding: [true],
++  });
++});
++
++test("a success that does not end the app is landed while running, then git is idle", async () => {
++  expect(await ran({ ok: true, value: "goesOn" })).toEqual({
++    running: false,
++    landed: [{ ok: true, value: "goesOn" }],
++    runningAtLanding: [true],
++  });
++});
++
++test("a refusal is landed while running, then git is idle", async () => {
++  expect(await ran({ ok: false, failure: { kind: "GitRunning" } })).toEqual({
++    running: false,
++    landed: [{ ok: false, cause: { kind: "GitRunning" } }],
++    runningAtLanding: [true],
++  });
++});
++
++test("a reply after its stop was dropped lands nothing, even one that would end the app", async () => {
++  expect(await ran({ ok: true, value: "ends" }, true)).toEqual({
++    running: false,
++    landed: [],
++    runningAtLanding: [],
++  });
++});
+diff --git a/frontend/src/ui/gitRun.ts b/frontend/src/ui/gitRun.ts
+new file mode 100644
+index 0000000..b945b8f
+--- /dev/null
++++ b/frontend/src/ui/gitRun.ts
+@@ -0,0 +1,34 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import type { SourceResult } from "../ipc";
++import { landed, type Stop } from "./currentStop";
++import { attempt, type Outcome } from "./problem";
++
++type GitCall<T> = {
++  readonly call: () => Promise<SourceResult<T>>;
++  readonly endsApp: (value: T) => boolean;
++  readonly landing: (outcome: Outcome<T>) => Promise<void>;
++};
++
++export type GitRun = {
++  readonly running: Readonly<ShallowRef<boolean>>;
++  run<T>(stop: Readonly<Stop>, git: GitCall<T>): Promise<void>;
++};
++
++export function createGitRun(): GitRun {
++  const running = shallowRef(false);
++
++  async function run<T>(stop: Readonly<Stop>, git: GitCall<T>): Promise<void> {
++    running.value = true;
++    const outcome = await landed(stop, () => attempt(git.call));
++    if (outcome !== null) {
++      await git.landing(outcome);
++      if (outcome.ok && git.endsApp(outcome.value)) {
++        return;
++      }
++    }
++    running.value = false;
++  }
++
++  return { running, run };
++}
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index 2d7f3a1..2f30049 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -2,7 +2,13 @@ import type { OperationKind, OperationView, ProgressView, SideName } from "../ip
+ 
+ type OperationLine = { readonly text: string; readonly tooltip: string };
+ 
+-type ContinueAction = { readonly verb: "Continue" | "Commit"; readonly object: string };
++type ContinueVerb = "Continue" | "Commit";
++
++type ContinueAction = {
++  readonly verb: ContinueVerb;
++  readonly object: string;
++  readonly label: string;
++};
+ 
+ const NAMES: Readonly<Record<OperationKind, string>> = {
+   Merge: "merge",
+@@ -36,6 +42,11 @@ const MERGE_VERBS: Readonly<Record<"Merge" | "SquashMerge", string>> = {
+   SquashMerge: "Squash-merging",
+ };
+ 
++export const SAVING_TEXT = "Saving…";
++
++export const CONTINUING_TEXT =
++  "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)";
++
+ export function operationName(kind: OperationKind): string {
+   return NAMES[kind];
+ }
+@@ -142,37 +153,44 @@ export function abortLabel(operation: OperationView): string {
+   return `Abort ${NAMES[operation.kind]}`;
+ }
+ 
+-export function continueLabel(operation: OperationView): string {
+-  switch (operation.kind) {
++function action(verb: ContinueVerb, kind: OperationKind, labelObject: string): ContinueAction {
++  return { verb, object: `the ${NAMES[kind]}`, label: `${verb} ${labelObject}` };
++}
++
++export function continueAction(kind: OperationKind): ContinueAction {
++  switch (kind) {
+     case "Merge":
+     case "SquashMerge":
+-      return "Commit merge";
++      return action("Commit", kind, "merge");
+     case "Am":
+-      return "Continue applying patches";
++      return action("Continue", kind, "applying patches");
+     case "Rebase":
+     case "CherryPick":
+     case "Revert":
+-      return `Continue ${NAMES[operation.kind]}`;
++      return action("Continue", kind, NAMES[kind]);
+     default: {
+-      const _exhaustive: never = operation;
++      const _exhaustive: never = kind;
+       return _exhaustive;
+     }
+   }
+ }
+ 
+-export function continueAction(kind: OperationKind): ContinueAction {
+-  const verb = kind === "Merge" || kind === "SquashMerge" ? "Commit" : "Continue";
+-  return { verb, object: `the ${NAMES[kind]}` };
++export function continueLabel(operation: OperationView): string {
++  return continueAction(operation.kind).label;
++}
++
++export function filesLeftText(count: number): string {
++  return count === 1 ? "1 file is not resolved yet" : `${count} files are not resolved yet`;
+ }
+ 
+ export function allResolvedText(operation: OperationView | null): string {
+   if (operation === null) {
+     return "All files are resolved. Close the window to finish the merge.";
+   }
+-  const next = continueLabel(operation);
+-  return continueAction(operation.kind).verb === "Commit"
+-    ? `All files are resolved. ${next} to commit it.`
+-    : `All files are resolved. ${next} to let git go on.`;
++  const { verb, label } = continueAction(operation.kind);
++  return verb === "Commit"
++    ? `All files are resolved. ${label} to commit it.`
++    : `All files are resolved. ${label} to let git go on.`;
+ }
+ 
+ export function abortTitle(operation: OperationView): string {
+diff --git a/frontend/src/ui/saving.ts b/frontend/src/ui/saving.ts
+index 5bb342b..6089140 100644
+--- a/frontend/src/ui/saving.ts
++++ b/frontend/src/ui/saving.ts
+@@ -1,4 +1,4 @@
+-import type { ShallowRef } from "vue";
++import type { ShallowReactive, ShallowRef } from "vue";
+ 
+ import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
+ import type { Asking } from "./asking";
+@@ -16,7 +16,7 @@ import { reload } from "./views";
+ 
+ type Claim = { writes: number; overtaken: boolean };
+ 
+-export type Writing = { readonly writing: Map<string, Claim>; stop: Stop };
++export type Writing = { readonly writing: ShallowReactive<Map<string, Claim>>; stop: Stop };
+ 
+ type WriteTarget = DiskChangeTarget &
+   Relist & {
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index c1e2029..ee3f856 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -12,6 +12,7 @@ import {
+ } from "../ipc";
+ import { createAborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
++import { createGitRun } from "./gitRun";
+ import { noticeRow, type Notice } from "./noticeText";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+@@ -311,7 +312,7 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
+ test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
+   quiet();
+   const stop = stopAt([]);
+-  const { abortOperation } = createAborting(Object.assign(stop, { running: shallowRef(false) }));
++  const { abortOperation } = createAborting(Object.assign(stop, { gitRun: createGitRun() }));
+   const pressed = abortOperation();
+   expect(stop.asking.question.value?.kind).toBe("abort");
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 0fc9b3a..64d6f78 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -6,6 +6,7 @@ import {
+   loadFixture,
+   parseKey,
+   type ChunkSource,
++  type ContinueReply,
+   type DiskChange,
+   type DiskResult,
+   type DiskVersion,
+@@ -2636,3 +2637,97 @@ test("a take git refuses stays on the file: no move to the next unresolved one",
+   expect(store.active.value).toBe(LOGO);
+   expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: refused });
+ });
++
++type HeldGit = {
++  readonly store: AppStore;
++  readonly aborts: ((reply: SourceResult<null>) => void)[];
++  readonly continues: ((reply: SourceResult<ContinueReply>) => void)[];
++};
++
++async function heldGit(
++  files: readonly FileEntry[],
++  stopped: readonly FileEntry[],
++): Promise<HeldGit> {
++  const aborts: HeldGit["aborts"] = [];
++  const continues: HeldGit["continues"] = [];
++  let listed = files;
++  const { source } = choiceSource({
++    listStop: () => Promise.resolve(listing(listed)),
++    abortOperation: () =>
++      new Promise((resolve) => {
++        aborts.push(resolve);
++      }),
++    continueOperation: () =>
++      new Promise((resolve) => {
++        listed = stopped;
++        continues.push(resolve);
++      }),
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  return { store, aborts, continues };
++}
++
++test("an Abort git has not answered yet makes Continue running and refuses the close", async () => {
++  spyConsole();
++  const { store, aborts } = await heldGit([resolvedEntry("a.ts")], []);
++
++  const aborting = store.abortOperation();
++  store.answer(true);
++  await vi.waitFor(() => {
++    expect(aborts).toHaveLength(1);
++  });
++
++  expect(store.continueState.value).toBe("running");
++  expect(await store.mayClose()).toBe(false);
++  expect(store.problem.value).toEqual({ action: "close" });
++  aborts[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
++  await aborting;
++  expect(store.continueState.value).toBe("ready");
++});
++
++test("a Continue git has not answered yet makes Abort running and refuses the close", async () => {
++  spyConsole();
++  const { store, continues } = await heldGit([resolvedEntry("a.ts")], [resolvedEntry("a.ts")]);
++
++  const continuing = store.continueOperation();
++  await vi.waitFor(() => {
++    expect(continues).toHaveLength(1);
++  });
++
++  expect(store.abortState.value).toEqual({ kind: "running", operation: MERGING });
++  expect(await store.mayClose()).toBe(false);
++  expect(store.problem.value).toEqual({ action: "close" });
++  continues[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
++  await continuing;
++  expect(store.abortState.value).toEqual({ kind: "ready", operation: MERGING });
++});
++
++test("a stop without files shows git's message in the stop view, not the bar; settings hide it and later problems keep it", async () => {
++  spyConsole();
++  const { store, aborts, continues } = await heldGit([resolvedEntry("a.ts")], []);
++  const continuing = store.continueOperation();
++  await vi.waitFor(() => {
++    expect(continues).toHaveLength(1);
++  });
++  continues[0]?.(ok({ kind: "Stopped", message: "Could not apply 1a2b3c4... add c\n" }));
++  await continuing;
++
++  const stopView = { message: "Could not apply 1a2b3c4... add c" };
++  expect(store.emptyStop.value).toEqual({ stopView, barProblem: null });
++  store.openSettings();
++  expect(store.emptyStop.value).toEqual({ stopView: null, barProblem: null });
++  store.closeSettings();
++
++  const aborting = store.abortOperation();
++  store.answer(true);
++  await vi.waitFor(() => {
++    expect(aborts).toHaveLength(1);
++  });
++  await store.mayClose();
++  expect(store.emptyStop.value).toEqual({ stopView, barProblem: { action: "close" } });
++  aborts[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
++  await aborting;
++  expect(store.emptyStop.value.stopView).toEqual(stopView);
++  expect(store.emptyStop.value.barProblem?.action).toBe("abort");
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 8c4ad9b..9b80322 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -18,7 +18,9 @@ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { createCollapsing, type Collapsing } from "./collapsing";
+ import { createContinuing, type Continuing } from "./continuing";
++import { emptyStop, keepStopMessage, type EmptyStop } from "./emptyStop";
+ import { fileListKey, type KeyPress } from "./fileListKey";
++import { createGitRun, type GitRun } from "./gitRun";
+ import { refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+ import { noticeKey, type Notice } from "./noticeText";
+@@ -59,7 +61,8 @@ type State = Refs &
+     readonly source: ChunkSource;
+     readonly asking: Asking;
+     readonly guard: CloseGuard;
+-    readonly running: ShallowRef<boolean>;
++    readonly gitRun: GitRun;
++    readonly stopMessage: ShallowRef<string | null>;
+     latestOpen: number;
+     latestSettings: number;
+     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
+@@ -90,6 +93,7 @@ type Actions = CloseGuard &
+ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly question: ComputedRef<Question | null>;
+   readonly allResolved: ComputedRef<boolean>;
++  readonly emptyStop: ComputedRef<EmptyStop>;
+   readonly preferences: ComputedRef<Preferences>;
+   readonly hiddenButtons: HiddenButtons["hidden"];
+ } & Actions &
+@@ -123,13 +127,14 @@ function createRefs(startTheme: Theme): Refs {
+ 
+ function createState(refs: Refs, source: ChunkSource): State {
+   const asking = createAsking();
+-  const running = shallowRef(false);
++  const gitRun = createGitRun();
+   const state: State = {
+     ...refs,
+     source,
+     asking,
+-    guard: createCloseGuard({ asking, opened: refs.opened, problem: refs.problem, running }),
+-    running,
++    guard: createCloseGuard({ ...refs, asking, running: gitRun.running }),
++    gitRun,
++    stopMessage: shallowRef(null),
+     writing: shallowReactive(new Map()),
+     stop: { dropped: false },
+     latestOpen: 0,
+@@ -138,7 +143,7 @@ function createState(refs: Refs, source: ChunkSource): State {
+     refreshFiles: async () => {
+       await refreshFiles(state, "running");
+     },
+-    nextStop: (end) => nextStop(state, end),
++    nextStop: (end) => keepStopMessage(state, () => nextStop(state, end)),
+   };
+   return state;
+ }
+@@ -160,6 +165,15 @@ export function createAppStore(
+     allResolved: computed(
+       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+     ),
++    emptyStop: computed(() =>
++      emptyStop({
++        operation: refs.operation.value,
++        files: files.value,
++        screen: refs.screen.value,
++        problem: refs.problem.value,
++        stopMessage: state.stopMessage.value,
++      }),
++    ),
+     preferences: computed(() => preferencesOf(settings.value)),
+     hiddenButtons: buttons.hidden,
+     ...acts,
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index e4f68b4..425f39e 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -2,7 +2,6 @@ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type { OperationView } from "../ipc";
+-import type { AbortState } from "./aborting";
+ import {
+   createHiddenButtons,
+   listedButtons,
+@@ -187,9 +186,6 @@ const REBASE: OperationView = {
+   editor_steps_ahead: false,
+ };
+ 
+-const NONE: AbortState = { kind: "none" };
+-const READY: AbortState = { kind: "ready", operation: REBASE };
+-const RUNNING: AbortState = { kind: "running", operation: REBASE };
+ const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
+ 
+ function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
+@@ -199,18 +195,17 @@ function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
+ test("the menu lists Continue and Abort only while git records an operation, labelled by it", () => {
+   const withoutOperation = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" && id !== "continue");
+ 
+-  expect(ids(listedButtons(NONE))).toEqual(withoutOperation);
+-  expect(ids(listedButtons(READY))).toEqual(TOOLBAR_BUTTONS);
+-  expect(ids(listedButtons(RUNNING))).toEqual(TOOLBAR_BUTTONS);
+-  expect(listedButtons(READY).slice(0, 2)).toEqual([
++  expect(ids(listedButtons(null))).toEqual(withoutOperation);
++  expect(ids(listedButtons(REBASE))).toEqual(TOOLBAR_BUTTONS);
++  expect(listedButtons(REBASE).slice(0, 2)).toEqual([
+     { id: "continue", label: "Continue rebase" },
+     { id: "abortMerge", label: "Abort rebase" },
+   ]);
+-  expect(listedButtons({ kind: "ready", operation: MERGE })[0]).toEqual({
++  expect(listedButtons(MERGE)[0]).toEqual({
+     id: "continue",
+     label: "Commit merge",
+   });
+-  expect(listedButtons(NONE)[0]).toEqual({ id: "previous", label: "Previous change" });
++  expect(listedButtons(null)[0]).toEqual({ id: "previous", label: "Previous change" });
+ });
+ 
+ test("the toolbar shows Continue and Abort only while git records an operation and the user shows them", () => {
+@@ -218,7 +213,7 @@ test("the toolbar shows Continue and Abort only while git records an operation a
+   const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
+   const userHidesContinue = new Set<ToolbarButtonId>(["continue"]);
+ 
+-  expect(ids(shownButtons(READY, userHidesUndo))).toEqual([
++  expect(ids(shownButtons(REBASE, userHidesUndo))).toEqual([
+     "continue",
+     "abortMerge",
+     "previous",
+@@ -228,13 +223,12 @@ test("the toolbar shows Continue and Abort only while git records an operation a
+     "applyRight",
+     "redo",
+   ]);
+-  expect(ids(shownButtons(RUNNING, userHidesUndo)).slice(0, 2)).toEqual(["continue", "abortMerge"]);
+-  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("abortMerge");
+-  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("continue");
+-  expect(shownButtons(NONE, userHidesUndo)).toHaveLength(6);
+-  expect(ids(shownButtons(READY, userHidesAbort))).not.toContain("abortMerge");
+-  expect(shownButtons(READY, userHidesAbort)).toHaveLength(7);
+-  expect(ids(shownButtons(READY, userHidesContinue))).not.toContain("continue");
++  expect(ids(shownButtons(null, userHidesUndo))).not.toContain("abortMerge");
++  expect(ids(shownButtons(null, userHidesUndo))).not.toContain("continue");
++  expect(shownButtons(null, userHidesUndo)).toHaveLength(6);
++  expect(ids(shownButtons(REBASE, userHidesAbort))).not.toContain("abortMerge");
++  expect(shownButtons(REBASE, userHidesAbort)).toHaveLength(7);
++  expect(ids(shownButtons(REBASE, userHidesContinue))).not.toContain("continue");
+ });
+ 
+ test("Continue starts shown, its toggle is stored like the others, and the Abort merge decision stays", () => {
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index f89463d..da856d0 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -1,7 +1,7 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+-import type { AbortState } from "./aborting";
++import type { OperationView } from "../ipc";
+ import { abortLabel, continueLabel } from "./operationText";
+ import { parseStored, storedValue } from "./windowStorage";
+ 
+@@ -68,24 +68,23 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+   redo: true,
+ };
+ 
+-export function listedButtons(abort: AbortState): readonly ListedButton[] {
++export function listedButtons(operation: OperationView | null): readonly ListedButton[] {
+   return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
+     if (id !== "continue" && id !== "abortMerge") {
+       return [{ id, label: LABELS[id] }];
+     }
+-    if (abort.kind === "none") {
++    if (operation === null) {
+       return [];
+     }
+-    const { operation } = abort;
+     return [{ id, label: id === "continue" ? continueLabel(operation) : abortLabel(operation) }];
+   });
+ }
+ 
+ export function shownButtons(
+-  abort: AbortState,
++  operation: OperationView | null,
+   hidden: ReadonlySet<ToolbarButtonId>,
+ ): readonly ListedButton[] {
+-  return listedButtons(abort).filter((button) => !hidden.has(button.id));
++  return listedButtons(operation).filter((button) => !hidden.has(button.id));
+ }
+ 
+ function readHiddenList(names: readonly unknown[]): Decisions {
+-- 
+2.56.0
+
