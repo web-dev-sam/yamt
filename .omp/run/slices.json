@@ -1,46 +1,29 @@
 {
-  "GitOpsStops": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.J-stops.md",
+  "GitOpsRunCoreR1Correctness": {
+    "agent": "correctness-reviewer",
+    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
+    "owned": []
+  },
+  "GitOpsRunAppR1": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-run-app-rework-1.md",
     "owned": [
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/listing.ts",
-      "frontend/src/ui/listing.test.ts",
-      "frontend/src/ui/aborting.ts",
-      "frontend/src/ui/aborting.test.ts",
-      "frontend/src/ui/stops.ts",
-      "frontend/src/ui/stops.test.ts",
-      "frontend/src/ui/operationText.ts",
-      "frontend/src/ui/operationText.test.ts",
-      "frontend/src/ui/question.ts",
-      "frontend/src/ui/question.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/noticeText.ts",
-      "frontend/src/ui/noticeText.test.ts",
-      "frontend/src/ui/diskChanges.ts",
-      "frontend/src/ui/diskChanges.test.ts",
-      "frontend/src/ui/saving.ts",
-      "frontend/src/ui/saving.test.ts",
-      "frontend/src/ui/toolbarButtons.ts",
-      "frontend/src/ui/toolbarButtons.test.ts",
-      "frontend/src/ui/OperationBar.vue",
-      "frontend/src/ui/App.vue",
-      "frontend/src/ui/MergeToolbar.vue",
-      "frontend/src/ui/ToolbarMenu.vue",
-      "frontend/src/main.ts",
-      "frontend/src/ui/NoticeBar.vue",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/fixtureOperations.test.ts"
+      "src-tauri/src/merge.rs",
+      "src-tauri/src/merge/tests.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/outcome.rs",
+      "src-tauri/src/mock_window.rs",
+      "src-tauri/AGENTS.md",
+      "frontend/src/ipc/fixtureOperations.ts",
+      "frontend/src/ipc/fixtureOperations.test.ts",
+      "scripts/operations-repo.sh",
+      "scripts/conflict-repo.sh",
+      "scripts/git-sandbox.sh"
     ]
   },
-  "GitOpsRunCoreR1Boundary": {
+  "GitOpsStopsBoundary": {
     "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
+    "brief": "docs/slices/briefs/3.J-stops.md",
     "owned": []
   }
 }

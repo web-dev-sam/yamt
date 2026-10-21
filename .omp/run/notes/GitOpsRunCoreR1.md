@@ -89,3 +89,7 @@ All 14 items from the brief are done, in `gitio`, `session` and `conflict-repo` 
 - `crates/gitio/tests/operations.rs` is 452 lines, over the 400 cap.
 
 Checks for you to run on the merged tree: `just check`, `just map-check` (for `names.rs`), `just mutants` on the changed lines.
+
+## Mutants (`just mutants 7436a2b`)
+
+82 — 42 caught, 33 unviable, 7 missed: conflict-repo lib.rs:218 `run_ignored_in_child` → Ok(()), lib.rs:226 `&&`→`||`; gitio run.rs:91 `+`→`-` in run_to_end; run.rs:194 Interrupted guard → true/false, `==`→`!=`; run.rs:198 `||`→`&&` in read_on_thread.
