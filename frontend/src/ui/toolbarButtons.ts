@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
-import type { AbortState } from "./aborting";
+import type { OperationView } from "../ipc";
 import { abortLabel, continueLabel } from "./operationText";
 import { parseStored, storedValue } from "./windowStorage";
 
@@ -68,24 +68,23 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
   redo: true,
 };
 
-export function listedButtons(abort: AbortState): readonly ListedButton[] {
+export function listedButtons(operation: OperationView | null): readonly ListedButton[] {
   return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
     if (id !== "continue" && id !== "abortMerge") {
       return [{ id, label: LABELS[id] }];
     }
-    if (abort.kind === "none") {
+    if (operation === null) {
       return [];
     }
-    const { operation } = abort;
     return [{ id, label: id === "continue" ? continueLabel(operation) : abortLabel(operation) }];
   });
 }
 
 export function shownButtons(
-  abort: AbortState,
+  operation: OperationView | null,
   hidden: ReadonlySet<ToolbarButtonId>,
 ): readonly ListedButton[] {
-  return listedButtons(abort).filter((button) => !hidden.has(button.id));
+  return listedButtons(operation).filter((button) => !hidden.has(button.id));
 }
 
 function readHiddenList(names: readonly unknown[]): Decisions {

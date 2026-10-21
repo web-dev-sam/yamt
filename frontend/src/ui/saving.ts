@@ -1,4 +1,4 @@
-import type { ShallowRef } from "vue";
+import type { ShallowReactive, ShallowRef } from "vue";
 
 import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
 import type { Asking } from "./asking";
@@ -16,7 +16,7 @@ import { reload } from "./views";
 
 type Claim = { writes: number; overtaken: boolean };
 
-export type Writing = { readonly writing: Map<string, Claim>; stop: Stop };
+export type Writing = { readonly writing: ShallowReactive<Map<string, Claim>>; stop: Stop };
 
 type WriteTarget = DiskChangeTarget &
   Relist & {

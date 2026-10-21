@@ -2,7 +2,13 @@ import type { OperationKind, OperationView, ProgressView, SideName } from "../ip
 
 type OperationLine = { readonly text: string; readonly tooltip: string };
 
-type ContinueAction = { readonly verb: "Continue" | "Commit"; readonly object: string };
+type ContinueVerb = "Continue" | "Commit";
+
+type ContinueAction = {
+  readonly verb: ContinueVerb;
+  readonly object: string;
+  readonly label: string;
+};
 
 const NAMES: Readonly<Record<OperationKind, string>> = {
   Merge: "merge",
@@ -35,6 +41,11 @@ const MERGE_VERBS: Readonly<Record<"Merge" | "SquashMerge", string>> = {
   Merge: "Merging",
   SquashMerge: "Squash-merging",
 };
+
+export const SAVING_TEXT = "Saving…";
+
+export const CONTINUING_TEXT =
+  "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)";
 
 export function operationName(kind: OperationKind): string {
   return NAMES[kind];
@@ -142,37 +153,44 @@ export function abortLabel(operation: OperationView): string {
   return `Abort ${NAMES[operation.kind]}`;
 }
 
-export function continueLabel(operation: OperationView): string {
-  switch (operation.kind) {
+function action(verb: ContinueVerb, kind: OperationKind, labelObject: string): ContinueAction {
+  return { verb, object: `the ${NAMES[kind]}`, label: `${verb} ${labelObject}` };
+}
+
+export function continueAction(kind: OperationKind): ContinueAction {
+  switch (kind) {
     case "Merge":
     case "SquashMerge":
-      return "Commit merge";
+      return action("Commit", kind, "merge");
     case "Am":
-      return "Continue applying patches";
+      return action("Continue", kind, "applying patches");
     case "Rebase":
     case "CherryPick":
     case "Revert":
-      return `Continue ${NAMES[operation.kind]}`;
+      return action("Continue", kind, NAMES[kind]);
     default: {
-      const _exhaustive: never = operation;
+      const _exhaustive: never = kind;
       return _exhaustive;
     }
   }
 }
 
-export function continueAction(kind: OperationKind): ContinueAction {
-  const verb = kind === "Merge" || kind === "SquashMerge" ? "Commit" : "Continue";
-  return { verb, object: `the ${NAMES[kind]}` };
+export function continueLabel(operation: OperationView): string {
+  return continueAction(operation.kind).label;
+}
+
+export function filesLeftText(count: number): string {
+  return count === 1 ? "1 file is not resolved yet" : `${count} files are not resolved yet`;
 }
 
 export function allResolvedText(operation: OperationView | null): string {
   if (operation === null) {
     return "All files are resolved. Close the window to finish the merge.";
   }
-  const next = continueLabel(operation);
-  return continueAction(operation.kind).verb === "Commit"
-    ? `All files are resolved. ${next} to commit it.`
-    : `All files are resolved. ${next} to let git go on.`;
+  const { verb, label } = continueAction(operation.kind);
+  return verb === "Commit"
+    ? `All files are resolved. ${label} to commit it.`
+    : `All files are resolved. ${label} to let git go on.`;
 }
 
 export function abortTitle(operation: OperationView): string {

@@ -44,7 +44,8 @@ const emit = defineEmits<{
 
 const SECONDARY_BUTTON = 2;
 
-const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortOperation } = useAppStore();
+const { hiddenButtons, collapsing, toggleCollapsing, operation, abortState, abortOperation } =
+  useAppStore();
 
 const menuAt = shallowRef<Point | null>(null);
 
@@ -124,7 +125,7 @@ const ICON_BUTTONS: Readonly<Record<IconButtonId, IconButton>> = {
   },
 };
 
-const listed = computed(() => shownButtons(abortState.value, hiddenButtons.value));
+const listed = computed(() => shownButtons(operation.value, hiddenButtons.value));
 const continueShown = computed(() => listed.value.some((button) => button.id === "continue"));
 const shown = computed(() =>
   listed.value.flatMap((button) =>

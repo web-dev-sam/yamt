@@ -12,6 +12,7 @@ import {
 } from "../ipc";
 import { createAborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
+import { createGitRun } from "./gitRun";
 import { noticeRow, type Notice } from "./noticeText";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
@@ -311,7 +312,7 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
 test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
   quiet();
   const stop = stopAt([]);
-  const { abortOperation } = createAborting(Object.assign(stop, { running: shallowRef(false) }));
+  const { abortOperation } = createAborting(Object.assign(stop, { gitRun: createGitRun() }));
   const pressed = abortOperation();
   expect(stop.asking.question.value?.kind).toBe("abort");
 

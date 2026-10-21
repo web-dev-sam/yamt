@@ -1,10 +1,11 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { shallowReactive, shallowRef, type ShallowRef } from "vue";
+import { shallowReactive, shallowRef, type ShallowReactive, type ShallowRef } from "vue";
 
 import type { ContinueReply, FileEntry, OperationView, SourceFailure, SourceResult } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createContinuing, type ContinueState, type Continuing } from "./continuing";
 import type { Stop } from "./currentStop";
+import { createGitRun } from "./gitRun";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
 import { claimWrite } from "./saving";
@@ -25,6 +26,7 @@ const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
 
 const RESOLVED: FileEntry = { path: "a.ts", status: "Resolved", unsupported: null };
 const LEFT: FileEntry = { path: "b.ts", status: "Unresolved", unsupported: null };
+const REMEMBERED: FileEntry = { path: "r.ts", status: "Remembered", unsupported: null };
 
 type Reply = SourceResult<ContinueReply>;
 
@@ -33,8 +35,7 @@ type Pressed = Continuing & {
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly operation: ShallowRef<OperationView | null>;
   readonly problem: ShallowRef<Problem | null>;
-  readonly running: ShallowRef<boolean>;
-  readonly writing: Map<string, { writes: number; overtaken: boolean }>;
+  readonly writing: ShallowReactive<Map<string, { writes: number; overtaken: boolean }>>;
   readonly calls: number[];
   readonly ends: StopEnd[];
   readonly lists: string[];
@@ -71,7 +72,7 @@ function continuing(
     files: shallowRef(files),
     operation: shallowRef(operation),
     problem: shallowRef<Problem | null>(null),
-    running: shallowRef(false),
+    gitRun: createGitRun(),
     writing: shallowReactive(new Map<string, { writes: number; overtaken: boolean }>()),
     calls,
     ends,
@@ -120,12 +121,15 @@ test("no recorded operation is noOperation, and a press calls nothing", async ()
   expect([press.calls, press.asking.question.value]).toEqual([[], null]);
 });
 
-test("files git lists as not resolved make it filesLeft, counted in the hover, and a press calls nothing", async () => {
+test("files git lists as not resolved, a remembered one too, make it filesLeft, counted in the hover, and a press calls nothing", async () => {
   const press = continuing(REBASE, [RESOLVED, LEFT, { ...LEFT, path: "c.ts" }]);
 
   expect(press.continueState.value).toBe("filesLeft");
   expect(press.continueHover.value).toBe("2 files are not resolved yet");
   press.files.value = [RESOLVED, LEFT];
+  expect(press.continueHover.value).toBe("1 file is not resolved yet");
+  press.files.value = [RESOLVED, REMEMBERED];
+  expect(press.continueState.value).toBe("filesLeft");
   expect(press.continueHover.value).toBe("1 file is not resolved yet");
   await press.continueOperation();
   expect(press.calls).toEqual([]);

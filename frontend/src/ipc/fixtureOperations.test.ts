@@ -149,6 +149,27 @@ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each tim
   expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
 });
 
+test("?empty makes the second step a stop without files, with git's edit message, and the third lists them again", async () => {
+  const source = sourceAt("?operation=rebase&empty");
+
+  const stopped = valueOf(await source.continueOperation());
+  const empty = await filesListed(source);
+  const files = valueOf(await source.listFiles()).files;
+  const third = valueOf(await source.continueOperation());
+
+  expect(stopped).toEqual({
+    kind: "Stopped",
+    message:
+      "Stopped at 8b4e7d0...  Show reminders on the board\nYou can amend the commit now, with\n\n  git commit --amend\n\nOnce you are satisfied with your changes, run\n\n  git rebase --continue\n",
+  });
+  expect([empty.files, empty.operation?.kind, files]).toEqual([[], "Rebase", []]);
+  expect(third).toEqual({
+    kind: "Stopped",
+    message: "CONFLICT (content): Merge conflict at step 3 of 3",
+  });
+  expect((await filesListed(source)).files.map((file) => file.path)).toEqual(["a.ts"]);
+});
+
 test.each(["", "?operation=squash"])("%j finishes at the first Continue", async (search) => {
   const source = sourceAt(search);
 

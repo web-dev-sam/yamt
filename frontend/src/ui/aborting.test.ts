@@ -5,6 +5,7 @@ import type { OperationView, SourceFailure, SourceResult } from "../ipc";
 import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import type { Stop } from "./currentStop";
+import { createGitRun } from "./gitRun";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
 
@@ -44,7 +45,7 @@ function aborting(
     problem: shallowRef<Problem | null>(null),
     lists,
     stop: { dropped: false },
-    running: shallowRef(false),
+    gitRun: createGitRun(),
     refreshFiles: () => {
       lists.push("list");
       return Promise.resolve();

@@ -6,6 +6,7 @@ import {
   loadFixture,
   parseKey,
   type ChunkSource,
+  type ContinueReply,
   type DiskChange,
   type DiskResult,
   type DiskVersion,
@@ -2635,4 +2636,98 @@ test("a take git refuses stays on the file: no move to the next unresolved one",
   expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
   expect(store.active.value).toBe(LOGO);
   expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: refused });
+});
+
+type HeldGit = {
+  readonly store: AppStore;
+  readonly aborts: ((reply: SourceResult<null>) => void)[];
+  readonly continues: ((reply: SourceResult<ContinueReply>) => void)[];
+};
+
+async function heldGit(
+  files: readonly FileEntry[],
+  stopped: readonly FileEntry[],
+): Promise<HeldGit> {
+  const aborts: HeldGit["aborts"] = [];
+  const continues: HeldGit["continues"] = [];
+  let listed = files;
+  const { source } = choiceSource({
+    listStop: () => Promise.resolve(listing(listed)),
+    abortOperation: () =>
+      new Promise((resolve) => {
+        aborts.push(resolve);
+      }),
+    continueOperation: () =>
+      new Promise((resolve) => {
+        listed = stopped;
+        continues.push(resolve);
+      }),
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  return { store, aborts, continues };
+}
+
+test("an Abort git has not answered yet makes Continue running and refuses the close", async () => {
+  spyConsole();
+  const { store, aborts } = await heldGit([resolvedEntry("a.ts")], []);
+
+  const aborting = store.abortOperation();
+  store.answer(true);
+  await vi.waitFor(() => {
+    expect(aborts).toHaveLength(1);
+  });
+
+  expect(store.continueState.value).toBe("running");
+  expect(await store.mayClose()).toBe(false);
+  expect(store.problem.value).toEqual({ action: "close" });
+  aborts[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
+  await aborting;
+  expect(store.continueState.value).toBe("ready");
+});
+
+test("a Continue git has not answered yet makes Abort running and refuses the close", async () => {
+  spyConsole();
+  const { store, continues } = await heldGit([resolvedEntry("a.ts")], [resolvedEntry("a.ts")]);
+
+  const continuing = store.continueOperation();
+  await vi.waitFor(() => {
+    expect(continues).toHaveLength(1);
+  });
+
+  expect(store.abortState.value).toEqual({ kind: "running", operation: MERGING });
+  expect(await store.mayClose()).toBe(false);
+  expect(store.problem.value).toEqual({ action: "close" });
+  continues[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
+  await continuing;
+  expect(store.abortState.value).toEqual({ kind: "ready", operation: MERGING });
+});
+
+test("a stop without files shows git's message in the stop view, not the bar; settings hide it and later problems keep it", async () => {
+  spyConsole();
+  const { store, aborts, continues } = await heldGit([resolvedEntry("a.ts")], []);
+  const continuing = store.continueOperation();
+  await vi.waitFor(() => {
+    expect(continues).toHaveLength(1);
+  });
+  continues[0]?.(ok({ kind: "Stopped", message: "Could not apply 1a2b3c4... add c\n" }));
+  await continuing;
+
+  const stopView = { message: "Could not apply 1a2b3c4... add c" };
+  expect(store.emptyStop.value).toEqual({ stopView, barProblem: null });
+  store.openSettings();
+  expect(store.emptyStop.value).toEqual({ stopView: null, barProblem: null });
+  store.closeSettings();
+
+  const aborting = store.abortOperation();
+  store.answer(true);
+  await vi.waitFor(() => {
+    expect(aborts).toHaveLength(1);
+  });
+  await store.mayClose();
+  expect(store.emptyStop.value).toEqual({ stopView, barProblem: { action: "close" } });
+  aborts[0]?.({ ok: false, failure: { kind: "Git", message: "no" } });
+  await aborting;
+  expect(store.emptyStop.value.stopView).toEqual(stopView);
+  expect(store.emptyStop.value.barProblem?.action).toBe("abort");
 });

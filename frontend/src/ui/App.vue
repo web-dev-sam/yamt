@@ -23,7 +23,7 @@ const {
   active,
   screen,
   fileListShown,
-  problem,
+  emptyStop,
   notices,
   operation,
   question,
@@ -45,13 +45,6 @@ useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
 
-const stopShown = computed(
-  () => operation.value !== null && files.value.length === 0 && screen.value.kind === "files",
-);
-const stopped = computed(() =>
-  stopShown.value && problem.value?.action === "stopped" ? problem.value.message.trim() : null,
-);
-const barProblem = computed(() => (stopped.value === null ? problem.value : null));
 const resolvedLine = computed(() => allResolvedText(operation.value));
 
 watch(focused, (now) => {
@@ -78,7 +71,11 @@ onMounted(() => {
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <OperationBar v-if="operation !== null" :operation="operation" />
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
-      <ProblemBar v-if="barProblem !== null" :problem="barProblem" @close="dismissProblem" />
+      <ProblemBar
+        v-if="emptyStop.barProblem !== null"
+        :problem="emptyStop.barProblem"
+        @close="dismissProblem"
+      />
       <p
         v-else-if="allResolved"
         role="status"
@@ -100,7 +97,7 @@ onMounted(() => {
           :sides="sides"
           :shown="sides.path === active && screen.kind === 'files'"
         />
-        <StopView v-if="stopShown" :message="stopped" />
+        <StopView v-if="emptyStop.stopView !== null" :message="emptyStop.stopView.message" />
         <SettingsView v-if="screen.kind === 'settings'" />
         <ServerLogView
           v-else-if="screen.kind === 'serverLog'"

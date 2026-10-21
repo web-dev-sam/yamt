@@ -1,10 +1,18 @@
-import { computed, type ComputedRef, type ShallowRef } from "vue";
+import { computed, type ComputedRef, type ShallowReactive, type ShallowRef } from "vue";
 
-import { log, type ChunkSource, type FileEntry, type OperationView } from "../ipc";
+import {
+  log,
+  type ChunkSource,
+  type ContinueReply,
+  type FileEntry,
+  type OperationView,
+} from "../ipc";
 import type { Asking } from "./asking";
 import type { CloseGuard } from "./closeGuard";
-import { landed, type Stop } from "./currentStop";
-import { attempt, report, type Problem, type ProblemCause, type Relist } from "./problem";
+import type { Stop } from "./currentStop";
+import type { GitRun } from "./gitRun";
+import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
+import { report, type Outcome, type Problem, type ProblemCause, type Relist } from "./problem";
 import type { Question } from "./question";
 import type { StopEnd } from "./stops";
 
@@ -12,8 +20,8 @@ export type ContinueState = "noOperation" | "filesLeft" | "writing" | "ready" | 
 
 type ContinueTarget = Relist & {
   readonly stop: Stop;
-  readonly writing: ReadonlyMap<string, unknown>;
-  readonly running: ShallowRef<boolean>;
+  readonly writing: ShallowReactive<ReadonlyMap<string, unknown>>;
+  readonly gitRun: GitRun;
   readonly source: Pick<ChunkSource, "continueOperation">;
   readonly asking: Pick<Asking, "ask">;
   readonly guard: Pick<CloseGuard, "unsavedFiles">;
@@ -35,13 +43,11 @@ function hoverText(state: ContinueState, filesLeft: number): string | null {
     case "ready":
       return null;
     case "filesLeft":
-      return filesLeft === 1
-        ? "1 file is not resolved yet"
-        : `${filesLeft} files are not resolved yet`;
+      return filesLeftText(filesLeft);
     case "writing":
-      return "Saving…";
+      return SAVING_TEXT;
     case "running":
-      return "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)";
+      return CONTINUING_TEXT;
     default: {
       const _exhaustive: never = state;
       return _exhaustive;
@@ -74,26 +80,18 @@ async function refused(
   }
 }
 
-async function continued(
+async function landing(
   target: ContinueTarget,
   operation: OperationView,
-  stop: Readonly<Stop>,
+  outcome: Outcome<ContinueReply>,
 ): Promise<void> {
-  target.running.value = true;
-  const outcome = await landed(stop, () => attempt(() => target.source.continueOperation()));
-  if (outcome === null) {
-    target.running.value = false;
-    return;
-  }
   if (!outcome.ok) {
     await refused(target, operation, outcome.cause);
   } else if (outcome.value.kind === "Stopped") {
     await target.nextStop({ kind: "continued", message: outcome.value.message });
   } else {
     log.info("continue.finished", { operation: operation.kind });
-    return;
   }
-  target.running.value = false;
 }
 
 export function createContinuing(target: ContinueTarget): Continuing {
@@ -104,7 +102,7 @@ export function createContinuing(target: ContinueTarget): Continuing {
     if (target.operation.value === null) {
       return "noOperation";
     }
-    if (target.running.value) {
+    if (target.gitRun.running.value) {
       return "running";
     }
     if (filesLeft.value > 0) {
@@ -122,7 +120,11 @@ export function createContinuing(target: ContinueTarget): Continuing {
     if (!(await confirmed(target, operation))) {
       return;
     }
-    await continued(target, operation, stop);
+    await target.gitRun.run(stop, {
+      call: () => target.source.continueOperation(),
+      endsApp: (reply) => reply.kind === "Finished",
+      landing: (outcome) => landing(target, operation, outcome),
+    });
   }
 
   return {

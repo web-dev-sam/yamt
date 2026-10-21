@@ -18,7 +18,9 @@ import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
 import { createContinuing, type Continuing } from "./continuing";
+import { emptyStop, keepStopMessage, type EmptyStop } from "./emptyStop";
 import { fileListKey, type KeyPress } from "./fileListKey";
+import { createGitRun, type GitRun } from "./gitRun";
 import { refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import { noticeKey, type Notice } from "./noticeText";
@@ -59,7 +61,8 @@ type State = Refs &
     readonly source: ChunkSource;
     readonly asking: Asking;
     readonly guard: CloseGuard;
-    readonly running: ShallowRef<boolean>;
+    readonly gitRun: GitRun;
+    readonly stopMessage: ShallowRef<string | null>;
     latestOpen: number;
     latestSettings: number;
     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
@@ -90,6 +93,7 @@ type Actions = CloseGuard &
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly question: ComputedRef<Question | null>;
   readonly allResolved: ComputedRef<boolean>;
+  readonly emptyStop: ComputedRef<EmptyStop>;
   readonly preferences: ComputedRef<Preferences>;
   readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions &
@@ -123,13 +127,14 @@ function createRefs(startTheme: Theme): Refs {
 
 function createState(refs: Refs, source: ChunkSource): State {
   const asking = createAsking();
-  const running = shallowRef(false);
+  const gitRun = createGitRun();
   const state: State = {
     ...refs,
     source,
     asking,
-    guard: createCloseGuard({ asking, opened: refs.opened, problem: refs.problem, running }),
-    running,
+    guard: createCloseGuard({ ...refs, asking, running: gitRun.running }),
+    gitRun,
+    stopMessage: shallowRef(null),
     writing: shallowReactive(new Map()),
     stop: { dropped: false },
     latestOpen: 0,
@@ -138,7 +143,7 @@ function createState(refs: Refs, source: ChunkSource): State {
     refreshFiles: async () => {
       await refreshFiles(state, "running");
     },
-    nextStop: (end) => nextStop(state, end),
+    nextStop: (end) => keepStopMessage(state, () => nextStop(state, end)),
   };
   return state;
 }
@@ -159,6 +164,15 @@ export function createAppStore(
     question: state.asking.question,
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+    ),
+    emptyStop: computed(() =>
+      emptyStop({
+        operation: refs.operation.value,
+        files: files.value,
+        screen: refs.screen.value,
+        problem: refs.problem.value,
+        stopMessage: state.stopMessage.value,
+      }),
     ),
     preferences: computed(() => preferencesOf(settings.value)),
     hiddenButtons: buttons.hidden,

@@ -2,10 +2,11 @@ import { computed, type ComputedRef, type ShallowRef } from "vue";
 
 import type { ChunkSource, OperationView } from "../ipc";
 import type { Asking } from "./asking";
-import { landed, type Stop } from "./currentStop";
-import { attempt, reportFailure, type Problem, type Relist } from "./problem";
+import type { Stop } from "./currentStop";
+import type { GitRun } from "./gitRun";
+import { reportFailure, type Problem, type Relist } from "./problem";
 
-export type AbortState =
+type AbortState =
   | { readonly kind: "none" }
   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
 
@@ -15,7 +16,7 @@ type AbortTarget = Relist & {
   readonly asking: Pick<Asking, "ask">;
   readonly operation: Readonly<ShallowRef<OperationView | null>>;
   readonly problem: ShallowRef<Problem | null>;
-  readonly running: ShallowRef<boolean>;
+  readonly gitRun: GitRun;
 };
 
 export type Aborting = {
@@ -24,7 +25,7 @@ export type Aborting = {
 };
 
 export function createAborting(target: AbortTarget): Aborting {
-  const { running } = target;
+  const { running } = target.gitRun;
   const abortState = computed((): AbortState => {
     const operation = target.operation.value;
     if (operation === null) {
@@ -43,19 +44,19 @@ export function createAborting(target: AbortTarget): Aborting {
     if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
       return;
     }
-    running.value = true;
-    const outcome = await landed(stop, () => attempt(() => target.source.abortOperation()));
-    if (outcome?.ok === true) {
-      return;
-    }
-    running.value = false;
-    if (outcome !== null) {
-      await reportFailure(target, {
-        action: "abort",
-        operation: operation.kind,
-        cause: outcome.cause,
-      });
-    }
+    await target.gitRun.run(stop, {
+      call: () => target.source.abortOperation(),
+      endsApp: () => true,
+      landing: async (outcome) => {
+        if (!outcome.ok) {
+          await reportFailure(target, {
+            action: "abort",
+            operation: operation.kind,
+            cause: outcome.cause,
+          });
+        }
+      },
+    });
   }
 
   return { abortState, abortOperation };

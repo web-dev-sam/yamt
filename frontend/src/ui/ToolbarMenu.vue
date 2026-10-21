@@ -12,7 +12,7 @@ type Item = ListedButton & { readonly shown: boolean };
 const props = defineProps<{ at: Point }>();
 const emit = defineEmits<{ close: [] }>();
 
-const { hiddenButtons, toggleButton, abortState } = useAppStore();
+const { hiddenButtons, toggleButton, operation } = useAppStore();
 const panel = useTemplateRef<HTMLDivElement>("panel");
 const size = shallowRef<Size>({ width: 0, height: 0 });
 const viewport = useWindowSize();
@@ -22,7 +22,7 @@ useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
 useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
 
 const items = computed(() =>
-  listedButtons(abortState.value).map(({ id, label }): Item => ({
+  listedButtons(operation.value).map(({ id, label }): Item => ({
     id,
     label,
     shown: !hiddenButtons.value.has(id),

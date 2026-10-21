@@ -51,9 +51,12 @@ type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
 type Sequence = {
   readonly operation: FixtureOperation;
   readonly rewords: boolean;
+  readonly empty: boolean;
   step: number;
   ended: Ended | null;
 };
+
+const EMPTY_STEP = 2;
 
 function refused<T>(failure: SourceFailure): SourceResult<T> {
   return { ok: false, failure };
@@ -98,12 +101,42 @@ function stepView(
   }
 }
 
-/** `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`. */
+/**
+ * `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`;
+ * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`.
+ */
 function sequenceOf(search: string): Sequence {
   const params = new URLSearchParams(search);
   const chosen = params.get("operation");
   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
-  return { operation, rewords: params.has("rewords"), step: 1, ended: null };
+  const empty = params.has("empty");
+  return { operation, rewords: params.has("rewords"), empty, step: 1, ended: null };
+}
+
+function atEmptyStop(at: Sequence): boolean {
+  return at.empty && at.step === EMPTY_STEP;
+}
+
+function listedAt(at: Sequence, files: StopFiles): FileEntry[] {
+  return atEmptyStop(at) ? [] : files.listed();
+}
+
+function stoppedMessage(at: Sequence): string {
+  if (!atEmptyStop(at)) {
+    return `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
+  }
+  const commit = COMMITS[at.step - 1] ?? COMMITS[0];
+  return [
+    `Stopped at ${commit.short_id}...  ${commit.subject}`,
+    "You can amend the commit now, with",
+    "",
+    "  git commit --amend",
+    "",
+    "Once you are satisfied with your changes, run",
+    "",
+    "  git rebase --continue",
+    "",
+  ].join("\n");
 }
 
 function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
@@ -113,7 +146,7 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFi
         return refused(at.ended);
       }
       const merging = at.operation === "merge";
-      return { ok: true, value: { files: files.listed(), diskChanges: [], merging } };
+      return { ok: true, value: { files: listedAt(at, files), diskChanges: [], merging } };
     },
     async listStop() {
       if (at.ended !== null) {
@@ -121,7 +154,7 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFi
       }
       const view = stepView(at.operation, at.step, at.rewords);
       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
-      const value = { files: files.listed(), diskChanges: [], operation: view, sides };
+      const value = { files: listedAt(at, files), diskChanges: [], operation: view, sides };
       return { ok: true, value: { kind: "Files", ...value } };
     },
   };
@@ -149,8 +182,7 @@ function stopActions(
       }
       at.step += 1;
       files.unresolveAll();
-      const message = `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
-      return { ok: true, value: { kind: "Stopped", message } };
+      return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
     },
     async abortOperation() {
       if (at.ended !== null) {
