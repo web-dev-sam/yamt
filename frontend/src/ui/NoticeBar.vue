@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import X from "~icons/lucide/x";
 
-import { noticeRow, type Notice } from "./noticeText";
+import type { NoticeRow } from "./noticeText";
 
-const props = defineProps<{ notices: readonly Notice[] }>();
+defineProps<{ rows: readonly NoticeRow[] }>();
 const emit = defineEmits<{ close: [key: string] }>();
-
-const rows = computed(() => props.notices.map((notice) => noticeRow(notice)));
 </script>
 
 <template>

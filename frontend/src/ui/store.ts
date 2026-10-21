@@ -34,6 +34,7 @@ import { createServers, type Servers } from "./servers";
 import { createServerSetup, type ServerSetup } from "./serverSetup";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
+import { registerSettingsStore } from "./settingsStore";
 import type { Taken } from "./sides";
 import { nextStop, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
@@ -185,6 +186,7 @@ export function createAppStore(
     ...createServers(refs.screen, servers),
     ...createServerSetup({ ...state, ...acts, host, servers }),
   };
+  registerSettingsStore(store);
   return store;
 }
 
