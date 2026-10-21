@@ -1,9 +1,4 @@
 {
-  "GitOpsRememberedR1Boundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-remembered-rework-1.md",
-    "owned": []
-  },
   "GitOpsContinueR1": {
     "agent": "web-impl",
     "brief": "docs/slices/briefs/3.J-continue-rework-1.md",
@@ -40,14 +35,8 @@
       "frontend/src/ui/ProblemBar.vue",
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ipc/fixtureOperations.ts",
-      "frontend/src/ipc/fixtureOperations.test.ts"
-    ]
-  },
-  "GitOpsRememberedR2": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-remembered-rework-2.md",
-    "owned": [
-      "crates/session/**"
+      "frontend/src/ipc/fixtureOperations.test.ts",
+      "frontend/src/ui/stops.test.ts"
     ]
   }
 }

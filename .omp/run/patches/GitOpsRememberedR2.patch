@@ -1,0 +1,92 @@
+From c5826f47dab96f65ffa5e35f9fe3bbcb96cb21cb Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:25:05 +0200
+Subject: [PATCH] refactor(session): one text rule before line_map in both disk
+ views (#1417)
+
+---
+ crates/session/src/locate.rs     | 12 ++++++------
+ crates/session/src/remembered.rs | 21 ++++++++++++++++++---
+ 2 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/crates/session/src/locate.rs b/crates/session/src/locate.rs
+index 897db59..f38743d 100644
+--- a/crates/session/src/locate.rs
++++ b/crates/session/src/locate.rs
+@@ -128,7 +128,7 @@ fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usi
+ 
+ impl Maps {
+     fn new(ours: &SideView, theirs: &SideView, texts: &Texts, orientation: Orientation) -> Maps {
+-        let pane_of = |side| side_text(texts.pane(orientation.pane(side)));
++        let pane_of = |side| mapped_text(texts.pane(orientation.pane(side)));
+         Maps {
+             orientation,
+             ours_to_pane: line_map(&ours.text, &pane_of(GitSide::Ours)),
+@@ -185,13 +185,13 @@ impl Maps {
+     }
+ }
+ 
+-/// A side's text read as its view is: `\r\n` as `\n`, every line ended.
++/// A text as session maps it with `line_map`: `\r\n` as `\n`, every line ended.
+ // git ends a section's last line before the marker after it, also the last line of a side
+ // without a line break (xdiff/xmerge.c `fill_conflict_hunk`, observed on git 2.56).
+-fn side_text(text: &str) -> String {
+-    let mut side = text.replace("\r\n", "\n");
+-    end_last_line(&mut side);
+-    side
++pub(crate) fn mapped_text(text: &str) -> String {
++    let mut mapped = text.replace("\r\n", "\n");
++    end_last_line(&mut mapped);
++    mapped
+ }
+ 
+ fn end_last_line(text: &mut String) {
+diff --git a/crates/session/src/remembered.rs b/crates/session/src/remembered.rs
+index c13352a..8a4e1bf 100644
+--- a/crates/session/src/remembered.rs
++++ b/crates/session/src/remembered.rs
+@@ -6,7 +6,7 @@ use yamt_merge_core::{
+ 
+ use crate::decode::detect_eol;
+ use crate::disk::DiskVersion;
+-use crate::locate::{Placed, line_number, place_pieces};
++use crate::locate::{Placed, line_number, mapped_text, place_pieces};
+ use crate::markers::{parse, split_lines};
+ use crate::merge_data::{
+     FileMergeData, MergeChunk, MiddleLine, Texts, disk_text, shown_merge_data,
+@@ -113,8 +113,7 @@ fn remembered_chunks(
+     };
+     let output_lines: Vec<&str> = output.split_inclusive('\n').collect();
+     let pieces = parse(&split_lines(git_output), marker_size);
+-    // git-config(1) `core.autocrlf`: the worktree file can end its lines with CRLF over git's LF.
+-    let to_shown = line_map(&output.replace("\r\n", "\n"), &shown.replace("\r\n", "\n"));
++    let to_shown = line_map(&mapped_text(output), &mapped_text(shown));
+     let mut conflicts: Vec<Spans> = Vec::new();
+     let mut exact = true;
+     for piece in place_pieces(&output_lines, &pieces, texts, orientation) {
+@@ -248,6 +247,22 @@ mod tests {
+         assert_eq!((chunk.base.start.0, chunk.base.len), (1, 1));
+     }
+ 
++    // Catches git's ended last line mapped onto a resolution whose last line has no line break:
++    // the line does not match, and the conflict takes it too (#1417).
++    #[test]
++    fn a_resolution_without_a_final_line_break_places_the_conflict_on_its_line() {
++        let texts = texts(
++            "top\none\nbottom\n",
++            "top\nlocal\nbottom\n",
++            "top\nremote\nbottom\n",
++        );
++        let git_output = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
++
++        let data = remembered_view(&texts, "top\nlocal and remote\nbottom", git_output);
++
++        assert_eq!(middles(&data), [(1, 1)]);
++    }
++
+     // Catches two blocks whose resolutions and the line between them were edited together: the first
+     // conflict took every changed line and the second became an empty point (#1401).
+     #[test]
+-- 
+2.56.0
+
