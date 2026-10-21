@@ -8,6 +8,7 @@ members = [
   "crates/conflict-repo",
   "crates/settings",
   "crates/lsp-host",
+  "crates/compare",
   "src-tauri",
 ]
 
@@ -24,6 +25,7 @@ yamt-session = { path = "crates/session" }
 yamt-conflict-repo = { path = "crates/conflict-repo" }
 yamt-settings = { path = "crates/settings" }
 yamt-lsp-host = { path = "crates/lsp-host" }
+yamt-compare = { path = "crates/compare" }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

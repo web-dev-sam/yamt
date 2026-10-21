@@ -4607,6 +4607,7 @@ dependencies = [
  "tauri-specta",
  "tracing",
  "tracing-subscriber",
+ "yamt-compare",
  "yamt-conflict-repo",
  "yamt-lsp-host",
  "yamt-session",
@@ -4624,6 +4625,18 @@ dependencies = [
  "yamt-conflict-repo",
  "yamt-merge-core",
  "yamt-session",
+]
+
+[[package]]
+name = "yamt-compare"
+version = "0.4.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "yamt-merge-core",
 ]
 
 [[package]]
