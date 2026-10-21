@@ -12,7 +12,7 @@ import type { CloseGuard } from "./closeGuard";
 import type { Stop } from "./currentStop";
 import type { GitRun } from "./gitRun";
 import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
-import { report, type Outcome, type Problem, type ProblemCause } from "./problem";
+import { reportFailure, type Outcome, type Problem, type ProblemCause } from "./problem";
 import type { Question } from "./question";
 import type { StopEnd } from "./stops";
 
@@ -71,11 +71,7 @@ async function refused(
   operation: OperationView,
   cause: ProblemCause,
 ): Promise<void> {
-  if (cause.kind === "StopMovedOn") {
-    await target.nextStop({ kind: "outside" });
-    return;
-  }
-  report(target, { action: "continue", operation: operation.kind, cause });
+  await reportFailure(target, { action: "continue", operation: operation.kind, cause });
   if (cause.kind === "Git") {
     await target.refreshFiles();
   }

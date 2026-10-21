@@ -291,11 +291,15 @@ test("another failure is reported through problemText without reading the list a
   expect([press.lists, press.continueState.value]).toEqual([[], "ready"]);
 });
 
-test("StopMovedOn goes on to the stop git is at instead of showing a problem", async () => {
+test("StopMovedOn is logged and goes on to the stop git is at once, instead of showing a problem", async () => {
+  const lines = quiet();
   const press = continuing();
 
   await answered(press, { ok: false, failure: { kind: "StopMovedOn" } });
 
+  expect(lines).toEqual([
+    `[error] store.continue_failed {operation: "Rebase", kind: "StopMovedOn"}`,
+  ]);
   expect([press.ends, press.problem.value, press.lists]).toEqual([[{ kind: "outside" }], null, []]);
   expect(press.continueState.value).toBe("ready");
 });
