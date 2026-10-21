@@ -18,20 +18,38 @@
       "tests/showcase/**"
     ]
   },
-  "GitOpsRunAppR2": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-run-app-rework-2.md",
-    "owned": [
-      "src-tauri/src/outcome.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/mock_window.rs",
-      "src-tauri/src/merge/tests.rs",
-      "src-tauri/src/merge.rs"
-    ]
-  },
   "GitOpsStopsR1Boundary": {
     "agent": "boundary-reviewer",
     "brief": "docs/slices/briefs/3.J-stops-rework-1.md",
     "owned": []
+  },
+  "GitOpsContinue": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-continue.md",
+    "owned": [
+      "frontend/src/ui/continuing.ts",
+      "frontend/src/ui/continuing.test.ts",
+      "frontend/src/ui/toolbarButtons.ts",
+      "frontend/src/ui/toolbarButtons.test.ts",
+      "frontend/src/ui/question.ts",
+      "frontend/src/ui/question.test.ts",
+      "frontend/src/ui/closeGuard.ts",
+      "frontend/src/ui/closeGuard.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/operationText.ts",
+      "frontend/src/ui/operationText.test.ts",
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/OperationButtons.vue",
+      "frontend/src/ui/StopView.vue",
+      "frontend/src/ui/MergeToolbar.vue",
+      "frontend/src/ui/ToolbarMenu.vue",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/ChoiceView.vue",
+      "frontend/src/ui/MergeView.vue"
+    ]
   }
 }
