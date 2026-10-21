@@ -35,7 +35,7 @@ impl TabStore {
         let index = if let Some(index) = read_index(&index_path)? {
             index
         } else {
-            let index = Index::first();
+            let index = Index::first(&index_path)?;
             write_index(&index_path, &index)?;
             index
         };
@@ -93,7 +93,7 @@ impl TabStore {
     /// Appends a new tab and shows it.
     pub fn add_tab(&mut self) -> Result<TabList> {
         let mut next = self.index.clone();
-        next.add_tab();
+        next.add_tab(&self.index_path())?;
         self.commit(next)?;
         Ok(self.list())
     }
@@ -101,7 +101,7 @@ impl TabStore {
     /// Removes the tab from `tabs.json`, then its column files.
     pub fn close_tab(&mut self, tab: TabId) -> Result<TabList> {
         let mut next = self.index.clone();
-        next.close_tab(tab)?;
+        next.close_tab(tab, &self.index_path())?;
         self.commit(next)?;
         self.loaded.remove(&tab);
         remove_columns(&self.dir, tab);
@@ -140,10 +140,14 @@ impl TabStore {
     /// Writes `next` when it differs from the index in memory, then keeps it; a failed write keeps the old one.
     fn commit(&mut self, next: Index) -> Result<()> {
         if next != self.index {
-            write_index(&self.dir.join(INDEX_FILE), &next)?;
+            write_index(&self.index_path(), &next)?;
             self.index = next;
         }
         Ok(())
+    }
+
+    fn index_path(&self) -> PathBuf {
+        self.dir.join(INDEX_FILE)
     }
 
     fn list(&self) -> TabList {

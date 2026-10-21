@@ -35,22 +35,30 @@ struct FormatOnly {
 }
 
 impl Index {
-    pub(crate) fn first() -> Index {
+    pub(crate) fn first(path: &Path) -> Result<Index> {
         let mut index = Index {
             format: FORMAT,
             shown: FIRST_ID,
             next_id: FIRST_ID,
             tabs: Vec::new(),
         };
-        index.add_tab();
-        index
+        index.add_tab(path)?;
+        Ok(index)
     }
 
-    /// Appends "Compare <number>" with a number above every tab's, and shows it.
-    pub(crate) fn add_tab(&mut self) {
-        let number = self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0) + 1;
+    /// Appends "Compare <number>" with a number above every tab's, and shows it; refused as `Broken` at `path`
+    /// when the new tab would leave no id or number for one more.
+    pub(crate) fn add_tab(&mut self, path: &Path) -> Result<()> {
+        let number = self.highest_number().saturating_add(1);
         let id = self.next_id;
-        self.next_id = TabId(id.0 + 1);
+        let next_id = TabId(id.0.saturating_add(1));
+        if let Some(message) = no_room_left(next_id, number) {
+            return Err(Error::Broken {
+                path: path.to_owned(),
+                message,
+            });
+        }
+        self.next_id = next_id;
         self.tabs.push(StoredTab {
             id,
             number,
@@ -58,14 +66,15 @@ impl Index {
             language: TabLanguage::Auto,
         });
         self.shown = id;
+        Ok(())
     }
 
     /// The next tab is shown when the shown one goes, else the previous; the last one gone leaves a new tab.
-    pub(crate) fn close_tab(&mut self, tab: TabId) -> Result<()> {
+    pub(crate) fn close_tab(&mut self, tab: TabId, path: &Path) -> Result<()> {
         let position = self.position(tab)?;
         self.tabs.remove(position);
         if self.tabs.is_empty() {
-            self.add_tab();
+            self.add_tab(path)?;
         } else if self.shown == tab {
             let shown_at = position.min(self.tabs.len() - 1);
             if let Some(shown) = self.tabs.get(shown_at) {
@@ -97,23 +106,21 @@ impl Index {
             .ok_or(Error::UnknownTab { tab })
     }
 
+    fn highest_number(&self) -> u32 {
+        self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0)
+    }
+
     /// What makes a parsed index unusable: no id or number left for a new tab, an id repeated, at or above
     /// `nextId`, or a shown tab not listed.
     fn problem(&self) -> Option<String> {
         if self.tabs.is_empty() {
             return Some("`tabs` is empty".to_owned());
         }
-        if self.next_id.0 == u32::MAX {
-            return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
+        if let Some(message) = no_room_left(self.next_id, self.highest_number()) {
+            return Some(message);
         }
         let mut seen = HashSet::new();
         for tab in &self.tabs {
-            if tab.number == u32::MAX {
-                return Some(format!(
-                    "the tab number {} leaves no number for a new tab",
-                    u32::MAX
-                ));
-            }
             if !seen.insert(tab.id) {
                 return Some(format!("the tab id {} appears twice", tab.id.0));
             }
@@ -129,6 +136,20 @@ impl Index {
         }
         None
     }
+}
+
+/// Why an index with this `nextId` and this highest tab number has no id or number left for a new tab.
+fn no_room_left(next_id: TabId, highest_number: u32) -> Option<String> {
+    if next_id.0 == u32::MAX {
+        return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
+    }
+    if highest_number == u32::MAX {
+        return Some(format!(
+            "the tab number {} leaves no number for a new tab",
+            u32::MAX
+        ));
+    }
+    None
 }
 
 /// `None` when there is no `tabs.json` at `path`.
@@ -189,7 +210,7 @@ mod tests {
 
     #[test]
     fn the_first_index_has_compare_1_shown() {
-        let index = Index::first();
+        let index = Index::first(Path::new("tabs.json")).unwrap();
         assert_eq!(index.shown, FIRST_ID);
         assert_eq!(index.next_id, TabId(2));
         assert_eq!(index.tabs.len(), 1);

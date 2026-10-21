@@ -269,3 +269,33 @@ fn a_restart_reads_back_order_names_languages_and_the_shown_tab() {
     );
     assert!(before.tabs.iter().all(|tab| tab.id != list.shown));
 }
+
+fn add_refused_after_opening(json: &str, message: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let index = dir.path().join("tabs.json");
+    fs::write(&index, json).unwrap();
+    let mut store = TabStore::open(dir.path()).unwrap();
+    let result = store.add_tab();
+    assert!(
+        matches!(&result, Err(Error::Broken { path, message: said }) if *path == index && said == message),
+        "{result:?}"
+    );
+    assert_eq!(fs::read_to_string(&index).unwrap(), json);
+    assert_eq!(store.start().list.tabs.len(), 1);
+}
+
+#[test]
+fn a_next_id_one_below_u32_max_opens_and_refuses_a_new_tab_writing_nothing() {
+    add_refused_after_opening(
+        r#"{"format":1,"shown":1,"nextId":4294967294,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
+        "`nextId` 4294967295 leaves no id for a new tab",
+    );
+}
+
+#[test]
+fn a_tab_number_one_below_u32_max_opens_and_refuses_a_new_tab_writing_nothing() {
+    add_refused_after_opening(
+        r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"number":4294967294,"name":"a","language":{"kind":"auto"}}]}"#,
+        "the tab number 4294967295 leaves no number for a new tab",
+    );
+}
