@@ -115,7 +115,7 @@ rebase-apply)
     ;;
 rebase-interactive)
     sequence_repo
-    stops -c "sequence.editor=sed -i -e 3s/^pick/reword/" rebase -i main feature
+    stops -c "sequence.editor=sed -i.orig -e 3s/^pick/reword/" rebase -i main feature
     expected=3
     ;;
 cherry-pick)

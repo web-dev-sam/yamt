@@ -11,9 +11,6 @@ pub const STEP_TWO_FILE: &str = "steps.txt";
 const STEP_THREE_FILE: &str = "step-three.txt";
 /// Step 1's message in every sequence: a subject and a body.
 pub const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
-const REWORD_STEP_THREE: &str = "sequence.editor=sed -i -e 3s/^pick/reword/";
-const SQUASH_STEP_TWO: &str = "sequence.editor=sed -i -e 2s/^pick/squash/";
-const EDIT_STEP_ONE: &str = "sequence.editor=sed -i -e 1s/^pick/edit/";
 
 /// What stopped on the scripted conflicts. Sequences (every rebase but `RebaseMerges`, the
 /// ranges, `Am`) run three steps: step 1 conflicts in the caller's files, step 2 in
@@ -71,8 +68,10 @@ pub fn start(run: Run, root: &Path) -> Result<()> {
         Run::SquashMerge => stopped(run, root, &["merge", "--squash", "remote"], None),
         Run::Rebase => stopped(run, root, &["rebase", "local", "remote"], None),
         Run::RebaseApply => stopped(run, root, &["rebase", "--apply", "local", "remote"], None),
-        Run::RebaseInteractive => interactive(run, root, REWORD_STEP_THREE),
-        Run::RebaseSquash => interactive(run, root, SQUASH_STEP_TWO),
+        Run::RebaseInteractive => {
+            interactive(run, root, &sed_sequence_editor(&["3s/^pick/reword/"]))
+        }
+        Run::RebaseSquash => interactive(run, root, &sed_sequence_editor(&["2s/^pick/squash/"])),
         Run::RebaseMerges => {
             let args = [
                 "rebase", "--quiet", "-r", "--onto", "local", "HEAD^", "merged",
@@ -96,12 +95,23 @@ fn interactive(run: Run, root: &Path, sequence_editor: &str) -> Result<()> {
     stopped(run, root, &args, None)
 }
 
+/// The `git -c` value that edits the todo in place with `scripts`, each in single quotes. BSD sed (macOS) reads the
+/// argument after a bare `-i` as the backup suffix, so the suffix is attached: `-i.orig` works with GNU sed too.
+pub fn sed_sequence_editor(scripts: &[&str]) -> String {
+    let mut value = String::from("sequence.editor=sed -i.orig");
+    for script in scripts {
+        value.push_str(&format!(" -e '{script}'"));
+    }
+    value
+}
+
 /// A rebase of branch `remote` onto `main` stopped, without a conflict, at an `edit` of step 1: HEAD is step 1.
 pub fn edit_stop_repo(files: &[ConflictFile]) -> Result<TempDir> {
     let dir = sequence_repo(files)?;
+    let edit_step_one = sed_sequence_editor(&["1s/^pick/edit/"]);
     git_ok(
         dir.path(),
-        &["-c", EDIT_STEP_ONE, "rebase", "-i", "main", "remote"],
+        &["-c", &edit_step_one, "rebase", "-i", "main", "remote"],
     )?;
     Ok(dir)
 }

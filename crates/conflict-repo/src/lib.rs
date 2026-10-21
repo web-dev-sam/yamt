@@ -10,7 +10,8 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 pub use operation::{
-    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start,
+    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo,
+    sed_sequence_editor, start,
 };
 pub use rerere::{Remembered, Replay, rerere_repo};
 pub use tempfile::TempDir;

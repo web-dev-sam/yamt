@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, diverged_repo, git, git_ok,
-    operation_repo,
+    operation_repo, sed_sequence_editor,
 };
 use yamt_gitio::{Error, Oid, Operation, Progress, Rebase, Repo, Stop};
 
@@ -418,11 +418,11 @@ fn a_refused_continue_keeps_the_id() {
 fn edit_todo_dropping_a_later_step_keeps_the_id() {
     let (dir, repo) = stopped(Run::RebaseInteractive);
     let first = repo.stop().unwrap();
-    let drop_the_reword = "sequence.editor=sed -i -e /^reword/d";
+    let drop_the_reword = sed_sequence_editor(&["/^reword/d"]);
 
     git_ok(
         dir.path(),
-        &["-c", drop_the_reword, "rebase", "--edit-todo"],
+        &["-c", &drop_the_reword, "rebase", "--edit-todo"],
     )
     .unwrap();
 

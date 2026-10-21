@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use yamt_conflict_repo::{
     ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, edit_stop_repo, git, git_ok,
-    operation_repo, ready_repo,
+    operation_repo, ready_repo, sed_sequence_editor,
 };
 use yamt_gitio::{Oid, Operation, Rebase, Repo};
 
@@ -17,15 +17,15 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     local: Some(b"local\n"),
     remote: Some(b"remote\n"),
 }];
-const REWORD_STEP_TWO_DROP_THREE: &str = "sequence.editor=sed -i -e 2s/^pick/reword/ -e 3d";
 
 /// Step 2 joins step 1's chain as `chain_step`, and step 3 becomes a `fixup` of `local`, which conflicts.
 fn chain_sequence_editor(chain_step: &str, root: &Path) -> String {
     let local = oid(root, "local");
     let local = local.as_str();
-    format!(
-        "sequence.editor=sed -i -e 2s/^pick/{chain_step}/ -e '3s/^pick [0-9a-f]*/fixup {local}/'"
-    )
+    sed_sequence_editor(&[
+        &format!("2s/^pick/{chain_step}/"),
+        &format!("3s/^pick [0-9a-f]*/fixup {local}/"),
+    ])
 }
 
 fn oid(root: &Path, revision: &str) -> Oid {
@@ -149,9 +149,10 @@ fn a_conflicted_squash_step_replays_its_commit_and_is_an_editor_step() {
 fn a_conflicted_reword_stop_with_an_empty_todo_has_an_editor_step_ahead() {
     let dir = ready_repo(Run::Rebase, &FILES).unwrap();
     let root = dir.path();
+    let reword_step_two_drop_three = sed_sequence_editor(&["2s/^pick/reword/", "3d"]);
     let args = [
         "-c",
-        REWORD_STEP_TWO_DROP_THREE,
+        reword_step_two_drop_three.as_str(),
         "rebase",
         "-i",
         "local",
