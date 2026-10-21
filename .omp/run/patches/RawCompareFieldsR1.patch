@@ -1,0 +1,543 @@
+diff --git a/frontend/src/editor/compare.browser.test.ts b/frontend/src/editor/compare.browser.test.ts
+index 88e00b6..26174d2 100644
+--- a/frontend/src/editor/compare.browser.test.ts
++++ b/frontend/src/editor/compare.browser.test.ts
+@@ -2,7 +2,7 @@ import "../style.css";
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { page, userEvent } from "vitest/browser";
+ 
+-import { createFixtureCompareSource, DEFAULT_KEYS, log, type TabTexts } from "../ipc";
++import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
+ import { CompareController, type CompareEvents, type CompareHosts } from "./index";
+ import type { CompareOptions } from "./index";
+ import { found } from "./paneHarness";
+@@ -107,19 +107,6 @@ const CASE = {
+   ],
+ };
+ 
+-async function texts(): Promise<TabTexts> {
+-  const source = createFixtureCompareSource(log, "?raw=probe", { "probe.json": CASE });
+-  const start = await source.openCompare();
+-  if (!start.ok) {
+-    throw new Error("the fixture compare did not open");
+-  }
+-  const tab = await source.loadTab(start.value.list.shown);
+-  if (!tab.ok) {
+-    throw new Error("the fixture compare lost its tab");
+-  }
+-  return tab.value;
+-}
+-
+ function box(style: string): HTMLDivElement {
+   const node = document.createElement("div");
+   node.setAttribute("style", style);
+@@ -159,7 +146,8 @@ const controllers: CompareController[] = [];
+ 
+ async function opened(): Promise<{ hosts: CompareHosts; controller: CompareController }> {
+   const hosts = mount();
+-  const controller = new CompareController(await texts(), hosts, OPTIONS, EVENTS);
++  const texts = await loadCompareFixture("probe", { "probe.json": CASE });
++  const controller = new CompareController(texts, hosts, OPTIONS, EVENTS);
+   controllers.push(controller);
+   return { hosts, controller };
+ }
+diff --git a/frontend/src/editor/internal/compareFields.test.ts b/frontend/src/editor/internal/compareFields.test.ts
+index d8d4b6d..6d88615 100644
+--- a/frontend/src/editor/internal/compareFields.test.ts
++++ b/frontend/src/editor/internal/compareFields.test.ts
+@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureCompareSource, log, type Difference } from "../../ipc";
++import { loadCompareFixture } from "../../ipc";
+ import { differenceField, showDifferences } from "./compareFields";
+ import { columnMarks } from "./compareMarks";
+ 
+@@ -24,22 +24,10 @@ const CASE = {
+   ],
+ };
+ 
+-async function differences(): Promise<readonly Difference[]> {
+-  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
+-  const start = await source.openCompare();
+-  if (!start.ok) {
+-    throw new Error("fixture compare did not open");
+-  }
+-  const tab = await source.loadTab(start.value.list.shown);
+-  if (!tab.ok) {
+-    throw new Error("fixture compare lost its tab");
+-  }
+-  return tab.value.comparison.differences;
+-}
+-
+ async function shown(): Promise<EditorState> {
+   const state = EditorState.create({ doc: LEFT, extensions: differenceField });
+-  const marks = columnMarks(state.doc, await differences(), "left");
++  const { comparison } = await loadCompareFixture("case", { "case.json": CASE });
++  const marks = columnMarks(state.doc, comparison.differences, "left");
+   return state.update({ effects: showDifferences.of(marks) }).state;
+ }
+ 
+diff --git a/frontend/src/editor/internal/compareMarks.test.ts b/frontend/src/editor/internal/compareMarks.test.ts
+index b3dd707..079afab 100644
+--- a/frontend/src/editor/internal/compareMarks.test.ts
++++ b/frontend/src/editor/internal/compareMarks.test.ts
+@@ -2,7 +2,7 @@ import { Text } from "@codemirror/state";
+ import type { DecorationSet } from "@codemirror/view";
+ import { expect, test } from "vitest";
+ 
+-import { createFixtureCompareSource, log, type Difference } from "../../ipc";
++import { loadCompareFixture, type Difference } from "../../ipc";
+ import { columnMarks } from "./compareMarks";
+ 
+ const LEFT = "same\nold word!\ngone\nend\n";
+@@ -43,16 +43,7 @@ const CASE = {
+ };
+ 
+ async function differences(): Promise<readonly Difference[]> {
+-  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
+-  const start = await source.openCompare();
+-  if (!start.ok) {
+-    throw new Error("fixture compare did not open");
+-  }
+-  const tab = await source.loadTab(start.value.list.shown);
+-  if (!tab.ok) {
+-    throw new Error("fixture compare lost its tab");
+-  }
+-  return tab.value.comparison.differences;
++  return (await loadCompareFixture("case", { "case.json": CASE })).comparison.differences;
+ }
+ 
+ function painted(doc: Text, set: DecorationSet): string[] {
+diff --git a/frontend/src/editor/internal/compareNavigation.test.ts b/frontend/src/editor/internal/compareNavigation.test.ts
+index 39841a0..80c270d 100644
+--- a/frontend/src/editor/internal/compareNavigation.test.ts
++++ b/frontend/src/editor/internal/compareNavigation.test.ts
+@@ -1,31 +1,43 @@
++import { Text } from "@codemirror/state";
+ import { expect, test } from "vitest";
+ 
+ import type { DiffSpan } from "./compareMarks";
+ import { nextDifference } from "./compareNavigation";
+ import { toDocPos } from "./docPos";
+ 
++const DOC = Text.of(["aaaa", "bbbbbbbbb", "cccc", "ddd", "eeeeeeee", ""]);
+ const FIRST: DiffSpan = { from: toDocPos(5), to: toDocPos(15), tone: "modified" };
+ const SECOND: DiffSpan = { from: toDocPos(15), to: toDocPos(20), tone: "deleted" };
+ const LAST: DiffSpan = { from: toDocPos(24), to: toDocPos(24), tone: "inserted" };
+ const SPANS = [FIRST, SECOND, LAST];
+ 
+ test("down goes to the first difference starting after the cursor", () => {
+-  expect(nextDifference(SPANS, toDocPos(0), "down")).toBe(FIRST);
+-  expect(nextDifference(SPANS, toDocPos(5), "down")).toBe(SECOND);
+-  expect(nextDifference(SPANS, toDocPos(10), "down")).toBe(SECOND);
+-  expect(nextDifference(SPANS, toDocPos(15), "down")).toBe(LAST);
++  expect(nextDifference(DOC, SPANS, toDocPos(0), "down")).toBe(FIRST);
++  expect(nextDifference(DOC, SPANS, toDocPos(5), "down")).toBe(SECOND);
++  expect(nextDifference(DOC, SPANS, toDocPos(10), "down")).toBe(SECOND);
++  expect(nextDifference(DOC, SPANS, toDocPos(15), "down")).toBe(LAST);
+ });
+ 
+ test("up goes to the last difference ending before the cursor, never the one the cursor is in", () => {
+-  expect(nextDifference(SPANS, toDocPos(24), "up")).toBe(SECOND);
+-  expect(nextDifference(SPANS, toDocPos(18), "up")).toBe(FIRST);
+-  expect(nextDifference(SPANS, toDocPos(15), "up")).toBe(FIRST);
+-  expect(nextDifference(SPANS, toDocPos(30), "up")).toBe(LAST);
++  expect(nextDifference(DOC, SPANS, toDocPos(24), "up")).toBe(SECOND);
++  expect(nextDifference(DOC, SPANS, toDocPos(18), "up")).toBe(FIRST);
++  expect(nextDifference(DOC, SPANS, toDocPos(15), "up")).toBe(FIRST);
++  expect(nextDifference(DOC, SPANS, toDocPos(30), "up")).toBe(LAST);
+ });
+ 
+ test("past the last or before the first difference there is nowhere to go: no wrap", () => {
+-  expect(nextDifference(SPANS, toDocPos(24), "down")).toBeNull();
+-  expect(nextDifference(SPANS, toDocPos(5), "up")).toBeNull();
+-  expect(nextDifference(SPANS, toDocPos(10), "up")).toBeNull();
+-  expect(nextDifference([], toDocPos(0), "down")).toBeNull();
++  expect(nextDifference(DOC, SPANS, toDocPos(24), "down")).toBeNull();
++  expect(nextDifference(DOC, SPANS, toDocPos(5), "up")).toBeNull();
++  expect(nextDifference(DOC, SPANS, toDocPos(10), "up")).toBeNull();
++  expect(nextDifference(DOC, [], toDocPos(0), "down")).toBeNull();
++});
++
++test("up from the end of a text without a final line break skips the last-line difference the cursor is in", () => {
++  const doc = Text.of(["a", "b", "last"]);
++  const earlier: DiffSpan = { from: toDocPos(0), to: toDocPos(2), tone: "modified" };
++  const lastLine: DiffSpan = { from: toDocPos(4), to: toDocPos(doc.length), tone: "modified" };
++  const end = toDocPos(doc.length);
++
++  expect(nextDifference(doc, [earlier, lastLine], end, "up")).toBe(earlier);
++  expect(nextDifference(doc, [lastLine], end, "up")).toBeNull();
+ });
+diff --git a/frontend/src/editor/internal/compareNavigation.ts b/frontend/src/editor/internal/compareNavigation.ts
+index 05cc8ec..8775a1d 100644
+--- a/frontend/src/editor/internal/compareNavigation.ts
++++ b/frontend/src/editor/internal/compareNavigation.ts
+@@ -1,8 +1,11 @@
++import type { Text } from "@codemirror/state";
++
+ import type { DiffSpan } from "./compareMarks";
+ import type { DocPos } from "./docPos";
+ import type { Direction } from "./navigation";
+ 
+ export function nextDifference(
++  doc: Text,
+   spans: readonly DiffSpan[],
+   cursor: DocPos,
+   direction: Direction,
+@@ -10,8 +13,10 @@ export function nextDifference(
+   switch (direction) {
+     case "down":
+       return spans.find((span) => span.from > cursor) ?? null;
+-    case "up":
+-      return spans.findLast((span) => span.from < cursor && span.to <= cursor) ?? null;
++    case "up": {
++      const lineStart = doc.lineAt(cursor).from;
++      return spans.findLast((span) => span.from < cursor && span.to <= lineStart) ?? null;
++    }
+     default: {
+       const _exhaustive: never = direction;
+       return _exhaustive;
+diff --git a/frontend/src/editor/internal/compareSettle.test.ts b/frontend/src/editor/internal/compareSettle.test.ts
+index 5050d43..93bab1c 100644
+--- a/frontend/src/editor/internal/compareSettle.test.ts
++++ b/frontend/src/editor/internal/compareSettle.test.ts
+@@ -1,82 +1,40 @@
+-import { expect, test, vi } from "vitest";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ 
+-import {
+-  createFixtureCompareSource,
+-  log,
+-  nextColumnVersion,
+-  type Column,
+-  type ColumnVersions,
+-} from "../../ipc";
+-import { SETTLE_PAUSE_MS, Settle, type Timers } from "./compareSettle";
+-
+-type FakeTimers = {
+-  readonly timers: Timers;
+-  readonly advance: (ms: number) => void;
+-  readonly pending: () => number;
+-};
+-
+-function fakeTimers(): FakeTimers {
+-  let now = 0;
+-  let nextId = 1;
+-  const due = new Map<number, { readonly at: number; readonly run: () => void }>();
+-  return {
+-    timers: {
+-      set: (run, ms) => {
+-        const id = nextId++;
+-        due.set(id, { at: now + ms, run });
+-        return id;
+-      },
+-      clear: (id) => {
+-        due.delete(id);
+-      },
+-    },
+-    advance: (ms) => {
+-      now += ms;
+-      for (const [id, timer] of due) {
+-        if (timer.at <= now) {
+-          due.delete(id);
+-          timer.run();
+-        }
+-      }
+-    },
+-    pending: () => due.size,
+-  };
+-}
++import { loadCompareFixture, nextColumnVersion, type Column, type ColumnVersions } from "../../ipc";
++import { SETTLE_PAUSE_MS, Settle } from "./compareSettle";
+ 
+ async function startVersions(): Promise<ColumnVersions> {
+-  const source = createFixtureCompareSource(log, "", {});
+-  const start = await source.openCompare();
+-  if (!start.ok) {
+-    throw new Error("fixture compare did not open");
+-  }
+-  const tab = await source.loadTab(start.value.list.shown);
+-  if (!tab.ok) {
+-    throw new Error("fixture compare lost its tab");
+-  }
+-  return tab.value.comparison.versions;
++  return (await loadCompareFixture("words")).comparison.versions;
+ }
+ 
++beforeEach(() => {
++  vi.useFakeTimers();
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
+ test("one settle after the pause, with exactly the columns edited since the last one", async () => {
+-  const fake = fakeTimers();
+   const settled = vi.fn<(columns: readonly Column[]) => void>();
+-  const settle = new Settle(await startVersions(), settled, fake.timers);
++  const settle = new Settle(await startVersions(), settled);
+ 
+   settle.edited("left");
+-  fake.advance(SETTLE_PAUSE_MS - 1);
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS - 1);
+   settle.edited("left");
+-  fake.advance(SETTLE_PAUSE_MS - 1);
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS - 1);
+   expect(settled).not.toHaveBeenCalled();
+-  fake.advance(1);
++  vi.advanceTimersByTime(1);
+   expect(settled.mock.calls).toEqual([[["left"]]]);
+ 
+   settle.edited("right");
+-  fake.advance(SETTLE_PAUSE_MS);
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS);
+   expect(settled.mock.calls).toEqual([[["left"]], [["right"]]]);
+ });
+ 
+ test("an edit raises only its own column's version; a reply with an old right version is refused", async () => {
+   const start = await startVersions();
+-  const settle = new Settle(start, () => {}, fakeTimers().timers);
++  const settle = new Settle(start, () => {});
+ 
+   settle.edited("right");
+ 
+@@ -89,28 +47,25 @@ test("an edit raises only its own column's version; a reply with an old right ve
+ });
+ 
+ test("settleNow hands over the edited columns and cancels the pause", async () => {
+-  const fake = fakeTimers();
+   const settled = vi.fn<(columns: readonly Column[]) => void>();
+-  const settle = new Settle(await startVersions(), settled, fake.timers);
++  const settle = new Settle(await startVersions(), settled);
+ 
+   settle.edited("right");
+   settle.edited("left");
+ 
+   expect(settle.settleNow()).toEqual(["left", "right"]);
+-  expect(fake.pending()).toBe(0);
++  expect(vi.getTimerCount()).toBe(0);
+   expect(settle.settleNow()).toEqual([]);
+-  fake.advance(SETTLE_PAUSE_MS);
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS);
+   expect(settled).not.toHaveBeenCalled();
+ });
+ 
+ test("destroy cancels the pause and forgets the edits", async () => {
+-  const fake = fakeTimers();
+-  const settled = vi.fn<(columns: readonly Column[]) => void>();
+-  const settle = new Settle(await startVersions(), settled, fake.timers);
++  const settle = new Settle(await startVersions(), () => {});
+ 
+   settle.edited("left");
+   settle.destroy();
+ 
+-  expect(fake.pending()).toBe(0);
++  expect(vi.getTimerCount()).toBe(0);
+   expect(settle.settleNow()).toEqual([]);
+ });
+diff --git a/frontend/src/editor/internal/compareSettle.ts b/frontend/src/editor/internal/compareSettle.ts
+index d7968b0..39bfb9a 100644
+--- a/frontend/src/editor/internal/compareSettle.ts
++++ b/frontend/src/editor/internal/compareSettle.ts
+@@ -4,31 +4,15 @@ export const SETTLE_PAUSE_MS = 300;
+ 
+ const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
+ 
+-export type Timers = {
+-  readonly set: (run: () => void, ms: number) => number;
+-  readonly clear: (id: number) => void;
+-};
+-
+-const SYSTEM_TIMERS: Timers = {
+-  set: (run, ms) => globalThis.setTimeout(run, ms),
+-  clear: (id) => globalThis.clearTimeout(id),
+-};
+-
+ export class Settle {
+   #versions: ColumnVersions;
+   readonly #settled: (columns: readonly Column[]) => void;
+-  readonly #timers: Timers;
+   readonly #edited = new Set<Column>();
+   #timer: number | null = null;
+ 
+-  constructor(
+-    versions: ColumnVersions,
+-    settled: (columns: readonly Column[]) => void,
+-    timers: Timers = SYSTEM_TIMERS,
+-  ) {
++  constructor(versions: ColumnVersions, settled: (columns: readonly Column[]) => void) {
+     this.#versions = versions;
+     this.#settled = settled;
+-    this.#timers = timers;
+   }
+ 
+   edited(column: Column): void {
+@@ -39,7 +23,7 @@ export class Settle {
+         : { left, right: nextColumnVersion(right) };
+     this.#edited.add(column);
+     this.#cancel();
+-    this.#timer = this.#timers.set(() => {
++    this.#timer = globalThis.setTimeout(() => {
+       this.#timer = null;
+       const columns = this.#take();
+       if (columns.length > 0) {
+@@ -74,7 +58,7 @@ export class Settle {
+ 
+   #cancel(): void {
+     if (this.#timer !== null) {
+-      this.#timers.clear(this.#timer);
++      globalThis.clearTimeout(this.#timer);
+       this.#timer = null;
+     }
+   }
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+index c03eeea..89867e2 100644
+--- a/frontend/src/editor/internal/compareViews.ts
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -75,6 +75,7 @@ export function keyboardColumn(views: ColumnViews): Column | null {
+ export function revealDifference(view: EditorView, direction: Direction): void {
+   const { state } = view;
+   const target = nextDifference(
++    state.doc,
+     state.field(differenceField).spans,
+     toDocPos(state.selection.main.head),
+     direction,
+diff --git a/frontend/src/ipc/fixtureCompare.test.ts b/frontend/src/ipc/fixtureCompare.test.ts
+index ca4f38d..b1efa5b 100644
+--- a/frontend/src/ipc/fixtureCompare.test.ts
++++ b/frontend/src/ipc/fixtureCompare.test.ts
+@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
+ import type { TabList } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+ import { nextColumnVersion, type SourceResult, type TabId } from "./domain";
+-import { createFixtureCompareSource } from "./fixtureCompare";
++import { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+@@ -124,6 +124,24 @@ test("an unknown ?raw case fails the start naming it and the known ones", () =>
+   );
+ });
+ 
++test("loadCompareFixture reads a committed or an in-memory case as tab 1 and rejects an unknown name", async () => {
++  const words = committedCase("words");
++  const loaded = await loadCompareFixture("words");
++  const inMemory = { left: "a\n", right: "b\n", differences: [] };
++
++  expect(loaded.left).toBe(words.left);
++  expect(loaded.right).toBe(words.right);
++  expect(loaded.comparison.differences).toEqual(words.differences);
++  expect(await loadCompareFixture("case", { "case.json": inMemory })).toEqual({
++    left: "a\n",
++    right: "b\n",
++    comparison: { versions: { left: 0, right: 0 }, differences: [] },
++  });
++  await expect(loadCompareFixture("nope", { "case.json": inMemory })).rejects.toThrow(
++    "no compare fixture nope; known: case",
++  );
++});
++
+ test("a new tab's number is above every open tab's, and ids never repeat (catches counting tabs)", async () => {
+   const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
+   const three = await withThree(source);
+diff --git a/frontend/src/ipc/fixtureCompare.ts b/frontend/src/ipc/fixtureCompare.ts
+index 3453945..07b6271 100644
+--- a/frontend/src/ipc/fixtureCompare.ts
++++ b/frontend/src/ipc/fixtureCompare.ts
+@@ -12,6 +12,7 @@ import {
+   type Difference,
+   type TabLanguage,
+   type TabList,
++  type TabTexts,
+ } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+ import type { SourceResult } from "./domain";
+@@ -94,12 +95,14 @@ function addTab(tabs: Tabs): FixtureTab {
+   return tab;
+ }
+ 
+-function firstTabs(search: string, cases: ReadonlyMap<string, Case>): Tabs {
++function firstTabs(
++  raw: string | null,
++  cases: ReadonlyMap<string, Case>,
++): { readonly tabs: Tabs; readonly first: FixtureTab } {
+   const tabs: Tabs = { list: [], shown: FIRST_TAB_ID, nextId: FIRST_TAB_ID };
+   const first = addTab(tabs);
+-  const raw = new URLSearchParams(search).get("raw");
+   if (raw === null || raw === "") {
+-    return tabs;
++    return { tabs, first };
+   }
+   const shown = cases.get(raw);
+   if (shown === undefined) {
+@@ -107,7 +110,7 @@ function firstTabs(search: string, cases: ReadonlyMap<string, Case>): Tabs {
+   }
+   first.texts.left = shown.left;
+   first.texts.right = shown.right;
+-  return tabs;
++  return { tabs, first };
+ }
+ 
+ function tabListDto(tabs: Tabs): Generated.TabList {
+@@ -143,6 +146,12 @@ function differencesOf(
+     ?.differences;
+ }
+ 
++function tabTexts(cases: ReadonlyMap<string, Case>, { texts, versions }: FixtureTab): TabTexts {
++  const differences = differencesOf(cases, texts) ?? [];
++  const comparison = { versions: toColumnVersions(versions), differences };
++  return { left: texts.left, right: texts.right, comparison };
++}
++
+ function closeTab(tabs: Tabs, tab: number): SourceResult<TabList> {
+   const position = tabs.list.findIndex((each) => each.id === tab);
+   if (position === -1) {
+@@ -219,18 +228,14 @@ export function createFixtureCompareSource(
+   files: Readonly<Record<string, unknown>> = CASE_FILES,
+ ): CompareSource {
+   const cases = parseCases(files);
+-  const tabs = firstTabs(search, cases);
++  const { tabs } = firstTabs(new URLSearchParams(search).get("raw"), cases);
+   return {
+     async openCompare() {
+       const start = { list: tabListDto(tabs), column_limit: COLUMN_LIMIT_BYTES };
+       return { ok: true, value: toCompareStart(start) };
+     },
+     async loadTab(tab) {
+-      return withTab(tabs, tab, ({ texts, versions }) => {
+-        const differences = differencesOf(cases, texts) ?? [];
+-        const comparison = { versions: toColumnVersions(versions), differences };
+-        return { ok: true, value: { left: texts.left, right: texts.right, comparison } };
+-      });
++      return withTab(tabs, tab, (found) => ({ ok: true, value: tabTexts(cases, found) }));
+     },
+     async setColumn(write) {
+       return setColumn({ log, cases, tabs }, write);
+@@ -239,3 +244,11 @@ export function createFixtureCompareSource(
+     ...createFixtureSettings(),
+   };
+ }
++
++export async function loadCompareFixture(
++  name: string,
++  files: Readonly<Record<string, unknown>> = CASE_FILES,
++): Promise<TabTexts> {
++  const cases = parseCases(files);
++  return tabTexts(cases, firstTabs(name, cases).first);
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 14e3031..600ae8d 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -60,7 +60,7 @@ export type {
+ } from "./domain";
+ export { nextColumnVersion } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
+-export { createFixtureCompareSource } from "./fixtureCompare";
++export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+ export { createFixtureServerHost } from "./fixtureServers";
+ export {
+   bindingsOf,
