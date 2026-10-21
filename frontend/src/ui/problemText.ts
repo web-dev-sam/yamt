@@ -1,9 +1,9 @@
 import { keyLabel, type KeyProblem } from "../ipc";
 import { ACTION_NAMES } from "./keyText";
-import { operationName } from "./operationText";
+import { continueAction, operationName } from "./operationText";
 import type { Problem, ProblemCause } from "./problem";
 
-type CausedProblem = Exclude<Problem, { action: "stopped" }>;
+type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
@@ -36,6 +36,10 @@ function attempted(problem: CausedProblem): string {
       return "Could not use the settings file";
     case "abort":
       return `Could not abort the ${operationName(problem.operation)}`;
+    case "continue": {
+      const { verb, object } = continueAction(problem.operation);
+      return `Could not ${verb.toLowerCase()} ${object}`;
+    }
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -131,6 +135,9 @@ function causedText(problem: CausedProblem, platform: string): string {
 }
 
 export function problemText(problem: Problem, platform: string): string {
+  if (problem.action === "close") {
+    return "Git is still running; close yamt when it is done.";
+  }
   if (problem.action !== "stopped") {
     return causedText(problem, platform);
   }

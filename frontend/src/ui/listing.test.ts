@@ -11,10 +11,10 @@ import type {
   SideNames,
   SourceResult,
 } from "../ipc";
+import type { Stop } from "./currentStop";
 import { refreshFiles } from "./listing";
 import type { Notice } from "./noticeText";
 import type { Problem } from "./problem";
-import type { Stop } from "./saving";
 import type { Taken } from "./sides";
 import type { StopEnd } from "./stops";
 

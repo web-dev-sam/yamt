@@ -4,9 +4,9 @@ import { shallowRef, type ShallowRef } from "vue";
 import type { OperationView, SourceFailure, SourceResult } from "../ipc";
 import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
+import type { Stop } from "./currentStop";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
-import type { Stop } from "./saving";
 
 const LINUX = "Linux x86_64";
 
@@ -44,6 +44,7 @@ function aborting(
     problem: shallowRef<Problem | null>(null),
     lists,
     stop: { dropped: false },
+    running: shallowRef(false),
     refreshFiles: () => {
       lists.push("list");
       return Promise.resolve();

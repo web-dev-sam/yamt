@@ -178,6 +178,21 @@ test.each([
   expect(text({ action: "abort", operation, cause })).toBe(words);
 });
 
+test.each([
+  ["Rebase", "Could not continue the rebase: hook says no"],
+  ["CherryPick", "Could not continue the cherry-pick: hook says no"],
+  ["Merge", "Could not commit the merge: hook says no"],
+  ["SquashMerge", "Could not commit the squash merge: hook says no"],
+] as const)("a Continue git refused names the %s and keeps git's words", (operation, words) => {
+  const cause = { kind: "Git", message: "hook says no\n" } as const;
+
+  expect(text({ action: "continue", operation, cause })).toBe(words);
+});
+
+test("a close refused while git runs says to wait for git", () => {
+  expect(text({ action: "close" })).toBe("Git is still running; close yamt when it is done.");
+});
+
 test("a stop with nothing to list shows git's message as it came, naming the operation or git", () => {
   const message = "Rebasing (2/3)\rerror: could not apply cdc3800... card title\n";
 

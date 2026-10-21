@@ -1,21 +1,22 @@
-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+import { computed, type ComputedRef, type ShallowRef } from "vue";
 
 import type { ChunkSource, OperationView } from "../ipc";
 import type { Asking } from "./asking";
+import { landed, type Stop } from "./currentStop";
 import { attempt, reportFailure, type Problem, type Relist } from "./problem";
-import { landed, type Writing } from "./saving";
 
 export type AbortState =
   | { readonly kind: "none" }
   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
 
-type AbortTarget = Relist &
-  Pick<Writing, "stop"> & {
-    readonly source: Pick<ChunkSource, "abortOperation">;
-    readonly asking: Pick<Asking, "ask">;
-    readonly operation: Readonly<ShallowRef<OperationView | null>>;
-    readonly problem: ShallowRef<Problem | null>;
-  };
+type AbortTarget = Relist & {
+  readonly stop: Stop;
+  readonly source: Pick<ChunkSource, "abortOperation">;
+  readonly asking: Pick<Asking, "ask">;
+  readonly operation: Readonly<ShallowRef<OperationView | null>>;
+  readonly problem: ShallowRef<Problem | null>;
+  readonly running: ShallowRef<boolean>;
+};
 
 export type Aborting = {
   readonly abortState: ComputedRef<AbortState>;
@@ -23,7 +24,7 @@ export type Aborting = {
 };
 
 export function createAborting(target: AbortTarget): Aborting {
-  const running = shallowRef(false);
+  const { running } = target;
   const abortState = computed((): AbortState => {
     const operation = target.operation.value;
     if (operation === null) {

@@ -1,4 +1,4 @@
-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+import { computed, shallowReactive, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
   type ChunkSource,
@@ -17,6 +17,7 @@ import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
+import { createContinuing, type Continuing } from "./continuing";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
@@ -58,6 +59,7 @@ type State = Refs &
     readonly source: ChunkSource;
     readonly asking: Asking;
     readonly guard: CloseGuard;
+    readonly running: ShallowRef<boolean>;
     latestOpen: number;
     latestSettings: number;
     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
@@ -92,6 +94,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions &
   Aborting &
+  Continuing &
   Collapsing &
   PaneSplitState &
   Saving &
@@ -120,12 +123,14 @@ function createRefs(startTheme: Theme): Refs {
 
 function createState(refs: Refs, source: ChunkSource): State {
   const asking = createAsking();
+  const running = shallowRef(false);
   const state: State = {
     ...refs,
     source,
     asking,
-    guard: createCloseGuard(asking, refs.opened),
-    writing: new Map(),
+    guard: createCloseGuard({ asking, opened: refs.opened, problem: refs.problem, running }),
+    running,
+    writing: shallowReactive(new Map()),
     stop: { dropped: false },
     latestOpen: 0,
     latestSettings: 0,
@@ -161,6 +166,7 @@ export function createAppStore(
     ...createCollapsing(),
     ...createPaneSplit(),
     ...createAborting(state),
+    ...createContinuing(state),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
     ...createServerSetup({ ...state, ...acts, host, servers }),

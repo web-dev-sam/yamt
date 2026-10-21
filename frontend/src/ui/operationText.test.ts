@@ -1,7 +1,14 @@
 import { expect, test } from "vitest";
 
 import type { OperationView, SideName } from "../ipc";
-import { abortLabel, abortMessage, abortTitle, operationLine } from "./operationText";
+import {
+  abortLabel,
+  abortMessage,
+  abortTitle,
+  allResolvedText,
+  continueLabel,
+  operationLine,
+} from "./operationText";
 
 const MAIN: SideName = { kind: "Branch", name: "main" };
 const FEATURE: SideName = { kind: "Branch", name: "feature/reminders" };
@@ -194,4 +201,28 @@ test.each<OperationView>([
   { kind: "Revert", reverting: ADD_CACHE, progress: { step: 1, total: 2 } },
 ])("the first step has nothing done to name: %j", (operation) => {
   expect(abortMessage(operation)).not.toContain("undone too");
+});
+
+test.each<[OperationView, string]>([
+  [REBASE, "Continue rebase"],
+  [{ kind: "CherryPick", picking: FIX_LOGIN, progress: null }, "Continue cherry-pick"],
+  [{ kind: "Revert", reverting: ADD_CACHE, progress: null }, "Continue revert"],
+  [{ kind: "Am", subject: "", message: "", progress: null }, "Continue applying patches"],
+  [{ kind: "Merge", merging: FEATURE, into: MAIN }, "Commit merge"],
+  [{ kind: "SquashMerge", merging: FEATURE, into: MAIN }, "Commit merge"],
+])("Continue is labelled per operation (a merge commits): %j", (operation, label) => {
+  expect(continueLabel(operation)).toBe(label);
+});
+
+test("the all-resolved line names the next step, and without an operation keeps its old words", () => {
+  expect(allResolvedText(REBASE)).toBe("All files are resolved. Continue rebase to let git go on.");
+  expect(allResolvedText({ kind: "Am", subject: "", message: "", progress: null })).toBe(
+    "All files are resolved. Continue applying patches to let git go on.",
+  );
+  expect(allResolvedText({ kind: "SquashMerge", merging: FEATURE, into: MAIN })).toBe(
+    "All files are resolved. Commit merge to commit it.",
+  );
+  expect(allResolvedText(null)).toBe(
+    "All files are resolved. Close the window to finish the merge.",
+  );
 });

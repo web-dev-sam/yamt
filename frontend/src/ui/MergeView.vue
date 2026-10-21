@@ -7,6 +7,7 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
 import type { FileWork } from "./closeGuard";
 import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
 import MergeToolbar from "./MergeToolbar.vue";
+import OperationButtons from "./OperationButtons.vue";
 import PaneDivider from "./PaneDivider.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
@@ -199,6 +200,7 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
       @finish="markResolved"
     />
     <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
+      <OperationButtons :abort="true" />
       <ServerStatus class="ml-auto" :path="null" :problems="null" />
       <SettingsButton />
     </header>

@@ -164,8 +164,9 @@ test("stored decisions drop ids yamt does not know and values that are not true 
   expect(storedDecisions(storage)).toEqual({ abortMerge: false, previous: true, undo: false });
 });
 
-test("the toolbar order puts Abort merge first and the collapse toggle after Next change", () => {
+test("the toolbar order puts Continue and Abort merge first and the collapse toggle after Next change", () => {
   expect(TOOLBAR_BUTTONS).toEqual([
+    "continue",
     "abortMerge",
     "previous",
     "next",
@@ -189,26 +190,36 @@ const REBASE: OperationView = {
 const NONE: AbortState = { kind: "none" };
 const READY: AbortState = { kind: "ready", operation: REBASE };
 const RUNNING: AbortState = { kind: "running", operation: REBASE };
+const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
 
 function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
   return buttons.map((button) => button.id);
 }
 
-test("the menu lists Abort only while git records an operation, labelled by it", () => {
-  const withoutAbort = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge");
+test("the menu lists Continue and Abort only while git records an operation, labelled by it", () => {
+  const withoutOperation = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" && id !== "continue");
 
-  expect(ids(listedButtons(NONE))).toEqual(withoutAbort);
+  expect(ids(listedButtons(NONE))).toEqual(withoutOperation);
   expect(ids(listedButtons(READY))).toEqual(TOOLBAR_BUTTONS);
   expect(ids(listedButtons(RUNNING))).toEqual(TOOLBAR_BUTTONS);
-  expect(listedButtons(READY)[0]).toEqual({ id: "abortMerge", label: "Abort rebase" });
+  expect(listedButtons(READY).slice(0, 2)).toEqual([
+    { id: "continue", label: "Continue rebase" },
+    { id: "abortMerge", label: "Abort rebase" },
+  ]);
+  expect(listedButtons({ kind: "ready", operation: MERGE })[0]).toEqual({
+    id: "continue",
+    label: "Commit merge",
+  });
   expect(listedButtons(NONE)[0]).toEqual({ id: "previous", label: "Previous change" });
 });
 
-test("the toolbar shows Abort only while git records an operation and the user shows it", () => {
+test("the toolbar shows Continue and Abort only while git records an operation and the user shows them", () => {
   const userHidesUndo = new Set<ToolbarButtonId>(["undo"]);
   const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
+  const userHidesContinue = new Set<ToolbarButtonId>(["continue"]);
 
   expect(ids(shownButtons(READY, userHidesUndo))).toEqual([
+    "continue",
     "abortMerge",
     "previous",
     "next",
@@ -217,11 +228,25 @@ test("the toolbar shows Abort only while git records an operation and the user s
     "applyRight",
     "redo",
   ]);
-  expect(shownButtons(RUNNING, userHidesUndo)[0]?.id).toBe("abortMerge");
+  expect(ids(shownButtons(RUNNING, userHidesUndo)).slice(0, 2)).toEqual(["continue", "abortMerge"]);
   expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("abortMerge");
+  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("continue");
   expect(shownButtons(NONE, userHidesUndo)).toHaveLength(6);
   expect(ids(shownButtons(READY, userHidesAbort))).not.toContain("abortMerge");
-  expect(shownButtons(READY, userHidesAbort)).toHaveLength(6);
+  expect(shownButtons(READY, userHidesAbort)).toHaveLength(7);
+  expect(ids(shownButtons(READY, userHidesContinue))).not.toContain("continue");
+});
+
+test("Continue starts shown, its toggle is stored like the others, and the Abort merge decision stays", () => {
+  const storage = memoryStorage({ [KEY]: '{"abortMerge":false}' });
+  const buttons = createHiddenButtons(storage);
+  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
+
+  buttons.toggle("continue");
+
+  expect(hiddenList(buttons)).toEqual(["continue", "undo", "redo"]);
+  expect(storedDecisions(storage)).toEqual({ abortMerge: false, continue: true });
+  expect(hiddenList(createHiddenButtons(storage))).toEqual(["continue", "undo", "redo"]);
 });
 
 test.each([

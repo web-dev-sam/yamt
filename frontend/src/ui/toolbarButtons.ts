@@ -2,10 +2,11 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
 import type { AbortState } from "./aborting";
-import { abortLabel } from "./operationText";
+import { abortLabel, continueLabel } from "./operationText";
 import { parseStored, storedValue } from "./windowStorage";
 
 export const TOOLBAR_BUTTONS = [
+  "continue",
   "abortMerge",
   "previous",
   "next",
@@ -19,6 +20,10 @@ export const TOOLBAR_BUTTONS = [
 export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
 
 export type ListedButton = { readonly id: ToolbarButtonId; readonly label: string };
+
+type OperationButtonId = "continue" | "abortMerge";
+
+export type IconButtonId = Exclude<ToolbarButtonId, "continue">;
 
 export type HiddenButtons = {
   readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
@@ -39,7 +44,7 @@ const OLD_FORMAT_IDS = [
   "redo",
 ] as const satisfies readonly ToolbarButtonId[];
 
-const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {
+const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {
   previous: "Previous change",
   next: "Next change",
   collapse: "Collapse unchanged fragments",
@@ -52,6 +57,7 @@ const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> =
 // Abort, Undo and Redo start hidden until the user shows them (plan §2 #58, #74, #88); the
 // keys of Undo and Redo still work.
 const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+  continue: false,
   abortMerge: true,
   previous: false,
   next: false,
@@ -64,10 +70,14 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
 
 export function listedButtons(abort: AbortState): readonly ListedButton[] {
   return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
-    if (id !== "abortMerge") {
+    if (id !== "continue" && id !== "abortMerge") {
       return [{ id, label: LABELS[id] }];
     }
-    return abort.kind === "none" ? [] : [{ id, label: abortLabel(abort.operation) }];
+    if (abort.kind === "none") {
+      return [];
+    }
+    const { operation } = abort;
+    return [{ id, label: id === "continue" ? continueLabel(operation) : abortLabel(operation) }];
   });
 }
 

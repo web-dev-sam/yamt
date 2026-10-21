@@ -1,9 +1,9 @@
 import type { ShallowRef } from "vue";
 
-import type { DiskChange, DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
+import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
 import type { Asking } from "./asking";
-import { noteDiskChanges, type DiskChangeTarget } from "./diskChanges";
-import type { DiskNotice } from "./noticeText";
+import { landed, type Stop } from "./currentStop";
+import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import { attempt, clearProblemAbout, reportFailure, type Problem, type Relist } from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import type {
@@ -12,9 +12,7 @@ import type {
   MergeSummary,
   ResultSnapshot,
 } from "./useMergeController";
-import { fetchView, type Shown } from "./views";
-
-export type Stop = { dropped: boolean };
+import { reload } from "./views";
 
 type Claim = { writes: number; overtaken: boolean };
 
@@ -44,38 +42,6 @@ export type FinishRequest = Omit<WriteRequest, "text"> & {
 export type FormatOutcomes = ShallowRef<ReadonlyMap<string, FormatOutcome>>;
 
 export type Saving = { save(request: SaveRequest): Promise<void> };
-
-export async function landed<T>(stop: Readonly<Stop>, call: () => Promise<T>): Promise<T | null> {
-  const reply = await call();
-  return stop.dropped ? null : reply;
-}
-
-async function reload(
-  target: Shown & Relist,
-  path: string,
-  stop: Readonly<Stop>,
-): Promise<boolean> {
-  const view = await landed(stop, () => fetchView(target, path));
-  if (view === null) {
-    return false;
-  }
-  if (!view.ok) {
-    await reportFailure(target, { action: "open", path, cause: view.cause });
-    return false;
-  }
-  view.value();
-  return true;
-}
-
-export async function applyDiskChanges(
-  target: DiskChangeTarget & Relist,
-  changes: readonly DiskChange[],
-  when: DiskNotice["when"],
-  stop: Readonly<Stop>,
-): Promise<void> {
-  const shown = noteDiskChanges(target, changes, when);
-  await Promise.all(shown.map((path) => reload(target, path, stop)));
-}
 
 export async function afterWrite(
   target: WriteTarget,

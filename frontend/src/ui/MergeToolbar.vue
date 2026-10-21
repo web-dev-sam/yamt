@@ -10,12 +10,13 @@ import Redo2 from "~icons/lucide/redo-2";
 import Undo2 from "~icons/lucide/undo-2";
 
 import type { Point } from "./menuPosition";
+import OperationButtons from "./OperationButtons.vue";
 import { finishMustAsk } from "./question";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useAppStore } from "./store";
 import { summaryLabel } from "./summaryLabel";
-import { shownButtons, type ToolbarButtonId } from "./toolbarButtons";
+import { shownButtons, type IconButtonId } from "./toolbarButtons";
 import ToolbarMenu from "./ToolbarMenu.vue";
 import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
 
@@ -50,7 +51,7 @@ const menuAt = shallowRef<Point | null>(null);
 const noSummary = computed(() => props.summary === null);
 const abortRunning = computed(() => abortState.value.kind === "running");
 
-const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+const ICON_BUTTONS: Readonly<Record<IconButtonId, IconButton>> = {
   abortMerge: {
     icon: GitPullRequestClosed,
     keepsKeyboard: true,
@@ -123,11 +124,12 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
   },
 };
 
+const listed = computed(() => shownButtons(abortState.value, hiddenButtons.value));
+const continueShown = computed(() => listed.value.some((button) => button.id === "continue"));
 const shown = computed(() =>
-  shownButtons(abortState.value, hiddenButtons.value).map((button) => ({
-    ...button,
-    ...ICON_BUTTONS[button.id],
-  })),
+  listed.value.flatMap((button) =>
+    button.id === "continue" ? [] : [{ ...button, ...ICON_BUTTONS[button.id] }],
+  ),
 );
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -183,6 +185,7 @@ function closeMenu(): void {
     >
       Mark resolved
     </button>
+    <OperationButtons v-if="continueShown" class="mr-2" :abort="false" />
     <button
       v-for="button in shown"
       :key="button.id"

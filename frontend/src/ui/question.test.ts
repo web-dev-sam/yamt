@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { parseKey } from "../ipc";
 import { serverKey, type ServerSpec } from "../lsp";
-import { exitMustAsk, finishMustAsk, questionText } from "./question";
+import { endsWithStop, exitMustAsk, finishMustAsk, questionText } from "./question";
 
 const LINUX = "Linux x86_64";
 
@@ -171,4 +171,45 @@ test("aborting a rebase names it and counts the commits already replayed", () =>
   expect(text.message).toBe(
     "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
   );
+});
+
+test("Continue with unsaved edits names the files and continues or commits by the operation", () => {
+  const files = ["src/App.vue", "a.ts"];
+
+  expect(questionText({ kind: "continueUnsaved", operation: "Rebase", files }, LINUX)).toEqual({
+    title: "Unsaved Changes",
+    message:
+      "These files have changes that are not saved to disk. Continue the rebase without saving them?",
+    list: { kind: "files", files },
+    note: null,
+    confirm: "Continue Without Saving",
+    cancel: "Cancel",
+  });
+  expect(questionText({ kind: "continueUnsaved", operation: "Merge", files }, LINUX)).toMatchObject(
+    {
+      message:
+        "These files have changes that are not saved to disk. Commit the merge without saving them?",
+      confirm: "Commit Without Saving",
+    },
+  );
+});
+
+test("the reword question says the message stays as git prepares it (plan §2 #91)", () => {
+  expect(questionText({ kind: "rewords" }, LINUX)).toEqual({
+    title: "Commit Messages",
+    message:
+      "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
+    list: { kind: "none" },
+    note: null,
+    confirm: "Continue rebase",
+    cancel: "Cancel",
+  });
+});
+
+test("both Continue questions are about the stop and end with it; the exit question does not", () => {
+  expect(endsWithStop({ kind: "continueUnsaved", operation: "Rebase", files: ["a.ts"] })).toBe(
+    true,
+  );
+  expect(endsWithStop({ kind: "rewords" })).toBe(true);
+  expect(endsWithStop({ kind: "exit", files: ["a.ts"] })).toBe(false);
 });

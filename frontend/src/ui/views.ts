@@ -1,7 +1,8 @@
 import type { ShallowRef } from "vue";
 
 import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
-import { attempt, type Outcome, type Problem } from "./problem";
+import { landed, type Stop } from "./currentStop";
+import { attempt, reportFailure, type Outcome, type Problem, type Relist } from "./problem";
 
 export type Shown = {
   readonly source: ChunkSource;
@@ -49,4 +50,21 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<() 
   }
   const data = await attempt(() => shown.source.loadFile(path));
   return data.ok ? { ok: true, value: () => putOpened(shown, data.value) } : data;
+}
+
+export async function reload(
+  target: Shown & Relist,
+  path: string,
+  stop: Readonly<Stop>,
+): Promise<boolean> {
+  const view = await landed(stop, () => fetchView(target, path));
+  if (view === null) {
+    return false;
+  }
+  if (!view.ok) {
+    await reportFailure(target, { action: "open", path, cause: view.cause });
+    return false;
+  }
+  view.value();
+  return true;
 }

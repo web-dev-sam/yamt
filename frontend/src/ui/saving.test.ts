@@ -14,12 +14,12 @@ import {
   type WriteReply,
   type WriteRequest,
 } from "../ipc";
+import { applyDiskChanges } from "./diskChanges";
 import type { Notice } from "./noticeText";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
 import {
   afterWrite,
-  applyDiskChanges,
   claimWrite,
   createSaving,
   dropStop,
@@ -712,6 +712,37 @@ test.each<[string, SourceResult<FileMergeData>]>([
     expect([target.opened.value, target.problem.value, target.lists]).toEqual([[], null, []]);
   },
 );
+
+test("a reset whose reload is still waiting when the stop is dropped keeps the new stop's open problem", async () => {
+  vi.spyOn(console, "info").mockImplementation(() => undefined);
+  const loads: ((view: SourceResult<FileMergeData>) => void)[] = [];
+  const target = writeTarget([entry("a.ts")], {
+    resetFile: () => Promise.resolve(written([entry("a.ts")])),
+    loadFile: () =>
+      new Promise((resolve) => {
+        loads.push(resolve);
+      }),
+  });
+  const resetting = reset(target, "a.ts", VERSION);
+  await vi.waitFor(() => {
+    expect(target.loads).toEqual(["a.ts"]);
+  });
+
+  dropStop(target);
+  const newStopProblem: Problem = {
+    action: "open",
+    path: "a.ts",
+    cause: { kind: "Git", message: "the new stop's" },
+  };
+  target.problem.value = newStopProblem;
+  const opened = target.opened.value;
+  loads[0]?.({ ok: true, value: { ...MAGIC_KEYS, path: "a.ts" } });
+  await resetting;
+
+  expect(target.problem.value).toBe(newStopProblem);
+  expect(target.opened.value).toBe(opened);
+  expect(target.lists).toEqual([]);
+});
 
 test.each(WRITES)(
   "a %s git answers StopMovedOn is reported and lists again, which goes on to the new stop",

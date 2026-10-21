@@ -2562,3 +2562,77 @@ test("a focus list that finds git moved on outside drops the old stop, names the
   store.dismissNotice("movedOn");
   expect(store.notices.value).toEqual([]);
 });
+
+test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
+  spyConsole();
+  const rebase: OperationView = {
+    kind: "Rebase",
+    branch: "feature",
+    onto: null,
+    replaying: null,
+    progress: { step: 1, total: 3 },
+    editor_steps_ahead: false,
+  };
+  const step2: OperationView = { ...rebase, progress: { step: 2, total: 3 } };
+  const sides: SideNames = { local: null, remote: null };
+  const answers: SourceResult<Listing>[] = [
+    ok({
+      kind: "Files",
+      files: [resolvedEntry("a.ts")],
+      diskChanges: [],
+      operation: rebase,
+      sides,
+    }),
+    ok({ kind: "Files", files: [entry("c.ts")], diskChanges: [], operation: step2, sides }),
+  ];
+  const { source, calls } = choiceSource({
+    listStop: () => {
+      calls.push("listStop");
+      return Promise.resolve(answers.shift() ?? ok({ kind: "MovedOn" }));
+    },
+    continueOperation: () => {
+      calls.push("continueOperation");
+      return Promise.resolve(ok({ kind: "Stopped", message: "CONFLICT in c.ts" }));
+    },
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  expect(store.continueState.value).toBe("ready");
+
+  await store.continueOperation();
+
+  expect(calls).toEqual([
+    "listStop",
+    "loadFile a.ts",
+    "continueOperation",
+    "listStop",
+    "loadFile c.ts",
+  ]);
+  expect(store.files.value).toEqual([entry("c.ts")]);
+  expect(store.operation.value).toBe(step2);
+  expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
+  expect(store.active.value).toBe("c.ts");
+  expect(store.problem.value).toBeNull();
+  expect(store.continueState.value).toBe("filesLeft");
+});
+
+test("a take git refuses stays on the file: no move to the next unresolved one", async () => {
+  spyConsole();
+  const refused: SourceFailure = { kind: "Git", message: "index.lock exists" };
+  const { source, calls } = choiceSource({
+    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+    takeSide: (path, side) => {
+      calls.push(`takeSide ${path} ${side}`);
+      return Promise.resolve({ ok: false, failure: refused });
+    },
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  expect(store.active.value).toBe(LOGO);
+
+  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
+
+  expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
+  expect(store.active.value).toBe(LOGO);
+  expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: refused });
+});

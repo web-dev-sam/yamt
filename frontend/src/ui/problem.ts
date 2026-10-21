@@ -21,10 +21,11 @@ export type ProblemCause = SourceFailure | Unexpected;
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
   | {
-      readonly action: "abort";
+      readonly action: "abort" | "continue";
       readonly operation: OperationKind;
       readonly cause: ProblemCause;
     }
+  | { readonly action: "close" }
   | {
       readonly action: "stopped";
       readonly operation: OperationKind | null;
@@ -65,7 +66,11 @@ export function logProblem(problem: Problem): void {
       log.error(event, { ...problem.cause });
       return;
     case "abort":
+    case "continue":
       log.error(event, { operation: problem.operation, ...problem.cause });
+      return;
+    case "close":
+      log.info("store.close_refused", { reason: "git_running" });
       return;
     case "stopped":
       log.info("store.stopped", {
@@ -110,16 +115,7 @@ export async function reportFailure(
 
 export function clearProblemAbout(target: Target, path: string): void {
   const problem = target.problem.value;
-  if (
-    problem === null ||
-    problem.action === "list" ||
-    problem.action === "abort" ||
-    problem.action === "stopped" ||
-    problem.action === "settings"
-  ) {
-    return;
-  }
-  if (problem.path === path) {
+  if (problem !== null && "path" in problem && problem.path === path) {
     target.problem.value = null;
   }
 }

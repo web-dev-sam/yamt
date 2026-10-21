@@ -311,7 +311,7 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
 test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
   quiet();
   const stop = stopAt([]);
-  const { abortOperation } = createAborting(stop);
+  const { abortOperation } = createAborting(Object.assign(stop, { running: shallowRef(false) }));
   const pressed = abortOperation();
   expect(stop.asking.question.value?.kind).toBe("abort");
 

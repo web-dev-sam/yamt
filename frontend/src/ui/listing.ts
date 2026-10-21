@@ -1,15 +1,15 @@
 import type { ShallowRef } from "vue";
 
 import type { FileEntry, OperationView, SideNames } from "../ipc";
-import type { DiskChangeTarget } from "./diskChanges";
+import { landed, type Stop } from "./currentStop";
+import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import type { DiskNotice } from "./noticeText";
 import { attempt, report, type Relist } from "./problem";
-import { applyDiskChanges, landed, type Writing } from "./saving";
 import type { StopEnd } from "./stops";
 
 type ListTarget = DiskChangeTarget &
-  Relist &
-  Pick<Writing, "stop"> & {
+  Relist & {
+    readonly stop: Stop;
     readonly files: ShallowRef<readonly FileEntry[]>;
     readonly operation: ShallowRef<OperationView | null>;
     readonly sideNames: ShallowRef<SideNames>;
