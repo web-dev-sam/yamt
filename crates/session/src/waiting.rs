@@ -4,6 +4,7 @@ use yamt_gitio::{OURS_LABEL, THEIRS_LABEL};
 use yamt_merge_core::{Chunk, ChunkKind};
 
 use crate::markers::{Block, Piece, parse, split_lines};
+use crate::sides::Side;
 
 /// What Save writes for this change while a side of it still waits (plan §2 #69).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -11,10 +12,12 @@ use crate::markers::{Block, Piece, parse, split_lines};
 pub enum Waiting {
     /// One side changed these lines, or both the same way: written applied, as git wrote it.
     SideLines,
-    /// A conflict: `open`, the local section, `between` (base section if any, then the separator),
-    /// the remote section, `close`. Lines without line breaks.
+    /// A conflict as git writes it: `open`, the section of the pane `first` (git's ours: HEAD),
+    /// `between` (base section if any, then the separator), the other pane's section, `close`.
+    /// Lines without line breaks.
     Markers {
         open: String,
+        first: Side,
         between: Vec<String>,
         close: String,
     },
@@ -22,7 +25,8 @@ pub enum Waiting {
     AsShown,
 }
 
-/// The marker lines git writes around a conflict in one file, without line breaks.
+/// The marker lines git writes around a conflict in one file, without line breaks, and the pane
+/// showing git's ours, whose section git writes first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkerStyle {
     open: String,
@@ -30,14 +34,15 @@ pub struct MarkerStyle {
     base: Option<String>,
     separator: String,
     close: String,
+    ours_pane: Side,
 }
 
 impl MarkerStyle {
     /// The marker lines of the first block in `disk`, else the `fallback`.
     #[must_use]
-    pub fn found_in(disk: &[u8], marker_size: usize) -> MarkerStyle {
+    pub fn found_in(disk: &[u8], marker_size: usize, ours_pane: Side) -> MarkerStyle {
         let Ok(text) = std::str::from_utf8(disk) else {
-            return MarkerStyle::fallback(marker_size);
+            return MarkerStyle::fallback(marker_size, ours_pane);
         };
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
         let pieces = parse(&split_lines(disk), marker_size);
@@ -46,20 +51,21 @@ impl MarkerStyle {
             Piece::Settled(_) | Piece::Raw(_) => None,
         });
         match first_block {
-            Some(block) => style_of(&lines, block),
-            None => MarkerStyle::fallback(marker_size),
+            Some(block) => style_of(&lines, block, ours_pane),
+            None => MarkerStyle::fallback(marker_size, ours_pane),
         }
     }
 
     /// Merge style with the labels `Repo::merge_file` passes to `git merge-file` (gitio
     /// `merge_file.rs`).
     #[must_use]
-    pub fn fallback(marker_size: usize) -> MarkerStyle {
+    pub fn fallback(marker_size: usize, ours_pane: Side) -> MarkerStyle {
         MarkerStyle {
             open: format!("{} {OURS_LABEL}", "<".repeat(marker_size)),
             base: None,
             separator: "=".repeat(marker_size),
             close: format!("{} {THEIRS_LABEL}", ">".repeat(marker_size)),
+            ours_pane,
         }
     }
 
@@ -83,6 +89,7 @@ impl MarkerStyle {
         between.push(self.separator.clone());
         Waiting::Markers {
             open: self.open.clone(),
+            first: self.ours_pane,
             between,
             close: self.close.clone(),
         }
@@ -90,22 +97,24 @@ impl MarkerStyle {
 }
 
 /// The marker lines of `block`, copied as they are from the file's `lines`.
-pub(crate) fn block_markers(lines: &[&str], block: &Block) -> Waiting {
+pub(crate) fn block_markers(lines: &[&str], block: &Block, ours_pane: Side) -> Waiting {
     let between = (block.ours.end..block.theirs.start).map(|at| line_text(lines, at));
     Waiting::Markers {
         open: line_text(lines, block.whole.start),
+        first: ours_pane,
         between: between.collect(),
         close: line_text(lines, block.whole.end - 1),
     }
 }
 
-fn style_of(lines: &[&str], block: &Block) -> MarkerStyle {
+fn style_of(lines: &[&str], block: &Block, ours_pane: Side) -> MarkerStyle {
     let has_base = block.ours.end + 1 < block.theirs.start;
     MarkerStyle {
         open: line_text(lines, block.whole.start),
         base: has_base.then(|| line_text(lines, block.ours.end)),
         separator: line_text(lines, block.theirs.start - 1),
         close: line_text(lines, block.whole.end - 1),
+        ours_pane,
     }
 }
 
@@ -131,6 +140,7 @@ mod tests {
     use super::*;
     use crate::markers::DEFAULT_MARKER_SIZE;
     use crate::merge_data::Texts;
+    use crate::orientation::{OURS_LEFT, THEIRS_LEFT};
     use crate::seed::seed;
 
     const MERGE: &[u8] = include_bytes!("../tests/markers/style-merge.txt");
@@ -149,7 +159,12 @@ mod tests {
             base: base.map(str::to_owned),
             separator: separator.to_owned(),
             close: close.to_owned(),
+            ours_pane: Side::Local,
         }
+    }
+
+    fn found_in(disk: &[u8], marker_size: usize) -> MarkerStyle {
+        MarkerStyle::found_in(disk, marker_size, Side::Local)
     }
 
     #[test]
@@ -161,26 +176,23 @@ mod tests {
             "=======",
             ">>>>>>> theirs",
         );
-        assert_eq!(MarkerStyle::found_in(MERGE, DEFAULT_MARKER_SIZE), merge);
-        assert_eq!(MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE), diff3);
-        assert_eq!(
-            MarkerStyle::found_in(ZDIFF3.as_bytes(), DEFAULT_MARKER_SIZE),
-            diff3
-        );
+        assert_eq!(found_in(MERGE, DEFAULT_MARKER_SIZE), merge);
+        assert_eq!(found_in(DIFF3, DEFAULT_MARKER_SIZE), diff3);
+        assert_eq!(found_in(ZDIFF3.as_bytes(), DEFAULT_MARKER_SIZE), diff3);
         let crlf = style(
             "<<<<<<< HEAD",
             Some("||||||| 8956f4f"),
             "=======",
             ">>>>>>> theirs",
         );
-        assert_eq!(MarkerStyle::found_in(CRLF, DEFAULT_MARKER_SIZE), crlf);
+        assert_eq!(found_in(CRLF, DEFAULT_MARKER_SIZE), crlf);
         let size_12 = style(
             "<<<<<<<<<<<< HEAD",
             Some("|||||||||||| e87a625"),
             "============",
             ">>>>>>>>>>>> theirs",
         );
-        assert_eq!(MarkerStyle::found_in(SIZE_12, SIZE_12_MARKERS), size_12);
+        assert_eq!(found_in(SIZE_12, SIZE_12_MARKERS), size_12);
     }
 
     #[test]
@@ -191,20 +203,14 @@ mod tests {
             "============",
             ">>>>>>>>>>>> theirs",
         );
-        assert_eq!(MarkerStyle::fallback(SIZE_12_MARKERS), fallback);
         assert_eq!(
-            MarkerStyle::found_in(SIZE_12, DEFAULT_MARKER_SIZE).open,
-            "<<<<<<< ours"
-        );
-        assert_eq!(
-            MarkerStyle::found_in(b"no markers\n", SIZE_12_MARKERS),
+            MarkerStyle::fallback(SIZE_12_MARKERS, Side::Local),
             fallback
         );
+        assert_eq!(found_in(SIZE_12, DEFAULT_MARKER_SIZE).open, "<<<<<<< ours");
+        assert_eq!(found_in(b"no markers\n", SIZE_12_MARKERS), fallback);
         let latin1 = b"<<<<<<< \xe9\nx\n=======\ny\n>>>>>>> theirs\n";
-        assert_eq!(
-            MarkerStyle::found_in(latin1, DEFAULT_MARKER_SIZE).open,
-            "<<<<<<< ours"
-        );
+        assert_eq!(found_in(latin1, DEFAULT_MARKER_SIZE).open, "<<<<<<< ours");
     }
 
     fn chunk(kind: ChunkKind, base: LineRange<BaseLine>) -> Chunk {
@@ -233,18 +239,20 @@ mod tests {
                 len: 3,
             },
         );
-        let diff3 = MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE);
+        let diff3 = found_in(DIFF3, DEFAULT_MARKER_SIZE);
         let expected = Waiting::Markers {
             open: "<<<<<<< HEAD".to_owned(),
+            first: Side::Local,
             between: ["||||||| 8409db1", "one", "two", "three", "======="]
                 .map(str::to_owned)
                 .to_vec(),
             close: ">>>>>>> theirs".to_owned(),
         };
         assert_eq!(diff3.waiting(&conflict, &base_lines), expected);
-        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE);
+        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Side::Remote);
         let expected = Waiting::Markers {
             open: "<<<<<<< ours".to_owned(),
+            first: Side::Remote,
             between: vec!["=======".to_owned()],
             close: ">>>>>>> theirs".to_owned(),
         };
@@ -257,7 +265,7 @@ mod tests {
             start: BaseLine(0),
             len: 1,
         };
-        let diff3 = MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE);
+        let diff3 = found_in(DIFF3, DEFAULT_MARKER_SIZE);
         for kind in [
             ChunkKind::LocalOnly,
             ChunkKind::RemoteOnly,
@@ -273,42 +281,51 @@ mod tests {
     fn rebuilt_block(waiting: &Waiting, local: &[&str], remote: &[&str]) -> String {
         let Waiting::Markers {
             open,
+            first,
             between,
             close,
         } = waiting
         else {
             panic!("expected markers, got {waiting:?}");
         };
+        let (first, second) = match first {
+            Side::Local => (local, remote),
+            Side::Remote => (remote, local),
+        };
         let mut block = vec![open.as_str()];
-        block.extend(local.iter().map(|line| without_line_break(line)));
+        block.extend(first.iter().map(|line| without_line_break(line)));
         block.extend(between.iter().map(String::as_str));
-        block.extend(remote.iter().map(|line| without_line_break(line)));
+        block.extend(second.iter().map(|line| without_line_break(line)));
         block.push(close);
         block.join("\n") + "\n"
     }
 
     #[test]
     fn an_exact_block_s_markers_and_its_section_lines_rebuild_the_block_exactly() {
-        let texts = Texts {
-            base: BASE.to_owned(),
-            local: OURS.to_owned(),
-            remote: THEIRS.to_owned(),
-            deleted: None,
-        };
-        let seeded = seed(ZDIFF3, DEFAULT_MARKER_SIZE, &texts);
-        let local: Vec<&str> = OURS.split_inclusive('\n').collect();
-        let remote: Vec<&str> = THEIRS.split_inclusive('\n').collect();
-        let blocks = [2..17, 22..29];
-        let disk: Vec<&str> = ZDIFF3.split_inclusive('\n').collect();
+        for (orientation, local, remote) in [(OURS_LEFT, OURS, THEIRS), (THEIRS_LEFT, THEIRS, OURS)]
+        {
+            let texts = Texts {
+                base: BASE.to_owned(),
+                local: local.to_owned(),
+                remote: remote.to_owned(),
+                deleted: None,
+            };
+            let seeded = seed(ZDIFF3, DEFAULT_MARKER_SIZE, &texts, orientation);
+            let local: Vec<&str> = local.split_inclusive('\n').collect();
+            let remote: Vec<&str> = remote.split_inclusive('\n').collect();
+            let blocks = [2..17, 22..29];
+            let disk: Vec<&str> = ZDIFF3.split_inclusive('\n').collect();
 
-        assert_eq!(seeded.chunks.len(), blocks.len());
-        for (chunk, block) in seeded.chunks.iter().zip(blocks) {
-            let local_lines =
-                chunk.chunk.local.start.0 as usize..chunk.chunk.local.end().0 as usize;
-            let remote_lines =
-                chunk.chunk.remote.start.0 as usize..chunk.chunk.remote.end().0 as usize;
-            let rebuilt = rebuilt_block(&chunk.waiting, &local[local_lines], &remote[remote_lines]);
-            assert_eq!(rebuilt, disk[block].concat());
+            assert_eq!(seeded.chunks.len(), blocks.len());
+            for (chunk, block) in seeded.chunks.iter().zip(blocks) {
+                let local_lines =
+                    chunk.chunk.local.start.0 as usize..chunk.chunk.local.end().0 as usize;
+                let remote_lines =
+                    chunk.chunk.remote.start.0 as usize..chunk.chunk.remote.end().0 as usize;
+                let (local, remote) = (&local[local_lines], &remote[remote_lines]);
+                let rebuilt = rebuilt_block(&chunk.waiting, local, remote);
+                assert_eq!(rebuilt, disk[block].concat());
+            }
         }
     }
 
@@ -324,7 +341,7 @@ mod tests {
         let raw = ZDIFF3.replace("eight-theirs\n>>>>>>> theirs\n", "eight-theirs\n");
 
         for disk in [edited, raw] {
-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
+            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
             let waiting: Vec<&Waiting> = seeded.chunks.iter().map(|chunk| &chunk.waiting).collect();
             assert!(waiting.contains(&&Waiting::AsShown), "{waiting:?}");
         }

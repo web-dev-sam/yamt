@@ -68,6 +68,7 @@ const DOMAIN_WORDS = {
 const WAITING = {
   kind: "Markers",
   open: "<<<<<<< ours",
+  first: "local",
   between: ["||||||| base", "b", "======="],
   close: ">>>>>>> theirs",
 };
@@ -209,6 +210,7 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
     waiting: {
       kind: "Markers",
       open: "<<<<<<< ours",
+      first: "local",
       between: ["======="],
       close: ">>>>>>> theirs",
     },
@@ -368,15 +370,36 @@ test.each([
   ],
   [
     "markers without their close line",
-    record("x.ts", { waiting: { kind: "Markers", open: "<<<<<<< ours", between: [] } }),
+    record("x.ts", {
+      waiting: { kind: "Markers", open: "<<<<<<< ours", first: "local", between: [] },
+    }),
     "chunks.0.waiting.close",
   ],
   [
     "markers whose between is one string",
     record("x.ts", {
-      waiting: { kind: "Markers", open: "<<<<<<< ours", between: "=======", close: ">>>>>>>" },
+      waiting: {
+        kind: "Markers",
+        open: "<<<<<<< ours",
+        first: "local",
+        between: "=======",
+        close: ">>>>>>>",
+      },
     }),
     "chunks.0.waiting.between",
+  ],
+  [
+    "markers whose first section is no side",
+    record("x.ts", {
+      waiting: {
+        kind: "Markers",
+        open: "<<<<<<< ours",
+        first: "ours",
+        between: ["======="],
+        close: ">>>>>>>",
+      },
+    }),
+    "chunks.0.waiting.first",
   ],
   ["a missing waiting", record("x.ts", { waiting: undefined }), "chunks.0.waiting"],
 ])("a record with %s is rejected naming the file", (_case, json, detail) => {

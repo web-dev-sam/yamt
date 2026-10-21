@@ -9,6 +9,8 @@ use yamt_session::{FileMergeData, MergeChunk, MergeSession, Middle, Waiting, Wri
 
 mod samples;
 use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+mod window;
+use window::{middle_text, saved_with_everything_waiting};
 
 const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden");
 const SAMPLE: &str = "sample.txt";
@@ -73,53 +75,6 @@ fn loaded_again(dir: &TempDir, path: &str) -> FileMergeData {
     let mut session = MergeSession::open(dir.path()).unwrap();
     session.refresh().unwrap();
     session.load(path).unwrap()
-}
-
-fn middle_text(data: &FileMergeData) -> &str {
-    match &data.middle {
-        Middle::Stages { text } | Middle::Disk { text } => text,
-        Middle::DiskNotText { found } => panic!("not text: {found:?}"),
-    }
-}
-
-fn lines<T: Copy>(lines: &[T], range: (u32, u32)) -> Vec<T> {
-    lines[range.0 as usize..(range.0 + range.1) as usize].to_vec()
-}
-
-/// What the window's file builder writes with every change still waiting on both sides.
-fn saved_with_everything_waiting(data: &FileMergeData) -> String {
-    let mut middle: Vec<&str> = middle_text(data).split('\n').collect();
-    let local: Vec<&str> = data.local.split('\n').collect();
-    let remote: Vec<&str> = data.remote.split('\n').collect();
-    for chunk in data.chunks.iter().rev() {
-        let local = lines(&local, (chunk.chunk.local.start.0, chunk.chunk.local.len));
-        let remote = lines(
-            &remote,
-            (chunk.chunk.remote.start.0, chunk.chunk.remote.len),
-        );
-        let written = match (&chunk.waiting, chunk.chunk.kind) {
-            (Waiting::SideLines, ChunkKind::RemoteOnly) => remote,
-            (Waiting::SideLines, _) => local,
-            (
-                Waiting::Markers {
-                    open,
-                    between,
-                    close,
-                },
-                _,
-            ) => {
-                let between = between.iter().map(String::as_str);
-                let mut block = vec![open.as_str()];
-                block.extend(local.into_iter().chain(between).chain(remote));
-                block.push(close);
-                block
-            }
-            (Waiting::AsShown, _) => continue,
-        };
-        let start = chunk.middle.start.0 as usize;
-        middle.splice(start..start + chunk.middle.len as usize, written);
-    }
-    middle.join("\n")
 }
 
 type Ranges = ((u32, u32), (u32, u32));

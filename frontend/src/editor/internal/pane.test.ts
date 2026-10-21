@@ -197,6 +197,7 @@ async function tintedLeft(): Promise<EditorState> {
           waiting: {
             kind: "Markers",
             open: "<<<<<<< ours",
+            first: "local",
             between: ["======="],
             close: ">>>>>>> theirs",
           },

@@ -6,6 +6,7 @@ use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
 use crate::disk::{AtOpen, MarkerRule, OnDisk, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
+use crate::orientation::{GitSide, Orientation};
 use crate::session::{Content, FileState, FileStatus, MergeSession};
 use crate::side_names::read_side_names;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
@@ -17,9 +18,9 @@ enum Stored {
     Submodule,
     Symlink,
     BothDeleted,
-    /// base, local and remote bytes; a deleted side holds base.
+    /// base, ours and theirs bytes, in git's order; a deleted side holds base.
     Regular {
-        deleted: Option<Side>,
+        deleted: Option<GitSide>,
         sides: [Vec<u8>; 3],
     },
 }
@@ -27,16 +28,20 @@ enum Stored {
 impl MergeSession {
     pub fn open(cwd: &Path) -> Result<MergeSession> {
         let repo = Repo::discover(cwd)?;
+        let stop = repo.stop()?;
+        let orientation = Orientation::of(&stop);
         let groups = group_by_path(repo.unmerged()?);
         let paths: Vec<&Path> = groups.iter().map(|(path, _)| path.as_path()).collect();
         let attributes = repo.attributes(&paths)?;
         let config = repo.merge_config()?;
-        let files = open_files(&repo, groups, &attributes, &config)?;
-        let side_names = read_side_names(&repo);
+        let files = open_files(&repo, groups, &attributes, &config, orientation)?;
+        let side_names = read_side_names(&repo, &stop, orientation);
         Ok(MergeSession {
             repo,
             files,
-            side_names,
+            side_names: Box::new(side_names),
+            stop,
+            orientation,
         })
     }
 }
@@ -57,6 +62,7 @@ fn open_files(
     groups: Vec<(PathBuf, CapturedStages)>,
     attributes: &[MergeAttributes],
     config: &MergeConfig,
+    orientation: Orientation,
 ) -> Result<Vec<FileState>> {
     let mut blobs = repo.blob_reader()?;
     let mut check = StartCheck::new(repo);
@@ -64,7 +70,15 @@ fn open_files(
     let mut looks = Vec::with_capacity(groups.len());
     for ((path, stages), found) in groups.into_iter().zip(attributes) {
         let attributes = Attributes::from_git(found, config);
-        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, &attributes)?;
+        let (file, look) = open_file(
+            repo,
+            &mut blobs,
+            &mut check,
+            path,
+            stages,
+            &attributes,
+            orientation,
+        )?;
         opened.push(file);
         looks.push(look);
     }
@@ -85,6 +99,7 @@ fn open_file(
     path: PathBuf,
     stages: CapturedStages,
     attributes: &Attributes,
+    orientation: Orientation,
 ) -> Result<(Opened, StartLook)> {
     let stored = stored(blobs, &stages)?;
     let (disk, look) = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
@@ -108,7 +123,7 @@ fn open_file(
             (None, StartLook::Changed)
         }
     };
-    let content = content(&path, stored);
+    let content = content(&path, stored, orientation);
     let opened = Opened {
         rule: marker_rule(&content, attributes),
         path,
@@ -146,18 +161,18 @@ fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {
     if stages.has_mode(SYMLINK_MODE) {
         return Ok(Stored::Symlink);
     }
-    let deleted = match (&stages.local, &stages.remote) {
+    let deleted = match (&stages.ours, &stages.theirs) {
         (Some(_), Some(_)) => None,
-        (None, Some(_)) => Some(Side::Local),
-        (Some(_), None) => Some(Side::Remote),
+        (None, Some(_)) => Some(GitSide::Ours),
+        (Some(_), None) => Some(GitSide::Theirs),
         (None, None) => return Ok(Stored::BothDeleted),
     };
     let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
-    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
-    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
+    let ours = stage_bytes(blobs, stages.ours.as_ref(), &base)?;
+    let theirs = stage_bytes(blobs, stages.theirs.as_ref(), &base)?;
     Ok(Stored::Regular {
         deleted,
-        sides: [base, local, remote],
+        sides: [base, ours, theirs],
     })
 }
 
@@ -172,7 +187,7 @@ fn stage_bytes(
     }
 }
 
-fn content(path: &Path, stored: Stored) -> Content {
+fn content(path: &Path, stored: Stored, orientation: Orientation) -> Content {
     if path.to_str().is_none() {
         return Content::Unsupported(UnsupportedReason::NonUtf8);
     }
@@ -180,15 +195,18 @@ fn content(path: &Path, stored: Stored) -> Content {
         Stored::Submodule => return Content::Unsupported(UnsupportedReason::Submodule),
         Stored::Symlink => return Content::Unsupported(UnsupportedReason::Symlink),
         Stored::BothDeleted => return Content::Unsupported(UnsupportedReason::LocalDeleted),
-        Stored::Regular { deleted, sides } => (deleted, sides),
+        Stored::Regular { deleted, sides } => (deleted.map(|side| orientation.pane(side)), sides),
     };
     match decode_sides(sides) {
-        Ok([base, local, remote]) => Content::Text(Texts {
-            base,
-            local,
-            remote,
-            deleted,
-        }),
+        Ok([base, ours, theirs]) => {
+            let (local, remote) = orientation.panes(ours, theirs);
+            Content::Text(Texts {
+                base,
+                local,
+                remote,
+                deleted,
+            })
+        }
         Err(reason) => Content::Unsupported(deleted_reason(deleted).unwrap_or(reason)),
     }
 }

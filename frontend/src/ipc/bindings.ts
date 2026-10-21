@@ -272,10 +272,13 @@ export type Side = "local" | "remote";
 
 export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
 
-/**  What one side of the merge is: a branch, else a commit. */
-export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
+/**
+ *  What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
+ *  patch `git am` applies.
+ */
+export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | { kind: "Revert"; short_id: string; subject: string; message: string } | { kind: "Patch"; subject: string; message: string };
 
-/**  Both sides' names, read once when the session opens; `None` when nothing names that side. */
+/**  Both panes' names, read once when the session opens; `None` when nothing names that side. */
 export type SideNames = {
 	local: SideName | null,
 	remote: SideName | null,
@@ -314,10 +317,11 @@ export type Waiting =
 /**  One side changed these lines, or both the same way: written applied, as git wrote it. */
 { kind: "SideLines" } | 
 /**
- *  A conflict: `open`, the local section, `between` (base section if any, then the separator),
- *  the remote section, `close`. Lines without line breaks.
+ *  A conflict as git writes it: `open`, the section of the pane `first` (git's ours: HEAD),
+ *  `between` (base section if any, then the separator), the other pane's section, `close`.
+ *  Lines without line breaks.
  */
-{ kind: "Markers"; open: string; between: string[]; close: string } | 
+{ kind: "Markers"; open: string; first: Side; between: string[]; close: string } | 
 /**  A region yamt could not place: written as the Result shows it. */
 { kind: "AsShown" };
 

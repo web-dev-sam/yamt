@@ -4,20 +4,30 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
+use yamt_conflict_repo::{
+    ConflictFile, FileKind, Run, TempDir, diverged_repo, git, git_ok, operation_repo,
+};
 use yamt_session::{MergeSession, SideName, SideNames};
 
 const FILE: &str = "cart.ts";
+const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
 
-fn diverged() -> TempDir {
-    diverged_repo(&[ConflictFile {
+fn cart() -> ConflictFile<'static> {
+    ConflictFile {
         path: FILE,
         kind: FileKind::Regular,
         base: Some(b"one\n"),
         local: Some(b"local\n"),
         remote: Some(b"remote\n"),
-    }])
-    .unwrap()
+    }
+}
+
+fn diverged() -> TempDir {
+    diverged_repo(&[cart()]).unwrap()
+}
+
+fn stopped(run: Run) -> TempDir {
+    operation_repo(run, &[cart()]).unwrap()
 }
 
 fn require_conflict(root: &Path, args: &[&str]) {
@@ -204,15 +214,109 @@ fn a_cherry_pick_names_the_branch_and_the_picked_commit() {
 }
 
 #[test]
-fn a_rebase_names_the_commit_it_stands_on_and_the_replayed_commit() {
+fn a_rebase_names_the_replayed_commit_on_the_left_and_the_commit_it_stands_on_on_the_right() {
     let dir = diverged();
     let root = dir.path();
     let local = stdout_line(root, &["rev-parse", "local"]);
     require_conflict(root, &["rebase", "remote"]);
 
     let expected = SideNames {
-        local: Some(commit(root, "remote", "remote", "remote")),
-        remote: Some(commit(root, &local, "local", "local")),
+        local: Some(commit(root, &local, "local", "local")),
+        remote: Some(commit(root, "remote", "remote", "remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
+}
+
+#[test]
+fn both_rebase_backends_name_the_replayed_step_on_the_left() {
+    for run in [Run::Rebase, Run::RebaseApply] {
+        let dir = stopped(run);
+        let root = dir.path();
+
+        let expected = SideNames {
+            local: Some(commit(root, "remote~2", "step 1", STEP_ONE_MESSAGE)),
+            remote: Some(commit(root, "HEAD", "local", "local")),
+        };
+        assert_eq!(side_names_of(root), expected, "{run:?}");
+    }
+}
+
+#[test]
+fn a_rebase_redoing_a_merge_keeps_head_on_the_left_and_names_the_merged_branch() {
+    let dir = stopped(Run::RebaseMerges);
+    let root = dir.path();
+
+    let expected = SideNames {
+        local: Some(commit(root, "HEAD", "onto", "onto")),
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
+}
+
+#[test]
+fn a_squash_merge_names_the_merged_branch() {
+    let dir = stopped(Run::SquashMerge);
+
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(branch("remote")),
+    };
+    assert_eq!(side_names_of(dir.path()), expected);
+}
+
+#[test]
+fn a_squash_merge_of_a_commit_no_branch_points_at_names_the_commit() {
+    let dir = diverged();
+    let root = dir.path();
+    let remote = stdout_line(root, &["rev-parse", "remote"]);
+    git_ok(root, &["branch", "--quiet", "-D", "remote"]).unwrap();
+    require_conflict(root, &["merge", "--squash", &remote]);
+
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(commit(root, &remote, "remote", "remote")),
+    };
+    assert_eq!(side_names_of(root), expected);
+}
+
+#[test]
+fn a_revert_names_the_reverted_commit_as_a_revert() {
+    let dir = stopped(Run::Revert);
+    let root = dir.path();
+
+    let expected = SideNames {
+        local: Some(branch("main")),
+        remote: Some(SideName::Revert {
+            short_id: short_id_as_gitio_reads_config(root, "HEAD~1"),
+            subject: "step 1".to_owned(),
+            message: STEP_ONE_MESSAGE.to_owned(),
+        }),
+    };
+    assert_eq!(side_names_of(root), expected);
+}
+
+#[test]
+fn am_names_the_patch_by_its_subject_and_message() {
+    let dir = stopped(Run::Am);
+
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(SideName::Patch {
+            subject: "step 1".to_owned(),
+            message: STEP_ONE_MESSAGE.to_owned(),
+        }),
+    };
+    assert_eq!(side_names_of(dir.path()), expected);
+}
+
+#[test]
+fn a_cherry_pick_from_a_range_names_the_picked_step() {
+    let dir = stopped(Run::CherryPickRange);
+    let root = dir.path();
+
+    let expected = SideNames {
+        local: Some(branch("local")),
+        remote: Some(commit(root, "remote~2", "step 1", STEP_ONE_MESSAGE)),
     };
     assert_eq!(side_names_of(root), expected);
 }

@@ -99,6 +99,7 @@ const WAITING: v.GenericSchema<Generated.Waiting> = v.variant("kind", [
   v.object({
     kind: v.literal("Markers"),
     open: v.string(),
+    first: memberOf(SIDES),
     between: v.array(v.string()),
     close: v.string(),
   }),

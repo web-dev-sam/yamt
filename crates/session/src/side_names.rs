@@ -1,17 +1,15 @@
 use serde::Serialize;
 use specta::Type;
-use yamt_gitio::{Oid, Repo};
+use yamt_gitio::{Oid, Operation, Rebase, Repo, Stop};
 
 use crate::Result;
+use crate::orientation::{GitSide, Orientation};
 use crate::session::LOG_TARGET;
-use crate::sides::Side;
 
-const HEAD: &str = "HEAD";
-pub(crate) const MERGE_HEAD: &str = "MERGE_HEAD";
-const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
 const QUOTE: char = '\'';
 
-/// What one side of the merge is: a branch, else a commit.
+/// What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
+/// patch `git am` applies.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]
 pub enum SideName {
@@ -23,23 +21,32 @@ pub enum SideName {
         subject: String,
         message: String,
     },
+    Revert {
+        short_id: String,
+        subject: String,
+        message: String,
+    },
+    Patch {
+        subject: String,
+        message: String,
+    },
 }
 
-/// Both sides' names, read once when the session opens; `None` when nothing names that side.
+/// Both panes' names, read once when the session opens; `None` when nothing names that side.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct SideNames {
     pub local: Option<SideName>,
     pub remote: Option<SideName>,
 }
 
-pub(crate) fn read_side_names(repo: &Repo) -> SideNames {
-    SideNames {
-        local: name_or_warn(Side::Local, checked_out(repo)),
-        remote: name_or_warn(Side::Remote, merged_in(repo)),
-    }
+pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
+    let ours = name_or_warn(GitSide::Ours, checked_out(repo, stop.head.as_ref()));
+    let theirs = name_or_warn(GitSide::Theirs, applied(repo, stop.operation.as_ref()));
+    let (local, remote) = orientation.panes(ours, theirs);
+    SideNames { local, remote }
 }
 
-fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName> {
+fn name_or_warn(side: GitSide, read: Result<Option<SideName>>) -> Option<SideName> {
     match read {
         Ok(name) => name,
         Err(error) => {
@@ -49,28 +56,55 @@ fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName> 
     }
 }
 
-fn checked_out(repo: &Repo) -> Result<Option<SideName>> {
+/// HEAD's branch, else HEAD's commit (a rebase detaches HEAD).
+fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<SideName>> {
     if let Some(branch) = repo.current_branch()? {
         return Ok(Some(SideName::Branch {
             name: text(&branch),
         }));
     }
-    match repo.commit_named(HEAD)? {
-        Some(commit) => Ok(Some(commit_name(repo, &commit)?)),
-        None => Ok(None),
+    named(repo, head, commit_name)
+}
+
+/// What git's theirs side is the change of, per operation (plan §2 #87).
+fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
+    let Some(operation) = operation else {
+        return Ok(None);
+    };
+    match operation {
+        Operation::Merge { merging }
+        | Operation::Rebase(Rebase {
+            redoing_merge: Some(merging),
+            ..
+        }) => Ok(Some(merge_head_name(repo, merging)?)),
+        Operation::SquashMerge { merging } => named(repo, merging.as_ref(), merge_head_name),
+        Operation::Rebase(Rebase {
+            redoing_merge: None,
+            replaying: commit,
+            ..
+        })
+        | Operation::CherryPick {
+            picking: commit, ..
+        } => named(repo, commit.as_ref(), commit_name),
+        Operation::Revert { reverting, .. } => named(repo, reverting.as_ref(), revert_name),
+        Operation::Am {
+            subject, message, ..
+        } => Ok(Some(SideName::Patch {
+            subject: text(subject),
+            message: text(message).trim().to_owned(),
+        })),
     }
 }
 
-fn merged_in(repo: &Repo) -> Result<Option<SideName>> {
-    if let Some(commit) = repo.commit_named(MERGE_HEAD)? {
-        return Ok(Some(merge_head_name(repo, &commit)?));
+fn named(
+    repo: &Repo,
+    commit: Option<&Oid>,
+    name: fn(&Repo, &Oid) -> Result<SideName>,
+) -> Result<Option<SideName>> {
+    match commit {
+        Some(commit) => Ok(Some(name(repo, commit)?)),
+        None => Ok(None),
     }
-    for head in REPLAYED_HEADS {
-        if let Some(commit) = repo.commit_named(head)? {
-            return Ok(Some(commit_name(repo, &commit)?));
-        }
-    }
-    Ok(None)
 }
 
 fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
@@ -97,6 +131,15 @@ fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
 fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
     Ok(SideName::Commit {
+        short_id: text(&summary.short_id),
+        subject: text(&summary.subject),
+        message: text(&summary.message).trim().to_owned(),
+    })
+}
+
+fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+    let summary = repo.commit_summary(commit)?;
+    Ok(SideName::Revert {
         short_id: text(&summary.short_id),
         subject: text(&summary.subject),
         message: text(&summary.message).trim().to_owned(),

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use yamt_session::{DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, merge_data};
+use yamt_session::{DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, Side, merge_data};
 
 use crate::case::Case;
 use crate::{Result, print};
@@ -14,7 +14,7 @@ pub(crate) fn fixture(case_dir: &Path) -> Result<()> {
         &case.local,
         &case.remote,
         None,
-        &MarkerStyle::fallback(DEFAULT_MARKER_SIZE),
+        &MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Side::Local),
         DiskVersion(0),
     );
     print(&(serde_json::to_string_pretty(&data)? + "\n"))

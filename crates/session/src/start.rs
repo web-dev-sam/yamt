@@ -49,7 +49,7 @@ pub(crate) enum MergeDriver {
 pub(crate) struct StartFile<'a> {
     pub(crate) path: &'a Path,
     pub(crate) stages: &'a CapturedStages,
-    /// base, local and remote bytes of a regular file with at least one side.
+    /// base, ours and theirs bytes, in git's order, of a regular file with at least one side.
     pub(crate) sides: Option<&'a [Vec<u8>; 3]>,
     pub(crate) attributes: &'a Attributes,
     pub(crate) disk: &'a OnDisk,
@@ -137,20 +137,20 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
     if file.attributes.encoded || file.stages.has_mode(SUBMODULE_MODE) {
         return GitWrote::NotWritten;
     }
-    let local = match (&file.stages.local, &file.stages.remote) {
+    let ours = match (&file.stages.ours, &file.stages.theirs) {
         (None, None) => return GitWrote::Nothing,
         // merge-ort.c, modify/delete: "Version %s of %s left in tree" — the kept side.
         (Some(kept), None) | (None, Some(kept)) => return GitWrote::Stage(kept),
-        (Some(local), Some(_)) => local,
+        (Some(ours), Some(_)) => ours,
     };
     // merge-ort.c `handle_content_merge`: two symlinks keep ours; merge-ll.c `ll_binary_merge`:
     // "For the final merge, it is 'ours' by default", also when any version is binary.
     if file.stages.has_mode(SYMLINK_MODE) {
-        return GitWrote::Stage(local);
+        return GitWrote::Stage(ours);
     }
     let union = match file.attributes.driver {
         MergeDriver::Custom => return GitWrote::Unknown,
-        MergeDriver::Binary => return GitWrote::Stage(local),
+        MergeDriver::Binary => return GitWrote::Stage(ours),
         MergeDriver::Text => false,
         MergeDriver::Union => true,
     };
@@ -158,7 +158,7 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
         Some(sides) if !sides.iter().any(|side| is_binary(side)) => {
             GitWrote::Merged { sides, union }
         }
-        Some(_) | None => GitWrote::Stage(local),
+        Some(_) | None => GitWrote::Stage(ours),
     }
 }
 
@@ -213,7 +213,7 @@ impl<'r> StartCheck<'r> {
             Some(scratch) => scratch,
             None => ScratchDir::create().map_err(|error| error.to_string())?,
         };
-        let [base, local, remote] = sides;
+        let [base, ours, theirs] = sides;
         let options = MergeFileOptions {
             marker_size,
             union,
@@ -222,7 +222,7 @@ impl<'r> StartCheck<'r> {
         self.merge_file_runs += 1;
         let merged = self
             .repo
-            .merge_file(&scratch.0, base, local, remote, &options);
+            .merge_file(&scratch.0, base, ours, theirs, &options);
         self.scratch = Some(scratch);
         merged.map_err(|error| error.to_string())
     }

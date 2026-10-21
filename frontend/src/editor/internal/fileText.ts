@@ -2,7 +2,7 @@ import { ChangeSet, type EditorState, type StateField, type Text } from "@codemi
 
 import { sideLines, wholeLines, type SideDocs } from "./apply";
 import type { ChunkSpan } from "./chunkField";
-import { sideChanged, SIDES, type Side } from "./side";
+import { otherSide, sideChanged, SIDES, type Side } from "./side";
 import { isResolved, isSideOpen, type ChunkState } from "./status";
 
 export function dropsShownText({ chunk, status }: ChunkState): boolean {
@@ -44,7 +44,14 @@ function writtenLines(span: ChunkSpan, doc: Text, sides: SideDocs): string[] | n
   const remote = isSideOpen(chunk, status, "remote")
     ? sideLines(sides.remote, chunk.remote)
     : shown;
-  return [waiting.open, ...local, ...waiting.between, ...remote, waiting.close];
+  const sections: Readonly<Record<Side, string[]>> = { local, remote };
+  return [
+    waiting.open,
+    ...sections[waiting.first],
+    ...waiting.between,
+    ...sections[otherSide(waiting.first)],
+    waiting.close,
+  ];
 }
 
 export function fileText(

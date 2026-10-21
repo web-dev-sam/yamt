@@ -1,7 +1,8 @@
 use yamt_gitio::Repo;
 
 use crate::session::LOG_TARGET;
-use crate::side_names::MERGE_HEAD;
+
+const MERGE_HEAD: &str = "MERGE_HEAD";
 
 pub(crate) fn is_merging(repo: &Repo) -> bool {
     match merge_in_progress(repo) {

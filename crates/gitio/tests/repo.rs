@@ -39,7 +39,7 @@ fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
 
     let entries = repo.unmerged().unwrap();
 
-    let expected_stages = [Stage::Base, Stage::Local, Stage::Remote];
+    let expected_stages = [Stage::Base, Stage::Ours, Stage::Theirs];
     assert_eq!(stages_of(&entries), expected_stages);
     for (entry, text) in entries.iter().zip([BASE, LOCAL, REMOTE]) {
         assert_eq!(entry.path, Path::new(FILE));
@@ -55,7 +55,7 @@ fn add_add_conflict_has_only_local_and_remote_stages() {
 
     let entries = repo.unmerged().unwrap();
 
-    assert_eq!(stages_of(&entries), [Stage::Local, Stage::Remote]);
+    assert_eq!(stages_of(&entries), [Stage::Ours, Stage::Theirs]);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn delete_modify_conflict_has_base_and_the_modifying_side() {
 
     let entries = repo.unmerged().unwrap();
 
-    assert_eq!(stages_of(&entries), [Stage::Base, Stage::Remote]);
+    assert_eq!(stages_of(&entries), [Stage::Base, Stage::Theirs]);
 }
 
 #[test]

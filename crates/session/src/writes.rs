@@ -78,7 +78,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         let index_before = index_before(&self.repo, file)?;
-        let chosen = file.stages.side(side);
+        let chosen = file.stages.of(self.orientation.git_side(side));
         match chosen {
             Some(entry) => self.repo.resolve_with(entry)?,
             None => self.repo.remove_paths(&[file.path.as_path()])?,

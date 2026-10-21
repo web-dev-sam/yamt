@@ -32,6 +32,7 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
 const MARKERS = {
   kind: "Markers",
   open: "<<<<<<< ours",
+  first: "local",
   between: ["======="],
   close: ">>>>>>> theirs",
 };

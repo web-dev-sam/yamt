@@ -6,6 +6,8 @@ use crate::decode::{Eol, detect_eol};
 use crate::locate::{Located, Maps, line_number, side_view};
 use crate::markers::{Block, Piece, parse, split_lines};
 use crate::merge_data::{MergeChunk, MiddleLine, Texts};
+use crate::orientation::{GitSide, Orientation};
+use crate::sides::Side;
 use crate::waiting::{Waiting, block_markers};
 
 /// The middle pane's starting text built from a worktree file, and its open conflicts.
@@ -20,6 +22,8 @@ struct MiddleText<'a> {
     disk_lines: &'a [&'a str],
     base_lines: Vec<&'a str>,
     eol: Eol,
+    /// The pane showing git's ours, whose section a block holds first.
+    ours_pane: Side,
     text: String,
     line_count: u32,
     previous_base_end: u32,
@@ -28,16 +32,22 @@ struct MiddleText<'a> {
     placed: Vec<(LineRange<MiddleLine>, Waiting)>,
 }
 
-pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
+pub(crate) fn seed(
+    disk: &str,
+    marker_size: usize,
+    texts: &Texts,
+    orientation: Orientation,
+) -> Seeded {
     let disk_lines: Vec<&str> = disk.split_inclusive('\n').collect();
     let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
     let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
     let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
-    let maps = Maps::new(&ours, &theirs, texts);
+    let maps = Maps::new(&ours, &theirs, texts, orientation);
     let mut middle = MiddleText {
         disk_lines: &disk_lines,
         base_lines: texts.base.split_inclusive('\n').collect(),
         eol: detect_eol(disk),
+        ours_pane: orientation.pane(GitSide::Ours),
         text: String::with_capacity(disk.len()),
         line_count: 0,
         previous_base_end: 0,
@@ -101,7 +111,7 @@ impl MiddleText<'_> {
         let waiting = match block {
             Some(block) if located.exact => {
                 self.push_base_lines(base);
-                block_markers(self.disk_lines, block)
+                block_markers(self.disk_lines, block, self.ours_pane)
             }
             Some(_) | None => {
                 self.push_disk_lines(disk_lines);
@@ -168,6 +178,7 @@ fn end_open_line(text: &mut String, eol: Eol) {
 mod tests {
     use super::*;
     use crate::markers::DEFAULT_MARKER_SIZE;
+    use crate::orientation::OURS_LEFT;
 
     const BASE: &str = include_str!("../tests/markers/base.txt");
     const OURS: &str = include_str!("../tests/markers/ours.txt");
@@ -240,7 +251,7 @@ mod tests {
         for (style, second_block) in [(ZDIFF3, SECOND_BLOCK_ZDIFF3), (MERGE, SECOND_BLOCK_MERGE)] {
             let disk = style.replace(second_block, "eight-theirs\n");
 
-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
+            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
 
             assert_eq!(seeded.middle, WORKED_MIDDLE);
             assert_eq!(ranges(&seeded), [[(2, 3), (2, 4), (2, 4)]]);
@@ -256,7 +267,7 @@ mod tests {
         let first_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours\n||||||| 8409db1\none\ntwo\nthree\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
         let disk = ZDIFF3.replace(first_block, "one\nTWO\nshared-a\nthree-ours\n");
 
-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
+        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
 
         assert_eq!(ranges(&seeded), [[(11, 1), (11, 1), (11, 1)]]);
         assert_eq!(with_local_applied(&seeded, OURS), OURS);
@@ -271,7 +282,7 @@ mod tests {
     fn an_edit_inside_the_ours_section_leaves_the_block_raw_with_covering_ranges() {
         let disk = MERGE.replace("three-ours\n", "three-ours, edited\n");
 
-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
+        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
 
         let raw_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours, edited\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
         assert!(
@@ -299,7 +310,7 @@ mod tests {
         let texts = texts("a\nb\nc\n", "a\nc\n", "a\nB\nc\n");
         let disk = "a\n<<<<<<< ours\n=======\nB\n>>>>>>> theirs\nc\n";
 
-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
 
         assert_eq!(seeded.middle, "a\nb\nc\n");
         assert_eq!(ranges(&seeded), [[(1, 1), (1, 0), (1, 1)]]);
@@ -315,7 +326,7 @@ mod tests {
         );
         let disk = "DUP\nnew\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
 
-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
 
         assert_eq!(seeded.middle, "DUP\nnew\nmid\nbase\nend\n");
         assert_eq!(ranges(&seeded), [[(3, 1), (2, 1), (3, 1)]]);
@@ -337,7 +348,7 @@ mod tests {
         let disk =
             "{\n  \"a\": 1,\n<<<<<<< ours\n  \"x\": 2\n=======\n  \"y\": 3\n>>>>>>> theirs\n}\n";
 
-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
+        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
 
         assert_eq!(seeded.middle, "{\n  \"a\": 1,\n  \"a\": 1\n}\n}\n");
         assert_eq!(ranges(&seeded), [[(2, 2), (2, 1), (2, 1)]]);
@@ -361,7 +372,7 @@ mod tests {
             block("L2", "R2")
         );
 
-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
+        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
 
         assert_eq!(seeded.middle, "a\nX\ns1\ns2\ns3\ns4\nz\n");
         assert_eq!(base_ranges(&seeded), [(1, 1), (2, 0)]);
@@ -380,7 +391,7 @@ mod tests {
         let crlf_stages = texts(&crlf(BASE), &crlf(OURS), &crlf(THEIRS));
 
         for stages in [crlf_stages, sample_texts()] {
-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &stages);
+            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &stages, OURS_LEFT);
 
             assert_eq!(seeded.middle, crlf(WORKED_MIDDLE));
             assert_eq!(seeded.eol, Eol::CrLf);
@@ -390,7 +401,7 @@ mod tests {
 
     #[test]
     fn settled_text_only_gives_no_chunk_and_the_text_as_it_is() {
-        let seeded = seed(OURS, DEFAULT_MARKER_SIZE, &sample_texts());
+        let seeded = seed(OURS, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
         assert_eq!(seeded.middle, OURS);
         assert_eq!(seeded.chunks, Vec::new());
         assert_eq!(seeded.eol, Eol::Lf);

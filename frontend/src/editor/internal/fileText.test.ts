@@ -20,6 +20,7 @@ const CLOSE = ">>>>>>> theirs";
 const MARKERS: Chunk["waiting"] = {
   kind: "Markers",
   open: OPEN,
+  first: "local",
   between: [SEPARATOR],
   close: CLOSE,
 };
@@ -118,6 +119,7 @@ test.each([
     const diff3: Chunk["waiting"] = {
       kind: "Markers",
       open: "<<<<<<< HEAD",
+      first: "local",
       between: ["||||||| base", "base", SEPARATOR],
       close: ">>>>>>> feature",
     };
@@ -188,6 +190,25 @@ test("a half-decided conflict keeps its markers: the decided section holds the R
 
   expect(written(typed)).toBe(`a\n${OPEN}\ntyped L\n${SEPARATOR}\nR1\nR2\n${CLOSE}\nz\n`);
   expect(written(ignored)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nb\n${CLOSE}\nz\n`);
+});
+
+test("a conflict whose first section is the remote pane's (git's ours, as in a rebase) writes the remote lines first", async () => {
+  const remoteFirst: Chunk["waiting"] = {
+    kind: "Markers",
+    open: OPEN,
+    first: "remote",
+    between: [SEPARATOR],
+    close: CLOSE,
+  };
+  const merge = await opened(
+    { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n" },
+    [{ ...CONFLICT, waiting: remoteFirst }],
+  );
+  const local = decided(merge, "apply", "local");
+  const typed = updated(local, { changes: { from: 2, insert: "typed " } });
+
+  expect(written(merge)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\nL\n${CLOSE}\nz\n`);
+  expect(written(typed)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\ntyped L\n${CLOSE}\nz\n`);
 });
 
 test("a change at the end of a file without a final line break keeps the file without one", async () => {

@@ -30,19 +30,20 @@ impl Oid {
     }
 }
 
+/// An index stage, named as git names it: 1 base, 2 ours (HEAD), 3 theirs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Base,
-    Local,
-    Remote,
+    Ours,
+    Theirs,
 }
 
 impl Stage {
     fn from_index_number(number: &str) -> Option<Stage> {
         match number {
             "1" => Some(Stage::Base),
-            "2" => Some(Stage::Local),
-            "3" => Some(Stage::Remote),
+            "2" => Some(Stage::Ours),
+            "3" => Some(Stage::Theirs),
             _ => None,
         }
     }
@@ -50,8 +51,8 @@ impl Stage {
     fn index_number(self) -> u8 {
         match self {
             Stage::Base => 1,
-            Stage::Local => 2,
-            Stage::Remote => 3,
+            Stage::Ours => 2,
+            Stage::Theirs => 3,
         }
     }
 }
@@ -167,7 +168,7 @@ mod tests {
         let expected = StageEntry {
             mode: 0o100_644,
             oid: Oid::parse(OID).unwrap(),
-            stage: Stage::Local,
+            stage: Stage::Ours,
             path: PathBuf::from("dir/a b.txt"),
         };
         assert_eq!(entries, vec![expected]);

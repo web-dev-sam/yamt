@@ -48,6 +48,7 @@ const LINE = { start: 0, len: 1 };
 const MARKERS: Generated.Waiting = {
   kind: "Markers",
   open: "<<<<<<< ours",
+  first: "local",
   between: ["||||||| base", "b", "======="],
   close: ">>>>>>> theirs",
 };

@@ -85,6 +85,7 @@ async function synthetic(
             ? {
                 kind: "Markers",
                 open: "<<<<<<< ours",
+                first: "local",
                 between: ["======="],
                 close: ">>>>>>> theirs",
               }

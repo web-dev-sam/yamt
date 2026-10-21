@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use specta::Type;
-use yamt_gitio::Repo;
+use yamt_gitio::{Repo, Stop};
 
 use crate::decode::UnsupportedReason;
 use crate::disk::{
@@ -11,8 +11,9 @@ use crate::disk::{
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
 use crate::merging::is_merging;
+use crate::orientation::{GitSide, Orientation};
 use crate::side_names::SideNames;
-use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
+use crate::sides::{FileSides, SUBMODULE_MODE, Side, side_content};
 use crate::stages::CapturedStages;
 use crate::waiting::MarkerStyle;
 use crate::{Error, Result};
@@ -57,7 +58,12 @@ pub(crate) const LOG_TARGET: &str = "session";
 pub struct MergeSession {
     pub(crate) repo: Repo,
     pub(crate) files: Vec<FileState>,
-    pub(crate) side_names: SideNames,
+    // Boxed so that src-tauri's `Startup` and `Merge` enums keep the sizes their
+    // clippy::large_enum_variant checks expect.
+    pub(crate) side_names: Box<SideNames>,
+    pub(crate) stop: Stop,
+    /// Decided once at open from `stop` (plan §2 #86).
+    pub(crate) orientation: Orientation,
 }
 
 pub(crate) struct FileState {
@@ -93,6 +99,12 @@ impl MergeSession {
     #[must_use]
     pub fn side_names(&self) -> &SideNames {
         &self.side_names
+    }
+
+    /// What git was doing when the session opened.
+    #[must_use]
+    pub fn stop(&self) -> &Stop {
+        &self.stop
     }
 
     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
@@ -179,12 +191,14 @@ impl MergeSession {
         let texts = file.require_text()?;
         let version = file.disk_version();
         let path = file.display_path();
+        let orientation = self.orientation;
         match &file.seen {
             Seen::ViewFromDisk(disk) => Ok(disk_merge_data(
                 &path,
                 texts,
                 disk,
                 file.marker_size,
+                orientation,
                 version,
             )),
             Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
@@ -193,7 +207,7 @@ impl MergeSession {
                 &texts.local,
                 &texts.remote,
                 texts.deleted,
-                &file.marker_style(),
+                &file.marker_style(orientation.pane(GitSide::Ours)),
                 version,
             )),
         }
@@ -202,11 +216,13 @@ impl MergeSession {
     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
         let file = find_file(&mut self.files, path)?;
         let mut blobs = self.repo.blob_reader()?;
+        let orientation = self.orientation;
+        let pane = |side| file.stages.of(orientation.git_side(side));
         Ok(FileSides {
             path: file.display_path(),
             reason: file.unsupported_reason(),
-            local: side_content(&mut blobs, file.stages.local.as_ref())?,
-            remote: side_content(&mut blobs, file.stages.remote.as_ref())?,
+            local: side_content(&mut blobs, pane(Side::Local))?,
+            remote: side_content(&mut blobs, pane(Side::Remote))?,
             disk_version: file.disk_version(),
         })
     }
@@ -268,14 +284,14 @@ impl FileState {
             .map_or(DiskVersion(0), |settled| settled.version)
     }
 
-    /// The marker lines git wrote into this file, as found at open.
-    fn marker_style(&self) -> MarkerStyle {
+    /// The marker lines git wrote into this file, as found at open; `ours_pane` shows git's ours.
+    fn marker_style(&self, ours_pane: Side) -> MarkerStyle {
         match &self.at_open {
             AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
-                MarkerStyle::found_in(bytes, self.marker_size)
+                MarkerStyle::found_in(bytes, self.marker_size, ours_pane)
             }
             AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
-                MarkerStyle::fallback(self.marker_size)
+                MarkerStyle::fallback(self.marker_size, ours_pane)
             }
         }
     }
