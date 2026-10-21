@@ -1,16 +1,12 @@
 {
-  "GitOpsSidesBoundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-sides.md",
-    "owned": []
-  },
   "GitOpsRunCore": {
     "agent": "rust-impl",
     "brief": "docs/slices/briefs/3.J-run-core.md",
     "owned": [
       "crates/gitio/**",
       "crates/session/**",
-      "crates/conflict-repo/**"
+      "crates/conflict-repo/**",
+      "crates/cli/**"
     ]
   }
 }

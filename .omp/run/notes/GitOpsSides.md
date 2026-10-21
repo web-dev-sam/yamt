@@ -88,3 +88,15 @@ I made the brief's slice. During a rebase, own work (the replayed commit) is now
 - `crates/session/src/seed.rs` is 409 lines, over the 400-line file limit (it was 398). The extra lines come from the new `orientation` argument being reflowed and every test call passing `OURS_LEFT`. One fix is to move some seed tests next to `locate.rs`.
 - `crates/session/src/session.rs:61-63`: the boxed `side_names` only just fits both src-tauri size checks, so the next field added to `MergeSession` (rows 4–5) will trip one of them. A lasting fix is in src-tauri: box the session in `Startup`, or drop the `#[expect]` on `Merge`.
 - `crates/session/src/side_names.rs` (`applied`): a squash merge with no `commit <oid>` line in `SQUASH_MSG`, and a cherry-pick or revert range stopped without `CHERRY_PICK_HEAD`/`REVERT_HEAD`, leave the right side unnamed. That matches "none recorded", but neither case is tested.
+
+## Orchestrator note
+
+The 11 editor test files (Markers literals, `first` only) were granted mid-slice to the first attempt and listed in the respawn's task; not a deviation.
+
+## Boundary review (GitOpsSidesBoundary): pass
+
+Findings #1326–#1329.
+
+## Correctness review (GitOpsSidesCorrectness): pass
+
+Findings #1330–#1332. Mutants `just mutants 2f64334`: Rust 60 — 25 caught, 34 unviable, 1 missed (stages.rs:33, → #1331); TS changed lines 8 killed, 0 survived.
