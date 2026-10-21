@@ -1,0 +1,1681 @@
+From e4b1730fbc5e5ab124ddd8e460fca96a37e3213f Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 13:37:55 +0200
+Subject: [PATCH] fix(ui): nothing of an old stop survives into the next
+
+One Stop token and one landed() rule for late replies (save, finish,
+take, reset, format, reloads, Abort); a stop's question ends with it;
+formatOutcomes is store-owned; StopMovedOn lists again.
+
+Refs #1369-#1382
+---
+ frontend/src/ui/AGENTS.md             |   6 +-
+ frontend/src/ui/aborting.test.ts      |  46 +++++-
+ frontend/src/ui/aborting.ts           |  32 ++--
+ frontend/src/ui/diskChanges.ts        |  19 +--
+ frontend/src/ui/listing.test.ts       |   5 +
+ frontend/src/ui/listing.ts            |  26 +--
+ frontend/src/ui/operationText.test.ts |  21 +++
+ frontend/src/ui/operationText.ts      |  31 ++--
+ frontend/src/ui/problem.ts            |  12 ++
+ frontend/src/ui/question.ts           |  16 ++
+ frontend/src/ui/saving.test.ts        | 225 ++++++++++++++++++++++++--
+ frontend/src/ui/saving.ts             | 168 +++++++++++++------
+ frontend/src/ui/stops.test.ts         | 172 +++++++++++++++++---
+ frontend/src/ui/stops.ts              |  21 ++-
+ frontend/src/ui/store.ts              | 107 ++++++------
+ frontend/src/ui/views.ts              |  12 +-
+ 16 files changed, 703 insertions(+), 216 deletions(-)
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index badc305..9deda02 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -8,6 +8,8 @@ Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and th
+ 
+ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box; `FileList`'s handle uses `useColumnDrag` and `FILE_LIST_BOUNDS`, its dots centred as an absolute box (flex-centred dots there cost WebKitGTK scroll frames).
+ 
+-Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`.
++Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Abort merge (plan §2 #74): `aborting.ts` holds the action and whether an abort runs; `merging` is git's view, written only by `listing.ts` `refreshFiles`. `AbortState` is `noMerge` / `ready` / `running`; `running` stays after a success, since the app is ending. A refusal is the `abort` problem, never cleared by a path. The button is the toolbar's first icon button (#58): `toolbarButtons.ts` `listedButtons` leaves it out of the menu and the toolbar while git has `noMerge`; whether the user hid it is a separate fact, `hiddenButtons`, which starts it hidden.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem. "A reply after the stop was dropped changes nothing" is written once, `saving.ts` `landed(stop, call)` (null once dropped): every write, the format step, Abort, and every reload (`saving.ts` `reload`, also for disk changes) capture `target.stop` before they call. A failure answered `StopMovedOn` is reported through `problem.ts` `reportFailure`, which lists again. `operationText.ts` holds every operation word (the top line and its tooltip, Abort's label, title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++
++Abort (plan §2 #74, #88): `aborting.ts` holds the action and whether an abort runs; `AbortState` is `none` / `ready` / `running` with the listed `operation`; `running` stays after a success, since the app is ending. A refusal is the `abort` problem, naming the operation, never cleared by a path. The button is the toolbar's first icon button (#58), labelled per operation: `toolbarButtons.ts` `listedButtons` leaves it out of the menu and the toolbar while git records no operation; whether the user hid it is a separate fact, `hiddenButtons`, which starts it hidden.
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index b9c91b9..ddb12d8 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -6,6 +6,7 @@ import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
++import type { Stop } from "./saving";
+ 
+ const LINUX = "Linux x86_64";
+ 
+@@ -22,6 +23,8 @@ type Pressed = Aborting & {
+   readonly asking: Asking;
+   readonly operation: ShallowRef<OperationView | null>;
+   readonly problem: ShallowRef<Problem | null>;
++  readonly lists: string[];
++  stop: Stop;
+ };
+ 
+ afterEach(() => {
+@@ -33,13 +36,20 @@ function aborting(
+   operation: OperationView | null = REBASE,
+ ): Pressed {
+   const asking = createAsking();
++  const lists: string[] = [];
+   const target = {
+     source: { abortOperation },
+     asking,
+     operation: shallowRef(operation),
+     problem: shallowRef<Problem | null>(null),
++    lists,
++    stop: { dropped: false },
++    refreshFiles: () => {
++      lists.push("list");
++      return Promise.resolve();
++    },
+   };
+-  return { ...target, ...createAborting(target) };
++  return Object.assign(target, createAborting(target));
+ }
+ 
+ async function pressUnasked(abort: Pressed): Promise<void> {
+@@ -130,3 +140,37 @@ test("git's refusal names the operation, logs it, and a later press asks again",
+   await again;
+   expect(aborts).toBe(2);
+ });
++
++test("an abort git answers StopMovedOn lists again, so the window goes on to the new stop", async () => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  const abort = aborting(() => Promise.resolve({ ok: false, failure: { kind: "StopMovedOn" } }));
++
++  const refusing = abort.abortOperation();
++  abort.asking.answer(true);
++  await refusing;
++
++  expect(abort.lists).toEqual(["list"]);
++  expect(abort.abortState.value.kind).toBe("ready");
++});
++
++test("an abort answered after its stop was dropped reports nothing and lists nothing", async () => {
++  const answers: ((reply: SourceResult<null>) => void)[] = [];
++  const abort = aborting(
++    () =>
++      new Promise((resolve) => {
++        answers.push(resolve);
++      }),
++  );
++
++  const pressed = abort.abortOperation();
++  abort.asking.answer(true);
++  await vi.waitFor(() => {
++    expect(answers).toHaveLength(1);
++  });
++  abort.stop.dropped = true;
++  answers[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
++  await pressed;
++
++  expect([abort.problem.value, abort.lists]).toEqual([null, []]);
++  expect(abort.abortState.value.kind).toBe("ready");
++});
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index 08ba6a1..0140353 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -2,18 +2,20 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type { ChunkSource, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+-import { attempt, report, type Problem } from "./problem";
++import { attempt, reportFailure, type Problem, type Relist } from "./problem";
++import { landed, type Writing } from "./saving";
+ 
+ export type AbortState =
+   | { readonly kind: "none" }
+   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
+ 
+-type AbortTarget = {
+-  readonly source: Pick<ChunkSource, "abortOperation">;
+-  readonly asking: Pick<Asking, "ask">;
+-  readonly operation: Readonly<ShallowRef<OperationView | null>>;
+-  readonly problem: ShallowRef<Problem | null>;
+-};
++type AbortTarget = Relist &
++  Pick<Writing, "stop"> & {
++    readonly source: Pick<ChunkSource, "abortOperation">;
++    readonly asking: Pick<Asking, "ask">;
++    readonly operation: Readonly<ShallowRef<OperationView | null>>;
++    readonly problem: ShallowRef<Problem | null>;
++  };
+ 
+ export type Aborting = {
+   readonly abortState: ComputedRef<AbortState>;
+@@ -36,14 +38,22 @@ export function createAborting(target: AbortTarget): Aborting {
+       return;
+     }
+     const { operation } = state;
++    const { stop } = target;
+     if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
+       return;
+     }
+     running.value = true;
+-    const outcome = await attempt(() => target.source.abortOperation());
+-    if (!outcome.ok) {
+-      running.value = false;
+-      report(target, { action: "abort", operation: operation.kind, cause: outcome.cause });
++    const outcome = await landed(stop, () => attempt(() => target.source.abortOperation()));
++    if (outcome?.ok === true) {
++      return;
++    }
++    running.value = false;
++    if (outcome !== null) {
++      await reportFailure(target, {
++        action: "abort",
++        operation: operation.kind,
++        cause: outcome.cause,
++      });
+     }
+   }
+ 
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+index 5187064..0a3b168 100644
+--- a/frontend/src/ui/diskChanges.ts
++++ b/frontend/src/ui/diskChanges.ts
+@@ -3,9 +3,8 @@ import type { ShallowRef } from "vue";
+ import { log, type DiskChange } from "../ipc";
+ import type { CloseGuard } from "./closeGuard";
+ import type { DiskNotice, Notice } from "./noticeText";
+-import { clearProblemAbout, type Problem } from "./problem";
+ import type { Taken } from "./sides";
+-import { isShown, reload, takesASide, type Shown } from "./views";
++import { isShown, takesASide, type Shown } from "./views";
+ 
+ export type DiskChangeTarget = Shown & {
+   readonly notices: ShallowRef<readonly Notice[]>;
+@@ -23,11 +22,11 @@ function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
+   }
+ }
+ 
+-export async function applyDiskChanges(
++export function noteDiskChanges(
+   target: DiskChangeTarget,
+   changes: readonly DiskChange[],
+   when: DiskNotice["when"],
+-): Promise<void> {
++): readonly string[] {
+   const unsaved = target.guard.unsavedFiles();
+   const byPath = new Map(changes.map((change) => [change.path, change.result]));
+   const notices = [...byPath].map(([path, result]): DiskNotice => ({
+@@ -50,15 +49,5 @@ export async function applyDiskChanges(
+     }
+   }
+   target.taken.value = taken;
+-  const shown = [...byPath.keys()].filter((path) => isShown(target, path));
+-  await Promise.all(shown.map((path) => reload(target, path)));
+-}
+-
+-export async function changedOnDisk(
+-  target: DiskChangeTarget & { readonly problem: ShallowRef<Problem | null> },
+-  path: string,
+-  change: DiskChange,
+-): Promise<void> {
+-  clearProblemAbout(target, path);
+-  await applyDiskChanges(target, [change], "running");
++  return [...byPath.keys()].filter((path) => isShown(target, path));
+ }
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index e18f8d7..b154ae1 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -14,6 +14,7 @@ import type {
+ import { refreshFiles } from "./listing";
+ import type { Notice } from "./noticeText";
+ import type { Problem } from "./problem";
++import type { Stop } from "./saving";
+ import type { Taken } from "./sides";
+ import type { StopEnd } from "./stops";
+ 
+@@ -29,7 +30,9 @@ type Listed = {
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+   readonly guard: { unsavedFiles(): string[] };
+   readonly ends: StopEnd[];
++  stop: Stop;
+   nextStop(end: StopEnd): Promise<void>;
++  refreshFiles(): Promise<void>;
+ };
+ 
+ const FILES: readonly FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
+@@ -95,10 +98,12 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+     guard: { unsavedFiles: () => [] },
+     ends,
++    stop: { dropped: false },
+     nextStop: (end) => {
+       ends.push(end);
+       return Promise.resolve();
+     },
++    refreshFiles: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index 78e710b..7adbcbe 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -1,17 +1,20 @@
+ import type { ShallowRef } from "vue";
+ 
+ import type { FileEntry, OperationView, SideNames } from "../ipc";
+-import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
++import type { DiskChangeTarget } from "./diskChanges";
+ import type { DiskNotice } from "./noticeText";
+-import { attempt, report } from "./problem";
++import { attempt, report, type Relist } from "./problem";
++import { applyDiskChanges, landed, type Writing } from "./saving";
+ import type { StopEnd } from "./stops";
+ 
+-type ListTarget = DiskChangeTarget & {
+-  readonly files: ShallowRef<readonly FileEntry[]>;
+-  readonly operation: ShallowRef<OperationView | null>;
+-  readonly sideNames: ShallowRef<SideNames>;
+-  nextStop(end: StopEnd): Promise<void>;
+-};
++type ListTarget = DiskChangeTarget &
++  Relist &
++  Pick<Writing, "stop"> & {
++    readonly files: ShallowRef<readonly FileEntry[]>;
++    readonly operation: ShallowRef<OperationView | null>;
++    readonly sideNames: ShallowRef<SideNames>;
++    nextStop(end: StopEnd): Promise<void>;
++  };
+ 
+ export async function refreshFiles(
+   target: ListTarget,
+@@ -33,6 +36,9 @@ export async function refreshFiles(
+   if (target.problem.value?.action === "list") {
+     target.problem.value = null;
+   }
+-  await applyDiskChanges(target, diskChanges, when);
+-  return files;
++  const { stop } = target;
++  return landed(stop, async () => {
++    await applyDiskChanges(target, diskChanges, when, stop);
++    return files;
++  });
+ }
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index cb841a2..b7094aa 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -123,6 +123,27 @@ test("the tooltip holds the line and the full message of the commit applied; a b
+   );
+ });
+ 
++test("a patch whose progress git did not record has a line without a count", () => {
++  expect(
++    operationLine({ kind: "Am", subject: "Fix typo", message: "Fix typo", progress: null }).text,
++  ).toBe("Applying patch: Fix typo");
++});
++
++test("a patch's tooltip holds the line and the patch message trimmed; an empty message adds nothing", () => {
++  const progress = { step: 2, total: 4 };
++  expect(
++    operationLine({
++      kind: "Am",
++      subject: "Fix typo",
++      message: "\nFix typo\n\nThe label said 'Sumbit'.\n\n",
++      progress,
++    }).tooltip,
++  ).toBe("Applying patch 2 of 4: Fix typo\n\nFix typo\n\nThe label said 'Sumbit'.");
++  expect(operationLine({ kind: "Am", subject: "", message: " \n", progress }).tooltip).toBe(
++    "Applying patch 2 of 4",
++  );
++});
++
+ test.each<[OperationView, string, string]>([
+   [{ kind: "Merge", merging: FEATURE, into: MAIN }, "Abort merge", "Abort Merge"],
+   [
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index 575e3ec..8be6ddf 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -20,9 +20,9 @@ const TITLES: Readonly<Record<OperationKind, string>> = {
+   Am: "Patch Application",
+ };
+ 
+-const DONE_STEPS: Readonly<Record<OperationKind, readonly [string, string] | null>> = {
+-  Merge: null,
+-  SquashMerge: null,
++type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
++
++const DONE_STEPS: Readonly<Record<StepKind, readonly [string, string]>> = {
+   Rebase: ["commit already replayed is", "commits already replayed are"],
+   CherryPick: ["commit already picked is", "commits already picked are"],
+   Revert: ["commit already reverted is", "commits already reverted are"],
+@@ -144,16 +144,25 @@ export function abortTitle(operation: OperationView): string {
+   return `Abort ${TITLES[operation.kind]}`;
+ }
+ 
+-function stepsDone(operation: OperationView): number {
++function stepsSentence(kind: StepKind, progress: ProgressView | null): string {
++  const done = progress === null ? 0 : progress.step - 1;
++  if (done === 0) {
++    return "";
++  }
++  const [one, many] = DONE_STEPS[kind];
++  return done === 1 ? ` The 1 ${one} undone too.` : ` The ${done} ${many} undone too.`;
++}
++
++function doneSentence(operation: OperationView): string {
+   switch (operation.kind) {
+     case "Merge":
+     case "SquashMerge":
+-      return 0;
++      return "";
+     case "Rebase":
+     case "CherryPick":
+     case "Revert":
+     case "Am":
+-      return operation.progress === null ? 0 : operation.progress.step - 1;
++      return stepsSentence(operation.kind, operation.progress);
+     default: {
+       const _exhaustive: never = operation;
+       return _exhaustive;
+@@ -161,16 +170,6 @@ function stepsDone(operation: OperationView): number {
+   }
+ }
+ 
+-function doneSentence(operation: OperationView): string {
+-  const done = stepsDone(operation);
+-  const words = DONE_STEPS[operation.kind];
+-  if (done === 0 || words === null) {
+-    return "";
+-  }
+-  const [one, many] = words;
+-  return done === 1 ? ` The 1 ${one} undone too.` : ` The ${done} ${many} undone too.`;
+-}
+-
+ export function abortMessage(operation: OperationView): string {
+   const name = NAMES[operation.kind];
+   return `Every resolution and every save in this ${name} will be lost, and so will unsaved edits.${doneSentence(operation)} The repository goes back to how it was before the ${name}, and yamt closes.`;
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 6da380c..10305c7 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -43,6 +43,8 @@ export type Outcome<T> =
+ 
+ type Target = { readonly problem: ShallowRef<Problem | null> };
+ 
++export type Relist = { refreshFiles(): Promise<void> };
++
+ export function unexpected(error: unknown): Unexpected {
+   return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
+ }
+@@ -96,6 +98,16 @@ export function report(target: Target, failure: Problem): void {
+   target.problem.value = failure;
+ }
+ 
++export async function reportFailure(
++  target: Target & Relist,
++  failure: Extract<Problem, { readonly cause: ProblemCause }>,
++): Promise<void> {
++  report(target, failure);
++  if (failure.cause.kind === "StopMovedOn") {
++    await target.refreshFiles();
++  }
++}
++
+ export function clearProblemAbout(target: Target, path: string): void {
+   const problem = target.problem.value;
+   if (
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 15f8b40..cd36710 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -57,6 +57,22 @@ export function exitMustAsk(unsaved: readonly string[]): boolean {
+   return unsaved.length > 0;
+ }
+ 
++export function endsWithStop(question: Question): boolean {
++  switch (question.kind) {
++    case "unprocessed":
++    case "abort":
++      return true;
++    case "exit":
++    case "clash":
++    case "servers":
++      return false;
++    default: {
++      const _exhaustive: never = question;
++      return _exhaustive;
++    }
++  }
++}
++
+ function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
+   const parts = [
+     ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 63d5591..b821753 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -19,10 +19,13 @@ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+ import {
+   afterWrite,
++  applyDiskChanges,
+   claimWrite,
+   createSaving,
+-  dropClaims,
++  dropStop,
+   finish,
++  reset,
++  take,
+   whileWriting,
+   type Writing,
+ } from "./saving";
+@@ -95,30 +98,44 @@ class Editor {
+   }
+ }
+ 
++type Calls = Partial<
++  Pick<ChunkSource, "saveFile" | "finishFile" | "resetFile" | "takeSide" | "loadFile">
++>;
++
++type Target = Parameters<typeof finish>[0] &
++  Parameters<typeof createSaving>[0] & {
++    readonly loads: string[];
++    readonly sent: WriteRequest[];
++    readonly lists: string[];
++  };
++
+ function writeTarget(
+   files: readonly FileEntry[],
+-  writes: Pick<ChunkSource, "saveFile" | "finishFile">,
++  calls: Calls,
+   editors: Readonly<Record<string, Editor>> = {},
+-): Parameters<typeof finish>[0] & { readonly loads: string[]; readonly sent: WriteRequest[] } {
++): Target {
+   const loads: string[] = [];
+   const sent: WriteRequest[] = [];
++  const lists: string[] = [];
+   const source: ChunkSource = {
+     listFiles: notUsed,
+     loadFile: (path) => {
+       loads.push(path);
+-      return Promise.resolve({ ok: true, value: { ...MAGIC_KEYS, path } });
++      return (
++        calls.loadFile?.(path) ?? Promise.resolve({ ok: true, value: { ...MAGIC_KEYS, path } })
++      );
+     },
+     finishFile: (request) => {
+       sent.push(request);
+-      return writes.finishFile(request);
++      return calls.finishFile?.(request) ?? notUsed();
+     },
+     saveFile: (request) => {
+       sent.push(request);
+-      return writes.saveFile(request);
++      return calls.saveFile?.(request) ?? notUsed();
+     },
+-    resetFile: notUsed,
++    resetFile: (path, diskVersion) => calls.resetFile?.(path, diskVersion) ?? notUsed(),
+     describeFile: notUsed,
+-    takeSide: notUsed,
++    takeSide: (path, side, diskVersion) => calls.takeSide?.(path, side, diskVersion) ?? notUsed(),
+     sideNames: notUsed,
+     abortMerge: notUsed,
+     listStop: notUsed,
+@@ -137,12 +154,14 @@ function writeTarget(
+     source,
+     loads,
+     sent,
++    lists,
+     files: shallowRef(files),
+     opened: shallowRef<readonly FileMergeData[]>([{ ...MAGIC_KEYS, path: "a.ts" }]),
+     choices: shallowRef<readonly FileSides[]>([]),
+     problem: shallowRef<Problem | null>(null),
+     notices: shallowRef<readonly Notice[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
++    formatOutcomes: shallowRef<ReadonlyMap<string, FormatOutcome>>(new Map()),
+     guard: {
+       unsavedFiles: () =>
+         Object.entries(editors)
+@@ -150,7 +169,12 @@ function writeTarget(
+           .map(([path]) => path),
+     },
+     writing: new Map(),
++    stop: { dropped: false },
+     asking: { ask: () => Promise.resolve("yes") },
++    refreshFiles: () => {
++      lists.push("list");
++      return Promise.resolve();
++    },
+   };
+ }
+ 
+@@ -178,7 +202,7 @@ test("save: Written sends the file text, marks it saved as the file text, takes
+   expect(editor.saved).toBe("formatted\n");
+   expect(editor.marks).toEqual(["fileText"]);
+   expect(target.files.value).toEqual(after);
+-  expect(saving.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
++  expect(target.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
+   expect(target.problem.value).toBeNull();
+ });
+ 
+@@ -230,7 +254,7 @@ test("save without unsaved work formats but sends nothing", async () => {
+ 
+   expect(format).toHaveBeenCalledTimes(2);
+   expect(target.sent).toEqual([]);
+-  expect(saving.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
++  expect(target.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
+ });
+ 
+ test("save goes on whatever formatting answers, and an editor without an outcome records none", async () => {
+@@ -258,7 +282,7 @@ test("save goes on whatever formatting answers, and an editor without an outcome
+     ["b.ts", "b typed\n(file)"],
+   ]);
+   expect([a.saved, b.saved]).toEqual(["a typed\n", "b typed\n"]);
+-  expect(saving.formatOutcomes.value).toEqual(new Map([["a.ts", crashed]]));
++  expect(target.formatOutcomes.value).toEqual(new Map([["a.ts", crashed]]));
+ });
+ 
+ test("a save while a save of the same file runs is ignored; typing during the write keeps the dot", async () => {
+@@ -308,7 +332,7 @@ test("a save while a save of the same file runs is ignored; typing during the wr
+   expect(a.snapshot().unsaved).toBe(false);
+ });
+ 
+-test("after dropClaims a save's and a finish's late replies change nothing, and a new claim on the path outlives the old one", async () => {
++test("after dropStop a save's and a finish's late replies change nothing, and a new claim on the path outlives the old one", async () => {
+   const saves: Answer[] = [];
+   const finishes: Answer[] = [];
+   const target = writeTarget([entry("a.ts"), entry("b.ts")], {
+@@ -331,7 +355,7 @@ test("after dropClaims a save's and a finish's late replies change nothing, and
+   });
+   const before = target.files.value;
+ 
+-  dropClaims(target);
++  dropStop(target);
+   expect(target.writing.size).toBe(0);
+   const releases: (() => void)[] = [];
+   const next = claimWrite(
+@@ -357,7 +381,7 @@ test("after dropClaims a save's and a finish's late replies change nothing, and
+ });
+ 
+ test("claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended", async () => {
+-  const target: Writing = { writing: new Map() };
++  const target: Writing = { writing: new Map(), stop: { dropped: false } };
+   const ran: string[] = [];
+   const releases: (() => void)[] = [];
+   function held(name: string): () => Promise<void> {
+@@ -440,7 +464,7 @@ test("a save whose formatting still runs when another write of the same file sta
+ 
+   expect(target.sent).toEqual([]);
+   expect(editor.snapshot().unsaved).toBe(true);
+-  expect(saving.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
++  expect(target.formatOutcomes.value).toEqual(new Map([["a.ts", OXFMT]]));
+ });
+ 
+ test("finish writes the Result as shown and marks it saved as shown", async () => {
+@@ -470,11 +494,16 @@ test("afterWrite takes git's list and says whether the write landed; a disk chan
+   const change: DiskChange = { path: "a.ts", result: TWO_LEFT };
+   const target = writeTarget(files, { saveFile: notUsed, finishFile: notUsed });
+ 
+-  expect(await afterWrite(target, "a.ts", { kind: "Written", files: [entry("a.ts")] })).toBe(true);
++  const { stop } = target;
++  expect(await afterWrite(target, "a.ts", { kind: "Written", files: [entry("a.ts")] }, stop)).toBe(
++    true,
++  );
+   expect(target.files.value).toEqual([entry("a.ts")]);
+   expect(target.loads).toEqual([]);
+ 
+-  expect(await afterWrite(target, "a.ts", { kind: "ChangedOnDisk", files, change })).toBe(false);
++  expect(await afterWrite(target, "a.ts", { kind: "ChangedOnDisk", files, change }, stop)).toBe(
++    false,
++  );
+   expect(target.files.value).toEqual(files);
+   expect(target.loads).toEqual(["a.ts"]);
+   expect(target.notices.value).toEqual([
+@@ -541,3 +570,165 @@ test("a failed save keeps the dot, is reported in words, and the next save clear
+   expect(target.problem.value).toBeNull();
+   expect(editor.saved).toBe("typed\n");
+ });
++
++type StartWrite = (target: Target, editor: Editor) => Promise<unknown>;
++
++const WRITES: readonly (readonly [string, StartWrite])[] = [
++  [
++    "save",
++    (target, editor) =>
++      createSaving(target).save({ path: "a.ts", diskVersion: VERSION, handle: editor.handle() }),
++  ],
++  [
++    "finish",
++    (target, editor) =>
++      finish(target, {
++        path: "a.ts",
++        diskVersion: VERSION,
++        summary: NOTHING_LEFT,
++        snapshot: editor.snapshot(),
++      }),
++  ],
++  ["take", (target) => take(target, "a.ts", "local", VERSION)],
++  ["reset", (target) => reset(target, "a.ts", VERSION)],
++];
++
++const LATE_REPLIES: readonly (readonly [string, SourceResult<WriteReply>])[] = [
++  ["written", written([resolvedEntry("a.ts")])],
++  [
++    "changed on disk",
++    {
++      ok: true,
++      value: {
++        kind: "ChangedOnDisk",
++        files: [resolvedEntry("a.ts")],
++        change: { path: "a.ts", result: TWO_LEFT },
++      },
++    },
++  ],
++  ["refused", { ok: false, failure: { kind: "Git", message: "refused" } }],
++  ["moved on", { ok: false, failure: { kind: "StopMovedOn" } }],
++];
++
++function everyWrite(answer: () => Promise<SourceResult<WriteReply>>): Calls {
++  return { saveFile: answer, finishFile: answer, resetFile: answer, takeSide: answer };
++}
++
++function typedEditor(): Editor {
++  const editor = new Editor("a\n");
++  editor.text = "typed\n";
++  return editor;
++}
++
++function shownState(target: Target): Readonly<Record<string, unknown>> {
++  return {
++    files: target.files.value,
++    taken: target.taken.value,
++    choices: target.choices.value,
++    problem: target.problem.value,
++    opened: target.opened.value,
++    notices: target.notices.value,
++    formatOutcomes: target.formatOutcomes.value,
++  };
++}
++
++test.each(
++  WRITES.flatMap(([write, start]) =>
++    LATE_REPLIES.map(([reply, answer]) => [write, reply, start, answer] as const),
++  ),
++)("a %s answered %s after dropStop changes nothing", async (_write, _reply, start, answer) => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const answers: Answer[] = [];
++  const target = writeTarget(
++    [entry("a.ts")],
++    everyWrite(() => answeredLater(answers)),
++  );
++  const editor = typedEditor();
++  const writing = start(target, editor);
++  await vi.waitFor(() => {
++    expect(answers).toHaveLength(1);
++  });
++  const before = shownState(target);
++
++  dropStop(target);
++  answers[0]?.(answer);
++  await writing;
++
++  const after = shownState(target);
++  expect(Object.keys(after).filter((key) => after[key] !== before[key])).toEqual([]);
++  expect([editor.marks, target.loads, target.lists]).toEqual([[], [], []]);
++});
++
++test("a format answer after dropStop records no format note and writes nothing", async () => {
++  const formats: ((outcome: FormatOutcome | null) => void)[] = [];
++  const target = writeTarget([entry("a.ts")], everyWrite(notUsed));
++  const before = target.formatOutcomes.value;
++  const saving = createSaving(target).save({
++    path: "a.ts",
++    diskVersion: VERSION,
++    handle: typedEditor().handle(
++      () =>
++        new Promise((resolve) => {
++          formats.push(resolve);
++        }),
++    ),
++  });
++
++  dropStop(target);
++  formats[0]?.(OXFMT);
++  await saving;
++
++  expect(target.formatOutcomes.value).toBe(before);
++  expect(target.sent).toEqual([]);
++});
++
++test.each<[string, SourceResult<FileMergeData>]>([
++  ["the fetched view", { ok: true, value: { ...MAGIC_KEYS, path: "a.ts" } }],
++  ["a failure", { ok: false, failure: { kind: "StopMovedOn" } }],
++])(
++  "a reload still waiting when the stop is dropped leaves opened and problem as the new stop has them: %s",
++  async (_name, loaded) => {
++    vi.spyOn(console, "info").mockImplementation(() => undefined);
++    const loads: ((view: SourceResult<FileMergeData>) => void)[] = [];
++    const target = writeTarget([entry("a.ts")], {
++      loadFile: () =>
++        new Promise((resolve) => {
++          loads.push(resolve);
++        }),
++    });
++    const change: DiskChange = { path: "a.ts", result: TWO_LEFT };
++    const reloading = applyDiskChanges(target, [change], "running", target.stop);
++    await vi.waitFor(() => {
++      expect(target.loads).toEqual(["a.ts"]);
++    });
++
++    dropStop(target);
++    target.opened.value = [];
++    target.problem.value = null;
++    loads[0]?.(loaded);
++    await reloading;
++
++    expect([target.opened.value, target.problem.value, target.lists]).toEqual([[], null, []]);
++  },
++);
++
++test.each(WRITES)(
++  "a %s git answers StopMovedOn is reported and lists again, which goes on to the new stop",
++  async (_write, start) => {
++    vi.spyOn(console, "error").mockImplementation(() => undefined);
++    const movedOn: SourceResult<WriteReply> = { ok: false, failure: { kind: "StopMovedOn" } };
++    const target = writeTarget(
++      [entry("a.ts")],
++      everyWrite(() => Promise.resolve(movedOn)),
++    );
++
++    await start(target, typedEditor());
++
++    const { problem } = target;
++    expect(problem.value !== null && "cause" in problem.value ? problem.value.cause : null).toEqual(
++      { kind: "StopMovedOn" },
++    );
++    expect(target.lists).toEqual(["list"]);
++  },
++);
+diff --git a/frontend/src/ui/saving.ts b/frontend/src/ui/saving.ts
+index 6b35aef..52eac50 100644
+--- a/frontend/src/ui/saving.ts
++++ b/frontend/src/ui/saving.ts
+@@ -1,9 +1,10 @@
+-import { shallowRef, type ShallowRef } from "vue";
++import type { ShallowRef } from "vue";
+ 
+-import type { DiskVersion, FileEntry, WriteReply, WriteRequest } from "../ipc";
++import type { DiskChange, DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
+ import type { Asking } from "./asking";
+-import { changedOnDisk, type DiskChangeTarget } from "./diskChanges";
+-import { attempt, clearProblemAbout, report, type Problem } from "./problem";
++import { noteDiskChanges, type DiskChangeTarget } from "./diskChanges";
++import type { DiskNotice } from "./noticeText";
++import { attempt, clearProblemAbout, reportFailure, type Problem, type Relist } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
+ import type {
+   FormatOutcome,
+@@ -11,16 +12,19 @@ import type {
+   MergeSummary,
+   ResultSnapshot,
+ } from "./useMergeController";
+-import { reload } from "./views";
++import { fetchView, type Shown } from "./views";
+ 
+-type Claim = { writes: number; overtaken: boolean; dropped: boolean };
++export type Stop = { dropped: boolean };
+ 
+-export type Writing = { readonly writing: Map<string, Claim> };
++type Claim = { writes: number; overtaken: boolean };
+ 
+-type WriteTarget = DiskChangeTarget & {
+-  readonly files: ShallowRef<readonly FileEntry[]>;
+-  readonly problem: ShallowRef<Problem | null>;
+-};
++export type Writing = { readonly writing: Map<string, Claim>; stop: Stop };
++
++type WriteTarget = DiskChangeTarget &
++  Relist & {
++    readonly files: ShallowRef<readonly FileEntry[]>;
++    readonly problem: ShallowRef<Problem | null>;
++  };
+ 
+ type SaveTarget = WriteTarget & Writing;
+ 
+@@ -37,19 +41,52 @@ export type FinishRequest = Omit<WriteRequest, "text"> & {
+   readonly snapshot: Pick<ResultSnapshot, "asShown" | "markSaved">;
+ };
+ 
+-export type Saving = {
+-  readonly formatOutcomes: Readonly<ShallowRef<ReadonlyMap<string, FormatOutcome>>>;
+-  save(request: SaveRequest): Promise<void>;
+-};
++export type FormatOutcomes = ShallowRef<ReadonlyMap<string, FormatOutcome>>;
++
++export type Saving = { save(request: SaveRequest): Promise<void> };
++
++export async function landed<T>(stop: Readonly<Stop>, call: () => Promise<T>): Promise<T | null> {
++  const reply = await call();
++  return stop.dropped ? null : reply;
++}
++
++async function reload(
++  target: Shown & Relist,
++  path: string,
++  stop: Readonly<Stop>,
++): Promise<boolean> {
++  const view = await landed(stop, () => fetchView(target, path));
++  if (view === null) {
++    return false;
++  }
++  if (!view.ok) {
++    await reportFailure(target, { action: "open", path, cause: view.cause });
++    return false;
++  }
++  view.value();
++  return true;
++}
++
++export async function applyDiskChanges(
++  target: DiskChangeTarget & Relist,
++  changes: readonly DiskChange[],
++  when: DiskNotice["when"],
++  stop: Readonly<Stop>,
++): Promise<void> {
++  const shown = noteDiskChanges(target, changes, when);
++  await Promise.all(shown.map((path) => reload(target, path, stop)));
++}
+ 
+ export async function afterWrite(
+   target: WriteTarget,
+   path: string,
+   reply: WriteReply,
++  stop: Readonly<Stop>,
+ ): Promise<boolean> {
+   target.files.value = reply.files;
+   if (reply.kind === "ChangedOnDisk") {
+-    await changedOnDisk(target, path, reply.change);
++    clearProblemAbout(target, path);
++    await applyDiskChanges(target, [reply.change], "running", stop);
+     return false;
+   }
+   return true;
+@@ -74,7 +111,7 @@ async function holding<T>(
+ }
+ 
+ function freeClaim(): Claim {
+-  return { writes: 0, overtaken: false, dropped: false };
++  return { writes: 0, overtaken: false };
+ }
+ 
+ export async function whileWriting<T>(
+@@ -87,10 +124,11 @@ export async function whileWriting<T>(
+   return holding(target, path, claim, write);
+ }
+ 
+-export function dropClaims(target: Writing): void {
++export function dropStop(target: Writing): void {
++  target.stop.dropped = true;
++  target.stop = { dropped: false };
+   for (const claim of target.writing.values()) {
+     claim.overtaken = true;
+-    claim.dropped = true;
+   }
+   target.writing.clear();
+ }
+@@ -110,23 +148,23 @@ export async function finish(
+   target: SaveTarget & { readonly asking: Pick<Asking, "ask"> },
+   { path, snapshot, summary, diskVersion }: FinishRequest,
+ ): Promise<boolean> {
++  const { stop } = target;
+   const unprocessed: Question = { kind: "unprocessed", summary };
+   if (finishMustAsk(summary) && (await target.asking.ask(unprocessed)) !== "yes") {
+     return false;
+   }
+   const text = snapshot.asShown();
+-  const outcome = await whileWriting(target, path, async (claim) => {
+-    const reply = await attempt(() => target.source.finishFile({ path, text, diskVersion }));
+-    return claim.dropped ? null : reply;
+-  });
++  const outcome = await whileWriting(target, path, () =>
++    landed(stop, () => attempt(() => target.source.finishFile({ path, text, diskVersion }))),
++  );
+   if (outcome === null) {
+     return false;
+   }
+   if (!outcome.ok) {
+-    report(target, { action: "finish", path, cause: outcome.cause });
++    await reportFailure(target, { action: "finish", path, cause: outcome.cause });
+     return false;
+   }
+-  if (!(await afterWrite(target, path, outcome.value))) {
++  if (!(await afterWrite(target, path, outcome.value, stop))) {
+     return false;
+   }
+   snapshot.markSaved("asShown");
+@@ -134,26 +172,59 @@ export async function finish(
+   return true;
+ }
+ 
++export async function take(
++  target: SaveTarget,
++  path: string,
++  side: Side,
++  diskVersion: DiskVersion,
++): Promise<boolean> {
++  const { stop } = target;
++  return whileWriting(target, path, async () => {
++    const outcome = await landed(stop, () =>
++      attempt(() => target.source.takeSide(path, side, diskVersion)),
++    );
++    if (outcome === null) {
++      return false;
++    }
++    if (!outcome.ok) {
++      await reportFailure(target, { action: "take", path, cause: outcome.cause });
++      return false;
++    }
++    if (!(await afterWrite(target, path, outcome.value, stop))) {
++      return false;
++    }
++    target.taken.value = new Map([...target.taken.value, [path, { by: "side", side }]]);
++    clearProblemAbout(target, path);
++    if (target.opened.value.some((file) => file.path === path)) {
++      await reload(target, path, stop);
++    }
++    return true;
++  });
++}
++
+ export async function reset(
+   target: SaveTarget,
+   path: string,
+   diskVersion: DiskVersion,
+ ): Promise<void> {
+-  await whileWriting(target, path, async (claim) => {
+-    const outcome = await attempt(() => target.source.resetFile(path, diskVersion));
+-    if (claim.dropped) {
++  const { stop } = target;
++  await whileWriting(target, path, async () => {
++    const outcome = await landed(stop, () =>
++      attempt(() => target.source.resetFile(path, diskVersion)),
++    );
++    if (outcome === null) {
+       return;
+     }
+     if (!outcome.ok) {
+-      report(target, { action: "reset", path, cause: outcome.cause });
++      await reportFailure(target, { action: "reset", path, cause: outcome.cause });
+       return;
+     }
+-    if (!(await afterWrite(target, path, outcome.value))) {
++    if (!(await afterWrite(target, path, outcome.value, stop))) {
+       return;
+     }
+     target.choices.value = target.choices.value.filter((sides) => sides.path !== path);
+     target.taken.value = new Map([...target.taken.value].filter(([taken]) => taken !== path));
+-    if (await reload(target, path)) {
++    if (await reload(target, path, stop)) {
+       clearProblemAbout(target, path);
+     }
+   });
+@@ -162,7 +233,7 @@ export async function reset(
+ async function written(
+   target: SaveTarget,
+   { path, diskVersion, handle }: SaveRequest,
+-  claim: Readonly<Claim>,
++  stop: Readonly<Stop>,
+ ): Promise<void> {
+   const snapshot = handle.snapshot();
+   if (snapshot === null || !snapshot.unsaved) {
+@@ -173,33 +244,40 @@ async function written(
+   );
+   const sent: WrittenText = resolved ? "asShown" : "fileText";
+   const text = snapshot[sent]();
+-  const outcome = await attempt(() => target.source.saveFile({ path, text, diskVersion }));
+-  if (claim.dropped) {
++  const outcome = await landed(stop, () =>
++    attempt(() => target.source.saveFile({ path, text, diskVersion })),
++  );
++  if (outcome === null) {
+     return;
+   }
+   if (!outcome.ok) {
+-    report(target, { action: "save", path, cause: outcome.cause });
++    await reportFailure(target, { action: "save", path, cause: outcome.cause });
+     return;
+   }
+-  if (await afterWrite(target, path, outcome.value)) {
++  if (await afterWrite(target, path, outcome.value, stop)) {
+     snapshot.markSaved(sent);
+     clearProblemAbout(target, path);
+   }
+ }
+ 
+-export function createSaving(target: SaveTarget): Saving {
+-  const formatOutcomes = shallowRef<ReadonlyMap<string, FormatOutcome>>(new Map());
++export function createSaving(
++  target: SaveTarget & { readonly formatOutcomes: FormatOutcomes },
++): Saving {
+   return {
+-    formatOutcomes,
+-    save: (request) =>
+-      claimWrite(target, request.path, async (claim) => {
+-        const formatted = await request.handle.format();
++    save: (request) => {
++      const { stop } = target;
++      return claimWrite(target, request.path, async (claim) => {
++        const formatted = await landed(stop, () => request.handle.format());
+         if (formatted !== null) {
+-          formatOutcomes.value = new Map([...formatOutcomes.value, [request.path, formatted]]);
++          target.formatOutcomes.value = new Map([
++            ...target.formatOutcomes.value,
++            [request.path, formatted],
++          ]);
+         }
+         if (!claim.overtaken) {
+-          await written(target, request, claim);
++          await written(target, request, stop);
+         }
+-      }),
++      });
++    },
+   };
+ }
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 1b36575..6b3f260 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -3,18 +3,23 @@ import { shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+   loadFixture,
++  type ChunkSource,
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
+   type OperationView,
++  type WriteRequest,
+ } from "../ipc";
+-import type { Notice } from "./noticeText";
++import { createAborting } from "./aborting";
++import { createAsking, type Asking } from "./asking";
++import { noticeRow, type Notice } from "./noticeText";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+-import { claimWrite } from "./saving";
++import { claimWrite, finish } from "./saving";
+ import type { Screen } from "./screen";
+ import type { Taken } from "./sides";
+ import { nextStop, type StopTarget } from "./stops";
++import type { FormatOutcome } from "./useMergeController";
+ 
+ const LINUX = "Linux x86_64";
+ const MAGIC_KEYS = await loadFixture("vueuse-use-magic-keys.ts");
+@@ -34,25 +39,76 @@ const REBASE: OperationView = {
+   editor_steps_ahead: false,
+ };
+ const NEXT_STEP: OperationView = { ...REBASE, progress: { step: 2, total: 3 } };
++const CHERRY_PICK: OperationView = { kind: "CherryPick", picking: null, progress: null };
++const C_TS: FileEntry = { path: "c.ts", status: "Unresolved", unsupported: null };
+ 
+-type Stop = StopTarget & {
+-  readonly lists: number[];
+-  readonly operation: ShallowRef<OperationView | null>;
++type Stop = StopTarget &
++  Parameters<typeof finish>[0] & {
++    readonly lists: number[];
++    readonly finishes: WriteRequest[];
++    readonly aborts: string[];
++    readonly asking: Asking;
++    readonly operation: ShallowRef<OperationView | null>;
++  };
++
++type NextStop = {
++  readonly files: readonly FileEntry[] | null;
++  readonly operation: OperationView | null;
+ };
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+ 
++function notUsed(): Promise<never> {
++  return Promise.reject(new Error("not used"));
++}
++
++function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
++  return {
++    listFiles: notUsed,
++    loadFile: notUsed,
++    finishFile: (request) => {
++      finishes.push(request);
++      return Promise.resolve({ ok: true, value: { kind: "Written", files: [] } });
++    },
++    saveFile: notUsed,
++    resetFile: notUsed,
++    describeFile: notUsed,
++    takeSide: notUsed,
++    sideNames: notUsed,
++    abortMerge: notUsed,
++    listStop: notUsed,
++    continueOperation: notUsed,
++    abortOperation: () => {
++      aborts.push("abort");
++      return Promise.resolve({ ok: true, value: null });
++    },
++    loadSettings: notUsed,
++    setTheme: notUsed,
++    setAntialiasing: notUsed,
++    setKeys: notUsed,
++    moveSettings: notUsed,
++    setServerAnswer: notUsed,
++    setServerSwitch: notUsed,
++    setAddedServers: notUsed,
++  };
++}
++
+ function stopAt(
+   unsaved: readonly string[],
+-  nextFiles: readonly FileEntry[] | null = [
+-    { path: "c.ts", status: "Unresolved", unsupported: null },
+-  ],
++  next: NextStop = { files: [C_TS], operation: NEXT_STEP },
++  operation: OperationView | null = REBASE,
+ ): Stop {
+   const lists: number[] = [];
++  const finishes: WriteRequest[] = [];
++  const aborts: string[] = [];
+   const stop: Stop = {
+     lists,
++    finishes,
++    aborts,
++    source: writesSource(finishes, aborts),
++    files: shallowRef<readonly FileEntry[]>([]),
+     opened: shallowRef<readonly FileMergeData[]>([
+       { ...MAGIC_KEYS, path: "a.ts" },
+       { ...MAGIC_KEYS, path: "b.ts" },
+@@ -60,6 +116,7 @@ function stopAt(
+     choices: shallowRef<readonly FileSides[]>([LOGO]),
+     problem: shallowRef<Problem | null>({ action: "list", cause: { kind: "GitRunning" } }),
+     writing: new Map(),
++    stop: { dropped: false },
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map([[LOGO.path, { by: "disk" }]])),
+     notices: shallowRef<readonly Notice[]>([
+       {
+@@ -70,19 +127,24 @@ function stopAt(
+         when: "start",
+       },
+     ]),
++    formatOutcomes: shallowRef<ReadonlyMap<string, FormatOutcome>>(
++      new Map([["a.ts", { kind: "formatted", server: "oxfmt" }]]),
++    ),
+     active: shallowRef<string | null>("a.ts"),
+     screen: shallowRef<Screen>({ kind: "serverLog", name: "oxlint" }),
+-    operation: shallowRef<OperationView | null>(REBASE),
++    operation: shallowRef<OperationView | null>(operation),
++    asking: createAsking(),
+     guard: { unsavedFiles: () => [...unsaved] },
+     latestOpen: 4,
+     loadFiles: () => {
+       lists.push(stop.latestOpen);
+-      stop.operation.value = NEXT_STEP;
+-      if (nextFiles !== null) {
+-        stop.active.value = nextFiles[0]?.path ?? null;
++      stop.operation.value = next.operation;
++      if (next.files !== null) {
++        stop.active.value = next.files[0]?.path ?? null;
+       }
+-      return Promise.resolve(nextFiles);
++      return Promise.resolve(next.files);
+     },
++    refreshFiles: notUsed,
+   };
+   return stop;
+ }
+@@ -102,6 +164,7 @@ test("a new stop drops every opened file, choice, side taken, notice, problem an
+       choices: stop.choices.value,
+       taken: stop.taken.value,
+       notices: stop.notices.value,
++      formatOutcomes: stop.formatOutcomes.value,
+       active: stop.active.value,
+       problem: stop.problem.value,
+       screen: stop.screen.value,
+@@ -117,6 +180,7 @@ test("a new stop drops every opened file, choice, side taken, notice, problem an
+       choices: [],
+       taken: new Map(),
+       notices: [],
++      formatOutcomes: new Map(),
+       active: null,
+       problem: null,
+       screen: { kind: "files" },
+@@ -134,16 +198,17 @@ test("the list runs after the opens are bumped, so a load still running for the
+   expect(stop.active.value).toBe("c.ts");
+ });
+ 
+-test("a write still running for the old stop is dropped: its claim is gone and marked overtaken", async () => {
++test("a write still running for the old stop is dropped: its claim is gone, marked overtaken, and its stop dropped", async () => {
+   quiet();
+   const stop = stopAt([]);
+-  const claims: { overtaken: boolean; dropped: boolean }[] = [];
++  const old = stop.stop;
++  const claims: boolean[] = [];
+   const releases: (() => void)[] = [];
+   const writing = claimWrite(stop, "a.ts", async (claim) => {
+     await new Promise<void>((resolve) => {
+       releases.push(resolve);
+     });
+-    claims.push({ overtaken: claim.overtaken, dropped: claim.dropped });
++    claims.push(claim.overtaken);
+   });
+ 
+   await nextStop(stop, { kind: "outside" });
+@@ -151,7 +216,8 @@ test("a write still running for the old stop is dropped: its claim is gone and m
+   releases[0]?.();
+   await writing;
+ 
+-  expect(claims).toEqual([{ overtaken: true, dropped: true }]);
++  expect(claims).toEqual([true]);
++  expect([old.dropped, stop.stop.dropped]).toEqual([true, false]);
+ });
+ 
+ test("moved on outside with unsaved edits: one notice names the operation and every dropped file", async () => {
+@@ -178,28 +244,92 @@ test("moved on outside without unsaved edits, or continued with them, gives no n
+ 
+ test("continued to a stop that lists no file shows git's message, naming the new stop's operation", async () => {
+   quiet();
+-  const stop = stopAt([], []);
++  const stop = stopAt([], { files: [], operation: CHERRY_PICK });
+ 
+   await nextStop(stop, { kind: "continued", message: "error: could not apply 8b4e7d0\n" });
+ 
+   const problem = stop.problem.value;
+   expect(problem).toEqual({
+     action: "stopped",
+-    operation: "Rebase",
++    operation: "CherryPick",
+     message: "error: could not apply 8b4e7d0\n",
+   });
+   expect(problem === null ? null : problemText(problem, LINUX)).toBe(
+-    "The rebase stopped: error: could not apply 8b4e7d0",
++    "The cherry-pick stopped: error: could not apply 8b4e7d0",
+   );
+ });
+ 
+ test("continued to a stop with files, or one whose list failed, shows no message", async () => {
+   quiet();
+   const listed = stopAt([]);
+-  const failed = stopAt([], null);
++  const failed = stopAt([], { files: null, operation: NEXT_STEP });
+ 
+   await nextStop(listed, { kind: "continued", message: "CONFLICT (content)" });
+   await nextStop(failed, { kind: "continued", message: "CONFLICT (content)" });
+ 
+   expect([listed.problem.value, failed.problem.value]).toEqual([null, null]);
+ });
++
++test("moved on outside to a stop that lists no file shows no message", async () => {
++  quiet();
++  const stop = stopAt([], { files: [], operation: NEXT_STEP });
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(stop.problem.value).toBeNull();
++});
++
++test("moved on outside from a stop that recorded no operation: the notice says Git moved on", async () => {
++  quiet();
++  const stop = stopAt(["a.ts"], { files: [C_TS], operation: null }, null);
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(stop.notices.value.map((notice) => noticeRow(notice).text)).toEqual([
++    "Git moved on outside yamt; your unsaved edits in a.ts were dropped",
++  ]);
++});
++
++test("a Mark resolved question waiting when the stop ends ends with it: a Yes afterwards sends no finishFile", async () => {
++  quiet();
++  const stop = stopAt([]);
++  const finishing = finish(stop, {
++    path: "a.ts",
++    diskVersion: MAGIC_KEYS.diskVersion,
++    summary: { conflicts: 1, changes: 0 },
++    snapshot: { asShown: () => "the old stop's text\n", markSaved: () => undefined },
++  });
++  expect(stop.asking.question.value?.kind).toBe("unprocessed");
++
++  await nextStop(stop, { kind: "outside" });
++  stop.asking.answer(true);
++
++  expect(await finishing).toBe(false);
++  expect([stop.asking.question.value, stop.finishes]).toEqual([null, []]);
++});
++
++test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
++  quiet();
++  const stop = stopAt([]);
++  const { abortOperation } = createAborting(stop);
++  const pressed = abortOperation();
++  expect(stop.asking.question.value?.kind).toBe("abort");
++
++  await nextStop(stop, { kind: "outside" });
++  stop.asking.answer(true);
++  await pressed;
++
++  expect([stop.asking.question.value, stop.aborts]).toEqual([null, []]);
++});
++
++test("a question that is not about the stop stays open across it", async () => {
++  quiet();
++  const stop = stopAt([]);
++  const asked = stop.asking.ask({ kind: "exit", files: ["a.ts"] });
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(stop.asking.question.value).toEqual({ kind: "exit", files: ["a.ts"] });
++  stop.asking.answer(false);
++  expect(await asked).toBe("no");
++});
+diff --git a/frontend/src/ui/stops.ts b/frontend/src/ui/stops.ts
+index b0f820b..a6d5f12 100644
+--- a/frontend/src/ui/stops.ts
++++ b/frontend/src/ui/stops.ts
+@@ -1,10 +1,12 @@
+ import type { ShallowRef } from "vue";
+ 
+ import { log, type FileEntry, type OperationView } from "../ipc";
++import type { Asking } from "./asking";
+ import type { CloseGuard } from "./closeGuard";
+ import type { Notice } from "./noticeText";
+-import { logProblem, type Problem } from "./problem";
+-import { dropClaims, type Writing } from "./saving";
++import { report } from "./problem";
++import { endsWithStop } from "./question";
++import { dropStop, type FormatOutcomes, type Writing } from "./saving";
+ import type { Screen } from "./screen";
+ import type { Taken } from "./sides";
+ import type { Shown } from "./views";
+@@ -19,7 +21,9 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
+     readonly notices: ShallowRef<readonly Notice[]>;
+     readonly active: ShallowRef<string | null>;
+     readonly screen: ShallowRef<Screen>;
++    readonly formatOutcomes: FormatOutcomes;
+     readonly operation: Readonly<ShallowRef<OperationView | null>>;
++    readonly asking: Pick<Asking, "question" | "dismiss">;
+     readonly guard: Pick<CloseGuard, "unsavedFiles">;
+     latestOpen: number;
+     loadFiles(): Promise<readonly FileEntry[] | null>;
+@@ -27,11 +31,16 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
+ 
+ function clearStop(target: StopTarget): void {
+   target.latestOpen += 1;
+-  dropClaims(target);
++  dropStop(target);
++  const question = target.asking.question.value;
++  if (question !== null && endsWithStop(question)) {
++    target.asking.dismiss();
++  }
+   target.opened.value = [];
+   target.choices.value = [];
+   target.taken.value = new Map();
+   target.notices.value = [];
++  target.formatOutcomes.value = new Map();
+   target.active.value = null;
+   target.problem.value = null;
+   target.screen.value = { kind: "files" };
+@@ -47,12 +56,10 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void>
+   }
+   const listed = await target.loadFiles();
+   if (end.kind === "continued" && listed !== null && listed.length === 0) {
+-    const stopped: Problem = {
++    report(target, {
+       action: "stopped",
+       operation: target.operation.value?.kind ?? null,
+       message: end.message,
+-    };
+-    logProblem(stopped);
+-    target.problem.value = stopped;
++    });
+   }
+ }
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index ee53494..0a4f697 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -22,10 +22,10 @@ import { refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+ import { noticeKey, type Notice } from "./noticeText";
+ import { createPaneSplit, type PaneSplitState } from "./paneSplit";
+-import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
++import { logProblem, reportFailure, type Problem } from "./problem";
+ import type { Question } from "./question";
+-import { afterWrite, createSaving, finish, reset, whileWriting } from "./saving";
+-import type { FinishRequest, Saving, Writing } from "./saving";
++import { createSaving, finish, reset, take } from "./saving";
++import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
+ import type { Screen } from "./screen";
+ import { createServers, type Servers } from "./servers";
+ import { createServerSetup, type ServerSetup } from "./serverSetup";
+@@ -34,8 +34,8 @@ import type { SettingsActions, SettingsInUse } from "./settings";
+ import type { Taken } from "./sides";
+ import { nextStop, type StopEnd } from "./stops";
+ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
+-import type { Preferences } from "./useMergeController";
+-import { fetchView, isShown, reload } from "./views";
++import type { FormatOutcome, Preferences } from "./useMergeController";
++import { fetchView, isShown } from "./views";
+ 
+ type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+@@ -48,6 +48,7 @@ type Refs = {
+   readonly active: ShallowRef<string | null>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly screen: ShallowRef<Screen>;
++  readonly formatOutcomes: FormatOutcomes;
+   readonly settings: ShallowRef<SettingsInUse>;
+   readonly fileListShown: ShallowRef<boolean>;
+ };
+@@ -59,8 +60,9 @@ type State = Refs &
+     readonly guard: CloseGuard;
+     latestOpen: number;
+     latestSettings: number;
+-    loadFiles(): Promise<readonly FileEntry[] | null>;
+-    nextStop(end: StopEnd): Promise<void>;
++    readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
++    readonly refreshFiles: () => Promise<void>;
++    readonly nextStop: (end: StopEnd) => Promise<void>;
+   };
+ 
+ type Actions = CloseGuard &
+@@ -110,11 +112,32 @@ function createRefs(startTheme: Theme): Refs {
+     active: shallowRef<string | null>(null),
+     problem: shallowRef<Problem | null>(null),
+     screen: shallowRef<Screen>({ kind: "files" }),
++    formatOutcomes: shallowRef<ReadonlyMap<string, FormatOutcome>>(new Map()),
+     settings: shallowRef(startSettings(startTheme)),
+     fileListShown: shallowRef(true),
+   };
+ }
+ 
++function createState(refs: Refs, source: ChunkSource): State {
++  const asking = createAsking();
++  const state: State = {
++    ...refs,
++    source,
++    asking,
++    guard: createCloseGuard(asking, refs.opened),
++    writing: new Map(),
++    stop: { dropped: false },
++    latestOpen: 0,
++    latestSettings: 0,
++    loadFiles: () => loadFiles(state),
++    refreshFiles: async () => {
++      await refreshFiles(state, "running");
++    },
++    nextStop: (end) => nextStop(state, end),
++  };
++  return state;
++}
++
+ export function createAppStore(
+   source: ChunkSource,
+   startTheme: Theme,
+@@ -122,24 +145,13 @@ export function createAppStore(
+   host: ServerHost | null,
+ ): AppStore {
+   const refs = createRefs(startTheme);
+-  const asking = createAsking();
++  const state = createState(refs, source);
+   const buttons = createHiddenButtons();
+-  const state: State = {
+-    ...refs,
+-    source,
+-    asking,
+-    guard: createCloseGuard(asking, refs.opened),
+-    writing: new Map(),
+-    latestOpen: 0,
+-    latestSettings: 0,
+-    loadFiles: () => loadFiles(state),
+-    nextStop: (end) => nextStop(state, end),
+-  };
+   const { files, settings } = refs;
+   const acts = actions(state, buttons, settingsActions(state));
+   store = {
+     ...refs,
+-    question: asking.question,
++    question: state.asking.question,
+     allResolved: computed(
+       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+     ),
+@@ -161,17 +173,16 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+     loadFiles: async () => {
+       await state.loadFiles();
+     },
+-    refreshFiles: async () => {
+-      await refreshFiles(state, "running");
+-    },
+-    nextStop: (end) => state.nextStop(end),
++    refreshFiles: state.refreshFiles,
++    nextStop: state.nextStop,
+     open: (path) => open(state, path),
+     pick: async (path) => {
+       state.screen.value = { kind: "files" };
+       await open(state, path);
+     },
+-    finish: (request) => finishThenMoveOn(state, request),
+-    takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
++    finish: (request) => thenMoveOn(state, request.path, () => finish(state, request)),
++    takeSide: (path, side, diskVersion) =>
++      thenMoveOn(state, path, () => take(state, path, side, diskVersion)),
+     reset: (path, diskVersion) => reset(state, path, diskVersion),
+     dismissProblem: () => {
+       state.problem.value = null;
+@@ -205,10 +216,14 @@ async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
+   return listed;
+ }
+ 
+-async function finishThenMoveOn(state: State, request: FinishRequest): Promise<void> {
++async function thenMoveOn(
++  state: State,
++  path: string,
++  write: () => Promise<boolean>,
++): Promise<void> {
+   const opensBefore = state.latestOpen;
+-  if (await finish(state, request)) {
+-    await moveOn(state, request.path, opensBefore);
++  if (await write()) {
++    await moveOn(state, path, opensBefore);
+   }
+ }
+ 
+@@ -232,9 +247,10 @@ async function load(state: State, path: string): Promise<void> {
+   const current = ticket === state.latestOpen;
+   if (!view.ok) {
+     const failure: Problem = { action: "open", path, cause: view.cause };
+-    logProblem(failure);
+     if (current) {
+-      state.problem.value = failure;
++      await reportFailure(state, failure);
++    } else {
++      logProblem(failure);
+     }
+     return;
+   }
+@@ -253,35 +269,6 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
+   }
+ }
+ 
+-async function takeSide(
+-  state: State,
+-  path: string,
+-  side: Side,
+-  diskVersion: DiskVersion,
+-): Promise<void> {
+-  const opensBefore = state.latestOpen;
+-  const outcome = await whileWriting(state, path, async (claim) => {
+-    const reply = await attempt(() => state.source.takeSide(path, side, diskVersion));
+-    return claim.dropped ? null : reply;
+-  });
+-  if (outcome === null) {
+-    return;
+-  }
+-  if (!outcome.ok) {
+-    report(state, { action: "take", path, cause: outcome.cause });
+-    return;
+-  }
+-  if (!(await afterWrite(state, path, outcome.value))) {
+-    return;
+-  }
+-  state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
+-  clearProblemAbout(state, path);
+-  if (state.opened.value.some((file) => file.path === path)) {
+-    await reload(state, path);
+-  }
+-  await moveOn(state, path, opensBefore);
+-}
+-
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
+diff --git a/frontend/src/ui/views.ts b/frontend/src/ui/views.ts
+index 03fcc9b..9040bac 100644
+--- a/frontend/src/ui/views.ts
++++ b/frontend/src/ui/views.ts
+@@ -1,7 +1,7 @@
+ import type { ShallowRef } from "vue";
+ 
+ import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
+-import { attempt, report, type Outcome, type Problem } from "./problem";
++import { attempt, type Outcome, type Problem } from "./problem";
+ 
+ export type Shown = {
+   readonly source: ChunkSource;
+@@ -50,13 +50,3 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<()
+   const data = await attempt(() => shown.source.loadFile(path));
+   return data.ok ? { ok: true, value: () => putOpened(shown, data.value) } : data;
+ }
+-
+-export async function reload(shown: Shown, path: string): Promise<boolean> {
+-  const view = await fetchView(shown, path);
+-  if (!view.ok) {
+-    report(shown, { action: "open", path, cause: view.cause });
+-    return false;
+-  }
+-  view.value();
+-  return true;
+-}
+-- 
+2.56.0
+
