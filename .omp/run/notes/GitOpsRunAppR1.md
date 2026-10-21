@@ -59,3 +59,10 @@ All blocks and promoted findings from the brief are fixed. The tests for items 3
 - The #1363 test reaches the empty stop through a cherry-pick at a rebase's edit stop, which relies on git's behaviour there (as `gitio/tests/edit_stop.rs` also does).
 
 Checks for Main to run on the merged tree: `just check`, `just map-check` (after its sourced-by line is updated), and `just mutants` on `merge.rs`, `commands.rs` and `fixtureOperations.ts`.
+
+## Mutants (`just mutants 1dba43c`)
+
+Rust 7 — 3 caught, 3 unviable, 1 missed (`close_window_if_ended` → (), dropped #1384). TS changed lines 38 killed, 2 survived (fixture `NO_OPERATION` literal, dropped).
+
+## Boundary re-check: fail — #1352–#1357 fixed; new block #1385 (a test copy of the close decision).
+Correctness re-check: pass, no findings (#1384 drop stands; the final desktop smoke should see the window close after a Finished continue and after an abort).
