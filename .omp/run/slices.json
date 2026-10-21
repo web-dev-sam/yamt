@@ -1,7 +1,14 @@
 {
-  "GitOpsDesign": {
-    "agent": "designer",
-    "brief": "docs/slices/briefs/3.J-git-operations-design.md",
-    "owned": []
+  "GitOpsRead": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-read.md",
+    "owned": [
+      "crates/gitio/src/operation.rs",
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/tests/operations.rs",
+      "crates/gitio/AGENTS.md",
+      "crates/conflict-repo/**"
+    ]
   }
 }
