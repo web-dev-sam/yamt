@@ -1,0 +1,214 @@
+diff --git a/crates/compare/src/index.rs b/crates/compare/src/index.rs
+index 7076868..767065b 100644
+--- a/crates/compare/src/index.rs
++++ b/crates/compare/src/index.rs
+@@ -35,22 +35,30 @@ struct FormatOnly {
+ }
+ 
+ impl Index {
+-    pub(crate) fn first() -> Index {
++    pub(crate) fn first(path: &Path) -> Result<Index> {
+         let mut index = Index {
+             format: FORMAT,
+             shown: FIRST_ID,
+             next_id: FIRST_ID,
+             tabs: Vec::new(),
+         };
+-        index.add_tab();
+-        index
++        index.add_tab(path)?;
++        Ok(index)
+     }
+ 
+-    /// Appends "Compare <number>" with a number above every tab's, and shows it.
+-    pub(crate) fn add_tab(&mut self) {
+-        let number = self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0) + 1;
++    /// Appends "Compare <number>" with a number above every tab's, and shows it; refused as `Broken` at `path`
++    /// when the new tab would leave no id or number for one more.
++    pub(crate) fn add_tab(&mut self, path: &Path) -> Result<()> {
++        let number = self.highest_number().saturating_add(1);
+         let id = self.next_id;
+-        self.next_id = TabId(id.0 + 1);
++        let next_id = TabId(id.0.saturating_add(1));
++        if let Some(message) = no_room_left(next_id, number) {
++            return Err(Error::Broken {
++                path: path.to_owned(),
++                message,
++            });
++        }
++        self.next_id = next_id;
+         self.tabs.push(StoredTab {
+             id,
+             number,
+@@ -58,14 +66,15 @@ impl Index {
+             language: TabLanguage::Auto,
+         });
+         self.shown = id;
++        Ok(())
+     }
+ 
+     /// The next tab is shown when the shown one goes, else the previous; the last one gone leaves a new tab.
+-    pub(crate) fn close_tab(&mut self, tab: TabId) -> Result<()> {
++    pub(crate) fn close_tab(&mut self, tab: TabId, path: &Path) -> Result<()> {
+         let position = self.position(tab)?;
+         self.tabs.remove(position);
+         if self.tabs.is_empty() {
+-            self.add_tab();
++            self.add_tab(path)?;
+         } else if self.shown == tab {
+             let shown_at = position.min(self.tabs.len() - 1);
+             if let Some(shown) = self.tabs.get(shown_at) {
+@@ -97,23 +106,21 @@ impl Index {
+             .ok_or(Error::UnknownTab { tab })
+     }
+ 
++    fn highest_number(&self) -> u32 {
++        self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0)
++    }
++
+     /// What makes a parsed index unusable: no id or number left for a new tab, an id repeated, at or above
+     /// `nextId`, or a shown tab not listed.
+     fn problem(&self) -> Option<String> {
+         if self.tabs.is_empty() {
+             return Some("`tabs` is empty".to_owned());
+         }
+-        if self.next_id.0 == u32::MAX {
+-            return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
++        if let Some(message) = no_room_left(self.next_id, self.highest_number()) {
++            return Some(message);
+         }
+         let mut seen = HashSet::new();
+         for tab in &self.tabs {
+-            if tab.number == u32::MAX {
+-                return Some(format!(
+-                    "the tab number {} leaves no number for a new tab",
+-                    u32::MAX
+-                ));
+-            }
+             if !seen.insert(tab.id) {
+                 return Some(format!("the tab id {} appears twice", tab.id.0));
+             }
+@@ -131,6 +138,20 @@ impl Index {
+     }
+ }
+ 
++/// Why an index with this `nextId` and this highest tab number has no id or number left for a new tab.
++fn no_room_left(next_id: TabId, highest_number: u32) -> Option<String> {
++    if next_id.0 == u32::MAX {
++        return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
++    }
++    if highest_number == u32::MAX {
++        return Some(format!(
++            "the tab number {} leaves no number for a new tab",
++            u32::MAX
++        ));
++    }
++    None
++}
++
+ /// `None` when there is no `tabs.json` at `path`.
+ pub(crate) fn read_index(path: &Path) -> Result<Option<Index>> {
+     match fs::read(path) {
+@@ -189,7 +210,7 @@ mod tests {
+ 
+     #[test]
+     fn the_first_index_has_compare_1_shown() {
+-        let index = Index::first();
++        let index = Index::first(Path::new("tabs.json")).unwrap();
+         assert_eq!(index.shown, FIRST_ID);
+         assert_eq!(index.next_id, TabId(2));
+         assert_eq!(index.tabs.len(), 1);
+diff --git a/crates/compare/src/store.rs b/crates/compare/src/store.rs
+index cf4d91a..5f61827 100644
+--- a/crates/compare/src/store.rs
++++ b/crates/compare/src/store.rs
+@@ -35,7 +35,7 @@ impl TabStore {
+         let index = if let Some(index) = read_index(&index_path)? {
+             index
+         } else {
+-            let index = Index::first();
++            let index = Index::first(&index_path)?;
+             write_index(&index_path, &index)?;
+             index
+         };
+@@ -93,7 +93,7 @@ impl TabStore {
+     /// Appends a new tab and shows it.
+     pub fn add_tab(&mut self) -> Result<TabList> {
+         let mut next = self.index.clone();
+-        next.add_tab();
++        next.add_tab(&self.index_path())?;
+         self.commit(next)?;
+         Ok(self.list())
+     }
+@@ -101,7 +101,7 @@ impl TabStore {
+     /// Removes the tab from `tabs.json`, then its column files.
+     pub fn close_tab(&mut self, tab: TabId) -> Result<TabList> {
+         let mut next = self.index.clone();
+-        next.close_tab(tab)?;
++        next.close_tab(tab, &self.index_path())?;
+         self.commit(next)?;
+         self.loaded.remove(&tab);
+         remove_columns(&self.dir, tab);
+@@ -140,12 +140,16 @@ impl TabStore {
+     /// Writes `next` when it differs from the index in memory, then keeps it; a failed write keeps the old one.
+     fn commit(&mut self, next: Index) -> Result<()> {
+         if next != self.index {
+-            write_index(&self.dir.join(INDEX_FILE), &next)?;
++            write_index(&self.index_path(), &next)?;
+             self.index = next;
+         }
+         Ok(())
+     }
+ 
++    fn index_path(&self) -> PathBuf {
++        self.dir.join(INDEX_FILE)
++    }
++
+     fn list(&self) -> TabList {
+         let tabs = self
+             .index
+diff --git a/crates/compare/tests/tabs.rs b/crates/compare/tests/tabs.rs
+index 85912e5..a88d28c 100644
+--- a/crates/compare/tests/tabs.rs
++++ b/crates/compare/tests/tabs.rs
+@@ -269,3 +269,33 @@ fn a_restart_reads_back_order_names_languages_and_the_shown_tab() {
+     );
+     assert!(before.tabs.iter().all(|tab| tab.id != list.shown));
+ }
++
++fn add_refused_after_opening(json: &str, message: &str) {
++    let dir = tempfile::tempdir().unwrap();
++    let index = dir.path().join("tabs.json");
++    fs::write(&index, json).unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let result = store.add_tab();
++    assert!(
++        matches!(&result, Err(Error::Broken { path, message: said }) if *path == index && said == message),
++        "{result:?}"
++    );
++    assert_eq!(fs::read_to_string(&index).unwrap(), json);
++    assert_eq!(store.start().list.tabs.len(), 1);
++}
++
++#[test]
++fn a_next_id_one_below_u32_max_opens_and_refuses_a_new_tab_writing_nothing() {
++    add_refused_after_opening(
++        r#"{"format":1,"shown":1,"nextId":4294967294,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
++        "`nextId` 4294967295 leaves no id for a new tab",
++    );
++}
++
++#[test]
++fn a_tab_number_one_below_u32_max_opens_and_refuses_a_new_tab_writing_nothing() {
++    add_refused_after_opening(
++        r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"number":4294967294,"name":"a","language":{"kind":"auto"}}]}"#,
++        "the tab number 4294967295 leaves no number for a new tab",
++    );
++}
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index b055a37..d60f51b 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--raw` over `yamt_compare::TabStore` (plan §2 #93–#97): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --raw` → `Compare`; `--raw` with `--repo` is a usage error, `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; never called for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `open_store` opens `TabStore` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --raw` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `window.rs` (one window per run, merge or compare, built by one `open_and_wait`: reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of both windows; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` sets only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error` and from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`). Three `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host` and `compare` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--raw` over `yamt_compare::TabStore` (plan §2 #93–#97): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --raw` → `Compare`; `--raw` with `--repo` is a usage error, `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; never called for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --raw` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `window.rs` (one window per run, merge or compare, built by one `open_and_wait`: reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of both windows; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` sets only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error` and from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`). Three `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host` and `compare` only, never on `gitio` or `merge-core` (arch-check).
