@@ -158,6 +158,29 @@ test("an action after an abort says the merge was aborted", () => {
   );
 });
 
+test("an unknown compare tab says the tab was closed", () => {
+  expect(text({ action: "list", cause: { kind: "UnknownTab", tab: 3 } })).toBe(
+    "Could not list the conflicted files: that tab was closed.",
+  );
+});
+
+test("a column over the limit names the limit from the reply in MiB", () => {
+  const limit = 8 * 1024 * 1024;
+
+  expect(text({ action: "list", cause: { kind: "ColumnTooLarge", limit } })).toBe(
+    "Could not list the conflicted files: a column holds up to 8 MiB.",
+  );
+  expect(text({ action: "list", cause: { kind: "ColumnTooLarge", limit: limit / 2 } })).toBe(
+    "Could not list the conflicted files: a column holds up to 4 MiB.",
+  );
+});
+
+test("a stopped worker says to try again", () => {
+  expect(text({ action: "list", cause: { kind: "WorkerStopped" } })).toBe(
+    "Could not list the conflicted files: yamt's worker stopped; try again.",
+  );
+});
+
 test.each([
   ["StopMovedOn", "The operation moved on; the list is being read again."],
   ["GitRunning", "Git is still running; try again when it is done."],

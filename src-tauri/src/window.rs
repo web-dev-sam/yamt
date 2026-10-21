@@ -1,23 +1,26 @@
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use tauri::path::PathResolver;
 use tauri::window::Color;
 use tauri::{
-    AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 use yamt_session::MergeSession;
 use yamt_settings::{StoredSettings, Theme};
 
-use crate::commands::with_session;
+use crate::commands::{with_compare, with_session};
+use crate::compare;
 use crate::merge::MergeState;
-use crate::outcome::{Ending, ending_when_git_is_done};
+use crate::outcome::{Ending, Exit, ending_when_git_is_done};
 use crate::servers::{self, HostState};
 use crate::settings;
 
 const WINDOW_LABEL: &str = "main";
+const COMPARE_TITLE: &str = "Compare — yamt";
 const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
@@ -30,16 +33,63 @@ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
 const PAGE_ANSWER: &str = "true";
 
+/// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowKind {
+    Merge,
+    Compare,
+}
+
+impl WindowKind {
+    fn name(self) -> &'static str {
+        match self {
+            WindowKind::Merge => "merge",
+            WindowKind::Compare => "compare",
+        }
+    }
+}
+
 pub(crate) fn run(session: Box<MergeSession>) -> Ending {
     let title = window_title(session.root());
-    match open_and_wait(&title, session) {
+    match open_merge(&title, session) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }
 }
 
-fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
-    let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
+pub(crate) fn run_compare() -> Ending {
+    match open_compare() {
+        Ok(ending) => ending,
+        Err(error) => Ending::failure(error.to_string()),
+    }
+}
+
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
+fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
+    let app = with_session(tauri::Builder::default(), session).build(context())?;
+    let handle = open_and_wait(app, title, WindowKind::Merge)?;
+    servers::lock(&handle.state::<HostState>()).stop_all();
+    Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
+}
+
+fn open_compare() -> tauri::Result<Ending> {
+    let app = with_compare(tauri::Builder::default()).build(context())?;
+    let store = match compare::open_store(app.path()) {
+        Ok(store) => store,
+        Err(problem) => return Ok(Ending::failure(problem)),
+    };
+    app.manage(Mutex::new(store));
+    open_and_wait(app, COMPARE_TITLE, WindowKind::Compare)?;
+    Ok(Ending {
+        exit: Exit::Success,
+        message: None,
+    })
+}
+
+fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
     #[cfg(target_os = "linux")]
@@ -50,13 +100,12 @@ fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Endin
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .background_color(background(theme))
-        .initialization_script(start_script(theme))
+        .initialization_script(start_script(theme, kind))
         .build()?;
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
-    servers::lock(&handle.state::<HostState>()).stop_all();
-    Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
+    Ok(handle)
 }
 
 fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {
@@ -87,10 +136,11 @@ fn background(theme: Theme) -> Color {
 
 // wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
 // document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
-fn start_script(theme: Theme) -> String {
+fn start_script(theme: Theme, kind: WindowKind) -> String {
     format!(
-        "document.documentElement.dataset.theme = \"{}\";",
-        theme.name()
+        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";",
+        theme.name(),
+        kind.name()
     )
 }
 
@@ -199,14 +249,14 @@ mod tests {
     }
 
     #[test]
-    fn the_start_script_names_the_theme() {
+    fn the_start_script_names_the_theme_and_the_window() {
         assert_eq!(
-            start_script(Theme::Light),
-            r#"document.documentElement.dataset.theme = "light";"#
+            start_script(Theme::Light, WindowKind::Merge),
+            r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
         );
         assert_eq!(
-            start_script(Theme::Dark),
-            r#"document.documentElement.dataset.theme = "dark";"#
+            start_script(Theme::Dark, WindowKind::Compare),
+            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
         );
     }
 

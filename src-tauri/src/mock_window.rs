@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde_json::Value;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
@@ -8,7 +10,8 @@ use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
-use crate::commands::with_session;
+use crate::commands::{with_compare, with_session};
+use crate::compare::open_store_in;
 use crate::merge::MergeState;
 use crate::outcome::{Ending, ending_when_git_is_done};
 
@@ -70,6 +73,36 @@ impl Window {
 
     pub(crate) fn ending(&self) -> Ending {
         ending_when_git_is_done(&self.app.state::<MergeState>())
+    }
+}
+
+/// The compare window as `window::open_compare` builds it, its data folder a temp dir.
+pub(crate) struct CompareWindow {
+    pub(crate) data: TempDir,
+    pub(crate) webview: WebviewWindow<MockRuntime>,
+    _app: App<MockRuntime>,
+}
+
+pub(crate) fn open_compare_window() -> CompareWindow {
+    let data = TempDir::new().unwrap();
+    let store = open_store_in(data.path()).unwrap();
+    let app = with_compare(mock_builder())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    app.manage(Mutex::new(store));
+    let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+        .build()
+        .unwrap();
+    CompareWindow {
+        data,
+        webview,
+        _app: app,
+    }
+}
+
+impl CompareWindow {
+    pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
+        invoke_on(&self.webview, cmd, args)
     }
 }
 

@@ -1,3 +1,4 @@
+use yamt_compare::{MAX_COLUMN_BYTES, TabId};
 use yamt_session::UnsupportedReason;
 
 #[derive(Debug, serde::Serialize, specta::Type)]
@@ -37,6 +38,13 @@ pub enum IpcError {
     GitRunning,
     MergeFinished,
     NoOperation,
+    UnknownTab {
+        tab: TabId,
+    },
+    ColumnTooLarge {
+        limit: u32,
+    },
+    WorkerStopped,
 }
 
 impl From<yamt_session::Error> for IpcError {
@@ -81,6 +89,34 @@ impl From<yamt_settings::Error> for IpcError {
                 message,
             },
             yamt_settings::Error::NotAbsolute { path } => IpcError::NotAbsolute { path },
+        }
+    }
+}
+
+impl From<yamt_compare::Error> for IpcError {
+    fn from(error: yamt_compare::Error) -> IpcError {
+        match error {
+            yamt_compare::Error::ReadFailed { path, message }
+            | yamt_compare::Error::Broken { path, message } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_compare::Error::Locked { path } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message: "another yamt --raw window holds it".to_owned(),
+            },
+            yamt_compare::Error::NewerFormat { path, format } => IpcError::ReadFailed {
+                path: path.display().to_string(),
+                message: format!("written by a newer yamt (format {format})"),
+            },
+            yamt_compare::Error::WriteFailed { path, message } => IpcError::WriteFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_compare::Error::UnknownTab { tab } => IpcError::UnknownTab { tab },
+            yamt_compare::Error::TooLarge { .. } => IpcError::ColumnTooLarge {
+                limit: MAX_COLUMN_BYTES,
+            },
         }
     }
 }
@@ -211,6 +247,58 @@ mod tests {
         assert_eq!(
             serde_json::to_value(IpcError::NoConfigFolder).unwrap(),
             json!({ "kind": "NoConfigFolder" })
+        );
+    }
+
+    fn compare_json(error: yamt_compare::Error) -> Value {
+        serde_json::to_value(IpcError::from(error)).unwrap()
+    }
+
+    #[test]
+    fn compare_store_problems_serialise_as_read_failures_naming_the_file() {
+        let locked = yamt_compare::Error::Locked {
+            path: "/d/yamt/compare".into(),
+        };
+        assert_eq!(
+            compare_json(locked),
+            json!({ "kind": "ReadFailed", "path": "/d/yamt/compare", "message": "another yamt --raw window holds it" })
+        );
+        let newer = yamt_compare::Error::NewerFormat {
+            path: "/d/tabs.json".into(),
+            format: 2,
+        };
+        assert_eq!(
+            compare_json(newer),
+            json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "written by a newer yamt (format 2)" })
+        );
+        let broken = yamt_compare::Error::Broken {
+            path: "/d/tabs.json".into(),
+            message: "`tabs` is empty".to_owned(),
+        };
+        assert_eq!(
+            compare_json(broken),
+            json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "`tabs` is empty" })
+        );
+    }
+
+    #[test]
+    fn compare_write_tab_and_size_errors_serialise_with_their_kinds() {
+        let write_failed = yamt_compare::Error::WriteFailed {
+            path: "/d/1-left.txt".into(),
+            message: "disk full".to_owned(),
+        };
+        assert_eq!(
+            compare_json(write_failed),
+            json!({ "kind": "WriteFailed", "path": "/d/1-left.txt", "message": "disk full" })
+        );
+        let too_large = yamt_compare::Error::TooLarge { bytes: 9_000_000 };
+        assert_eq!(
+            compare_json(too_large),
+            json!({ "kind": "ColumnTooLarge", "limit": MAX_COLUMN_BYTES })
+        );
+        assert_eq!(
+            compare_json(yamt_compare::Error::UnknownTab { tab: TabId(7) }),
+            json!({ "kind": "UnknownTab", "tab": 7 })
         );
     }
 }
