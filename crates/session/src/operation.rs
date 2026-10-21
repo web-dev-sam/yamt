@@ -3,9 +3,10 @@ use specta::Type;
 use yamt_gitio::{Operation, Progress, Rebase, Repo, Stop};
 
 use crate::disk::DiskChange;
-use crate::session::{FileEntry, LOG_TARGET, MergeSession};
+use crate::session::{FileEntry, MergeSession};
 use crate::side_names::{
-    SideName, SideNames, checked_out, commit_name, merge_head_name, named, revert_name, text,
+    SideName, SideNames, applied, checked_out, commit_name, merge_head_name, message_text,
+    name_or_warn, named, text,
 };
 use crate::{Error, Result};
 
@@ -117,7 +118,7 @@ impl MergeSession {
     /// Re-reads the stop: none → `NoOperation`; another stop → `StopMovedOn`; else git's abort.
     pub fn abort_operation(&mut self) -> Result<OperationKind> {
         let operation = self.operation_still_here()?;
-        self.repo.abort(&operation)?;
+        self.repo.abort(&operation).map_err(refusal_as_shown)?;
         Ok(kind_of(&operation))
     }
 
@@ -126,7 +127,7 @@ impl MergeSession {
     pub fn continue_operation(&mut self) -> Result<Continued> {
         let operation = self.operation_still_here()?;
         let run = self.repo.continue_operation(&operation)?;
-        let message = text(&run.output).trim_end().to_owned();
+        let message = shown_text(&text(&run.output));
         let after = self.repo.stop()?;
         if after.operation.is_none() {
             let kind = kind_of(&operation);
@@ -169,26 +170,25 @@ fn kind_of(operation: &Operation) -> OperationKind {
 }
 
 fn view(repo: &Repo, stop: &Stop) -> Option<OperationView> {
-    let head = stop.head.as_ref();
-    Some(match stop.operation.as_ref()? {
-        Operation::Merge { merging } => OperationView::Merge {
-            merging: name_or_warn("merging", merge_head_name(repo, merging).map(Some)),
-            into: name_or_warn("into", checked_out(repo, head)),
+    let operation = stop.operation.as_ref()?;
+    let theirs = |label| name_or_warn(label, applied(repo, Some(operation)));
+    let into = || name_or_warn("into", checked_out(repo, stop.head.as_ref()));
+    Some(match operation {
+        Operation::Merge { .. } => OperationView::Merge {
+            merging: theirs("merging"),
+            into: into(),
         },
-        Operation::SquashMerge { merging } => OperationView::SquashMerge {
-            merging: name_or_warn("merging", named(repo, merging.as_ref(), merge_head_name)),
-            into: name_or_warn("into", checked_out(repo, head)),
+        Operation::SquashMerge { .. } => OperationView::SquashMerge {
+            merging: theirs("merging"),
+            into: into(),
         },
         Operation::Rebase(rebase) => rebase_view(repo, rebase),
-        Operation::CherryPick { picking, progress } => OperationView::CherryPick {
-            picking: name_or_warn("picking", named(repo, picking.as_ref(), commit_name)),
+        Operation::CherryPick { progress, .. } => OperationView::CherryPick {
+            picking: theirs("picking"),
             progress: progress.map(progress_view),
         },
-        Operation::Revert {
-            reverting,
-            progress,
-        } => OperationView::Revert {
-            reverting: name_or_warn("reverting", named(repo, reverting.as_ref(), revert_name)),
+        Operation::Revert { progress, .. } => OperationView::Revert {
+            reverting: theirs("reverting"),
             progress: progress.map(progress_view),
         },
         Operation::Am {
@@ -197,7 +197,7 @@ fn view(repo: &Repo, stop: &Stop) -> Option<OperationView> {
             progress,
         } => OperationView::Am {
             subject: text(subject),
-            message: text(message).trim().to_owned(),
+            message: message_text(message),
             progress: progress.map(progress_view),
         },
     })
@@ -223,12 +223,35 @@ fn progress_view(progress: Progress) -> ProgressView {
     }
 }
 
-fn name_or_warn(name: &'static str, read: Result<Option<SideName>>) -> Option<SideName> {
-    match read {
-        Ok(found) => found,
-        Err(error) => {
-            tracing::warn!(target: LOG_TARGET, event = "operation_name_unread", name, %error, "this name is left out");
-            None
-        }
+fn refusal_as_shown(mut error: yamt_gitio::Error) -> yamt_gitio::Error {
+    if let yamt_gitio::Error::GitFailed { stderr, .. } = &mut error {
+        *stderr = shown_text(stderr);
+    }
+    error
+}
+
+/// git's output as its terminal shows it: progress lines end in `\r` and the next text overwrites them, so
+/// each line keeps what follows its last `\r`.
+fn shown_text(output: &str) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(|line| line.rsplit_once('\r').map_or(line, |(_, shown)| shown))
+        .collect();
+    lines.join("\n").trim_end().to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_line_of_git_s_output_keeps_what_follows_its_last_carriage_return() {
+        let output = "[detached HEAD 1a2b3c4] step 1\nRebasing (2/3)\rRebasing (3/3)\rerror: could not apply\r\nhint: x\n\n";
+
+        assert_eq!(
+            shown_text(output),
+            "[detached HEAD 1a2b3c4] step 1\nerror: could not apply\nhint: x"
+        );
+        assert_eq!(shown_text("one line"), "one line");
     }
 }

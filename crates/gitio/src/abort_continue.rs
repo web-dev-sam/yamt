@@ -1,6 +1,6 @@
 use crate::operation::Operation;
 use crate::repo::Repo;
-use crate::run::{argv, git_command_as_user, run_to_end};
+use crate::run::{argv, run_to_end};
 use crate::{Error, Result};
 
 /// What one git run printed, stdout then stderr, and whether it exited 0.
@@ -13,32 +13,34 @@ pub struct GitRun {
 impl Repo {
     /// git's own abort for `operation` (plan §2 #88; a squash merge: `reset --merge`, as `merge --abort`
     /// refuses without `MERGE_HEAD`). No deadline: a kill in the middle of a reset leaves `index.lock`.
-    /// A refusal is `Error::GitFailed` with git's output.
+    /// A refusal is `Error::GitFailed` with git's stderr.
     pub fn abort(&self, operation: &Operation) -> Result<()> {
-        let command = git_command_as_user(&self.git, &self.root, &abort_args(operation));
+        let command = self.command_as_user(&abort_args(operation));
         let args = argv(&command);
-        let (status, output) = run_to_end(command)?;
-        if status.success() {
+        let finished = run_to_end(command)?;
+        if finished.status.success() {
             return Ok(());
         }
         Err(Error::GitFailed {
             args,
-            status: status.code(),
-            stderr: String::from_utf8_lossy(&output).trim_end().to_owned(),
+            status: finished.status.code(),
+            stderr: String::from_utf8_lossy(&finished.stderr)
+                .trim_end()
+                .to_owned(),
         })
     }
 
     /// git's own continue for `operation` (plan §2 #89; a squash merge: `commit`). A non-zero exit is not
     /// an `Err`: the caller reads the stop again to learn what happened.
     pub fn continue_operation(&self, operation: &Operation) -> Result<GitRun> {
-        let mut command = git_command_as_user(&self.git, &self.root, continue_args(operation));
+        let mut command = self.command_as_user(continue_args(operation));
         // GIT_EDITOR wins over core.editor, and `:` is never run (git editor.c): the commit keeps
         // git's prepared message with its comment lines stripped, as an editor saved unchanged would.
         command.env("GIT_EDITOR", ":");
-        let (status, output) = run_to_end(command)?;
+        let finished = run_to_end(command)?;
         Ok(GitRun {
-            succeeded: status.success(),
-            output,
+            succeeded: finished.status.success(),
+            output: finished.combined(),
         })
     }
 }

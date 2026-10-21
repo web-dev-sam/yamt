@@ -2,11 +2,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, git, git_ok,
-    operation_repo, ready_repo, start,
+    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, TempDir, conflict_repo, git,
+    git_ok, operation_repo, ready_repo, run_ignored_in_child, start,
 };
 use yamt_gitio::{Error, GitRun, Operation, Repo};
 
@@ -18,7 +17,6 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     local: Some(b"local\n"),
     remote: Some(b"remote\n"),
 }];
-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
 const WITHOUT_AN_EDITOR: [&str; 7] = [
     "a_merge_commits_git_s_message_without_its_conflicts_comment",
     "a_squash_merge_commits_git_s_squash_message",
@@ -161,23 +159,16 @@ fn a_continue_git_refuses_is_no_err_and_carries_git_s_message() {
 // With GIT_EDITOR, VISUAL and EDITOR gone and `core.editor=false`, only yamt's `GIT_EDITOR=:` lets a commit through.
 #[test]
 fn continue_commits_git_s_prepared_messages_without_an_editor_in_the_environment() {
-    let child = Command::new(std::env::current_exe().unwrap())
-        .args(["--ignored", "--exact", "--test-threads=1"])
-        .args(WITHOUT_AN_EDITOR)
-        .env_remove("GIT_EDITOR")
-        .env_remove("VISUAL")
-        .env_remove("EDITOR")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&child.stdout);
-    let passed = format!("test result: ok. {} passed", WITHOUT_AN_EDITOR.len());
-    assert!(
-        child.status.success() && stdout.contains(&passed),
-        "{stdout}{}",
-        String::from_utf8_lossy(&child.stderr)
-    );
+    let ran = run_ignored_in_child(&WITHOUT_AN_EDITOR, |child| {
+        child
+            .env_remove("GIT_EDITOR")
+            .env_remove("VISUAL")
+            .env_remove("EDITOR")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+    });
+
+    ran.unwrap_or_else(|error| panic!("{error}"));
 }
 
 #[test]

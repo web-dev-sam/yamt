@@ -9,7 +9,8 @@ use crate::{
 /// The file a sequence's step 2 conflicts in, whatever step 1's conflict was resolved to.
 pub const STEP_TWO_FILE: &str = "steps.txt";
 const STEP_THREE_FILE: &str = "step-three.txt";
-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+/// Step 1's message in every sequence: a subject and a body.
+pub const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
 const REWORD_STEP_THREE: &str = "sequence.editor=sed -i -e 3s/^pick/reword/";
 const SQUASH_STEP_TWO: &str = "sequence.editor=sed -i -e 2s/^pick/squash/";
 const EDIT_STEP_ONE: &str = "sequence.editor=sed -i -e 1s/^pick/edit/";

@@ -9,6 +9,7 @@ mod blob;
 mod entry;
 mod merge_config;
 mod merge_file;
+mod names;
 mod operation;
 mod repo;
 mod run;
@@ -22,8 +23,9 @@ pub use blob::BlobReader;
 pub use entry::{Oid, Stage, StageEntry};
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+pub use names::CommitSummary;
 pub use operation::{Operation, Progress, Rebase, Stop, StopId};
-pub use repo::{CommitSummary, Repo};
+pub use repo::Repo;
 pub use version::GitVersion;
 
 #[derive(Debug, thiserror::Error)]

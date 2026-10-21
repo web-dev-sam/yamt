@@ -5,12 +5,12 @@ use std::path::Path;
 use std::process::Command;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, TempDir, diverged_repo, git, git_ok, operation_repo,
+    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, TempDir, diverged_repo, git, git_ok,
+    operation_repo,
 };
 use yamt_session::{MergeSession, SideName, SideNames};
 
 const FILE: &str = "cart.ts";
-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
 
 fn cart() -> ConflictFile<'static> {
     ConflictFile {

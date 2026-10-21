@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::Result;
 use crate::entry::Oid;
 use crate::repo::{Repo, exists, read_if_present};
-use crate::todo::{first_command, has_editor_steps};
+use crate::todo::{first_command, has_editor_steps, is_edit_step, is_editor_step, last_step};
 
 const STATE_PATHS: [&str; 4] = ["rebase-merge", "rebase-apply", "sequencer", "SQUASH_MSG"];
 const BRANCH_REF_PREFIX: &[u8] = b"refs/heads/";
@@ -45,7 +45,7 @@ pub struct StopId(Stop);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    /// `MERGE_HEAD`, no rebase in progress.
+    /// `MERGE_HEAD`, no rebase in progress or a rebase stopped at an `edit`.
     Merge { merging: Oid },
     /// `SQUASH_MSG` and no `MERGE_HEAD`; `merging` is its first `commit <oid>` line.
     SquashMerge { merging: Option<Oid> },
@@ -74,12 +74,12 @@ pub struct Rebase {
     /// `head-name` without `refs/heads/`; `None` for a detached rebase.
     pub branch: Option<Vec<u8>>,
     pub onto: Option<Oid>,
-    /// `REBASE_HEAD`.
+    /// `REBASE_HEAD`; `None` at an `edit` stop, where git keeps it too.
     pub replaying: Option<Oid>,
     /// `MERGE_HEAD` while `rebase -r` re-does a merge commit.
     pub redoing_merge: Option<Oid>,
     pub progress: Option<Progress>,
-    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) left in the todo.
+    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop or left in the todo.
     pub editor_steps_ahead: bool,
 }
 
@@ -154,12 +154,7 @@ impl Repo {
             return self.applying_patches(&paths.rebase_apply).map(Some);
         }
         if exists(&paths.rebase_merge)? {
-            let rebase_merge = &paths.rebase_merge;
-            let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?;
-            let editor_steps_ahead = todo.is_some_and(|todo| has_editor_steps(&todo));
-            let progress = progress_in(rebase_merge, "msgnum", "end")?;
-            let rebase = self.rebase(rebase_merge, progress, editor_steps_ahead)?;
-            return Ok(Some(Operation::Rebase(rebase)));
+            return self.rebase_merge(&paths.rebase_merge).map(Some);
         }
         if let Some(merging) = self.commit_named("MERGE_HEAD")? {
             return Ok(Some(Operation::Merge { merging }));
@@ -170,8 +165,10 @@ impl Repo {
     fn applying_patches(&self, rebase_apply: &Path) -> Result<Operation> {
         let progress = progress_in(rebase_apply, "next", "last")?;
         if !exists(&rebase_apply.join("applying"))? {
+            let replaying = self.commit_named("REBASE_HEAD")?;
             return Ok(Operation::Rebase(self.rebase(
                 rebase_apply,
+                replaying,
                 progress,
                 false,
             )?));
@@ -185,20 +182,37 @@ impl Repo {
         })
     }
 
-    fn rebase(
-        &self,
-        state_dir: &Path,
-        progress: Option<Progress>,
-        editor_steps_ahead: bool,
-    ) -> Result<Rebase> {
-        let head_name = read_if_present(&state_dir.join("head-name"))?;
-        // git keeps `REBASE_HEAD` at an `edit` stop too and writes `amend` only there (observed on git 2.56,
-        // `an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort`).
-        let replaying = if exists(&state_dir.join("amend"))? {
+    // git writes `amend` at an `edit` stop and at a conflicted `squash`/`fixup` step, and keeps `REBASE_HEAD` at
+    // both (observed on git 2.56, `tests/edit_stop.rs`); only the stopped step tells them apart.
+    fn rebase_merge(&self, rebase_merge: &Path) -> Result<Operation> {
+        let done = read_if_present(&rebase_merge.join("done"))?.unwrap_or_default();
+        let stopped_step = last_step(&done);
+        let at_edit =
+            stopped_step.is_some_and(is_edit_step) && exists(&rebase_merge.join("amend"))?;
+        if at_edit && let Some(merging) = self.commit_named("MERGE_HEAD")? {
+            return Ok(Operation::Merge { merging });
+        }
+        let replaying = if at_edit {
             None
         } else {
             self.commit_named("REBASE_HEAD")?
         };
+        let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?.unwrap_or_default();
+        let editor_steps_ahead =
+            has_editor_steps(&todo) || stopped_step.is_some_and(is_editor_step);
+        let progress = progress_in(rebase_merge, "msgnum", "end")?;
+        let rebase = self.rebase(rebase_merge, replaying, progress, editor_steps_ahead)?;
+        Ok(Operation::Rebase(rebase))
+    }
+
+    fn rebase(
+        &self,
+        state_dir: &Path,
+        replaying: Option<Oid>,
+        progress: Option<Progress>,
+        editor_steps_ahead: bool,
+    ) -> Result<Rebase> {
+        let head_name = read_if_present(&state_dir.join("head-name"))?;
         Ok(Rebase {
             branch: head_name.as_deref().and_then(branch_name),
             onto: read_oid(&state_dir.join("onto"))?,

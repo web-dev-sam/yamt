@@ -3,7 +3,7 @@ use specta::Type;
 use yamt_gitio::{Oid, Operation, Rebase, Repo, Stop};
 
 use crate::Result;
-use crate::orientation::{GitSide, Orientation};
+use crate::orientation::Orientation;
 use crate::session::LOG_TARGET;
 
 const QUOTE: char = '\'';
@@ -40,17 +40,21 @@ pub struct SideNames {
 }
 
 pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
-    let ours = name_or_warn(GitSide::Ours, checked_out(repo, stop.head.as_ref()));
-    let theirs = name_or_warn(GitSide::Theirs, applied(repo, stop.operation.as_ref()));
+    let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
+    let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
     let (local, remote) = orientation.panes(ours, theirs);
     SideNames { local, remote }
 }
 
-fn name_or_warn(side: GitSide, read: Result<Option<SideName>>) -> Option<SideName> {
+/// The name `read` gave; a git failure drops only this name (plan §2 #50, #62), with a warning naming `label`.
+pub(crate) fn name_or_warn(
+    label: &'static str,
+    read: Result<Option<SideName>>,
+) -> Option<SideName> {
     match read {
         Ok(name) => name,
         Err(error) => {
-            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", ?side, %error, "this side's name is left out");
+            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", name = label, %error, "this name is left out");
             None
         }
     }
@@ -67,7 +71,7 @@ pub(crate) fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<Side
 }
 
 /// What git's theirs side is the change of, per operation (plan §2 #87).
-fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
+pub(crate) fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
     let Some(operation) = operation else {
         return Ok(None);
     };
@@ -91,7 +95,7 @@ fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName
             subject, message, ..
         } => Ok(Some(SideName::Patch {
             subject: text(subject),
-            message: text(message).trim().to_owned(),
+            message: message_text(message),
         })),
     }
 }
@@ -133,16 +137,16 @@ pub(crate) fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     Ok(SideName::Commit {
         short_id: text(&summary.short_id),
         subject: text(&summary.subject),
-        message: text(&summary.message).trim().to_owned(),
+        message: message_text(&summary.message),
     })
 }
 
-pub(crate) fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
     Ok(SideName::Revert {
         short_id: text(&summary.short_id),
         subject: text(&summary.subject),
-        message: text(&summary.message).trim().to_owned(),
+        message: message_text(&summary.message),
     })
 }
 
@@ -155,6 +159,11 @@ fn quoted_name(message: &str) -> Option<&str> {
 
 pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// A commit's or a patch's message as shown: without the blank lines around it.
+pub(crate) fn message_text(message: &[u8]) -> String {
+    text(message).trim().to_owned()
 }
 
 #[cfg(test)]

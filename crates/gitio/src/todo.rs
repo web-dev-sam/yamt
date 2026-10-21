@@ -15,16 +15,29 @@ pub(crate) fn first_command(todo: &[u8]) -> Option<&[u8]> {
     words(commands(todo).next()?).next()
 }
 
-// `fixup -C` takes the commit's message as it is; only `-c` opens the editor (git-rebase(1)).
+// git appends a step to `rebase-merge/done` before it runs it, so the last one is where it stopped (observed on git
+// 2.56: a conflicted `reword`, `tests/edit_stop.rs`).
+pub(crate) fn last_step(done: &[u8]) -> Option<&[u8]> {
+    commands(done).last()
+}
+
+pub(crate) fn is_edit_step(step: &[u8]) -> bool {
+    matches!(words(step).next(), Some(b"edit" | b"e"))
+}
+
 pub(crate) fn has_editor_steps(todo: &[u8]) -> bool {
-    commands(todo).any(|command| {
-        let mut words = words(command);
-        match (words.next(), words.next()) {
-            (Some(b"reword" | b"r" | b"squash" | b"s"), _)
-            | (Some(b"fixup" | b"f"), Some(b"-c")) => true,
-            (Some(_) | None, _) => false,
+    commands(todo).any(is_editor_step)
+}
+
+// `fixup -C` takes the commit's message as it is; only `-c` opens the editor (git-rebase(1)).
+pub(crate) fn is_editor_step(step: &[u8]) -> bool {
+    let mut words = words(step);
+    match (words.next(), words.next()) {
+        (Some(b"reword" | b"r" | b"squash" | b"s"), _) | (Some(b"fixup" | b"f"), Some(b"-c")) => {
+            true
         }
-    })
+        (Some(_) | None, _) => false,
+    }
 }
 
 #[cfg(test)]
@@ -62,5 +75,14 @@ mod tests {
         );
         assert_eq!(first_command(b"# only a comment\n"), None);
         assert_eq!(commands(b"pick 1\n# c\n\npick 2\n").count(), 2);
+    }
+
+    #[test]
+    fn the_stopped_step_is_the_last_done_line_and_an_edit_in_either_spelling_is_an_edit() {
+        let done = b"pick 1 a\nedit 2 b\n# a comment\n\n";
+        assert_eq!(last_step(done), Some(&b"edit 2 b"[..]));
+        assert_eq!(last_step(b""), None);
+        assert!(is_edit_step(b"edit 2 b") && is_edit_step(b"e 2 b"));
+        assert!(!is_edit_step(b"exec make") && !is_edit_step(b"squash 2 b"));
     }
 }

@@ -8,7 +8,9 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-pub use operation::{Run, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start};
+pub use operation::{
+    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start,
+};
 pub use tempfile::TempDir;
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +23,8 @@ pub enum Error {
     DidNotStop { run: Run },
     #[error("git started without a stdin pipe")]
     NoStdin,
+    #[error("the ignored tests run in a child did not all pass:\n{output}")]
+    ChildTestsFailed { output: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -68,26 +72,18 @@ fn isolated_git(dir: &Path) -> Command {
         .env("GIT_EDITOR", ":")
         .env_remove("GIT_SEQUENCE_EDITOR")
         .env_remove("GIT_CONFIG_PARAMETERS")
-        .env_remove("GIT_CONFIG_COUNT")
-        .args([
-            "-c",
-            "user.name=yamt test",
-            "-c",
-            "user.email=test@yamt.invalid",
-        ])
-        .args([
-            "-c",
-            "init.defaultBranch=main",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(["-c", "core.autocrlf=false"])
-        .args([
-            "-c",
-            "core.attributesFile=/dev/null",
-            "-c",
-            "core.excludesFile=/dev/null",
-        ]);
+        .env_remove("GIT_CONFIG_COUNT");
+    for (key, value) in REPOSITORY_CONFIG {
+        command.arg("-c").arg(format!("{key}={value}"));
+    }
+    command.args([
+        "-c",
+        "init.defaultBranch=main",
+        "-c",
+        "core.attributesFile=/dev/null",
+        "-c",
+        "core.excludesFile=/dev/null",
+    ]);
     command
 }
 
@@ -216,6 +212,26 @@ pub(crate) fn stopped(run: Run, root: &Path, args: &[&str], stdin: Option<&[u8]>
     Ok(())
 }
 
+/// Runs `tests`, ignored tests of the running test binary named exactly, one at a time in a child process
+/// that `configure` sets up; `ChildTestsFailed` with the child's output unless every one passed.
+pub fn run_ignored_in_child(tests: &[&str], configure: impl FnOnce(&mut Command)) -> Result<()> {
+    let mut child = Command::new(std::env::current_exe()?);
+    child
+        .args(["--ignored", "--exact", "--test-threads=1"])
+        .args(tests);
+    configure(&mut child);
+    let output = child.output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let all_passed = format!("test result: ok. {} passed", tests.len());
+    if output.status.success() && stdout.contains(&all_passed) {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(Error::ChildTestsFailed {
+        output: format!("{stdout}{stderr}"),
+    })
+}
+
 fn commit_side<'a>(
     root: &Path,
     files: &[ConflictFile<'a>],
@@ -304,20 +320,16 @@ mod tests {
         fs::create_dir(&git_dir).unwrap();
         fs::write(git_dir.join("attributes"), "* -merge\n").unwrap();
         fs::write(git_dir.join("ignore"), "*\n").unwrap();
-        let child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", CHILD_TEST, "--ignored"])
-            .env("XDG_CONFIG_HOME", xdg_config_home.path())
-            .env("GIT_CONFIG_PARAMETERS", "'merge.conflictstyle'='diff3'")
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
-            .env("GIT_CONFIG_VALUE_0", "zdiff3")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&child.stdout);
-        assert!(
-            child.status.success() && stdout.contains("test result: ok. 1 passed"),
-            "{stdout}{}",
-            String::from_utf8_lossy(&child.stderr)
-        );
+
+        let ran = run_ignored_in_child(&[CHILD_TEST], |child| {
+            child
+                .env("XDG_CONFIG_HOME", xdg_config_home.path())
+                .env("GIT_CONFIG_PARAMETERS", "'merge.conflictstyle'='diff3'")
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
+                .env("GIT_CONFIG_VALUE_0", "zdiff3");
+        });
+
+        ran.unwrap_or_else(|error| panic!("{error}"));
     }
 }

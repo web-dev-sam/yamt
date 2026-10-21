@@ -4,10 +4,13 @@ use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, TempDir, edit_stop_repo, git, git_ok, hash_object, operation_repo,
+    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, edit_stop_repo, git, git_ok, hash_object,
+    operation_repo,
 };
 use yamt_merge_core::ChunkKind;
-use yamt_session::{DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, Waiting};
+use yamt_session::{
+    DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, SideName, Waiting,
+};
 
 mod window;
 use window::{lines, middle_text, saved_with_everything_waiting};
@@ -206,6 +209,38 @@ fn every_other_operation_keeps_head_on_the_left() {
         let head_blob = hash_object(root, HEAD_TEXT.as_bytes()).unwrap();
         assert_eq!(staged_oid(root, TEXT), head_blob, "{run:?}");
     }
+}
+
+fn commit_subject(name: Option<&SideName>) -> Option<&str> {
+    match name? {
+        SideName::Commit { subject, .. } => Some(subject),
+        SideName::Branch { .. } | SideName::Revert { .. } | SideName::Patch { .. } => None,
+    }
+}
+
+// git writes `amend` at a conflicted squash step too; read as an edit stop, the step's own text would be on the right, unnamed.
+#[test]
+fn a_conflicted_squash_step_shows_its_own_commit_on_the_left_and_names_both_sides() {
+    let dir = operation_repo(Run::RebaseSquash, &[TEXT_FILE]).unwrap();
+    let root = dir.path();
+    git_ok(root, &["add", "--", TEXT]).unwrap();
+    assert!(
+        !git(root, &["rebase", "--continue"])
+            .unwrap()
+            .status
+            .success()
+    );
+    let mut session = MergeSession::open(root).unwrap();
+
+    let data = session.load(STEP_TWO_FILE).unwrap();
+
+    assert_eq!(
+        (data.local.as_str(), data.remote.as_str()),
+        ("remote\n", "local\n")
+    );
+    let names = session.side_names();
+    assert_eq!(commit_subject(names.local.as_ref()), Some("step 2"));
+    assert_eq!(commit_subject(names.remote.as_ref()), Some("step 1"));
 }
 
 // At an `edit` stop git replays nothing: a pick or a stash pop there is applied onto HEAD, the commit being edited.

@@ -2,10 +2,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, git, git_ok, install_hook, operation_repo,
+    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, TempDir, git, git_ok,
+    install_hook, operation_repo, run_ignored_in_child,
 };
 use yamt_session::{
     Continued, DiskVersion, Error, FileStatus, MergeSession, OperationKind, OperationView,
@@ -28,7 +28,6 @@ const BOTH_STEPS: [ConflictFile<'static>; 1] = [ConflictFile {
     local: Some(b"local-1\n"),
     remote: Some(b"remote-1\n"),
 }];
-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
 const HOOK_LINE: &str = "hook: refused";
 const USER_LOCALE: &str = "C.UTF-8";
 const LOCALE_HOOK_TEST: &str =
@@ -179,21 +178,29 @@ fn a_rebase_aborted_in_a_terminal_lists_git_s_view_without_an_operation() {
     assert_eq!(list.files[0].status, FileStatus::Resolved);
 }
 
-fn commit_fields(root: &Path, revision: &str) -> (String, String, String) {
+fn revert_range_view(root: &Path) -> OperationView {
     let SideName::Commit {
         short_id,
         subject,
         message,
-    } = commit(root, revision)
+    } = commit(root, "HEAD~1")
     else {
         panic!("not a commit");
     };
-    (short_id, subject, message)
+    let reverting = SideName::Revert {
+        short_id,
+        subject,
+        message,
+    };
+    OperationView::Revert {
+        reverting: Some(reverting),
+        progress: ONE_OF_THREE,
+    }
 }
 
 #[test]
 fn each_operation_s_view_names_what_it_applies() {
-    let cases: [(Run, ExpectedView); 6] = [
+    let cases: [(Run, ExpectedView); 7] = [
         (Run::Merge, |_| OperationView::Merge {
             merging: Some(branch("remote")),
             into: Some(branch("local")),
@@ -201,6 +208,13 @@ fn each_operation_s_view_names_what_it_applies() {
         (Run::SquashMerge, |_| OperationView::SquashMerge {
             merging: Some(branch("remote")),
             into: Some(branch("local")),
+        }),
+        (Run::RebaseInteractive, |root| OperationView::Rebase {
+            branch: Some("remote".to_owned()),
+            onto: Some(branch("local")),
+            replaying: Some(commit(root, "remote~2")),
+            progress: ONE_OF_THREE,
+            editor_steps_ahead: true,
         }),
         (Run::CherryPick, |root| OperationView::CherryPick {
             picking: Some(commit(root, "remote~2")),
@@ -210,18 +224,7 @@ fn each_operation_s_view_names_what_it_applies() {
             picking: Some(commit(root, "remote~2")),
             progress: ONE_OF_THREE,
         }),
-        (Run::RevertRange, |root| {
-            let (short_id, subject, message) = commit_fields(root, "HEAD~1");
-            let reverting = SideName::Revert {
-                short_id,
-                subject,
-                message,
-            };
-            OperationView::Revert {
-                reverting: Some(reverting),
-                progress: ONE_OF_THREE,
-            }
-        }),
+        (Run::RevertRange, revert_range_view),
         (Run::Am, |_| OperationView::Am {
             subject: "step 1".to_owned(),
             message: STEP_ONE_MESSAGE.to_owned(),
@@ -248,20 +251,25 @@ fn a_sequence_continued_stops_at_step_two_then_finishes() {
 
         let stopped = session.continue_operation().unwrap();
 
-        assert!(
-            matches!(stopped, Continued::Stopped { .. }),
-            "{run:?} {stopped:?}"
-        );
+        let Continued::Stopped { message } = &stopped else {
+            panic!("{run:?} {stopped:?}");
+        };
+        assert!(!message.contains('\r'), "{run:?} {message:?}");
         let mut next = MergeSession::open(dir.path()).unwrap();
         let files = next.files();
         assert_eq!(files.len(), 1, "{run:?}");
         assert_eq!(files[0].path, STEP_TWO_FILE, "{run:?}");
         finished_every_file(&mut next);
         let finished = next.continue_operation().unwrap();
-        assert!(
-            matches!(&finished, Continued::Finished { kind: found, .. } if *found == kind),
-            "{run:?} {finished:?}"
-        );
+        let Continued::Finished {
+            kind: found,
+            output,
+        } = &finished
+        else {
+            panic!("{run:?} {finished:?}");
+        };
+        assert_eq!(*found, kind, "{run:?}");
+        assert!(!output.contains('\r'), "{run:?} {output:?}");
     }
 }
 
@@ -312,18 +320,11 @@ fn abort_returns_the_operation_it_aborted_and_leaves_none() {
 // `LC_ALL=C` on Continue would show a hook's words in another language than the user's terminal does.
 #[test]
 fn a_hook_sees_the_user_s_locale() {
-    let child = Command::new(std::env::current_exe().unwrap())
-        .args(["--ignored", "--exact", LOCALE_HOOK_TEST])
-        .env("LC_ALL", USER_LOCALE)
-        .env("LANG", USER_LOCALE)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&child.stdout);
-    assert!(
-        child.status.success() && stdout.contains("test result: ok. 1 passed"),
-        "{stdout}{}",
-        String::from_utf8_lossy(&child.stderr)
-    );
+    let ran = run_ignored_in_child(&[LOCALE_HOOK_TEST], |child| {
+        child.env("LC_ALL", USER_LOCALE).env("LANG", USER_LOCALE);
+    });
+
+    ran.unwrap_or_else(|error| panic!("{error}"));
 }
 
 #[test]
