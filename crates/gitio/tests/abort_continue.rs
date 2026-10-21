@@ -26,6 +26,34 @@ const WITHOUT_AN_EDITOR: [&str; 7] = [
     "am_keeps_the_patch_s_message",
     "a_squash_step_continued_past_gives_the_combined_message",
 ];
+const ADDED: &str = "src/added.ts";
+const REMOVED: &str = "docs/removed.md";
+const CRLF: &str = "notes/crlf.txt";
+const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
+const UNTRACKED: &str = "scratch.txt";
+const MERGE_FILES: [ConflictFile<'static>; 3] = [
+    ConflictFile {
+        path: ADDED,
+        kind: FileKind::Regular,
+        base: None,
+        local: Some(b"local\n"),
+        remote: Some(b"remote\n"),
+    },
+    ConflictFile {
+        path: REMOVED,
+        kind: FileKind::Regular,
+        base: Some(b"one\n"),
+        local: None,
+        remote: Some(b"remote\n"),
+    },
+    ConflictFile {
+        path: CRLF,
+        kind: FileKind::Regular,
+        base: Some(b"a\r\nb\r\n"),
+        local: Some(CRLF_AT_HEAD),
+        remote: Some(b"a\r\nremote\r\n"),
+    },
+];
 
 fn text(root: &Path, args: &[&str]) -> String {
     String::from_utf8(git_ok(root, args).unwrap()).unwrap()
@@ -141,6 +169,26 @@ fn an_abort_git_refuses_is_git_s_text_and_changes_nothing() {
         before
     );
     assert!(matches!(operation(&repo), Operation::Merge { .. }));
+}
+
+#[test]
+fn a_merge_abort_drops_resolutions_saves_and_merge_head_but_keeps_untracked_files() {
+    let dir = conflict_repo(&MERGE_FILES).unwrap();
+    let root = dir.path();
+    let repo = Repo::discover(root).unwrap();
+    resolve(root, ADDED);
+    git_ok(root, &["rm", "--quiet", "--", REMOVED]).unwrap();
+    fs::write(root.join(CRLF), "a\r\nsaved\r\n").unwrap();
+    fs::write(root.join(UNTRACKED), "mine\n").unwrap();
+
+    repo.abort(&operation(&repo)).unwrap();
+
+    assert_eq!(
+        text(root, &["status", "--porcelain"]),
+        format!("?? {UNTRACKED}\n")
+    );
+    assert_eq!(repo.commit_named("MERGE_HEAD").unwrap(), None);
+    assert_eq!(fs::read(root.join(CRLF)).unwrap(), CRLF_AT_HEAD);
 }
 
 #[test]

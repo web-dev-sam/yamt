@@ -300,23 +300,21 @@ fn a_continue_git_refuses_answers_git_s_text_and_keeps_the_stop_open() {
 }
 
 #[test]
-fn a_worker_that_panics_leaves_moved_on_and_answers_a_git_error() {
+fn a_worker_that_panics_leaves_moved_on_and_answers_stop_moved_on() {
     let repo = operation_repo(Run::Rebase, &STEPS).unwrap();
     let session = MergeSession::open(repo.path()).unwrap();
     let root = session.root().to_path_buf();
     let state: MergeState = Mutex::new(Merge::Held(Box::new(session)));
     let panicking = |_: &mut MergeSession| -> yamt_session::Result<()> { panic!("worker panic") };
 
-    let answered = tauri::async_runtime::block_on(on_worker(&state, panicking));
+    let answered = tauri::async_runtime::block_on(on_worker(&state, panicking)).err();
 
-    let Err(IpcError::Git { message }) = answered else {
-        panic!("expected a Git error");
-    };
     assert!(
-        message.starts_with("yamt's worker stopped while git ran"),
-        "{message}"
+        matches!(answered, Some(IpcError::StopMovedOn)),
+        "{answered:?}"
     );
     assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved, .. } if *moved == root));
+    assert!(matches!(lock(&state).session(), Err(IpcError::StopMovedOn)));
 }
 
 #[test]

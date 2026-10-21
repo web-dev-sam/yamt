@@ -51,7 +51,6 @@ pub(crate) const LOG_TARGET: &str = "session";
 pub struct MergeSession {
     pub(crate) repo: Repo,
     pub(crate) files: Vec<FileState>,
-    /// Both panes' names, read once at open.
     pub(crate) side_names: SideNames,
     pub(crate) stop: Stop,
     /// Decided once at open from `stop` (plan §2 #86).
@@ -330,7 +329,7 @@ impl FileState {
     fn settled_as(&mut self, disk: OnDisk, result: DiskResult, first: DiskVersion) -> DiskChange {
         self.seen = Seen::ViewFromDisk(disk);
         self.settled = Some(Settled {
-            version: DiskVersion(self.disk_version(first).0.saturating_add(1)),
+            version: self.disk_version(first).next(),
             result: result.clone(),
         });
         DiskChange {

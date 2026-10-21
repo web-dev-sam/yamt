@@ -196,8 +196,6 @@ mod tests {
 
     /// Continues the rebase in a terminal to step 2 and edits its file by hand; git's unmerged list then.
     fn continued_in_a_terminal(root: &Path) -> Vec<u8> {
-        std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
-        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
         let continued = git(root, &["rebase", "--continue"]).unwrap();
         assert!(!continued.status.success());
         std::fs::write(root.join(STEP_TWO_FILE), "edited by hand\n").unwrap();
@@ -209,6 +207,8 @@ mod tests {
     fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
         let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
         let root = repo.path();
+        std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
+        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
         let unmerged = continued_in_a_terminal(root);
 
         let ending = closed(Merge::MovedOn {
@@ -228,6 +228,10 @@ mod tests {
         let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
         let root = repo.path();
         let mut session = MergeSession::open(root).unwrap();
+        session
+            .finish(STEP_TWO_FILE, "resolved\n", DiskVersion(0))
+            .unwrap();
+        assert_eq!(session.remaining(), 0);
         let unmerged = continued_in_a_terminal(root);
 
         let ending = held_merge_ending(&mut session);

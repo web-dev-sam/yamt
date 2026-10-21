@@ -14,6 +14,12 @@ use crate::{Error, Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 pub struct DiskVersion(pub u32);
 
+impl DiskVersion {
+    pub(crate) fn next(self) -> DiskVersion {
+        DiskVersion(self.0.saturating_add(1))
+    }
+}
+
 /// What yamt did with a file that changed on disk.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]

@@ -33,7 +33,7 @@ impl MergeSession {
     /// Opens the stop git is at now with every disk version above `previous`, the highest of the
     /// session this one follows: a write meant for the earlier stop never matches (#1383).
     pub fn open_after(cwd: &Path, previous: DiskVersion) -> Result<MergeSession> {
-        MergeSession::open_from(cwd, DiskVersion(previous.0.saturating_add(1)))
+        MergeSession::open_from(cwd, previous.next())
     }
 
     fn open_from(cwd: &Path, first_disk_version: DiskVersion) -> Result<MergeSession> {

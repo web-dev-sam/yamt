@@ -40,7 +40,7 @@ pub enum Error {
     UnknownPath { path: String },
     #[error("git records no operation to abort or continue")]
     NoOperation,
-    #[error("git has moved on to another stop since this one was opened")]
+    #[error("git has moved on from the stop this request was made at")]
     StopMovedOn,
     #[error("git refused: {message}")]
     GitRefused { message: String },
