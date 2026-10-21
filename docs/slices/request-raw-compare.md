@@ -17,13 +17,13 @@ Plan §2 #5 ("3-way always — 2-way diff mode / replacing `git difftool` — ou
 request (new information under DR4: a changed requirement, asked by the owner directly, as #990 was). The replacement
 row keeps `git difftool`/file-pair diffs out of scope and admits one 2-way view: pasted text behind `--raw`.
 
-## Questions asked (answers recorded here when they arrive)
+## Questions asked (owner's answers, #1462)
 
-| question                                                      | options                                                                                                                                                        | answer  |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Which formats does Format cover?                              | JSON only, built in · **JSON and XML, built in (default)** · JSON, YAML, CSS, HTML, Markdown, GraphQL, JS/TS through a bundled formatter (app a few MB larger) | pending |
-| Does Format sort JSON object keys?                            | **keep the order (default)** · always sort · two actions (Format / Format and sort keys)                                                                       | pending |
-| Arrows in the strip that copy a change into the other column? | **bands only (default)** · bands and arrows both ways, as WebStorm's compare                                                                                   | pending |
+| question                                                      | options                                                                                                                                                        | answer                     |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Which formats does Format cover?                              | JSON only, built in · **JSON and XML, built in (default)** · JSON, YAML, CSS, HTML, Markdown, GraphQL, JS/TS through a bundled formatter (app a few MB larger) | **JSON and XML, built in** |
+| Does Format sort JSON object keys?                            | **keep the order (default)** · always sort · two actions (Format / Format and sort keys)                                                                       | **keep the order**         |
+| Arrows in the strip that copy a change into the other column? | **bands only (default)** · bands and arrows both ways, as WebStorm's compare                                                                                   | **bands only**             |
 
 ## Rules (product terms)
 
