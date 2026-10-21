@@ -182,6 +182,20 @@ test("a stopped worker says to try again", () => {
 });
 
 test.each([
+  [{ action: "tabs" }, "Could not update the tabs: boom"],
+  [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
+  [{ action: "saveTab", name: "Compare 2" }, "Could not save Compare 2: boom"],
+] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
+  expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
+});
+
+test("a save to a tab another call closed says the tab was closed", () => {
+  expect(
+    text({ action: "saveTab", name: "Compare 2", cause: { kind: "UnknownTab", tab: 2 } }),
+  ).toBe("Could not save Compare 2: that tab was closed.");
+});
+
+test.each([
   ["StopMovedOn", "The operation moved on; the list is being read again."],
   ["GitRunning", "Git is still running; try again when it is done."],
   ["MergeFinished", "The operation is finished."],

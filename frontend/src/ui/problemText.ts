@@ -50,6 +50,12 @@ function attempted(problem: CausedProblem): string {
       const { verb, object } = continueAction(problem.operation);
       return `Could not ${verb.toLowerCase()} ${object}`;
     }
+    case "tabs":
+      return "Could not update the tabs";
+    case "loadTab":
+      return `Could not load ${problem.name}`;
+    case "saveTab":
+      return `Could not save ${problem.name}`;
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;

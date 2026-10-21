@@ -230,3 +230,17 @@ test("both Continue questions are about the stop and end with it; the exit quest
   expect(endsWithStop({ kind: "rewords" })).toBe(true);
   expect(endsWithStop({ kind: "exit", files: ["a.ts"] })).toBe(false);
 });
+
+test("closing a tab that holds text asks with its name, Yes or No, and never ends with a stop (catches a question that does not name the tab)", () => {
+  const question = { kind: "closeTab", name: "Compare 2" } as const;
+
+  expect(questionText(question, LINUX)).toEqual({
+    title: "Close Tab",
+    message: "Close Compare 2? Its text is lost.",
+    list: { kind: "none" },
+    note: null,
+    confirm: "Yes",
+    cancel: "No",
+  });
+  expect(endsWithStop(question)).toBe(false);
+});
