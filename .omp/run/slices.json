@@ -42,13 +42,13 @@
       "frontend/src/ui/currentStop.test.ts"
     ]
   },
-  "GitOpsStopsR1Correctness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-stops-rework-1.md",
-    "owned": []
-  },
   "GitOpsRememberedBoundary": {
     "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-remembered.md",
+    "owned": []
+  },
+  "GitOpsRememberedCorrectness": {
+    "agent": "correctness-reviewer",
     "brief": "docs/slices/briefs/3.J-remembered.md",
     "owned": []
   }

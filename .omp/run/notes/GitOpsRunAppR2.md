@@ -35,3 +35,5 @@ deviations_from_brief
 
 open_risks
 - None found.
+
+## Boundary re-check: pass (#1391 AGENTS.md text → row 9).

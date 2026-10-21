@@ -79,3 +79,7 @@ Output fields verbatim.
 - If `MERGE_RR` cannot be read, yamt logs a `rerere_unread` warning and counts no file as remembered, so that file is staged at the first list as before #90. I judged that acceptable, but it is the less safe direction.
 
 Checks for Main on the merged tree: `just check`, `just bindings-check`, `just mutants` on the changed lines (not run), and the `src-tauri` tests (not run).
+
+## Mutants (`just mutants a28eed5`)
+
+Rust 76 — 43 caught, 29 unviable, 4 missed: conflict-repo rerere.rs:31 (delete field remote), rerere.rs:54 (delete !) — fixture; session remembered.rs:51 `looks_resolved -> true`, remembered.rs:54 `&& -> ||` in looks_resolved. TS changed lines 22 — 20 killed, 2 survived: fixture.ts:108 `Remembered` valibot schema (`v.object({})`, literal "").
