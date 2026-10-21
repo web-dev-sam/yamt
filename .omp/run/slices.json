@@ -1,9 +1,4 @@
 {
-  "GitOpsReadBoundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-read.md",
-    "owned": []
-  },
   "GitOpsSides": {
     "agent": "rust-impl",
     "brief": "docs/slices/briefs/3.J-sides.md",
@@ -42,9 +37,16 @@
       "frontend/src/editor/internal/words.test.ts"
     ]
   },
-  "GitOpsReadCorrectness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-read.md",
-    "owned": []
+  "GitOpsReadR1": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-read-rework-1.md",
+    "owned": [
+      "crates/gitio/src/operation.rs",
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/src/todo.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/tests/operations.rs",
+      "crates/gitio/AGENTS.md"
+    ]
   }
 }

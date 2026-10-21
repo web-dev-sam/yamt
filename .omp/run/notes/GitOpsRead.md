@@ -104,3 +104,11 @@ StashPop: Stop { operation: None, head: Some(Oid("08fdef26…")) }
 - `crates/gitio/src/todo.rs` `commands`: comment lines are recognised only by `#`. A custom `core.commentChar` is ignored.
 - `crates/gitio/src/repo.rs` `git_paths`: the output is split on `\n`, so a git directory path containing a newline would be misread.
 - `crates/conflict-repo/src/operation.rs` `RebaseInteractive` needs `sed` in git's shell. On Windows CI that relies on the `sed` shipped with Git for Windows `[INFERENCE]`; this slice ran only on Linux.
+
+## Boundary review (GitOpsReadBoundary): fail
+
+Findings #1311–#1318 in findings.jsonl.
+
+## Correctness review (GitOpsReadCorrectness): pass
+
+Findings #1319–#1322. Mutants `just mutants f8a26bf`: 85 — 56 caught, 26 unviable, 3 missed (conflict-repo fixture helpers `hash_object` ×2, `stage_file`; dropped: dev-only helpers proven by the consumer crates' tests).
