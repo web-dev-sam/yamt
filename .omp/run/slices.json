@@ -42,9 +42,16 @@
       "frontend/src/ui/currentStop.test.ts"
     ]
   },
-  "GitOpsRememberedCorrectness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-remembered.md",
-    "owned": []
+  "GitOpsRememberedR1": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-remembered-rework-1.md",
+    "owned": [
+      "crates/session/**",
+      "crates/gitio/**",
+      "crates/conflict-repo/**",
+      "crates/cli/**",
+      "tests/showcase/**",
+      "frontend/fixtures/**"
+    ]
   }
 }

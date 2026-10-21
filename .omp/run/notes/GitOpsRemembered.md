@@ -87,3 +87,7 @@ Rust 76 — 43 caught, 29 unviable, 4 missed: conflict-repo rerere.rs:31 (delete
 ## Boundary review (GitOpsRememberedBoundary): pass
 
 Shoulds #1392–#1397, nits #1398/#1399 (promoted; #1397 docs part to the orchestrator).
+
+## Correctness review (GitOpsRememberedCorrectness): fail
+
+Blocks #1400–#1404 (CRLF, overlapping blocks, stale MERGE_RR, untested detection half, unreadable MERGE_RR); #1405/#1406 duplicate #1393/#1396. Fixture/schema survivors dropped (killed under `just test`).
