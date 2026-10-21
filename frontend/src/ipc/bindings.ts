@@ -13,6 +13,9 @@ export const commands = {
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
 	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
 	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
+	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
+	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
+	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
@@ -75,6 +78,9 @@ export type ChunkKind =
 "BothSame" | 
 /**  Local and remote changed these base lines differently. */
 "Conflict";
+
+/**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
+export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
 
 export type DiskChange = {
 	path: string,
@@ -155,7 +161,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -184,6 +190,9 @@ export type LineRange<L> = {
 	/**  Number of lines in the range. */
 	len: number,
 };
+
+/**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
+export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
 
 /**  0-based line index in the local text. */
 export type LocalLine = number;
@@ -214,6 +223,9 @@ export type MiddleLine = number;
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
+/**  What git is doing, with the names of what it applies (plan §2 #87). */
+export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+
 /**
  *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
  *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
@@ -229,6 +241,12 @@ export type ProgramFolders = {
 export type ProgramFound = { kind: "Found"; path: string; place: ProgramPlace } | { kind: "NotFound"; searched: string[] };
 
 export type ProgramPlace = "Project" | "Path" | "Home";
+
+/**  Step `step` of `total`, 1 ≤ step ≤ total. */
+export type ProgressView = {
+	step: number,
+	total: number,
+};
 
 /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
 export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };

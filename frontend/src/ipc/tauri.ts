@@ -11,6 +11,7 @@ import type { ChunkSource, SettingsSource } from "./ChunkSource";
 import {
   toDomain,
   toFileList,
+  toListing,
   toSettingsRead,
   toSides,
   toStartReply,
@@ -73,6 +74,24 @@ function createTauriSettings(): SettingsSource {
   };
 }
 
+function createTauriStops(): Pick<
+  ChunkSource,
+  "listStop" | "continueOperation" | "abortOperation"
+> {
+  return {
+    async listStop() {
+      const result = toResult(await commands.listStop());
+      return result.ok ? { ok: true, value: toListing(result.value) } : result;
+    },
+    async continueOperation() {
+      return toResult(await commands.continueOperation());
+    },
+    async abortOperation() {
+      return toResult(await commands.abortOperation());
+    },
+  };
+}
+
 export function createTauriSource(): ChunkSource {
   return {
     async listFiles() {
@@ -109,6 +128,7 @@ export function createTauriSource(): ChunkSource {
     async abortMerge() {
       return toResult(await commands.abortMerge());
     },
+    ...createTauriStops(),
     ...createTauriSettings(),
   };
 }

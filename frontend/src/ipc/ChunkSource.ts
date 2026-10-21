@@ -1,11 +1,13 @@
 import type {
   AddedServer,
   Antialiasing,
+  ContinueReply,
   DiskVersion,
   FileList,
   FileMergeData,
   FileSides,
   KeysChange,
+  Listing,
   RepositoryAnswer,
   SettingsRead,
   Side,
@@ -32,6 +34,9 @@ export interface ChunkSource {
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   sideNames(): Promise<SideNames>;
   abortMerge(): Promise<SourceResult<null>>;
+  listStop(): Promise<SourceResult<Listing>>;
+  continueOperation(): Promise<SourceResult<ContinueReply>>;
+  abortOperation(): Promise<SourceResult<null>>;
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
   setAntialiasing(

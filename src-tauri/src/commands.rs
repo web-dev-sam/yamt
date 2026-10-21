@@ -7,7 +7,7 @@ use yamt_session::{
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
-use crate::merge::{Merge, MergeState, lock};
+use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
 use crate::{servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
@@ -21,6 +21,9 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         take_side,
         side_names,
         abort_merge::<tauri::Wry>,
+        list_stop,
+        continue_operation::<tauri::Wry>,
+        abort_operation::<tauri::Wry>,
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
@@ -41,7 +44,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
 
 pub(crate) fn with_session<R: Runtime>(
     builder: tauri::Builder<R>,
-    session: MergeSession,
+    session: Box<MergeSession>,
 ) -> tauri::Builder<R> {
     servers::manage(builder, session.root())
         .manage(Mutex::new(Merge::Held(session)))
@@ -130,6 +133,12 @@ fn take_side(
 
 // tauri 2.12 `WebviewWindow::destroy` "does not emit any events": no `CloseRequested`, so the page's
 // unsaved-work question does not run; the last window gone ends `run_return`.
+fn close_window<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+    if let Err(error) = window.destroy() {
+        tracing::warn!(%error, ended, "git is done but the window stays: closing it ends yamt");
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 #[expect(
@@ -141,9 +150,36 @@ fn abort_merge<R: Runtime>(
     state: State<'_, MergeState>,
 ) -> Result<(), IpcError> {
     lock(&state).abort()?;
-    if let Err(error) = window.destroy() {
-        tracing::warn!(%error, "the merge is aborted but the window stays: closing it ends yamt");
+    close_window(&window, "aborted");
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn list_stop(state: State<'_, MergeState>) -> Result<Listing, IpcError> {
+    lock(&state).list_stop()
+}
+
+// The merge state comes from the window: tauri-macros 2.7 checks an async command with a borrowed
+// argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
+#[tauri::command]
+#[specta::specta]
+async fn continue_operation<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> Result<ContinueReply, IpcError> {
+    let reply = merge::continue_operation(&window.state()).await?;
+    if reply == ContinueReply::Finished {
+        close_window(&window, "finished");
     }
+    Ok(reply)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
+    merge::abort_operation(&window.state()).await?;
+    close_window(&window, "aborted");
     Ok(())
 }
 

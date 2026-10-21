@@ -12,7 +12,7 @@ use yamt_session::MergeSession;
 use yamt_settings::{StoredSettings, Theme};
 
 use crate::commands::with_session;
-use crate::merge::{MergeState, lock};
+use crate::merge::{MergeState, lock_when_git_is_done};
 use crate::outcome::{Ending, ending_on_close};
 use crate::servers::{self, HostState};
 use crate::settings;
@@ -30,7 +30,7 @@ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
 const PAGE_ANSWER: &str = "true";
 
-pub(crate) fn run(session: MergeSession) -> Ending {
+pub(crate) fn run(session: Box<MergeSession>) -> Ending {
     let title = window_title(session.root());
     match open_and_wait(&title, session) {
         Ok(ending) => ending,
@@ -38,7 +38,7 @@ pub(crate) fn run(session: MergeSession) -> Ending {
     }
 }
 
-fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
@@ -56,7 +56,9 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
     servers::lock(&handle.state::<HostState>()).stop_all();
-    Ok(ending_on_close(&mut lock(&handle.state::<MergeState>())))
+    Ok(ending_on_close(&mut lock_when_git_is_done(
+        &handle.state::<MergeState>(),
+    )))
 }
 
 fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {

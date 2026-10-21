@@ -133,6 +133,9 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     takeSide: () => Promise.reject(new Error("not used")),
     sideNames: () => Promise.resolve({ local: null, remote: null }),
     abortMerge: () => Promise.reject(new Error("not used")),
+    listStop: () => Promise.reject(new Error("not used")),
+    continueOperation: () => Promise.reject(new Error("not used")),
+    abortOperation: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
   };
   return { source, pending };
@@ -1077,6 +1080,9 @@ function choiceSource(
     },
     sideNames: () => Promise.resolve({ local: null, remote: null }),
     abortMerge: () => Promise.reject(new Error("not used")),
+    listStop: () => Promise.reject(new Error("not used")),
+    continueOperation: () => Promise.reject(new Error("not used")),
+    abortOperation: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
     ...overrides,
   };

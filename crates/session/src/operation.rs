@@ -108,6 +108,12 @@ impl MergeSession {
         }))
     }
 
+    /// The operation of the stop this session opened, as read at open.
+    #[must_use]
+    pub fn operation_kind(&self) -> Option<OperationKind> {
+        self.stop.operation.as_ref().map(kind_of)
+    }
+
     /// Re-reads the stop: none → `NoOperation`; another stop → `StopMovedOn`; else git's abort.
     pub fn abort_operation(&mut self) -> Result<OperationKind> {
         let operation = self.operation_still_here()?;

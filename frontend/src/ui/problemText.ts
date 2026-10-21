@@ -6,6 +6,15 @@ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"
 
 const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
 
+const OPERATION_STATE_WORDS: Readonly<
+  Record<"StopMovedOn" | "GitRunning" | "MergeFinished" | "NoOperation", string>
+> = {
+  StopMovedOn: "The operation moved on; the list is being read again.",
+  GitRunning: "Git is still running; try again when it is done.",
+  MergeFinished: "The operation is finished.",
+  NoOperation: "Git has no operation to continue or abort.",
+};
+
 function attempted(problem: Problem): string {
   switch (problem.action) {
     case "list":
@@ -102,6 +111,11 @@ export function problemText(problem: Problem, platform: string): string {
       return `${attempted(problem)}: this system has no config folder to keep it in.`;
     case "MergeAborted":
       return `${attempted(problem)}: the merge was aborted.`;
+    case "StopMovedOn":
+    case "GitRunning":
+    case "MergeFinished":
+    case "NoOperation":
+      return OPERATION_STATE_WORDS[cause.kind];
     case "Keys":
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "Unexpected":

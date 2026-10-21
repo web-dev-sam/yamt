@@ -158,6 +158,16 @@ test("an action after an abort says the merge was aborted", () => {
   );
 });
 
+test.each([
+  ["StopMovedOn", "The operation moved on; the list is being read again."],
+  ["GitRunning", "Git is still running; try again when it is done."],
+  ["MergeFinished", "The operation is finished."],
+  ["NoOperation", "Git has no operation to continue or abort."],
+] as const)("%s says what git is at, whatever was tried", (kind, words) => {
+  expect(text({ action: "save", path: PATH, cause: { kind } })).toBe(words);
+  expect(text({ action: "abort", cause: { kind } })).toBe(words);
+});
+
 test("key problems name the action, the key and what yamt does instead", () => {
   const said = problemText(
     {

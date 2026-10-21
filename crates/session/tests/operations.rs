@@ -156,6 +156,17 @@ fn a_stash_pop_lists_no_operation_and_has_nothing_to_abort_or_continue() {
     ));
 }
 
+// Abort and Continue name what git does while it runs; a kind read again later could be another stop's.
+#[test]
+fn the_operation_kind_is_the_one_read_at_open() {
+    let (dir, rebase) = opened(Run::Rebase, &FILES);
+    git_ok(dir.path(), &["rebase", "--abort"]).unwrap();
+    let (_stash_dir, stash_pop) = opened(Run::StashPop, &FILES);
+
+    assert_eq!(rebase.operation_kind(), Some(OperationKind::Rebase));
+    assert_eq!(stash_pop.operation_kind(), None);
+}
+
 // An operation aborted outside is git's view, not a move: the list goes on, without the operation.
 #[test]
 fn a_rebase_aborted_in_a_terminal_lists_git_s_view_without_an_operation() {

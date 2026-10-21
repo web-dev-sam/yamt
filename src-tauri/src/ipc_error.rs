@@ -33,6 +33,10 @@ pub enum IpcError {
     },
     NoConfigFolder,
     MergeAborted,
+    StopMovedOn,
+    GitRunning,
+    MergeFinished,
+    NoOperation,
 }
 
 impl From<yamt_session::Error> for IpcError {
@@ -54,11 +58,9 @@ impl From<yamt_session::Error> for IpcError {
                 path,
                 message: source.to_string(),
             },
-            error @ (yamt_session::Error::NoOperation
-            | yamt_session::Error::StopMovedOn
-            | yamt_session::Error::GitRefused { .. }) => IpcError::Git {
-                message: error.to_string(),
-            },
+            yamt_session::Error::NoOperation => IpcError::NoOperation,
+            yamt_session::Error::StopMovedOn => IpcError::StopMovedOn,
+            yamt_session::Error::GitRefused { message } => IpcError::Git { message },
         }
     }
 }
@@ -144,6 +146,27 @@ mod tests {
         assert_eq!(
             ipc_json(read_failed),
             json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
+        );
+    }
+
+    // A refusal read as "git refused: …" would say it twice under the window's "Could not continue".
+    #[test]
+    fn operation_errors_have_their_own_kinds_and_git_s_refusal_is_git_s_text() {
+        assert_eq!(
+            ipc_json(yamt_session::Error::NoOperation),
+            json!({ "kind": "NoOperation" })
+        );
+        assert_eq!(
+            ipc_json(yamt_session::Error::StopMovedOn),
+            json!({ "kind": "StopMovedOn" })
+        );
+        let message = "error: commit is not possible because you have unmerged files.";
+        let refused = yamt_session::Error::GitRefused {
+            message: message.to_owned(),
+        };
+        assert_eq!(
+            ipc_json(refused),
+            json!({ "kind": "Git", "message": message })
         );
     }
 

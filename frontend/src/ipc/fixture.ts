@@ -10,6 +10,7 @@ import {
   type SourceResult,
   type WriteReply,
 } from "./domain";
+import { createFixtureStops } from "./fixtureOperations";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -234,13 +235,22 @@ function fixtureWrites(
 export function createFixtureSource(
   log: Log,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+  search: string = typeof location === "undefined" ? "" : location.search,
 ): ChunkSource {
   const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
+  const stops = createFixtureStops(log, search, {
+    listed: () => entries(records),
+    unresolveAll: () => records.finished.clear(),
+  });
 
   return {
     async listFiles() {
-      return { ok: true, value: { files: entries(records), diskChanges: [], merging: true } };
+      const value = { files: entries(records), diskChanges: [], merging: stops.merging };
+      return { ok: true, value };
     },
+    listStop: stops.listStop,
+    continueOperation: stops.continueOperation,
+    abortOperation: stops.abortOperation,
     async loadFile(path) {
       const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
