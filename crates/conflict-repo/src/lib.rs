@@ -1,11 +1,14 @@
 //! Test fixture: real git repositories whose merge stops with scripted conflicts.
 #![forbid(unsafe_code)]
 
+mod operation;
+
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+pub use operation::{Run, STEP_TWO_FILE, operation_repo};
 pub use tempfile::TempDir;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,7 +21,9 @@ pub enum Error {
     MergeDidNotConflict,
     #[error("`git rebase -r` did not stop on the merge commit's conflict")]
     RebaseDidNotConflict,
-    #[error("`git hash-object` started without a stdin pipe")]
+    #[error("`{run:?}` did not stop on conflicts")]
+    DidNotStop { run: Run },
+    #[error("git started without a stdin pipe")]
     NoStdin,
 }
 
@@ -55,6 +60,8 @@ fn isolated_git(dir: &Path) -> Command {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("LC_ALL", "C")
+        .env("GIT_EDITOR", ":")
+        .env_remove("GIT_SEQUENCE_EDITOR")
         .env_remove("GIT_CONFIG_PARAMETERS")
         .env_remove("GIT_CONFIG_COUNT")
         .args([
@@ -99,17 +106,22 @@ fn stdout_or_failure(args: &[&str], output: Output) -> Result<Vec<u8>> {
 }
 
 pub fn hash_object(dir: &Path, content: &[u8]) -> Result<String> {
+    let output = git_with_input(dir, &HASH_OBJECT_ARGS, content)?;
+    let stdout = stdout_or_failure(&HASH_OBJECT_ARGS, output)?;
+    Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
+}
+
+fn git_with_input(dir: &Path, args: &[&str], input: &[u8]) -> Result<Output> {
     let mut child = isolated_git(dir)
-        .args(HASH_OBJECT_ARGS)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
     let mut stdin = child.stdin.take().ok_or(Error::NoStdin)?;
-    stdin.write_all(content)?;
+    stdin.write_all(input)?;
     drop(stdin);
-    let stdout = stdout_or_failure(&HASH_OBJECT_ARGS, child.wait_with_output()?)?;
-    Ok(String::from_utf8_lossy(&stdout).trim_end().to_owned())
+    Ok(child.wait_with_output()?)
 }
 
 /// What a test sets before the merge runs: repository config (also in force for the merge, so it

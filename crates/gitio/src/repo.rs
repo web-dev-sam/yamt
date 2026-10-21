@@ -1,11 +1,11 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::blob::{BlobReader, CAT_FILE};
 use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
+use crate::operation::read_if_present;
 use crate::run::{Access, GIT_TIMEOUT, git_command, run};
 use crate::{Error, Result, StageEntry};
 
@@ -94,12 +94,7 @@ impl Repo {
     }
 
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
-        let path = self.git_path(MERGE_MSG)?;
-        match fs::read(&path) {
-            Ok(message) => Ok(Some(message)),
-            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(Error::ReadFailed { path, source }),
-        }
+        read_if_present(&self.git_path(MERGE_MSG)?)
     }
 
     /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
@@ -130,6 +125,19 @@ impl Repo {
         let command = self.command(Access::Read, &[REV_PARSE, "--git-path", name]);
         let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
         Ok(self.root.join(path_from_git(&git_path)))
+    }
+
+    /// One `rev-parse --git-path` call for every name; the paths in the order of `names`.
+    pub(crate) fn git_paths(&self, names: &[&str]) -> Result<Vec<PathBuf>> {
+        let mut command = self.command(Access::Read, &[REV_PARSE]);
+        for name in names {
+            command.args(["--git-path", name]);
+        }
+        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+        let lines = output.split(|&byte| byte == b'\n');
+        Ok(lines
+            .map(|line| self.root.join(path_from_git(line)))
+            .collect())
     }
 
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
