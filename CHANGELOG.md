@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A line at the top of the window names what git is doing — merging, squash-merging, rebasing, cherry-picking,
+  reverting or applying patches — with what it applies, onto what, and how far a sequence is ("Rebasing feature onto
+  main · 2 of 5"); hover it for the full commit message.
+- **Continue** (Continue rebase / cherry-pick / revert / applying patches, Commit merge for a merge) right after Mark
+  resolved: once every file is resolved it runs git's own continue with git's prepared commit message and shows the
+  next stop's conflicts without a restart; when git finishes, yamt closes with status 0. It asks first about unsaved
+  edits and about a step that rewords or squashes a commit. Continue and Abort also sit in the header of files without
+  a toolbar (binary, deleted on one side) and of a stop without conflicts.
+- Continuing, skipping or editing in a terminal while yamt is open: when the window gets focus yamt shows where git
+  stopped next, with a notice when unsaved edits of the old stop were dropped.
+- With git's `rerere` on, a file git filled in with a resolution you recorded before is marked "remembered" in the file
+  list instead of being staged: it opens with that resolution and both sides' changes for review, and Mark resolved
+  stages it without asking about its conflicts.
+
+### Changed
+
+- During a rebase your own commit is on the left ("Local (yours)") and the commit the rebase builds on on the right,
+  so your work is always on the left; staging, Take, Keep and Delete follow the panes, and the file on disk keeps git's
+  conflict order.
+- The right pane names what a revert undoes ("revert of 9b8e7d6 Add cache") and the patch `git am` applies.
+- Abort works for every operation git records — merge, squash merge, rebase, cherry-pick, revert and `git am` — with
+  git's own abort; its label and question name the operation and what is lost. A conflict git keeps no record of (a
+  `git stash pop`) has neither Continue nor Abort.
+- Closing the window while git continues or aborts waits until git is done; it is refused from the window meanwhile.
+
 ## [0.4.1] - 2026-10-20
 
 ### Added
