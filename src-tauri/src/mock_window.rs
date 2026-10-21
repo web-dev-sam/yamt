@@ -9,8 +9,8 @@ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
 use crate::commands::with_session;
-use crate::merge::{MergeState, lock_when_git_is_done};
-use crate::outcome::{Ending, ending_on_close};
+use crate::merge::MergeState;
+use crate::outcome::{Ending, ending_when_git_is_done};
 
 pub(crate) const CRLF_PATH: &str = "crlf.ts";
 
@@ -18,11 +18,6 @@ pub(crate) struct Window {
     pub(crate) repo: TempDir,
     pub(crate) app: App<MockRuntime>,
     pub(crate) webview: WebviewWindow<MockRuntime>,
-}
-
-/// The ending `window.rs` computes when the window closes: once no worker runs git.
-pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
-    ending_on_close(&mut lock_when_git_is_done(state))
 }
 
 pub(crate) fn file<'a>(

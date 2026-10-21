@@ -12,8 +12,8 @@ use yamt_session::MergeSession;
 use yamt_settings::{StoredSettings, Theme};
 
 use crate::commands::with_session;
-use crate::merge::{MergeState, lock_when_git_is_done};
-use crate::outcome::{Ending, ending_on_close};
+use crate::merge::MergeState;
+use crate::outcome::{Ending, ending_when_git_is_done};
 use crate::servers::{self, HostState};
 use crate::settings;
 
@@ -56,9 +56,7 @@ fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Endin
     let mut close_watch = CloseWatch::new();
     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
     servers::lock(&handle.state::<HostState>()).stop_all();
-    Ok(ending_on_close(&mut lock_when_git_is_done(
-        &handle.state::<MergeState>(),
-    )))
+    Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
 
 fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {

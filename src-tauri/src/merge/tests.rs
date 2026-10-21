@@ -9,10 +9,8 @@ use yamt_conflict_repo::{
 };
 
 use super::*;
-use crate::mock_window::{
-    CRLF_PATH, Window, ending_when_git_is_done, invoke_on, open_window, open_window_in,
-};
-use crate::outcome::{Ending, Exit};
+use crate::mock_window::{CRLF_PATH, Window, invoke_on, open_window, open_window_in};
+use crate::outcome::{Ending, Exit, ending_when_git_is_done};
 
 const ADDED: &str = "added.ts";
 const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";

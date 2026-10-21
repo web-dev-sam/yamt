@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use yamt_session::{MergeSession, OperationKind};
 
-use crate::merge::Merge;
+use crate::merge::{Merge, MergeState, lock_when_git_is_done};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Exit {
@@ -48,6 +48,11 @@ pub(crate) fn startup(repo: &Path) -> Startup {
         }),
         Ok(session) => Startup::Merge(Box::new(session)),
     }
+}
+
+/// The ending when the window closes: once no worker runs git.
+pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
+    ending_on_close(&mut lock_when_git_is_done(state))
 }
 
 /// The ending of a merge no worker runs git for; see `merge::lock_when_git_is_done`.
