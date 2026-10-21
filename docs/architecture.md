@@ -692,6 +692,17 @@ none and an `info` log `compare.fixture_miss`; both fixture sources parse throug
 | whether the minimap shows (Alt held)                                                                    | `useAltHold()` (`ui/altHold.ts`), one instance in `App.vue`: a `shallowRef` set by Alt's own key press and cleared by its release, another key, window blur, the page hidden or a key/pointer event reporting Alt up (`heldAfter`, pure); pointer listeners exist only while held; never stored. `App.vue` passes it to every `MergeView` as `minimap`; MergeView hands `shown && minimap` and the Result shown as text (`showsMinimap`, the rule `centerLine` also uses) to `useMergeController`'s `minimap` option → `MergeOptions.minimap` / `showMinimap` (plan §2 #80 hold, #81)                             | one window-wide fact, one writer; hidden files never get it, so they compute nothing                                                                                      |
 | the Result's minimap (code tiles, slider, edge marks)                                                   | `Minimap` (`editor/internal/minimap.ts`), owned by `Frame`: one `.minimap` box in the right pane's `view.dom`, `display: none` while not shown; code rows in `MinimapTiles` (128 rows each) dropped by `staleTiles` and outside the window, all dropped while hidden; slider and canvas window from `minimapLayout` per frame while shown; edge marks from `Frame`'s rows and the Result's diagnostics, dropped when rows move or problems arrive; theme colours read when shown or after the dark flag changed; no history (plan §2 #81)                                                                         | derived from the one geometry cache, the one tint rule (`paneTone`) and the one syntax table (`SYNTAX_COLOURS`); nothing to keep                                          |
 
+The compare window (`yamt --raw`, plan §2 #93–#97) has its own rows:
+
+| state                                                                           | owner                                                                                                                                                                                                     | why                                                  |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| each column's text while its tab is mounted                                     | that column's CodeMirror `EditorState` (`CompareController`); Vue never holds it: a column's text passes once, from `settled`/`settleNow` into `saveColumn` → `setColumn`                                 | as the merge window's documents                      |
+| the stored copy of every tab's texts, the tab list, names, languages, shown tab | Rust `yamt-compare` `TabStore` (`<data_dir>/yamt/compare/`, `CompareState = Mutex<TabStore>`); the window's `tabs`/`shown` in `ui/compareStore.ts` are written only from its replies                      | survives a restart, a crash and a kill (plan §2 #97) |
+| each column's version, the columns edited since their last send                 | `Settle` (`editor/internal/compareSettle.ts`), from the versions `loadTab` returned; Rust stores a column only for a higher version, `showComparison` applies a reply only when both versions are current | a late reply never tints changed text (plan §2 #95)  |
+| the differences shown                                                           | each column's `differenceField` (`editor/internal/compareFields.ts`): set by a reply, mapped through edits until the next                                                                                 | built once per reply, never per key (plan §2 #96)    |
+| Auto's finding per tab                                                          | the controller (`compareLanguage.ts`), reported through `detected` to `compareStore.detected` (names only)                                                                                                | the toolbar's "Auto · JSON"                          |
+| the compare window's notices, problem, question, screen, tab panel shown        | `ui/compareStore.ts` + `ui/compareNotices.ts` (notices), `fileListKey` the one writer of `fileListShown`; settings through the seam `ui/settingsStore.ts`, which the merge store registers too            | one store per root (plan §2 #94)                     |
+
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
 (`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event.
 
@@ -701,7 +712,7 @@ snapshot then marks its own saved point (`markSaved`).
 
 ### 5.2 `editor/` — public surface is one class
 
-```ts
+````ts
 export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), minimap (the Result's minimap shown at build, plan §2 #81), servers: LanguageServers | null (plan §2 #70) }
   setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
@@ -721,7 +732,30 @@ export class MergeController {
   onSummaryChange(listener: (s: MergeSummary) => void): void;
   destroy(): void;
 }
-```
+
+The compare window's class (plan §2 #96), `editor/compare.ts`, beside it:
+
+```ts
+export class CompareController {
+  constructor(texts: TabTexts, hosts: CompareHosts, options: CompareOptions, events: CompareEvents); // hosts { left, right, strip }; options { preferences, language: TabLanguage, columnLimit }; events { settled(columns), detected(language | null), refused(column) }
+  showComparison(comparison: Comparison): boolean; // false = versions not current, dropped
+  setLanguage(language: TabLanguage): void;         // both columns
+  setPreferences(preferences: Preferences): void;
+  formatLanguage(): "JSON" | "XML" | null;          // the pick, else Auto's finding; null = Format disabled
+  format(): FormatReport;                           // per column formatted | unchanged | failed { message, line }; one `yamt.format` whole-document replace each
+  moveToChange(direction: Direction): void;         // the toolbar arrows, no wrap
+  historyKey(event: KeyboardEvent): boolean;        // undo/redo in the column that has the keyboard
+  holdsText(): boolean;
+  settleNow(): readonly ColumnText[];               // the unsent columns (close, tab close)
+  destroy(): void;
+}
+````
+
+Two `"center"` panes (own history, keymap, find, theme and language compartments), one strip of bands (`CompareStrip`,
+the same `placedBand` rule as the merge strips), the locked scroll through the generalised `ScrollSync<P>`, the colours
+from `changeTone` (WebStorm's 2-way rule). Format and Auto are the pure scanners of plan §2 #98.
+
+````
 
 Per-change apply/ignore is internal: its callers are the icons in the strips (a click or a drag over
 several, plan §2 #45; with Ctrl/Cmd both sides of a conflict, #55), Ctrl/Cmd+click and
@@ -896,7 +930,7 @@ export type WaveEnds =
   | { kind: "through"; enters; leaves }; // where a pane meets its strips
 export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase; // { offset, period } of a pane's mask (plan §2 #64): on the centre line heading down at a strip it leaves into (WAVE_DOWN_X = 5), heading up where it enters (WAVE_UP_X = 15); "through" stretches to k+½ waves, the period rounded so MASK_PERIODS (64) waves are whole CSS px, pinned at the middle of the span
 // WAVE_STROKE_PX = 1, WAVE_HOVER_STROKE_PX = 2: the wave's strokes in the panes and the strips
-```
+````
 
 `editor/internal/geometry.ts` turns chunk ranges into `Span`s and each run's displayed wave into a top
 (via `lineBlockAt`); `Frame` caches these rows with the scroll sync's anchors until the document, the
