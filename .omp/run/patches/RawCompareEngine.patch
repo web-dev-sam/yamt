@@ -1,0 +1,1329 @@
+diff --git a/crates/cli/AGENTS.md b/crates/cli/AGENTS.md
+index 594bc8d..40f4b88 100644
+--- a/crates/cli/AGENTS.md
++++ b/crates/cli/AGENTS.md
+@@ -1,3 +1,5 @@
+-Owner skill: `skill://rust-conventions`. Headless binary over `session`: classify / scan / golden / fixture. Hosts the `git merge-file` cross-check (RK13) and golden snapshots (`tests/golden/`).
++Owner skill: `skill://rust-conventions`. Headless binary over `session`: classify / scan / golden / fixture / compare. Hosts the `git merge-file` cross-check (RK13) and golden snapshots (`tests/golden/`).
+ 
+ `fixture <case-dir>` prints a case's `FileMergeData` (`just fixtures`): the stages view of `base`/`local`/`remote.<ext>`, or, when the case has `remembered.<ext>` and `git-output.<ext>` (`tests/showcase/remembered/`, plan §2 #90), the remembered view through `yamt_session::remembered_data` — the resolution rerere replayed as the Result, each block of git's merge output a conflict. A `git-output.<ext>` with a block not found unchanged in the sides is refused (`MalformedCase`), so a stale one fails `just fixtures`.
++
++`compare <case-dir>` prints `{ left, right, differences }` from `<case-dir>/left.txt` and `right.txt` through `yamt_merge_core::compare` (plan §2 #95): `tests/compare/<case>/` → `frontend/fixtures/compare/<case>.json` (`just fixtures`), the compare window's fixture-mode answers.
+diff --git a/crates/cli/src/args.rs b/crates/cli/src/args.rs
+index 549eece..680ad80 100644
+--- a/crates/cli/src/args.rs
++++ b/crates/cli/src/args.rs
+@@ -26,6 +26,9 @@ pub(crate) enum Command {
+     Fixture {
+         case_dir: PathBuf,
+     },
++    Compare {
++        case_dir: PathBuf,
++    },
+ }
+ 
+ pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
+@@ -42,6 +45,9 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
+         "fixture" => Ok(Command::Fixture {
+             case_dir: required_path(rest, "<case-dir>")?,
+         }),
++        "compare" => Ok(Command::Compare {
++            case_dir: required_path(rest, "<case-dir>")?,
++        }),
+         other => Err(usage(format!("unknown command `{other}`"))),
+     }
+ }
+diff --git a/crates/cli/src/compare.rs b/crates/cli/src/compare.rs
+new file mode 100644
+index 0000000..604d700
+--- /dev/null
++++ b/crates/cli/src/compare.rs
+@@ -0,0 +1,16 @@
++use std::path::Path;
++
++use serde_json::json;
++
++use crate::{Result, print, read_text};
++
++const LEFT_FILE: &str = "left.txt";
++const RIGHT_FILE: &str = "right.txt";
++
++pub(crate) fn compare(case_dir: &Path) -> Result<()> {
++    let left = read_text(&case_dir.join(LEFT_FILE))?;
++    let right = read_text(&case_dir.join(RIGHT_FILE))?;
++    let differences = serde_json::to_value(yamt_merge_core::compare(&left, &right))?;
++    let comparison = json!({ "left": left, "right": right, "differences": differences });
++    print(&(serde_json::to_string_pretty(&comparison)? + "\n"))
++}
+diff --git a/crates/cli/src/lib.rs b/crates/cli/src/lib.rs
+index 894c201..320802b 100644
+--- a/crates/cli/src/lib.rs
++++ b/crates/cli/src/lib.rs
+@@ -1,9 +1,10 @@
+-//! Headless command line front end: classify, scan, golden and fixture tooling.
++//! Headless command line front end: classify, scan, golden, fixture and compare tooling.
+ #![forbid(unsafe_code)]
+ 
+ mod args;
+ mod case;
+ mod classify;
++mod compare;
+ mod fixture;
+ mod golden;
+ mod scan;
+@@ -20,7 +21,8 @@ const USAGE: &str = "usage:
+   yamt-cli classify <base> <local> <remote> [--gap N] [--json]
+   yamt-cli scan [<repo>]
+   yamt-cli golden run|update [<dir>]
+-  yamt-cli fixture <case-dir>";
++  yamt-cli fixture <case-dir>
++  yamt-cli compare <case-dir>";
+ const USAGE_EXIT_CODE: u8 = 2;
+ 
+ #[derive(Debug, thiserror::Error)]
+@@ -83,6 +85,7 @@ pub fn run(args: &[OsString]) -> Result<()> {
+         Command::GoldenRun { dir } => golden::run(&dir),
+         Command::GoldenUpdate { dir } => golden::update(&dir),
+         Command::Fixture { case_dir } => fixture::fixture(&case_dir),
++        Command::Compare { case_dir } => compare::compare(&case_dir),
+     }
+ }
+ 
+diff --git a/crates/cli/tests/commands.rs b/crates/cli/tests/commands.rs
+index 9710dc8..ff026dd 100644
+--- a/crates/cli/tests/commands.rs
++++ b/crates/cli/tests/commands.rs
+@@ -324,6 +324,65 @@ fn fixture_refuses_a_git_output_not_made_from_the_case_s_sides() {
+     );
+ }
+ 
++fn write_compare_case(root: &Path) -> std::path::PathBuf {
++    let dir = root.join("pair");
++    fs::create_dir(&dir).unwrap();
++    fs::write(dir.join("left.txt"), LOCAL).unwrap();
++    fs::write(dir.join("right.txt"), REMOTE).unwrap();
++    dir
++}
++
++// Catches the compare fixtures losing a text or the differences, or changing between two runs of
++// `just fixtures` (which `just fixtures-check` would report as a stale file).
++#[test]
++fn compare_prints_both_texts_and_their_differences_the_same_way_twice() {
++    let root = TempDir::new().unwrap();
++    let case = write_compare_case(root.path());
++
++    let output = yamt_cli(&["compare", path(&case)]);
++
++    assert_eq!(output.code, 0, "{}", output.stderr);
++    assert!(output.stdout.ends_with("}\n"));
++    let data: Value = serde_json::from_str(&output.stdout).unwrap();
++    assert_eq!(data["left"], LOCAL);
++    assert_eq!(data["right"], REMOTE);
++    let ranges: Vec<(&Value, &Value)> = data["differences"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .map(|difference| (&difference["left"], &difference["right"]))
++        .collect();
++    let line = |start: u32| json!({ "start": start, "len": 1 });
++    assert_eq!(
++        ranges,
++        [
++            (&line(1), &line(1)),
++            (&line(4), &line(4)),
++            (&line(7), &line(7))
++        ]
++    );
++    assert_eq!(yamt_cli(&["compare", path(&case)]).stdout, output.stdout);
++}
++
++// Catches a missing column read as empty text, which would show every line as inserted.
++#[test]
++fn compare_fails_with_a_read_error_without_right_txt() {
++    let root = TempDir::new().unwrap();
++    let case = write_compare_case(root.path());
++    let right = case.join("right.txt");
++    fs::remove_file(&right).unwrap();
++
++    let output = yamt_cli(&["compare", path(&case)]);
++
++    assert_eq!(output.code, 1);
++    assert_eq!(output.stdout, "");
++    let os_error = fs::read(&right).unwrap_err();
++    assert_eq!(
++        output.stderr,
++        format!("yamt-cli: cannot read {}: {os_error}\n", path(&right))
++    );
++}
++
+ #[test]
+ fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
+     let repo = conflict_repo(&[
+diff --git a/crates/merge-core/AGENTS.md b/crates/merge-core/AGENTS.md
+index c03fc1b..7d4a899 100644
+--- a/crates/merge-core/AGENTS.md
++++ b/crates/merge-core/AGENTS.md
+@@ -1 +1,3 @@
+ Owner skill: `skill://rust-conventions`. Pure diff3 chunk model: no I/O, no git, no serde_json, no tauri (clippy `disallowed_*`, `just arch-check`). Public API documented with `///` one-liners (`missing_docs`); tests: unit in-file, invariants via proptest, goldens via insta in `crates/cli`.
++
++`compare(left, right)` is the 2-way diff behind `yamt --raw` (plan §2 #95): `compute_chunks(left, left, right)` with `COMPARE_GAP` 0 for the lines, `side_word_changes` in both directions for the word marks, line spaces `LeftLine`/`RightLine`; no second diff rule.
+diff --git a/crates/merge-core/src/compare.rs b/crates/merge-core/src/compare.rs
+new file mode 100644
+index 0000000..1d63979
+--- /dev/null
++++ b/crates/merge-core/src/compare.rs
+@@ -0,0 +1,61 @@
++use serde::Serialize;
++use specta::Type;
++
++use crate::compute::{Options, compute_chunks};
++use crate::line::{LeftLine, LineRange, RightLine, lines_in, split_lines};
++use crate::word::{SideWordChanges, side_word_changes};
++
++/// One fragment per hunk, as `WebStorm`'s 2-way diff shows it (plan §2 #95).
++const COMPARE_GAP: u32 = 0;
++
++/// One place where the right text differs from the left, located in both texts.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct Difference {
++    /// The lines in the left; empty where the right inserted lines.
++    pub left: LineRange<LeftLine>,
++    /// The lines in the right; empty where the right removed the left's lines.
++    pub right: LineRange<RightLine>,
++    /// Where the two sides of this difference differ inside their lines.
++    pub words: DifferenceWords,
++}
++
++/// Each side of a difference compared with the other side.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct DifferenceWords {
++    /// Left compared with right: left text the right lacks; removals are right text the left
++    /// lacks, placed where it would sit in the left.
++    pub left: SideWordChanges<LeftLine>,
++    /// Right compared with left.
++    pub right: SideWordChanges<RightLine>,
++}
++
++/// The differences between two texts, sorted and disjoint; none for equal texts.
++#[must_use]
++pub fn compare(left: &str, right: &str) -> Vec<Difference> {
++    let left_lines = split_lines(left);
++    let right_lines = split_lines(right);
++    let chunks = compute_chunks(left, left, right, &Options { gap: COMPARE_GAP });
++    chunks
++        .iter()
++        .map(|chunk| {
++            let left_range = chunk.base.start.0..chunk.base.end().0;
++            let right_range = chunk.remote.start.0..chunk.remote.end().0;
++            let left_text = lines_in(&left_lines, &left_range);
++            let right_text = lines_in(&right_lines, &right_range);
++            Difference {
++                left: LineRange {
++                    start: LeftLine(chunk.base.start.0),
++                    len: chunk.base.len,
++                },
++                right: LineRange {
++                    start: RightLine(chunk.remote.start.0),
++                    len: chunk.remote.len,
++                },
++                words: DifferenceWords {
++                    left: side_word_changes(right_text, &left_lines, left_range, LeftLine),
++                    right: side_word_changes(left_text, &right_lines, right_range, RightLine),
++                },
++            }
++        })
++        .collect()
++}
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index 33e79f8..57d63d3 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -1,9 +1,10 @@
+-//! Pure three-way chunk model: base, local and remote text in, classified chunks out.
++//! Pure diff model: three-way chunks for a merge, two-way differences for a compare.
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
+ mod apply;
+ mod chunk;
++mod compare;
+ mod compute;
+ mod line;
+ mod line_map;
+@@ -13,7 +14,10 @@ mod word;
+ 
+ pub use apply::apply_non_conflicting;
+ pub use chunk::{Chunk, ChunkId, ChunkKind};
++pub use compare::{Difference, DifferenceWords, compare};
+ pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+-pub use line::{BaseLine, InlinePoint, InlineRange, LineRange, LocalLine, RemoteLine};
++pub use line::{
++    BaseLine, InlinePoint, InlineRange, LeftLine, LineRange, LocalLine, RemoteLine, RightLine,
++};
+ pub use line_map::{LineMap, line_map};
+ pub use word::{Removal, SideWordChanges, WordChanges, word_changes};
+diff --git a/crates/merge-core/src/line.rs b/crates/merge-core/src/line.rs
+index 0a40523..ac8d4eb 100644
+--- a/crates/merge-core/src/line.rs
++++ b/crates/merge-core/src/line.rs
+@@ -15,6 +15,14 @@ pub struct LocalLine(pub u32);
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
+ pub struct RemoteLine(pub u32);
+ 
++/// 0-based line index in the left text of a 2-way compare.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
++pub struct LeftLine(pub u32);
++
++/// 0-based line index in the right text of a 2-way compare.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
++pub struct RightLine(pub u32);
++
+ /// The lines `start .. start + len` of one text; built from a length, so it cannot be inverted.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct LineRange<L> {
+@@ -56,6 +64,22 @@ impl LineRange<RemoteLine> {
+     }
+ }
+ 
++impl LineRange<LeftLine> {
++    /// First line after the range.
++    #[must_use]
++    pub fn end(&self) -> LeftLine {
++        LeftLine(self.start.0 + self.len)
++    }
++}
++
++impl LineRange<RightLine> {
++    /// First line after the range.
++    #[must_use]
++    pub fn end(&self) -> RightLine {
++        RightLine(self.start.0 + self.len)
++    }
++}
++
+ /// Changed text inside one line of one text: `len` UTF-16 code units from column `start`
+ /// (the unit of JavaScript strings and `CodeMirror` positions). Never contains a line break.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+diff --git a/crates/merge-core/src/word.rs b/crates/merge-core/src/word.rs
+index c43f895..dbe414d 100644
+--- a/crates/merge-core/src/word.rs
++++ b/crates/merge-core/src/word.rs
+@@ -63,7 +63,7 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) ->
+         .collect()
+ }
+ 
+-fn side_word_changes<L: Copy + PartialEq>(
++pub(crate) fn side_word_changes<L: Copy + PartialEq>(
+     base: &[&str],
+     all_side_lines: &[&str],
+     side_range: Range<u32>,
+diff --git a/crates/merge-core/tests/compare.rs b/crates/merge-core/tests/compare.rs
+new file mode 100644
+index 0000000..b94e004
+--- /dev/null
++++ b/crates/merge-core/tests/compare.rs
+@@ -0,0 +1,295 @@
++#![cfg(test)]
++
++use proptest::collection::vec;
++use proptest::option;
++use proptest::prelude::*;
++use proptest::sample::{Index, subsequence};
++use yamt_merge_core::{
++    Difference, InlinePoint, InlineRange, LeftLine, Options, RightLine, SideWordChanges, compare,
++    compute_chunks,
++};
++
++const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
++const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
++const MAX_LINES: usize = 10;
++const MAX_EDITS: usize = 5;
++const CASES: u32 = 512;
++const WORDS: [&str; 5] = ["alpha", "beta", "gamma", "delta", "omega"];
++const NEW_WORD: &str = "CHANGED";
++
++#[derive(Clone, Debug)]
++enum Edit {
++    Insert(String),
++    Delete,
++    Replace(String),
++}
++
++#[derive(Clone, Debug)]
++struct Doc {
++    lines: Vec<String>,
++    last: String,
++}
++
++impl Doc {
++    fn text(&self) -> String {
++        self.lines.concat() + &self.last
++    }
++
++    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
++        let mut lines = self.lines.clone();
++        for (at, edit) in edits {
++            match edit {
++                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
++                Edit::Delete if !lines.is_empty() => {
++                    lines.remove(at.index(lines.len()));
++                }
++                Edit::Replace(line) if !lines.is_empty() => {
++                    let replaced = at.index(lines.len());
++                    lines[replaced].clone_from(line);
++                }
++                Edit::Delete | Edit::Replace(_) => {}
++            }
++        }
++        Doc {
++            lines,
++            last: last.unwrap_or_else(|| self.last.clone()),
++        }
++    }
++}
++
++#[derive(Clone, Debug)]
++struct Pair {
++    left: String,
++    right: String,
++}
++
++fn doc() -> impl Strategy<Value = Doc> {
++    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
++}
++
++fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
++    let edit = prop_oneof![
++        LINE.prop_map(Edit::Insert),
++        Just(Edit::Delete),
++        LINE.prop_map(Edit::Replace),
++    ];
++    vec((any::<Index>(), edit), 0..MAX_EDITS)
++}
++
++fn pair() -> impl Strategy<Value = Pair> {
++    let edited = (doc(), edits(), option::of(LAST_LINE)).prop_map(|(left, edits, last)| Pair {
++        right: left.edited(&edits, last).text(),
++        left: left.text(),
++    });
++    let independent = (doc(), doc()).prop_map(|(left, right)| Pair {
++        left: left.text(),
++        right: right.text(),
++    });
++    prop_oneof![4 => edited, 1 => independent]
++}
++
++fn lines(text: &str) -> Vec<&str> {
++    text.split_inclusive('\n').collect()
++}
++
++fn content(line: &str) -> &str {
++    line.strip_suffix("\r\n")
++        .or_else(|| line.strip_suffix('\n'))
++        .unwrap_or(line)
++}
++
++fn width(line: &str) -> u32 {
++    u32::try_from(content(line).encode_utf16().count()).unwrap()
++}
++
++fn rebuilt_right(left: &str, right: &str, differences: &[Difference]) -> String {
++    let (left_lines, right_lines) = (lines(left), lines(right));
++    let mut rebuilt = String::new();
++    let mut next_left_line = 0;
++    for difference in differences {
++        rebuilt += &left_lines[next_left_line..difference.left.start.0 as usize].concat();
++        let right_start = difference.right.start.0 as usize;
++        rebuilt += &right_lines[right_start..difference.right.end().0 as usize].concat();
++        next_left_line = difference.left.end().0 as usize;
++    }
++    rebuilt + &left_lines[next_left_line..].concat()
++}
++
++/// Every mark of one side lies on a line of its difference, inside that line's content, and
++/// every removal carries text.
++fn check_side<L: Copy + std::fmt::Debug>(
++    side: &SideWordChanges<L>,
++    text: &str,
++    (first, len): (u32, u32),
++    index: fn(L) -> u32,
++) -> Result<(), TestCaseError> {
++    let text_lines = lines(text);
++    let in_difference = |line: u32| line >= first && line < first + len;
++    for range in &side.changed {
++        let line = index(range.line);
++        prop_assert!(in_difference(line), "{range:?} not in {first}+{len}");
++        prop_assert!(range.len > 0, "{range:?}");
++        let line_width = width(text_lines[line as usize]);
++        prop_assert!(
++            range.start + range.len <= line_width,
++            "{range:?} past {line_width}"
++        );
++    }
++    for removal in &side.removals {
++        let line = index(removal.at.line);
++        prop_assert!(in_difference(line), "{removal:?} not in {first}+{len}");
++        prop_assert!(
++            removal.at.column <= width(text_lines[line as usize]),
++            "{removal:?}"
++        );
++    }
++    Ok(())
++}
++
++/// Lines `l<number> <words>`, and the same lines with one word replaced by `NEW_WORD`; the word
++/// starts at `column` in both, `left_len` long in the left.
++struct OneWordChange {
++    left: String,
++    right: String,
++    line: u32,
++    column: u32,
++    left_len: u32,
++}
++
++fn one_word_change(text: &[Vec<&str>], changed_line: Index, changed_word: Index) -> OneWordChange {
++    let line = changed_line.index(text.len());
++    let word = changed_word.index(text[line].len());
++    let line_text = |words: &[&str], number: usize| format!("l{number} {}\n", words.join(" "));
++    let left_lines: Vec<String> = text
++        .iter()
++        .enumerate()
++        .map(|(number, words)| line_text(words, number))
++        .collect();
++    let mut right_words = text[line].clone();
++    right_words[word] = NEW_WORD;
++    let mut right_lines = left_lines.clone();
++    right_lines[line] = line_text(&right_words, line);
++    let words_before: usize = text[line][..word].iter().map(|word| word.len() + 1).sum();
++    OneWordChange {
++        left: left_lines.concat(),
++        right: right_lines.concat(),
++        line: u32::try_from(line).unwrap(),
++        column: u32::try_from(format!("l{line} ").len() + words_before).unwrap(),
++        left_len: u32::try_from(text[line][word].len()).unwrap(),
++    }
++}
++
++proptest! {
++    #![proptest_config(ProptestConfig::with_cases(CASES))]
++
++    // Catches a difference located in the wrong lines on either side, or one left out.
++    #[test]
++    fn replacing_each_difference_with_its_right_lines_rebuilds_the_right_text(pair in pair()) {
++        let differences = compare(&pair.left, &pair.right);
++        prop_assert_eq!(rebuilt_right(&pair.left, &pair.right, &differences), pair.right.clone());
++    }
++
++    // Catches differences that overlap, touch, run backwards, or mark nothing on either side.
++    #[test]
++    fn differences_are_sorted_disjoint_and_never_empty_on_both_sides(pair in pair()) {
++        let differences = compare(&pair.left, &pair.right);
++        for difference in &differences {
++            prop_assert!(!(difference.left.is_empty() && difference.right.is_empty()), "{difference:?}");
++        }
++        for neighbours in differences.windows(2) {
++            prop_assert!(neighbours[0].left.end() < neighbours[1].left.start, "{neighbours:?}");
++            prop_assert!(neighbours[0].right.end() < neighbours[1].right.start, "{neighbours:?}");
++        }
++        if let Some(last) = differences.last() {
++            prop_assert!(last.left.end().0 as usize <= lines(&pair.left).len());
++            prop_assert!(last.right.end().0 as usize <= lines(&pair.right).len());
++        }
++    }
++
++    // Catches a difference reported for equal texts (e.g. a line break counted as a change).
++    #[test]
++    fn comparing_a_text_with_itself_finds_nothing(text in doc()) {
++        let text = text.text();
++        prop_assert!(compare(&text, &text).is_empty());
++    }
++
++    // Catches a second diff rule: a gap other than 0 joining nearby hunks, or the texts swapped.
++    #[test]
++    fn line_ranges_are_the_two_way_chunks_of_compute_chunks(pair in pair()) {
++        let chunks = compute_chunks(&pair.left, &pair.left, &pair.right, &Options { gap: 0 });
++        let from_chunks: Vec<(u32, u32, u32, u32)> = chunks
++            .iter()
++            .map(|chunk| (chunk.base.start.0, chunk.base.len, chunk.remote.start.0, chunk.remote.len))
++            .collect();
++        let from_compare: Vec<(u32, u32, u32, u32)> = compare(&pair.left, &pair.right)
++            .iter()
++            .map(|difference| (difference.left.start.0, difference.left.len, difference.right.start.0, difference.right.len))
++            .collect();
++        prop_assert_eq!(from_compare, from_chunks);
++    }
++
++    // Catches word marks or removals placed in the other column's lines, or across a line break,
++    // and empty removal texts.
++    #[test]
++    fn every_word_mark_lies_inside_a_line_of_its_own_column(pair in pair()) {
++        for difference in compare(&pair.left, &pair.right) {
++            let left = (difference.left.start.0, difference.left.len);
++            let right = (difference.right.start.0, difference.right.len);
++            check_side(&difference.words.left, &pair.left, left, |line| line.0)?;
++            check_side(&difference.words.right, &pair.right, right, |line| line.0)?;
++            let removals = difference.words.left.removals.iter().map(|removal| &removal.text);
++            let right_removals = difference.words.right.removals.iter().map(|removal| &removal.text);
++            for removal in removals.chain(right_removals) {
++                prop_assert!(!removal.is_empty(), "{difference:?}");
++            }
++        }
++    }
++
++    // Catches marks computed in one direction only (the right against the left, as
++    // `word_changes` would), or the two columns' marks swapped.
++    #[test]
++    fn a_one_word_change_marks_exactly_that_word_in_both_columns(
++        text in vec(subsequence(WORDS.to_vec(), 1..=WORDS.len()), 1..MAX_LINES),
++        changed_line in any::<Index>(),
++        changed_word in any::<Index>(),
++    ) {
++        let change = one_word_change(&text, changed_line, changed_word);
++        let differences = compare(&change.left, &change.right);
++        prop_assert_eq!(differences.len(), 1);
++        let words = &differences[0].words;
++        let new_len = u32::try_from(NEW_WORD.len()).unwrap();
++        prop_assert_eq!(&words.left.changed, &vec![InlineRange { line: LeftLine(change.line), start: change.column, len: change.left_len }]);
++        prop_assert_eq!(&words.right.changed, &vec![InlineRange { line: RightLine(change.line), start: change.column, len: new_len }]);
++        prop_assert!(words.left.removals.is_empty() && words.right.removals.is_empty(), "{words:?}");
++    }
++}
++
++// Catches removals given to the wrong column: a word only the left has is the left's mark and a
++// removal in the right, at the place it would sit.
++#[test]
++fn a_word_only_in_the_left_is_a_left_mark_and_a_right_removal() {
++    let differences = compare("one two three\n", "one three\n");
++    assert_eq!(differences.len(), 1);
++    let words = &differences[0].words;
++    assert_eq!(
++        words.left.changed,
++        vec![InlineRange {
++            line: LeftLine(0),
++            start: 4,
++            len: 4
++        }]
++    );
++    assert!(words.left.removals.is_empty(), "{words:?}");
++    assert!(words.right.changed.is_empty(), "{words:?}");
++    let [removal] = words.right.removals.as_slice() else {
++        panic!("{words:?}");
++    };
++    assert_eq!(
++        removal.at,
++        InlinePoint {
++            line: RightLine(0),
++            column: 4
++        }
++    );
++    assert_eq!(removal.text, "two ");
++}
+diff --git a/docs/slices/briefs/3.C-shell.md b/docs/slices/briefs/3.C-shell.md
+new file mode 100644
+index 0000000..ba26159
+--- /dev/null
++++ b/docs/slices/briefs/3.C-shell.md
+@@ -0,0 +1,112 @@
++# Slice 3.C-shell — `yamt --raw` in the shell: the compare window's start and close, the eight commands
++
++Board "Raw compare" row 6 (needs row 4's `yamt-compare`). Product rules: `docs/plan.md` §2 **#93**, **#94**, **#95**,
++**#97** — read them in full. Request: `docs/slices/request-raw-compare.md` rule 1 and "Defaults decided after the
++design". Design: `.omp/run/notes/RawCompareDesign.md` option A §1 (mode), §2 (when the diff runs), §7 (commands,
++`IpcError`). Row 7 (the window's sources) builds on the generated commands and types.
++
++Facts (given):
++
++- `src-tauri/src/args.rs`: `USAGE`, `Invocation::{Merge { repo }, Help, Version}`, `parse` (an unknown argument is a
++  usage error; `--help`/`--version` win). `src-tauri/src/lib.rs:33-54` `run`: `Merge` → `appimage::repo_from_start_dir`
++  (Linux) → `merge(&repo)`; a usage error → `Ending::failure(format!("{problem}\n{USAGE}"))` (exit 2,
++  `outcome.rs:8-35`).
++- `src-tauri/src/window.rs`: `run(session)` → `open_and_wait` (`:41-60`): `with_session(Builder, session)`, settings
++  read once (`start_settings`, `:62-73`), Linux font rendering, `WebviewWindowBuilder` with `background_color` and
++  `initialization_script(start_script(theme))` (`:90-95`, `dataset.theme`), `CloseWatch` (`:98-174`, shared close
++  fallback), after `run_return` the language servers stop and the ending is read. `window_title(root)` (`:97`).
++- `src-tauri/src/commands.rs:11-38` `specta_builder` (one builder for both bins and `export_bindings`), `with_session`
++  (`:40-53`: manages `HostState` and `Mutex<Merge>`, the invoke handler, the page-load hook). Settings commands
++  (`settings.rs`) need only the window's paths, so they work without a merge; the async merge commands hand work to a
++  `spawn_blocking` worker (`merge.rs:150-160` `on_worker`).
++- `src-tauri/src/ipc_error.rs`: `IpcError` (`#[serde(tag = "kind")]`), `From<yamt_session::Error>`,
++  `From<yamt_settings::Error>`. Its TS words: `frontend/src/ui/problemText.ts:100-130` (an exhaustive `switch` on
++  `cause.kind`, so a new kind needs its words in the same commit).
++- Row 4's API (`crates/compare/src/lib.rs`): `TabStore::{open, start, load_tab, set_column, add_tab, close_tab,
++  rename_tab, set_language, show_tab}`, `comparison(&LoadedTab)`, `tab_texts(&LoadedTab)`, the types `TabId`,
++  `Column`, `ColumnVersion`, `ColumnVersions`, `TabLanguage`, `TabEntry`, `TabList`, `CompareStart`, `Comparison`,
++  `TabTexts`, `MAX_COLUMN_BYTES`, `Error::{Locked, Broken, NewerFormat, ReadFailed, WriteFailed, UnknownTab, TooLarge}`.
++- Tauri 2.12 `PathResolver::data_dir()` = the per-user data folder (`~/.local/share` on Linux, `~/Library/Application
++  Support` on macOS, `%APPDATA%` on Windows). The settings folder is `<config_dir>/yamt/` (`crates/settings/src/places.rs:21-27`).
++- Test harness: `src-tauri/src/mock_window.rs` (`open_window*`, `Window::invoke(cmd, args)`, `Window::ending`).
++
++## Target
++
++Owned: `src-tauri/src/{args,lib,window,commands,ipc_error,mock_window}.rs`, `src-tauri/src/compare.rs` (new),
++`src-tauri/AGENTS.md`, `frontend/src/ui/problemText.ts`, `frontend/src/ui/problemText.test.ts`.
++
++Read-only: everything else (`crates/**`, `src-tauri/Cargo.toml`, other `frontend/**`, `frontend/src/ipc/bindings.ts`
++(generated: run `just bindings` locally to typecheck; the orchestrator regenerates it after your patch), `docs/**`,
++`.omp/**`).
++
++Non-goals: the window's sources, stores and views (rows 7–11); a merge window change of any kind; bringing an open
++compare window to the front.
++
++## Contract (fixed; you may add, never change)
++
++```rust
++// args.rs
++pub(crate) enum Invocation { Merge { repo: PathBuf }, Compare, Help, Version }
++// `--raw` → Compare; `--raw` with `--repo` (any order) → Err("--raw compares pasted text and takes no --repo")
++
++// window.rs: the start script always names the window, before the first frame
++//   document.documentElement.dataset.theme = "<dark|light>"; document.documentElement.dataset.window = "<merge|compare>";
++
++// compare.rs — commands (registered in specta_builder; state Mutex<TabStore>, never locked with another Mutex)
++#[tauri::command] #[specta::specta] fn open_compare(..) -> Result<CompareStart, IpcError>;
++#[tauri::command] #[specta::specta] async fn load_tab(.., tab: TabId) -> Result<TabTexts, IpcError>;          // worker; diff outside the lock
++#[tauri::command] #[specta::specta] async fn set_column(.., tab: TabId, column: Column, text: String, version: ColumnVersion) -> Result<Comparison, IpcError>; // worker; diff outside the lock
++#[tauri::command] #[specta::specta] fn add_tab(..) -> Result<TabList, IpcError>;
++#[tauri::command] #[specta::specta] fn close_tab(.., tab: TabId) -> Result<TabList, IpcError>;
++#[tauri::command] #[specta::specta] fn rename_tab(.., tab: TabId, name: String) -> Result<TabList, IpcError>;
++#[tauri::command] #[specta::specta] fn set_tab_language(.., tab: TabId, language: TabLanguage) -> Result<TabList, IpcError>;
++#[tauri::command] #[specta::specta] fn show_tab(.., tab: TabId) -> Result<TabList, IpcError>;
++
++// ipc_error.rs — added kinds
++UnknownTab { tab: TabId },
++ColumnTooLarge { limit: u32 },
++// From<yamt_compare::Error>: ReadFailed/Locked/Broken/NewerFormat → ReadFailed { path, message };
++// WriteFailed → WriteFailed; UnknownTab → UnknownTab; TooLarge → ColumnTooLarge { limit: MAX_COLUMN_BYTES }
++```
++
++## Behaviour
++
++1. **`--help`** prints the new usage: `usage: yamt [--repo <path>]` / `       yamt --raw`, one sentence that `--raw`
++   compares any two pasted texts in two columns, no repository needed, its tabs kept between runs, and a `--raw` line
++   in the option list.
++2. **`Compare`** never opens a `MergeSession`, never runs git, never calls `appimage::repo_from_start_dir`, never
++   manages `Mutex<Merge>` or `HostState`. It builds the app, opens `TabStore` in `<data_dir>/yamt/compare/` and on
++   failure ends before any window with exit 2 and one line: `another yamt --raw window is open (<folder>)` (Locked);
++   `the stored compare tabs <path> cannot be read: <message>; nothing was changed` (Broken, ReadFailed);
++   `the stored compare tabs <path> were written by a newer yamt (format <n>)` (NewerFormat); `no data folder: <error>`.
++   Otherwise it manages `Mutex<TabStore>`, reads the settings and applies the font rendering as the merge window does,
++   opens the window titled `Compare — yamt` with the same size, background and start script (`window = "compare"`),
++   runs `CloseWatch` unchanged, and after `run_return` ends with exit 0 and no message. Split `open_and_wait` so both
++   windows share one builder path (no copied window setup).
++3. **`load_tab`/`set_column`** lock the store only to call it and clone the `LoadedTab`'s handles, then build the reply
++   (`tab_texts`/`comparison`) after the lock is released, on a `spawn_blocking` worker as `merge.rs` does.
++4. **Words** for the two new kinds in `problemText.ts` in the file's style (e.g. "That tab was closed" /
++   "A column holds up to 8 MiB"; the limit from the reply, written as MiB).
++
++## Acceptance
++
++- `args.rs` tests: `--raw` → `Compare`; `--raw --repo p` and `--repo p --raw` → the error; `--raw --help` → `Help`;
++  the usage names `--raw`.
++- `window.rs` test: the start script names the window for both kinds and the theme.
++- `compare.rs` tests through `mock_window` (a window built on a temp data folder): each command's reply for a fresh
++  store (one "Compare 1"); `set_column` then `load_tab` gives the text and differences of `yamt_merge_core::compare`;
++  `UnknownTab` and `ColumnTooLarge` serialise as their kinds; the start-failure words for Locked, Broken, NewerFormat.
++- Real app (`cargo build -p yamt-app`, a fresh `HOME`/`XDG_DATA_HOME`): `target/debug/yamt --raw` from a folder outside
++  any repository opens a window titled "Compare — yamt" (the page is still the merge page until row 11; the title and
++  `document.documentElement.dataset.window === "compare"` are the proof, through the app-session tooling or the
++  devtools console); `<data>/yamt/compare/tabs.json` exists; a second `yamt --raw` exits 2 with the lock line; closing
++  the first exits 0; `yamt --raw --repo x` exits 2 with the usage; in `scripts/conflict-repo.sh /tmp/<dir>`, `yamt --raw`
++  started there leaves `git status --porcelain=v2` and `git ls-files -u` byte-equal before and after.
++- `pnpm -C frontend typecheck` and `test` pass with the regenerated bindings.
++- Commands: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p yamt-app`,
++  `just arch-check`.
++
++## Skills
++
++`skill://ipc-contract`, `skill://rust-conventions`, `skill://risk-register`, `skill://verification` (plus your
++autoloaded ones). Read `docs/architecture.md` §3.5 and §4 first.
+diff --git a/frontend/.oxfmtrc.json b/frontend/.oxfmtrc.json
+index d6d1035..1b05058 100644
+--- a/frontend/.oxfmtrc.json
++++ b/frontend/.oxfmtrc.json
+@@ -8,6 +8,7 @@
+     "pnpm-lock.yaml",
+     "src/ipc/bindings.ts",
+     "fixtures/golden/**",
+-    "fixtures/showcase/**"
++    "fixtures/showcase/**",
++    "fixtures/compare/**"
+   ]
+ }
+diff --git a/frontend/fixtures/compare/json-payload.json b/frontend/fixtures/compare/json-payload.json
+new file mode 100644
+index 0000000..d26252d
+--- /dev/null
++++ b/frontend/fixtures/compare/json-payload.json
+@@ -0,0 +1,110 @@
++{
++  "differences": [
++    {
++      "left": {
++        "len": 1,
++        "start": 2
++      },
++      "right": {
++        "len": 1,
++        "start": 2
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 7,
++              "line": 2,
++              "start": 13
++            }
++          ],
++          "removals": []
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 7,
++              "line": 2,
++              "start": 13
++            }
++          ],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 5
++      },
++      "right": {
++        "len": 0,
++        "start": 5
++      },
++      "words": {
++        "left": {
++          "changed": [],
++          "removals": []
++        },
++        "right": {
++          "changed": [],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 11
++      },
++      "right": {
++        "len": 1,
++        "start": 10
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 8,
++              "line": 11,
++              "start": 16
++            }
++          ],
++          "removals": []
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 9,
++              "line": 10,
++              "start": 16
++            }
++          ],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 0,
++        "start": 23
++      },
++      "right": {
++        "len": 1,
++        "start": 22
++      },
++      "words": {
++        "left": {
++          "changed": [],
++          "removals": []
++        },
++        "right": {
++          "changed": [],
++          "removals": []
++        }
++      }
++    }
++  ],
++  "left": "{\n  \"id\": \"order-1042\",\n  \"status\": \"pending\",\n  \"customer\": {\n    \"name\": \"Ada Lovelace\",\n    \"email\": \"ada@example.com\",\n    \"phone\": \"+44 20 7946 0958\"\n  },\n  \"items\": [\n    {\n      \"sku\": \"BOOK-17\",\n      \"title\": \"Notes on the analytical engine\",\n      \"quantity\": 1,\n      \"price\": 24.5\n    },\n    {\n      \"sku\": \"PEN-03\",\n      \"title\": \"Fountain pen\",\n      \"quantity\": 2,\n      \"price\": 8\n    }\n  ],\n  \"note\": \"leave the parcel at the front door\",\n  \"total\": 40.5\n}\n",
++  "right": "{\n  \"id\": \"order-1042\",\n  \"status\": \"shipped\",\n  \"customer\": {\n    \"name\": \"Ada Lovelace\",\n    \"phone\": \"+44 20 7946 0958\"\n  },\n  \"items\": [\n    {\n      \"sku\": \"BOOK-17\",\n      \"title\": \"Sketch of the analytical engine\",\n      \"quantity\": 1,\n      \"price\": 24.5\n    },\n    {\n      \"sku\": \"PEN-03\",\n      \"title\": \"Fountain pen\",\n      \"quantity\": 2,\n      \"price\": 8\n    }\n  ],\n  \"note\": \"leave the parcel at the front door\",\n  \"tracking\": \"RX-2291-UK\",\n  \"total\": 40.5\n}\n"
++}
+diff --git a/frontend/fixtures/compare/typescript.json b/frontend/fixtures/compare/typescript.json
+new file mode 100644
+index 0000000..0afd780
+--- /dev/null
++++ b/frontend/fixtures/compare/typescript.json
+@@ -0,0 +1,85 @@
++{
++  "differences": [
++    {
++      "left": {
++        "len": 1,
++        "start": 13
++      },
++      "right": {
++        "len": 1,
++        "start": 13
++      },
++      "words": {
++        "left": {
++          "changed": [],
++          "removals": [
++            {
++              "at": {
++                "column": 22,
++                "line": 13
++              },
++              "text": " || trimmed.startsWith(\"#\")"
++            }
++          ]
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 27,
++              "line": 13,
++              "start": 22
++            }
++          ],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 32
++      },
++      "right": {
++        "len": 2,
++        "start": 32
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 5,
++              "line": 32,
++              "start": 37
++            }
++          ],
++          "removals": [
++            {
++              "at": {
++                "column": 0,
++                "line": 32
++              },
++              "text": "  const word = open === 1 ? \"task\" : \"tasks\";\n"
++            }
++          ]
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 45,
++              "line": 32,
++              "start": 0
++            },
++            {
++              "len": 7,
++              "line": 33,
++              "start": 37
++            }
++          ],
++          "removals": []
++        }
++      }
++    }
++  ],
++  "left": "import { readFile } from \"node:fs/promises\";\n\nexport interface Task {\n  id: number;\n  title: string;\n  done: boolean;\n  due?: Date;\n}\n\nexport function parseTasks(text: string): Task[] {\n  const tasks: Task[] = [];\n  for (const line of text.split(\"\\n\")) {\n    const trimmed = line.trim();\n    if (trimmed === \"\") {\n      continue;\n    }\n    const [id, title, done] = trimmed.split(\";\");\n    tasks.push({\n      id: Number(id),\n      title: title ?? \"\",\n      done: done === \"x\",\n    });\n  }\n  return tasks;\n}\n\nexport function openTasks(tasks: Task[]): Task[] {\n  return tasks.filter((task) => !task.done);\n}\n\nexport function summary(tasks: Task[]): string {\n  const open = openTasks(tasks).length;\n  return `${open} of ${tasks.length} tasks open`;\n}\n\nexport async function loadTasks(path: string): Promise<Task[]> {\n  const text = await readFile(path, \"utf8\");\n  return parseTasks(text);\n}\n",
++  "right": "import { readFile } from \"node:fs/promises\";\n\nexport interface Task {\n  id: number;\n  title: string;\n  done: boolean;\n  due?: Date;\n}\n\nexport function parseTasks(text: string): Task[] {\n  const tasks: Task[] = [];\n  for (const line of text.split(\"\\n\")) {\n    const trimmed = line.trim();\n    if (trimmed === \"\" || trimmed.startsWith(\"#\")) {\n      continue;\n    }\n    const [id, title, done] = trimmed.split(\";\");\n    tasks.push({\n      id: Number(id),\n      title: title ?? \"\",\n      done: done === \"x\",\n    });\n  }\n  return tasks;\n}\n\nexport function openTasks(tasks: Task[]): Task[] {\n  return tasks.filter((task) => !task.done);\n}\n\nexport function summary(tasks: Task[]): string {\n  const open = openTasks(tasks).length;\n  const word = open === 1 ? \"task\" : \"tasks\";\n  return `${open} of ${tasks.length} ${word} open`;\n}\n\nexport async function loadTasks(path: string): Promise<Task[]> {\n  const text = await readFile(path, \"utf8\");\n  return parseTasks(text);\n}\n"
++}
+diff --git a/frontend/fixtures/compare/words.json b/frontend/fixtures/compare/words.json
+new file mode 100644
+index 0000000..2b617b4
+--- /dev/null
++++ b/frontend/fixtures/compare/words.json
+@@ -0,0 +1,149 @@
++{
++  "differences": [
++    {
++      "left": {
++        "len": 1,
++        "start": 0
++      },
++      "right": {
++        "len": 1,
++        "start": 0
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 4,
++              "line": 0,
++              "start": 22
++            }
++          ],
++          "removals": []
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 3,
++              "line": 0,
++              "start": 22
++            }
++          ],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 2
++      },
++      "right": {
++        "len": 1,
++        "start": 2
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 8,
++              "line": 2,
++              "start": 10
++            }
++          ],
++          "removals": []
++        },
++        "right": {
++          "changed": [],
++          "removals": [
++            {
++              "at": {
++                "column": 10,
++                "line": 2
++              },
++              "text": "printed "
++            }
++          ]
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 0,
++        "start": 5
++      },
++      "right": {
++        "len": 1,
++        "start": 5
++      },
++      "words": {
++        "left": {
++          "changed": [],
++          "removals": []
++        },
++        "right": {
++          "changed": [],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 6
++      },
++      "right": {
++        "len": 0,
++        "start": 7
++      },
++      "words": {
++        "left": {
++          "changed": [],
++          "removals": []
++        },
++        "right": {
++          "changed": [],
++          "removals": []
++        }
++      }
++    },
++    {
++      "left": {
++        "len": 1,
++        "start": 8
++      },
++      "right": {
++        "len": 2,
++        "start": 8
++      },
++      "words": {
++        "left": {
++          "changed": [
++            {
++              "len": 36,
++              "line": 8,
++              "start": 0
++            }
++          ],
++          "removals": []
++        },
++        "right": {
++          "changed": [
++            {
++              "len": 36,
++              "line": 8,
++              "start": 0
++            },
++            {
++              "len": 40,
++              "line": 9,
++              "start": 0
++            }
++          ],
++          "removals": []
++        }
++      }
++    }
++  ],
++  "left": "The meeting starts at nine in the small room.\nLunch is served after the second session.\nBring the printed agenda and your laptop.\n\nParking is free in the north lot.\nQuestions go to the front desk.\nThe east entrance stays closed all week.\nBadges are handed out at the door.\nVisitors sign the book at reception.\nCoffee is in the kitchen on floor two.\nTea is in the same cupboard.\n\nPlease leave the room tidy when you go.\n",
++  "right": "The meeting starts at ten in the small room.\nLunch is served after the second session.\nBring the agenda and your laptop.\n\nParking is free in the north lot.\nDinner is at seven in the hall.\nQuestions go to the front desk.\nBadges are handed out at the door.\nGuests wait in the lobby until noon.\nAll rooms are booked through the portal.\nCoffee is in the kitchen on floor two.\nTea is in the same cupboard.\n\nPlease leave the room tidy when you go.\n"
++}
+diff --git a/justfile b/justfile
+index dac3e6b..865a752 100644
+--- a/justfile
++++ b/justfile
+@@ -33,14 +33,17 @@ fixtures: (fixtures-into "frontend/fixtures")
+ fixtures-check: (fixtures-into "target/fixtures-check")
+     diff -ru frontend/fixtures/golden target/fixtures-check/golden
+     diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
++    diff -ru frontend/fixtures/compare target/fixtures-check/compare
+ 
+-# Window fixtures: the 10 goldens, plus hand-written demo cases in tests/showcase/ (not goldens).
++# Window fixtures: the 10 goldens, hand-written demo cases in tests/showcase/ (not goldens), and the compare
++# window's cases in tests/compare/ (plan §2 #95).
+ [private]
+ fixtures-into dir:
+-    rm -rf {{ dir }}/golden {{ dir }}/showcase && mkdir -p {{ dir }}/golden {{ dir }}/showcase
++    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare
+     cargo build --quiet -p yamt-cli
+     for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/golden/$(basename "$case").json"; done
+     for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
++    for case in tests/compare/*/; do target/debug/yamt-cli compare "$case" > "{{ dir }}/compare/$(basename "$case").json"; done
+ 
+ web-lint: (frontend "lint")
+ 
+diff --git a/tests/compare/json-payload/left.txt b/tests/compare/json-payload/left.txt
+new file mode 100644
+index 0000000..c3ac8dc
+--- /dev/null
++++ b/tests/compare/json-payload/left.txt
+@@ -0,0 +1,25 @@
++{
++  "id": "order-1042",
++  "status": "pending",
++  "customer": {
++    "name": "Ada Lovelace",
++    "email": "ada@example.com",
++    "phone": "+44 20 7946 0958"
++  },
++  "items": [
++    {
++      "sku": "BOOK-17",
++      "title": "Notes on the analytical engine",
++      "quantity": 1,
++      "price": 24.5
++    },
++    {
++      "sku": "PEN-03",
++      "title": "Fountain pen",
++      "quantity": 2,
++      "price": 8
++    }
++  ],
++  "note": "leave the parcel at the front door",
++  "total": 40.5
++}
+diff --git a/tests/compare/json-payload/right.txt b/tests/compare/json-payload/right.txt
+new file mode 100644
+index 0000000..c25df8a
+--- /dev/null
++++ b/tests/compare/json-payload/right.txt
+@@ -0,0 +1,25 @@
++{
++  "id": "order-1042",
++  "status": "shipped",
++  "customer": {
++    "name": "Ada Lovelace",
++    "phone": "+44 20 7946 0958"
++  },
++  "items": [
++    {
++      "sku": "BOOK-17",
++      "title": "Sketch of the analytical engine",
++      "quantity": 1,
++      "price": 24.5
++    },
++    {
++      "sku": "PEN-03",
++      "title": "Fountain pen",
++      "quantity": 2,
++      "price": 8
++    }
++  ],
++  "note": "leave the parcel at the front door",
++  "tracking": "RX-2291-UK",
++  "total": 40.5
++}
+diff --git a/tests/compare/typescript/left.txt b/tests/compare/typescript/left.txt
+new file mode 100644
+index 0000000..3f38539
+--- /dev/null
++++ b/tests/compare/typescript/left.txt
+@@ -0,0 +1,39 @@
++import { readFile } from "node:fs/promises";
++
++export interface Task {
++  id: number;
++  title: string;
++  done: boolean;
++  due?: Date;
++}
++
++export function parseTasks(text: string): Task[] {
++  const tasks: Task[] = [];
++  for (const line of text.split("\n")) {
++    const trimmed = line.trim();
++    if (trimmed === "") {
++      continue;
++    }
++    const [id, title, done] = trimmed.split(";");
++    tasks.push({
++      id: Number(id),
++      title: title ?? "",
++      done: done === "x",
++    });
++  }
++  return tasks;
++}
++
++export function openTasks(tasks: Task[]): Task[] {
++  return tasks.filter((task) => !task.done);
++}
++
++export function summary(tasks: Task[]): string {
++  const open = openTasks(tasks).length;
++  return `${open} of ${tasks.length} tasks open`;
++}
++
++export async function loadTasks(path: string): Promise<Task[]> {
++  const text = await readFile(path, "utf8");
++  return parseTasks(text);
++}
+diff --git a/tests/compare/typescript/right.txt b/tests/compare/typescript/right.txt
+new file mode 100644
+index 0000000..3512287
+--- /dev/null
++++ b/tests/compare/typescript/right.txt
+@@ -0,0 +1,40 @@
++import { readFile } from "node:fs/promises";
++
++export interface Task {
++  id: number;
++  title: string;
++  done: boolean;
++  due?: Date;
++}
++
++export function parseTasks(text: string): Task[] {
++  const tasks: Task[] = [];
++  for (const line of text.split("\n")) {
++    const trimmed = line.trim();
++    if (trimmed === "" || trimmed.startsWith("#")) {
++      continue;
++    }
++    const [id, title, done] = trimmed.split(";");
++    tasks.push({
++      id: Number(id),
++      title: title ?? "",
++      done: done === "x",
++    });
++  }
++  return tasks;
++}
++
++export function openTasks(tasks: Task[]): Task[] {
++  return tasks.filter((task) => !task.done);
++}
++
++export function summary(tasks: Task[]): string {
++  const open = openTasks(tasks).length;
++  const word = open === 1 ? "task" : "tasks";
++  return `${open} of ${tasks.length} ${word} open`;
++}
++
++export async function loadTasks(path: string): Promise<Task[]> {
++  const text = await readFile(path, "utf8");
++  return parseTasks(text);
++}
+diff --git a/tests/compare/words/left.txt b/tests/compare/words/left.txt
+new file mode 100644
+index 0000000..9eeb4b3
+--- /dev/null
++++ b/tests/compare/words/left.txt
+@@ -0,0 +1,13 @@
++The meeting starts at nine in the small room.
++Lunch is served after the second session.
++Bring the printed agenda and your laptop.
++
++Parking is free in the north lot.
++Questions go to the front desk.
++The east entrance stays closed all week.
++Badges are handed out at the door.
++Visitors sign the book at reception.
++Coffee is in the kitchen on floor two.
++Tea is in the same cupboard.
++
++Please leave the room tidy when you go.
+diff --git a/tests/compare/words/right.txt b/tests/compare/words/right.txt
+new file mode 100644
+index 0000000..bbe4ea3
+--- /dev/null
++++ b/tests/compare/words/right.txt
+@@ -0,0 +1,14 @@
++The meeting starts at ten in the small room.
++Lunch is served after the second session.
++Bring the agenda and your laptop.
++
++Parking is free in the north lot.
++Dinner is at seven in the hall.
++Questions go to the front desk.
++Badges are handed out at the door.
++Guests wait in the lobby until noon.
++All rooms are booked through the portal.
++Coffee is in the kitchen on floor two.
++Tea is in the same cupboard.
++
++Please leave the room tidy when you go.
