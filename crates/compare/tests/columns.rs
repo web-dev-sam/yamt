@@ -204,7 +204,7 @@ fn a_column_over_the_limit_is_too_large_and_nothing_is_written_or_stored() {
     store
         .set_column(tab, Column::Left, "kept".to_owned(), ColumnVersion(1))
         .unwrap();
-    let over = MAX_COLUMN_BYTES as usize + 1;
+    let over = 8 * 1024 * 1024 + 1;
     let result = store.set_column(tab, Column::Left, "x".repeat(over), ColumnVersion(2));
     assert!(matches!(result, Err(Error::TooLarge { bytes }) if bytes == over));
     assert_eq!(
@@ -223,16 +223,13 @@ fn a_column_over_the_limit_is_too_large_and_nothing_is_written_or_stored() {
 fn a_column_exactly_at_the_limit_is_stored() {
     let dir = tempfile::tempdir().unwrap();
     let (mut store, tab) = first_tab(dir.path());
-    let full = "x".repeat(MAX_COLUMN_BYTES as usize);
+    let full = "x".repeat(8 * 1024 * 1024);
     store
         .set_column(tab, Column::Right, full, ColumnVersion(1))
         .unwrap();
     drop(store);
     let (mut store, tab) = first_tab(dir.path());
-    assert_eq!(
-        texts(&mut store, tab).right.len(),
-        MAX_COLUMN_BYTES as usize
-    );
+    assert_eq!(texts(&mut store, tab).right.len(), 8 * 1024 * 1024);
 }
 
 #[test]
@@ -262,6 +259,28 @@ fn a_non_utf8_column_file_fails_at_load_and_no_other_call_rewrites_it() {
     drop(store);
     TabStore::open(dir.path()).unwrap();
     assert_eq!(fs::read(&left).unwrap(), bytes);
+    assert!(!column_file(dir.path(), tab, "right").exists());
+}
+
+#[test]
+fn a_column_file_that_cannot_be_read_fails_at_load_and_no_set_column_overwrites_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut store, tab) = first_tab(dir.path());
+    let left = column_file(dir.path(), tab, "left");
+    fs::create_dir(&left).unwrap();
+    let loaded = store.load_tab(tab);
+    assert!(
+        matches!(&loaded, Err(Error::ReadFailed { path, .. }) if *path == left),
+        "{loaded:?}"
+    );
+    for column in [Column::Left, Column::Right] {
+        let result = store.set_column(tab, column, "text".to_owned(), ColumnVersion(1));
+        assert!(
+            matches!(result, Err(Error::ReadFailed { .. })),
+            "{result:?}"
+        );
+    }
+    assert!(left.is_dir());
     assert!(!column_file(dir.path(), tab, "right").exists());
 }
 

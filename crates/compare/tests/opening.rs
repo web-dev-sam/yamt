@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use serde_json::{Value, json};
-use yamt_compare::{Error, MAX_COLUMN_BYTES, TabId, TabLanguage, TabStore};
+use yamt_compare::{Error, TabId, TabLanguage, TabStore};
 
 const ONE_TAB: &str = r#"{"format":1,"shown":3,"nextId":4,"tabs":[{"id":3,"number":1,"name":"Compare 1","language":{"kind":"auto"}}]}"#;
 
@@ -35,7 +35,7 @@ fn the_first_open_creates_the_folder_compare_1_and_its_tabs_json() {
     let dir = home.path().join("yamt").join("compare");
     let store = TabStore::open(&dir).unwrap();
     let start = store.start();
-    assert_eq!(start.column_limit, MAX_COLUMN_BYTES);
+    assert_eq!(start.column_limit, 8 * 1024 * 1024);
     assert_eq!(start.list.tabs.len(), 1);
     let tab = &start.list.tabs[0];
     assert_eq!((tab.id, tab.name.as_str()), (TabId(1), "Compare 1"));
@@ -110,6 +110,22 @@ fn format_2_is_newer_format_and_nothing_in_the_folder_changes() {
         matches!(result, Err(Error::NewerFormat { format: 2, path }) if path == dir.path().join("tabs.json"))
     );
     assert_eq!(files_in(dir.path()), before);
+}
+
+#[test]
+fn a_tabs_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let index = dir.path().join("tabs.json");
+    fs::create_dir(&index).unwrap();
+    let column = dir.path().join("7-left.txt");
+    fs::write(&column, "kept").unwrap();
+    let result = TabStore::open(dir.path());
+    assert!(
+        matches!(&result, Err(Error::ReadFailed { path, .. }) if *path == index),
+        "{result:?}"
+    );
+    assert_eq!(names_in(dir.path()), ["7-left.txt", "tabs.json"]);
+    assert_eq!(fs::read_to_string(&column).unwrap(), "kept");
 }
 
 #[test]

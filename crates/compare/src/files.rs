@@ -13,11 +13,15 @@ const LEFT_SUFFIX: &str = "-left.txt";
 const RIGHT_SUFFIX: &str = "-right.txt";
 
 pub(crate) fn column_path(dir: &Path, tab: TabId, column: Column) -> PathBuf {
+    dir.join(column_file_name(tab, column))
+}
+
+fn column_file_name(tab: TabId, column: Column) -> String {
     let suffix = match column {
         Column::Left => LEFT_SUFFIX,
         Column::Right => RIGHT_SUFFIX,
     };
-    dir.join(format!("{}{suffix}", tab.0))
+    format!("{}{suffix}", tab.0)
 }
 
 /// The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
@@ -106,7 +110,11 @@ fn column_file_tab(name: &str) -> Option<TabId> {
     let id = name
         .strip_suffix(LEFT_SUFFIX)
         .or_else(|| name.strip_suffix(RIGHT_SUFFIX))?;
-    id.parse().ok().map(TabId)
+    let tab = TabId(id.parse().ok()?);
+    [Column::Left, Column::Right]
+        .into_iter()
+        .any(|column| column_file_name(tab, column) == name)
+        .then_some(tab)
 }
 
 pub(crate) fn read_failed(path: &Path, message: String) -> Error {
@@ -141,5 +149,8 @@ mod tests {
         assert_eq!(column_file_tab("notes-left.txt"), None);
         assert_eq!(column_file_tab("3-middle.txt"), None);
         assert_eq!(column_file_tab("lock"), None);
+        assert_eq!(column_file_tab("03-left.txt"), None);
+        assert_eq!(column_file_tab("+3-left.txt"), None);
+        assert_eq!(column_file_tab("+7-right.txt.tmp"), None);
     }
 }

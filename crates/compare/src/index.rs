@@ -97,13 +97,23 @@ impl Index {
             .ok_or(Error::UnknownTab { tab })
     }
 
-    /// What makes a parsed index unusable: an id repeated, at or above `nextId`, or a shown tab not listed.
+    /// What makes a parsed index unusable: no id or number left for a new tab, an id repeated, at or above
+    /// `nextId`, or a shown tab not listed.
     fn problem(&self) -> Option<String> {
         if self.tabs.is_empty() {
             return Some("`tabs` is empty".to_owned());
         }
+        if self.next_id.0 == u32::MAX {
+            return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
+        }
         let mut seen = HashSet::new();
         for tab in &self.tabs {
+            if tab.number == u32::MAX {
+                return Some(format!(
+                    "the tab number {} leaves no number for a new tab",
+                    u32::MAX
+                ));
+            }
             if !seen.insert(tab.id) {
                 return Some(format!("the tab id {} appears twice", tab.id.0));
             }
@@ -209,6 +219,25 @@ mod tests {
             r#"{"format":1,"shown":2,"nextId":2,"tabs":[{"id":2,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
         );
         assert_eq!(message, "the tab id 2 is not below `nextId` 2");
+    }
+
+    #[test]
+    fn a_next_id_at_u32_max_is_broken_so_a_new_tab_never_overflows() {
+        let message = problem_of(
+            r#"{"format":1,"shown":1,"nextId":4294967295,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
+        );
+        assert_eq!(message, "`nextId` 4294967295 leaves no id for a new tab");
+    }
+
+    #[test]
+    fn a_tab_number_at_u32_max_is_broken_so_a_new_tab_never_overflows() {
+        let message = problem_of(
+            r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"number":4294967295,"name":"a","language":{"kind":"auto"}}]}"#,
+        );
+        assert_eq!(
+            message,
+            "the tab number 4294967295 leaves no number for a new tab"
+        );
     }
 
     #[test]

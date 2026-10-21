@@ -149,6 +149,30 @@ fn closing_a_tab_deletes_both_its_column_files() {
 }
 
 #[test]
+fn a_failed_index_write_at_close_keeps_the_tab_and_both_its_column_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = TabStore::open(dir.path()).unwrap();
+    let closed = store.add_tab().unwrap().shown;
+    let columns =
+        ["left", "right"].map(|column| dir.path().join(format!("{}-{column}.txt", closed.0)));
+    for column in &columns {
+        fs::write(column, "text").unwrap();
+    }
+    let temp = dir.path().join("tabs.json.tmp");
+    fs::create_dir(&temp).unwrap();
+    fs::write(temp.join("in the way"), "").unwrap();
+    let result = store.close_tab(closed);
+    assert!(
+        matches!(&result, Err(Error::WriteFailed { path, .. }) if *path == dir.path().join("tabs.json")),
+        "{result:?}"
+    );
+    for column in &columns {
+        assert_eq!(fs::read_to_string(column).unwrap(), "text");
+    }
+    assert!(store.start().list.tabs.iter().any(|tab| tab.id == closed));
+}
+
+#[test]
 fn rename_trims_the_name() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = TabStore::open(dir.path()).unwrap();
