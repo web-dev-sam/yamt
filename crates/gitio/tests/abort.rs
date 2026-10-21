@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok, rebase_merges_repo,
+    ConflictFile, FileKind, Run, TempDir, conflict_repo, diverged_repo, git, git_ok, operation_repo,
 };
 use yamt_gitio::{Error, Repo};
 
@@ -146,7 +146,7 @@ fn rebase_in_progress_is_true_in_a_stopped_rebase_of_either_backend() {
 
 #[test]
 fn rebase_in_progress_is_true_in_a_rebase_stopped_on_a_merge_commit_with_merge_head() {
-    let dir = rebase_merges_repo(&files()).unwrap();
+    let dir = operation_repo(Run::RebaseMerges, &files()).unwrap();
     let repo = Repo::discover(dir.path()).unwrap();
 
     assert!(repo.commit_named("MERGE_HEAD").unwrap().is_some());

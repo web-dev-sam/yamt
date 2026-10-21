@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok, rebase_merges_repo,
+    ConflictFile, FileKind, Run, TempDir, conflict_repo, diverged_repo, git, git_ok, operation_repo,
 };
 use yamt_session::MergeSession;
 
@@ -47,7 +47,7 @@ fn stops_that_git_merge_abort_refuses_are_not_merging() {
 
 #[test]
 fn a_rebase_stopped_on_a_merge_commit_has_merge_head_but_is_not_merging() {
-    let dir = rebase_merges_repo(&FILES).unwrap();
+    let dir = operation_repo(Run::RebaseMerges, &FILES).unwrap();
     assert!(git_ok(dir.path(), &["rev-parse", "--verify", "MERGE_HEAD"]).is_ok());
     assert!(!merging_after_refresh(dir.path()));
 }

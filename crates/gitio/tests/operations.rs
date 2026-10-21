@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, git, git_ok, operation_repo,
+    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, edit_stop_repo, git,
+    git_ok, operation_repo,
 };
 use yamt_gitio::{Oid, Operation, Progress, Rebase, Repo, Stop};
 
@@ -47,7 +48,8 @@ fn progress_of(stop: &Stop) -> Option<Progress> {
 
 // A `--continue` that reaches the next conflict exits non-zero, as the first stop did.
 fn resolve_and_continue(root: &Path, command: &str) {
-    git_ok(root, &["add", "--all"]).unwrap();
+    let [step_one] = FILES;
+    git_ok(root, &["add", "--", step_one.path]).unwrap();
     let next_stop = git(root, &[command, "--continue"]).unwrap();
     assert!(!next_stop.status.success(), "{command} --continue finished");
 }
@@ -72,10 +74,12 @@ fn merge_reads_merge_head_and_head() {
     assert_eq!(stop.head, Some(oid(dir.path(), "local")));
 }
 
+// `SQUASH_MSG` lists the squashed commits newest first: the merged commit is its first `commit` line.
 #[test]
 fn squash_merge_without_merge_head_reads_the_squashed_tip_not_none() {
     let (dir, repo) = stopped(Run::SquashMerge);
     let merging = Some(oid(dir.path(), "remote"));
+    assert_ne!(merging, Some(oid(dir.path(), "remote~2")));
     assert_eq!(operation(&repo), Operation::SquashMerge { merging });
 }
 
@@ -446,4 +450,67 @@ fn a_linked_worktree_reads_its_own_rebase_and_the_main_checkout_none() {
         Repo::discover(root).unwrap().stop().unwrap().operation,
         None
     );
+}
+
+// A pick at an `edit` stop read as the rebase would show the picked commit as own work, and Abort would end the rebase.
+#[test]
+fn an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort() {
+    let dir = edit_stop_repo(&FILES).unwrap();
+    let root = dir.path();
+    let repo = Repo::discover(root).unwrap();
+    let Operation::Rebase(at_edit) = operation(&repo) else {
+        panic!("not a rebase");
+    };
+    assert_eq!(at_edit.replaying, None);
+    assert!(git_ok(root, &["rev-parse", "--verify", "REBASE_HEAD"]).is_ok());
+
+    assert!(
+        !git(root, &["cherry-pick", "local"])
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let picking = Some(oid(root, "local"));
+    let progress = None;
+    assert_eq!(
+        operation(&repo),
+        Operation::CherryPick { picking, progress }
+    );
+    repo.abort(&operation(&repo)).unwrap();
+    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
+}
+
+#[test]
+fn a_revert_at_an_edit_stop_is_that_revert_and_its_continue_leaves_the_rebase_at_the_edit() {
+    let dir = edit_stop_repo(&FILES).unwrap();
+    let root = dir.path();
+    let repo = Repo::discover(root).unwrap();
+    let Operation::Rebase(at_edit) = operation(&repo) else {
+        panic!("not a rebase");
+    };
+    std::fs::write(root.join("cart.ts"), "later\n").unwrap();
+    git_ok(root, &["commit", "--quiet", "--all", "-m", "later"]).unwrap();
+    let reverting = Some(oid(root, "HEAD~1"));
+
+    assert!(
+        !git(root, &["revert", "--no-edit", "HEAD~1"])
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let progress = None;
+    assert_eq!(
+        operation(&repo),
+        Operation::Revert {
+            reverting,
+            progress
+        }
+    );
+    std::fs::write(root.join("cart.ts"), "resolved\n").unwrap();
+    git_ok(root, &["add", "--", "cart.ts"]).unwrap();
+    let run = repo.continue_operation(&operation(&repo)).unwrap();
+    assert!(run.succeeded, "{}", String::from_utf8_lossy(&run.output));
+    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
 }

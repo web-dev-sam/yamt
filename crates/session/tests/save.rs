@@ -259,3 +259,26 @@ fn reset_whose_file_write_fails_puts_the_index_back() {
     assert_eq!(index(&dir), index_before);
     assert_eq!(status(&session), FileStatus::Resolved);
 }
+
+// `checkout -m` refuses a path without both sides; running it there turns Reset into git's error.
+#[cfg(unix)]
+#[test]
+fn reset_of_a_link_deleted_on_one_side_keeps_it_unresolved_without_checkout_m() {
+    const LINK: &str = "link";
+    let dir = conflict_repo(&[ConflictFile {
+        path: LINK,
+        kind: FileKind::Symlink,
+        base: Some(b"base-target"),
+        local: Some(b"local-target"),
+        remote: None,
+    }])
+    .unwrap();
+    let mut session = opened(&dir);
+    let unmerged_before = unmerged(&dir);
+
+    let reset = session.reset(LINK, DiskVersion(0));
+
+    assert!(matches!(reset, Ok(WriteReply::Written { .. })), "{reset:?}");
+    assert_eq!(status(&session), FileStatus::Unresolved);
+    assert_eq!(unmerged(&dir), unmerged_before);
+}

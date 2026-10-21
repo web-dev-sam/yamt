@@ -4,10 +4,10 @@ use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, TempDir, git_ok, hash_object, operation_repo,
+    ConflictFile, FileKind, Run, TempDir, edit_stop_repo, git, git_ok, hash_object, operation_repo,
 };
 use yamt_merge_core::ChunkKind;
-use yamt_session::{DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent};
+use yamt_session::{DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, Waiting};
 
 mod window;
 use window::{lines, middle_text, saved_with_everything_waiting};
@@ -17,8 +17,8 @@ const GONE: &str = "b_gone.txt";
 const PICTURE: &str = "c_picture.bin";
 const BASE_TEXT: &str = "one\ntwo\nthree\nfour\nfive\nsix\nseven\n";
 const HEAD_TEXT: &str = "one\nTWO-head\nthree\nfour\nfive\nsix\nseven\n";
-/// The replayed commit's text: own work in a rebase.
-const OWN_TEXT: &str = "one\nTWO-own\nthree\nfour\nfive\nsix\nSEVEN-own\n";
+/// The replayed commit's text: own work in a rebase; its first change is one line longer than HEAD's.
+const OWN_TEXT: &str = "one\nTWO-own\nTWO-own-b\nthree\nfour\nfive\nsix\nSEVEN-own\n";
 const HEAD_GONE: &[u8] = b"kept, changed by HEAD\n";
 const HEAD_PICTURE: &[u8] = b"\0HEAD's picture";
 const OWN_PICTURE: &[u8] = b"\0own picture";
@@ -173,9 +173,22 @@ fn a_disk_view_block_is_written_back_as_it_was_and_its_left_section_is_own_work(
     let [chunk] = &data.chunks[..] else {
         panic!("one block expected: {:?}", data.chunks);
     };
+    assert!(
+        matches!(
+            chunk.waiting,
+            Waiting::Markers {
+                first: Side::Remote,
+                ..
+            }
+        ),
+        "{chunk:?}"
+    );
     let local: Vec<&str> = data.local.split('\n').collect();
+    let remote: Vec<&str> = data.remote.split('\n').collect();
     let left = (chunk.chunk.local.start.0, chunk.chunk.local.len);
-    assert_eq!(lines(&local, left), ["TWO-own"]);
+    let right = (chunk.chunk.remote.start.0, chunk.chunk.remote.len);
+    assert_eq!(lines(&local, left), ["TWO-own", "TWO-own-b"]);
+    assert_eq!(lines(&remote, right), ["TWO-head"]);
     assert!(middle_text(&data).starts_with("ONE, by hand\n"));
 }
 
@@ -193,4 +206,42 @@ fn every_other_operation_keeps_head_on_the_left() {
         let head_blob = hash_object(root, HEAD_TEXT.as_bytes()).unwrap();
         assert_eq!(staged_oid(root, TEXT), head_blob, "{run:?}");
     }
+}
+
+// At an `edit` stop git replays nothing: a pick or a stash pop there is applied onto HEAD, the commit being edited.
+#[test]
+fn a_pick_or_a_stash_pop_at_a_rebase_s_edit_stop_keeps_head_on_the_left() {
+    let dir = edit_stop_repo(&[TEXT_FILE]).unwrap();
+    let root = dir.path();
+    assert!(
+        !git(root, &["cherry-pick", "local"])
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let picked = MergeSession::open(root).unwrap().load(TEXT).unwrap();
+
+    assert_eq!(
+        (picked.local.as_str(), picked.remote.as_str()),
+        (OWN_TEXT, HEAD_TEXT)
+    );
+
+    git_ok(root, &["cherry-pick", "--abort"]).unwrap();
+    let stashed = OWN_TEXT.replace("SEVEN-own", "SEVEN-stash");
+    let later = OWN_TEXT.replace("SEVEN-own", "SEVEN-later");
+    fs::write(root.join(TEXT), &stashed).unwrap();
+    git_ok(root, &["stash", "--quiet"]).unwrap();
+    fs::write(root.join(TEXT), &later).unwrap();
+    git_ok(root, &["commit", "--quiet", "--all", "-m", "later"]).unwrap();
+    assert!(
+        !git(root, &["stash", "pop", "--quiet"])
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let popped = MergeSession::open(root).unwrap().load(TEXT).unwrap();
+
+    assert_eq!((popped.local, popped.remote), (later, stashed));
 }

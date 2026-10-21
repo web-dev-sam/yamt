@@ -4,6 +4,7 @@ use yamt_gitio::{OURS_LABEL, THEIRS_LABEL};
 use yamt_merge_core::{Chunk, ChunkKind};
 
 use crate::markers::{Block, Piece, parse, split_lines};
+use crate::orientation::{GitSide, Orientation};
 use crate::sides::Side;
 
 /// What Save writes for this change while a side of it still waits (plan §2 #69).
@@ -25,8 +26,8 @@ pub enum Waiting {
     AsShown,
 }
 
-/// The marker lines git writes around a conflict in one file, without line breaks, and the pane
-/// showing git's ours, whose section git writes first.
+/// The marker lines git writes around a conflict in one file, without line breaks, and which pane
+/// shows git's ours, whose section git writes first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkerStyle {
     open: String,
@@ -34,15 +35,15 @@ pub struct MarkerStyle {
     base: Option<String>,
     separator: String,
     close: String,
-    ours_pane: Side,
+    orientation: Orientation,
 }
 
 impl MarkerStyle {
     /// The marker lines of the first block in `disk`, else the `fallback`.
     #[must_use]
-    pub fn found_in(disk: &[u8], marker_size: usize, ours_pane: Side) -> MarkerStyle {
+    pub fn found_in(disk: &[u8], marker_size: usize, orientation: Orientation) -> MarkerStyle {
         let Ok(text) = std::str::from_utf8(disk) else {
-            return MarkerStyle::fallback(marker_size, ours_pane);
+            return MarkerStyle::fallback(marker_size, orientation);
         };
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
         let pieces = parse(&split_lines(disk), marker_size);
@@ -51,21 +52,21 @@ impl MarkerStyle {
             Piece::Settled(_) | Piece::Raw(_) => None,
         });
         match first_block {
-            Some(block) => style_of(&lines, block, ours_pane),
-            None => MarkerStyle::fallback(marker_size, ours_pane),
+            Some(block) => style_of(&lines, block, orientation),
+            None => MarkerStyle::fallback(marker_size, orientation),
         }
     }
 
     /// Merge style with the labels `Repo::merge_file` passes to `git merge-file` (gitio
     /// `merge_file.rs`).
     #[must_use]
-    pub fn fallback(marker_size: usize, ours_pane: Side) -> MarkerStyle {
+    pub fn fallback(marker_size: usize, orientation: Orientation) -> MarkerStyle {
         MarkerStyle {
             open: format!("{} {OURS_LABEL}", "<".repeat(marker_size)),
             base: None,
             separator: "=".repeat(marker_size),
             close: format!("{} {THEIRS_LABEL}", ">".repeat(marker_size)),
-            ours_pane,
+            orientation,
         }
     }
 
@@ -89,7 +90,7 @@ impl MarkerStyle {
         between.push(self.separator.clone());
         Waiting::Markers {
             open: self.open.clone(),
-            first: self.ours_pane,
+            first: self.orientation.pane(GitSide::Ours),
             between,
             close: self.close.clone(),
         }
@@ -97,24 +98,24 @@ impl MarkerStyle {
 }
 
 /// The marker lines of `block`, copied as they are from the file's `lines`.
-pub(crate) fn block_markers(lines: &[&str], block: &Block, ours_pane: Side) -> Waiting {
+pub(crate) fn block_markers(lines: &[&str], block: &Block, orientation: Orientation) -> Waiting {
     let between = (block.ours.end..block.theirs.start).map(|at| line_text(lines, at));
     Waiting::Markers {
         open: line_text(lines, block.whole.start),
-        first: ours_pane,
+        first: orientation.pane(GitSide::Ours),
         between: between.collect(),
         close: line_text(lines, block.whole.end - 1),
     }
 }
 
-fn style_of(lines: &[&str], block: &Block, ours_pane: Side) -> MarkerStyle {
+fn style_of(lines: &[&str], block: &Block, orientation: Orientation) -> MarkerStyle {
     let has_base = block.ours.end + 1 < block.theirs.start;
     MarkerStyle {
         open: line_text(lines, block.whole.start),
         base: has_base.then(|| line_text(lines, block.ours.end)),
         separator: line_text(lines, block.theirs.start - 1),
         close: line_text(lines, block.whole.end - 1),
-        ours_pane,
+        orientation,
     }
 }
 
@@ -159,12 +160,12 @@ mod tests {
             base: base.map(str::to_owned),
             separator: separator.to_owned(),
             close: close.to_owned(),
-            ours_pane: Side::Local,
+            orientation: OURS_LEFT,
         }
     }
 
     fn found_in(disk: &[u8], marker_size: usize) -> MarkerStyle {
-        MarkerStyle::found_in(disk, marker_size, Side::Local)
+        MarkerStyle::found_in(disk, marker_size, OURS_LEFT)
     }
 
     #[test]
@@ -203,10 +204,7 @@ mod tests {
             "============",
             ">>>>>>>>>>>> theirs",
         );
-        assert_eq!(
-            MarkerStyle::fallback(SIZE_12_MARKERS, Side::Local),
-            fallback
-        );
+        assert_eq!(MarkerStyle::fallback(SIZE_12_MARKERS, OURS_LEFT), fallback);
         assert_eq!(found_in(SIZE_12, DEFAULT_MARKER_SIZE).open, "<<<<<<< ours");
         assert_eq!(found_in(b"no markers\n", SIZE_12_MARKERS), fallback);
         let latin1 = b"<<<<<<< \xe9\nx\n=======\ny\n>>>>>>> theirs\n";
@@ -249,7 +247,7 @@ mod tests {
             close: ">>>>>>> theirs".to_owned(),
         };
         assert_eq!(diff3.waiting(&conflict, &base_lines), expected);
-        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Side::Remote);
+        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, THEIRS_LEFT);
         let expected = Waiting::Markers {
             open: "<<<<<<< ours".to_owned(),
             first: Side::Remote,

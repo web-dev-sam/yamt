@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-pub use operation::{Run, STEP_TWO_FILE, operation_repo};
+pub use operation::{Run, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start};
 pub use tempfile::TempDir;
 
 #[derive(Debug, thiserror::Error)]
@@ -17,10 +17,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("`git {}` failed: {stderr}", args.join(" "))]
     GitFailed { args: Vec<String>, stderr: String },
-    #[error("merging `remote` into `local` did not conflict")]
-    MergeDidNotConflict,
-    #[error("`git rebase -r` did not stop on the merge commit's conflict")]
-    RebaseDidNotConflict,
     #[error("`{run:?}` did not stop on conflicts")]
     DidNotStop { run: Run },
     #[error("git started without a stdin pipe")]
@@ -32,6 +28,15 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 const SUBMODULE_MODE: &str = "160000";
 const GITATTRIBUTES: &str = ".gitattributes";
 const HASH_OBJECT_ARGS: [&str; 2] = ["hash-object", "--stdin"];
+const REPOSITORY_CONFIG: [(&str, &str); 4] = [
+    ("core.autocrlf", "false"),
+    ("user.name", "yamt test"),
+    ("user.email", "test@yamt.invalid"),
+    ("commit.gpgsign", "false"),
+];
+const HOOKS_DIR: &str = ".git/hooks";
+#[cfg(unix)]
+const HOOK_MODE: u32 = 0o755;
 
 /// One path in the scripted merge; `None` means the file does not exist on that side.
 #[derive(Clone, Copy, Debug)]
@@ -147,10 +152,7 @@ pub fn conflict_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempD
     }
     merge_args.extend(["merge", "--quiet", "remote"].map(str::to_owned));
     let merge_args: Vec<&str> = merge_args.iter().map(String::as_str).collect();
-    let merge = git(dir.path(), &merge_args)?;
-    if merge.status.success() {
-        return Err(Error::MergeDidNotConflict);
-    }
+    stopped(Run::Merge, dir.path(), &merge_args, None)?;
     Ok(dir)
 }
 
@@ -160,10 +162,8 @@ pub fn diverged_repo(files: &[ConflictFile]) -> Result<TempDir> {
 }
 
 fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> {
-    let dir = tempfile::tempdir()?;
+    let dir = empty_repo()?;
     let root = dir.path();
-    git_ok(root, &["init", "--quiet"])?;
-    git_ok(root, &["config", "core.autocrlf", "false"])?;
     if let Some(attributes) = setup.attributes {
         fs::write(root.join(GITATTRIBUTES), attributes)?;
         git_ok(root, &["add", "--", GITATTRIBUTES])?;
@@ -177,25 +177,43 @@ fn diverged_repo_with(files: &[ConflictFile], setup: &Setup) -> Result<TempDir> 
     Ok(dir)
 }
 
-/// A repo where `git rebase -r` stopped re-doing the merge of `remote` into `local`, with `files`
-/// conflicted: git has written both `MERGE_HEAD` and `REBASE_HEAD`.
-pub fn rebase_merges_repo(files: &[ConflictFile]) -> Result<TempDir> {
-    let dir = conflict_repo(files)?;
+/// A new repository with no commit. Its own config names the committer and turns signing off, so
+/// that git run outside this sandbox (`yamt_gitio::Repo`) can commit in it too.
+fn empty_repo() -> Result<TempDir> {
+    let dir = tempfile::tempdir()?;
     let root = dir.path();
-    commit_side(root, files, |file| file.local, "merge")?;
-    git_ok(root, &["branch", "--quiet", "merged"])?;
-    git_ok(root, &["reset", "--quiet", "--hard", "HEAD^"])?;
-    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", "onto"])?;
-    let rebase = git(
-        root,
-        &[
-            "rebase", "--quiet", "-r", "--onto", "local", "HEAD^", "merged",
-        ],
-    )?;
-    if rebase.status.success() {
-        return Err(Error::RebaseDidNotConflict);
+    git_ok(root, &["init", "--quiet"])?;
+    for (key, value) in REPOSITORY_CONFIG {
+        git_ok(root, &["config", key, value])?;
     }
     Ok(dir)
+}
+
+/// Installs `script` as the hook `name` and points `core.hooksPath` at it, over any user setting.
+pub fn install_hook(root: &Path, name: &str, script: &str) -> Result<()> {
+    let hooks = root.join(HOOKS_DIR);
+    fs::create_dir_all(&hooks)?;
+    let hook = hooks.join(name);
+    fs::write(&hook, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(HOOK_MODE))?;
+    }
+    git_ok(root, &["config", "core.hooksPath", HOOKS_DIR])?;
+    Ok(())
+}
+
+/// `git` with `args` (and `stdin` when given), which must stop on conflicts: a non-zero exit.
+pub(crate) fn stopped(run: Run, root: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<()> {
+    let output = match stdin {
+        Some(input) => git_with_input(root, args, input)?,
+        None => git(root, args)?,
+    };
+    if output.status.success() {
+        return Err(Error::DidNotStop { run });
+    }
+    Ok(())
 }
 
 fn commit_side<'a>(

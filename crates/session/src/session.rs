@@ -11,7 +11,7 @@ use crate::disk::{
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
 use crate::merging::is_merging;
-use crate::orientation::{GitSide, Orientation};
+use crate::orientation::Orientation;
 use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, Side, side_content};
 use crate::stages::CapturedStages;
@@ -109,6 +109,16 @@ impl MergeSession {
 
     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
     pub fn refresh(&mut self) -> Result<FileList> {
+        let disk_changes = self.settle_and_mark()?;
+        Ok(FileList {
+            files: self.files(),
+            disk_changes,
+            merging: is_merging(&self.repo),
+        })
+    }
+
+    /// `refresh`'s two steps: settle the disk changes, then re-read git's marks.
+    pub(crate) fn settle_and_mark(&mut self) -> Result<Vec<DiskChange>> {
         let mut looked = Vec::new();
         for (index, file) in self.files.iter().enumerate() {
             match file.look(&self.repo) {
@@ -119,11 +129,7 @@ impl MergeSession {
         }
         let disk_changes = self.settle(looked);
         self.refresh_statuses()?;
-        Ok(FileList {
-            files: self.files(),
-            disk_changes,
-            merging: is_merging(&self.repo),
-        })
+        Ok(disk_changes)
     }
 
     /// `git merge --abort`. The session must not be used for the merge afterwards.
@@ -207,7 +213,7 @@ impl MergeSession {
                 &texts.local,
                 &texts.remote,
                 texts.deleted,
-                &file.marker_style(orientation.pane(GitSide::Ours)),
+                &file.marker_style(orientation),
                 version,
             )),
         }
@@ -284,14 +290,14 @@ impl FileState {
             .map_or(DiskVersion(0), |settled| settled.version)
     }
 
-    /// The marker lines git wrote into this file, as found at open; `ours_pane` shows git's ours.
-    fn marker_style(&self, ours_pane: Side) -> MarkerStyle {
+    /// The marker lines git wrote into this file, as found at open.
+    fn marker_style(&self, orientation: Orientation) -> MarkerStyle {
         match &self.at_open {
             AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
-                MarkerStyle::found_in(bytes, self.marker_size, ours_pane)
+                MarkerStyle::found_in(bytes, self.marker_size, orientation)
             }
             AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
-                MarkerStyle::fallback(self.marker_size, ours_pane)
+                MarkerStyle::fallback(self.marker_size, orientation)
             }
         }
     }

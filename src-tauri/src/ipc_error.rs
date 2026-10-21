@@ -54,6 +54,11 @@ impl From<yamt_session::Error> for IpcError {
                 path,
                 message: source.to_string(),
             },
+            error @ (yamt_session::Error::NoOperation
+            | yamt_session::Error::StopMovedOn
+            | yamt_session::Error::GitRefused { .. }) => IpcError::Git {
+                message: error.to_string(),
+            },
         }
     }
 }

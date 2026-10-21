@@ -41,12 +41,33 @@ pub(crate) fn git_command(git: &Path, cwd: &Path, access: Access, args: &[&str])
     command
 }
 
+/// A git command as a terminal would run it: the user's locale (hooks print in their language), no lock
+/// option; only `core.quotepath=false`, so paths in its output read as the user wrote them.
+pub(crate) fn git_command_as_user(git: &Path, cwd: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(git);
+    command
+        .current_dir(cwd)
+        .args(["-c", "core.quotepath=false"])
+        .args(args);
+    command
+}
+
 pub(crate) fn argv(command: &Command) -> Vec<String> {
     let program = command.get_program().to_string_lossy().into_owned();
     let args = command
         .get_args()
         .map(|arg| arg.to_string_lossy().into_owned());
     std::iter::once(program).chain(args).collect()
+}
+
+/// Runs `command` until it exits, however long that takes, with stdin closed; stdout then stderr.
+pub(crate) fn run_to_end(mut command: Command) -> Result<(ExitStatus, Vec<u8>)> {
+    let args = argv(&command);
+    tracing::debug!(?args, "running git without a deadline");
+    let finished = command.stdin(Stdio::null()).output()?;
+    let mut output = finished.stdout;
+    output.extend_from_slice(&finished.stderr);
+    Ok((finished.status, output))
 }
 
 pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Vec<u8>> {
@@ -222,5 +243,39 @@ mod tests {
         let (error, elapsed) = run_alias_with_short_timeout(&alias_body);
 
         assert_is_short_timeout(error, elapsed);
+    }
+
+    fn run_alias_to_end(alias_body: &str) -> (ExitStatus, Vec<u8>) {
+        let alias = format!("alias.say=!{alias_body}");
+        let command = git_command_as_user(Path::new("git"), Path::new("/"), &["-c", &alias, "say"]);
+        run_to_end(command).unwrap()
+    }
+
+    #[test]
+    fn a_run_to_the_end_gives_stdout_then_stderr_and_git_s_exit_status() {
+        let (status, output) = run_alias_to_end("echo err >&2; echo out; exit 3");
+
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(output, b"out\nerr\n");
+    }
+
+    // A hook or editor reading stdin would wait forever on an open pipe.
+    #[test]
+    fn a_run_to_the_end_closes_stdin() {
+        let (status, output) = run_alias_to_end("cat; echo read");
+
+        assert!(status.success());
+        assert_eq!(output, b"read\n");
+    }
+
+    #[test]
+    fn a_command_as_the_user_runs_it_keeps_the_user_s_locale_and_locks() {
+        let command = git_command_as_user(Path::new("git"), Path::new("/"), &["status"]);
+
+        assert_eq!(command.get_envs().count(), 0);
+        assert_eq!(
+            argv(&command),
+            ["git", "-c", "core.quotepath=false", "status"]
+        );
     }
 }

@@ -206,6 +206,23 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_ours_section_is_an_insertion_point_in_local() {
+        let texts = Texts {
+            base: "a\nb\nc\n".to_owned(),
+            local: "a\nc\n".to_owned(),
+            remote: "a\nB\nc\n".to_owned(),
+            deleted: None,
+        };
+        let disk = "a\n<<<<<<< ours\n=======\nB\n>>>>>>> theirs\nc\n";
+
+        assert_eq!(located(disk, &texts, OURS_LEFT), [(1, 0), (1, 1)]);
+        assert_eq!(
+            seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT).middle,
+            "a\nb\nc\n"
+        );
+    }
+
+    #[test]
     fn a_section_holding_a_side_s_last_line_without_a_line_break_is_located_exactly() {
         let texts = Texts {
             base: "a\nb".to_owned(),

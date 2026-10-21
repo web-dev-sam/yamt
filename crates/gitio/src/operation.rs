@@ -1,15 +1,13 @@
 use std::path::{Path, PathBuf};
 
+use crate::Result;
 use crate::entry::Oid;
 use crate::repo::{Repo, exists, read_if_present};
-use crate::run::{Access, GIT_TIMEOUT, run};
-use crate::todo::{commands, first_command, has_editor_steps};
-use crate::{Error, Result};
+use crate::todo::{first_command, has_editor_steps};
 
 const STATE_PATHS: [&str; 4] = ["rebase-merge", "rebase-apply", "sequencer", "SQUASH_MSG"];
 const BRANCH_REF_PREFIX: &[u8] = b"refs/heads/";
 const SQUASHED_COMMIT_PREFIX: &[u8] = b"commit ";
-const REV_LIST: &str = "rev-list";
 
 /// What git is doing in this worktree, and the commit HEAD is at.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,8 +142,14 @@ impl Repo {
     }
 
     // The order of git's own `wt_status_get_state` (wt-status.c): a rebase or `am` first, even
-    // with `MERGE_HEAD`, then `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer.
+    // with `MERGE_HEAD`, then `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer. A single
+    // pick or revert run at a rebase's `edit` or `break` stop goes before that rebase: its conflict is the
+    // pick's, and its own abort and continue leave the rebase stopped where it was.
     fn operation(&self, paths: &StatePaths) -> Result<Option<Operation>> {
+        let in_rebase = exists(&paths.rebase_apply)? || exists(&paths.rebase_merge)?;
+        if in_rebase && let Some((step, applying)) = self.applied_step(None)? {
+            return Ok(Some(sequence_operation(step, applying, None)));
+        }
         if exists(&paths.rebase_apply)? {
             return self.applying_patches(&paths.rebase_apply).map(Some);
         }
@@ -188,10 +192,17 @@ impl Repo {
         editor_steps_ahead: bool,
     ) -> Result<Rebase> {
         let head_name = read_if_present(&state_dir.join("head-name"))?;
+        // git keeps `REBASE_HEAD` at an `edit` stop too and writes `amend` only there (observed on git 2.56,
+        // `an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort`).
+        let replaying = if exists(&state_dir.join("amend"))? {
+            None
+        } else {
+            self.commit_named("REBASE_HEAD")?
+        };
         Ok(Rebase {
             branch: head_name.as_deref().and_then(branch_name),
             onto: read_oid(&state_dir.join("onto"))?,
-            replaying: self.commit_named("REBASE_HEAD")?,
+            replaying,
             redoing_merge: self.commit_named("MERGE_HEAD")?,
             progress,
             editor_steps_ahead,
@@ -209,16 +220,7 @@ impl Repo {
         } else {
             None
         };
-        Ok(Some(match step {
-            SequenceStep::Pick => Operation::CherryPick {
-                picking: applying,
-                progress,
-            },
-            SequenceStep::Revert => Operation::Revert {
-                reverting: applying,
-                progress,
-            },
-        }))
+        Ok(Some(sequence_operation(step, applying, progress)))
     }
 
     fn applied_step(
@@ -232,41 +234,6 @@ impl Repo {
             return Ok(Some((SequenceStep::Revert, Some(reverting))));
         }
         Ok(next.map(|step| (step, None)))
-    }
-
-    // The stopped command is still `todo`'s first line and git keeps no `done` file
-    // (`cherry_pick_range_progress_moves_from_one_to_two_of_three`); every earlier step made one commit,
-    // unless the range runs with `--no-commit` (`opts` as sequencer.c `save_opts` writes it).
-    fn sequence_progress(&self, sequencer: &Path, todo: &[u8]) -> Result<Option<Progress>> {
-        let opts = read_if_present(&sequencer.join("opts"))?.unwrap_or_default();
-        if makes_no_commits(&opts) {
-            return Ok(None);
-        }
-        let Some(saved_head) = read_oid(&sequencer.join("head"))? else {
-            return Ok(None);
-        };
-        let Some(start) = self.commit_named(saved_head.as_str())? else {
-            return Ok(None);
-        };
-        let done = self.commits_since(&start)?;
-        let Ok(left) = u32::try_from(commands(todo).count()) else {
-            return Ok(None);
-        };
-        Ok(Progress::new(
-            done.saturating_add(1),
-            done.saturating_add(left),
-        ))
-    }
-
-    fn commits_since(&self, start: &Oid) -> Result<u32> {
-        let range = format!("{}..HEAD", start.as_str());
-        let command = self.command(Access::Read, &[REV_LIST, "--count", &range]);
-        let output = run(command, None, GIT_TIMEOUT)?;
-        let count = String::from_utf8_lossy(output.trim_ascii());
-        count.parse().map_err(|_| Error::UnexpectedOutput {
-            command: REV_LIST,
-            output: count.into_owned(),
-        })
     }
 
     fn squash_merge(&self, squash_msg: &Path) -> Result<Option<Operation>> {
@@ -304,7 +271,7 @@ fn oid_in(text: &[u8]) -> Option<Oid> {
     Oid::parse(&String::from_utf8_lossy(text.trim_ascii())).ok()
 }
 
-fn read_oid(path: &Path) -> Result<Option<Oid>> {
+pub(crate) fn read_oid(path: &Path) -> Result<Option<Oid>> {
     Ok(read_if_present(path)?.as_deref().and_then(oid_in))
 }
 
@@ -321,9 +288,21 @@ fn sequence_step(command: &[u8]) -> Option<SequenceStep> {
     }
 }
 
-fn makes_no_commits(opts: &[u8]) -> bool {
-    opts.split(|&byte| byte == b'\n')
-        .any(|line| line.trim_ascii() == b"no-commit = true")
+fn sequence_operation(
+    step: SequenceStep,
+    applying: Option<Oid>,
+    progress: Option<Progress>,
+) -> Operation {
+    match step {
+        SequenceStep::Pick => Operation::CherryPick {
+            picking: applying,
+            progress,
+        },
+        SequenceStep::Revert => Operation::Revert {
+            reverting: applying,
+            progress,
+        },
+    }
 }
 
 fn first_line(message: &[u8]) -> &[u8] {
@@ -398,12 +377,5 @@ mod tests {
         assert_eq!(number_in(b" 2\n"), Some(2));
         assert_eq!(number_in(b"two"), None);
         assert_eq!(number_in(b"-1"), None);
-    }
-
-    #[test]
-    fn only_a_no_commit_option_set_to_true_makes_no_commits() {
-        assert!(makes_no_commits(b"[options]\n\tno-commit = true\n"));
-        assert!(!makes_no_commits(b"[options]\n\tsignoff = true\n"));
-        assert!(!makes_no_commits(b""));
     }
 }

@@ -57,7 +57,7 @@ fn name_or_warn(side: GitSide, read: Result<Option<SideName>>) -> Option<SideNam
 }
 
 /// HEAD's branch, else HEAD's commit (a rebase detaches HEAD).
-fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<SideName>> {
+pub(crate) fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<SideName>> {
     if let Some(branch) = repo.current_branch()? {
         return Ok(Some(SideName::Branch {
             name: text(&branch),
@@ -96,7 +96,7 @@ fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName
     }
 }
 
-fn named(
+pub(crate) fn named(
     repo: &Repo,
     commit: Option<&Oid>,
     name: fn(&Repo, &Oid) -> Result<SideName>,
@@ -107,7 +107,7 @@ fn named(
     }
 }
 
-fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+pub(crate) fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let branches: Vec<String> = repo
         .branches_at(commit)?
         .iter()
@@ -128,7 +128,7 @@ fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     }
 }
 
-fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+pub(crate) fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
     Ok(SideName::Commit {
         short_id: text(&summary.short_id),
@@ -137,7 +137,7 @@ fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     })
 }
 
-fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+pub(crate) fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
     Ok(SideName::Revert {
         short_id: text(&summary.short_id),
@@ -153,7 +153,7 @@ fn quoted_name(message: &str) -> Option<&str> {
     Some(name)
 }
 
-fn text(bytes: &[u8]) -> String {
+pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 

@@ -11,30 +11,43 @@ pub enum GitSide {
 
 /// Which git side the left pane (Local) shows; the right pane shows the other (plan §2 #86).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Orientation {
+pub struct Orientation {
     left: GitSide,
 }
 
 impl Orientation {
-    /// Own work on the left: a rebase replays the user's commits as git's theirs onto HEAD.
+    /// Nothing recorded by git: HEAD's side, git's ours, on the left.
+    pub const NO_OPERATION: Orientation = Orientation {
+        left: GitSide::Ours,
+    };
+
+    /// Own work on the left: a rebase replaying one of the user's commits has it as git's theirs on
+    /// HEAD. A rebase stopped at an `edit`, `break` or `exec` replays nothing (`replaying: None`), so
+    /// a stash popped there keeps HEAD, the commit being edited, on the left.
     pub(crate) fn of(stop: &Stop) -> Orientation {
         let left = match &stop.operation {
             Some(Operation::Rebase(Rebase {
                 redoing_merge: None,
+                replaying: Some(_),
                 ..
             })) => GitSide::Theirs,
             Some(
-                Operation::Rebase(Rebase {
-                    redoing_merge: Some(_),
-                    ..
-                })
+                Operation::Rebase(
+                    Rebase {
+                        redoing_merge: Some(_),
+                        ..
+                    }
+                    | Rebase {
+                        replaying: None, ..
+                    },
+                )
                 | Operation::Merge { .. }
                 | Operation::SquashMerge { .. }
                 | Operation::CherryPick { .. }
                 | Operation::Revert { .. }
                 | Operation::Am { .. },
-            )
-            | None => GitSide::Ours,
+            ) => GitSide::Ours,
+            None => return Orientation::NO_OPERATION,
         };
         Orientation { left }
     }
@@ -65,9 +78,7 @@ impl Orientation {
 }
 
 #[cfg(test)]
-pub(crate) const OURS_LEFT: Orientation = Orientation {
-    left: GitSide::Ours,
-};
+pub(crate) const OURS_LEFT: Orientation = Orientation::NO_OPERATION;
 
 #[cfg(test)]
 pub(crate) const THEIRS_LEFT: Orientation = Orientation {

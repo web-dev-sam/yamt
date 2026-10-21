@@ -6,8 +6,7 @@ use crate::decode::{Eol, detect_eol};
 use crate::locate::{Located, Maps, line_number, side_view};
 use crate::markers::{Block, Piece, parse, split_lines};
 use crate::merge_data::{MergeChunk, MiddleLine, Texts};
-use crate::orientation::{GitSide, Orientation};
-use crate::sides::Side;
+use crate::orientation::Orientation;
 use crate::waiting::{Waiting, block_markers};
 
 /// The middle pane's starting text built from a worktree file, and its open conflicts.
@@ -22,8 +21,7 @@ struct MiddleText<'a> {
     disk_lines: &'a [&'a str],
     base_lines: Vec<&'a str>,
     eol: Eol,
-    /// The pane showing git's ours, whose section a block holds first.
-    ours_pane: Side,
+    orientation: Orientation,
     text: String,
     line_count: u32,
     previous_base_end: u32,
@@ -47,7 +45,7 @@ pub(crate) fn seed(
         disk_lines: &disk_lines,
         base_lines: texts.base.split_inclusive('\n').collect(),
         eol: detect_eol(disk),
-        ours_pane: orientation.pane(GitSide::Ours),
+        orientation,
         text: String::with_capacity(disk.len()),
         line_count: 0,
         previous_base_end: 0,
@@ -111,7 +109,7 @@ impl MiddleText<'_> {
         let waiting = match block {
             Some(block) if located.exact => {
                 self.push_base_lines(base);
-                block_markers(self.disk_lines, block, self.ours_pane)
+                block_markers(self.disk_lines, block, self.orientation)
             }
             Some(_) | None => {
                 self.push_disk_lines(disk_lines);
@@ -303,18 +301,6 @@ mod tests {
         );
         assert_eq!(first[2], (2, 4));
         assert_eq!(second[1], (11, 1));
-    }
-
-    #[test]
-    fn an_empty_ours_section_is_an_insertion_point_in_local() {
-        let texts = texts("a\nb\nc\n", "a\nc\n", "a\nB\nc\n");
-        let disk = "a\n<<<<<<< ours\n=======\nB\n>>>>>>> theirs\nc\n";
-
-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
-
-        assert_eq!(seeded.middle, "a\nb\nc\n");
-        assert_eq!(ranges(&seeded), [[(1, 1), (1, 0), (1, 1)]]);
-        assert_eq!(with_local_applied(&seeded, &texts.local), "a\nc\n");
     }
 
     #[test]

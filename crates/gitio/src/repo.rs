@@ -22,8 +22,8 @@ const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
 const COMMIT_SUMMARY_FIELDS: usize = 3;
 
 pub struct Repo {
-    root: PathBuf,
-    git: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) git: PathBuf,
 }
 
 /// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
