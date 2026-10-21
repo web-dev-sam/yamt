@@ -15,5 +15,10 @@
     "agent": "boundary-reviewer",
     "brief": "docs/slices/briefs/3.J-continue.md",
     "owned": []
+  },
+  "GitOpsContinueCorrectness": {
+    "agent": "correctness-reviewer",
+    "brief": "docs/slices/briefs/3.J-continue.md",
+    "owned": []
   }
 }
