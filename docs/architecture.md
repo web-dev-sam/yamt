@@ -247,10 +247,16 @@ impl Repo {
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>>;        // MERGE_MSG through rev-parse --git-path
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary>; // log -1 %h %s %B
     pub fn current_branch(&self) -> Result<Option<Vec<u8>>>;      // branch --show-current; detached (empty output) → None
-    // Abort merge (plan §2 #74)
-    pub fn rebase_in_progress(&self) -> Result<bool>;              // rebase-merge or rebase-apply exists (rev-parse --git-path)
-    pub fn abort_merge(&self) -> Result<()>;                       // merge --abort; git's refusal is GitFailed with its stderr
+    // what git is doing (plan §2 #85, #91; operation.rs, sequence.rs, todo.rs): git's `wt_status_get_state` order plus a squash merge
+    pub fn stop(&self) -> Result<Stop>;                            // Stop { operation: Option<Operation>, head }; state files through one batched rev-parse --git-path, refs through rev-parse --verify
+    // Abort and Continue (plan §2 #88, #89; abort_continue.rs): git's own command per operation, no deadline, the user's locale, stdin closed
+    pub fn abort(&self, operation: &Operation) -> Result<()>;       // merge/rebase/cherry-pick/revert/am --abort, a squash merge reset --merge; a refusal is GitFailed with git's stderr
+    pub fn continue_operation(&self, operation: &Operation) -> Result<GitRun>; // GIT_EDITOR=: (git keeps its prepared message); GitRun { succeeded, output } (stdout then stderr)
+    pub fn rerere_tracked(&self) -> Result<Option<Vec<PathBuf>>>;  // MERGE_RR's paths (`--git-path`); None while rerere is not enabled (rerere.c `is_rerere_enabled`) or nothing is recorded (plan §2 #90)
 }
+pub enum Operation { Merge { merging }, SquashMerge { merging }, Rebase(Rebase { branch, onto, replaying, redoing_merge, progress, editor_steps_ahead }),
+                     CherryPick { picking, progress }, Revert { reverting, progress }, Am { subject, message, progress } }
+impl Stop { pub fn id(&self) -> StopId; }                          // the stop's identity: the operation's kind, its ids and HEAD, never progress or the todo (`rebase --edit-todo` is the same stop)
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ```
 
@@ -264,29 +270,36 @@ impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
 ### 3.3 `session` — the state machine
 
 ```rust
-pub struct MergeSession { repo: Repo, files: Vec<FileState> /* private: captured stages, decoded content, `at_open` (the entry this run found, set once, #66), `seen` (what the disk looked like), `settled` (last disk result + version) */ }
+pub struct MergeSession { repo: Repo, stop: Stop /* read at open, plan §2 #85 */, orientation: Orientation /* which git side each pane shows, #86 */, side_names: SideNames /* read at open, #87 */, first_disk_version: DiskVersion, files: Vec<FileState> /* private: captured stages, decoded content, `at_open` (the entry this run found, set once, #66), `seen` (what the disk looked like), `settled` (last disk result + version) */ }
 
 pub enum Eol { Lf, CrLf, Mixed }
-pub enum FileStatus { Unresolved, Resolved }
+pub enum FileStatus { Unresolved, Remembered /* unmerged for git, git rerere's replayed resolution on disk, not reviewed yet, #90 */, Resolved }
 pub enum UnsupportedReason { Binary, NonUtf8, TooLarge, LocalDeleted, RemoteDeleted, Symlink, Submodule }
 
 // DTOs (serde::Serialize + specta::Type), see §4
 pub struct FileEntry { pub path: String, pub status: FileStatus, pub unsupported: Option<UnsupportedReason> }
 pub struct MiddleLine(pub u32);   // a line of the middle pane's starting text
-pub struct DiskVersion(pub u32);  // bumped by each settle of the file (plan §2 #53)
+pub struct DiskVersion(pub u32);  // bumped by each settle of the file (plan §2 #53); a session git moved on from hands its highest to the next (`open_after`), so versions never repeat within one run (#1383)
 pub enum Middle { Stages { text: String } /* base; "" for add/add */, Disk { text: String }, DiskNotText { found: NotText } }
 pub struct MergeChunk { pub chunk: Chunk, pub middle: LineRange<MiddleLine>, pub words: WordChanges, pub waiting: Waiting }
-pub enum Waiting { SideLines, Markers { open: String, between: Vec<String>, close: String }, AsShown } // what Save writes while a side waits (#69): the side applied; git's marker lines copied from the file's first block (`MarkerStyle`, size, labels, diff3 base section) or a disk block's own; the Result as shown
+pub enum Waiting { SideLines, Markers { open: String, first: Side, between: Vec<String>, close: String }, AsShown, Remembered } // what Save writes while a side waits (#69): the side applied; git's marker lines copied from the file's first block (`MarkerStyle`, size, labels, diff3 base section; `first`: the pane git's first section is, #86) or a disk block's own; the Result as shown; a rerere-replayed block as shown (#90)
 pub struct FileMergeData { pub path: String, pub middle: Middle, pub local: String, pub remote: String,
                            pub deleted: Option<Side>, pub eol: Eol, pub chunks: Vec<MergeChunk>, pub disk_version: DiskVersion }
 pub enum DiskResult { Staged, MarkersLeft { conflicts: u32 }, LeftAsIs, StageFailed { message: String } }
 pub struct DiskChange { pub path: String, pub result: DiskResult }
-pub struct FileList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange>, pub merging: bool /* MERGE_HEAD names a commit, no rebase stopped (#74) */ }
+pub enum Refreshed { Files(StopList), MovedOn }                    // MovedOn: git is at another stop now, nothing was settled (#89)
+pub struct StopList { pub files: Vec<FileEntry>, pub disk_changes: Vec<DiskChange>, pub operation: Option<OperationView>, pub sides: SideNames }
+pub enum OperationView { Merge { merging, into }, SquashMerge { merging, into }, Rebase { branch, onto, replaying, progress, editor_steps_ahead },
+                         CherryPick { picking, progress }, Revert { reverting, progress }, Am { subject, message, progress } } // names as SideName (#87), progress { step, total }
+pub enum Continued { Finished { kind: OperationKind, output: String }, Stopped { message: String } }
 pub enum WriteReply { Written { files: Vec<FileEntry> }, ChangedOnDisk { files: Vec<FileEntry>, change: DiskChange } }
 
 impl MergeSession {
-    pub fn open(cwd: &Path) -> Result<Self>;                         // captures every file's stages, decodes its blobs, reads the disk, compares it with what git wrote
-    pub fn refresh(&mut self) -> Result<FileList>;                   // looks at every file, settles disk changes (stage or reopen), then re-reads `ls-files -u`
+    pub fn open(cwd: &Path) -> Result<Self>;                         // reads the stop, decides the orientation, captures every file's stages, decodes its blobs, reads the disk, compares it with what git wrote
+    pub fn open_after(cwd: &Path, previous: DiskVersion) -> Result<Self>; // the next stop of one run: disk versions start above `previous` (#1383)
+    pub fn refresh_stop(&mut self) -> Result<Refreshed>;             // reads the stop first (another → MovedOn); else settles disk changes (stage or reopen), re-reads `ls-files -u`, the operation as now, the names as at open
+    pub fn stop(&self) -> &Stop;
+    pub fn highest_disk_version(&self) -> DiskVersion;
     pub fn files(&self) -> Vec<FileEntry>;
     pub fn load(&mut self, path: &str) -> Result<FileMergeData>;     // from the stages (base + compute_chunks), or from the disk (one Conflict per open block)
     pub fn finish(&mut self, path: &str, result: &str, v: DiskVersion) -> Result<WriteReply>; // look first; write worktree, git add, Resolved; on a failed add the worktree is put back
@@ -296,22 +309,27 @@ impl MergeSession {
     pub fn reset(&mut self, path: &str, v: DiskVersion) -> Result<WriteReply>;  // look first; restore_stages, then the at-open bytes (`AtOpen::reset_to`, #66); checkout -m only for a link, submodule, other entry or unread file; all or nothing
     pub fn root(&self) -> &Path;
     pub fn remaining(&self) -> usize;
-    pub fn abort_merge(&self) -> Result<()>;                         // git merge --abort (#74); src-tauri then drops the session (`Merge::Aborted`)
+    pub fn operation_kind(&self) -> Option<OperationKind>;          // the stop's operation as read at open
+    pub fn abort_operation(&mut self) -> Result<OperationKind>;      // re-reads the stop (none → NoOperation, another → StopMovedOn), then git's abort (#88)
+    pub fn continue_operation(&mut self) -> Result<Continued>;       // re-reads the stop, then git's continue; a refusal → GitRefused { message }, nothing settled (#89)
 }
 ```
 
 Edge cases owned here (plan §6 → code):
 
-| case                                                           | handling                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                                                                                                                                                                                 |
-| no stage 2 or 3 (delete/modify)                                | kept side and base text → loads with `FileMergeData.deleted` (that side's text = base, every chunk one-sided; the window shows the kept side read-only with Keep / Delete, plan §2 #47); otherwise `unsupported: LocalDeleted / RemoteDeleted` and the two-button choice. `take`: the kept side's stage 0 + `checkout-index`, or `--force-remove` + delete (#36)                             |
-| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; the window shows each side's size and offers take left / take right (`take`, same result as `git checkout --ours/--theirs` + add), plan §2 #36                                                                                                                                                                                                              |
-| line endings                                                   | `Eol` detected on the first of base, local, remote that contains a line break (none → `Lf`): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning                                                                                                                      |
-| `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                                                                                                                                                                                          |
-| file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                                                                                                                                                                                         |
-| a conflicted file changed on disk (plan §2 #52/#53)            | `refresh()` and each write look at the disk; no marker lines, not text, or gone → staged in one batch; markers left → the view is the disk, one `Conflict` per open block (`markers.rs`, `locate.rs`, `seed.rs`); a write with an old `DiskVersion` or after an unseen change writes nothing and replies `ChangedOnDisk`; `finish` never writes through a link or into a folder (`NotAFile`) |
-| a file already changed before start                            | `start.rs`: two-sided text is compared with `git merge-file` of the stages (ours/theirs views, any conflict style), other kinds with the stage git leaves through `hash-object`; the merge driver is resolved as git does (attribute, `merge.default`, configured drivers); a differing file starts as `GitOutput` and the first `refresh()` settles it                                      |
+| case                                                           | handling                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no stage 1 (add/add)                                           | `base = ""`; chunk model yields one Conflict                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| no stage 2 or 3 (delete/modify)                                | kept side and base text → loads with `FileMergeData.deleted` (that side's text = base, every chunk one-sided; the window shows the kept side read-only with Keep / Delete, plan §2 #47); otherwise `unsupported: LocalDeleted / RemoteDeleted` and the two-button choice. `take`: the kept side's stage 0 + `checkout-index`, or `--force-remove` + delete (#36)                                                                                                      |
+| binary (NUL in first 8000 bytes, git's heuristic) or non-UTF-8 | `unsupported: Binary / NonUtf8`; the window shows each side's size and offers take left / take right (`take`, same result as `git checkout --ours/--theirs` + add), plan §2 #36                                                                                                                                                                                                                                                                                       |
+| line endings                                                   | `Eol` detected on the first of base, local, remote that contains a line break (none → `Lf`): `Lf`, `CrLf`, `Mixed`; `finish` writes text as given by the frontend (frontend joins with the configured separator); `Mixed` is passed through untouched with a UI warning                                                                                                                                                                                               |
+| `git add` destroys stages                                      | `stages` captured in `open()`; `reset` replays them                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| file > 8 MiB                                                   | `Unsupported(TooLarge)` — CM6 handles it, the webview IPC does not enjoy it; revisit                                                                                                                                                                                                                                                                                                                                                                                  |
+| a conflicted file changed on disk (plan §2 #52/#53)            | `refresh_stop()` and each write look at the disk; no marker lines, not text, or gone → staged in one batch; markers left → the view is the disk, one `Conflict` per open block (`markers.rs`, `locate.rs`, `seed.rs`); a write with an old `DiskVersion` or after an unseen change writes nothing and replies `ChangedOnDisk`; a version from before this session (an older stop) → `StopMovedOn`; `finish` never writes through a link or into a folder (`NotAFile`) |
+| a file already changed before start                            | `start.rs`: two-sided text is compared with `git merge-file` of the stages (ours/theirs views, any conflict style), other kinds with the stage git leaves through `hash-object`; the merge driver is resolved as git does (attribute, `merge.default`, configured drivers); a differing file starts as `GitOutput` and the first `refresh_stop()` settles it                                                                                                          |
+| a resolution git rerere replayed (plan §2 #90)                 | `start.rs`: rerere enabled, the path in `MERGE_RR` (`rerere_tracked`), git's output had conflict blocks, the disk has none → `AtOpen::Remembered`, `Seen::ViewRemembered`: never settled, so never staged at open; `remembered.rs` shows the remembered text as the Result, each block git wrote a `Waiting::Remembered` conflict at the lines `line_map` finds (one text rule with the disk view, `locate::mapped_text`); Mark resolved stages it                    |
+| a rebase replays the user's own commit (plan §2 #86/#91)       | `orientation.rs`: `Orientation` from the `Stop`, once per stop: git's theirs on the left only for `Rebase { replaying: Some(_), redoing_merge: None }`; every consumer of git's sides (describe, take, Keep/Delete, names, line ranges) goes through it; disk and index stay in git's order, so Save writes git's own bytes                                                                                                                                           |
+| git moved on to another stop (plan §2 #89)                     | every list, Continue and Abort re-reads `Repo::stop()` first; another `StopId` → `Refreshed::MovedOn` / `StopMovedOn`, nothing settled or staged; the app opens the next stop with `open_after`                                                                                                                                                                                                                                                                       |
 
 ### 3.4 `cli`
 
@@ -335,12 +353,17 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 
 ### 3.5 `src-tauri`
 
-- `tauri::State<Mutex<Merge>>` (`merge.rs`: `Merge = Held(MergeSession) | Aborted`, plan §2 #74) and
-  `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. After a successful
-  `abort_merge` the app holds no merge: `Merge::session()` answers `MergeAborted` for every merge command.
-- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_files() -> Result<FileList>`
-  (settles disk changes, then re-reads git's unmerged entries, so the marks are git's view, plan
-  §2 #49/#53; `merging`: `MERGE_HEAD` names a commit and no rebase is stopped, re-read each time, #74),
+- `tauri::State<Mutex<Merge>>` (`merge.rs`: `Merge = Held(Box<MergeSession>) | Running(OperationKind) | MovedOn { root,
+  highest_disk_version } | Aborted(OperationKind) | Finished(OperationKind)`, plan §2 #88/#89) and
+  `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. `Merge::session()` is the
+  one state → error mapping: `Running` → `GitRunning`, `MovedOn` → `StopMovedOn`, `Aborted` → `MergeAborted`,
+  `Finished` → `MergeFinished`. Continue and Abort hand the session to a `spawn_blocking` worker (`on_worker`), so the
+  main thread never waits on git; the state is `Running` meanwhile, git's refusal puts the session back (`Held`), a
+  worker panic leaves `MovedOn` with the version from before the hand-over.
+- Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_stop() -> Result<Listing>` (`Listing = Files { files,
+  disk_changes, operation, sides } | MovedOn`; in `MovedOn` it first opens the next stop with `open_after`, then lists
+  through `refresh_stop`: settles disk changes and re-reads git's unmerged entries, so the marks are git's view, plan
+  §2 #49/#53; `operation` is what git is doing now, `sides` both panes' names as read at open, #85/#87),
   `load_file(path) -> FileMergeData` (`deleted` names the deleted side of a
   deleted-on-one-side text file, whose text is base, #47; `middle` is the stages' base or the disk),
   `finish_file(path, text, disk_version) -> WriteReply`, `save_file(path, text, disk_version) -> WriteReply`
@@ -348,13 +371,16 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `reset_file(path, disk_version) -> WriteReply` (back to this run's start: the stages captured at open and the
   bytes found at open, `FileState.at_open`, #66/#69),
   `describe_file(path) -> FileSides`, `take_side(path, side, disk_version) -> WriteReply` (plan §2 #36;
-  `ChangedOnDisk` when the disk changed first or the version is old, #53), `side_names() -> Result<SideNames>`
-  (`{ local, remote }`, each a `SideName` or none: HEAD's branch or commit, what is merged in; read once at
-  open, each side on its own, #50/#62), `abort_merge() -> Result<()>` (`git merge --abort`; git's refusal is `Git`
-  with its message and the merge stays held; on success the merge becomes `Aborted` and the calling window is
-  destroyed, which emits no close request, so the page's unsaved-work question never runs, #74), `log(entry)`. No
-  `quit_if_done`: the app stays open after the last file (#37); the exit status at close goes through `refresh()`,
-  so it settles disk changes and uses git's view (#49); after an abort it is 1 with `merge aborted`, nothing re-read.
+  `ChangedOnDisk` when the disk changed first or the version is old, #53), `continue_operation() -> Result<ContinueReply>`
+  (`Finished` | `Stopped { message }`: git's continue on the worker; `Finished` → `Merge::Finished` and the window is
+  destroyed; `Stopped` → `MovedOn`, the window lists the next stop; a refusal is `Git` with git's message, #89),
+  `abort_operation() -> Result<()>` (git's abort for the operation, #88: on success `Aborted` and the calling window is
+  destroyed, which emits no close request, so the page's unsaved-work question never runs; a refusal is `Git` with
+  its message and the session stays held). The two async commands destroy the window only when `has_ended()`. `log(entry)`. No
+  `quit_if_done`: the app stays open after the last file (#37); the exit status at close goes through
+  `outcome::ending_when_git_is_done` (waits for a running worker, then lists through `refresh_stop`, so it settles disk
+  changes and uses git's view, #49; a stop git moved on from counts the new stop's files, staging nothing); after an
+  abort it is 1 with `<operation> aborted`, after a finished Continue 0 with `<operation> finished`, nothing re-read.
 - Settings commands (`settings.rs`, plan §2 #57, #60), each given the window's settings in use
   (`current: StoredSettings`) and answering `SettingsRead { path, default_path, stored }`:
   `load_settings(current)`, `set_theme(current, theme)`, `set_antialiasing(current, antialiasing)`,
@@ -384,10 +410,12 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
-  `NoConfigFolder`, `MergeAborted`) mirrored into TS; no stringly errors. A disk change is never an error.
+  `NoConfigFolder`, `MergeAborted`, `StopMovedOn`, `GitRunning`, `MergeFinished`, `NoOperation`) mirrored into TS; no
+  stringly errors. A disk change is never an error.
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
-  `remaining() == 0`, else 1; after Abort merge exit 1 with `merge aborted` (#74). Window title `<repository folder> — yamt`.
+  `remaining() == 0`, else 1; after Abort exit 1 with `<operation> aborted`, after a finished Continue exit 0 with
+  `<operation> finished` (#88/#89). Window title `<repository folder> — yamt`.
 - `export-bindings` bin writes `frontend/src/ipc/bindings.ts`. It needs the `bindings` feature, so
   `cargo tauri build` neither builds nor bundles it: tauri bundles every bin of the package unless
   its required features are off, and the universal macOS build makes only the main binary.
@@ -435,9 +463,10 @@ export type MergeChunk = { chunk: Chunk; middle: LineRange<MiddleLine>; words: W
 export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };
 export type FileMergeData = { path: string; middle: Middle; local: string; remote: string; deleted: Side | null; eol: Eol; chunks: MergeChunk[]; disk_version: DiskVersion };
 export type DiskResult = { kind: "Staged" } | { kind: "MarkersLeft"; conflicts: number } | { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
-export type FileList = { files: FileEntry[]; disk_changes: DiskChange[]; merging: boolean };     // DiskChange = { path; result: DiskResult }; merging (#74)
+export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" }; // DiskChange = { path; result: DiskResult } (#85-#89)
+export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
 export type WriteReply = { kind: "Written"; files: FileEntry[] } | { kind: "ChangedOnDisk"; files: FileEntry[]; change: DiskChange };
-export const commands: { listFiles(): Promise<FileList>; loadFile(path: string): Promise<FileMergeData>; … };
+export const commands: { listStop(): Promise<Listing>; loadFile(path: string): Promise<FileMergeData>; … };
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
@@ -471,7 +500,7 @@ blocked by a hook and caught by `just bindings-check`.
 ```ts
 export type SourceResult<T> = { ok: true; value: T } | { ok: false; failure: SourceFailure }; // SourceFailure = IpcError
 export interface ChunkSource {
-  listFiles(): Promise<SourceResult<FileList>>; // settles disk changes, then re-reads git: marks are git's view (plan §2 #49/#53)
+  listStop(): Promise<SourceResult<Listing>>; // settles disk changes, then re-reads git: marks are git's view (plan §2 #49/#53); the operation, both panes' names (#85-#87); MovedOn: git is at another stop (#89)
   loadFile(path: string): Promise<SourceResult<FileMergeData>>; // domain Chunk: { id, kind, middle, local, remote, words, waiting }; base is not shown, so not carried; waiting = what Save writes while a side waits (#69)
   finishFile(request: {
     path: string;
@@ -486,8 +515,8 @@ export interface ChunkSource {
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // the window reloads the file
   describeFile(path: string): Promise<SourceResult<FileSides>>; // a file the editor cannot show; carries its diskVersion
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>; // stage one side as the result
-  sideNames(): Promise<SideNames>; // both sides' names, for the two headers (#50, #62); fixture: both null; an error reply rejects
-  abortMerge(): Promise<SourceResult<null>>; // git merge --abort (#74); the app then ends; fixture: logs, answers null
+  continueOperation(): Promise<SourceResult<ContinueReply>>; // git's continue (#89): Finished (the app then ends) or Stopped { message } at the next stop; fixture: ipc/fixtureOperations.ts
+  abortOperation(): Promise<SourceResult<null>>; // git's abort for the operation (#88); the app then ends; fixture: logs, answers null
   // settings (plan §2 #57): each sends the settings in use and answers SettingsRead { path, defaultPath, stored };
   // the fixture keeps them in memory (ipc/fixtureSettings.ts, path /fixture/settings.json)
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
