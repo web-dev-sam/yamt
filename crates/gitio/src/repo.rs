@@ -118,27 +118,26 @@ impl Repo {
     }
 
     fn git_path(&self, name: &str) -> Result<PathBuf> {
-        match self.git_paths(&[name])?.as_slice() {
-            [path] => Ok(path.clone()),
-            paths => Err(Error::UnexpectedOutput {
-                command: REV_PARSE,
-                output: format!("{paths:?}"),
-            }),
-        }
+        let [path] = self.git_paths([name])?;
+        Ok(path)
     }
 
     /// One `rev-parse --git-path` call for every name (git-rev-parse(1): the path inside the git directory,
     /// relative to the cwd); the paths in the order of `names`.
-    pub(crate) fn git_paths(&self, names: &[&str]) -> Result<Vec<PathBuf>> {
+    pub(crate) fn git_paths<const N: usize>(&self, names: [&str; N]) -> Result<[PathBuf; N]> {
         let mut command = self.command(Access::Read, &[REV_PARSE]);
         for name in names {
             command.args(["--git-path", name]);
         }
         let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        let lines = output.split(|&byte| byte == b'\n');
-        Ok(lines
+        let paths: Vec<PathBuf> = output
+            .split(|&byte| byte == b'\n')
             .map(|line| self.root.join(path_from_git(line)))
-            .collect())
+            .collect();
+        paths.try_into().map_err(|paths| Error::UnexpectedOutput {
+            command: REV_PARSE,
+            output: format!("{paths:?}"),
+        })
     }
 
     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {

@@ -134,19 +134,13 @@ impl Repo {
     }
 
     fn state_paths(&self) -> Result<StatePaths> {
-        let paths = self.git_paths(&STATE_PATHS)?;
-        match paths.as_slice() {
-            [rebase_merge, rebase_apply, sequencer, squash_msg] => Ok(StatePaths {
-                rebase_merge: rebase_merge.clone(),
-                rebase_apply: rebase_apply.clone(),
-                sequencer: sequencer.clone(),
-                squash_msg: squash_msg.clone(),
-            }),
-            _ => Err(Error::UnexpectedOutput {
-                command: "rev-parse",
-                output: format!("{paths:?}"),
-            }),
-        }
+        let [rebase_merge, rebase_apply, sequencer, squash_msg] = self.git_paths(STATE_PATHS)?;
+        Ok(StatePaths {
+            rebase_merge,
+            rebase_apply,
+            sequencer,
+            squash_msg,
+        })
     }
 
     // The order of git's own `wt_status_get_state` (wt-status.c): a rebase or `am` first, even
