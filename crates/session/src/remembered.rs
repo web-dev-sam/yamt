@@ -6,7 +6,7 @@ use yamt_merge_core::{
 
 use crate::decode::detect_eol;
 use crate::disk::DiskVersion;
-use crate::locate::{Placed, line_number, place_pieces};
+use crate::locate::{Placed, line_number, mapped_text, place_pieces};
 use crate::markers::{parse, split_lines};
 use crate::merge_data::{
     FileMergeData, MergeChunk, MiddleLine, Texts, disk_text, shown_merge_data,
@@ -113,8 +113,7 @@ fn remembered_chunks(
     };
     let output_lines: Vec<&str> = output.split_inclusive('\n').collect();
     let pieces = parse(&split_lines(git_output), marker_size);
-    // git-config(1) `core.autocrlf`: the worktree file can end its lines with CRLF over git's LF.
-    let to_shown = line_map(&output.replace("\r\n", "\n"), &shown.replace("\r\n", "\n"));
+    let to_shown = line_map(&mapped_text(output), &mapped_text(shown));
     let mut conflicts: Vec<Spans> = Vec::new();
     let mut exact = true;
     for piece in place_pieces(&output_lines, &pieces, texts, orientation) {
@@ -246,6 +245,22 @@ mod tests {
         let chunk = &data.chunks[0].chunk;
         assert_eq!((chunk.local.start.0, chunk.local.len), (1, 1));
         assert_eq!((chunk.base.start.0, chunk.base.len), (1, 1));
+    }
+
+    // Catches git's ended last line mapped onto a resolution whose last line has no line break:
+    // the line does not match, and the conflict takes it too (#1417).
+    #[test]
+    fn a_resolution_without_a_final_line_break_places_the_conflict_on_its_line() {
+        let texts = texts(
+            "top\none\nbottom\n",
+            "top\nlocal\nbottom\n",
+            "top\nremote\nbottom\n",
+        );
+        let git_output = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
+        let data = remembered_view(&texts, "top\nlocal and remote\nbottom", git_output);
+
+        assert_eq!(middles(&data), [(1, 1)]);
     }
 
     // Catches two blocks whose resolutions and the line between them were edited together: the first

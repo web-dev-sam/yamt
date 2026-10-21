@@ -128,7 +128,7 @@ fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usi
 
 impl Maps {
     fn new(ours: &SideView, theirs: &SideView, texts: &Texts, orientation: Orientation) -> Maps {
-        let pane_of = |side| side_text(texts.pane(orientation.pane(side)));
+        let pane_of = |side| mapped_text(texts.pane(orientation.pane(side)));
         Maps {
             orientation,
             ours_to_pane: line_map(&ours.text, &pane_of(GitSide::Ours)),
@@ -185,13 +185,13 @@ impl Maps {
     }
 }
 
-/// A side's text read as its view is: `\r\n` as `\n`, every line ended.
+/// A text as session maps it with `line_map`: `\r\n` as `\n`, every line ended.
 // git ends a section's last line before the marker after it, also the last line of a side
 // without a line break (xdiff/xmerge.c `fill_conflict_hunk`, observed on git 2.56).
-fn side_text(text: &str) -> String {
-    let mut side = text.replace("\r\n", "\n");
-    end_last_line(&mut side);
-    side
+pub(crate) fn mapped_text(text: &str) -> String {
+    let mut mapped = text.replace("\r\n", "\n");
+    end_last_line(&mut mapped);
+    mapped
 }
 
 fn end_last_line(text: &mut String) {
