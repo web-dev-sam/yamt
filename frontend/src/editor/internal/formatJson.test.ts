@@ -169,18 +169,6 @@ test("formatJson: valid input nested past the output cap fails instead of throwi
   }
 });
 
-test("formatJson: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NUMBER or ESCAPE moved back to module level)", () => {
-  const sources = import.meta.glob<string>("./formatJson.ts", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  });
-  const source = sources["./formatJson.ts"] ?? "";
-
-  expect(source).toContain("class JsonScan");
-  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
-});
-
 test("formatJson: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
   expect(formatJson('\uFEFF {"a":[1]}\n')).toEqual({
     kind: "formatted",

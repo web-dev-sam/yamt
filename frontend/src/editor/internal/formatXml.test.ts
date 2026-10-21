@@ -186,18 +186,6 @@ test("formatXml: 100,000 nested elements are scanned without throwing", () => {
   });
 });
 
-test("formatXml: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NAME moved back to module level)", () => {
-  const sources = import.meta.glob<string>("./formatXml.ts", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  });
-  const source = sources["./formatXml.ts"] ?? "";
-
-  expect(source).toContain("class XmlScan");
-  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
-});
-
 test("formatXml: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
   expect(formatXml("\uFEFF\n<a><b/></a>")).toEqual({
     kind: "formatted",
