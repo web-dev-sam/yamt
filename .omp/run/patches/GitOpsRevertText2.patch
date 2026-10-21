@@ -1,0 +1,38 @@
+From 4093d45ba167c84ad43e89474079be113e5d51be Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 16:36:45 +0200
+Subject: [PATCH] test(ui): a squash merge's Abort question is checked whole
+
+Refs #1448
+---
+ frontend/src/ui/operationText.test.ts | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index 729de4b..41e582a 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -171,10 +171,17 @@ test.each<[OperationView, string, string]>([
+   expect(abortTitle(operation)).toBe(title);
+ });
+ 
+-test("a merge's abort message is plan #74's, word for word", () => {
+-  expect(abortMessage({ kind: "Merge", merging: FEATURE, into: MAIN })).toBe(
++test.each<[OperationView, string]>([
++  [
++    { kind: "Merge", merging: FEATURE, into: MAIN },
+     "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
+-  );
++  ],
++  [
++    { kind: "SquashMerge", merging: FEATURE, into: MAIN },
++    "Every resolution and every save in this squash merge will be lost, and so will unsaved edits. The repository goes back to how it was before the squash merge, and yamt closes.",
++  ],
++])("a merge's abort message is plan #74's, word for word: %j", (operation, message) => {
++  expect(abortMessage(operation)).toBe(message);
+ });
+ 
+ test.each<[OperationView, string]>([
+-- 
+2.56.0
+
