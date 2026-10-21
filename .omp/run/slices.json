@@ -1,46 +1,49 @@
 {
-  "GitOpsRunCoreBoundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-core.md",
-    "owned": []
-  },
-  "GitOpsRunApp": {
+  "GitOpsRunCoreR1": {
     "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-run-app.md",
+    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
     "owned": [
-      "src-tauri/src/merge.rs",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/outcome.rs",
-      "src-tauri/src/ipc_error.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/src/main.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/mock_window.rs",
-      "src-tauri/src/args.rs",
-      "src-tauri/src/bin/**",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/fixtureOperations.ts",
-      "frontend/src/ipc/fixtureOperations.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/*.test.ts",
-      "scripts/operations-repo.sh",
-      "src-tauri/src/frontend_log.rs",
-      "crates/session/src/operation.rs",
-      "crates/session/tests/operations.rs"
+      "crates/gitio/**",
+      "crates/session/**",
+      "crates/conflict-repo/**"
     ]
   },
-  "GitOpsRunCoreCorrectness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-core.md",
+  "GitOpsStops": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-stops.md",
+    "owned": [
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/listing.ts",
+      "frontend/src/ui/listing.test.ts",
+      "frontend/src/ui/aborting.ts",
+      "frontend/src/ui/aborting.test.ts",
+      "frontend/src/ui/stops.ts",
+      "frontend/src/ui/stops.test.ts",
+      "frontend/src/ui/operationText.ts",
+      "frontend/src/ui/operationText.test.ts",
+      "frontend/src/ui/question.ts",
+      "frontend/src/ui/question.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/noticeText.ts",
+      "frontend/src/ui/noticeText.test.ts",
+      "frontend/src/ui/diskChanges.ts",
+      "frontend/src/ui/diskChanges.test.ts",
+      "frontend/src/ui/saving.ts",
+      "frontend/src/ui/saving.test.ts",
+      "frontend/src/ui/toolbarButtons.ts",
+      "frontend/src/ui/toolbarButtons.test.ts",
+      "frontend/src/ui/OperationBar.vue",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/MergeToolbar.vue",
+      "frontend/src/ui/ToolbarMenu.vue",
+      "frontend/src/main.ts"
+    ]
+  },
+  "GitOpsRunAppBoundary": {
+    "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-run-app.md",
     "owned": []
   }
 }
