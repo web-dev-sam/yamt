@@ -10,7 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - A gray tag at the bottom of the file list names what git is doing — MERGE, SQUASH MERGE, REBASE, CHERRY-PICK,
-  REVERT or AM; hover it for what is applied onto what, how far a sequence is ("Rebasing feature onto main · 2 of 5")
+  REVERT or PATCHES (`git am`); hover it for what is applied onto what, how far a sequence is ("Rebasing feature onto main · 2 of 5")
   and the full commit message.
 - **Continue** (Continue rebase / cherry-pick / revert / applying patches, Commit merge for a merge) right after Mark
   resolved: once every file is resolved it runs git's own continue with git's prepared commit message and shows the
