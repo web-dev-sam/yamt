@@ -1,1 +1,3 @@
 Owner skill: `skill://rust-conventions`. Headless binary over `session`: classify / scan / golden / fixture. Hosts the `git merge-file` cross-check (RK13) and golden snapshots (`tests/golden/`).
+
+`fixture <case-dir>` prints a case's `FileMergeData` (`just fixtures`): the stages view of `base`/`local`/`remote.<ext>`, or, when the case has `remembered.<ext>` and `git-output.<ext>` (`tests/showcase/remembered/`, plan §2 #90), the remembered view through `yamt_session::remembered_data` — the resolution rerere replayed as the Result, each block of git's merge output a conflict. A `git-output.<ext>` with a block not found unchanged in the sides is refused (`MalformedCase`), so a stale one fails `just fixtures`.

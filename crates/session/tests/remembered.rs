@@ -237,3 +237,60 @@ fn with_rerere_off_markers_removed_by_hand_before_open_are_staged_at_the_first_l
     assert_eq!(list.disk_changes, [staged(TEXT)]);
     assert_eq!(status_of(&session, TEXT), FileStatus::Resolved);
 }
+
+// Catches the empty `MERGE_RR` a commit made with rerere on leaves behind, read once rerere is off as
+// "rerere replayed this path": the hand fix would stay unmerged as Remembered (#1402).
+#[test]
+fn with_rerere_switched_off_after_a_committed_rerere_merge_a_hand_fix_before_open_is_staged_at_the_first_list()
+ {
+    let dir = rerere_repo(&REMEMBERED, &[CARD], Replay::Off).unwrap();
+    assert!(dir.path().join(".git/MERGE_RR").is_file());
+    write(&dir, FRESH, HAND_FIX);
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    let list = listed(&mut session);
+
+    assert_eq!(list.disk_changes, [staged(FRESH)]);
+    assert_eq!(status_of(&session, FRESH), FileStatus::Resolved);
+}
+
+// Catches an unreadable `MERGE_RR` read as "rerere off", which stages a replayed resolution unseen
+// at the first list (#1404).
+#[test]
+fn with_a_merge_rr_record_without_a_tab_a_replayed_resolution_stays_remembered() {
+    let dir = rerere_repo(&REMEMBERED, &[], Replay::Review).unwrap();
+    fs::write(dir.path().join(".git/MERGE_RR"), "0a1b src/card.ts\0").unwrap();
+    let mut session = MergeSession::open(dir.path()).unwrap();
+
+    let list = listed(&mut session);
+
+    assert_eq!(list.disk_changes, []);
+    assert_eq!(status_of(&session, TEXT), FileStatus::Remembered);
+    assert!(unmerged(&dir).contains(TEXT), "{}", unmerged(&dir));
+}
+
+// Catches a file whose disk still has git's markers taken for a replayed resolution (#1403).
+#[test]
+fn a_replayed_path_checked_out_again_with_markers_and_edited_opens_unresolved_in_the_disk_view() {
+    let dir = rerere_repo(&REMEMBERED, &[], Replay::Review).unwrap();
+    git_ok(dir.path(), &["checkout", "-m", "--", TEXT]).unwrap();
+    let markers = read(&dir, TEXT);
+    assert!(markers.contains("<<<<<<<"), "{markers}");
+    write(&dir, TEXT, &markers.replace("top\n", "top, edited\n"));
+    let mut session = MergeSession::open(dir.path()).unwrap();
+    assert_eq!(status_of(&session, TEXT), FileStatus::Unresolved);
+
+    let list = listed(&mut session);
+
+    assert_eq!(status_of(&session, TEXT), FileStatus::Unresolved);
+    assert!(unmerged(&dir).contains(TEXT), "{list:?}");
+    let data = session.load(TEXT).unwrap();
+    assert!(matches!(data.middle, Middle::Disk { .. }), "{data:?}");
+    let [chunk] = data.chunks.as_slice() else {
+        panic!("{:?}", data.chunks);
+    };
+    assert!(
+        matches!(chunk.waiting, Waiting::Markers { .. }),
+        "{chunk:?}"
+    );
+}

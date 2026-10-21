@@ -40,7 +40,7 @@ impl MergeSession {
             return Err(error.into());
         }
         file.status = FileStatus::Resolved;
-        file.seen = file.seen.after_own_write(result.as_bytes().to_vec());
+        file.seen.note_own_write(result.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 
@@ -58,7 +58,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         write_text(&self.repo, file, text)?;
-        file.seen = file.seen.after_own_write(text.as_bytes().to_vec());
+        file.seen.note_own_write(text.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 

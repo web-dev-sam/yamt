@@ -300,6 +300,30 @@ fn fixture_of_a_case_with_a_remembered_text_prints_the_remembered_view() {
     assert_eq!(chunks[0]["chunk"]["base"], json!({ "start": 7, "len": 1 }));
 }
 
+// Catches a `git-output.<ext>` left stale after a side changed, which `just fixtures` would turn into
+// conflicts placed by guesswork.
+#[test]
+fn fixture_refuses_a_git_output_not_made_from_the_case_s_sides() {
+    const STALE: &str =
+        "a\nB\nc\nd\nE\nf\ng\n<<<<<<< ours\nL, before\n=======\nR\n>>>>>>> theirs\ni\n";
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "cart", "ts");
+    fs::write(
+        case.join("remembered.ts"),
+        "a\nB\nc\nd\nE\nf\ng\nL and R\ni\n",
+    )
+    .unwrap();
+    fs::write(case.join("git-output.ts"), STALE).unwrap();
+
+    let output = yamt_cli(&["fixture", path(&case)]);
+
+    assert_eq!(output.code, 1);
+    assert_eq!(
+        output.stderr,
+        "yamt-cli: cart is not a golden case: git-output.ts was not made from these sides\n"
+    );
+}
+
 #[test]
 fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
     let repo = conflict_repo(&[

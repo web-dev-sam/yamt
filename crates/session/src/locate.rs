@@ -8,9 +8,25 @@ use crate::orientation::{GitSide, Orientation};
 
 /// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`, every line
 /// ended), and the line where each piece starts in it.
-pub(crate) struct SideView {
-    pub(crate) text: String,
-    pub(crate) piece_starts: Vec<u32>,
+struct SideView {
+    text: String,
+    piece_starts: Vec<u32>,
+}
+
+/// A piece of a text holding git's markers, placed in the panes. A block or raw region is located,
+/// and its base lines start where the previous one's end, so chunks stay disjoint in base.
+pub(crate) enum Placed<'p> {
+    Settled(&'p Range<usize>),
+    Block {
+        block: &'p Block,
+        located: Located,
+        base: LineRange<BaseLine>,
+    },
+    Raw {
+        lines: &'p Range<usize>,
+        located: Located,
+        base: LineRange<BaseLine>,
+    },
 }
 
 /// Where an open block or raw region sits in local and remote; `exact` when every line of both
@@ -23,7 +39,7 @@ pub(crate) struct Located {
 
 /// Line maps from the ours and theirs views of the disk to the panes showing ours and theirs
 /// (untyped git-order lines until `located` orients them), and from local and remote to base.
-pub(crate) struct Maps {
+struct Maps {
     orientation: Orientation,
     ours_to_pane: LineMap,
     theirs_to_pane: LineMap,
@@ -31,11 +47,58 @@ pub(crate) struct Maps {
     remote_to_base: LineMap,
 }
 
-pub(crate) fn side_view(
+/// Each of `pieces`, parsed from `lines`, placed in the panes of `texts`.
+pub(crate) fn place_pieces<'p>(
     lines: &[&str],
-    pieces: &[Piece],
-    section: fn(&Block) -> &Range<usize>,
-) -> SideView {
+    pieces: &'p [Piece],
+    texts: &Texts,
+    orientation: Orientation,
+) -> Vec<Placed<'p>> {
+    let ours = side_view(lines, pieces, |block| &block.ours);
+    let theirs = side_view(lines, pieces, |block| &block.theirs);
+    let maps = Maps::new(&ours, &theirs, texts, orientation);
+    let mut base_end = 0;
+    let mut placed = Vec::with_capacity(pieces.len());
+    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
+    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
+        placed.push(match piece {
+            Piece::Settled(lines) => Placed::Settled(lines),
+            Piece::Block(block) => {
+                let located = maps.block(block, ours_start, theirs_start);
+                let base = after_previous(maps.base(&located), &mut base_end);
+                Placed::Block {
+                    block,
+                    located,
+                    base,
+                }
+            }
+            Piece::Raw(lines) => {
+                let located = maps.raw(ours_start, theirs_start);
+                let base = after_previous(maps.base(&located), &mut base_end);
+                Placed::Raw {
+                    lines,
+                    located,
+                    base,
+                }
+            }
+        });
+    }
+    placed
+}
+
+/// `base` without the lines before `end`, where the previous chunk's base lines end; `end` moves to
+/// its end.
+fn after_previous(base: LineRange<BaseLine>, end: &mut u32) -> LineRange<BaseLine> {
+    let start = base.start.0.max(*end);
+    let after = LineRange {
+        start: BaseLine(start),
+        len: base.end().0.saturating_sub(start),
+    };
+    *end = after.end().0;
+    after
+}
+
+fn side_view(lines: &[&str], pieces: &[Piece], section: fn(&Block) -> &Range<usize>) -> SideView {
     let mut view = SideView {
         text: String::new(),
         piece_starts: Vec::with_capacity(pieces.len()),
@@ -64,12 +127,7 @@ pub(crate) fn side_view(
 }
 
 impl Maps {
-    pub(crate) fn new(
-        ours: &SideView,
-        theirs: &SideView,
-        texts: &Texts,
-        orientation: Orientation,
-    ) -> Maps {
+    fn new(ours: &SideView, theirs: &SideView, texts: &Texts, orientation: Orientation) -> Maps {
         let pane_of = |side| side_text(texts.pane(orientation.pane(side)));
         Maps {
             orientation,
@@ -80,7 +138,7 @@ impl Maps {
         }
     }
 
-    pub(crate) fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
+    fn block(&self, block: &Block, ours_start: u32, theirs_start: u32) -> Located {
         let ours = ours_start..ours_start + line_number(block.ours.len());
         let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
         match (
@@ -96,7 +154,7 @@ impl Maps {
         }
     }
 
-    pub(crate) fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
+    fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
         self.located(
             self.ours_to_pane.covering(ours_start..ours_start),
             self.theirs_to_pane.covering(theirs_start..theirs_start),
@@ -114,7 +172,7 @@ impl Maps {
     }
 
     /// The base lines that the located local and remote lines cover.
-    pub(crate) fn base(&self, located: &Located) -> LineRange<BaseLine> {
+    fn base(&self, located: &Located) -> LineRange<BaseLine> {
         let local = located.local.start.0..located.local.end().0;
         let remote = located.remote.start.0..located.remote.end().0;
         let from_local = self.local_to_base.covering(local);

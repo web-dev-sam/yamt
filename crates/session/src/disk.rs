@@ -53,8 +53,12 @@ pub(crate) enum Seen {
     GitOutput,
     ViewFromStages(OnDisk),
     ViewFromDisk(OnDisk),
-    /// The regular file rerere filled in at open, or yamt's own write over it, shown for review (plan §2 #90).
-    ViewRemembered(Vec<u8>),
+    /// The regular file rerere filled in at open, or yamt's own write over it, shown for review with
+    /// each block of what git's merge wrote (plan §2 #90).
+    ViewRemembered {
+        shown: Vec<u8>,
+        git_output: Vec<u8>,
+    },
 }
 
 /// The file as this run of yamt found it at open: what Reset puts back (plan §2 #66).
@@ -101,17 +105,19 @@ impl Seen {
         match self {
             Seen::GitOutput => false,
             Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
-            Seen::ViewRemembered(seen) => matches!(disk, OnDisk::File(bytes) if bytes == seen),
+            Seen::ViewRemembered { shown, .. } => {
+                matches!(disk, OnDisk::File(bytes) if bytes == shown)
+            }
         }
     }
 
-    /// What yamt has seen once it wrote the file `written` itself; the view stays.
-    pub(crate) fn after_own_write(&self, written: Vec<u8>) -> Seen {
+    /// Notes that yamt wrote the file `written` itself; the view stays.
+    pub(crate) fn note_own_write(&mut self, written: Vec<u8>) {
         match self {
-            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(OnDisk::File(written)),
-            Seen::ViewRemembered(_) => Seen::ViewRemembered(written),
+            Seen::ViewFromDisk(disk) => *disk = OnDisk::File(written),
+            Seen::ViewRemembered { shown, .. } => *shown = written,
             Seen::ViewFromStages(_) | Seen::GitOutput => {
-                Seen::ViewFromStages(OnDisk::File(written))
+                *self = Seen::ViewFromStages(OnDisk::File(written));
             }
         }
     }
@@ -129,7 +135,13 @@ impl AtOpen {
     pub(crate) fn first_seen(&self) -> Seen {
         match self {
             AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
-            AtOpen::Remembered { remembered, .. } => Seen::ViewRemembered(remembered.clone()),
+            AtOpen::Remembered {
+                remembered,
+                git_output,
+            } => Seen::ViewRemembered {
+                shown: remembered.clone(),
+                git_output: git_output.clone(),
+            },
             AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
         }
     }
@@ -141,10 +153,16 @@ impl AtOpen {
         let (disk, seen) = match self {
             AtOpen::Untouched(disk) => (disk, Seen::ViewFromStages(disk.clone())),
             AtOpen::Changed(disk) => (disk, Seen::ViewFromDisk(disk.clone())),
-            AtOpen::Remembered { remembered, .. } => {
+            AtOpen::Remembered {
+                remembered,
+                git_output,
+            } => {
                 return Some(ResetTo {
                     bytes: Some(remembered.clone()),
-                    seen: Seen::ViewRemembered(remembered.clone()),
+                    seen: Seen::ViewRemembered {
+                        shown: remembered.clone(),
+                        git_output: git_output.clone(),
+                    },
                 });
             }
             AtOpen::Unread => return None,
@@ -155,14 +173,6 @@ impl AtOpen {
             OnDisk::Link(_) | OnDisk::Submodule(_) | OnDisk::Other => return None,
         };
         Some(ResetTo { bytes, seen })
-    }
-
-    /// What git's merge wrote at open, kept only for a remembered resolution.
-    pub(crate) fn git_output(&self) -> Option<&[u8]> {
-        match self {
-            AtOpen::Remembered { git_output, .. } => Some(git_output),
-            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => None,
-        }
     }
 }
 

@@ -1,85 +1,80 @@
 use std::ops::Range;
-use std::path::{Path, PathBuf};
 
-use yamt_gitio::Repo;
 use yamt_merge_core::{
-    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, WordChanges, line_map, word_changes,
+    BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, RemoteLine, line_map, word_changes,
 };
 
 use crate::decode::detect_eol;
 use crate::disk::DiskVersion;
-use crate::locate::{Maps, line_number, side_view};
-use crate::markers::{DEFAULT_MARKER_SIZE, Piece, open_regions, parse, split_lines};
+use crate::locate::{Placed, line_number, place_pieces};
+use crate::markers::{parse, split_lines};
 use crate::merge_data::{
     FileMergeData, MergeChunk, MiddleLine, Texts, disk_text, shown_merge_data,
 };
 use crate::orientation::Orientation;
 use crate::seed::Seeded;
-use crate::session::LOG_TARGET;
-use crate::waiting::Waiting;
+use crate::waiting::{MarkerStyle, Waiting};
 
-/// The paths rerere tracks at this stop, read once, when the first file looks resolved at open.
-pub(crate) enum RerereTracked {
-    Unread,
-    /// No `MERGE_RR`, or it could not be read.
-    Off,
-    Paths(Vec<PathBuf>),
+/// What git rerere left in a file: git's merge output with its conflict blocks, and the resolution
+/// rerere replayed over it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Replayed {
+    pub git_output: String,
+    pub resolution: String,
 }
 
-impl RerereTracked {
-    /// rerere replayed a resolution into `path`: `MERGE_RR` exists and no longer lists it.
-    pub(crate) fn has_replayed(&mut self, repo: &Repo, path: &Path) -> bool {
-        if let RerereTracked::Unread = self {
-            *self = match repo.rerere_tracked() {
-                Ok(Some(paths)) => RerereTracked::Paths(paths),
-                Ok(None) => RerereTracked::Off,
-                Err(error) => {
-                    tracing::warn!(target: LOG_TARGET, event = "rerere_unread", %error, "no file counts as remembered");
-                    RerereTracked::Off
-                }
-            };
-        }
-        match self {
-            RerereTracked::Paths(paths) => !paths.iter().any(|tracked| tracked == path),
-            RerereTracked::Unread | RerereTracked::Off => false,
-        }
-    }
+/// The remembered view's conflicts, and whether every block of git's output was found unchanged in
+/// the sides.
+struct RememberedChunks {
+    chunks: Vec<MergeChunk>,
+    exact: bool,
 }
 
-/// git's merge output has conflict blocks and the disk file has no marker line left.
-pub(crate) fn looks_resolved(git_output: &[u8], disk: &[u8], marker_size: usize) -> bool {
-    let has_block = parse(&split_lines(git_output), marker_size)
-        .iter()
-        .any(|piece| matches!(piece, Piece::Block(_)));
-    has_block && open_regions(&parse(&split_lines(disk), marker_size)) == 0
+/// One conflict in plain line numbers: its base, local and remote lines, and its lines in the
+/// shown text.
+struct Spans {
+    base: Range<u32>,
+    local: Range<u32>,
+    remote: Range<u32>,
+    middle: Range<u32>,
 }
 
-/// The remembered view of a showcase case (`yamt-cli fixture`, plan §2 #90), ours on the left and
-/// git's default marker size: `remembered` as the Result, each block of `git_output` a conflict.
+/// The remembered view (plan §2 #90) of a file from its three sides: the resolution as the Result,
+/// each block of git's output a conflict; `None` when a block is not found unchanged in the sides,
+/// so the output was made from other sides.
 #[must_use]
 pub fn remembered_data(
     path: &str,
     base: &str,
     local: &str,
     remote: &str,
-    remembered: &str,
-    git_output: &str,
-) -> FileMergeData {
+    replayed: &Replayed,
+    style: &MarkerStyle,
+    disk_version: DiskVersion,
+) -> Option<FileMergeData> {
     let texts = Texts {
         base: base.to_owned(),
         local: local.to_owned(),
         remote: remote.to_owned(),
         deleted: None,
     };
-    remembered_merge_data(
-        path,
+    let resolution = &replayed.resolution;
+    let found = remembered_chunks(
+        resolution,
+        replayed.git_output.as_bytes(),
+        style.marker_size,
         &texts,
-        remembered.as_bytes(),
-        git_output.as_bytes(),
-        DEFAULT_MARKER_SIZE,
-        Orientation::NO_OPERATION,
-        DiskVersion(0),
-    )
+        style.orientation,
+    );
+    if !found.exact {
+        return None;
+    }
+    let seeded = Seeded {
+        middle: resolution.clone(),
+        eol: detect_eol(resolution),
+        chunks: found.chunks,
+    };
+    Some(shown_merge_data(path, &texts, Ok(seeded), disk_version))
 }
 
 /// The remembered view (plan §2 #90): the file `shown` as the Result, and each block of
@@ -96,80 +91,217 @@ pub(crate) fn remembered_merge_data(
     let seeded = disk_text(shown).map(|text| Seeded {
         middle: text.to_owned(),
         eol: detect_eol(text),
-        chunks: remembered_chunks(text, git_output, marker_size, texts, orientation),
+        chunks: remembered_chunks(text, git_output, marker_size, texts, orientation).chunks,
     });
     shown_merge_data(path, texts, seeded, disk_version)
 }
 
-/// Each block git wrote, located in the stages as the disk view locates one, and its lines in
-/// `shown` found by a line map from git's output.
+/// Each block git wrote, placed in the stages as the disk view places one, and its lines in `shown`
+/// found by a line map from git's output; blocks whose lines in `shown` overlap are one conflict.
 fn remembered_chunks(
     shown: &str,
     git_output: &[u8],
     marker_size: usize,
     texts: &Texts,
     orientation: Orientation,
-) -> Vec<MergeChunk> {
+) -> RememberedChunks {
     let Ok(output) = std::str::from_utf8(git_output) else {
-        return Vec::new();
+        return RememberedChunks {
+            chunks: Vec::new(),
+            exact: false,
+        };
     };
     let output_lines: Vec<&str> = output.split_inclusive('\n').collect();
     let pieces = parse(&split_lines(git_output), marker_size);
-    let ours = side_view(&output_lines, &pieces, |block| &block.ours);
-    let theirs = side_view(&output_lines, &pieces, |block| &block.theirs);
-    let maps = Maps::new(&ours, &theirs, texts, orientation);
-    let to_shown = line_map(output, shown);
-    let (mut chunks, mut middles) = (Vec::new(), Vec::new());
-    let (mut base_end, mut middle_end) = (0, 0);
-    let starts = ours.piece_starts.into_iter().zip(theirs.piece_starts);
-    for (piece, (ours_start, theirs_start)) in pieces.iter().zip(starts) {
-        let Piece::Block(block) = piece else {
+    // git-config(1) `core.autocrlf`: the worktree file can end its lines with CRLF over git's LF.
+    let to_shown = line_map(&output.replace("\r\n", "\n"), &shown.replace("\r\n", "\n"));
+    let mut conflicts: Vec<Spans> = Vec::new();
+    let mut exact = true;
+    for piece in place_pieces(&output_lines, &pieces, texts, orientation) {
+        let Placed::Block {
+            block,
+            located,
+            base,
+        } = piece
+        else {
             continue;
         };
-        let located = maps.block(block, ours_start, theirs_start);
-        let base = maps.base(&located);
-        let base = after_previous(base.start.0..base.end().0, &mut base_end);
+        exact &= located.exact;
         let whole = line_number(block.whole.start)..line_number(block.whole.end);
-        middles.push(after_previous(to_shown.covering(whole), &mut middle_end));
+        let spans = Spans {
+            base: base.start.0..base.end().0,
+            local: located.local.start.0..located.local.end().0,
+            remote: located.remote.start.0..located.remote.end().0,
+            middle: to_shown.covering(whole),
+        };
+        match conflicts.last_mut() {
+            Some(previous) if spans.middle.start < previous.middle.end => previous.join(&spans),
+            Some(_) | None => conflicts.push(spans),
+        }
+    }
+    RememberedChunks {
+        chunks: waiting_chunks(conflicts, texts),
+        exact,
+    }
+}
+
+impl Spans {
+    /// Grows every span to cover `next`'s too.
+    fn join(&mut self, next: &Spans) {
+        for (span, other) in [
+            (&mut self.base, &next.base),
+            (&mut self.local, &next.local),
+            (&mut self.remote, &next.remote),
+            (&mut self.middle, &next.middle),
+        ] {
+            *span = span.start.min(other.start)..span.end.max(other.end);
+        }
+    }
+}
+
+fn waiting_chunks(conflicts: Vec<Spans>, texts: &Texts) -> Vec<MergeChunk> {
+    let mut chunks = Vec::with_capacity(conflicts.len());
+    let mut middles = Vec::with_capacity(conflicts.len());
+    for spans in conflicts {
         chunks.push(Chunk {
             id: ChunkId(line_number(chunks.len())),
             kind: ChunkKind::Conflict,
             base: LineRange {
-                start: BaseLine(base.start),
-                len: base.end - base.start,
+                start: BaseLine(spans.base.start),
+                len: spans.base.end - spans.base.start,
             },
-            local: located.local,
-            remote: located.remote,
+            local: LineRange {
+                start: LocalLine(spans.local.start),
+                len: spans.local.end - spans.local.start,
+            },
+            remote: LineRange {
+                start: RemoteLine(spans.remote.start),
+                len: spans.remote.end - spans.remote.start,
+            },
+        });
+        middles.push(LineRange {
+            start: MiddleLine(spans.middle.start),
+            len: spans.middle.end - spans.middle.start,
         });
     }
     let words = word_changes(&texts.base, &texts.local, &texts.remote, &chunks);
-    waiting_chunks(chunks, middles, words)
-}
-
-/// `lines` without those before `end`, where the previous chunk's lines end; `end` moves to theirs.
-fn after_previous(lines: Range<u32>, end: &mut u32) -> Range<u32> {
-    let start = lines.start.max(*end);
-    let after = start..lines.end.max(start);
-    *end = after.end;
-    after
-}
-
-fn waiting_chunks(
-    chunks: Vec<Chunk>,
-    middles: Vec<Range<u32>>,
-    words: Vec<WordChanges>,
-) -> Vec<MergeChunk> {
     let mut waiting = Vec::with_capacity(chunks.len());
     for ((chunk, middle), words) in chunks.into_iter().zip(middles).zip(words) {
         waiting.push(MergeChunk {
             chunk,
-            middle: LineRange {
-                start: MiddleLine(middle.start),
-                len: middle.end - middle.start,
-            },
+            middle,
             words,
             waiting: Waiting::Remembered,
         });
     }
     waiting
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markers::DEFAULT_MARKER_SIZE;
+    use crate::orientation::OURS_LEFT;
+
+    fn texts(base: &str, local: &str, remote: &str) -> Texts {
+        Texts {
+            base: base.to_owned(),
+            local: local.to_owned(),
+            remote: remote.to_owned(),
+            deleted: None,
+        }
+    }
+
+    fn middles(data: &FileMergeData) -> Vec<(u32, u32)> {
+        let middles = data.chunks.iter().map(|chunk| chunk.middle);
+        middles.map(|middle| (middle.start.0, middle.len)).collect()
+    }
+
+    fn remembered_view(texts: &Texts, shown: &str, git_output: &str) -> FileMergeData {
+        remembered_merge_data(
+            "board.ts",
+            texts,
+            shown.as_bytes(),
+            git_output.as_bytes(),
+            DEFAULT_MARKER_SIZE,
+            OURS_LEFT,
+            DiskVersion(0),
+        )
+    }
+
+    // Catches git's LF output mapped onto rerere's CRLF text (core.autocrlf): no line matches, and the
+    // conflict covers the whole file (#1400).
+    #[test]
+    fn a_crlf_resolution_over_lf_stages_places_the_conflict_on_the_resolution_s_line() {
+        let texts = texts(
+            "top\none\nbottom\n",
+            "top\nlocal\nbottom\n",
+            "top\nremote\nbottom\n",
+        );
+        let git_output = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
+        let data = remembered_view(&texts, "top\r\nlocal and remote\r\nbottom\r\n", git_output);
+
+        assert_eq!(middles(&data), [(1, 1)]);
+        let chunk = &data.chunks[0].chunk;
+        assert_eq!((chunk.local.start.0, chunk.local.len), (1, 1));
+        assert_eq!((chunk.base.start.0, chunk.base.len), (1, 1));
+    }
+
+    // Catches two blocks whose resolutions and the line between them were edited together: the first
+    // conflict took every changed line and the second became an empty point (#1401).
+    #[test]
+    fn blocks_whose_lines_in_the_resolution_overlap_join_into_one_conflict() {
+        let texts = texts(
+            "a\nb1\nm\nb2\nz\n",
+            "a\nL1\nm\nL2\nz\n",
+            "a\nR1\nm\nR2\nz\n",
+        );
+        let block = |ours: &str, theirs: &str| {
+            format!("<<<<<<< ours\n{ours}\n=======\n{theirs}\n>>>>>>> theirs\n")
+        };
+        let git_output = format!("a\n{}m\n{}z\n", block("L1", "R1"), block("L2", "R2"));
+
+        let data = remembered_view(&texts, "a\nfirst\nm edited\nsecond\nz\n", &git_output);
+
+        assert_eq!(middles(&data), [(1, 3)]);
+        let chunk = &data.chunks[0].chunk;
+        assert_eq!((chunk.base.start.0, chunk.base.len), (1, 3));
+        assert_eq!((chunk.local.start.0, chunk.local.len), (1, 3));
+        assert_eq!((chunk.remote.start.0, chunk.remote.len), (1, 3));
+        assert_eq!(data.chunks[0].waiting, Waiting::Remembered);
+    }
+
+    // Catches a stale `git-output` of a showcase case passing `just fixtures` (#1396).
+    #[test]
+    fn remembered_data_refuses_git_output_not_made_from_these_sides() {
+        let marker_style = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, OURS_LEFT);
+        let from_output = |git_output: &str| {
+            let replayed = Replayed {
+                git_output: git_output.to_owned(),
+                resolution: "top\nlocal and remote\nbottom\n".to_owned(),
+            };
+            let (base, local, remote) = (
+                "top\none\nbottom\n",
+                "top\nlocal\nbottom\n",
+                "top\nremote\nbottom\n",
+            );
+            remembered_data(
+                "board.ts",
+                base,
+                local,
+                remote,
+                &replayed,
+                &marker_style,
+                DiskVersion(0),
+            )
+        };
+        let made = "top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+        let outdated = made.replace("remote\n>", "remote, before\n>");
+
+        let made_view = from_output(made).map(|data| middles(&data));
+
+        assert_eq!(made_view, Some(vec![(1, 1)]));
+        assert_eq!(from_output(&outdated), None);
+    }
 }

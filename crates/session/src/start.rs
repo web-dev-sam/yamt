@@ -1,5 +1,3 @@
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -11,8 +9,8 @@ use yamt_gitio::{
 use crate::Result;
 use crate::decode::is_binary;
 use crate::disk::OnDisk;
-use crate::markers::{DEFAULT_MARKER_SIZE, views};
-use crate::remembered::{RerereTracked, looks_resolved};
+use crate::markers::{DEFAULT_MARKER_SIZE, Piece, open_regions, parse, split_lines, views};
+use crate::scratch::ScratchDir;
 use crate::session::LOG_TARGET;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE};
 use crate::stages::CapturedStages;
@@ -23,9 +21,6 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
     major: 2,
     minor: 44,
 };
-const SCRATCH_ATTEMPTS: u32 = 1000;
-#[cfg(unix)]
-const SCRATCH_MODE: u32 = 0o700;
 
 /// The gitattributes that decide what git wrote to a conflicted path.
 pub(crate) struct Attributes {
@@ -96,8 +91,15 @@ pub(crate) struct StartCheck<'r> {
     started: Instant,
 }
 
-/// A directory under the system temp directory, removed when dropped.
-struct ScratchDir(PathBuf);
+/// The paths rerere tracks at this stop, read once, when the first file looks resolved at open.
+enum RerereTracked {
+    NotRead,
+    /// rerere is not enabled, or recorded nothing at this stop.
+    Off,
+    Paths(Vec<PathBuf>),
+    /// rerere may be enabled, but what it tracks could not be read: any path may have been replayed.
+    Unknown,
+}
 
 impl Attributes {
     pub(crate) fn from_git(found: &MergeAttributes, config: &MergeConfig) -> Attributes {
@@ -181,7 +183,7 @@ impl<'r> StartCheck<'r> {
             repo,
             scratch: None,
             histogram: None,
-            rerere: RerereTracked::Unread,
+            rerere: RerereTracked::NotRead,
             merge_file_runs: 0,
             started: Instant::now(),
         }
@@ -209,7 +211,7 @@ impl<'r> StartCheck<'r> {
             }
             Ok(output)
                 if looks_resolved(&output, disk, marker_size)
-                    && self.rerere.has_replayed(self.repo, file.path) =>
+                    && has_replayed(&mut self.rerere, self.repo, file.path) =>
             {
                 StartLook::Remembered { git_output: output }
             }
@@ -330,64 +332,64 @@ fn same(expected: &[u8], found: &[u8]) -> StartLook {
     }
 }
 
-impl ScratchDir {
-    fn create() -> io::Result<ScratchDir> {
-        let temp = std::env::temp_dir();
-        let process = std::process::id();
-        for attempt in 0..SCRATCH_ATTEMPTS {
-            let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
-            match create_private_dir(&dir) {
-                Ok(()) => return Ok(ScratchDir(dir)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
+/// rerere replayed a resolution into `path`: rerere is enabled and `MERGE_RR` no longer lists it.
+fn has_replayed(rerere: &mut RerereTracked, repo: &Repo, path: &Path) -> bool {
+    if let RerereTracked::NotRead = rerere {
+        *rerere = match repo.rerere_tracked() {
+            Ok(Some(paths)) => RerereTracked::Paths(paths),
+            Ok(None) => RerereTracked::Off,
+            Err(error) => {
+                tracing::warn!(target: LOG_TARGET, event = "rerere_unread", %error, "every file that looks resolved counts as remembered");
+                RerereTracked::Unknown
             }
-        }
-        Err(io::Error::from(io::ErrorKind::AlreadyExists))
+        };
+    }
+    match rerere {
+        RerereTracked::Paths(paths) => !paths.iter().any(|tracked| tracked == path),
+        RerereTracked::Unknown => true,
+        RerereTracked::NotRead | RerereTracked::Off => false,
     }
 }
 
-#[cfg(unix)]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
-}
-
-// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
-// system and administrators) may read.
-#[cfg(not(unix))]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
-    fs::create_dir(dir)
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.0) {
-            let dir = self.0.display();
-            tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
-        }
-    }
+/// git's merge output has conflict blocks and the disk file has no marker line left.
+fn looks_resolved(git_output: &[u8], disk: &[u8], marker_size: usize) -> bool {
+    let has_block = parse(&split_lines(git_output), marker_size)
+        .iter()
+        .any(|piece| matches!(piece, Piece::Block(_)));
+    has_block && open_regions(&parse(&split_lines(disk), marker_size)) == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const GIT_OUTPUT: &[u8] =
+        b"top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
     #[test]
-    fn the_scratch_dir_is_removed_when_dropped() {
-        let scratch = ScratchDir::create().unwrap();
-        let dir = scratch.0.clone();
-        assert!(dir.is_dir());
-        drop(scratch);
-        assert!(!dir.exists());
+    fn a_file_without_markers_over_git_output_with_a_block_looks_resolved() {
+        let resolved = b"top\nlocal and remote\nbottom\n";
+
+        assert!(looks_resolved(GIT_OUTPUT, resolved, DEFAULT_MARKER_SIZE));
     }
 
-    #[cfg(unix)]
+    // Catches a file still holding git's markers taken for a replayed resolution.
     #[test]
-    fn the_scratch_dir_is_readable_by_its_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-        const PERMISSION_BITS: u32 = 0o777;
-        let scratch = ScratchDir::create().unwrap();
-        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
-        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
+    fn a_file_with_markers_left_does_not_look_resolved() {
+        let edited = b"top, edited\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
+        assert!(!looks_resolved(GIT_OUTPUT, edited, DEFAULT_MARKER_SIZE));
+    }
+
+    // Catches a file git merged without a conflict block taken for a replayed resolution.
+    #[test]
+    fn without_a_block_in_git_output_nothing_looks_resolved() {
+        let merged = b"top\nlocal\nbottom\n";
+
+        assert!(!looks_resolved(
+            merged,
+            b"top\nedited\nbottom\n",
+            DEFAULT_MARKER_SIZE
+        ));
     }
 }

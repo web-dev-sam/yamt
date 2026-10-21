@@ -210,11 +210,11 @@ impl MergeSession {
                 orientation,
                 version,
             )),
-            Seen::ViewRemembered(shown) => Ok(remembered_merge_data(
+            Seen::ViewRemembered { shown, git_output } => Ok(remembered_merge_data(
                 &path,
                 texts,
                 shown,
-                file.at_open.git_output().unwrap_or_default(),
+                git_output,
                 file.marker_size,
                 orientation,
                 version,
@@ -306,21 +306,20 @@ impl FileState {
     /// The marker lines git wrote into this file, as found at open.
     fn marker_style(&self, orientation: Orientation) -> MarkerStyle {
         match &self.at_open {
-            AtOpen::Untouched(OnDisk::File(bytes))
-            | AtOpen::Changed(OnDisk::File(bytes))
-            | AtOpen::Remembered {
-                git_output: bytes, ..
-            } => MarkerStyle::found_in(bytes, self.marker_size, orientation),
-            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
-                MarkerStyle::fallback(self.marker_size, orientation)
+            AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
+                MarkerStyle::found_in(bytes, self.marker_size, orientation)
             }
+            AtOpen::Untouched(_)
+            | AtOpen::Changed(_)
+            | AtOpen::Remembered { .. }
+            | AtOpen::Unread => MarkerStyle::fallback(self.marker_size, orientation),
         }
     }
 
     /// The status of a file git lists unmerged: `Remembered` while it shows rerere's resolution.
     pub(crate) fn unmerged_status(&self) -> FileStatus {
         match self.seen {
-            Seen::ViewRemembered(_) => FileStatus::Remembered,
+            Seen::ViewRemembered { .. } => FileStatus::Remembered,
             Seen::GitOutput | Seen::ViewFromStages(_) | Seen::ViewFromDisk(_) => {
                 FileStatus::Unresolved
             }

@@ -29,8 +29,8 @@ pub enum Waiting {
     Remembered,
 }
 
-/// The marker lines git writes around a conflict in one file, without line breaks, and which pane
-/// shows git's ours, whose section git writes first.
+/// The marker lines git writes around a conflict in one file, without line breaks, the marker size
+/// they were read with, and which pane shows git's ours, whose section git writes first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkerStyle {
     open: String,
@@ -38,7 +38,8 @@ pub struct MarkerStyle {
     base: Option<String>,
     separator: String,
     close: String,
-    orientation: Orientation,
+    pub(crate) marker_size: usize,
+    pub(crate) orientation: Orientation,
 }
 
 impl MarkerStyle {
@@ -55,7 +56,7 @@ impl MarkerStyle {
             Piece::Settled(_) | Piece::Raw(_) => None,
         });
         match first_block {
-            Some(block) => style_of(&lines, block, orientation),
+            Some(block) => style_of(&lines, block, marker_size, orientation),
             None => MarkerStyle::fallback(marker_size, orientation),
         }
     }
@@ -69,6 +70,7 @@ impl MarkerStyle {
             base: None,
             separator: "=".repeat(marker_size),
             close: format!("{} {THEIRS_LABEL}", ">".repeat(marker_size)),
+            marker_size,
             orientation,
         }
     }
@@ -111,13 +113,19 @@ pub(crate) fn block_markers(lines: &[&str], block: &Block, orientation: Orientat
     }
 }
 
-fn style_of(lines: &[&str], block: &Block, orientation: Orientation) -> MarkerStyle {
+fn style_of(
+    lines: &[&str],
+    block: &Block,
+    marker_size: usize,
+    orientation: Orientation,
+) -> MarkerStyle {
     let has_base = block.ours.end + 1 < block.theirs.start;
     MarkerStyle {
         open: line_text(lines, block.whole.start),
         base: has_base.then(|| line_text(lines, block.ours.end)),
         separator: line_text(lines, block.theirs.start - 1),
         close: line_text(lines, block.whole.end - 1),
+        marker_size,
         orientation,
     }
 }
@@ -163,6 +171,7 @@ mod tests {
             base: base.map(str::to_owned),
             separator: separator.to_owned(),
             close: close.to_owned(),
+            marker_size: separator.len(),
             orientation: OURS_LEFT,
         }
     }
