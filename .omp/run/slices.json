@@ -1,13 +1,4 @@
 {
-  "GitOpsRunCoreR1": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
-    "owned": [
-      "crates/gitio/**",
-      "crates/session/**",
-      "crates/conflict-repo/**"
-    ]
-  },
   "GitOpsStops": {
     "agent": "web-impl",
     "brief": "docs/slices/briefs/3.J-stops.md",
@@ -46,5 +37,10 @@
       "frontend/src/ipc/fixture.test.ts",
       "frontend/src/ipc/fixtureOperations.test.ts"
     ]
+  },
+  "GitOpsRunCoreR1Boundary": {
+    "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-run-core-rework-1.md",
+    "owned": []
   }
 }

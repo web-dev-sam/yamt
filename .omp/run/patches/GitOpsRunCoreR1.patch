@@ -1,0 +1,1668 @@
+From 01fb6b55a167fcc57ed7a0595f70be8c23e45e55 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 12:58:14 +0200
+Subject: [PATCH] fix(gitio): edit stops, runner waits on git not pipes; one
+ naming path
+
+Edit stop = amend with edit last in done; a merge there is its own
+stop; squash/fixup conflicts stay replays; editor steps count the
+stopped step. run_to_end no longer hangs on a hook's background job.
+
+Refs #1336-#1348
+---
+ crates/conflict-repo/AGENTS.md        |   2 +-
+ crates/conflict-repo/src/lib.rs       |  84 +++++++------
+ crates/conflict-repo/src/operation.rs |   3 +-
+ crates/gitio/AGENTS.md                |   4 +-
+ crates/gitio/src/abort_continue.rs    |  24 ++--
+ crates/gitio/src/lib.rs               |   4 +-
+ crates/gitio/src/names.rs             |  79 ++++++++++++
+ crates/gitio/src/operation.rs         |  54 ++++++---
+ crates/gitio/src/repo.rs              |  87 ++------------
+ crates/gitio/src/run.rs               | 167 +++++++++++++++++++++-----
+ crates/gitio/src/todo.rs              |  38 ++++--
+ crates/gitio/tests/abort_continue.rs  |  33 ++---
+ crates/gitio/tests/edit_stop.rs       | 160 ++++++++++++++++++++++++
+ crates/gitio/tests/operations.rs      |  66 +---------
+ crates/session/AGENTS.md              |   2 +-
+ crates/session/src/operation.rs       |  77 +++++++-----
+ crates/session/src/side_names.rs      |  29 +++--
+ crates/session/tests/operations.rs    |  79 ++++++------
+ crates/session/tests/orientation.rs   |  39 +++++-
+ crates/session/tests/side_names.rs    |   4 +-
+ 20 files changed, 679 insertions(+), 356 deletions(-)
+ create mode 100644 crates/gitio/src/names.rs
+ create mode 100644 crates/gitio/tests/edit_stop.rs
+
+diff --git a/crates/conflict-repo/AGENTS.md b/crates/conflict-repo/AGENTS.md
+index 201b69c..06308a8 100644
+--- a/crates/conflict-repo/AGENTS.md
++++ b/crates/conflict-repo/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `core.autocrlf=false`, the committer and `commit.gpgsign=false`, so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is "step 1" with a body. `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
++Owner skill: `skill://rust-conventions`. Dev-only test fixture: `conflict_repo(files)` builds a real temp repo (user and system git config, XDG attributes/ignore files and env-passed config isolated; `GIT_EDITOR=:` and no `GIT_SEQUENCE_EDITOR`, so a `--continue` never waits for an editor) whose `git merge` stops with the scripted conflicts (regular files, symlinks, submodule gitlinks via `FileKind`); `conflict_repo_with(files, setup)` also sets repo config (in force for the merge too) and a `.gitattributes` committed with base. Every builder starts from one `empty_repo()`, whose own config holds `REPOSITORY_CONFIG` (`core.autocrlf=false`, the committer and `commit.gpgsign=false`), so git run outside the sandbox (`yamt_gitio::Repo`'s Continue) can commit there too; the sandboxed `git` passes the same values as `-c`. `operation_repo(run, files)` (`src/operation.rs`) = `ready_repo(run, files)` (everything committed, nothing run; what an abort must give back) then `start(run, root)`, for any `Run`: `Merge`, `SquashMerge` (of the three steps), `Rebase`, `RebaseApply`, `RebaseInteractive` (a `reword` left at step 3), `RebaseSquash` (step 2 a `squash` into step 1), `RebaseMerges` (`git rebase -r` re-doing the merge of `remote` into `local`: `MERGE_HEAD` and `REBASE_HEAD`, one stop), `CherryPick`, `CherryPickRange`, `Revert`, `RevertRange`, `Am` (`git am -3`, the mailbox on stdin), `StashPop`; a run that does not stop (also `conflict_repo_with`'s merge) is `Error::DidNotStop { run }`. In every run stage 2 is `local`, stage 3 `remote`, stage 1 `base`. Sequences (the four other rebases, the two ranges, `Am`) have three steps: step 1 conflicts in the caller's files, step 2 in `STEP_TWO_FILE` whatever step 1 was resolved to, step 3 applies cleanly; rebases replay branch `remote` onto `local`, picks and `am` apply `main..remote` on `local`, reverts undo `HEAD~4..HEAD~1` (step 1 = `HEAD~1`); step 1's message is `STEP_ONE_MESSAGE` ("step 1" with a body). `edit_stop_repo(files)` is a rebase of `remote` onto `main` stopped without a conflict at an `edit` of step 1. `install_hook(root, name, script)` writes a hook and points `core.hooksPath` at it, over any user setting. `run_ignored_in_child(tests, configure)` reruns ignored tests of the running test binary in a child process `configure` sets up (an environment the test process cannot change for itself), `Error::ChildTestsFailed` with the child's output unless all passed. `FileKind::Symlink` exists on unix only, so a fixture element or test that scripts a link carries `#[cfg(unix)]` or fails to compile for Windows. The one source of scripted conflicts for `gitio` and `session` tests; library code, so it returns `Result` and never unwraps.
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index bc8bed8..3d5a788 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -8,7 +8,9 @@ use std::io::Write;
+ use std::path::Path;
+ use std::process::{Command, Output, Stdio};
+ 
+-pub use operation::{Run, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start};
++pub use operation::{
++    Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start,
++};
+ pub use tempfile::TempDir;
+ 
+ #[derive(Debug, thiserror::Error)]
+@@ -21,6 +23,8 @@ pub enum Error {
+     DidNotStop { run: Run },
+     #[error("git started without a stdin pipe")]
+     NoStdin,
++    #[error("the ignored tests run in a child did not all pass:\n{output}")]
++    ChildTestsFailed { output: String },
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+@@ -68,26 +72,18 @@ fn isolated_git(dir: &Path) -> Command {
+         .env("GIT_EDITOR", ":")
+         .env_remove("GIT_SEQUENCE_EDITOR")
+         .env_remove("GIT_CONFIG_PARAMETERS")
+-        .env_remove("GIT_CONFIG_COUNT")
+-        .args([
+-            "-c",
+-            "user.name=yamt test",
+-            "-c",
+-            "user.email=test@yamt.invalid",
+-        ])
+-        .args([
+-            "-c",
+-            "init.defaultBranch=main",
+-            "-c",
+-            "commit.gpgsign=false",
+-        ])
+-        .args(["-c", "core.autocrlf=false"])
+-        .args([
+-            "-c",
+-            "core.attributesFile=/dev/null",
+-            "-c",
+-            "core.excludesFile=/dev/null",
+-        ]);
++        .env_remove("GIT_CONFIG_COUNT");
++    for (key, value) in REPOSITORY_CONFIG {
++        command.arg("-c").arg(format!("{key}={value}"));
++    }
++    command.args([
++        "-c",
++        "init.defaultBranch=main",
++        "-c",
++        "core.attributesFile=/dev/null",
++        "-c",
++        "core.excludesFile=/dev/null",
++    ]);
+     command
+ }
+ 
+@@ -216,6 +212,26 @@ pub(crate) fn stopped(run: Run, root: &Path, args: &[&str], stdin: Option<&[u8]>
+     Ok(())
+ }
+ 
++/// Runs `tests`, ignored tests of the running test binary named exactly, one at a time in a child process
++/// that `configure` sets up; `ChildTestsFailed` with the child's output unless every one passed.
++pub fn run_ignored_in_child(tests: &[&str], configure: impl FnOnce(&mut Command)) -> Result<()> {
++    let mut child = Command::new(std::env::current_exe()?);
++    child
++        .args(["--ignored", "--exact", "--test-threads=1"])
++        .args(tests);
++    configure(&mut child);
++    let output = child.output()?;
++    let stdout = String::from_utf8_lossy(&output.stdout);
++    let all_passed = format!("test result: ok. {} passed", tests.len());
++    if output.status.success() && stdout.contains(&all_passed) {
++        return Ok(());
++    }
++    let stderr = String::from_utf8_lossy(&output.stderr);
++    Err(Error::ChildTestsFailed {
++        output: format!("{stdout}{stderr}"),
++    })
++}
++
+ fn commit_side<'a>(
+     root: &Path,
+     files: &[ConflictFile<'a>],
+@@ -304,20 +320,16 @@ mod tests {
+         fs::create_dir(&git_dir).unwrap();
+         fs::write(git_dir.join("attributes"), "* -merge\n").unwrap();
+         fs::write(git_dir.join("ignore"), "*\n").unwrap();
+-        let child = Command::new(std::env::current_exe().unwrap())
+-            .args(["--exact", CHILD_TEST, "--ignored"])
+-            .env("XDG_CONFIG_HOME", xdg_config_home.path())
+-            .env("GIT_CONFIG_PARAMETERS", "'merge.conflictstyle'='diff3'")
+-            .env("GIT_CONFIG_COUNT", "1")
+-            .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
+-            .env("GIT_CONFIG_VALUE_0", "zdiff3")
+-            .output()
+-            .unwrap();
+-        let stdout = String::from_utf8_lossy(&child.stdout);
+-        assert!(
+-            child.status.success() && stdout.contains("test result: ok. 1 passed"),
+-            "{stdout}{}",
+-            String::from_utf8_lossy(&child.stderr)
+-        );
++
++        let ran = run_ignored_in_child(&[CHILD_TEST], |child| {
++            child
++                .env("XDG_CONFIG_HOME", xdg_config_home.path())
++                .env("GIT_CONFIG_PARAMETERS", "'merge.conflictstyle'='diff3'")
++                .env("GIT_CONFIG_COUNT", "1")
++                .env("GIT_CONFIG_KEY_0", "merge.conflictStyle")
++                .env("GIT_CONFIG_VALUE_0", "zdiff3");
++        });
++
++        ran.unwrap_or_else(|error| panic!("{error}"));
+     }
+ }
+diff --git a/crates/conflict-repo/src/operation.rs b/crates/conflict-repo/src/operation.rs
+index e3771e0..f7a5667 100644
+--- a/crates/conflict-repo/src/operation.rs
++++ b/crates/conflict-repo/src/operation.rs
+@@ -9,7 +9,8 @@ use crate::{
+ /// The file a sequence's step 2 conflicts in, whatever step 1's conflict was resolved to.
+ pub const STEP_TWO_FILE: &str = "steps.txt";
+ const STEP_THREE_FILE: &str = "step-three.txt";
+-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
++/// Step 1's message in every sequence: a subject and a body.
++pub const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+ const REWORD_STEP_THREE: &str = "sequence.editor=sed -i -e 3s/^pick/reword/";
+ const SQUASH_STEP_TWO: &str = "sequence.editor=sed -i -e 2s/^pick/squash/";
+ const EDIT_STEP_ONE: &str = "sequence.editor=sed -i -e 1s/^pick/edit/";
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index e7ce309..18ab1a0 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -1,5 +1,5 @@
+ Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subprocess layer only: explicit argv, bytes in/out, never depends on `yamt-merge-core`. Tests are integration tests against real temp repositories in `tests/`.
+ 
+-What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress). `Rebase.replaying` is `REBASE_HEAD` only while git replays it: `None` at an `edit` stop (`rebase-merge/amend`, where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, editor steps ahead). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`.
++What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo).
+ 
+-Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's output), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (a non-zero exit is not an `Err`). Both run through `run.rs` `git_command_as_user` + `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout then stderr, and no `LC_ALL=C`, so hooks see the user's locale; every other call keeps `git_command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run in a child test process without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
++Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
+diff --git a/crates/gitio/src/abort_continue.rs b/crates/gitio/src/abort_continue.rs
+index 114b1ad..ef98a53 100644
+--- a/crates/gitio/src/abort_continue.rs
++++ b/crates/gitio/src/abort_continue.rs
+@@ -1,6 +1,6 @@
+ use crate::operation::Operation;
+ use crate::repo::Repo;
+-use crate::run::{argv, git_command_as_user, run_to_end};
++use crate::run::{argv, run_to_end};
+ use crate::{Error, Result};
+ 
+ /// What one git run printed, stdout then stderr, and whether it exited 0.
+@@ -13,32 +13,34 @@ pub struct GitRun {
+ impl Repo {
+     /// git's own abort for `operation` (plan §2 #88; a squash merge: `reset --merge`, as `merge --abort`
+     /// refuses without `MERGE_HEAD`). No deadline: a kill in the middle of a reset leaves `index.lock`.
+-    /// A refusal is `Error::GitFailed` with git's output.
++    /// A refusal is `Error::GitFailed` with git's stderr.
+     pub fn abort(&self, operation: &Operation) -> Result<()> {
+-        let command = git_command_as_user(&self.git, &self.root, &abort_args(operation));
++        let command = self.command_as_user(&abort_args(operation));
+         let args = argv(&command);
+-        let (status, output) = run_to_end(command)?;
+-        if status.success() {
++        let finished = run_to_end(command)?;
++        if finished.status.success() {
+             return Ok(());
+         }
+         Err(Error::GitFailed {
+             args,
+-            status: status.code(),
+-            stderr: String::from_utf8_lossy(&output).trim_end().to_owned(),
++            status: finished.status.code(),
++            stderr: String::from_utf8_lossy(&finished.stderr)
++                .trim_end()
++                .to_owned(),
+         })
+     }
+ 
+     /// git's own continue for `operation` (plan §2 #89; a squash merge: `commit`). A non-zero exit is not
+     /// an `Err`: the caller reads the stop again to learn what happened.
+     pub fn continue_operation(&self, operation: &Operation) -> Result<GitRun> {
+-        let mut command = git_command_as_user(&self.git, &self.root, continue_args(operation));
++        let mut command = self.command_as_user(continue_args(operation));
+         // GIT_EDITOR wins over core.editor, and `:` is never run (git editor.c): the commit keeps
+         // git's prepared message with its comment lines stripped, as an editor saved unchanged would.
+         command.env("GIT_EDITOR", ":");
+-        let (status, output) = run_to_end(command)?;
++        let finished = run_to_end(command)?;
+         Ok(GitRun {
+-            succeeded: status.success(),
+-            output,
++            succeeded: finished.status.success(),
++            output: finished.combined(),
+         })
+     }
+ }
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 9457df4..994b539 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -9,6 +9,7 @@ mod blob;
+ mod entry;
+ mod merge_config;
+ mod merge_file;
++mod names;
+ mod operation;
+ mod repo;
+ mod run;
+@@ -22,8 +23,9 @@ pub use blob::BlobReader;
+ pub use entry::{Oid, Stage, StageEntry};
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
++pub use names::CommitSummary;
+ pub use operation::{Operation, Progress, Rebase, Stop, StopId};
+-pub use repo::{CommitSummary, Repo};
++pub use repo::Repo;
+ pub use version::GitVersion;
+ 
+ #[derive(Debug, thiserror::Error)]
+diff --git a/crates/gitio/src/names.rs b/crates/gitio/src/names.rs
+new file mode 100644
+index 0000000..f4dc1b4
+--- /dev/null
++++ b/crates/gitio/src/names.rs
+@@ -0,0 +1,79 @@
++use crate::entry::Oid;
++use crate::repo::{Repo, read_if_present, without_final_newline};
++use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::{Error, Result};
++
++const BRANCH: &str = "branch";
++const LOG: &str = "log";
++const MERGE_MSG: &str = "MERGE_MSG";
++const NON_SYMBOLIC_SHORT_NAME: &str =
++    "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
++const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
++const COMMIT_SUMMARY_FIELDS: usize = 3;
++
++/// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct CommitSummary {
++    pub short_id: Vec<u8>,
++    pub subject: Vec<u8>,
++    pub message: Vec<u8>,
++}
++
++impl Repo {
++    /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
++    pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
++        let command = self.command(Access::Read, &[BRANCH, "--show-current"]);
++        let output = run(command, None, GIT_TIMEOUT)?;
++        if output.is_empty() {
++            return Ok(None);
++        }
++        Ok(Some(without_final_newline(BRANCH, output)?))
++    }
++
++    pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
++        let args = [
++            "for-each-ref",
++            NON_SYMBOLIC_SHORT_NAME,
++            "--points-at",
++            commit.as_str(),
++            "refs/heads",
++            "refs/remotes",
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        let names = output.split(|&byte| byte == b'\n');
++        Ok(names
++            .filter(|name| !name.is_empty())
++            .map(<[u8]>::to_vec)
++            .collect())
++    }
++
++    pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
++        read_if_present(&self.git_path(MERGE_MSG)?)
++    }
++
++    pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
++        let args = [
++            LOG,
++            "-1",
++            "--no-show-signature",
++            SHORT_ID_SUBJECT_MESSAGE,
++            commit.as_str(),
++            "--",
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        let fields: Vec<&[u8]> = output
++            .splitn(COMMIT_SUMMARY_FIELDS, |&byte| byte == b'\0')
++            .collect();
++        let [short_id, subject, message] = fields.as_slice() else {
++            return Err(Error::UnexpectedOutput {
++                command: LOG,
++                output: String::from_utf8_lossy(&output).into_owned(),
++            });
++        };
++        Ok(CommitSummary {
++            short_id: short_id.to_vec(),
++            subject: subject.to_vec(),
++            message: message.to_vec(),
++        })
++    }
++}
+diff --git a/crates/gitio/src/operation.rs b/crates/gitio/src/operation.rs
+index 83ba5f3..2208bc9 100644
+--- a/crates/gitio/src/operation.rs
++++ b/crates/gitio/src/operation.rs
+@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
+ use crate::Result;
+ use crate::entry::Oid;
+ use crate::repo::{Repo, exists, read_if_present};
+-use crate::todo::{first_command, has_editor_steps};
++use crate::todo::{first_command, has_editor_steps, is_edit_step, is_editor_step, last_step};
+ 
+ const STATE_PATHS: [&str; 4] = ["rebase-merge", "rebase-apply", "sequencer", "SQUASH_MSG"];
+ const BRANCH_REF_PREFIX: &[u8] = b"refs/heads/";
+@@ -45,7 +45,7 @@ pub struct StopId(Stop);
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub enum Operation {
+-    /// `MERGE_HEAD`, no rebase in progress.
++    /// `MERGE_HEAD`, no rebase in progress or a rebase stopped at an `edit`.
+     Merge { merging: Oid },
+     /// `SQUASH_MSG` and no `MERGE_HEAD`; `merging` is its first `commit <oid>` line.
+     SquashMerge { merging: Option<Oid> },
+@@ -74,12 +74,12 @@ pub struct Rebase {
+     /// `head-name` without `refs/heads/`; `None` for a detached rebase.
+     pub branch: Option<Vec<u8>>,
+     pub onto: Option<Oid>,
+-    /// `REBASE_HEAD`.
++    /// `REBASE_HEAD`; `None` at an `edit` stop, where git keeps it too.
+     pub replaying: Option<Oid>,
+     /// `MERGE_HEAD` while `rebase -r` re-does a merge commit.
+     pub redoing_merge: Option<Oid>,
+     pub progress: Option<Progress>,
+-    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) left in the todo.
++    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop or left in the todo.
+     pub editor_steps_ahead: bool,
+ }
+ 
+@@ -154,12 +154,7 @@ impl Repo {
+             return self.applying_patches(&paths.rebase_apply).map(Some);
+         }
+         if exists(&paths.rebase_merge)? {
+-            let rebase_merge = &paths.rebase_merge;
+-            let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?;
+-            let editor_steps_ahead = todo.is_some_and(|todo| has_editor_steps(&todo));
+-            let progress = progress_in(rebase_merge, "msgnum", "end")?;
+-            let rebase = self.rebase(rebase_merge, progress, editor_steps_ahead)?;
+-            return Ok(Some(Operation::Rebase(rebase)));
++            return self.rebase_merge(&paths.rebase_merge).map(Some);
+         }
+         if let Some(merging) = self.commit_named("MERGE_HEAD")? {
+             return Ok(Some(Operation::Merge { merging }));
+@@ -170,8 +165,10 @@ impl Repo {
+     fn applying_patches(&self, rebase_apply: &Path) -> Result<Operation> {
+         let progress = progress_in(rebase_apply, "next", "last")?;
+         if !exists(&rebase_apply.join("applying"))? {
++            let replaying = self.commit_named("REBASE_HEAD")?;
+             return Ok(Operation::Rebase(self.rebase(
+                 rebase_apply,
++                replaying,
+                 progress,
+                 false,
+             )?));
+@@ -185,20 +182,37 @@ impl Repo {
+         })
+     }
+ 
+-    fn rebase(
+-        &self,
+-        state_dir: &Path,
+-        progress: Option<Progress>,
+-        editor_steps_ahead: bool,
+-    ) -> Result<Rebase> {
+-        let head_name = read_if_present(&state_dir.join("head-name"))?;
+-        // git keeps `REBASE_HEAD` at an `edit` stop too and writes `amend` only there (observed on git 2.56,
+-        // `an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort`).
+-        let replaying = if exists(&state_dir.join("amend"))? {
++    // git writes `amend` at an `edit` stop and at a conflicted `squash`/`fixup` step, and keeps `REBASE_HEAD` at
++    // both (observed on git 2.56, `tests/edit_stop.rs`); only the stopped step tells them apart.
++    fn rebase_merge(&self, rebase_merge: &Path) -> Result<Operation> {
++        let done = read_if_present(&rebase_merge.join("done"))?.unwrap_or_default();
++        let stopped_step = last_step(&done);
++        let at_edit =
++            stopped_step.is_some_and(is_edit_step) && exists(&rebase_merge.join("amend"))?;
++        if at_edit && let Some(merging) = self.commit_named("MERGE_HEAD")? {
++            return Ok(Operation::Merge { merging });
++        }
++        let replaying = if at_edit {
+             None
+         } else {
+             self.commit_named("REBASE_HEAD")?
+         };
++        let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?.unwrap_or_default();
++        let editor_steps_ahead =
++            has_editor_steps(&todo) || stopped_step.is_some_and(is_editor_step);
++        let progress = progress_in(rebase_merge, "msgnum", "end")?;
++        let rebase = self.rebase(rebase_merge, replaying, progress, editor_steps_ahead)?;
++        Ok(Operation::Rebase(rebase))
++    }
++
++    fn rebase(
++        &self,
++        state_dir: &Path,
++        replaying: Option<Oid>,
++        progress: Option<Progress>,
++        editor_steps_ahead: bool,
++    ) -> Result<Rebase> {
++        let head_name = read_if_present(&state_dir.join("head-name"))?;
+         Ok(Rebase {
+             branch: head_name.as_deref().and_then(branch_name),
+             onto: read_oid(&state_dir.join("onto"))?,
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index a6b28fc..85d7a30 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -6,32 +6,17 @@ use std::process::Command;
+ 
+ use crate::blob::{BlobReader, CAT_FILE};
+ use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
+-use crate::run::{Access, GIT_TIMEOUT, git_command, run};
++use crate::run::{Access, GIT_TIMEOUT, git_command, git_command_as_user, run};
+ use crate::{Error, Result, StageEntry};
+ 
+ const REV_PARSE: &str = "rev-parse";
+-const BRANCH: &str = "branch";
+-const LOG: &str = "log";
+ const HASH_OBJECT: &str = "hash-object";
+-const MERGE_MSG: &str = "MERGE_MSG";
+ const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
+ const UNRESOLVED_NAME_STATUS: i32 = 1;
+-const NON_SYMBOLIC_SHORT_NAME: &str =
+-    "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+-const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
+-const COMMIT_SUMMARY_FIELDS: usize = 3;
+ 
+ pub struct Repo {
+-    pub(crate) root: PathBuf,
+-    pub(crate) git: PathBuf,
+-}
+-
+-/// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub struct CommitSummary {
+-    pub short_id: Vec<u8>,
+-    pub subject: Vec<u8>,
+-    pub message: Vec<u8>,
++    root: PathBuf,
++    git: PathBuf,
+ }
+ 
+ impl Repo {
+@@ -66,37 +51,6 @@ impl Repo {
+         Ok(Some(Oid::parse(&hex)?))
+     }
+ 
+-    /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
+-    pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
+-        let command = self.command(Access::Read, &[BRANCH, "--show-current"]);
+-        let output = run(command, None, GIT_TIMEOUT)?;
+-        if output.is_empty() {
+-            return Ok(None);
+-        }
+-        Ok(Some(without_final_newline(BRANCH, output)?))
+-    }
+-
+-    pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
+-        let args = [
+-            "for-each-ref",
+-            NON_SYMBOLIC_SHORT_NAME,
+-            "--points-at",
+-            commit.as_str(),
+-            "refs/heads",
+-            "refs/remotes",
+-        ];
+-        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+-        let names = output.split(|&byte| byte == b'\n');
+-        Ok(names
+-            .filter(|name| !name.is_empty())
+-            .map(<[u8]>::to_vec)
+-            .collect())
+-    }
+-
+-    pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+-        read_if_present(&self.git_path(MERGE_MSG)?)
+-    }
+-
+     /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
+     pub fn rebase_in_progress(&self) -> Result<bool> {
+         for name in REBASE_STATE_DIRS {
+@@ -117,7 +71,7 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    fn git_path(&self, name: &str) -> Result<PathBuf> {
++    pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
+         let [path] = self.git_paths([name])?;
+         Ok(path)
+     }
+@@ -140,32 +94,6 @@ impl Repo {
+         })
+     }
+ 
+-    pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
+-        let args = [
+-            LOG,
+-            "-1",
+-            "--no-show-signature",
+-            SHORT_ID_SUBJECT_MESSAGE,
+-            commit.as_str(),
+-            "--",
+-        ];
+-        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+-        let fields: Vec<&[u8]> = output
+-            .splitn(COMMIT_SUMMARY_FIELDS, |&byte| byte == b'\0')
+-            .collect();
+-        let [short_id, subject, message] = fields.as_slice() else {
+-            return Err(Error::UnexpectedOutput {
+-                command: LOG,
+-                output: String::from_utf8_lossy(&output).into_owned(),
+-            });
+-        };
+-        Ok(CommitSummary {
+-            short_id: short_id.to_vec(),
+-            subject: subject.to_vec(),
+-            message: message.to_vec(),
+-        })
+-    }
+-
+     pub fn index_records(&self, path: &Path) -> Result<Vec<u8>> {
+         let mut command = self.command(Access::Read, &[LS_FILES, "-s", "-z", "--"]);
+         command.arg(path);
+@@ -275,6 +203,11 @@ impl Repo {
+     pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
+         git_command(&self.git, &self.root, access, args)
+     }
++
++    /// A command as the user's terminal would run it (`git_command_as_user`): Abort and Continue only.
++    pub(crate) fn command_as_user(&self, args: &[&str]) -> Command {
++        git_command_as_user(&self.git, &self.root, args)
++    }
+ }
+ 
+ // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
+@@ -303,7 +236,7 @@ pub(crate) fn read_if_present(path: &Path) -> Result<Option<Vec<u8>>> {
+     }
+ }
+ 
+-fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
++pub(crate) fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
+     if output.pop() == Some(b'\n') {
+         return Ok(output);
+     }
+diff --git a/crates/gitio/src/run.rs b/crates/gitio/src/run.rs
+index 988ba1e..25c4ead 100644
+--- a/crates/gitio/src/run.rs
++++ b/crates/gitio/src/run.rs
+@@ -9,6 +9,8 @@ use crate::{Error, Result};
+ 
+ pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+ const POLL_INTERVAL: Duration = Duration::from_millis(5);
++const READER_GRACE: Duration = Duration::from_secs(1);
++const READ_CHUNK_BYTES: usize = 8192;
+ 
+ #[derive(Clone, Copy)]
+ pub(crate) enum Access {
+@@ -25,13 +27,30 @@ enum Waited {
+     TimedOut,
+ }
+ 
++/// What a git run printed on each stream, and how it exited.
++pub(crate) struct Finished {
++    pub(crate) status: ExitStatus,
++    pub(crate) stdout: Vec<u8>,
++    pub(crate) stderr: Vec<u8>,
++}
++
++impl Finished {
++    /// stdout, then stderr.
++    pub(crate) fn combined(mut self) -> Vec<u8> {
++        self.stdout.append(&mut self.stderr);
++        self.stdout
++    }
++}
++
++/// A pipe's bytes: all of them up to its end, or those that came before the deadline.
++enum Collected {
++    Whole(Vec<u8>),
++    Cut(Vec<u8>),
++}
++
+ pub(crate) fn git_command(git: &Path, cwd: &Path, access: Access, args: &[&str]) -> Command {
+-    let mut command = Command::new(git);
+-    command
+-        .current_dir(cwd)
+-        .env("LC_ALL", "C")
+-        .args(["-c", "core.quotepath=false"])
+-        .args(args);
++    let mut command = git_command_as_user(git, cwd, args);
++    command.env("LC_ALL", "C");
+     match access {
+         Access::Read => {
+             command.env("GIT_OPTIONAL_LOCKS", "0");
+@@ -60,14 +79,31 @@ pub(crate) fn argv(command: &Command) -> Vec<String> {
+     std::iter::once(program).chain(args).collect()
+ }
+ 
+-/// Runs `command` until it exits, however long that takes, with stdin closed; stdout then stderr.
+-pub(crate) fn run_to_end(mut command: Command) -> Result<(ExitStatus, Vec<u8>)> {
++/// Runs `command` until it exits, however long that takes, with stdin closed. A process it left in the
++/// background (a hook's) may hold both pipes open: after the exit, its output is read for `READER_GRACE` only.
++pub(crate) fn run_to_end(command: Command) -> Result<Finished> {
+     let args = argv(&command);
+     tracing::debug!(?args, "running git without a deadline");
+-    let finished = command.stdin(Stdio::null()).output()?;
+-    let mut output = finished.stdout;
+-    output.extend_from_slice(&finished.stderr);
+-    Ok((finished.status, output))
++    let mut child = spawn_piped(command, false)?;
++    let stdout = read_on_thread(child.stdout.take().ok_or_else(closed_pipe)?);
++    let stderr = read_on_thread(child.stderr.take().ok_or_else(closed_pipe)?);
++    let status = child.wait()?;
++    let grace_end = Instant::now() + READER_GRACE;
++    Ok(Finished {
++        status,
++        stdout: output_until(&stdout, grace_end)?,
++        stderr: output_until(&stderr, grace_end)?,
++    })
++}
++
++fn output_until(chunks: &Receiver<io::Result<Vec<u8>>>, end: Instant) -> io::Result<Vec<u8>> {
++    match collected(chunks, end)? {
++        Collected::Whole(bytes) => Ok(bytes),
++        Collected::Cut(bytes) => {
++            tracing::debug!("a process git left running still holds its output pipe");
++            Ok(bytes)
++        }
++    }
+ }
+ 
+ pub(crate) fn run(command: Command, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<Vec<u8>> {
+@@ -145,33 +181,50 @@ fn wait_with_deadline(child: &mut Child, deadline: Instant) -> io::Result<Waited
+     }
+ }
+ 
++/// Sends each piece of the pipe as it is read, so a reader cut off at a deadline keeps what came before it;
++/// the channel closes at the pipe's end.
+ fn read_on_thread(mut pipe: impl Read + Send + 'static) -> Receiver<io::Result<Vec<u8>>> {
+     let (sender, receiver) = mpsc::channel();
+     thread::spawn(move || {
+-        let mut bytes = Vec::new();
+-        let read = pipe.read_to_end(&mut bytes).map(|_| bytes);
+-        if sender.send(read).is_err() {
+-            tracing::debug!("git output arrived after the deadline");
++        let mut buffer = [0; READ_CHUNK_BYTES];
++        loop {
++            let piece = match pipe.read(&mut buffer) {
++                Ok(0) => return,
++                Ok(read) => Ok(buffer[..read].to_vec()),
++                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
++                Err(error) => Err(error),
++            };
++            let failed = piece.is_err();
++            if sender.send(piece).is_err() || failed {
++                return;
++            }
+         }
+     });
+     receiver
+ }
+ 
++fn collected(pieces: &Receiver<io::Result<Vec<u8>>>, deadline: Instant) -> io::Result<Collected> {
++    let mut bytes = Vec::new();
++    loop {
++        match pieces.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
++            Ok(piece) => bytes.extend_from_slice(&piece?),
++            Err(RecvTimeoutError::Disconnected) => return Ok(Collected::Whole(bytes)),
++            Err(RecvTimeoutError::Timeout) => return Ok(Collected::Cut(bytes)),
++        }
++    }
++}
++
+ fn receive_output(
+     status: ExitStatus,
+     stdout: &Receiver<io::Result<Vec<u8>>>,
+     stderr: &Receiver<io::Result<Vec<u8>>>,
+     deadline: Instant,
+ ) -> io::Result<Waited> {
+-    let stdout = match stdout.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+-        Ok(read) => read?,
+-        Err(RecvTimeoutError::Timeout) => return Ok(Waited::TimedOut),
+-        Err(RecvTimeoutError::Disconnected) => return Err(thread_panicked()),
++    let Collected::Whole(stdout) = collected(stdout, deadline)? else {
++        return Ok(Waited::TimedOut);
+     };
+-    let stderr = match stderr.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+-        Ok(read) => read?,
+-        Err(RecvTimeoutError::Timeout) => return Ok(Waited::TimedOut),
+-        Err(RecvTimeoutError::Disconnected) => return Err(thread_panicked()),
++    let Collected::Whole(stderr) = collected(stderr, deadline)? else {
++        return Ok(Waited::TimedOut);
+     };
+     Ok(Waited::Exited {
+         status,
+@@ -245,27 +298,49 @@ mod tests {
+         assert_is_short_timeout(error, elapsed);
+     }
+ 
+-    fn run_alias_to_end(alias_body: &str) -> (ExitStatus, Vec<u8>) {
++    fn run_alias_to_end(alias_body: &str) -> Finished {
+         let alias = format!("alias.say=!{alias_body}");
+         let command = git_command_as_user(Path::new("git"), Path::new("/"), &["-c", &alias, "say"]);
+         run_to_end(command).unwrap()
+     }
+ 
+     #[test]
+-    fn a_run_to_the_end_gives_stdout_then_stderr_and_git_s_exit_status() {
+-        let (status, output) = run_alias_to_end("echo err >&2; echo out; exit 3");
++    fn a_run_to_the_end_keeps_stdout_and_stderr_apart_and_gives_git_s_exit_status() {
++        let finished = run_alias_to_end("echo err >&2; echo out; exit 3");
+ 
+-        assert_eq!(status.code(), Some(3));
+-        assert_eq!(output, b"out\nerr\n");
++        assert_eq!(finished.status.code(), Some(3));
++        assert_eq!(finished.stdout, b"out\n");
++        assert_eq!(finished.stderr, b"err\n");
++        assert_eq!(finished.combined(), b"out\nerr\n");
+     }
+ 
+     // A hook or editor reading stdin would wait forever on an open pipe.
+     #[test]
+     fn a_run_to_the_end_closes_stdin() {
+-        let (status, output) = run_alias_to_end("cat; echo read");
++        let finished = run_alias_to_end("cat; echo read");
+ 
+-        assert!(status.success());
+-        assert_eq!(output, b"read\n");
++        assert!(finished.status.success());
++        assert_eq!(finished.stdout, b"read\n");
++    }
++
++    // `Command::output` reads both pipes to their end: a hook's background process holding them would keep
++    // Continue running after git exited.
++    #[test]
++    fn a_run_to_the_end_returns_when_git_exits_while_a_background_process_holds_its_pipes() {
++        let started = Instant::now();
++
++        let finished = run_alias_to_end("echo out; echo err >&2; sleep 30 &");
++
++        assert!(
++            started.elapsed() < Duration::from_secs(SLEEP_SECONDS),
++            "{:?}",
++            started.elapsed()
++        );
++        assert!(finished.status.success());
++        assert_eq!(
++            (finished.stdout, finished.stderr),
++            (b"out\n".to_vec(), b"err\n".to_vec())
++        );
+     }
+ 
+     #[test]
+@@ -278,4 +353,32 @@ mod tests {
+             ["git", "-c", "core.quotepath=false", "status"]
+         );
+     }
++
++    #[test]
++    fn yamt_s_own_command_is_the_user_s_with_the_c_locale_and_no_optional_locks_on_reads() {
++        let (git, root) = (Path::new("git"), Path::new("/"));
++        let envs = |command: &Command| -> Vec<(String, String)> {
++            let envs = command.get_envs();
++            envs.map(|(key, value)| {
++                (
++                    key.display().to_string(),
++                    value.unwrap().display().to_string(),
++                )
++            })
++            .collect()
++        };
++        let read = git_command(git, root, Access::Read, &["status"]);
++        let write = git_command(git, root, Access::Write, &["add"]);
++
++        assert_eq!(
++            argv(&read),
++            argv(&git_command_as_user(git, root, &["status"]))
++        );
++        let c_locale = ("LC_ALL".to_owned(), "C".to_owned());
++        let no_locks = ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned());
++        let mut read_envs = envs(&read);
++        read_envs.sort();
++        assert_eq!(read_envs, [no_locks, c_locale.clone()]);
++        assert_eq!(envs(&write), [c_locale]);
++    }
+ }
+diff --git a/crates/gitio/src/todo.rs b/crates/gitio/src/todo.rs
+index 799a052..cfbd0f9 100644
+--- a/crates/gitio/src/todo.rs
++++ b/crates/gitio/src/todo.rs
+@@ -15,16 +15,29 @@ pub(crate) fn first_command(todo: &[u8]) -> Option<&[u8]> {
+     words(commands(todo).next()?).next()
+ }
+ 
+-// `fixup -C` takes the commit's message as it is; only `-c` opens the editor (git-rebase(1)).
++// git appends a step to `rebase-merge/done` before it runs it, so the last one is where it stopped (observed on git
++// 2.56: a conflicted `reword`, `tests/edit_stop.rs`).
++pub(crate) fn last_step(done: &[u8]) -> Option<&[u8]> {
++    commands(done).last()
++}
++
++pub(crate) fn is_edit_step(step: &[u8]) -> bool {
++    matches!(words(step).next(), Some(b"edit" | b"e"))
++}
++
+ pub(crate) fn has_editor_steps(todo: &[u8]) -> bool {
+-    commands(todo).any(|command| {
+-        let mut words = words(command);
+-        match (words.next(), words.next()) {
+-            (Some(b"reword" | b"r" | b"squash" | b"s"), _)
+-            | (Some(b"fixup" | b"f"), Some(b"-c")) => true,
+-            (Some(_) | None, _) => false,
++    commands(todo).any(is_editor_step)
++}
++
++// `fixup -C` takes the commit's message as it is; only `-c` opens the editor (git-rebase(1)).
++pub(crate) fn is_editor_step(step: &[u8]) -> bool {
++    let mut words = words(step);
++    match (words.next(), words.next()) {
++        (Some(b"reword" | b"r" | b"squash" | b"s"), _) | (Some(b"fixup" | b"f"), Some(b"-c")) => {
++            true
+         }
+-    })
++        (Some(_) | None, _) => false,
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -63,4 +76,13 @@ mod tests {
+         assert_eq!(first_command(b"# only a comment\n"), None);
+         assert_eq!(commands(b"pick 1\n# c\n\npick 2\n").count(), 2);
+     }
++
++    #[test]
++    fn the_stopped_step_is_the_last_done_line_and_an_edit_in_either_spelling_is_an_edit() {
++        let done = b"pick 1 a\nedit 2 b\n# a comment\n\n";
++        assert_eq!(last_step(done), Some(&b"edit 2 b"[..]));
++        assert_eq!(last_step(b""), None);
++        assert!(is_edit_step(b"edit 2 b") && is_edit_step(b"e 2 b"));
++        assert!(!is_edit_step(b"exec make") && !is_edit_step(b"squash 2 b"));
++    }
+ }
+diff --git a/crates/gitio/tests/abort_continue.rs b/crates/gitio/tests/abort_continue.rs
+index fa0a222..a3597b5 100644
+--- a/crates/gitio/tests/abort_continue.rs
++++ b/crates/gitio/tests/abort_continue.rs
+@@ -2,11 +2,10 @@
+ 
+ use std::fs;
+ use std::path::Path;
+-use std::process::Command;
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, git, git_ok,
+-    operation_repo, ready_repo, start,
++    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, TempDir, conflict_repo, git,
++    git_ok, operation_repo, ready_repo, run_ignored_in_child, start,
+ };
+ use yamt_gitio::{Error, GitRun, Operation, Repo};
+ 
+@@ -18,7 +17,6 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     local: Some(b"local\n"),
+     remote: Some(b"remote\n"),
+ }];
+-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+ const WITHOUT_AN_EDITOR: [&str; 7] = [
+     "a_merge_commits_git_s_message_without_its_conflicts_comment",
+     "a_squash_merge_commits_git_s_squash_message",
+@@ -161,23 +159,16 @@ fn a_continue_git_refuses_is_no_err_and_carries_git_s_message() {
+ // With GIT_EDITOR, VISUAL and EDITOR gone and `core.editor=false`, only yamt's `GIT_EDITOR=:` lets a commit through.
+ #[test]
+ fn continue_commits_git_s_prepared_messages_without_an_editor_in_the_environment() {
+-    let child = Command::new(std::env::current_exe().unwrap())
+-        .args(["--ignored", "--exact", "--test-threads=1"])
+-        .args(WITHOUT_AN_EDITOR)
+-        .env_remove("GIT_EDITOR")
+-        .env_remove("VISUAL")
+-        .env_remove("EDITOR")
+-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+-        .env("GIT_CONFIG_NOSYSTEM", "1")
+-        .output()
+-        .unwrap();
+-    let stdout = String::from_utf8_lossy(&child.stdout);
+-    let passed = format!("test result: ok. {} passed", WITHOUT_AN_EDITOR.len());
+-    assert!(
+-        child.status.success() && stdout.contains(&passed),
+-        "{stdout}{}",
+-        String::from_utf8_lossy(&child.stderr)
+-    );
++    let ran = run_ignored_in_child(&WITHOUT_AN_EDITOR, |child| {
++        child
++            .env_remove("GIT_EDITOR")
++            .env_remove("VISUAL")
++            .env_remove("EDITOR")
++            .env("GIT_CONFIG_GLOBAL", "/dev/null")
++            .env("GIT_CONFIG_NOSYSTEM", "1");
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
+ }
+ 
+ #[test]
+diff --git a/crates/gitio/tests/edit_stop.rs b/crates/gitio/tests/edit_stop.rs
+new file mode 100644
+index 0000000..5f4a8b0
+--- /dev/null
++++ b/crates/gitio/tests/edit_stop.rs
+@@ -0,0 +1,160 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, edit_stop_repo, git, git_ok,
++    operation_repo, ready_repo,
++};
++use yamt_gitio::{Oid, Operation, Rebase, Repo};
++
++const CART: &str = "cart.ts";
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: CART,
++    kind: FileKind::Regular,
++    base: Some(b"one\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++const REWORD_STEP_TWO_DROP_THREE: &str = "sequence.editor=sed -i -e 2s/^pick/reword/ -e 3d";
++
++fn oid(root: &Path, revision: &str) -> Oid {
++    let output = git_ok(root, &["rev-parse", "--verify", revision]).unwrap();
++    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
++}
++
++fn git_path(root: &Path, name: &str) -> PathBuf {
++    let path = git_ok(root, &["rev-parse", "--git-path", name]).unwrap();
++    root.join(String::from_utf8(path).unwrap().trim_end())
++}
++
++fn operation(repo: &Repo) -> Operation {
++    repo.stop().unwrap().operation.unwrap()
++}
++
++fn rebase_of(repo: &Repo) -> Rebase {
++    let Operation::Rebase(rebase) = operation(repo) else {
++        panic!("not a rebase");
++    };
++    rebase
++}
++
++fn conflicted(root: &Path, args: &[&str]) {
++    let output = git(root, args).unwrap();
++    assert!(!output.status.success(), "{args:?} did not stop");
++}
++
++/// Resolves step 1's conflict and continues in a terminal; git stops at step 2's conflict.
++fn at_step_two(dir: &TempDir) -> Repo {
++    let root = dir.path();
++    git_ok(root, &["add", "--", CART]).unwrap();
++    conflicted(root, &["rebase", "--continue"]);
++    let unmerged = git_ok(root, &["ls-files", "-u", "--", STEP_TWO_FILE]).unwrap();
++    assert!(!unmerged.is_empty(), "step 2 did not conflict");
++    Repo::discover(root).unwrap()
++}
++
++// A pick at an `edit` stop read as the rebase would show the picked commit as own work, and Abort would end the rebase.
++#[test]
++fn an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort() {
++    let dir = edit_stop_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    let at_edit = rebase_of(&repo);
++    assert_eq!(at_edit.replaying, None);
++    assert!(git_ok(root, &["rev-parse", "--verify", "REBASE_HEAD"]).is_ok());
++
++    conflicted(root, &["cherry-pick", "local"]);
++
++    let picking = Some(oid(root, "local"));
++    let progress = None;
++    assert_eq!(
++        operation(&repo),
++        Operation::CherryPick { picking, progress }
++    );
++    repo.abort(&operation(&repo)).unwrap();
++    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
++}
++
++#[test]
++fn a_revert_at_an_edit_stop_is_that_revert_and_its_continue_leaves_the_rebase_at_the_edit() {
++    let dir = edit_stop_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    let at_edit = rebase_of(&repo);
++    fs::write(root.join(CART), "later\n").unwrap();
++    git_ok(root, &["commit", "--quiet", "--all", "-m", "later"]).unwrap();
++    let reverting = Some(oid(root, "HEAD~1"));
++
++    conflicted(root, &["revert", "--no-edit", "HEAD~1"]);
++
++    let progress = None;
++    assert_eq!(
++        operation(&repo),
++        Operation::Revert {
++            reverting,
++            progress
++        }
++    );
++    fs::write(root.join(CART), "resolved\n").unwrap();
++    git_ok(root, &["add", "--", CART]).unwrap();
++    let run = repo.continue_operation(&operation(&repo)).unwrap();
++    assert!(run.succeeded, "{}", String::from_utf8_lossy(&run.output));
++    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
++}
++
++// Read as a `rebase -r` merge step, Abort would run `rebase --abort` and drop the whole rebase.
++#[test]
++fn a_merge_at_an_edit_stop_is_that_merge_and_its_abort_leaves_the_rebase_at_the_edit() {
++    let dir = edit_stop_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    let at_edit = rebase_of(&repo);
++
++    conflicted(root, &["merge", "local"]);
++
++    let merging = oid(root, "local");
++    assert_eq!(operation(&repo), Operation::Merge { merging });
++    repo.abort(&operation(&repo)).unwrap();
++    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
++}
++
++// git writes `amend` at a conflicted squash step too: read as an edit stop, own work would show on the right, unnamed.
++#[test]
++fn a_conflicted_squash_step_replays_its_commit_and_is_an_editor_step() {
++    let dir = operation_repo(Run::RebaseSquash, &FILES).unwrap();
++    let repo = at_step_two(&dir);
++    let root = dir.path();
++    assert!(git_path(root, "rebase-merge/amend").exists());
++
++    let rebase = rebase_of(&repo);
++
++    assert_eq!(rebase.replaying, Some(oid(root, "remote~1")));
++    assert_eq!(rebase.redoing_merge, None);
++    assert!(rebase.editor_steps_ahead);
++}
++
++// `rebase --continue` runs the editor for the stopped reword itself, though the todo is empty.
++#[test]
++fn a_conflicted_reword_stop_with_an_empty_todo_has_an_editor_step_ahead() {
++    let dir = ready_repo(Run::Rebase, &FILES).unwrap();
++    let root = dir.path();
++    let args = [
++        "-c",
++        REWORD_STEP_TWO_DROP_THREE,
++        "rebase",
++        "-i",
++        "local",
++        "remote",
++    ];
++    conflicted(root, &args);
++    let repo = at_step_two(&dir);
++    let todo = fs::read(git_path(root, "rebase-merge/git-rebase-todo")).unwrap();
++    assert!(todo.trim_ascii().is_empty(), "{todo:?}");
++
++    let rebase = rebase_of(&repo);
++
++    assert_eq!(rebase.replaying, Some(oid(root, "remote~1")));
++    assert!(rebase.editor_steps_ahead);
++}
+diff --git a/crates/gitio/tests/operations.rs b/crates/gitio/tests/operations.rs
+index 1855449..9486071 100644
+--- a/crates/gitio/tests/operations.rs
++++ b/crates/gitio/tests/operations.rs
+@@ -3,8 +3,7 @@
+ use std::path::{Path, PathBuf};
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, edit_stop_repo, git,
+-    git_ok, operation_repo,
++    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, git, git_ok, operation_repo,
+ };
+ use yamt_gitio::{Oid, Operation, Progress, Rebase, Repo, Stop};
+ 
+@@ -451,66 +450,3 @@ fn a_linked_worktree_reads_its_own_rebase_and_the_main_checkout_none() {
+         None
+     );
+ }
+-
+-// A pick at an `edit` stop read as the rebase would show the picked commit as own work, and Abort would end the rebase.
+-#[test]
+-fn an_edit_stop_replays_nothing_and_a_pick_there_is_that_pick_with_its_own_abort() {
+-    let dir = edit_stop_repo(&FILES).unwrap();
+-    let root = dir.path();
+-    let repo = Repo::discover(root).unwrap();
+-    let Operation::Rebase(at_edit) = operation(&repo) else {
+-        panic!("not a rebase");
+-    };
+-    assert_eq!(at_edit.replaying, None);
+-    assert!(git_ok(root, &["rev-parse", "--verify", "REBASE_HEAD"]).is_ok());
+-
+-    assert!(
+-        !git(root, &["cherry-pick", "local"])
+-            .unwrap()
+-            .status
+-            .success()
+-    );
+-
+-    let picking = Some(oid(root, "local"));
+-    let progress = None;
+-    assert_eq!(
+-        operation(&repo),
+-        Operation::CherryPick { picking, progress }
+-    );
+-    repo.abort(&operation(&repo)).unwrap();
+-    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
+-}
+-
+-#[test]
+-fn a_revert_at_an_edit_stop_is_that_revert_and_its_continue_leaves_the_rebase_at_the_edit() {
+-    let dir = edit_stop_repo(&FILES).unwrap();
+-    let root = dir.path();
+-    let repo = Repo::discover(root).unwrap();
+-    let Operation::Rebase(at_edit) = operation(&repo) else {
+-        panic!("not a rebase");
+-    };
+-    std::fs::write(root.join("cart.ts"), "later\n").unwrap();
+-    git_ok(root, &["commit", "--quiet", "--all", "-m", "later"]).unwrap();
+-    let reverting = Some(oid(root, "HEAD~1"));
+-
+-    assert!(
+-        !git(root, &["revert", "--no-edit", "HEAD~1"])
+-            .unwrap()
+-            .status
+-            .success()
+-    );
+-
+-    let progress = None;
+-    assert_eq!(
+-        operation(&repo),
+-        Operation::Revert {
+-            reverting,
+-            progress
+-        }
+-    );
+-    std::fs::write(root.join("cart.ts"), "resolved\n").unwrap();
+-    git_ok(root, &["add", "--", "cart.ts"]).unwrap();
+-    let run = repo.continue_operation(&operation(&repo)).unwrap();
+-    assert!(run.succeeded, "{}", String::from_utf8_lossy(&run.output));
+-    assert_eq!(operation(&repo), Operation::Rebase(at_edit));
+-}
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 109ebe9..2fd35d2 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in the panes showing ours and theirs and in base (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; a git failure there only drops that side's name (plan §2 #50, #62); its name builders are the only ones, also used by `operation.rs`. `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else `refresh`'s settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); a failed name read there warns `operation_name_unread` and drops only that name. `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs in a child test process with the user's locale set) run on `conflict-repo`'s `operation_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`, also a conflicted `squash`/`fixup` step, plan §2 #91), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in the panes showing ours and theirs and in base (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation (`applied`) — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; `applied` and the name builders are the only ones (`operation.rs`'s view names what a merge, squash merge, pick or revert applies through `applied`), `message_text` is the one rule for a commit's or patch's message, and one `name_or_warn(label, read)` drops only that name on a git failure with a `side_name_unread` warning naming it (plan §2 #50, #62). `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else `refresh`'s settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); git's continue output and an abort's refusal (`GitFailed.stderr`) leave the session through `shown_text` only: per line, what follows its last `\r`, as a terminal shows git's progress lines. `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; a conflicted squash step's own commit on the left, both sides named; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs through `yamt_conflict_repo::run_ignored_in_child` with the user's locale set) run on `conflict-repo`'s `operation_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
+diff --git a/crates/session/src/operation.rs b/crates/session/src/operation.rs
+index e28e9cd..c5a03ec 100644
+--- a/crates/session/src/operation.rs
++++ b/crates/session/src/operation.rs
+@@ -3,9 +3,10 @@ use specta::Type;
+ use yamt_gitio::{Operation, Progress, Rebase, Repo, Stop};
+ 
+ use crate::disk::DiskChange;
+-use crate::session::{FileEntry, LOG_TARGET, MergeSession};
++use crate::session::{FileEntry, MergeSession};
+ use crate::side_names::{
+-    SideName, SideNames, checked_out, commit_name, merge_head_name, named, revert_name, text,
++    SideName, SideNames, applied, checked_out, commit_name, merge_head_name, message_text,
++    name_or_warn, named, text,
+ };
+ use crate::{Error, Result};
+ 
+@@ -117,7 +118,7 @@ impl MergeSession {
+     /// Re-reads the stop: none → `NoOperation`; another stop → `StopMovedOn`; else git's abort.
+     pub fn abort_operation(&mut self) -> Result<OperationKind> {
+         let operation = self.operation_still_here()?;
+-        self.repo.abort(&operation)?;
++        self.repo.abort(&operation).map_err(refusal_as_shown)?;
+         Ok(kind_of(&operation))
+     }
+ 
+@@ -126,7 +127,7 @@ impl MergeSession {
+     pub fn continue_operation(&mut self) -> Result<Continued> {
+         let operation = self.operation_still_here()?;
+         let run = self.repo.continue_operation(&operation)?;
+-        let message = text(&run.output).trim_end().to_owned();
++        let message = shown_text(&text(&run.output));
+         let after = self.repo.stop()?;
+         if after.operation.is_none() {
+             let kind = kind_of(&operation);
+@@ -169,26 +170,25 @@ fn kind_of(operation: &Operation) -> OperationKind {
+ }
+ 
+ fn view(repo: &Repo, stop: &Stop) -> Option<OperationView> {
+-    let head = stop.head.as_ref();
+-    Some(match stop.operation.as_ref()? {
+-        Operation::Merge { merging } => OperationView::Merge {
+-            merging: name_or_warn("merging", merge_head_name(repo, merging).map(Some)),
+-            into: name_or_warn("into", checked_out(repo, head)),
++    let operation = stop.operation.as_ref()?;
++    let theirs = |label| name_or_warn(label, applied(repo, Some(operation)));
++    let into = || name_or_warn("into", checked_out(repo, stop.head.as_ref()));
++    Some(match operation {
++        Operation::Merge { .. } => OperationView::Merge {
++            merging: theirs("merging"),
++            into: into(),
+         },
+-        Operation::SquashMerge { merging } => OperationView::SquashMerge {
+-            merging: name_or_warn("merging", named(repo, merging.as_ref(), merge_head_name)),
+-            into: name_or_warn("into", checked_out(repo, head)),
++        Operation::SquashMerge { .. } => OperationView::SquashMerge {
++            merging: theirs("merging"),
++            into: into(),
+         },
+         Operation::Rebase(rebase) => rebase_view(repo, rebase),
+-        Operation::CherryPick { picking, progress } => OperationView::CherryPick {
+-            picking: name_or_warn("picking", named(repo, picking.as_ref(), commit_name)),
++        Operation::CherryPick { progress, .. } => OperationView::CherryPick {
++            picking: theirs("picking"),
+             progress: progress.map(progress_view),
+         },
+-        Operation::Revert {
+-            reverting,
+-            progress,
+-        } => OperationView::Revert {
+-            reverting: name_or_warn("reverting", named(repo, reverting.as_ref(), revert_name)),
++        Operation::Revert { progress, .. } => OperationView::Revert {
++            reverting: theirs("reverting"),
+             progress: progress.map(progress_view),
+         },
+         Operation::Am {
+@@ -197,7 +197,7 @@ fn view(repo: &Repo, stop: &Stop) -> Option<OperationView> {
+             progress,
+         } => OperationView::Am {
+             subject: text(subject),
+-            message: text(message).trim().to_owned(),
++            message: message_text(message),
+             progress: progress.map(progress_view),
+         },
+     })
+@@ -223,12 +223,35 @@ fn progress_view(progress: Progress) -> ProgressView {
+     }
+ }
+ 
+-fn name_or_warn(name: &'static str, read: Result<Option<SideName>>) -> Option<SideName> {
+-    match read {
+-        Ok(found) => found,
+-        Err(error) => {
+-            tracing::warn!(target: LOG_TARGET, event = "operation_name_unread", name, %error, "this name is left out");
+-            None
+-        }
++fn refusal_as_shown(mut error: yamt_gitio::Error) -> yamt_gitio::Error {
++    if let yamt_gitio::Error::GitFailed { stderr, .. } = &mut error {
++        *stderr = shown_text(stderr);
++    }
++    error
++}
++
++/// git's output as its terminal shows it: progress lines end in `\r` and the next text overwrites them, so
++/// each line keeps what follows its last `\r`.
++fn shown_text(output: &str) -> String {
++    let lines: Vec<&str> = output
++        .lines()
++        .map(|line| line.rsplit_once('\r').map_or(line, |(_, shown)| shown))
++        .collect();
++    lines.join("\n").trim_end().to_owned()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn each_line_of_git_s_output_keeps_what_follows_its_last_carriage_return() {
++        let output = "[detached HEAD 1a2b3c4] step 1\nRebasing (2/3)\rRebasing (3/3)\rerror: could not apply\r\nhint: x\n\n";
++
++        assert_eq!(
++            shown_text(output),
++            "[detached HEAD 1a2b3c4] step 1\nerror: could not apply\nhint: x"
++        );
++        assert_eq!(shown_text("one line"), "one line");
+     }
+ }
+diff --git a/crates/session/src/side_names.rs b/crates/session/src/side_names.rs
+index 1fd4400..1e9a6f9 100644
+--- a/crates/session/src/side_names.rs
++++ b/crates/session/src/side_names.rs
+@@ -3,7 +3,7 @@ use specta::Type;
+ use yamt_gitio::{Oid, Operation, Rebase, Repo, Stop};
+ 
+ use crate::Result;
+-use crate::orientation::{GitSide, Orientation};
++use crate::orientation::Orientation;
+ use crate::session::LOG_TARGET;
+ 
+ const QUOTE: char = '\'';
+@@ -40,17 +40,21 @@ pub struct SideNames {
+ }
+ 
+ pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
+-    let ours = name_or_warn(GitSide::Ours, checked_out(repo, stop.head.as_ref()));
+-    let theirs = name_or_warn(GitSide::Theirs, applied(repo, stop.operation.as_ref()));
++    let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
++    let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
+     let (local, remote) = orientation.panes(ours, theirs);
+     SideNames { local, remote }
+ }
+ 
+-fn name_or_warn(side: GitSide, read: Result<Option<SideName>>) -> Option<SideName> {
++/// The name `read` gave; a git failure drops only this name (plan §2 #50, #62), with a warning naming `label`.
++pub(crate) fn name_or_warn(
++    label: &'static str,
++    read: Result<Option<SideName>>,
++) -> Option<SideName> {
+     match read {
+         Ok(name) => name,
+         Err(error) => {
+-            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", ?side, %error, "this side's name is left out");
++            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", name = label, %error, "this name is left out");
+             None
+         }
+     }
+@@ -67,7 +71,7 @@ pub(crate) fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<Side
+ }
+ 
+ /// What git's theirs side is the change of, per operation (plan §2 #87).
+-fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
++pub(crate) fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
+     let Some(operation) = operation else {
+         return Ok(None);
+     };
+@@ -91,7 +95,7 @@ fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName
+             subject, message, ..
+         } => Ok(Some(SideName::Patch {
+             subject: text(subject),
+-            message: text(message).trim().to_owned(),
++            message: message_text(message),
+         })),
+     }
+ }
+@@ -133,16 +137,16 @@ pub(crate) fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+     Ok(SideName::Commit {
+         short_id: text(&summary.short_id),
+         subject: text(&summary.subject),
+-        message: text(&summary.message).trim().to_owned(),
++        message: message_text(&summary.message),
+     })
+ }
+ 
+-pub(crate) fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
++fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+     let summary = repo.commit_summary(commit)?;
+     Ok(SideName::Revert {
+         short_id: text(&summary.short_id),
+         subject: text(&summary.subject),
+-        message: text(&summary.message).trim().to_owned(),
++        message: message_text(&summary.message),
+     })
+ }
+ 
+@@ -157,6 +161,11 @@ pub(crate) fn text(bytes: &[u8]) -> String {
+     String::from_utf8_lossy(bytes).into_owned()
+ }
+ 
++/// A commit's or a patch's message as shown: without the blank lines around it.
++pub(crate) fn message_text(message: &[u8]) -> String {
++    text(message).trim().to_owned()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/session/tests/operations.rs b/crates/session/tests/operations.rs
+index b7846b2..743a005 100644
+--- a/crates/session/tests/operations.rs
++++ b/crates/session/tests/operations.rs
+@@ -2,10 +2,10 @@
+ 
+ use std::fs;
+ use std::path::Path;
+-use std::process::Command;
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, git, git_ok, install_hook, operation_repo,
++    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, TempDir, git, git_ok,
++    install_hook, operation_repo, run_ignored_in_child,
+ };
+ use yamt_session::{
+     Continued, DiskVersion, Error, FileStatus, MergeSession, OperationKind, OperationView,
+@@ -28,7 +28,6 @@ const BOTH_STEPS: [ConflictFile<'static>; 1] = [ConflictFile {
+     local: Some(b"local-1\n"),
+     remote: Some(b"remote-1\n"),
+ }];
+-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+ const HOOK_LINE: &str = "hook: refused";
+ const USER_LOCALE: &str = "C.UTF-8";
+ const LOCALE_HOOK_TEST: &str =
+@@ -179,21 +178,29 @@ fn a_rebase_aborted_in_a_terminal_lists_git_s_view_without_an_operation() {
+     assert_eq!(list.files[0].status, FileStatus::Resolved);
+ }
+ 
+-fn commit_fields(root: &Path, revision: &str) -> (String, String, String) {
++fn revert_range_view(root: &Path) -> OperationView {
+     let SideName::Commit {
+         short_id,
+         subject,
+         message,
+-    } = commit(root, revision)
++    } = commit(root, "HEAD~1")
+     else {
+         panic!("not a commit");
+     };
+-    (short_id, subject, message)
++    let reverting = SideName::Revert {
++        short_id,
++        subject,
++        message,
++    };
++    OperationView::Revert {
++        reverting: Some(reverting),
++        progress: ONE_OF_THREE,
++    }
+ }
+ 
+ #[test]
+ fn each_operation_s_view_names_what_it_applies() {
+-    let cases: [(Run, ExpectedView); 6] = [
++    let cases: [(Run, ExpectedView); 7] = [
+         (Run::Merge, |_| OperationView::Merge {
+             merging: Some(branch("remote")),
+             into: Some(branch("local")),
+@@ -202,6 +209,13 @@ fn each_operation_s_view_names_what_it_applies() {
+             merging: Some(branch("remote")),
+             into: Some(branch("local")),
+         }),
++        (Run::RebaseInteractive, |root| OperationView::Rebase {
++            branch: Some("remote".to_owned()),
++            onto: Some(branch("local")),
++            replaying: Some(commit(root, "remote~2")),
++            progress: ONE_OF_THREE,
++            editor_steps_ahead: true,
++        }),
+         (Run::CherryPick, |root| OperationView::CherryPick {
+             picking: Some(commit(root, "remote~2")),
+             progress: None,
+@@ -210,18 +224,7 @@ fn each_operation_s_view_names_what_it_applies() {
+             picking: Some(commit(root, "remote~2")),
+             progress: ONE_OF_THREE,
+         }),
+-        (Run::RevertRange, |root| {
+-            let (short_id, subject, message) = commit_fields(root, "HEAD~1");
+-            let reverting = SideName::Revert {
+-                short_id,
+-                subject,
+-                message,
+-            };
+-            OperationView::Revert {
+-                reverting: Some(reverting),
+-                progress: ONE_OF_THREE,
+-            }
+-        }),
++        (Run::RevertRange, revert_range_view),
+         (Run::Am, |_| OperationView::Am {
+             subject: "step 1".to_owned(),
+             message: STEP_ONE_MESSAGE.to_owned(),
+@@ -248,20 +251,25 @@ fn a_sequence_continued_stops_at_step_two_then_finishes() {
+ 
+         let stopped = session.continue_operation().unwrap();
+ 
+-        assert!(
+-            matches!(stopped, Continued::Stopped { .. }),
+-            "{run:?} {stopped:?}"
+-        );
++        let Continued::Stopped { message } = &stopped else {
++            panic!("{run:?} {stopped:?}");
++        };
++        assert!(!message.contains('\r'), "{run:?} {message:?}");
+         let mut next = MergeSession::open(dir.path()).unwrap();
+         let files = next.files();
+         assert_eq!(files.len(), 1, "{run:?}");
+         assert_eq!(files[0].path, STEP_TWO_FILE, "{run:?}");
+         finished_every_file(&mut next);
+         let finished = next.continue_operation().unwrap();
+-        assert!(
+-            matches!(&finished, Continued::Finished { kind: found, .. } if *found == kind),
+-            "{run:?} {finished:?}"
+-        );
++        let Continued::Finished {
++            kind: found,
++            output,
++        } = &finished
++        else {
++            panic!("{run:?} {finished:?}");
++        };
++        assert_eq!(*found, kind, "{run:?}");
++        assert!(!output.contains('\r'), "{run:?} {output:?}");
+     }
+ }
+ 
+@@ -312,18 +320,11 @@ fn abort_returns_the_operation_it_aborted_and_leaves_none() {
+ // `LC_ALL=C` on Continue would show a hook's words in another language than the user's terminal does.
+ #[test]
+ fn a_hook_sees_the_user_s_locale() {
+-    let child = Command::new(std::env::current_exe().unwrap())
+-        .args(["--ignored", "--exact", LOCALE_HOOK_TEST])
+-        .env("LC_ALL", USER_LOCALE)
+-        .env("LANG", USER_LOCALE)
+-        .output()
+-        .unwrap();
+-    let stdout = String::from_utf8_lossy(&child.stdout);
+-    assert!(
+-        child.status.success() && stdout.contains("test result: ok. 1 passed"),
+-        "{stdout}{}",
+-        String::from_utf8_lossy(&child.stderr)
+-    );
++    let ran = run_ignored_in_child(&[LOCALE_HOOK_TEST], |child| {
++        child.env("LC_ALL", USER_LOCALE).env("LANG", USER_LOCALE);
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
+ }
+ 
+ #[test]
+diff --git a/crates/session/tests/orientation.rs b/crates/session/tests/orientation.rs
+index 6408a27..c007da4 100644
+--- a/crates/session/tests/orientation.rs
++++ b/crates/session/tests/orientation.rs
+@@ -4,10 +4,13 @@ use std::fs;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, TempDir, edit_stop_repo, git, git_ok, hash_object, operation_repo,
++    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, edit_stop_repo, git, git_ok, hash_object,
++    operation_repo,
+ };
+ use yamt_merge_core::ChunkKind;
+-use yamt_session::{DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, Waiting};
++use yamt_session::{
++    DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, SideName, Waiting,
++};
+ 
+ mod window;
+ use window::{lines, middle_text, saved_with_everything_waiting};
+@@ -208,6 +211,38 @@ fn every_other_operation_keeps_head_on_the_left() {
+     }
+ }
+ 
++fn commit_subject(name: Option<&SideName>) -> Option<&str> {
++    match name? {
++        SideName::Commit { subject, .. } => Some(subject),
++        SideName::Branch { .. } | SideName::Revert { .. } | SideName::Patch { .. } => None,
++    }
++}
++
++// git writes `amend` at a conflicted squash step too; read as an edit stop, the step's own text would be on the right, unnamed.
++#[test]
++fn a_conflicted_squash_step_shows_its_own_commit_on_the_left_and_names_both_sides() {
++    let dir = operation_repo(Run::RebaseSquash, &[TEXT_FILE]).unwrap();
++    let root = dir.path();
++    git_ok(root, &["add", "--", TEXT]).unwrap();
++    assert!(
++        !git(root, &["rebase", "--continue"])
++            .unwrap()
++            .status
++            .success()
++    );
++    let mut session = MergeSession::open(root).unwrap();
++
++    let data = session.load(STEP_TWO_FILE).unwrap();
++
++    assert_eq!(
++        (data.local.as_str(), data.remote.as_str()),
++        ("remote\n", "local\n")
++    );
++    let names = session.side_names();
++    assert_eq!(commit_subject(names.local.as_ref()), Some("step 2"));
++    assert_eq!(commit_subject(names.remote.as_ref()), Some("step 1"));
++}
++
+ // At an `edit` stop git replays nothing: a pick or a stash pop there is applied onto HEAD, the commit being edited.
+ #[test]
+ fn a_pick_or_a_stash_pop_at_a_rebase_s_edit_stop_keeps_head_on_the_left() {
+diff --git a/crates/session/tests/side_names.rs b/crates/session/tests/side_names.rs
+index 5590a88..d565c95 100644
+--- a/crates/session/tests/side_names.rs
++++ b/crates/session/tests/side_names.rs
+@@ -5,12 +5,12 @@ use std::path::Path;
+ use std::process::Command;
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, TempDir, diverged_repo, git, git_ok, operation_repo,
++    ConflictFile, FileKind, Run, STEP_ONE_MESSAGE, TempDir, diverged_repo, git, git_ok,
++    operation_repo,
+ };
+ use yamt_session::{MergeSession, SideName, SideNames};
+ 
+ const FILE: &str = "cart.ts";
+-const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+ 
+ fn cart() -> ConflictFile<'static> {
+     ConflictFile {
+-- 
+2.56.0
+
