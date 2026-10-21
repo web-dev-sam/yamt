@@ -43,25 +43,28 @@ yamt/
 │  ├─ architecture.md         this file
 │  └─ slices/SLICES.md        orchestrator's durable work board
 ├─ crates/
-│  ├─ merge-core/             pure diff3 chunk model. NO I/O, NO git, NO tauri
+│  ├─ merge-core/             pure diff3 chunk model and the 2-way compare (plan §2 #95). NO I/O, NO git, NO tauri
 │  ├─ gitio/                  git subprocess layer. NO merge logic
 │  ├─ session/                MergeSession state machine; depends on merge-core + gitio
-│  ├─ cli/                    headless binary (M0): classify / scan / golden tooling
+│  ├─ cli/                    headless binary (M0): classify / scan / golden / fixture / compare tooling
 │  ├─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
-│  └─ settings/               the per-user settings file (theme, changed keys, its location). NO tauri, NO git
-├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session + settings only
+│  ├─ settings/               the per-user settings file (theme, changed keys, its location). NO tauri, NO git
+│  ├─ lsp-host/               starts language servers and frames their messages (plan §2 #70). NO yamt-*, NO tauri
+│  └─ compare/                the `yamt --raw` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
+├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
 │  ├─ src/
 │  │  ├─ ipc/                 ChunkSource interface; tauri.ts (createTauriSource); fixture.ts
 │  │  │  └─ bindings.ts       GENERATED from Rust (tauri-specta). Never hand-edited
 │  │  ├─ model/               pure TS, framework-free: chunk state, scroll map, apply math
-│  │  ├─ editor/              CodeMirror integration; exports ONLY MergeController
+│  │  ├─ editor/              CodeMirror integration; exports ONLY MergeController and CompareController (plan §2 #96)
 │  │  ├─ connectors/          pure geometry → SVG path strings
 │  │  ├─ ui/                  Vue components + one store. Never imports @codemirror/*
-│  │  └─ main.ts              wiring: create the source and the store, mount App (one source in M1)
-│  └─ fixtures/               golden/<case>.json: the engine's output per golden (`just fixtures`); sample/ for `just smoke-cli`
-└─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
+│  │  └─ main.ts              wiring: the merge root (source, store, App) or, for `yamt --raw`, the compare root (plan §2 #94)
+│  └─ fixtures/               golden/<case>.json: the engine's output per golden (`just fixtures`); compare/<case>.json (the compare window's cases); sample/ for `just smoke-cli`
+├─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
+└─ tests/compare/<case>/      left.txt right.txt: the compare window's fixture pairs (`yamt-cli compare`, plan §2 #95)
 ```
 
 Two toolchains, one entry point: `just check` runs every gate below (§8).
@@ -81,6 +84,9 @@ graph LR
     cli --> core
     tauri[src-tauri] --> session
     tauri --> settings[settings]
+    tauri --> lsphost[lsp-host]
+    tauri --> compare[compare]
+    compare --> core
   end
   tauri -. generates .-> bindings[ipc/bindings.ts]
   subgraph Frontend
@@ -100,15 +106,16 @@ Rules (each one is enforced, not advised — §8 says by what):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
 | `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
-| `src-tauri` depends only on `session`, `settings` + tauri crates; command bodies ≤ 15 lines (thin); `settings` depends on no `yamt-*` crate and not on tauri | `scripts/arch-check.sh` (yamt-app's and yamt-settings' direct deps); reviewer rule |
+| `src-tauri` depends only on `session`, `settings`, `lsp-host`, `compare` + tauri crates; command bodies ≤ 15 lines (thin); `settings` and `lsp-host` depend on no `yamt-*` crate and not on tauri; `compare` depends on `merge-core` only among `yamt-*` and not on tauri | `scripts/arch-check.sh` (yamt-app's, yamt-settings', yamt-lsp-host's and yamt-compare's direct deps); reviewer rule |
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
+| The compare window's root (`ui/CompareApp.vue`, `ui/Compare*.vue`, `ui/compare*.ts`, `ui/TabList.vue`, `ui/LanguagePicker.vue`, `ui/useCompareController.ts`) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94) | `frontend/scripts/fences.ts` PM7 + its failing-path test |
 | `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --features bindings --bin export-bindings` output                                | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
 | No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
 | No `any`, no non-null assertions, no `as` casts outside `ipc/fixture.ts`                                                                                     | oxlint `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (override for the fixture parser)        |
 | Every `switch` over a union is exhaustive; every Rust `match` over a domain enum lists all variants                                                          | oxlint type-aware `switch-exhaustiveness-check`; clippy `wildcard_enum_match_arm = deny`                                        |
 | No magic numbers                                                                                                                                             | oxlint `no-magic-numbers` (ignore `0, 1, -1`); Rust: reviewer rule, constants in `merge_core::Options` and module-level `const` |
-| Line numbers of different spaces never mix                                                                                                                   | Rust newtypes `BaseLine`/`LocalLine`/`RemoteLine`; TS brands applied in `ipc/` (§4)                                             |
+| Line numbers of different spaces never mix                                                                                                                   | Rust newtypes `BaseLine`/`LocalLine`/`RemoteLine`, `LeftLine`/`RightLine` for the compare; TS brands applied in `ipc/` (§4)     |
 
 ---
 
@@ -211,6 +218,17 @@ removals meeting at one place join in base order (plan §2 #73).
 `InlineRange<L> { line, start, len }` and `InlinePoint<L> { line, column }` stay on one line, columns
 in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions). A side whose chunk
 text or base text is empty gets nothing (the block tint says it all). Pure.
+
+**2-way compare** (plan §2 #93, #95; `compare.rs`): `pub fn compare(left: &str, right: &str) -> Vec<Difference>` for the
+`yamt --raw` window. One `compute_chunks(left, left, right, &Options { gap: COMPARE_GAP })` (`COMPARE_GAP` = 0: one
+difference per hunk, as WebStorm's 2-way; with `local == base` every chunk is `RemoteOnly`, `chunk.base` the left
+range, `chunk.remote` the right), then the word step's `side_word_changes` once per direction: the right against the
+left lines, the left against the right lines. `Difference { left: LineRange<LeftLine>, right: LineRange<RightLine>,
+words: DifferenceWords { left: SideWordChanges<LeftLine>, right: SideWordChanges<RightLine> } }` (an empty range is
+an insertion point); `LeftLine`/`RightLine` are line spaces of their own. Property-tested in `tests/compare.rs`
+(rebuilding the right from the left, sorted and disjoint, `compare(t, t)` empty, equal to `compute_chunks(l, l, r, gap
+0)`); the line-text generators are shared with the word tests (`tests/texts/`). Measured (release): two 8 MiB texts
+with 50 scattered edits 0.10 s, every line different 1.0 s.
 
 ### 3.2 `gitio` — subprocess only
 
@@ -338,9 +356,10 @@ yamt-cli classify <base> <local> <remote> [--gap N] [--json]   # chunk table, or
 yamt-cli scan [<repo>]                                         # unmerged files + per-file chunk counts or unsupported reason
 yamt-cli golden run|update [<dir>]                            # compare / rewrite every case's expected.json (default tests/golden)
 yamt-cli fixture <case-dir>                                    # FileMergeData JSON for M1 (`session::merge_data`), same DTO as IPC
+yamt-cli compare <case-dir>                                    # { left, right, differences } of <case-dir>/{left,right}.txt (`merge_core::compare`), the compare window's fixtures
 ```
 
-`cli` uses `merge-core` directly only for pure file classification (`classify`, `golden`);
+`cli` uses `merge-core` directly only for pure text work (`classify`, `golden`, `compare`);
 everything that touches a repository goes through `session`. A case is
 `tests/golden/<case>/{base,local,remote}.<ext>` with the original file extension (so PhpStorm
 and the window highlight it), a generated `expected.json` (the chunks; written only by
@@ -412,9 +431,23 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   child.
 - Errors: one `#[serde(tag = "kind")] enum IpcError` in `ipc_error.rs` (`Git`, `UnknownPath`,
   `Unsupported`, `WriteFailed`, `NotAFile`, `ReadFailed`, `SettingsBroken`, `NotAbsolute`,
-  `NoConfigFolder`, `MergeAborted`, `StopMovedOn`, `GitRunning`, `MergeFinished`, `NoOperation`) mirrored into TS; no
-  stringly errors. A disk change is never an error.
-- `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]`;
+  `NoConfigFolder`, `MergeAborted`, `StopMovedOn`, `GitRunning`, `MergeFinished`, `NoOperation`, and for the compare
+  window `UnknownTab { tab }`, `ColumnTooLarge { limit }`, `WorkerStopped`) mirrored into TS; no stringly errors. A disk
+  change is never an error.
+- **The compare window** (`yamt --raw`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare`,
+  `compare.rs`): never opens a `MergeSession`, never runs git, never manages `Mutex<Merge>` or the language-server host.
+  `compare::manage_store_in(app, data_dir)` opens `yamt_compare::TabStore` in `<data_dir>/yamt/compare/` and manages it
+  as `CompareState = Mutex<TabStore>` (the third `Mutex`, never held with another, plan §2 #97); a failure ends before
+  any window with exit 2 and one line (`another yamt --raw window is open (<folder>)`, the crate's `Broken`/`NewerFormat`
+  words, `no data folder: …`). Both windows go through one `open_and_wait`; the start script sets `<html data-window=
+  "merge|compare">` beside `data-theme`; the compare window is titled `Compare — yamt` and ends with exit 0, no question.
+  Commands: `open_compare() -> CompareStart`, `load_tab(tab) -> TabTexts` and `set_column(tab, column, text, version) ->
+  Comparison` (async: the store is locked only to call it, the reply's diff runs on a `spawn_blocking` worker after the
+  lock is released; a worker panic answers `WorkerStopped` and the lock recovers), `add_tab`, `close_tab(tab)`,
+  `rename_tab(tab, name)`, `set_tab_language(tab, language)`, `show_tab(tab)` (each `-> TabList`). The merge commands are
+  registered there too and answer Tauri's "state not managed"; the compare page never calls them.
+- `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]` / `yamt --raw`
+  (`--raw` with `--repo` is a usage error);
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1; after Abort exit 1 with `<operation> aborted`, after a finished Continue exit 0 with
   `<operation> finished` (#88/#89). Window title `<repository folder> — yamt`.
@@ -444,6 +477,32 @@ Plan §2 #57. Owns the file, never what a key means (the window does, `frontend/
 - Dependencies: `serde`, `serde_json` (line/column errors and kept entries), `specta`,
   `thiserror`.
 
+### 3.7 `compare` — the compare window's stored tabs
+
+Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `yamt-*`, never on tauri or git
+(`scripts/arch-check.sh`). Owns what is stored, never what a language name means (the window does).
+
+- Files in the folder the shell passes (`<data_dir>/yamt/compare/`): `tabs.json` = `{ format: 1, shown, nextId, tabs:
+  [{ id, number, name, language: { kind: "auto" } | { kind: "picked", name } }] }`, `<id>-left.txt`/`<id>-right.txt`
+  (plain UTF-8; missing = an empty column; the one name rule `column_file_name`, also used to recognise them), `lock`.
+  Every write is a temp file + rename; `tabs.json` only on add, close, rename, language and shown, a column file only
+  by `set_column` for that column.
+- `TabStore::open(dir)`: reads `tabs.json` before writing anything (unreadable → `ReadFailed`, not format 1, no tabs, a
+  repeated id, an id at or above `nextId`, a shown tab not listed, `nextId` or a number at `u32::MAX` → `Broken` with
+  line and column, format > 1 → `NewerFormat`; in each case nothing in the folder changes), then `File::try_lock` on
+  `lock` for the store's life (`Locked`; the OS releases it on any exit), first use → "Compare 1", orphan column and
+  temp files removed.
+- Tabs: a new tab's number is 1 + the highest, its name `Compare <number>`, its id `nextId` (ids never repeat), added
+  last and shown; closing writes the index first, then deletes the files; the shown tab closed → the next, else the
+  previous; the last closed → a fresh "Compare 1"; a rename is trimmed, empty keeps the old name; an add (or the last
+  close) that would bring an id or number to `u32::MAX` is refused as `Broken`, nothing written (`no_room_left`, the one
+  rule `open` also checks).
+- Columns: `Arc<str>` in memory; versions in memory only (0 per tab at open); `load_tab` reads the files once;
+  `set_column` with a version not above the stored one stores nothing and returns the stored texts and versions;
+  `MAX_COLUMN_BYTES` = 8 MiB (`TooLarge`); a failed write changes nothing in memory. `LoadedTab` shares the `Arc`s, so
+  `comparison`/`tab_texts` (`merge_core::compare`) run after the caller released the store's lock.
+- Dependencies: `serde`, `serde_json`, `specta`, `thiserror`, `yamt-merge-core`.
+
 ---
 
 ## 4. IPC contract (generated, the single source of truth)
@@ -469,6 +528,13 @@ export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskCha
 export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
 export type WriteReply = { kind: "Written"; files: FileEntry[] } | { kind: "ChangedOnDisk"; files: FileEntry[]; change: DiskChange };
 export const commands: { listStop(): Promise<Listing>; loadFile(path: string): Promise<FileMergeData>; … };
+// the compare window (plan §2 #93-#97): TabId, ColumnVersion, LeftLine, RightLine = number; Column = "left" | "right"
+export type Difference = { left: LineRange<LeftLine>; right: LineRange<RightLine>; words: { left: SideWordChanges<LeftLine>; right: SideWordChanges<RightLine> } };
+export type Comparison = { versions: { left: ColumnVersion; right: ColumnVersion }; differences: Difference[] };
+export type TabLanguage = { kind: "auto" } | { kind: "picked"; name: string };
+export type TabList = { tabs: { id: TabId; name: string; language: TabLanguage; holds_text: boolean }[]; shown: TabId };
+export type CompareStart = { list: TabList; column_limit: number };
+export type TabTexts = { left: string; right: string; comparison: Comparison };
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
@@ -557,6 +623,29 @@ golden case — and `frontend/fixtures/showcase/*.json` — hand-written demo ca
 in memory and logs the text. `createTauriSource` (2.1) maps the generated `commands`. `main.ts`
 picks one by `import.meta.env.VITE_CHUNK_SOURCE` (`"tauri"` from the app's dev and build
 commands); a failure reaches the window's problem bar through `ui/problemText.ts`.
+
+The compare window (plan §2 #94) talks to its own interface, `frontend/src/ipc/CompareSource.ts`:
+
+```ts
+export interface CompareSource extends SettingsSource {
+  openCompare(): Promise<SourceResult<CompareStart>>; // the tabs and the column limit (8 MiB, UTF-8 bytes)
+  loadTab(tab: TabId): Promise<SourceResult<TabTexts>>; // both texts and their comparison
+  setColumn(write: ColumnWrite): Promise<SourceResult<Comparison>>; // ColumnWrite { tab, column, text, version }: stores, then diffs; a stale version stores nothing
+  addTab(): Promise<SourceResult<TabList>>;
+  closeTab(tab: TabId): Promise<SourceResult<TabList>>;
+  renameTab(tab: TabId, name: string): Promise<SourceResult<TabList>>;
+  setTabLanguage(tab: TabId, language: TabLanguage): Promise<SourceResult<TabList>>;
+  showTab(tab: TabId): Promise<SourceResult<TabList>>;
+}
+```
+
+Domain shapes and conversions in `ipc/compareDomain.ts` (camelCase `holdsText`/`columnLimit`); the brands `TabId`,
+`ColumnVersion`, `LeftLine`, `RightLine` and `nextColumnVersion` in `ipc/domain.ts` (IPC3); `Column` and `TabLanguage`
+alias the generated unions. `createTauriCompareSource` (`ipc/tauriCompare.ts`) maps the eight commands;
+`createFixtureCompareSource(log, search)` (`ipc/fixtureCompare.ts`, in memory) starts with one "Compare 1", `?raw=<case>`
+puts `frontend/fixtures/compare/<case>.json` (written by `just fixtures` from `tests/compare/<case>/`) into tab 1, mirrors
+`yamt-compare`'s tab rules, and answers a column with a case's differences only when both texts equal that case's, else
+none and an `info` log `compare.fixture_miss`; both fixture sources parse through one `parsedFixture` (`ipc/fixture.ts`).
 
 ---
 
@@ -1039,14 +1128,17 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   (libraries `forbid`; the one exception is the NVIDIA start-up guard, plan §2 #43, checked by `arch-check`).
 - `cargo nextest`, `insta` (goldens), `proptest` (invariants), `cargo-deny`, `tracing` for logs.
 - deps: `imara-diff`, `thiserror`, `serde`, `specta` + `tauri-specta`, `tauri 2`, `tracing`;
-  `serde_json` at run time only in `cli` and `settings` (plan §2 #57).
+  `serde_json` at run time only in `cli`, `settings` (plan §2 #57) and `compare` (plan §2 #97). Crates: merge-core,
+  gitio, session, cli, conflict-repo (dev-only), settings, lsp-host, compare, src-tauri.
 - **Readable-by-a-Rust-beginner rules** (the product owner reads this code; cleverness is a
   defect): owned types at crate boundaries (`String`, `Vec<T>`, `PathBuf`); no lifetimes in
   public signatures beyond `&str`/`&[T]`/`&Path` parameters; a generic needs two concrete
   uses, a trait needs two implementations, else write the concrete thing; derive macros only
   (`serde`, `thiserror`, `specta`), no `macro_rules!`; iterator chains of at most three
-  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s two `Mutex`es
-  (`Merge` = the held `MergeSession` or none after an abort, #74; the language-server `Host`, plan §2 #70; never held together); no async (git subprocesses and
+  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s three `Mutex`es
+  (`Merge` = the held `MergeSession` or none after an abort, #74; the language-server `Host`, plan §2 #70; the compare
+  window's `TabStore`, #97; never held together) and `yamt-compare`'s `Arc<str>` columns (a reply's diff runs outside the
+  store's lock without a copy, plan §2 #97); no async (git subprocesses and
   diffs are synchronous and fast; the language-server host uses std threads and channels).
   Per milestone the orchestrator writes `docs/walkthroughs/M<n>.md`: what was built and the
   handful of non-obvious Rust constructs, with the reason each was chosen.
