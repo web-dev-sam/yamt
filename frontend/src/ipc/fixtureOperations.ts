@@ -1,5 +1,5 @@
 import type { ChunkSource } from "./ChunkSource";
-import type { FileEntry, OperationView, SideName, SourceResult } from "./domain";
+import type { FileEntry, OperationView, SideName, SourceFailure, SourceResult } from "./domain";
 import type { Log } from "./log";
 
 const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
@@ -39,22 +39,27 @@ type StopFiles = {
 };
 
 /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
-type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation"> & {
-  /** Only a merge has `MERGE_HEAD`. */
-  readonly merging: boolean;
-};
+type FixtureStops = Pick<
+  ChunkSource,
+  "listFiles" | "listStop" | "continueOperation" | "abortOperation"
+>;
 
-/** Where the chosen operation is: its step, or finished by the last Continue. */
+/** How the app answers every command once git finished or aborted the operation. */
+type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
+
+/** Where the chosen operation is: its step, or ended by the last Continue or Abort. */
 type Sequence = {
   readonly operation: FixtureOperation;
   readonly rewords: boolean;
   step: number;
-  finished: boolean;
+  ended: Ended | null;
 };
 
-function nothingToRun<T>({ finished }: Sequence): SourceResult<T> {
-  return { ok: false, failure: { kind: finished ? "MergeFinished" : "NoOperation" } };
+function refused<T>(failure: SourceFailure): SourceResult<T> {
+  return { ok: false, failure };
 }
+
+const NO_OPERATION: SourceFailure = { kind: "NoOperation" };
 
 function stepView(
   operation: FixtureOperation,
@@ -98,32 +103,47 @@ function sequenceOf(search: string): Sequence {
   const params = new URLSearchParams(search);
   const chosen = params.get("operation");
   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
-  return { operation, rewords: params.has("rewords"), step: 1, finished: false };
+  return { operation, rewords: params.has("rewords"), step: 1, ended: null };
 }
 
-function viewAt({ operation, step, rewords, finished }: Sequence): OperationView | null {
-  return finished ? null : stepView(operation, step, rewords);
-}
-
-export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
-  const at = sequenceOf(search);
-  const { operation } = at;
-
+function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
   return {
-    merging: operation === "merge",
+    async listFiles() {
+      if (at.ended !== null) {
+        return refused(at.ended);
+      }
+      const merging = at.operation === "merge";
+      return { ok: true, value: { files: files.listed(), diskChanges: [], merging } };
+    },
     async listStop() {
-      const view = viewAt(at);
+      if (at.ended !== null) {
+        return refused(at.ended);
+      }
+      const view = stepView(at.operation, at.step, at.rewords);
       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
       const value = { files: files.listed(), diskChanges: [], operation: view, sides };
       return { ok: true, value: { kind: "Files", ...value } };
     },
+  };
+}
+
+function stopActions(
+  log: Log,
+  at: Sequence,
+  files: StopFiles,
+): Pick<ChunkSource, "continueOperation" | "abortOperation"> {
+  const { operation } = at;
+  return {
     async continueOperation() {
-      const view = viewAt(at);
+      if (at.ended !== null) {
+        return refused(at.ended);
+      }
+      const view = stepView(operation, at.step, at.rewords);
       if (view === null) {
-        return nothingToRun(at);
+        return refused(NO_OPERATION);
       }
       if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
-        at.finished = true;
+        at.ended = { kind: "MergeFinished" };
         log.info("fixture.continue_finished", { operation });
         return { ok: true, value: { kind: "Finished" } };
       }
@@ -133,11 +153,20 @@ export function createFixtureStops(log: Log, search: string, files: StopFiles): 
       return { ok: true, value: { kind: "Stopped", message } };
     },
     async abortOperation() {
-      if (viewAt(at) === null) {
-        return nothingToRun(at);
+      if (at.ended !== null) {
+        return refused(at.ended);
       }
+      if (stepView(operation, at.step, at.rewords) === null) {
+        return refused(NO_OPERATION);
+      }
+      at.ended = { kind: "MergeAborted" };
       log.info("fixture.abort_operation", { operation });
       return { ok: true, value: null };
     },
   };
+}
+
+export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
+  const at = sequenceOf(search);
+  return { ...stopListings(at, files), ...stopActions(log, at, files) };
 }

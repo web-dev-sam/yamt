@@ -244,10 +244,7 @@ export function createFixtureSource(
   });
 
   return {
-    async listFiles() {
-      const value = { files: entries(records), diskChanges: [], merging: stops.merging };
-      return { ok: true, value };
-    },
+    listFiles: stops.listFiles,
     listStop: stops.listStop,
     continueOperation: stops.continueOperation,
     abortOperation: stops.abortOperation,

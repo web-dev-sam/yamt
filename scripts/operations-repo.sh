@@ -16,13 +16,6 @@ dir=$2
 require_empty_dir "$dir"
 isolate_git_config
 
-# $1: path in the repo, $2: printf format giving the content (\0 allowed).
-write() {
-    mkdir -p "$(dirname "$dir/$1")"
-    printf "$2" >"$dir/$1"
-    repo_git add -- "$1"
-}
-
 # $1: the commit message.
 commit() {
     repo_git commit -q -m "$1"

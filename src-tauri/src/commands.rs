@@ -169,9 +169,7 @@ async fn continue_operation<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> Result<ContinueReply, IpcError> {
     let reply = merge::continue_operation(&window.state()).await?;
-    if reply == ContinueReply::Finished {
-        close_window(&window, "finished");
-    }
+    close_window_if_ended(&window, "finished");
     Ok(reply)
 }
 
@@ -179,8 +177,14 @@ async fn continue_operation<R: Runtime>(
 #[specta::specta]
 async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
     merge::abort_operation(&window.state()).await?;
-    close_window(&window, "aborted");
+    close_window_if_ended(&window, "aborted");
     Ok(())
+}
+
+fn close_window_if_ended<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+    if lock(&window.state()).has_ended() {
+        close_window(window, ended);
+    }
 }
 
 #[tauri::command]
@@ -194,19 +198,13 @@ mod tests {
     use std::fs;
 
     use serde_json::{Value, json};
-    use tauri::Manager;
     use yamt_conflict_repo::git_ok;
 
-    use super::*;
     use crate::frontend_log::tests::logged;
     use crate::mock_window::{CRLF_PATH, Window, file, open_window, open_window_on};
-    use crate::outcome::{Exit, ending_on_close};
+    use crate::outcome::Exit;
 
     impl Window {
-        fn exit_on_close(&self) -> Exit {
-            ending_on_close(&mut lock(&self.app.state::<MergeState>())).exit
-        }
-
         fn unmerged(&self) -> String {
             String::from_utf8(git_ok(self.repo.path(), &["ls-files", "-u"]).unwrap()).unwrap()
         }
@@ -292,7 +290,7 @@ mod tests {
             "{}",
             window.unmerged()
         );
-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
+        assert_eq!(window.ending().exit, Exit::Unresolved);
     }
 
     #[test]
@@ -308,7 +306,7 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(window.unmerged(), "");
-        assert_eq!(window.exit_on_close(), Exit::Success);
+        assert_eq!(window.ending().exit, Exit::Success);
 
         let files = window.invoke("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 }));
 
@@ -320,7 +318,7 @@ mod tests {
         assert_eq!(window.unmerged().lines().collect::<Vec<_>>(), crlf_stages);
         let worktree = fs::read_to_string(window.repo.path().join(CRLF_PATH)).unwrap();
         assert!(worktree.contains("<<<<<<<"), "{worktree}");
-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
+        assert_eq!(window.ending().exit, Exit::Unresolved);
     }
 
     #[test]

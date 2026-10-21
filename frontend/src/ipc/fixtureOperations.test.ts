@@ -119,6 +119,19 @@ async function resolvedAndContinued(source: ChunkSource): Promise<unknown[]> {
   return [reply.kind, files[0]?.status, progress, sides.local === replaying];
 }
 
+async function everyStopCommand(source: ChunkSource): Promise<SourceResult<unknown>[]> {
+  return [
+    await source.listStop(),
+    await source.listFiles(),
+    await source.continueOperation(),
+    await source.abortOperation(),
+  ];
+}
+
+function everyCommandRefused(kind: "MergeFinished" | "MergeAborted"): SourceResult<unknown>[] {
+  return Array.from({ length: 4 }, () => ({ ok: false, failure: { kind } }));
+}
+
 test("a rebase advances 1 → 2 → 3, lists the files unresolved again each time, then finishes once", async () => {
   const { log, entries } = quietLog();
   const source = sourceAt("?operation=rebase", log);
@@ -133,25 +146,23 @@ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each tim
   expect(entries.filter((entry) => entry.event === "fixture.continue_finished")).toEqual([
     { level: "info", event: "fixture.continue_finished", fields: { operation: "rebase" } },
   ]);
-  expect(await operationAt(source)).toBeNull();
-  expect(await source.continueOperation()).toEqual({
-    ok: false,
-    failure: { kind: "MergeFinished" },
-  });
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
 });
 
 test.each(["", "?operation=squash"])("%j finishes at the first Continue", async (search) => {
   const source = sourceAt(search);
 
   expect(await source.continueOperation()).toEqual({ ok: true, value: FINISHED });
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
 });
 
-test("abortOperation answers done and logs the abort once", async () => {
+test("abortOperation answers done, logs the abort once, then every command answers MergeAborted", async () => {
   const { log, entries } = quietLog();
   const source = sourceAt("?operation=revert", log);
 
   expect(await source.abortOperation()).toEqual({ ok: true, value: null });
 
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
   expect(entries).toEqual([
     { level: "info", event: "fixture.abort_operation", fields: { operation: "revert" } },
   ]);

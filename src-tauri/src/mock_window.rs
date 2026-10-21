@@ -4,11 +4,13 @@ use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
 use crate::commands::with_session;
+use crate::merge::{MergeState, lock_when_git_is_done};
+use crate::outcome::{Ending, ending_on_close};
 
 pub(crate) const CRLF_PATH: &str = "crlf.ts";
 
@@ -16,6 +18,11 @@ pub(crate) struct Window {
     pub(crate) repo: TempDir,
     pub(crate) app: App<MockRuntime>,
     pub(crate) webview: WebviewWindow<MockRuntime>,
+}
+
+/// The ending `window.rs` computes when the window closes: once no worker runs git.
+pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
+    ending_on_close(&mut lock_when_git_is_done(state))
 }
 
 pub(crate) fn file<'a>(
@@ -64,6 +71,10 @@ pub(crate) fn open_window_in(repo: TempDir) -> Window {
 impl Window {
     pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
         invoke_on(&self.webview, cmd, args)
+    }
+
+    pub(crate) fn ending(&self) -> Ending {
+        ending_when_git_is_done(&self.app.state::<MergeState>())
     }
 }
 
